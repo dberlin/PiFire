@@ -202,16 +202,16 @@ def _pid_sp_update(revision=1):
 
 def _mpc_update(revision=1, *, mode=ActuationMode.FIXED_CYCLE):
     return MpcUpdatePayload(
-        **_common(revision, mode=mode, output=50.0, requested_fan_duty=70.0, applied_fan_duty=70.0),
+        **_common(revision, mode=mode, output=0.5, requested_fan_duty=70.0, applied_fan_duty=70.0),
         state_names=("temperature",),
         state_values=(220.0,),
         disturbance_estimate=0.0,
         model_revision=1,
         model_provenance="configured",
-        raw_policy_firing_load=50.0,
-        equilibrium_feed_forward=45.0,
-        residual_move=5.0,
-        bounded_firing_load=50.0,
+        raw_policy_firing_load=0.5,
+        equilibrium_feed_forward=0.45,
+        residual_move=0.05,
+        bounded_firing_load=0.5,
         policy_kind="net",
         failure_state=MpcFailureState.SUCCESS,
         solve_start_ms=revision * 2_000 - 1,
@@ -220,22 +220,17 @@ def _mpc_update(revision=1, *, mode=ActuationMode.FIXED_CYCLE):
         stale=False,
         recovered=False,
         predicted_feasible=True,
-        predicted_steady_load=50.0,
+        predicted_steady_load=0.5,
     )
 
 
 def _allocation(revision=1):
-    result = allocate(
-        50.0, Q_min=5.0, Q_max=100.0, u_min=0.1, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True
-    )
+    result = allocate(0.5, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
     return AllocationPayload(
         result_revision=revision,
         normalized_combustion_load=result.normalized_combustion_load,
         requested_auger_duty=result.auger_duty,
         requested_fan_duty=result.fan_duty,
-        q_min=result.q_min,
-        q_max=result.q_max,
-        u_min=result.u_min,
         u_max=result.u_max,
         fan_min_pct=result.fan_min_pct,
         fan_max_pct=result.fan_max_pct,
@@ -278,7 +273,7 @@ def _applied(revision=1):
         interval_start_ms=2_000,
         interval_end_ms=4_000,
         realized_auger_duty=0.5,
-        realized_combustion_load=50.0,
+        realized_combustion_load=0.5,
         actual_fan_duty=70.0,
         sample_complete=True,
         output_source=OutputSource.CONTROLLER,
@@ -314,7 +309,7 @@ def _mpc_framed_records():
                 "result_revision": 1,
                 "pulse_slot_seconds": 2.0,
                 "frame_seconds": 20.0,
-                "requested_combustion_load": 50.0,
+                "requested_combustion_load": 0.5,
                 "requested_auger_duty": allocation.requested_auger_duty,
                 "credit_before_seconds": 0.0,
                 "credit_after_seconds": 0.0,

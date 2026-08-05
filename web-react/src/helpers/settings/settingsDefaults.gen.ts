@@ -268,7 +268,7 @@ export const SETTINGS_DEFAULTS = {
     "reigniteretries": 1,
     "startup_check": true
   },
-  "schema_version": 4,
+  "schema_version": 5,
   "shutdown": {
     "auto_power_off": false,
     "shutdown_duration": 240

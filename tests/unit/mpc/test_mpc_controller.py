@@ -20,8 +20,6 @@ CONFIG = dict(
     control_period=1.0,
     Q_w=1.0,
     R_dQ=0.02,
-    Q_min=5.0,
-    Q_max=100.0,
     C_c=306.0,
     h_amb=0.55,
     T_amb=20.0,
@@ -74,7 +72,7 @@ def test_update_returns_dict_contract():
     c = _make()
     out = c.update(100.0)
     assert isinstance(out, dict)
-    assert 0.1 <= out["cycle_ratio"] <= 0.9
+    assert 0.0 <= out["cycle_ratio"] <= 0.9
     assert "fan" in out and "duty" in out["fan"]
     assert 40.0 <= out["fan"]["duty"] <= 100.0
 
@@ -138,7 +136,15 @@ def test_get_status_is_json_safe():
     # the real bar: it survives the MQTT encoder
     encoded = json.dumps(status, allow_nan=False)
     assert "do_mpc" not in encoded
-    assert set(status) >= {"set_point", "set_point_c", "last_Q", "applied_Q", "policy", "x_hat", "cycle_data"}
+    assert set(status) >= {
+        "set_point",
+        "set_point_c",
+        "last_combustion_load",
+        "applied_combustion_load",
+        "policy",
+        "x_hat",
+        "cycle_data",
+    }
     # a tuple, not a list: controller_state() copies the returned dict but not
     # its values, so a mutable x_hat would let one consumer's mutation reach
     # every other consumer reading the same control-period snapshot.
@@ -159,14 +165,14 @@ def test_get_status_guards_against_non_finite_values():
     c.set_target(225.0)
     c.update(200.0)
     c._x_hat = [float("nan"), float("inf"), 1.0]
-    c._last_Q = float("nan")
+    c._last_combustion_load = float("nan")
     c.set_point = float("nan")  # e.g. a malformed setpoint, guarded like every other field
     c.cycle_data["u_min"] = float("nan")  # e.g. a malformed setting
     status = c.get_status()
     # allow_nan=False raises on a bare NaN; None is the safe substitute.
     json.dumps(status, allow_nan=False)
     assert status["x_hat"] == (None, None, 1.0)
-    assert status["last_Q"] is None
+    assert status["last_combustion_load"] is None
     assert status["set_point"] is None
     assert status["cycle_data"]["u_min"] is None
 
@@ -296,8 +302,8 @@ def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
         "cycle_ratio": 0.5,
         "set_point": status["set_point"],
         "set_point_c": status["set_point_c"],
-        "last_Q": status["last_Q"],
-        "applied_Q": status["applied_Q"],
+        "last_combustion_load": status["last_combustion_load"],
+        "applied_combustion_load": status["applied_combustion_load"],
     }
 
     cycle_payloads = [
@@ -328,134 +334,87 @@ def test_stop_to_startup_transition_zeroes_only_numeric_pid_sensors(monkeypatch)
     assert zeroed and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in zeroed.values())
 
 
-def test_set_output_inverts_the_allocation_exactly(mpc_controller):
-    """allocate() is affine, so applied ratio -> applied Q round-trips."""
+def test_set_output_inverts_measured_auger_duty_to_normalized_applied_load(mpc_controller):
     from controller.mpc_allocator import allocate
 
     cfg = mpc_controller.cfg
-    for q in (cfg["Q_min"], 0.5 * (cfg["Q_min"] + cfg["Q_max"]), cfg["Q_max"]):
+    for load in (0.0, 0.5, 1.0):
         allocation = allocate(
-            q,
-            Q_min=cfg["Q_min"],
-            Q_max=cfg["Q_max"],
-            u_min=mpc_controller.u_min,
+            load,
             u_max=mpc_controller.u_max,
             fan_min_pct=cfg["fan_min_pct"],
             fan_max_pct=cfg["fan_max_pct"],
             enable_fan=bool(cfg["enable_fan_input"]),
         )
         mpc_controller.set_output(AppliedOutput(allocation.auger_duty, OutputSource.CONTROLLER, 1.0))
-        assert mpc_controller._applied_Q == pytest.approx(q)
+        assert mpc_controller._applied_combustion_load == pytest.approx(load)
 
 
-def test_a_lid_open_report_goes_below_q_min(mpc_controller):
-    """The estimator gets the honest input; being told Q_min for a pause it did
-    not take is the defect being fixed."""
+def test_a_lid_open_report_recovers_zero_normalized_load(mpc_controller):
     mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    assert mpc_controller._applied_Q < mpc_controller.cfg["Q_min"]
+    assert mpc_controller._applied_combustion_load == 0.0
 
 
-def test_the_estimator_is_driven_by_the_applied_input(mpc_controller, monkeypatch):
+def test_the_estimator_and_history_receive_the_applied_normalized_load(mpc_controller, monkeypatch):
     seen = []
     real = mpc_controller.estimator.update
     monkeypatch.setattr(mpc_controller.estimator, "update", lambda u, y: (seen.append(u), real(u, y))[1])
     mpc_controller.set_target(225.0)
     mpc_controller.update(200.0)
     mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    applied = mpc_controller._applied_Q
+    applied = mpc_controller._applied_combustion_load
     mpc_controller.update(200.0)
     assert seen[-1] == pytest.approx(applied)
+    assert mpc_controller.cook_history()[-1][-1] == pytest.approx(applied)
 
 
-def test_with_no_report_the_command_is_assumed_applied(mpc_controller, monkeypatch):
-    """Preserves today's behavior for the sync path and controller-only tests."""
+def test_no_output_report_assumes_the_bounded_command_was_applied(mpc_controller, monkeypatch):
     seen = []
     real = mpc_controller.estimator.update
     monkeypatch.setattr(mpc_controller.estimator, "update", lambda u, y: (seen.append(u), real(u, y))[1])
     mpc_controller.set_target(225.0)
     mpc_controller.update(200.0)
-    commanded = mpc_controller._last_Q
+    commanded = mpc_controller._last_combustion_load
     mpc_controller.update(200.0)
     assert seen[-1] == pytest.approx(commanded)
 
 
-def test_the_net_sees_the_applied_input_clamped_to_its_trained_span(net_mpc_controller, monkeypatch):
-    seen = []
-    monkeypatch.setattr(
-        net_mpc_controller._net, "firing_rate_raw", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1]
-    )
-    net_mpc_controller.set_target(225.0)
-    net_mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    net_mpc_controller.update(200.0)
-    assert seen[-1] == pytest.approx(net_mpc_controller.cfg["Q_min"])
+def test_nlp_has_one_structurally_bounded_normalized_decision_variable(mpc_controller):
+    mpc = mpc_controller.mpc
+    assert mpc is not None
+    assert set(mpc.model.u.keys()) - {"default"} == {"combustion_load"}
+    assert float(mpc.bounds["lower", "_u", "combustion_load"]) == 0.0
+    assert float(mpc.bounds["upper", "_u", "combustion_load"]) == 1.0
 
 
-def test_a_degenerate_actuator_span_is_ignored(mpc_controller):
-    before = mpc_controller._applied_Q
-    mpc_controller.u_max = mpc_controller.u_min
-    mpc_controller.set_output(AppliedOutput(0.5, OutputSource.CONTROLLER, 1.0))
-    assert mpc_controller._applied_Q == before
+def test_partial_measured_duty_recovers_the_same_normalized_fraction(mpc_controller):
+    duty = mpc_controller.u_max / 2.0
+    mpc_controller.set_output(AppliedOutput(duty, OutputSource.LID_OPEN, 1.0))
+    assert mpc_controller._applied_combustion_load == pytest.approx(0.5)
 
 
-def test_zero_duty_is_zero_firing_not_negative(mpc_controller):
-    """A paused auger delivers no fuel, not negative fuel: mpc_model.py's
-    heat_in = K_Q * Q has no offset, so the affine inverse of allocate() --
-    which does have an offset, Q_min -> u_min -- must not be extrapolated
-    past u_min down to duty 0."""
-    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    assert mpc_controller._applied_Q == pytest.approx(0.0)
-
-
-def test_a_partial_floor_crossing_lands_strictly_between_zero_and_q_min(mpc_controller):
-    ratio = mpc_controller.u_min / 2.0
-    mpc_controller.set_output(AppliedOutput(ratio, OutputSource.LID_OPEN, 1.0))
-    assert 0.0 < mpc_controller._applied_Q < mpc_controller.cfg["Q_min"]
-
-
-def test_the_floor_blend_is_continuous_at_u_min(mpc_controller):
-    """The boundary-value tests alone (duty 0 -> Q 0, duty u_min -> Q_min) are
-    satisfied by any k*Q_min*ratio/u_min blend, not just k=1 -- a k<1 slope
-    leaves a jump exactly at u_min, which duty crosses routinely, not rarely.
-    Continuity across the seam is the assertion that actually pins the slope."""
-    u_min = mpc_controller.u_min
-    mpc_controller.set_output(AppliedOutput(u_min - 1e-9, OutputSource.LID_OPEN, 1.0))
-    just_below = mpc_controller._applied_Q
-    mpc_controller.set_output(AppliedOutput(u_min, OutputSource.CONTROLLER, 1.0))
-    at_floor = mpc_controller._applied_Q
-    assert just_below == pytest.approx(mpc_controller.cfg["Q_min"])
-    assert at_floor == pytest.approx(mpc_controller.cfg["Q_min"])
-    assert just_below == pytest.approx(at_floor)
-
-
-def test_a_degenerate_q_span_matches_allocates_own_guard(mpc_controller):
-    """allocate() falls back to span=1.0 when Q_max<=Q_min; the inverse must
-    use the same fallback so the two maps agree instead of this one flipping
-    sign on a nonsense config."""
-    mpc_controller.cfg["Q_max"] = mpc_controller.cfg["Q_min"]
-    mpc_controller.set_output(AppliedOutput(mpc_controller.u_max, OutputSource.CONTROLLER, 1.0))
-    assert mpc_controller._applied_Q == pytest.approx(mpc_controller.cfg["Q_min"] + 1.0)
+def test_measured_duty_above_the_actuator_ceiling_is_bounded_at_full_load(mpc_controller):
+    mpc_controller.set_output(AppliedOutput(mpc_controller.u_max * 2.0, OutputSource.CONTROLLER, 1.0))
+    assert mpc_controller._applied_combustion_load == 1.0
 
 
 def test_a_solve_failure_during_a_pause_holds_the_command_not_the_applied_value(mpc_controller, monkeypatch):
-    """The except-fallback holds the previous COMMAND (_last_Q), even mid-pause.
-    Conflating it with the paused _applied_Q would drop the auger to Q_min on
-    a transient solver failure instead of holding the prior command steady."""
     calls = {"n": 0}
 
     def fake_make_step(x):
         calls["n"] += 1
         if calls["n"] == 1:
-            return np.array([[40.0]])
+            return np.array([[0.4]])
         raise RuntimeError("solver failure")
 
     monkeypatch.setattr(mpc_controller.mpc, "make_step", fake_make_step)
     mpc_controller.set_target(225.0)
     mpc_controller.update(200.0)
-    commanded = mpc_controller._last_Q
-    assert commanded == pytest.approx(40.0)
+    commanded = mpc_controller._last_combustion_load
+    assert commanded == pytest.approx(0.4)
     mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
     mpc_controller.update(200.0)
-    assert mpc_controller._last_Q == pytest.approx(commanded)
+    assert mpc_controller._last_combustion_load == pytest.approx(commanded)
 
 
 def test_shipped_defaults_are_reported_as_uncalibrated(capsys):
@@ -467,7 +426,7 @@ def test_shipped_defaults_are_reported_as_uncalibrated(capsys):
 
 def test_calibrated_params_are_not_reported_as_uncalibrated(capsys):
     cfg = dict(_DEFAULTS)
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=200)
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, n_horizon=200)
     _warn_about_model(cfg)
     assert "uncalibrated" not in capsys.readouterr().out.lower()
 
@@ -559,7 +518,7 @@ def test_a_recovering_policy_clears_the_frozen_output_report(capsys):
             self.calls += 1
             if self.calls <= 2:
                 raise RuntimeError("transient")
-            return 42.0
+            return 0.42
 
     c._net = _FailsTwice()
     c.mpc = None
@@ -582,7 +541,7 @@ def test_a_horizon_shorter_than_the_braking_distance_is_reported(capsys):
     cfg = dict(_DEFAULTS)
     # 360 s of coast after a fuel cut, against a 24*25 = 600 s horizon... which
     # covers it. n_horizon is cut so the horizon is genuinely the short one.
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=8)
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, n_horizon=8)
     _warn_about_model(cfg)
     out = capsys.readouterr().out
     assert "horizon" in out.lower()
@@ -592,7 +551,7 @@ def test_a_horizon_shorter_than_the_braking_distance_is_reported(capsys):
 
 def test_an_adequate_horizon_is_not_reported(capsys):
     cfg = dict(_DEFAULTS)
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=200, t_step=25.0)
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, n_horizon=200, t_step=25.0)
     _warn_about_model(cfg)
     assert "horizon" not in capsys.readouterr().out.lower()
 
@@ -624,7 +583,7 @@ def test_a_coast_with_no_end_is_reported_as_one_no_horizon_reaches(capsys):
 #: past CONFIG's 20 * 25 = 500 s horizon and well inside the cap. Written out
 #: rather than derived so the numbers the tests below assert are pinned to
 #: parameters and not to whatever the module currently computes.
-_SLOW_COAST = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=600.0, n_delay=8, K_Q=6.95, sigma=1.4e-9)
+_SLOW_COAST = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=600.0, n_delay=8, K_Q=695.0, sigma=1.4e-9)
 _QUICK_COAST = dict(_SLOW_COAST, theta=50.0)
 
 
@@ -776,7 +735,7 @@ def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(cap
     from controller.model_promotion import evaluate, longest_braking_distance
 
     cfg = dict(_DEFAULTS)
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, t_step=25.0)
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, t_step=25.0)
     brake = longest_braking_distance(cfg)
     discredited = cfg["C_c"] / cfg["h_amb"]
     assert brake == pytest.approx(353.3, abs=5.0)
@@ -807,17 +766,13 @@ def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(cap
         assert warned is (n_horizon * 25.0 < brake), f"n_horizon={n_horizon} did not follow the braking distance"
 
 
-def test_set_target_keeps_the_applied_firing_rate_history():
-    """_applied_Q is the rate the grill actually ran at (recovered by
-    set_output) and is what the estimator is given as its known input;
-    _last_Q is the last command, held over on a solve failure. Both describe
-    the grill, not the target, so a new setpoint must not rewrite either."""
+def test_set_target_keeps_the_applied_normalized_load_history():
     c = Controller(dict(CONFIG), "C", dict(CYCLE))
-    c._last_Q = 87.5
-    c._applied_Q = 84.0
+    c._last_combustion_load = 0.875
+    c._applied_combustion_load = 0.84
     c.set_target(300)
-    assert c._last_Q == 87.5
-    assert c._applied_Q == 84.0
+    assert c._last_combustion_load == 0.875
+    assert c._applied_combustion_load == 0.84
 
 
 def test_set_target_still_updates_the_target():

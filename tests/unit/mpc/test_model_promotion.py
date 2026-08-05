@@ -22,7 +22,7 @@ from controller.model_promotion import (
     steady_state_at_full_fire,
 )
 
-GOOD = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
+GOOD = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=695.0, sigma=1.4e-9)
 INCUMBENT = dict(GOOD, C_c=2000.0, h_amb=0.30)  # tau 6667 vs candidate 11250
 HORIZON = dict(n_horizon=144, t_step=25.0)
 
@@ -38,7 +38,7 @@ REAL_MAK_FIT = dict(
     T_amb=20.0,
     theta=111.32,
     n_delay=8,
-    K_Q=9.9208,
+    K_Q=992.08,
     sigma=1.4e-9,
 )
 
@@ -778,7 +778,7 @@ def test_one_lag_state_brakes_on_the_closed_form_a_single_lag_has():
     loss = one["h_amb"] * (_HAZARD_C - one["T_amb"]) + one["sigma"] * (
         (_HAZARD_C + 273.15) ** 4 - (one["T_amb"] + 273.15) ** 4
     )
-    expected = one["theta"] * math.log(one["K_Q"] * 100.0 / loss)
+    expected = one["theta"] * math.log(one["K_Q"] / loss)
     assert expected > 0.0
     assert _model_coast(one, _HAZARD_C) == pytest.approx(expected, rel=1e-9)
 
@@ -805,7 +805,6 @@ def test_the_chain_is_the_transport_delay_and_nothing_longer():
         GOOD["theta"]
         * math.log(
             GOOD["K_Q"]
-            * 100.0
             / (
                 GOOD["h_amb"] * (_HAZARD_C - GOOD["T_amb"])
                 + GOOD["sigma"] * ((_HAZARD_C + 273.15) ** 4 - (GOOD["T_amb"] + 273.15) ** 4)
@@ -885,14 +884,14 @@ def test_the_implied_steady_state_is_where_full_fire_meets_the_chamber_loss():
     loss = GOOD["h_amb"] * (t_ss - GOOD["T_amb"]) + GOOD["sigma"] * (
         (t_ss + 273.15) ** 4 - (GOOD["T_amb"] + 273.15) ** 4
     )
-    assert loss == pytest.approx(GOOD["K_Q"] * 100.0, rel=1e-9)
+    assert loss == pytest.approx(GOOD["K_Q"], rel=1e-9)
     assert steady_state_at_full_fire(dict(GOOD, K_Q=GOOD["K_Q"] * 4)) > t_ss
     assert steady_state_at_full_fire(dict(GOOD, h_amb=GOOD["h_amb"] * 4)) < t_ss
     # The escape this exists to expose. Fitting the real cook with the old
     # five-parameter free set lands at C_c 1.06e5 with C_c/h_amb 3552 -- an
     # asymptote of 1713 F on a grill that peaked at 520 F, reproduced
     # independently by the parsimony study. The sound fit says 1067 F.
-    escaped = dict(REAL_MAK_FIT, C_c=1.06e5, h_amb=1.06e5 / 3552.0, K_Q=302.4)
+    escaped = dict(REAL_MAK_FIT, C_c=1.06e5, h_amb=1.06e5 / 3552.0, K_Q=30240.0)
     assert steady_state_at_full_fire(escaped) * 9.0 / 5.0 + 32.0 == pytest.approx(1713.0, abs=2.0)
     assert steady_state_at_full_fire(REAL_MAK_FIT) * 9.0 / 5.0 + 32.0 == pytest.approx(1067.0, abs=2.0)
     # 1.6x apart, and both far above the 550 F hazard limit -- which is why

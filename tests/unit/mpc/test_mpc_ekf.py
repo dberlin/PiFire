@@ -12,7 +12,7 @@ P = dict(
     r_meas=0.04,
     theta=50.0,
     n_delay=4,
-    K_Q=3.5,
+    K_Q=350.0,
 )
 
 
@@ -23,7 +23,7 @@ def test_ekf_reduces_to_kf_when_sigma_zero():
     ekf = GreyBoxEKF(sigma=0.0, **P)
     rng = np.random.default_rng(0)
     for _ in range(40):
-        Q = float(rng.uniform(5.0, 100.0))
+        Q = float(rng.uniform(0.0, 1.0))
         y = float(rng.uniform(20.0, 200.0))
         xk = kf.update(Q, y)
         xe = ekf.update(Q, y)
@@ -36,8 +36,8 @@ def test_ekf_radiative_changes_estimate():
     ekf0 = GreyBoxEKF(sigma=0.0, **P)
     ekf1 = GreyBoxEKF(sigma=1.4e-9, **P)
     for _ in range(20):
-        ekf0.update(80.0, 180.0)
-        ekf1.update(80.0, 180.0)
+        ekf0.update(0.8, 180.0)
+        ekf1.update(0.8, 180.0)
     iTc = P["n_delay"]
     # at a hot chamber the radiative loss pulls the disturbance/temperature
     # estimates apart from the linear-only case
@@ -52,5 +52,5 @@ def test_ekf_offset_free_constant_input():
     iTc = P["n_delay"]
     y = 150.0
     for _ in range(400):
-        ekf.update(40.0, y)
+        ekf.update(0.4, y)
     assert abs(ekf.x[iTc] - y) < 1.0

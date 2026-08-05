@@ -49,7 +49,7 @@ def _run(cfg, setpoint, seed=0, minutes=90):
     ts, temps = [], []
     for w in range(int(minutes * 60 / TS)):
         out = c.update(plant.measured())
-        ratio = float(np.clip(out["cycle_ratio"], CYCLE["u_min"], CYCLE["u_max"]))
+        ratio = float(np.clip(out["cycle_ratio"], 0.0, CYCLE["u_max"]))
         fan = out["fan"]["duty"] if out["fan"]["duty"] is not None else 100.0
         on = int(round(ratio * TS))
         for s in range(int(TS)):

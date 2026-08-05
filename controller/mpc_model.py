@@ -131,23 +131,25 @@ _KELVIN = 273.15
 #: what the parameters mean. Bumped whenever either changes, which is not the
 #: same event as a parameter being recalibrated.
 #:
-#: 1  two lumps: [q0..q_{n_delay-1}, T_f, T_c, d], parameters C_f/C_c/h_fc/h_amb
-#: 2  one lump:  [q0..q_{n_delay-1}, T_c, d],      parameters C_c/h_amb
+#: 3  normalized combustion load: [q0..q_{n_delay-1}, T_c, d], input q in [0, 1]
 #:
-#: Anything that outlives the process and describes this model has to carry it,
-#: because the alternative is comparing the model's own scalars and hoping they
-#: differ. They did not: collapsing to one lump left C_c, h_amb, K_Q, theta,
-#: sigma, T_amb and n_delay ALL numerically identical between the two
-#: structures, so a stale neural-policy artifact matched a calibration check on
-#: every field it had. The two consumers are controller/mpc.py's persisted
-#: model snapshot and controller/mpc_net.py's policy artifact; both refuse a
-#: record carrying a different value rather than trying to read it.
-MODEL_SCHEMA = 2
+#: Persisted parameters calibrated against the former firing-rate scale would
+#: otherwise be interpreted as heat per normalized full-load unit. Both stored
+#: snapshots and policy artifacts carry this revision and are rejected rather
+#: than silently converted.
+MODEL_SCHEMA = 3
 
 
 def _rad_loss(T_c, T_amb, sigma):
     # Radiative chamber loss (Stefan-Boltzmann-like). sigma=0 -> purely linear.
     return sigma * ((T_c + _KELVIN) ** 4 - (T_amb + _KELVIN) ** 4)
+
+
+def _normalized_load(value):
+    load = float(value)
+    if not np.isfinite(load) or not 0.0 <= load <= 1.0:
+        raise ValueError("normalized combustion load must be finite and within [0, 1]")
+    return load
 
 
 def _erlang_coefficients(n, a):
@@ -169,7 +171,7 @@ def _erlang_coefficients(n, a):
 
 def simulate_grey_box(
     t,
-    Q,
+    combustion_load,
     *,
     C_c,
     h_amb,
@@ -189,8 +191,8 @@ def simulate_grey_box(
     parameters it produces describe the model that consumes them.
 
     `out[i]` is the chamber temperature AT `t[i]`, so `out[0] == T0`; each step
-    advances the state from `t[i]` to `t[i+1]` under the input `Q[i]`. The
-    disturbance state `d` is absent: it exists to absorb model error at run
+    advances the state from `t[i]` to `t[i+1]` under normalized
+    `combustion_load[i]`. The disturbance state `d` is absent: it exists to
     time, and fitting against it would let it absorb the very mismatch a
     calibration exists to remove.
 
@@ -221,7 +223,9 @@ def simulate_grey_box(
     docs/superpowers/experiments/substep_convergence.py.
     """
     t = np.asarray(t, dtype=float)
-    Q = np.asarray(Q, dtype=float)
+    combustion_load = np.asarray(combustion_load, dtype=float)
+    if not np.all(np.isfinite(combustion_load)):
+        raise ValueError("combustion load samples must be finite")
     n = max(int(n_delay), 0)
     lag_tau = (float(theta) / n) if (n > 0 and theta > 0.0) else 0.0
     lags = np.zeros(n)
@@ -236,23 +240,16 @@ def simulate_grey_box(
             continue
         steps = max(1, int(np.ceil(span / max_dt)))
         dt = span / steps
-        u = float(Q[i])
+        load = float(combustion_load[i])
         if lag_tau > 0.0:
-            # lags(k*dt) = u + exp(A*k*dt) @ (lags(0) - u), exactly, for every
-            # sub-step k at once: `dev` is the state's departure from the
-            # equilibrium this constant input drives it to, and exp(A*k*dt) is
-            # lower-triangular Toeplitz in the Erlang coefficients. `heat` is
-            # the tail stage, which is what feeds the chamber; `lags` carries
-            # the whole chain into the next interval.
-            dev = lags - u
+            # lags(k*dt) = load + exp(A*k*dt) @ (lags(0) - load), exactly, for
+            # every sub-step k at once.
+            dev = lags - load
             coef = _erlang_coefficients(n, np.arange(1, steps + 1) * (dt / lag_tau))
-            # .tolist() because the chamber loop below is scalar Python: reading
-            # numpy scalars out of an array and doing float arithmetic on them
-            # costs more than the whole exact-chain build does.
-            heat = (u + coef @ dev[::-1]).tolist()
-            lags = u + np.convolve(coef[-1], dev)[:n]
+            heat = (load + coef @ dev[::-1]).tolist()
+            lags = load + np.convolve(coef[-1], dev)[:n]
         else:
-            heat = [u] * steps
+            heat = [load] * steps
         for k in range(steps):
             dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c
             T_c += dt * dT_c
@@ -260,31 +257,27 @@ def simulate_grey_box(
 
 
 def build_do_mpc_model(*, C_c, h_amb, T_amb, theta=0.0, n_delay=0, K_Q=1.0, sigma=0.0):
-    """Build the do-mpc continuous model of the augmented grey-box plant.
-
-    Parameters are the physical/model parameters documented in the module
-    docstring: chamber capacitance C_c, ambient conductance h_amb, ambient
-    T_amb, firing-rate gain K_Q, radiative coefficient sigma, and the optional
-    transport-delay pair (theta mean deadtime, n_delay lag states).
-    """
+    """Build the do-mpc continuous model with one normalized combustion input."""
     import do_mpc
 
     model = do_mpc.model.Model("continuous")
     q = [model.set_variable("_x", f"q{i}") for i in range(n_delay)]
     T_c = model.set_variable("_x", "T_c")
     d = model.set_variable("_x", "d")
-    Q = model.set_variable("_u", "Q")
+    combustion_load = model.set_variable("_u", "combustion_load")
     model.set_variable("_tvp", "T_set")
     if n_delay > 0:
         tau_d = theta / n_delay
-        model.set_rhs("q0", (Q - q[0]) / tau_d)
+        model.set_rhs("q0", (combustion_load - q[0]) / tau_d)
         for i in range(1, n_delay):
             model.set_rhs(f"q{i}", (q[i - 1] - q[i]) / tau_d)
-        heat_in = q[n_delay - 1]
+        delayed_load = q[n_delay - 1]
     else:
-        heat_in = Q
-    # K_Q maps the abstract firing rate to actual heat (calibrated to grill power)
-    model.set_rhs("T_c", (K_Q * heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma) + d) / C_c)
+        delayed_load = combustion_load
+    model.set_rhs(
+        "T_c",
+        (K_Q * delayed_load - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma) + d) / C_c,
+    )
     model.set_rhs("d", d * 0)
     model.setup()
     return model
@@ -342,9 +335,10 @@ class GreyBoxKF:
         self.P = np.eye(n) * 5.0
         self.n = n
 
-    def update(self, Q_applied, y_measured):
+    def update(self, normalized_combustion_load, y_measured):
+        load = _normalized_load(normalized_combustion_load)
         # predict
-        self.x = self.Ad @ self.x + self.Bd.flatten() * Q_applied + self.bd.flatten()
+        self.x = self.Ad @ self.x + self.Bd.flatten() * load + self.bd.flatten()
         self.P = self.Ad @ self.P @ self.Ad.T + self.Qkf
         # update
         S = self.H @ self.P @ self.H.T + self.Rkf
@@ -437,10 +431,11 @@ class GreyBoxEKF:
         Md = expm(Mblk * self.t_step)
         return Md[:n, :n], Md[:n, n : n + 1], Md[:n, n + 1 : n + 2]
 
-    def update(self, Q_applied, y_measured):
+    def update(self, normalized_combustion_load, y_measured):
+        load = _normalized_load(normalized_combustion_load)
         Ad, Bd, bd = self._discretize()
         # predict
-        self.x = Ad @ self.x + Bd.flatten() * Q_applied + bd.flatten()
+        self.x = Ad @ self.x + Bd.flatten() * load + bd.flatten()
         self.P = Ad @ self.P @ Ad.T + self.Qkf
         # update
         S = self.H @ self.P @ self.H.T + self.Rkf
@@ -494,15 +489,15 @@ class GreyBoxMHE:
         q = [model.set_variable("_x", f"q{i}") for i in range(n_delay)]
         T_c = model.set_variable("_x", "T_c")
         d = model.set_variable("_x", "d")
-        Q_app = model.set_variable("_tvp", "Q_app")  # applied input, KNOWN
+        applied_combustion_load = model.set_variable("_tvp", "applied_combustion_load")
         if n_delay > 0:
             tau_d = theta / n_delay
-            model.set_rhs("q0", (Q_app - q[0]) / tau_d, process_noise=True)
+            model.set_rhs("q0", (applied_combustion_load - q[0]) / tau_d, process_noise=True)
             for i in range(1, n_delay):
                 model.set_rhs(f"q{i}", (q[i - 1] - q[i]) / tau_d, process_noise=True)
             heat_in = q[n_delay - 1]
         else:
-            heat_in = Q_app
+            heat_in = applied_combustion_load
         model.set_rhs(
             "T_c",
             (K_Q * heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma) + d) / C_c,
@@ -530,7 +525,7 @@ class GreyBoxMHE:
 
         def tvp_fun(t_now):
             for k in range(self._N + 1):
-                tvp_template["_tvp", k, "Q_app"] = self._qhist[k]
+                tvp_template["_tvp", k, "applied_combustion_load"] = self._qhist[k]
             return tvp_template
 
         mhe.set_tvp_fun(tvp_fun)
@@ -542,6 +537,6 @@ class GreyBoxMHE:
         mhe.set_initial_guess()
         self.mhe = mhe
 
-    def update(self, Q_applied, y_measured):
-        self._qhist.append(float(Q_applied))
+    def update(self, normalized_combustion_load, y_measured):
+        self._qhist.append(_normalized_load(normalized_combustion_load))
         return np.asarray(self.mhe.make_step(np.array([[float(y_measured)]]))).flatten()

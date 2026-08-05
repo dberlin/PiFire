@@ -37,7 +37,7 @@ from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality, load_tra
 #: whether the fitter recovers what it is given, which needs a grill it can
 #: represent. The cost of that restriction is its own question, measured
 #: against a mismatched grill in tests/unit/mpc/test_model_promotion.py.
-TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=32.0, theta=110.0)
+TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=3200.0, theta=110.0)
 T_AMB = 20.0
 N_DELAY = _DEFAULTS["n_delay"]
 SIGMA = 1.4e-9
@@ -47,14 +47,14 @@ def _dataset():
     """A heat-up to a plateau then a step down -- enough excitation to identify
     the gain, the loss and the deadtime."""
     t = np.arange(0.0, 6000.0, 5.0)
-    Q = np.where(t < 3000.0, 100.0, 20.0)
+    Q = np.where(t < 3000.0, 1.0, 0.2)
     temp = simulate_grey_box(t, Q, T0=25.0, T_amb=T_AMB, sigma=SIGMA, n_delay=N_DELAY, **TRUTH)
     return t, Q, temp
 
 
 def _init():
     """The shipped starting point, exactly as controller/mpc.py's _REFIT_INIT."""
-    return dict(C_c=320.0, h_amb=0.5, K_Q=3.5, theta=50.0)
+    return dict(C_c=320.0, h_amb=0.5, K_Q=350.0, theta=50.0)
 
 
 def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibration-session"):
@@ -538,7 +538,7 @@ def test_a_fit_the_model_cannot_be_simulated_at_is_reported_as_not_converged():
     # pass on any init that merely fits badly.
     with pytest.raises(OverflowError):
         simulate_grey_box(
-            t, Q, C_c=1e-9, h_amb=0.5, T_amb=T_AMB, T0=float(temp[0]), K_Q=32.0, sigma=SIGMA, theta=110.0, n_delay=8
+            t, Q, C_c=1e-9, h_amb=0.5, T_amb=T_AMB, T0=float(temp[0]), K_Q=3200.0, sigma=SIGMA, theta=110.0, n_delay=8
         )
 
     diverged = fit_params(t, temp, Q, T_amb=T_AMB, init=dict(_init(), C_c=1e-9), sigma=SIGMA, n_delay=N_DELAY)

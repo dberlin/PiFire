@@ -19,7 +19,7 @@ from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
 
-TRACE_SCHEMA_VERSION = 1
+TRACE_SCHEMA_VERSION = 2
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
@@ -282,13 +282,10 @@ class MpcUpdatePayload(_ControlUpdatePayload):
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class AllocationPayload:
     result_revision: NonNegativeInt
-    normalized_combustion_load: FiniteFloat
+    normalized_combustion_load: Annotated[FiniteFloat, Field(ge=0, le=1)]
     requested_auger_duty: FiniteFloat
     requested_fan_duty: FiniteFloat | None
-    q_min: FiniteFloat
-    q_max: FiniteFloat
-    u_min: FiniteFloat
-    u_max: FiniteFloat
+    u_max: PositiveFloat
     fan_min_pct: FiniteFloat
     fan_max_pct: FiniteFloat
     fan_enabled: bool
@@ -300,10 +297,6 @@ class AllocationPayload:
 
     @model_validator(mode="after")
     def validate_allocator_inputs(self) -> AllocationPayload:
-        if self.q_min > self.q_max:
-            raise ValueError("q_min must not exceed q_max")
-        if self.u_min > self.u_max:
-            raise ValueError("u_min must not exceed u_max")
         if self.fan_min_pct > self.fan_max_pct:
             raise ValueError("fan_min_pct must not exceed fan_max_pct")
         if not self.fan_enabled and self.requested_fan_duty is not None:
@@ -488,7 +481,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[1] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")

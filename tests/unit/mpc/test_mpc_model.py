@@ -5,10 +5,16 @@ from controller.mpc_model import build_do_mpc_model, GreyBoxKF, simulate_grey_bo
 PARAMS = dict(C_c=306.0, h_amb=0.55, T_amb=20.0)
 
 
-def test_model_builds():
+def test_model_exposes_one_normalized_combustion_load_input():
     m = build_do_mpc_model(**PARAMS)
     assert set(m.x.keys()) >= {"T_c", "d"}
-    assert "Q" in m.u.keys()
+    assert set(m.u.keys()) - {"default"} == {"combustion_load"}
+
+
+def test_kf_rejects_an_applied_load_outside_the_normalized_domain():
+    kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04, x0=(20.0, 0.0), **PARAMS)
+    with np.testing.assert_raises_regex(ValueError, "normalized combustion load"):
+        kf.update(1.01, 100.0)
 
 
 def test_the_model_has_no_firepot_state():
@@ -31,7 +37,7 @@ def test_kf_offset_free_under_constant_disturbance():
     kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04, x0=(100.0, 0.0), **PARAMS)
     y = 100.0
     for _ in range(200):
-        x = kf.update(Q_applied=49.5, y_measured=y)  # ~steady Q for 100C
+        x = kf.update(normalized_combustion_load=0.495, y_measured=y)  # ~steady load for 100C
     # estimated chamber temp tracks the measurement
     assert abs(x[0] - y) < 0.5
     # disturbance state is non-trivial (it absorbed the model mismatch)
@@ -56,16 +62,16 @@ def test_kf_tracks_measured_temperature():
     kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04, x0=(20.0, 0.0), **PARAMS)
     x = None
     for _ in range(100):
-        x = kf.update(Q_applied=49.5, y_measured=110.0)
+        x = kf.update(normalized_combustion_load=0.495, y_measured=110.0)
     assert abs(x[0] - 110.0) < 1.0
 
 
-_P = dict(C_c=320.0, h_amb=0.5, T_amb=20.0, K_Q=3.5)
+_P = dict(C_c=320.0, h_amb=0.5, T_amb=20.0, K_Q=350.0)
 
 
 def test_output_starts_at_t0_and_is_aligned_with_the_time_grid():
     t = np.arange(0.0, 60.0, 5.0)
-    out = simulate_grey_box(t, np.full(t.shape, 50.0), T0=20.0, **_P)
+    out = simulate_grey_box(t, np.full(t.shape, 0.5), T0=20.0, **_P)
     assert out.shape == t.shape
     assert out[0] == 20.0
 
@@ -79,17 +85,17 @@ def test_zero_firing_rate_decays_toward_ambient():
 
 def test_radiative_loss_lowers_the_trajectory():
     t = np.arange(0.0, 1200.0, 5.0)
-    Q = np.full(t.shape, 100.0)
-    linear = simulate_grey_box(t, Q, T0=20.0, sigma=0.0, **_P)
-    radiative = simulate_grey_box(t, Q, T0=20.0, sigma=1.4e-9, **_P)
+    combustion_load = np.full(t.shape, 1.0)
+    linear = simulate_grey_box(t, combustion_load, T0=20.0, sigma=0.0, **_P)
+    radiative = simulate_grey_box(t, combustion_load, T0=20.0, sigma=1.4e-9, **_P)
     assert radiative[-1] < linear[-1]
 
 
 def test_transport_delay_postpones_the_response():
     t = np.arange(0.0, 600.0, 5.0)
-    Q = np.full(t.shape, 100.0)
-    prompt = simulate_grey_box(t, Q, T0=20.0, theta=0.0, n_delay=0, **_P)
-    delayed = simulate_grey_box(t, Q, T0=20.0, theta=100.0, n_delay=4, **_P)
+    combustion_load = np.full(t.shape, 1.0)
+    prompt = simulate_grey_box(t, combustion_load, T0=20.0, theta=0.0, n_delay=0, **_P)
+    delayed = simulate_grey_box(t, combustion_load, T0=20.0, theta=100.0, n_delay=4, **_P)
     # Delay only postpones; it removes no energy, so early samples lag and the
     # gap closes as the chain fills.
     assert delayed[10] < prompt[10]
@@ -108,12 +114,12 @@ def test_substepping_makes_the_answer_independent_of_the_log_cadence():
     fast = dict(_P, theta=20.0, n_delay=4)
     t_coarse = np.arange(0.0, 601.0, 20.0)
     t_fine = np.arange(0.0, 601.0, 1.0)
-    coarse = simulate_grey_box(t_coarse, np.full(t_coarse.shape, 100.0), T0=20.0, **fast)
-    fine = simulate_grey_box(t_fine, np.full(t_fine.shape, 100.0), T0=20.0, **fast)
+    coarse = simulate_grey_box(t_coarse, np.full(t_coarse.shape, 1.0), T0=20.0, **fast)
+    fine = simulate_grey_box(t_fine, np.full(t_fine.shape, 1.0), T0=20.0, **fast)
     assert abs(coarse[-1] - fine[-1]) < 0.05
     # The negative control: the same coarse grid integrated AT the sample
     # spacing, which is the log cadence leaking into the answer.
-    cadence_bound = simulate_grey_box(t_coarse, np.full(t_coarse.shape, 100.0), T0=20.0, max_dt=20.0, **fast)
+    cadence_bound = simulate_grey_box(t_coarse, np.full(t_coarse.shape, 1.0), T0=20.0, max_dt=20.0, **fast)
     assert abs(cadence_bound[-1] - fine[-1]) > 5.0
 
 
@@ -129,12 +135,12 @@ def test_a_short_deadtime_simulates_instead_of_overflowing():
     # correct against a converged reference.
     fast = dict(_P, theta=3.0, n_delay=8)
     t = np.arange(0.0, 1200.0, 5.0)
-    Q = np.where(t < 600.0, 100.0, 20.0)
-    out = simulate_grey_box(t, Q, T0=20.0, **fast)
+    combustion_load = np.where(t < 600.0, 1.0, 0.2)
+    out = simulate_grey_box(t, combustion_load, T0=20.0, **fast)
     assert np.all(np.isfinite(out))
     # A converged reference: a sub-step 60x shorter than the shipped one, which
     # is far enough down the first-order error curve to be the answer.
-    converged = simulate_grey_box(t, Q, T0=20.0, max_dt=0.002, **fast)
+    converged = simulate_grey_box(t, combustion_load, T0=20.0, max_dt=0.002, **fast)
     # 0.044 C as shipped; an Euler chain given a sub-step short enough to be
     # stable here at all still lands at 0.57 C.
     assert float(np.sqrt(np.mean((out - converged) ** 2))) < 0.1
@@ -154,9 +160,9 @@ def test_the_delay_chain_carries_no_discretization_error_of_its_own():
     # would shift it by.
     slow = dict(_P, theta=160.0, n_delay=8)
     t = np.arange(0.0, 2400.0, 5.0)
-    Q = np.where(t < 1200.0, 100.0, 0.0)
-    shipped = simulate_grey_box(t, Q, T0=20.0, **slow)
-    coarse = simulate_grey_box(t, Q, T0=20.0, max_dt=2.0, **slow)
+    combustion_load = np.where(t < 1200.0, 1.0, 0.0)
+    shipped = simulate_grey_box(t, combustion_load, T0=20.0, **slow)
+    coarse = simulate_grey_box(t, combustion_load, T0=20.0, max_dt=2.0, **slow)
     # 0.81 C as shipped, all of it the chamber's; an Euler chain moves 10.9 C
     # over the same change of sub-step, which is the 8 s of delay it loses.
     assert float(np.max(np.abs(coarse - shipped))) < 2.0

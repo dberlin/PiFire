@@ -44,8 +44,6 @@ _CALIB_FLOATS = (
     "Q_w",
     "R_dQ",
     "t_step",
-    "Q_min",
-    "Q_max",
 )
 _CALIB_INTS = ("n_delay", "n_horizon", "enable_fan_input")
 
@@ -169,14 +167,12 @@ class NetPolicy:
         return out * self.r_std + self.r_mean
 
     def firing_rate(self, x_hat, u_prev, set_point_c):
-        """Firing-rate demand Q for the estimated state and target (Celsius)."""
-        Q = self.firing_rate_raw(x_hat, u_prev, set_point_c)
-        return float(np.clip(Q, self.calib["Q_min"], self.calib["Q_max"]))
+        """Normalized combustion-load demand for the estimated state and target."""
+        combustion_load = self.firing_rate_raw(x_hat, u_prev, set_point_c)
+        return float(np.clip(combustion_load, 0.0, 1.0))
 
     def firing_rate_raw(self, x_hat, u_prev, set_point_c):
-        """The net's unclipped answer -- what firing_rate returns before it is
-        forced back into [Q_min, Q_max]. Needed to measure how far the net
-        extrapolates on states the clamp would otherwise hide."""
+        """Return the unclipped normalized combustion-load demand."""
         x = np.asarray(x_hat, dtype=float).reshape(-1)
         d = x[self.n_delay + 1]
         # the net only saw T_set in [sp_lo, sp_hi]; clip its input to avoid

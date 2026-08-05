@@ -119,8 +119,8 @@ class MqttNotificationHandler:
                 # once this loop zeroes only the "pid" one.
                 "set_point",
                 "set_point_c",
-                "last_Q",
-                "applied_Q",
+                "last_combustion_load",
+                "applied_combustion_load",
             ]
             self.HOPPER_SENSORS = ["hopper_level"]
             self.CONTROL_NOTIFY_SENSORS = ["target"]

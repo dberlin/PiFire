@@ -25,14 +25,14 @@ def _v3_settings():
     }
 
 
-def test_schema_version_four_removes_only_mpc_csv_logging_settings():
+def test_later_schema_versions_preserve_the_v4_logging_cutover():
     settings = _v3_settings()
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 4
+    assert SETTINGS_SCHEMA_VERSION == 5
     assert settings == {
-        "schema_version": 4,
+        "schema_version": 5,
         "controller": {
             "selected": "mpc",
             "config": {

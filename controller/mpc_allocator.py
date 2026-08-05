@@ -5,20 +5,38 @@
  PiFire MPC Combustion Allocator
 *****************************************
 
- Maps the MPC's scalar firing-rate demand Q to physical actuators (auger duty
- and, on PWM/DC-fan builds, fan duty) along a sensible air-fuel curve. Air
- tracks fuel so the air-fuel ratio stays near its target across the firing
- range, which keeps combustion sensible by construction.
+ Maps one normalized combustion-load command q in [0, 1] to physical actuators:
+ auger duty and, on PWM/DC-fan builds, fan duty. Air tracks fuel along the
+ same scalar axis, so no independent fan decision exists.
 
 *****************************************
 """
 
+import math
 from dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason
 
 
-ALLOCATOR_REVISION = 1
+ALLOCATOR_REVISION = 2
+
+
+def _normalized_combustion_load(value: float) -> float:
+    load = float(value)
+    if not math.isfinite(load) or not 0.0 <= load <= 1.0:
+        raise ValueError("normalized combustion load must be finite and within [0, 1]")
+    return load
+
+
+def normalized_load_from_auger_duty(auger_duty: float, *, u_max: float) -> float:
+    """Recover the bounded normalized load from measured mean auger duty."""
+    duty = float(auger_duty)
+    maximum = float(u_max)
+    if not math.isfinite(duty):
+        raise ValueError("measured auger duty must be finite")
+    if not math.isfinite(maximum) or maximum <= 0.0:
+        raise ValueError("u_max must be finite and greater than zero")
+    return min(1.0, max(0.0, duty / maximum))
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,9 +46,6 @@ class AllocationResult:
     normalized_combustion_load: float
     auger_duty: float
     fan_duty: float | None
-    q_min: float
-    q_max: float
-    u_min: float
     u_max: float
     fan_min_pct: float
     fan_max_pct: float
@@ -41,41 +56,31 @@ class AllocationResult:
 
 
 def allocate(
-    Q: float,
+    normalized_combustion_load: float,
     *,
-    Q_min: float,
-    Q_max: float,
-    u_min: float,
     u_max: float,
     fan_min_pct: float,
     fan_max_pct: float,
     enable_fan: bool,
 ) -> AllocationResult:
-    """Map a firing-load request to one immutable, traceable actuator allocation."""
-    span = (Q_max - Q_min) if Q_max > Q_min else 1.0
-    normalized_load = max(float(Q_min), min(float(Q_max), float(Q)))
-    fraction = (normalized_load - Q_min) / span
-    auger_duty = u_min + fraction * (u_max - u_min)
-    fan_duty = fan_min_pct + fraction * (fan_max_pct - fan_min_pct) if enable_fan else None
+    """Allocate the only MPC decision variable to coupled fuel and air commands."""
+    load = _normalized_combustion_load(normalized_combustion_load)
+    maximum = float(u_max)
+    fan_min = float(fan_min_pct)
+    fan_max = float(fan_max_pct)
+    if not math.isfinite(maximum) or maximum <= 0.0:
+        raise ValueError("u_max must be finite and greater than zero")
+    if not math.isfinite(fan_min) or not math.isfinite(fan_max) or fan_min > fan_max:
+        raise ValueError("fan bounds must be finite and ordered")
+    fan_duty = fan_min + load * (fan_max - fan_min) if enable_fan else None
     return AllocationResult(
-        normalized_combustion_load=normalized_load,
-        auger_duty=auger_duty,
+        normalized_combustion_load=load,
+        auger_duty=load * maximum,
         fan_duty=fan_duty,
-        q_min=Q_min,
-        q_max=Q_max,
-        u_min=u_min,
-        u_max=u_max,
-        fan_min_pct=fan_min_pct,
-        fan_max_pct=fan_max_pct,
+        u_max=maximum,
+        fan_min_pct=fan_min,
+        fan_max_pct=fan_max,
         fan_enabled=enable_fan,
-        auger_clamp_reason=AllocationClampReason.AUGER_MAX
-        if normalized_load == Q_max and Q > Q_max
-        else AllocationClampReason.NONE,
-        fan_clamp_reason=(
-            AllocationClampReason.FAN_MIN
-            if enable_fan and normalized_load == Q_min and Q < Q_min
-            else AllocationClampReason.FAN_MAX
-            if enable_fan and normalized_load == Q_max and Q > Q_max
-            else AllocationClampReason.NONE
-        ),
+        auger_clamp_reason=AllocationClampReason.NONE,
+        fan_clamp_reason=AllocationClampReason.NONE,
     )

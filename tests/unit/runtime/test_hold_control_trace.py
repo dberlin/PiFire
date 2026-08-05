@@ -116,10 +116,10 @@ def _mpc_result(
     revision=1,
     *,
     consecutive_policy_failures=0,
-    raw_policy_firing_load=40.0,
+    raw_policy_firing_load=0.4,
     requested_auger_duty=None,
     enable_fan=True,
-    applied_combustion_load=40.0,
+    applied_combustion_load=0.4,
 ):
     diagnostics = MpcTraceDiagnostics(
         state_names=("temperature",),
@@ -128,9 +128,9 @@ def _mpc_result(
         model_revision=1,
         model_provenance="configured",
         raw_policy_firing_load=raw_policy_firing_load,
-        equilibrium_feed_forward=35.0,
-        residual_move=5.0,
-        bounded_firing_load=40.0,
+        equilibrium_feed_forward=0.35,
+        residual_move=0.05,
+        bounded_firing_load=0.4,
         applied_combustion_load=applied_combustion_load,
         policy_kind="net",
         failure_state=MpcFailureState.SUCCESS,
@@ -140,10 +140,7 @@ def _mpc_result(
         solve_duration_seconds=1.1 - 1.0,
     )
     allocation = allocate(
-        40.0,
-        Q_min=5.0,
-        Q_max=100.0,
-        u_min=0.1,
+        0.4,
         u_max=0.9,
         fan_min_pct=40.0,
         fan_max_pct=100.0,
@@ -228,17 +225,11 @@ def test_mpc_hold_records_update_allocation_and_fixed_cycle_feedback_once_per_re
     assert result.allocation is not None
     assert allocation.payload.requested_auger_duty == result.allocation.auger_duty
     assert (
-        allocation.payload.q_min,
-        allocation.payload.q_max,
-        allocation.payload.u_min,
         allocation.payload.u_max,
         allocation.payload.fan_min_pct,
         allocation.payload.fan_max_pct,
         allocation.payload.fan_enabled,
     ) == (
-        result.allocation.q_min,
-        result.allocation.q_max,
-        result.allocation.u_min,
         result.allocation.u_max,
         result.allocation.fan_min_pct,
         result.allocation.fan_max_pct,

@@ -67,39 +67,37 @@ def test_pid_sp_trace_diagnostics_reproduce_completed_update(monkeypatch):
 
 
 class _Estimator:
-    def update(self, applied_q, measured_temperature):
-        assert applied_q == 7.0
+    def update(self, applied_load, measured_temperature):
+        assert applied_load == 0.7
         assert measured_temperature == 100.0
         return mpc.np.array([1.0, 2.0, 3.0, 4.0])
 
 
 class _Policy:
-    def firing_rate(self, x_hat, previous_q, setpoint_c):
-        assert previous_q == 7.0
+    def firing_rate(self, x_hat, previous_load, setpoint_c):
+        assert previous_load == 0.7
         assert setpoint_c == 120.0
-        return 110.0
+        return 1.1
 
 
 def _bare_mpc_controller():
     core = object.__new__(mpc.Controller)
     core.units = "C"
     core.cfg = {
-        "Q_min": 5.0,
-        "Q_max": 100.0,
         "n_delay": 2,
         "h_amb": 2.0,
         "T_amb": 20.0,
         "sigma": 0.0,
-        "K_Q": 4.0,
+        "K_Q": 400.0,
         "fan_min_pct": 40.0,
         "fan_max_pct": 100.0,
         "enable_fan_input": False,
     }
     core._set_point_c = 120.0
-    core._applied_Q = 7.0
-    core._last_Q = 8.0
-    core._last_Q_raw = 8.0
-    core._policy_u_prev = 8.0
+    core._applied_combustion_load = 0.7
+    core._last_combustion_load = 0.8
+    core._last_raw_combustion_load = 0.8
+    core._policy_u_prev = 0.8
     core._last_solve_failed = False
     core._consecutive_policy_failures = 0
     core._history = collections.deque(maxlen=2)
@@ -108,19 +106,15 @@ def _bare_mpc_controller():
     core._net = _Policy()
     core.mpc = None
     core.estimator = _Estimator()
-    core.u_min = 0.1
     core.u_max = 0.9
     return core
 
 
-def _allocation(_q, **_):
+def _allocation(_load, **_):
     return AllocationResult(
-        normalized_combustion_load=100.0,
+        normalized_combustion_load=1.0,
         auger_duty=0.5,
         fan_duty=None,
-        q_min=0.0,
-        q_max=100.0,
-        u_min=0.1,
         u_max=0.9,
         fan_min_pct=40.0,
         fan_max_pct=100.0,
@@ -144,15 +138,15 @@ def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monk
     assert diagnostic.state_names == ("q0", "q1", "T_c", "d")
     assert diagnostic.state_values == (1.0, 2.0, 3.0, 4.0)
     assert diagnostic.disturbance_estimate == pytest.approx(4.0)
-    assert diagnostic.raw_policy_firing_load == pytest.approx(110.0)
-    assert diagnostic.bounded_firing_load == pytest.approx(100.0)
+    assert diagnostic.raw_policy_firing_load == pytest.approx(1.1)
+    assert diagnostic.bounded_firing_load == pytest.approx(1.0)
     assert diagnostic.model_revision == 3
     assert diagnostic.model_provenance == "adopted"
     assert diagnostic.failure_state is MpcFailureState.SUCCESS
     assert diagnostic.solve_start_monotonic == pytest.approx(10.0)
     assert diagnostic.solve_end_monotonic == pytest.approx(10.25)
     assert diagnostic.solve_duration_seconds == pytest.approx(0.25)
-    assert diagnostic.applied_combustion_load == pytest.approx(7.0)
+    assert diagnostic.applied_combustion_load == pytest.approx(0.7)
 
 
 def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch):
@@ -162,7 +156,7 @@ def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch)
 
     core = _bare_mpc_controller()
     core._net = _FailingPolicy()
-    core._last_Q = 8.0
+    core._last_combustion_load = 0.8
     monotonic = iter((10.0, 10.25))
     monkeypatch.setattr(mpc.time, "monotonic", lambda: next(monotonic))
     monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
@@ -175,7 +169,7 @@ def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch)
     assert diagnostic.raw_policy_firing_load is None
     assert diagnostic.equilibrium_feed_forward is None
     assert diagnostic.residual_move is None
-    assert diagnostic.bounded_firing_load == pytest.approx(8.0)
+    assert diagnostic.bounded_firing_load == pytest.approx(0.8)
 
 
 def test_mpc_policy_timing_excludes_failure_logging(monkeypatch):

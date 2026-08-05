@@ -33,7 +33,7 @@ from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import _MAX_CONFIGURABLE_HORIZON_S, built_n_horizon, longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
-from controller.mpc_allocator import AllocationResult, allocate
+from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 
 _DEFAULTS = dict(
     # R_dQ (firing-move penalty) kept low: 1.0 was over-damped -> sluggish rise AND
@@ -44,8 +44,6 @@ _DEFAULTS = dict(
     control_period=5.0,
     Q_w=1.0,
     R_dQ=0.1,
-    Q_min=5.0,
-    Q_max=100.0,
     # Nominal grey-box thermal params -- CALIBRATE to your grill via update_mpc.py.
     C_c=320.0,
     h_amb=0.50,
@@ -60,7 +58,7 @@ _DEFAULTS = dict(
     # increment, and 16 and 20 less again for more. Measured in
     # docs/superpowers/experiments/ndelay_sweep.py.
     n_delay=8,
-    K_Q=3.5,
+    K_Q=350.0,
     sigma=1.4e-9,
     # 'ekf' linearizes the nonlinear radiative term each step (~us, default);
     # 'mhe' solves an NLP (nonlinear, slower); 'kf' is linear-only.
@@ -199,7 +197,12 @@ def _load_net_policy(cfg, n_horizon):
         print(f"[mpc] could not load net policy ({e}); using NLP")
         return None
     if not net.matches_config({**cfg, "n_horizon": n_horizon}):
-        if net.input_dim != net.expected_input_dim(cfg):
+        if net.model_schema != MODEL_SCHEMA:
+            print(
+                f"[mpc] net policy at {path} uses model schema {net.model_schema}, but normalized combustion "
+                f"load requires schema {MODEL_SCHEMA}; using NLP -- regenerate it with tools/regenerate_mpc_net.py."
+            )
+        elif net.input_dim != net.expected_input_dim(cfg):
             print(
                 f"[mpc] net policy at {path} takes a {net.input_dim}-wide input but this model "
                 f"produces {net.expected_input_dim(cfg)}; it was trained against a different "
@@ -208,7 +211,6 @@ def _load_net_policy(cfg, n_horizon):
         else:
             print("[mpc] net policy calibration does not match config; using NLP")
         return None
-    return net
 
 
 _PHYSICAL_PARAMS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
@@ -324,15 +326,14 @@ class Controller(ControllerBase):
         cfg.update(config or {})
         self.cfg = cfg
         _warn_about_model(cfg)
-        self.u_min = cycle_data.get("u_min", 0.1)
-        self.u_max = cycle_data.get("u_max", 0.9)
+        self.u_max = float(cycle_data.get("u_max", 0.9))
 
         self._set_point_c = 0.0
-        self._last_Q = cfg["Q_min"]
-        self._applied_Q = float(cfg["Q_min"])
+        self._last_combustion_load = 0.0
+        self._applied_combustion_load = 0.0
         self._x_hat = None
-        self._policy_u_prev = float(cfg["Q_min"])
-        self._last_Q_raw = float(cfg["Q_min"])
+        self._policy_u_prev = 0.0
+        self._last_raw_combustion_load = 0.0
         self._last_solve_failed = False
         # How long the output has been frozen. A single failure is a hiccup the
         # held command covers; a run of them means nothing is steering.
@@ -464,9 +465,9 @@ class Controller(ControllerBase):
         T_c = model.x["T_c"]
         T_set = model.tvp["T_set"]
         mpc.set_objective(mterm=cfg["Q_w"] * (T_c - T_set) ** 2, lterm=cfg["Q_w"] * (T_c - T_set) ** 2)
-        mpc.set_rterm(Q=cfg["R_dQ"])
-        mpc.bounds["lower", "_u", "Q"] = cfg["Q_min"]
-        mpc.bounds["upper", "_u", "Q"] = cfg["Q_max"]
+        mpc.set_rterm(combustion_load=cfg["R_dQ"])
+        mpc.bounds["lower", "_u", "combustion_load"] = 0.0
+        mpc.bounds["upper", "_u", "combustion_load"] = 1.0
 
         tvp_template = mpc.get_tvp_template()
 
@@ -501,14 +502,13 @@ class Controller(ControllerBase):
         return {
             "set_point": _finite_float(self.set_point),
             "set_point_c": _finite_float(self._set_point_c),
-            "last_Q": _finite_float(self._last_Q),
-            "applied_Q": _finite_float(self._applied_Q),
+            "last_combustion_load": _finite_float(self._last_combustion_load),
+            "applied_combustion_load": _finite_float(self._applied_combustion_load),
             "policy": "net" if self._net is not None else "nlp",
             # Non-zero means update() is returning a held command rather than a
             # computed one, so the number this reports is how many control
             # periods the grill has been running open-loop.
             "policy_failures": int(self._consecutive_policy_failures),
-            "u_min": _finite_float(self.u_min),
             "u_max": _finite_float(self.u_max),
             "x_hat": None
             if self._x_hat is None
@@ -799,50 +799,19 @@ class Controller(ControllerBase):
         return verdict
 
     def set_output(self, applied):
-        """Take the auger duty that actually ran and recover the firing rate.
-
-        allocate() is affine on [u_min, u_max], so this inverts it exactly
-        there. Below u_min the affine inverse would extrapolate to a negative
-        Q -- but mpc_model.py's heat_in = K_Q * Q has no offset, so a negative
-        Q reads as negative heat, and a paused auger delivers none, not
-        negative heat. Below u_min the inverse instead blends linearly to the
-        origin (duty 0 -> Q 0), agreeing with the affine branch exactly at
-        u_min. The result can still land below Q_min -- that floor-crossing
-        is the signal this method exists to report, reported one call at a
-        time (a shorter or mid-interval pause is invisible between reports) --
-        it just never goes negative.
-
-        Fidelity below u_min depends on u_min > 0. At u_min == 0 the blend
-        branch is unreachable for any non-negative ratio, so the affine
-        branch alone handles duty 0 and folds it back to Q_min --
-        indistinguishable from a minimum command, the exact defect this
-        method exists to fix. u_min == 0 is a valid cycle_data configuration
-        this method does not special-case further.
-        """
-        span = self.u_max - self.u_min
-        if span <= 0:
-            return
-        ratio = float(applied.ratio)
-        Q_min, Q_max = self.cfg["Q_min"], self.cfg["Q_max"]
-        # Mirrors allocate()'s own guard against a degenerate Q span, so the
-        # two maps stay consistent instead of this inverse flipping sign on a
-        # nonsense config.
-        q_span = (Q_max - Q_min) if Q_max > Q_min else 1.0
-        if self.u_min > 0 and ratio < self.u_min:
-            self._applied_Q = Q_min * ratio / self.u_min
-        else:
-            self._applied_Q = Q_min + (ratio - self.u_min) / span * q_span
+        """Recover the normalized applied load from measured mean auger duty."""
+        self._applied_combustion_load = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
 
     def update(self, current):
         y = _to_c(current, self.units)
-        applied_Q = self._applied_Q
-        x_hat = self.estimator.update(applied_Q, y)
+        applied_combustion_load = self._applied_combustion_load
+        x_hat = self.estimator.update(applied_combustion_load, y)
         self._x_hat = x_hat
         state_values = tuple(float(value) for value in np.asarray(x_hat).reshape(-1))
         state_names = tuple(f"q{index}" for index in range(int(self.cfg["n_delay"]))) + ("T_c", "d")
         disturbance = state_values[-1]
-        self._history.append((time.time(), float(y), float(applied_Q)))
-        self._policy_u_prev = float(np.clip(self._applied_Q, self.cfg["Q_min"], self.cfg["Q_max"]))
+        self._history.append((time.time(), float(y), float(applied_combustion_load)))
+        self._policy_u_prev = self._applied_combustion_load
 
         solve_start = time.monotonic()
         failure_state = MpcFailureState.SUCCESS
@@ -852,11 +821,11 @@ class Controller(ControllerBase):
                 raw_policy = (
                     self._net.firing_rate_raw if hasattr(self._net, "firing_rate_raw") else self._net.firing_rate
                 )
-                Q = raw_policy(x_hat, self._policy_u_prev, self._set_point_c)
+                combustion_load = raw_policy(x_hat, self._policy_u_prev, self._set_point_c)
             else:
-                Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+                combustion_load = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
         except Exception as error:
-            Q = self._last_Q
+            combustion_load = self._last_combustion_load
             failure_state = MpcFailureState.POLICY_EXCEPTION
             failure_error = error
         finally:
@@ -867,8 +836,8 @@ class Controller(ControllerBase):
                 print(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")
             self._consecutive_policy_failures = 0
             self._last_solve_failed = False
-            raw_firing_load = float(Q)
-            self._last_Q_raw = raw_firing_load
+            raw_firing_load = float(combustion_load)
+            self._last_raw_combustion_load = raw_firing_load
         else:
             self._last_solve_failed = True
             self._consecutive_policy_failures += 1
@@ -876,19 +845,16 @@ class Controller(ControllerBase):
             if n == 1 or n in (10, 60) or n % 300 == 0:
                 print(
                     f"[mpc] policy has failed {n} consecutive step(s) ({type(failure_error).__name__}: {failure_error}); "
-                    f"holding the last firing rate {Q:.1f}. The grill is not being controlled to "
+                    f"holding normalized combustion load {combustion_load:.3f}. The grill is not being controlled to "
                     "setpoint -- check the policy artifact and the model configuration."
                 )
             raw_firing_load = None
 
-        Q = float(np.clip(Q, self.cfg["Q_min"], self.cfg["Q_max"]))
-        self._last_Q = Q
-        self._applied_Q = Q
+        combustion_load = float(np.clip(combustion_load, 0.0, 1.0))
+        self._last_combustion_load = combustion_load
+        self._applied_combustion_load = combustion_load
         allocation = allocate(
-            Q,
-            Q_min=self.cfg["Q_min"],
-            Q_max=self.cfg["Q_max"],
-            u_min=self.u_min,
+            combustion_load,
             u_max=self.u_max,
             fan_min_pct=self.cfg["fan_min_pct"],
             fan_max_pct=self.cfg["fan_max_pct"],
@@ -917,8 +883,8 @@ class Controller(ControllerBase):
             raw_policy_firing_load=raw_firing_load,
             equilibrium_feed_forward=equilibrium,
             residual_move=residual_move,
-            bounded_firing_load=Q,
-            applied_combustion_load=applied_Q,
+            bounded_firing_load=combustion_load,
+            applied_combustion_load=applied_combustion_load,
             policy_kind="net" if self._net is not None else "nlp",
             failure_state=failure_state,
             consecutive_policy_failures=self._consecutive_policy_failures,

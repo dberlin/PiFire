@@ -1,62 +1,69 @@
 import dataclasses
+import math
 
 import pytest
 
 from common.control_trace import AllocationClampReason
-from controller.mpc_allocator import AllocationResult, allocate
+from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 
-CFG = dict(Q_min=5.0, Q_max=100.0, u_min=0.1, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
+CFG = dict(u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
 
 
-def test_min_fire_maps_to_lower_bounds_with_a_frozen_traceable_result():
-    allocation = allocate(5.0, **CFG)
+def test_zero_load_maps_to_zero_auger_and_minimum_fan_with_frozen_diagnostics():
+    allocation = allocate(0.0, **CFG)
 
     assert isinstance(allocation, AllocationResult)
-    assert allocation.auger_duty == pytest.approx(0.1)
+    assert allocation.normalized_combustion_load == 0.0
+    assert allocation.auger_duty == 0.0
     assert allocation.fan_duty == pytest.approx(40.0)
-    assert allocation.normalized_combustion_load == pytest.approx(5.0)
-    assert allocation.auger_clamp_reason is AllocationClampReason.NONE
-    assert (allocation.q_min, allocation.q_max, allocation.u_min, allocation.u_max) == (5.0, 100.0, 0.1, 0.9)
+    assert allocation.u_max == pytest.approx(0.9)
     assert (allocation.fan_min_pct, allocation.fan_max_pct, allocation.fan_enabled) == (40.0, 100.0, True)
+    assert allocation.auger_clamp_reason is AllocationClampReason.NONE
+    assert allocation.fan_clamp_reason is AllocationClampReason.NONE
     assert dataclasses.is_dataclass(allocation)
     with pytest.raises(dataclasses.FrozenInstanceError):
         allocation.auger_duty = 0.2
 
 
-def test_max_fire_maps_to_upper_bounds():
-    allocation = allocate(100.0, **CFG)
+def test_full_load_maps_to_maximum_auger_and_fan():
+    allocation = allocate(1.0, **CFG)
 
     assert allocation.auger_duty == pytest.approx(0.9)
     assert allocation.fan_duty == pytest.approx(100.0)
 
 
-def test_monotonic_and_clamped():
-    low = allocate(-50, **CFG)
-    high = allocate(999, **CFG)
-    middle = allocate(52.5, **CFG)
+def test_midpoint_couples_auger_and_fan_on_the_same_scalar_axis():
+    allocation = allocate(0.5, **CFG)
 
-    assert low.auger_duty == pytest.approx(0.1)
-    assert low.auger_clamp_reason is AllocationClampReason.NONE
-    assert high.auger_duty == pytest.approx(0.9)
-    assert high.auger_clamp_reason is AllocationClampReason.AUGER_MAX
-    assert 0.1 < middle.auger_duty < 0.9
-    assert allocate(40, **CFG).auger_duty < allocate(60, **CFG).auger_duty
+    assert allocation.auger_duty == pytest.approx(0.45)
+    assert allocation.fan_duty == pytest.approx(70.0)
+    assert allocation.auger_duty / allocation.u_max == pytest.approx(
+        (allocation.fan_duty - allocation.fan_min_pct) / (allocation.fan_max_pct - allocation.fan_min_pct)
+    )
 
 
-def test_air_tracks_fuel_constant_afr():
-    allocation = allocate(52.5, **CFG)
-    auger_fraction = (allocation.auger_duty - 0.1) / (0.9 - 0.1)
-    fan_fraction = (allocation.fan_duty - 40.0) / (100.0 - 40.0)
+def test_disabled_fan_authority_leaves_auger_allocation_unchanged():
+    fanless = allocate(0.5, **{**CFG, "enable_fan": False})
+    with_fan = allocate(0.5, **CFG)
 
-    assert auger_fraction == pytest.approx(fan_fraction)
+    assert fanless.fan_duty is None
+    assert fanless.fan_enabled is False
+    assert fanless.auger_duty == pytest.approx(with_fan.auger_duty)
 
 
-def test_fan_disabled_returns_no_fan_command():
-    cfg = dict(CFG)
-    cfg["enable_fan"] = False
+@pytest.mark.parametrize("load", (-0.01, 1.01, math.nan, math.inf, -math.inf))
+def test_allocator_rejects_loads_outside_the_normalized_finite_domain(load):
+    with pytest.raises(ValueError, match="normalized combustion load"):
+        allocate(load, **CFG)
 
-    allocation = allocate(60, **cfg)
 
-    assert allocation.fan_duty is None
-    assert allocation.fan_enabled is False
-    assert 0.1 < allocation.auger_duty < 0.9
+@pytest.mark.parametrize("load", (0.0, 0.125, 0.5, 1.0))
+def test_auger_inverse_round_trips_the_normalized_applied_load_including_zero(load):
+    allocation = allocate(load, **CFG)
+
+    assert normalized_load_from_auger_duty(allocation.auger_duty, u_max=CFG["u_max"]) == pytest.approx(load)
+
+
+def test_inverse_bounds_measured_duty_to_the_normalized_domain():
+    assert normalized_load_from_auger_duty(-0.2, u_max=CFG["u_max"]) == 0.0
+    assert normalized_load_from_auger_duty(2.0, u_max=CFG["u_max"]) == 1.0

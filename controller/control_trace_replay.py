@@ -43,16 +43,6 @@ class _TraceSessionReader(Protocol):
     ) -> list[ControlTraceRecord]: ...
 
 
-class _AllocationInputs(Protocol):
-    q_min: float
-    q_max: float
-    u_min: float
-    u_max: float
-    fan_min_pct: float
-    fan_max_pct: float
-    fan_enabled: bool
-
-
 class _FrameStart(Protocol):
     actual_start_active: bool
 
@@ -498,16 +488,12 @@ def _validate_allocations(
                 index,
             )
             continue
-        inputs = cast(_AllocationInputs, cast(object, payload))
         expected = allocate(
             payload.normalized_combustion_load,
-            Q_min=inputs.q_min,
-            Q_max=inputs.q_max,
-            u_min=inputs.u_min,
-            u_max=inputs.u_max,
-            fan_min_pct=inputs.fan_min_pct,
-            fan_max_pct=inputs.fan_max_pct,
-            enable_fan=inputs.fan_enabled,
+            u_max=payload.u_max,
+            fan_min_pct=payload.fan_min_pct,
+            fan_max_pct=payload.fan_max_pct,
+            enable_fan=payload.fan_enabled,
         )
         if not (
             _close(payload.normalized_combustion_load, update[1].bounded_firing_load)

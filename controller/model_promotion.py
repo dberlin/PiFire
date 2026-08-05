@@ -123,14 +123,9 @@ _INCUMBENT_KEYS = ("C_c", "h_amb", "theta", "n_delay", "sigma")
 #: controller/mpc_model.py's own constant.
 _KELVIN = 273.15
 
-#: Firing-rate demand that counts as full fire. Q is not a physical unit -- it
-#: is the abstract scalar controller/mpc_allocator.py maps affinely onto auger
-#: duty, and 100 is the top of that range (`Q_max` in controller/mpc.py's
-#: defaults). It appears here because the braking distance depends on how much
-#: heat was in flight when the fuel was cut, and it is a keyword rather than
-#: only a constant so a grill configured to a different top of range can be
-#: asked about its own.
-Q_FULL_FIRE = 100.0
+#: A full combustion command is the normalized scalar 1.0. It appears here
+#: because the braking distance depends on heat in flight when fuel is cut.
+NORMALIZED_FULL_LOAD = 1.0
 
 #: Bisection steps used to invert the lag chain's survival. The bracket halves
 #: each step, so this resolves the answer to about a part in 10**15 of it --
@@ -355,7 +350,7 @@ def _chain_survival(t, *, stages, mean):
     return math.exp(-x) * total
 
 
-def _model_coast(params, t_ref_c, *, q_full=Q_FULL_FIRE):
+def _model_coast(params, t_ref_c, *, q_full=NORMALIZED_FULL_LOAD):
     """Seconds the FITTED MODEL keeps rising after full fire is cut.
 
     The model's own reading, faithful to it and nothing more. `braking_distance`
@@ -419,7 +414,7 @@ def _model_coast(params, t_ref_c, *, q_full=Q_FULL_FIRE):
     return hi
 
 
-def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
+def braking_distance(params, t_ref_c, *, q_full=NORMALIZED_FULL_LOAD):
     """Seconds a REAL GRILL at `t_ref_c` keeps rising after full fire is cut.
 
     This is what a prediction horizon has to cover: unless the horizon reaches
@@ -446,7 +441,7 @@ def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
 _STEADY_STATE_CEILING_C = 100000.0
 
 
-def steady_state_at_full_fire(params, *, q_full=Q_FULL_FIRE):
+def steady_state_at_full_fire(params, *, q_full=NORMALIZED_FULL_LOAD):
     """The chamber temperature this model settles at under sustained full fire.
 
     The asymptote the fitted parameters imply: where the chamber's loss,
@@ -491,7 +486,7 @@ def steady_state_at_full_fire(params, *, q_full=Q_FULL_FIRE):
     return hi
 
 
-def longest_braking_distance(params, *, q_full=Q_FULL_FIRE):
+def longest_braking_distance(params, *, q_full=NORMALIZED_FULL_LOAD):
     """The braking distance at whichever end of the operating range is worst.
 
     One horizon has to be adequate everywhere the grill runs, so it is sized

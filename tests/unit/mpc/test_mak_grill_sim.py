@@ -16,9 +16,8 @@ from controller.mpc_allocator import allocate
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "mak_cook_2026-08-02.csv")
 
-# The grill's settings during the logged cook.
-U_MIN, U_MAX = 0.1, 0.9
-Q_MIN, Q_MAX = 5.0, 100.0
+# The grill's physical auger ceiling during the logged cook.
+U_MAX = 0.9
 HOLD_CYCLE_S = 25.0
 SETPOINT_C = (450 - 32) * 5 / 9
 
@@ -29,14 +28,14 @@ def _cook():
     t0 = float(rows[0]["time_s"])
     t = np.array([float(r["time_s"]) - t0 for r in rows])
     temp = np.array([float(r["temp_c"]) for r in rows])
-    Q = np.array([float(r["Q"]) for r in rows])
-    return t, temp, Q
+    normalized_load = np.array([float(r["Q"]) / 100.0 for r in rows])
+    return t, temp, normalized_load
 
 
-def _replay(sim, t, Q):
-    """Drive `sim` for one second per step with the cook's own commands."""
+def _replay(sim, t, normalized_load):
+    """Drive `sim` for one second per step with normalized cook commands."""
     grid = np.arange(0.0, t[-1] + 1.0, 1.0)
-    held = Q[np.clip(np.searchsorted(t, grid, side="right") - 1, 0, len(Q) - 1)]
+    held = normalized_load[np.clip(np.searchsorted(t, grid, side="right") - 1, 0, len(normalized_load) - 1)]
     out = np.empty_like(grid)
     for i, now in enumerate(grid):
         out[i] = sim.true_Tc
@@ -44,9 +43,6 @@ def _replay(sim, t, Q):
             break
         allocation = allocate(
             held[i],
-            Q_min=Q_MIN,
-            Q_max=Q_MAX,
-            u_min=U_MIN,
             u_max=U_MAX,
             fan_min_pct=40.0,
             fan_max_pct=100.0,

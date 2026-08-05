@@ -26,7 +26,6 @@ def test_mpc_entry_present():
         "policy_net_path",
         "C_c",
         "h_amb",
-        "Q_max",
         "enable_fan_input",
         "est_r_meas",
     } <= names
@@ -48,7 +47,7 @@ def test_default_controller_config_includes_mpc():
     assert cfg["mpc"]["control_period"] == 5.0
     assert cfg["mpc"]["theta"] == 50.0
     assert cfg["mpc"]["n_delay"] == 8
-    assert cfg["mpc"]["K_Q"] == 3.5
+    assert cfg["mpc"]["K_Q"] == 350.0
     assert cfg["mpc"]["estimator"] == "ekf"
     assert cfg["mpc"]["policy"] == "nlp"
     assert cfg["mpc"]["sigma"] > 0.0

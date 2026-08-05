@@ -24,8 +24,6 @@ export interface MpcConfig {
   control_period: number;
   Q_w: number;
   R_dQ: number;
-  Q_min: number;
-  Q_max: number;
   C_c: number;
   h_amb: number;
   T_amb: number;

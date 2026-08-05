@@ -18,7 +18,7 @@ CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 #: holds h_amb and sigma both, so a cook whose sigma/h_amb differs from the
 #: fitter's is one the fitter cannot represent, and the refit would be judged
 #: on a target outside its reach. Everything else here is far from the default.
-TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=32.0, theta=110.0)
+TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=3200.0, theta=110.0)
 
 # The fitted free parameters, plus the held ones a refit's starting point
 # supplies alongside them -- see update_mpc._FREE.
@@ -32,7 +32,7 @@ def _synthetic_cook(seed=0, noise=0.5, rows=1200):
     every error comparison in this file would be a comparison of rounding.
     """
     t = np.arange(0.0, 5.0 * rows, 5.0)
-    Q = np.where(t < 2.5 * rows, 100.0, 20.0)
+    Q = np.where(t < 2.5 * rows, 1.0, 0.2)
     temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
     temp = temp + np.random.default_rng(seed).normal(0.0, noise, size=temp.shape)
     return list(zip(t.tolist(), temp.tolist(), Q.tolist()))
@@ -194,7 +194,7 @@ def _heatup_only(rows, seed=0, noise=0.5):
     two bound tests below need.
     """
     t = np.arange(0.0, 5.0 * rows, 5.0)
-    Q = np.full_like(t, 100.0)
+    Q = np.full_like(t, 1.0)
     temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
     temp = temp + np.random.default_rng(seed).normal(0.0, noise, size=temp.shape)
     return t, temp, Q
@@ -271,7 +271,7 @@ def test_the_floor_still_admits_the_shortest_real_cook_the_controller_will_fit()
     # shortest record controller/mpc.py will refit at all.
     n = int(np.searchsorted(t, t[0] + 600.0, side="right"))
     assert n == 120
-    t, temp, Q = t[:n], df["temp_c"].values.astype(float)[:n], df["Q"].values.astype(float)[:n]
+    t, temp, Q = t[:n], df["temp_c"].values.astype(float)[:n], df["Q"].values.astype(float)[:n] / 100.0
 
     _, s_min = _shipped_fit(t, temp, Q)
     assert s_min == pytest.approx(1.098188, abs=1e-5)
@@ -301,7 +301,7 @@ def test_the_two_statistics_rank_the_same_pair_of_records_in_opposite_orders():
     flat_rng = np.random.default_rng(0)
     flat_t = np.arange(400, dtype=float) * 5.0
     flat_temp = 100.0 + flat_rng.normal(0.0, 0.05, size=400)
-    flat_Q = np.full(400, 50.0)
+    flat_Q = np.full(400, 0.5)
     flat_fit, flat_s_min = _shipped_fit(flat_t, flat_temp, flat_Q)
     flat_rmse, _ = update_mpc.fit_quality(flat_t, flat_temp, flat_Q, flat_fit, T_amb=20.0)
 
@@ -441,7 +441,7 @@ def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
     with more work than this one does.
     """
     t = np.arange(0.0, 5.0 * _HISTORY_MAX, 5.0)
-    Q = np.where((t // 1800) % 2 == 0, 100.0, 20.0)
+    Q = np.where((t // 1800) % 2 == 0, 1.0, 0.2)
     temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
     history = list(zip(t.tolist(), temp.tolist(), Q.tolist()))
     assert len(history) == _HISTORY_MAX

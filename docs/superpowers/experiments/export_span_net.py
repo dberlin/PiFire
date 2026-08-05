@@ -34,7 +34,7 @@ def main(data_path, out, enable_fan):
     blob["x_std"] = xs.numpy().astype(np.float32)
     blob["r_mean"] = np.float32(rm)
     blob["r_std"] = np.float32(rs)
-    # embed the FULL calibration the policy depends on (model + MPC tuning + bounds)
+    # Embed the full normalized-command calibration the policy depends on.
     from controller.mpc_model import MODEL_SCHEMA
     from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
 
@@ -54,7 +54,7 @@ def main(data_path, out, enable_fan):
     blob["sp_lo"] = np.float32(z["sp_lo"])
     blob["sp_hi"] = np.float32(z["sp_hi"])
 
-    # reference pairs: full torch firing-rate (Q_ss + net) on real sampled states
+    # Reference pairs: full torch normalized command on real sampled states.
     rng = np.random.default_rng(0)
     idx = rng.choice(len(z["u0"]), size=64, replace=False)
     X0 = z["X0"][idx]
@@ -64,11 +64,11 @@ def main(data_path, out, enable_fan):
     with torch.no_grad():
         inp = (torch.tensor(Xin, dtype=torch.float32) - xm) / xs
         resid = net(inp).numpy().flatten() * rs + rm
-    Qref = np.clip(Q_ss(X0[:, DIDX], TS) + resid, _DEFAULTS["Q_min"], _DEFAULTS["Q_max"])
+    normalized_load = np.clip(Q_ss(X0[:, DIDX], TS) + resid, 0.0, 1.0)
     blob["ref_state"] = X0.astype(np.float32)
     blob["ref_uprev"] = UP.astype(np.float32)
     blob["ref_set"] = TS.astype(np.float32)
-    blob["ref_Q"] = Qref.astype(np.float32)
+    blob["ref_combustion_load"] = normalized_load.astype(np.float32)
 
     np.savez_compressed(out, **blob)
     sz = os.path.getsize(out) / 1024

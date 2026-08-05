@@ -258,6 +258,25 @@ def _remove_retired_mpc_logging_settings(settings):
     return changed
 
 
+def _remove_mpc_affine_load_bounds(settings):
+    """Remove retired affine MPC load bounds without touching cycle settings."""
+    controller = settings.get("controller")
+    if not isinstance(controller, MutableMapping):
+        return False
+    config = controller.get("config")
+    if not isinstance(config, MutableMapping):
+        return False
+    mpc = config.get("mpc")
+    if not isinstance(mpc, MutableMapping):
+        return False
+    changed = False
+    for key in ("Q_min", "Q_max"):
+        if key in mpc:
+            mpc.pop(key)
+            changed = True
+    return changed
+
+
 _RETIRED_CONTROLLER_IDS = (
     "pid_clamping",
     "pid_clamping_percent_pb",
@@ -298,6 +317,7 @@ _SHAPE_MIGRATIONS = [
     (1, _migrate_i2c_buses),
     (3, _migrate_retired_controllers),
     (4, _remove_retired_mpc_logging_settings),
+    (5, _remove_mpc_affine_load_bounds),
 ]
 
 

@@ -12,7 +12,7 @@ from controller.mpc import _DEFAULTS, Controller
 #: expectation below along with any change to it, so a bump could never be
 #: caught here. Raising it is a deliberate edit, and the tests that pin what
 #: happens to an OLDER record keep their own literals.
-CURRENT_SCHEMA = 2
+CURRENT_SCHEMA = 3
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 PARAMS = dict(
@@ -21,7 +21,7 @@ PARAMS = dict(
     T_amb=20.0,
     theta=93.0,
     n_delay=4,
-    K_Q=6.95,
+    K_Q=695.0,
     sigma=1.4e-9,
 )
 
@@ -136,12 +136,10 @@ def test_a_malformed_snapshot_is_refused_rather_than_raising():
 def test_a_two_lump_snapshot_is_refused_and_says_why(capsys):
     """The record a grill that has been learning all season arrives with.
 
-    Version 1 described a model with a firepot state. Its C_c, h_amb and K_Q
-    have the same names as this model's and are not the same quantities -- they
-    were fitted against a chamber fed through a firepot -- so the subset whose
-    keys still match must not be applied. A full version 1 record is used here,
-    C_f and h_fc included, because the failure this guards against is precisely
-    that those two extra keys are ignored and the other seven look valid.
+    Version 2 described the prior firing-rate-scale model. Its C_c, h_amb and
+    K_Q values must not be read as normalized-load parameters, so the subset
+    whose keys still match must not be applied. A full old record includes
+    retired C_f/h_fc fields to prove extras cannot disguise the stale schema.
 
     It is also said out loud. The operator's model goes back to the shipped
     defaults exactly once, at the upgrade, and finding that out from the
@@ -149,7 +147,7 @@ def test_a_two_lump_snapshot_is_refused_and_says_why(capsys):
     """
     c = _c()
     v1 = {
-        "version": 1,
+        "version": 2,
         "revision": 12,
         "params": dict(PARAMS, C_f=9.0, h_fc=0.39),
         "rmse": 2.0,
@@ -161,10 +159,8 @@ def test_a_two_lump_snapshot_is_refused_and_says_why(capsys):
     assert c.cfg["C_c"] == pytest.approx(_DEFAULTS["C_c"])
     assert c.get_model_snapshot() is None
     # Both versions named, so the reader can tell which end is out of date.
-    # Asserted as the rendered phrases rather than a bare "1" in the output,
-    # which the schema number alone would satisfy.
     out = capsys.readouterr().out
-    assert "version 1" in out
+    assert "version 2" in out
     assert f"version {CURRENT_SCHEMA}" in out
     assert "snapshot" in out.lower()
 
