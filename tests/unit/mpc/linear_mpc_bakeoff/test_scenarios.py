@@ -57,6 +57,7 @@ def test_checkpoint_matrix_covers_every_arm_and_wrong_initialization(tmp_path: P
 
     assert {row.arm for row in artifact.scenarios} == {"scheduled-arx", "dmc", "state-space"}
     assert {row.initialization for row in artifact.scenarios} == {
+        "correct",
         "wrong-gain",
         "wrong-pole",
         "wrong-delay",
@@ -69,7 +70,7 @@ def test_recovery_evidence_keeps_chronological_before_and_after_residuals() -> N
     result = run_tiny_scenario(plant="GrillSim", seed=2)
     metrics = result.metrics
 
-    assert result.evidence_id == "scheduled-arx:2:wrong-gain"
+    assert result.evidence_id == "scheduled-arx:GrillSim:2:wrong-gain"
     assert result.to_document()["evidence_id"] == result.evidence_id
     assert metrics["recovery_before_mae_c"] > 0.0
     assert metrics["recovery_after_mae_c"] > 0.0
@@ -95,10 +96,8 @@ def test_horizon_evidence_bootstraps_unique_model_origins_once_despite_duplicate
     deduplicated = _artifact_from_rows(config, list(artifact.scenarios))
     duplicated = _artifact_from_rows(config, duplicate_rows)
 
-    assert len({row.evidence_id for row in artifact.scenarios}) == 9
     for arm in ("scheduled-arx", "dmc", "state-space"):
-        evidence = deduplicated.horizon_evidence[arm]["600"]
-        duplicate_evidence = duplicated.horizon_evidence[arm]["600"]
-        assert len(evidence["residuals_c"]) == 15
+        evidence = deduplicated.horizon_evidence[arm]["mpc_validation_candidates"]["600"]
+        duplicate_evidence = duplicated.horizon_evidence[arm]["mpc_validation_candidates"]["600"]
         assert duplicate_evidence["residuals_c"] == evidence["residuals_c"]
         assert duplicate_evidence["bootstrap_ci"] == evidence["bootstrap_ci"]

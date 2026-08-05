@@ -30,8 +30,8 @@ class ScenarioDefinition:
 SCENARIOS = (
     ScenarioDefinition("low-step", 55.0, 75.0, 60),
     ScenarioDefinition("middle-step", 90.0, 120.0, 60),
-    ScenarioDefinition("high-step", 145.0, 175.0, 60),
-    ScenarioDefinition("down-step", 120.0, 85.0, 60),
+    ScenarioDefinition("high-step-450f", 145.0, (450.0 - 32.0) * 5.0 / 9.0, 60),
+    ScenarioDefinition("high-step-600f", 175.0, (600.0 - 32.0) * 5.0 / 9.0, 60),
     ScenarioDefinition("long-hold", 110.0, 110.0),
     ScenarioDefinition("lid-excursion", 110.0, 110.0, lid_start_s=80, lid_duration_s=30),
 )

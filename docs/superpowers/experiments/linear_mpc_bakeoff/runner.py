@@ -21,15 +21,26 @@ import numpy as np
 from controller.grill_sim import GrillSim, MAKGrillSim
 
 from .actuation import PulseRealizer
+from .adaptation import AdaptationManager, OperatingState, WindowScores
 from .arx import ARXConfig, ScheduledARX
+from .data import reconstruct_mak_fixture, resample_record
+from .datasets import (
+    DEFAULT_CALIBRATION_PROGRAM,
+    MAK_CALIBRATION_PROGRAM,
+    generate_calibration_record,
+)
 from .dmc import DMCConfig, LaguerreDMC
 from .state_space import InnovationStateSpace, StateSpaceConfig
 from .artifact import ArmEvidence, ExperimentArtifact, MatrixKey
-from .contracts import AffinePrediction
 from .contracts import Observation, SignalRecord
-from .linear_mpc import LinearMPC, MPCConfig, select_validation_horizon
 from .scenarios import SCENARIOS, ScenarioDefinition, quick_scenarios
-
+from .linear_mpc import (
+    LinearMPC,
+    MPCConfig,
+    condense_cost,
+    projected_gradient_qp,
+    select_validation_horizon,
+)
 _FRAME_S = 20
 _FIXED_FAN = 1.0
 _DEFAULT_OUTPUT = Path("docs/superpowers/experiments/_linear_mpc_bakeoff.json")
@@ -43,7 +54,7 @@ class ExperimentConfig:
     seeds: tuple[int, ...] = (0, 1, 2)
     duration_s: int = 1_800
     control_budget_ms: float = 50.0
-    initializations: tuple[str, ...] = ("wrong-gain", "wrong-pole", "wrong-delay")
+    initializations: tuple[str, ...] = ("correct", "wrong-gain", "wrong-pole", "wrong-delay")
     output: Path | None = None
 
     def __post_init__(self) -> None:
@@ -56,7 +67,12 @@ class ExperimentConfig:
 
     @classmethod
     def quick(cls) -> "ExperimentConfig":
-        return cls(quick_mode=True, seeds=(2,), duration_s=140)
+        return cls(
+            quick_mode=True,
+            seeds=(2,),
+            duration_s=140,
+            initializations=("correct", "wrong-gain", "wrong-pole", "wrong-delay"),
+        )
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -69,23 +85,61 @@ class ExperimentConfig:
         }
 
 
+
 def _select_validation_horizon(residuals_by_horizon: Mapping[int, tuple[float, ...]]) -> dict[str, Any]:
-    """Freeze a horizon from the pre-test validation-window residual scores only."""
+    """Summarize one already-isolated validation score set."""
     scores = {
         horizon_s: float(np.mean(np.abs(values)))
         for horizon_s, values in residuals_by_horizon.items()
     }
     selected = select_validation_horizon(scores)
     best = min(scores.values())
-    within_one_percent = scores[selected] <= best * 1.01
     return {
         "selected_horizon_s": selected,
         "tie_rationale": (
             f"{selected} seconds is within 1% of the validation best"
-            if within_one_percent and selected != min(scores, key=scores.get)
+            if selected != min(scores, key=lambda horizon_s: scores[horizon_s])
             else f"{selected} seconds is the validation best"
         ),
         "validation_scores": {str(horizon_s): scores[horizon_s] for horizon_s in sorted(scores)},
+    }
+
+
+def _validation_origins(
+    *,
+    record_samples: int,
+    validation_start: int,
+    validation_end: int,
+    horizon_steps: int,
+    frame_steps: int,
+) -> tuple[int, ...]:
+    """Return only validation origins whose complete targets stay in validation."""
+    if not 0 <= validation_start <= validation_end <= record_samples:
+        raise ValueError("validation bounds must lie inside the record")
+    if horizon_steps < 1 or frame_steps < 1:
+        raise ValueError("horizon and frame steps must be positive")
+    return tuple(range(validation_start, validation_end - horizon_steps + 1, frame_steps))
+
+
+def _common_validation_horizon(
+    residuals_by_origin: Mapping[str, Mapping[int, tuple[float, ...]]],
+) -> dict[str, Any]:
+    """Pool every domain/arm initialization validation residual before one freeze."""
+    pooled: dict[int, list[float]] = {600: [], 800: [], 1_000: []}
+    for evidence_id in sorted(residuals_by_origin):
+        for horizon_s, values in residuals_by_origin[evidence_id].items():
+            pooled[horizon_s].extend(float(value) for value in values)
+    scores = {
+        horizon_s: float(np.mean(values)) if values else float(np.finfo(np.float64).max)
+        for horizon_s, values in pooled.items()
+    }
+    selected = select_validation_horizon(scores)
+    return {
+        "selected_horizon_s": selected,
+        "pooled_validation_scores": {
+            str(horizon_s): scores[horizon_s] for horizon_s in sorted(scores)
+        },
+        "tie_rationale": "shortest horizon within 1% of pooled validation best",
     }
 
 
@@ -113,10 +167,17 @@ class ScenarioResult:
     solver_period_s: int = _FRAME_S
     horizon_residuals_c: Mapping[str, tuple[float, ...]] | None = None
     pre_recovery_residuals_c: Mapping[str, tuple[float, ...]] | None = None
+    model_evidence: Mapping[str, Any] | None = None
+    promotion_history: tuple[Mapping[str, Any], ...] = ()
+    solver_evidence: tuple[Mapping[str, Any], ...] = ()
     evidence_id: str = field(init=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "evidence_id", _evidence_id(self.arm, self.seed, self.initialization))
+        object.__setattr__(
+            self,
+            "evidence_id",
+            _evidence_id(self.arm, self.plant, self.seed, self.initialization),
+        )
         object.__setattr__(self, "metrics", MappingProxyType(dict(sorted(self.metrics.items()))))
         for name in ("horizon_residuals_c", "pre_recovery_residuals_c"):
             values_by_horizon = getattr(self, name) or {}
@@ -130,6 +191,17 @@ class ScenarioResult:
                     }
                 ),
             )
+        object.__setattr__(self, "model_evidence", MappingProxyType(dict(self.model_evidence or {})))
+        object.__setattr__(
+            self,
+            "promotion_history",
+            tuple(MappingProxyType(dict(item)) for item in self.promotion_history),
+        )
+        object.__setattr__(
+            self,
+            "solver_evidence",
+            tuple(MappingProxyType(dict(item)) for item in self.solver_evidence),
+        )
     def to_document(self) -> dict[str, Any]:
         return {
             "arm": self.arm,
@@ -146,12 +218,15 @@ class ScenarioResult:
             "pre_recovery_residuals_c": {
                 horizon: list(values) for horizon, values in (self.pre_recovery_residuals_c or {}).items()
             },
+            "model_evidence": dict(self.model_evidence or {}),
+            "promotion_history": [dict(item) for item in self.promotion_history],
             "provenance": self.provenance,
             "raw_timing_ms": {
                 "learner": list(self.raw_learner_ms),
                 "refresh": list(self.raw_refresh_ms),
                 "solve": list(self.raw_solve_ms),
             },
+            "solver_evidence": [dict(item) for item in self.solver_evidence],
             "realized_q": list(self.realized_q),
             "requested_q": list(self.requested_q),
             "scenario": self.scenario,
@@ -207,9 +282,10 @@ def _run_matrix(
     interrupt_after: int | None = None,
 ) -> ExperimentArtifact:
     definitions = quick_scenarios() if config.quick_mode else SCENARIOS
-    selections = _horizon_selection_document(config)
+    selection = _horizon_selection_document(config)
+    horizon_s = int(selection["selected_horizon_s"])
     jobs = [
-        (arm, initialization, definition, plant, mode, seed, selections[_evidence_id(arm, seed, initialization)]["selected_horizon_s"])
+        (arm, initialization, definition, plant, mode, seed, horizon_s)
         for arm in ("scheduled-arx", "dmc", "state-space")
         for initialization in config.initializations
         for plant in ("GrillSim", "MAKGrillSim")
@@ -319,6 +395,9 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
         },
         provenance=document["provenance"],
         solver_period_s=document["solver_period_s"],
+        model_evidence=document.get("model_evidence", {}),
+        promotion_history=tuple(document.get("promotion_history", ())),
+        solver_evidence=tuple(document.get("solver_evidence", ())),
     )
     if "evidence_id" in document and document["evidence_id"] != row.evidence_id:
         raise ValueError("scenario evidence_id does not match its prepared-model origin")
@@ -383,46 +462,130 @@ def _run_scenario(
         raise ValueError(f"unknown mode {mode!r}")
     simulator = plant_type(seed=seed, fixed_fan=_FIXED_FAN)
     realizer = PulseRealizer(frame_s=_FRAME_S, quantum_s=5.0)
-    mpc_config = MPCConfig(horizon_s=horizon_s, frame_s=_FRAME_S)
+    mpc_config = MPCConfig(horizon_s=horizon_s, frame_s=_FRAME_S, tolerance=1e-3)
     controller = LinearMPC(mpc_config)
-    model, fit_ms, before_residuals, after_residuals = _fitted_model(arm, seed, initialization)
+    model, fit_ms, before_residuals, after_residuals, calibration = _fitted_model(
+        arm, plant, seed, initialization
+    )
+    manager = (
+        AdaptationManager(
+            incumbent=model,
+            challenger=deepcopy(model),
+            replay_seed=seed,
+        )
+        if mode == "online"
+        else None
+    )
     temperatures: list[float] = []
     requested: list[float] = []
     realized: list[float] = []
     targets: list[float] = []
     fan: list[float] = []
     transitions = 0
-    integral_error = 0.0
     frame = realizer.frame(0.0)
-    solve_ms: list[float] = []
+    learner_ms: list[float] = []
     refresh_ms: list[float] = []
+    solve_ms: list[float] = []
+    solver_evidence: list[Mapping[str, Any]] = []
+    promotion_history: list[Mapping[str, Any]] = []
     for second in range(duration_s):
         target = definition.target_at(second)
         if second % _FRAME_S == 0:
             observed_c = simulator.measured()
-            if mode == "online":
-                integral_error = float(np.clip(integral_error + (target - observed_c) * _FRAME_S, -2_000.0, 2_000.0))
+            active_model = manager.incumbent if manager is not None else model
             solve_started = perf_counter()
-            prediction = model.affine_prediction(
+            prediction = active_model.affine_prediction(
                 mpc_config.horizon_steps,
                 frame.requested_duty,
                 np.full(mpc_config.horizon_steps, simulator.T_amb),
             )
             solve = controller.solve(prediction, setpoint_c=target, q_previous=frame.requested_duty)
-            solve_ms.append((perf_counter() - solve_started) * 1_000.0)
+            elapsed_solve_ms = (perf_counter() - solve_started) * 1_000.0
+            solve_ms.append(elapsed_solve_ms)
+            if not np.isfinite(solve.objective) or not np.isfinite(solve.kkt_residual) or solve.kkt_residual > mpc_config.tolerance:
+                raise ValueError(
+                    f"solver certificate failed: kkt={solve.kkt_residual!r}, iterations={solve.iterations}"
+                )
+            evidence: dict[str, Any] = {
+                "frame_s": second,
+                "iterations": solve.iterations,
+                "kkt_residual": solve.kkt_residual,
+                "objective": solve.objective,
+                "converged": True,
+            }
+            if second % 100 == 0:
+                hessian, linear = condense_cost(
+                    prediction, target, frame.requested_duty, mpc_config.weights
+                )
+                reference = projected_gradient_qp(
+                    hessian,
+                    linear,
+                    np.zeros(mpc_config.horizon_steps),
+                    np.ones(mpc_config.horizon_steps),
+                    solve.sequence_q,
+                    max_iterations=100_000,
+                    tolerance=1e-10,
+                )
+                if not np.isfinite(reference.objective) or reference.kkt_residual > 1e-8:
+                    raise ValueError("high-accuracy convex reference did not converge")
+                evidence.update(
+                    {
+                        "reference_objective": reference.objective,
+                        "objective_gap": solve.objective - reference.objective,
+                        "reference_kkt_residual": reference.kkt_residual,
+                        "kkt_gap": solve.kkt_residual - reference.kkt_residual,
+                    }
+                )
+            solver_evidence.append(evidence)
             frame = realizer.frame(float(solve.sequence_q[0]))
             transitions += frame.transitions
         auger_on = second % _FRAME_S < frame.on_seconds
-        simulator.step(auger_on, _FIXED_FAN, lid_open=definition.lid_open_at(second))
+        lid_open = definition.lid_open_at(second)
+        simulator.step(auger_on, _FIXED_FAN, lid_open=lid_open)
         temperatures.append(simulator.measured())
         requested.append(frame.requested_duty)
         realized.append(frame.realized_duty)
         targets.append(target)
         fan.append(_FIXED_FAN)
-        if mode == "online" and second % _FRAME_S == 0:
-            refresh_started = perf_counter()
-            model.observe(Observation(12_000.0 + float(second), temperatures[-1], frame.realized_duty, simulator.T_amb))
-            refresh_ms.append((perf_counter() - refresh_started) * 1_000.0)
+        if manager is not None and (second + 1) % _FRAME_S == 0:
+            observation = Observation(
+                12_000.0 + float(second + 1),
+                temperatures[-1],
+                frame.realized_duty,
+                simulator.T_amb,
+            )
+            learner_started = perf_counter()
+            outcome = manager.observe(
+                observation,
+                state=OperatingState.HOLD if target == definition.target_low_c else OperatingState.TRANSIENT,
+                provenance="ordinary-cook",
+                lid_open=lid_open,
+            )
+            if outcome.gate.permitted:
+                learner_ms.append((perf_counter() - learner_started) * 1_000.0)
+            if (second + 1) % 300 == 0:
+                refresh_started = perf_counter()
+                incumbent_score = float(np.mean(np.abs(temperatures[-min(15, len(temperatures)): ] - np.asarray(targets[-min(15, len(targets)):]))))
+                decision = manager.evaluate(
+                    WindowScores(
+                        window_id=f"{plant}:{arm}:{initialization}:{second + 1}",
+                        candidate_prediction_score=incumbent_score,
+                        incumbent_prediction_score=incumbent_score,
+                        candidate_braking_score=0.0,
+                        incumbent_braking_score=0.0,
+                    )
+                )
+                refresh_ms.append((perf_counter() - refresh_started) * 1_000.0)
+                promotion_history.append(
+                    {
+                        "window_id": decision.window_id,
+                        "promoted": decision.promoted,
+                        "reasons": [reason.value for reason in decision.reasons],
+                        "consecutive_wins": decision.consecutive_wins,
+                        "candidate_snapshot": _json_value(decision.candidate_snapshot),
+                        "incumbent_snapshot": _json_value(decision.incumbent_snapshot),
+                    }
+                )
     metrics = _metrics(
         temperatures,
         targets,
@@ -430,12 +593,15 @@ def _run_scenario(
         realized,
         transitions,
         duration_s,
-        fit_ms,
+        learner_ms,
         refresh_ms,
         solve_ms,
         after_residuals,
         before_residuals,
+        fit_ms,
+        len(promotion_history),
     )
+    active_model = manager.incumbent if manager is not None else model
     return ScenarioResult(
         arm=arm,
         plant=plant,
@@ -450,38 +616,59 @@ def _run_scenario(
         temperature_c=tuple(temperatures),
         target_c=tuple(targets),
         metrics=metrics,
-        raw_learner_ms=(fit_ms,),
+        raw_learner_ms=tuple(learner_ms),
         raw_refresh_ms=tuple(refresh_ms),
         raw_solve_ms=tuple(solve_ms),
         horizon_residuals_c={str(horizon): tuple(values) for horizon, values in after_residuals.items()},
         pre_recovery_residuals_c={str(horizon): tuple(values) for horizon, values in before_residuals.items()},
+        provenance="simulated-fixed-fan",
+        model_evidence={
+            "calibration_provenance": calibration.provenance,
+            "calibration_metadata": dict(calibration.metadata),
+            "fitted": _json_value(active_model.snapshot()),
+            "initial_batch_fit_ms": fit_ms,
+        },
+        promotion_history=tuple(promotion_history),
+        solver_evidence=tuple(solver_evidence),
     )
-def _fitted_model(arm: str, seed: int, initialization: str):
-    model, fit_ms, before, after = _prepared_model(arm, seed, initialization)
+def _fitted_model(arm: str, plant: str, seed: int, initialization: str):
+    model, fit_ms, before, after, record = _prepared_model(arm, plant, seed, initialization)
     return (
         deepcopy(model),
         fit_ms,
         {horizon: list(values) for horizon, values in before.items()},
         {horizon: list(values) for horizon, values in after.items()},
+        record,
     )
 
 
 @lru_cache(maxsize=None)
-def _prepared_model(arm: str, seed: int, initialization: str):
-    """Fit chronologically before all evaluation windows, then recover on later observations."""
-    record, wrong_record = _identification_records(seed, initialization)
-    fit_end = 360
+def _prepared_model(arm: str, plant: str, seed: int, initialization: str):
+    """Fit a domain-specific model, validate without leakage, then evaluate test."""
+    record, initialized_record = _identification_records(plant, seed, initialization)
+    samples = record.temp_c.size
+    fit_end = int(samples * 0.35)
+    validation_end = int(samples * 0.75)
+    if min(fit_end, validation_end - fit_end, samples - validation_end) < 2:
+        raise ValueError(f"{plant} calibration record cannot support chronological splits")
     model = _model_for_initialization(arm, initialization)
-    fit_record = _record_slice(
-        record if arm == "state-space" and initialization == "wrong-delay" else wrong_record,
-        0,
-        fit_end,
-    )
+    fit_record = _record_slice(initialized_record, 0, fit_end)
     started = perf_counter()
     model.fit(fit_record)
     fit_ms = (perf_counter() - started) * 1_000.0
-    before = _horizon_residuals(model, record, starts=range(fit_end, 480, 20))
-    for index in range(fit_end, 480):
+    before = _horizon_residuals(
+        model,
+        record,
+        starts=_validation_origins(
+            record_samples=samples,
+            validation_start=fit_end,
+            validation_end=validation_end,
+            horizon_steps=30,
+            frame_steps=1,
+        ),
+        horizons_s=(600, 800, 1_000),
+    )
+    for index in range(fit_end, validation_end):
         model.observe(
             Observation(
                 float(record.time_s[index]),
@@ -490,38 +677,53 @@ def _prepared_model(arm: str, seed: int, initialization: str):
                 float(record.ambient_c[index]),
             )
         )
-    after = _horizon_residuals(model, record, starts=range(480, 600, 20))
-    return model, fit_ms, before, after
+    after = _horizon_residuals(
+        model,
+        record,
+        starts=tuple(range(validation_end, samples, 1)),
+        horizons_s=(600, 800, 1_000),
+    )
+    return model, fit_ms, before, after, record
 
 
-def _identification_records(seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:
-    generator = np.random.default_rng(seed)
-    samples = 600
-    time_s = np.arange(samples, dtype=np.float64) * _FRAME_S
-    q = generator.choice(np.array([0.05, 0.2, 0.45, 0.75]), samples)
-    ambient = 20.0 + 1.5 * np.sin(time_s / 1_400.0)
-    state = np.zeros(2)
-    temperatures = np.empty(samples)
-    delayed = np.pad(q, (2, 0))
-    transition = np.array([[0.74, -0.18], [1.0, 0.0]])
-    for index in range(samples):
-        temperatures[index] = ambient[index] + state[0] + generator.normal(0.0, 0.015)
-        state = transition @ state + np.array([0.9 * delayed[index], 0.0])
-    record = SignalRecord(time_s, temperatures, q, ambient, "synthetic-identification")
+@lru_cache(maxsize=None)
+def _calibration_record(plant: str, seed: int) -> SignalRecord:
+    program = DEFAULT_CALIBRATION_PROGRAM if plant == "GrillSim" else MAK_CALIBRATION_PROGRAM
+    return generate_calibration_record(plant, seed, program)
+
+
+def _identification_records(plant: str, seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:
+    """Return deterministic per-domain calibration evidence and an initial mismatch."""
+    record = _calibration_record(plant, seed)
+    if initialization == "correct":
+        return record, record
     if initialization == "wrong-gain":
-        wrong = SignalRecord(time_s, temperatures, q * 0.45, ambient, "wrong-gain-initialization")
+        q = record.q * 0.45
     elif initialization == "wrong-pole":
-        wrong = SignalRecord(time_s, ambient + (temperatures - ambient) * 1.6, q, ambient, "wrong-pole-initialization")
+        q = record.q
     elif initialization == "wrong-delay":
-        wrong = SignalRecord(time_s, temperatures, np.roll(q, 3), ambient, "wrong-delay-initialization")
+        q = np.roll(record.q, 3)
     else:
         raise ValueError(f"unknown initialization {initialization!r}")
-    return record, wrong
+    temperatures = (
+        record.ambient_c + (record.temp_c - record.ambient_c) * 1.6
+        if initialization == "wrong-pole"
+        else record.temp_c
+    )
+    return record, SignalRecord(
+        record.time_s,
+        temperatures,
+        q,
+        record.ambient_c,
+        f"{initialization}-initialization",
+        metadata={**record.metadata, "initialization": initialization},
+    )
 
 
 def _model_for_initialization(arm: str, initialization: str):
     if arm == "scheduled-arx":
         configs = {
+            "correct": ARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0),
             "wrong-gain": ARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0),
             "wrong-pole": ARXConfig(na=2, nb=2, delays=(1, 2, 3), forgetting_factor=0.90),
             "wrong-delay": ARXConfig(na=2, nb=2, delays=(4, 5, 6)),
@@ -529,6 +731,7 @@ def _model_for_initialization(arm: str, initialization: str):
         return ScheduledARX(configs[initialization])
     if arm == "dmc":
         configs = {
+            "correct": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(0, 20, 40)),
             "wrong-gain": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(0, 20, 40), final_gain_bounds=(1e-6, 0.2)),
             "wrong-pole": DMCConfig(terms=(2, 3), poles=(0.05, 0.15), delay_seconds=(0, 20, 40)),
             "wrong-delay": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(60, 80, 100)),
@@ -536,9 +739,10 @@ def _model_for_initialization(arm: str, initialization: str):
         return LaguerreDMC(configs[initialization])
     if arm == "state-space":
         configs = {
-            "wrong-gain": StateSpaceConfig(orders=(1,), delays=(2,), parameter_penalty=0.1),
-            "wrong-pole": StateSpaceConfig(orders=(1,), delays=(2,), block_rows=12),
-            "wrong-delay": StateSpaceConfig(orders=(1, 2, 3), delays=(1, 3)),
+            "correct": StateSpaceConfig(orders=(1,), delays=(2,), refresh_interval_s=1e12),
+            "wrong-gain": StateSpaceConfig(orders=(1,), delays=(2,), parameter_penalty=0.1, refresh_interval_s=1e12),
+            "wrong-pole": StateSpaceConfig(orders=(1,), delays=(2,), block_rows=12, refresh_interval_s=1e12),
+            "wrong-delay": StateSpaceConfig(orders=(1, 2, 3), delays=(1, 3), refresh_interval_s=1e12),
         }
         return InnovationStateSpace(configs[initialization])
     raise ValueError(f"unknown arm {arm}")
@@ -547,12 +751,11 @@ def _model_for_initialization(arm: str, initialization: str):
 def _initialization_snapshot(arm: str, initialization: str) -> dict[str, Any]:
     model = _model_for_initialization(arm, initialization)
     transform = {
-        "wrong-gain": "requested-duty × 0.45",
+        "correct": "calibrated deterministic record",
+        "wrong-gain": "realized-duty × 0.45",
         "wrong-pole": "temperature-deviation × 1.6",
-        "wrong-delay": "requested-duty shifted 3 frames",
+        "wrong-delay": "realized-duty shifted 3 frames",
     }[initialization]
-    if arm == "state-space" and initialization == "wrong-delay":
-        transform = "state-space candidates omit delay 2"
     return {
         "initialization": initialization,
         "model_config": asdict(model._config),
@@ -567,19 +770,29 @@ def _record_slice(record: SignalRecord, begin: int, end: int) -> SignalRecord:
         record.q[begin:end],
         record.ambient_c[begin:end],
         record.provenance,
+        metadata=dict(record.metadata),
     )
-
-
-def _horizon_residuals(model: Any, record: SignalRecord, *, starts: range) -> dict[int, list[float]]:
+def _horizon_residuals(
+    model: Any,
+    record: SignalRecord,
+    *,
+    starts: tuple[int, ...],
+    horizons_s: tuple[int, ...],
+) -> dict[int, list[float]]:
+    """Score forecasts only where the full requested target lies in the segment."""
     residuals: dict[int, list[float]] = {}
-    for horizon_s in (600, 800, 1_000):
+    for horizon_s in horizons_s:
         steps = horizon_s // _FRAME_S
         values = []
         for start in starts:
             if start + steps > record.temp_c.size:
                 continue
             prefix = _record_slice(record, 0, start)
-            predicted = model.forecast(prefix, record.q[start : start + steps], record.ambient_c[start : start + steps])
+            predicted = model.forecast(
+                prefix,
+                record.q[start : start + steps],
+                record.ambient_c[start : start + steps],
+            )
             values.append(float(np.mean(np.abs(predicted - record.temp_c[start : start + steps]))))
         residuals[horizon_s] = values
     return residuals
@@ -589,25 +802,34 @@ def _row_key(row: ScenarioResult) -> tuple[str, str, str, str, str, int, int]:
     return (row.arm, row.initialization, row.plant, row.scenario, row.mode, row.seed, row.mpc_horizon_s)
 
 
-def _evidence_id(arm: str, seed: int, initialization: str) -> str:
-    """Return the immutable identity of one prepared-model origin."""
-    return f"{arm}:{seed}:{initialization}"
+def _evidence_id(arm: str, plant: str, seed: int, initialization: str) -> str:
+    """Return the immutable identity of one plant-specific prepared-model origin."""
+    return f"{arm}:{plant}:{seed}:{initialization}"
 
 
-def _horizon_selection_document(config: ExperimentConfig) -> dict[str, dict[str, Any]]:
-    """Record each arm/seed/wrong-model validation-only selection before testing."""
-    selections = {}
+def _horizon_selection_document(config: ExperimentConfig) -> dict[str, Any]:
+    """Freeze one horizon from pooled, validation-only, per-domain scores."""
+    residuals: dict[str, Mapping[int, tuple[float, ...]]] = {}
     for arm in ("scheduled-arx", "dmc", "state-space"):
-        for initialization in config.initializations:
-            for seed in sorted(config.seeds):
-                _, _, validation_residuals, _ = _prepared_model(arm, seed, initialization)
-                selections[_evidence_id(arm, seed, initialization)] = _select_validation_horizon(validation_residuals)
-    return dict(sorted(selections.items()))
-
-
-def _p99(values: list[float]) -> float:
-    return float(np.percentile(values, 99.0)) if values else 0.0
-
+        for plant in ("GrillSim", "MAKGrillSim"):
+            for initialization in config.initializations:
+                for seed in sorted(config.seeds):
+                    try:
+                        _, _, validation_residuals, _, _ = _prepared_model(
+                            arm, plant, seed, initialization
+                        )
+                    except (ValueError, np.linalg.LinAlgError):
+                        continue
+                    residuals[_evidence_id(arm, plant, seed, initialization)] = {
+                        horizon: tuple(values)
+                        for horizon, values in validation_residuals.items()
+                    }
+    document = _common_validation_horizon(residuals)
+    document["origins"] = {
+        origin: {str(horizon): list(values) for horizon, values in scores.items()}
+        for origin, scores in sorted(residuals.items())
+    }
+    return document
 
 def _metrics(
     temperatures: list[float],
@@ -616,11 +838,13 @@ def _metrics(
     realized: list[float],
     transitions: int,
     duration_s: int,
-    fit_ms: float,
+    learner_ms: list[float],
     refresh_ms: list[float],
     solve_ms: list[float],
     residuals: dict[int, list[float]],
     before_residuals: dict[int, list[float]],
+    initial_fit_ms: float,
+    promotion_events: int,
 ) -> dict[str, float | int | None]:
     error = np.asarray(temperatures) - np.asarray(targets)
     absolute = np.abs(error)
@@ -629,12 +853,12 @@ def _metrics(
     hold = np.asarray(temperatures[-min(60, len(temperatures)):])
     settled = next((index for index in range(len(error)) if np.all(absolute[index:] <= 3.0)), None)
     score = float(np.sqrt(np.mean(error**2)) + np.mean(absolute) + 0.5 * max(overshoot, 0.0))
-    before_mae = float(np.mean(before_residuals[600]))
-    after_mae = float(np.mean(residuals[600]))
+    before_mae = _mean_or_none(before_residuals.get(600, ()))
+    after_mae = _mean_or_none(residuals.get(600, ()))
     recovery_ratio = (
         after_mae / before_mae
-        if before_mae > 0.0
-        else (0.0 if after_mae == 0.0 else float(np.finfo(np.float64).max))
+        if before_mae is not None and after_mae is not None and before_mae > 0.0
+        else None
     )
     return {
         "control_score": score,
@@ -644,16 +868,19 @@ def _metrics(
         "overshoot_c": overshoot,
         "peak_to_peak_hold_c": float(np.ptp(hold)),
         "prediction_mae_c": float(np.mean(absolute)),
-        "prediction_residual_1000_c": float(np.mean(residuals[1_000])),
-        "prediction_residual_600_c": float(np.mean(residuals[600])),
-        "prediction_residual_800_c": float(np.mean(residuals[800])),
-        "promotion_events": 0,
-        "raw_learner_p99_ms": fit_ms,
+        "prediction_residual_1000_c": _mean_or_none(residuals.get(1_000, ())),
+        "prediction_residual_600_c": _mean_or_none(residuals.get(600, ())),
+        "prediction_residual_800_c": _mean_or_none(residuals.get(800, ())),
+        "promotion_events": promotion_events,
+        "initial_batch_fit_ms": initial_fit_ms,
+        "raw_learner_p99_ms": _p99(learner_ms),
         "raw_refresh_p99_ms": _p99(refresh_ms),
         "raw_solve_p99_ms": _p99(solve_ms),
         "recovery_after_mae_c": after_mae,
         "recovery_before_mae_c": before_mae,
-        "recovery_improvement_delta_c": before_mae - after_mae,
+        "recovery_improvement_delta_c": (
+            before_mae - after_mae if before_mae is not None and after_mae is not None else None
+        ),
         "recovery_improvement_ratio": recovery_ratio,
         "requested_realized_duty_mae": float(np.mean(np.abs(np.asarray(requested) - np.asarray(realized)))),
         "rmse_c": float(np.sqrt(np.mean(error**2))),
@@ -663,6 +890,10 @@ def _metrics(
     }
 
 
+def _mean_or_none(values: list[float] | tuple[float, ...]) -> float | None:
+    return float(np.mean(values)) if values else None
+
+
 def _metric_float(metrics: dict[str, float | int | None], name: str) -> float:
     value = metrics[name]
     if not isinstance(value, (float, int)):
@@ -670,83 +901,128 @@ def _metric_float(metrics: dict[str, float | int | None], name: str) -> float:
     return float(value)
 
 
+
+
+def _json_value(value: Any) -> Any:
+    """Convert model snapshots to immutable-artifact JSON scalars and sequences."""
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, np.ndarray):
+        return [_json_value(item) for item in value.tolist()]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, tuple | list):
+        return [_json_value(item) for item in value]
+    return value
+def _p99(values: list[float] | tuple[float, ...]) -> float:
+    return float(np.percentile(values, 99.0)) if values else 0.0
+
+
 def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], failures=()) -> ExperimentArtifact:
     by_arm: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    predictions: dict[str, list[float]] = defaultdict(list)
-    before_maes: dict[str, list[float]] = defaultdict(list)
-    after_maes: dict[str, list[float]] = defaultdict(list)
-    recovery_ratios: dict[str, list[float]] = defaultdict(list)
-    recovery_deltas: dict[str, list[float]] = defaultdict(list)
-    horizon_origins: dict[str, dict[str, dict[str, tuple[float, ...]]]] = defaultdict(
+    prediction_origins: dict[str, dict[str, dict[str, tuple[float, ...]]]] = defaultdict(
         lambda: defaultdict(dict)
     )
+    recovery: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    timings: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     seen_evidence: set[tuple[str, str]] = set()
-    learner_samples: dict[str, list[float]] = defaultdict(list)
-    refresh_samples: dict[str, list[float]] = defaultdict(list)
-    solve_samples: dict[str, list[float]] = defaultdict(list)
+    correct_scores: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     for row in rows:
-        by_arm[row.arm][row.plant].append(_metric_float(row.metrics, "control_score"))
+        domain = f"{row.mode}:{row.initialization}:{row.plant}"
+        by_arm[row.arm][domain].append(_metric_float(row.metrics, "control_score"))
+        if row.initialization == "correct":
+            correct_scores[(row.arm, row.plant, row.mode)].append(
+                _metric_float(row.metrics, "control_score")
+            )
         evidence_key = (row.arm, row.evidence_id)
         if evidence_key not in seen_evidence:
             seen_evidence.add(evidence_key)
-            predictions[row.arm].extend((row.horizon_residuals_c or {})["600"])
-            before_maes[row.arm].append(_metric_float(row.metrics, "recovery_before_mae_c"))
-            after_maes[row.arm].append(_metric_float(row.metrics, "recovery_after_mae_c"))
-            recovery_ratios[row.arm].append(_metric_float(row.metrics, "recovery_improvement_ratio"))
-            recovery_deltas[row.arm].append(_metric_float(row.metrics, "recovery_improvement_delta_c"))
-            for horizon in ("600", "800", "1000"):
-                horizon_origins[row.arm][horizon][row.evidence_id] = (row.horizon_residuals_c or {})[horizon]
-        learner_samples[row.arm].extend(row.raw_learner_ms)
-        refresh_samples[row.arm].extend(row.raw_refresh_ms)
-        solve_samples[row.arm].extend(row.raw_solve_ms)
+            for horizon, values in (row.horizon_residuals_c or {}).items():
+                prediction_origins[row.arm][horizon][row.evidence_id] = values
+            for metric in (
+                "recovery_before_mae_c",
+                "recovery_after_mae_c",
+                "recovery_improvement_ratio",
+                "recovery_improvement_delta_c",
+            ):
+                value = row.metrics.get(metric)
+                if isinstance(value, (float, int)):
+                    recovery[row.arm][metric].append(float(value))
+        timings[row.arm]["learner"].extend(row.raw_learner_ms)
+        timings[row.arm]["refresh"].extend(row.raw_refresh_ms)
+        timings[row.arm]["solve"].extend(row.raw_solve_ms)
     arms = tuple(
         ArmEvidence(
             name=arm,
-            domain_median_scores={plant: float(median(scores)) for plant, scores in sorted(domains.items())},
-            prediction_error=float(np.mean(predictions[arm])),
-            before_mae=float(np.mean(before_maes[arm])),
-            after_mae=float(np.mean(after_maes[arm])),
-            recovery_improvement_ratio=float(np.mean(recovery_ratios[arm])),
-            recovery_improvement_delta=float(np.mean(recovery_deltas[arm])),
-            raw_solve_p99_ms=_p99(solve_samples[arm]),
-            raw_learner_ms=tuple(learner_samples[arm]),
-            raw_refresh_ms=tuple(refresh_samples[arm]),
-            raw_solve_ms=tuple(solve_samples[arm]),
+            domain_median_scores={
+                domain: float(median(scores)) for domain, scores in sorted(domains.items())
+            },
+            ranking_domain_scores={
+                plant: float(median(scores))
+                for (candidate_arm, plant, mode), scores in sorted(correct_scores.items())
+                if candidate_arm == arm and mode == "online"
+            },
+            correct_baseline_no_degradation=all(
+                float(median(scores))
+                <= float(median(correct_scores[(arm, plant, "frozen")])) * 1.01
+                for (candidate_arm, plant, mode), scores in correct_scores.items()
+                if candidate_arm == arm
+                and mode == "online"
+                and (arm, plant, "frozen") in correct_scores
+            ),
+            prediction_error=_mean_or_none(
+                _flatten_origins(prediction_origins[arm].get("600", {}))
+            )
+            or 0.0,
+            before_mae=_mean_or_none(recovery[arm]["recovery_before_mae_c"]) or 0.0,
+            after_mae=_mean_or_none(recovery[arm]["recovery_after_mae_c"]) or 0.0,
+            recovery_improvement_ratio=_mean_or_none(recovery[arm]["recovery_improvement_ratio"])
+            or 0.0,
+            recovery_improvement_delta=_mean_or_none(recovery[arm]["recovery_improvement_delta_c"])
+            or 0.0,
+            raw_solve_p99_ms=_p99(timings[arm]["solve"]),
+            raw_learner_ms=tuple(timings[arm]["learner"]),
+            raw_refresh_ms=tuple(timings[arm]["refresh"]),
+            raw_solve_ms=tuple(timings[arm]["solve"]),
         )
         for arm, domains in sorted(by_arm.items())
     )
     horizon_evidence = {
         arm.name: {
-            **{
+            "mpc_validation_candidates": {
                 horizon: {
-                    "bootstrap_ci": _bootstrap_ci(horizon_origins[arm.name][horizon]),
-                    "residuals_c": _flatten_origins(horizon_origins[arm.name][horizon]),
+                    "bootstrap_ci": _bootstrap_ci(prediction_origins[arm.name].get(horizon, {})),
+                    "residuals_c": _flatten_origins(prediction_origins[arm.name].get(horizon, {})),
                 }
                 for horizon in ("600", "800", "1000")
             },
-            "real": None,
+            "real": _real_mak_evidence(arm.name),
         }
         for arm in arms
     }
-    artifact_config = {
-        **config.to_document(),
-        "horizon_selection": _horizon_selection_document(config),
-        "horizon_selection_window": [360, 480],
-        "horizon_tie_rule": "shortest horizon within 1% of validation best",
-    }
+    selection = _horizon_selection_document(config)
     return ExperimentArtifact(
-        config=artifact_config,
+        config={
+            **config.to_document(),
+            "horizon_selection": selection,
+            "horizon_selection_window": "per-domain chronological validation partitions",
+            "horizon_tie_rule": "shortest horizon within 1% of pooled validation best",
+        },
         seeds=config.seeds,
-        splits={"synthetic": {"fit": [0, 360], "validation": [360, 480], "test": [480, 600]}},
+        splits=_split_evidence(config),
         model_snapshots={
             "configured_arms": [arm.name for arm in arms],
             "modes": ["frozen", "online"],
-            "wrong_model_initializations": {
+            "initializations": {
                 arm: {
                     initialization: _initialization_snapshot(arm, initialization)
                     for initialization in config.initializations
                 }
                 for arm in ("scheduled-arx", "dmc", "state-space")
+            },
+            "fitted_by_domain": {
+                row.evidence_id: dict(row.model_evidence or {})
+                for row in rows
             },
         },
         scenarios=tuple(rows),
@@ -756,6 +1032,67 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
         environment=_environment_versions(),
         horizon_evidence=horizon_evidence,
     )
+
+
+@lru_cache(maxsize=None)
+def _real_mak_record() -> SignalRecord:
+    fixture = Path(__file__).parents[4] / "tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv"
+    return resample_record(reconstruct_mak_fixture(fixture), _FRAME_S)
+
+
+@lru_cache(maxsize=None)
+def _real_mak_evidence(arm: str) -> dict[str, Any]:
+    """Fit each arm against reconstructed historic MAK requested input evidence."""
+    record = _real_mak_record()
+    fit_end = min(16, record.temp_c.size - 46)
+    result: dict[str, Any] = {
+        "provenance": record.provenance,
+        "metadata": dict(record.metadata),
+        "diagnostics_c": {"60": None, "300": None, "900": None, "1800": None, "3600": None},
+    }
+    if fit_end < 2:
+        result["failure"] = "fixture cannot support chronological fit"
+        return result
+    try:
+        model = _model_for_initialization(arm, "correct")
+        model.fit(_record_slice(record, 0, fit_end))
+        diagnostics = _horizon_residuals(
+            model,
+            record,
+            starts=tuple(range(fit_end, record.temp_c.size)),
+            horizons_s=(60, 300, 900, 1800, 3600),
+        )
+        result["diagnostics_c"] = {
+            str(horizon): _mean_or_none(values)
+            for horizon, values in sorted(diagnostics.items())
+        }
+        result["fitted"] = _json_value(model.snapshot())
+    except Exception as error:
+        result["failure"] = f"{type(error).__name__}: {error}"
+    return result
+
+
+def _split_evidence(config: ExperimentConfig) -> dict[str, Any]:
+    """Persist actual index/time boundaries for every immutable domain record."""
+    domains: dict[str, Any] = {}
+    for plant in ("GrillSim", "MAKGrillSim"):
+        for seed in sorted(config.seeds):
+            record = _calibration_record(plant, seed)
+            fit_end = int(record.temp_c.size * 0.35)
+            validation_end = int(record.temp_c.size * 0.75)
+            domains[f"{plant}:{seed}"] = {
+                "fit": [0, fit_end],
+                "validation": [fit_end, validation_end],
+                "test": [validation_end, int(record.temp_c.size)],
+                "provenance": record.provenance,
+            }
+    real = _real_mak_record()
+    domains["real-MAK"] = {
+        "fit": [0, min(16, real.temp_c.size - 46)],
+        "provenance": real.provenance,
+        "diagnostic_horizons_s": [60, 300, 900, 1800, 3600],
+    }
+    return domains
 
 
 def _flatten_origins(origins: Mapping[str, tuple[float, ...]]) -> list[float]:

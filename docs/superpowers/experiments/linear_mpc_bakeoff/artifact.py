@@ -107,13 +107,22 @@ class ArmEvidence:
     raw_learner_ms: Sequence[float] = ()
     raw_refresh_ms: Sequence[float] = ()
     raw_solve_ms: Sequence[float] = ()
+    ranking_domain_scores: Mapping[str, float] = field(default_factory=dict)
+    correct_baseline_no_degradation: bool = True
 
     def __post_init__(self) -> None:
         if self.name not in _COMPLEXITY:
             raise ValueError(f"unknown arm {self.name!r}")
         scores = {str(domain): float(score) for domain, score in self.domain_median_scores.items()}
+        ranking_scores = {
+            str(domain): float(score) for domain, score in self.ranking_domain_scores.items()
+        }
+        if not ranking_scores:
+            ranking_scores = scores
         if not scores or not all(isfinite(score) and score >= 0.0 for score in scores.values()):
             raise ValueError("domain scores must be finite and non-negative")
+        if not all(isfinite(score) and score >= 0.0 for score in ranking_scores.values()):
+            raise ValueError("ranking domain scores must be finite and non-negative")
         distributions = {
             "raw_learner_ms": tuple(float(value) for value in self.raw_learner_ms),
             "raw_refresh_ms": tuple(float(value) for value in self.raw_refresh_ms),
@@ -143,6 +152,7 @@ class ArmEvidence:
         if not isfinite(float(projected)) or float(projected) < 0.0:
             raise ValueError("projected solve timing must be finite and non-negative")
         object.__setattr__(self, "domain_median_scores", MappingProxyType(dict(sorted(scores.items()))))
+        object.__setattr__(self, "ranking_domain_scores", MappingProxyType(dict(sorted(ranking_scores.items()))))
         object.__setattr__(self, "prediction_error", float(self.prediction_error))
         object.__setattr__(self, "before_mae", float(self.before_mae))
         object.__setattr__(self, "after_mae", float(self.after_mae))
@@ -155,7 +165,7 @@ class ArmEvidence:
 
     @property
     def worst_domain_score(self) -> float:
-        return max(self.domain_median_scores.values())
+        return max(self.ranking_domain_scores.values())
 
     def to_document(self) -> dict[str, Any]:
         raw_timing = {
@@ -168,6 +178,8 @@ class ArmEvidence:
         }
         return {
             "domain_median_control_scores": _document(self.domain_median_scores),
+            "ranking_domain_control_scores": _document(self.ranking_domain_scores),
+            "correct_baseline_no_degradation": self.correct_baseline_no_degradation,
             "prediction_error": self.prediction_error,
             "projected_solve_p99_ms": self.projected_solve_p99_ms,
             "projected_timing_ms": {
@@ -293,7 +305,8 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
             or evidence.projected_solve_p99_ms > min(budget * 5.0, 250.0)
         ):
             reasons.append("runtime beyond hard limits")
-        reasons = sorted(set(reasons))
+        if not evidence.correct_baseline_no_degradation:
+            reasons.append("correct-baseline online degradation")
         valid = not reasons
         recommendations[evidence.name] = ArmRecommendation(valid, tuple(reasons), evidence.worst_domain_score)
         if valid:
