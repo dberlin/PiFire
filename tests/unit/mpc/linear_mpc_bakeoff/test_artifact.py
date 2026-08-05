@@ -13,7 +13,8 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import (
 
 
 def artifact_with_scores(
-    *, arx: float = 10.0, state_space: float = 12.0, dmc: float = 13.0
+    *, arx: float = 10.0, state_space: float = 12.0, dmc: float = 13.0,
+    state_prediction: float = 3.0,
 ) -> ExperimentArtifact:
     return ExperimentArtifact(
         config={"control_budget_ms": 50.0},
@@ -24,7 +25,7 @@ def artifact_with_scores(
         arms=(
             ArmEvidence("scheduled-arx", {"GrillSim": arx}, 3.0, 3.0, 2.0, 10.0),
             ArmEvidence("dmc", {"GrillSim": dmc}, 4.0, 4.0, 2.0, 10.0),
-            ArmEvidence("state-space", {"GrillSim": state_space}, 4.0, 4.0, 2.0, 10.0),
+            ArmEvidence("state-space", {"GrillSim": state_space}, state_prediction, state_prediction, 2.0, 10.0),
         ),
         source_revision="abc123",
         environment={"python": "test", "numpy": "test"},
@@ -87,7 +88,7 @@ def test_structured_failure_invalidates_only_allowed_reason() -> None:
 
 
 def test_pareto_frontier_does_not_force_a_winner() -> None:
-    artifact = artifact_with_scores(arx=10.0, state_space=9.0, dmc=12.0)
+    artifact = artifact_with_scores(arx=10.0, state_space=9.0, dmc=12.0, state_prediction=4.0)
 
     recommendation = recommend(artifact)
 
@@ -133,6 +134,31 @@ def test_arm_evidence_preserves_raw_distributions_and_horizon_residuals() -> Non
     assert evidence.to_document()["raw_timing_ms"]["learner"] == [1.0, 2.0]
     assert evidence.to_document()["raw_timing_ms"]["solve_p99"] == 5.99
 
+
+
+def test_runtime_gates_apply_to_five_times_learner_and_refresh_p99() -> None:
+    artifact = ExperimentArtifact(
+        config={"control_budget_ms": 50.0},
+        seeds=(2,),
+        splits={},
+        model_snapshots={},
+        scenarios=(),
+        arms=(
+            ArmEvidence(
+                "scheduled-arx",
+                {"GrillSim": 10.0},
+                1.0,
+                1.0,
+                raw_solve_p99_ms=1.0,
+                raw_learner_ms=(6.0,),
+                raw_refresh_ms=(1.0,),
+            ),
+        ),
+        source_revision="abc123",
+        environment={"python": "test"},
+    )
+
+    assert not recommend(artifact).arms["scheduled-arx"].valid
 
 def document_has_failure(artifact: ExperimentArtifact, category: str) -> bool:
     return any(failure["category"] == category for failure in artifact.to_document()["failures"])

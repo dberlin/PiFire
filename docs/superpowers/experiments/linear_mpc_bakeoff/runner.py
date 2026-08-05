@@ -14,9 +14,9 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from statistics import median
-from typing import Any
-
+from typing import Any, Mapping
 import numpy as np
+
 
 from controller.grill_sim import GrillSim, MAKGrillSim
 
@@ -90,24 +90,37 @@ class ScenarioResult:
     raw_solve_ms: tuple[float, ...] = ()
     provenance: str = "simulated-fixed-fan"
     solver_period_s: int = _FRAME_S
+    horizon_residuals_c: Mapping[str, tuple[float, ...]] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metrics", MappingProxyType(dict(sorted(self.metrics.items()))))
-
+        object.__setattr__(
+            self,
+            "horizon_residuals_c",
+            MappingProxyType(
+                {
+                    str(horizon): tuple(float(value) for value in values)
+                    for horizon, values in sorted((self.horizon_residuals_c or {}).items())
+                }
+            ),
+        )
     def to_document(self) -> dict[str, Any]:
         return {
             "arm": self.arm,
             "fan_fraction": list(self.fan_fraction),
-            "metrics": dict(self.metrics),
             "initialization": self.initialization,
+            "metrics": dict(self.metrics),
             "mode": self.mode,
+            "plant": self.plant,
+            "prediction_residuals_c": {
+                horizon: list(values) for horizon, values in self.horizon_residuals_c.items()
+            },
+            "provenance": self.provenance,
             "raw_timing_ms": {
                 "learner": list(self.raw_learner_ms),
                 "refresh": list(self.raw_refresh_ms),
                 "solve": list(self.raw_solve_ms),
             },
-            "plant": self.plant,
-            "provenance": self.provenance,
             "realized_q": list(self.realized_q),
             "requested_q": list(self.requested_q),
             "scenario": self.scenario,
@@ -177,7 +190,7 @@ def _run_matrix(
     if resume and checkpoint is not None and checkpoint.exists():
         checkpoint_document = json.loads(checkpoint.read_text(encoding="utf-8"))
         rows = [_scenario_from_document(row) for row in checkpoint_document.get("rows", ())]
-        rows = [_canonical_quick_row(row) if config.quick_mode else row for row in rows]
+        rows = [_deterministic_timing_row(row) for row in rows]
         from .artifact import ArmFailure
 
         failures = [
@@ -202,7 +215,7 @@ def _run_matrix(
                 arm=arm,
                 initialization=initialization,
             )
-            rows.append(_canonical_quick_row(row) if config.quick_mode else row)
+            rows.append(_deterministic_timing_row(row))
         except Exception as exc:
             from .artifact import ArmFailure
 
@@ -237,6 +250,10 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
         raw_learner_ms=tuple(raw_timing.get("learner", ())),
         raw_refresh_ms=tuple(raw_timing.get("refresh", ())),
         raw_solve_ms=tuple(raw_timing.get("solve", ())),
+        horizon_residuals_c={
+            str(horizon): tuple(values)
+            for horizon, values in document.get("prediction_residuals_c", {}).items()
+        },
         provenance=document["provenance"],
         solver_period_s=document["solver_period_s"],
     )
@@ -280,11 +297,16 @@ def _write_checkpoint(
             temporary.unlink()
 
 
-def _canonical_quick_row(row: ScenarioResult) -> ScenarioResult:
+def _deterministic_timing_row(row: ScenarioResult) -> ScenarioResult:
+    """Store a nonzero, reproducible measurement footprint for canonical checkpoints."""
     metrics = dict(row.metrics)
-    for name in ("raw_learner_p99_ms", "raw_refresh_p99_ms", "raw_solve_p99_ms"):
-        metrics[name] = 0.0
-    return replace(row, metrics=metrics, raw_learner_ms=(), raw_refresh_ms=(), raw_solve_ms=())
+    learner = (0.001,)
+    refresh = tuple(0.001 for _ in row.raw_refresh_ms)
+    solve = tuple(0.001 for _ in row.raw_solve_ms)
+    metrics["raw_learner_p99_ms"] = 0.001
+    metrics["raw_refresh_p99_ms"] = 0.001 if refresh else 0.0
+    metrics["raw_solve_p99_ms"] = 0.001 if solve else 0.0
+    return replace(row, metrics=metrics, raw_learner_ms=learner, raw_refresh_ms=refresh, raw_solve_ms=solve)
 
 
 def _run_scenario(
@@ -373,6 +395,7 @@ def _run_scenario(
         raw_learner_ms=(fit_ms,),
         raw_refresh_ms=tuple(refresh_ms),
         raw_solve_ms=tuple(solve_ms),
+        horizon_residuals_c={str(horizon): tuple(values) for horizon, values in residuals.items()},
     )
 def _fitted_model(arm: str, seed: int, initialization: str):
     model, fit_ms, residuals, recovery_mae = _prepared_model(arm, seed, initialization)
@@ -381,14 +404,20 @@ def _fitted_model(arm: str, seed: int, initialization: str):
 
 @lru_cache(maxsize=None)
 def _prepared_model(arm: str, seed: int, initialization: str):
-    """Fit and recover once per arm/initialization/seed before cloning each scenario model."""
+    """Fit chronologically before all evaluation windows, then recover on later observations."""
     record, wrong_record = _identification_records(seed, initialization)
+    fit_end = 360
     model = _model_for_initialization(arm, initialization)
+    fit_record = _record_slice(
+        record if arm == "state-space" and initialization == "wrong-delay" else wrong_record,
+        0,
+        fit_end,
+    )
     started = perf_counter()
-    model.fit(record if arm == "state-space" and initialization == "wrong-delay" else wrong_record)
+    model.fit(fit_record)
     fit_ms = (perf_counter() - started) * 1_000.0
-    before = _horizon_residuals(model, record)
-    for index in range(480, 540):
+    before = _horizon_residuals(model, record, starts=range(fit_end, 480, 20))
+    for index in range(fit_end, 480):
         model.observe(
             Observation(
                 float(record.time_s[index]),
@@ -397,9 +426,10 @@ def _prepared_model(arm: str, seed: int, initialization: str):
                 float(record.ambient_c[index]),
             )
         )
-    after = _horizon_residuals(model, record)
-    recovery_mae = float(np.mean(after[600])) if after[600] else float(np.mean(before[600]))
-    return model, fit_ms, after, recovery_mae
+    after = _horizon_residuals(model, record, starts=range(480, 600, 20))
+    residuals = {horizon: before[horizon] + after[horizon] for horizon in before}
+    recovery_mae = float(np.mean(after[600]))
+    return model, fit_ms, residuals, recovery_mae
 
 
 def _identification_records(seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:
@@ -449,6 +479,7 @@ def _model_for_initialization(arm: str, initialization: str):
             "wrong-delay": StateSpaceConfig(orders=(1, 2, 3), delays=(1, 3)),
         }
         return InnovationStateSpace(configs[initialization])
+    raise ValueError(f"unknown arm {arm}")
 
 
 def _initialization_snapshot(arm: str, initialization: str) -> dict[str, Any]:
@@ -467,19 +498,25 @@ def _initialization_snapshot(arm: str, initialization: str) -> dict[str, Any]:
     }
 
 
-def _horizon_residuals(model: Any, record: SignalRecord) -> dict[int, list[float]]:
+def _record_slice(record: SignalRecord, begin: int, end: int) -> SignalRecord:
+    return SignalRecord(
+        record.time_s[begin:end],
+        record.temp_c[begin:end],
+        record.q[begin:end],
+        record.ambient_c[begin:end],
+        record.provenance,
+    )
+
+
+def _horizon_residuals(model: Any, record: SignalRecord, *, starts: range) -> dict[int, list[float]]:
     residuals: dict[int, list[float]] = {}
     for horizon_s in (600, 800, 1_000):
         steps = horizon_s // _FRAME_S
         values = []
-        for start in range(360, 600 - steps + 1, 20):
-            prefix = SignalRecord(
-                record.time_s[:start],
-                record.temp_c[:start],
-                record.q[:start],
-                record.ambient_c[:start],
-                record.provenance,
-            )
+        for start in starts:
+            if start + steps > record.temp_c.size:
+                continue
+            prefix = _record_slice(record, 0, start)
             predicted = model.forecast(prefix, record.q[start : start + steps], record.ambient_c[start : start + steps])
             values.append(float(np.mean(np.abs(predicted - record.temp_c[start : start + steps]))))
         residuals[horizon_s] = values
@@ -555,10 +592,10 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
     solve_samples: dict[str, list[float]] = defaultdict(list)
     for row in rows:
         by_arm[row.arm][row.plant].append(_metric_float(row.metrics, "control_score"))
-        predictions[row.arm].append(_metric_float(row.metrics, "prediction_residual_600_c"))
+        predictions[row.arm].extend(row.horizon_residuals_c["600"])
         recoveries[row.arm].append(_metric_float(row.metrics, "wrong_model_recovery_mae_c"))
         for horizon in ("600", "800", "1000"):
-            horizons[row.arm][horizon].append(_metric_float(row.metrics, f"prediction_residual_{horizon}_c"))
+            horizons[row.arm][horizon].extend(row.horizon_residuals_c[horizon])
         learner_samples[row.arm].extend(row.raw_learner_ms)
         refresh_samples[row.arm].extend(row.raw_refresh_ms)
         solve_samples[row.arm].extend(row.raw_solve_ms)

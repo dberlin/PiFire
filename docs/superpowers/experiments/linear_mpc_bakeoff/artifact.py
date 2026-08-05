@@ -220,8 +220,8 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
     for evidence in artifact.arms:
         reasons = sorted(set(failures_by_arm.get(evidence.name, ())))
         if (
-            evidence.raw_learner_p99_ms > 25.0
-            or evidence.raw_refresh_p99_ms > 1_250.0
+            evidence.raw_learner_p99_ms * 5.0 > 25.0
+            or evidence.raw_refresh_p99_ms * 5.0 > 1_250.0
             or evidence.projected_solve_p99_ms > min(budget * 5.0, 250.0)
         ):
             reasons.append("runtime beyond hard limits")
@@ -249,27 +249,53 @@ def render_table(artifact: ExperimentArtifact, recommendation: Recommendation | 
     for evidence in artifact.arms:
         result = recommendation.arms[evidence.name]
         reasons = ", ".join(result.reasons) or "-"
-        lines.append(f"{evidence.name:<17}{str(result.valid):<7}{evidence.worst_domain_score:<13.3f}{evidence.projected_solve_p99_ms:<18.3f}{reasons}")
+        lines.append(
+            f"{evidence.name:<17}{str(result.valid):<7}{evidence.worst_domain_score:<13.3f}"
+            f"{evidence.projected_solve_p99_ms:<18.3f}{reasons}"
+        )
     lines.append(f"selected: {recommendation.selected_arm or 'none'}")
     lines.append(f"pareto: {', '.join(recommendation.pareto_frontier) or 'none'}")
     return "\n".join(lines)
 
 
 def _pareto_frontier(evidence: Sequence[ArmEvidence]) -> tuple[ArmEvidence, ...]:
-    return tuple(item for item in sorted(evidence, key=lambda value: value.name) if not any(_dominates(other, item) for other in evidence if other is not item))
+    if not evidence:
+        return ()
+    scales = tuple(
+        max(min(values), 1e-12)
+        for values in zip(*(_pareto_values(item) for item in evidence))
+    )
+    return tuple(
+        item
+        for item in sorted(evidence, key=lambda value: value.name)
+        if not any(_dominates(other, item, scales) for other in evidence if other is not item)
+    )
 
 
-def _dominates(left: ArmEvidence, right: ArmEvidence) -> bool:
-    left_values = (left.worst_domain_score, left.prediction_error, left.wrong_model_recovery, left.projected_solve_p99_ms)
-    right_values = (right.worst_domain_score, right.prediction_error, right.wrong_model_recovery, right.projected_solve_p99_ms)
-    return all(a <= b for a, b in zip(left_values, right_values, strict=True)) and any(a < b * 0.95 for a, b in zip(left_values, right_values, strict=True) if b > 0.0)
+def _pareto_values(evidence: ArmEvidence) -> tuple[float, float, float, float]:
+    return (
+        evidence.worst_domain_score,
+        evidence.prediction_error,
+        evidence.wrong_model_recovery,
+        evidence.projected_solve_p99_ms,
+    )
+
+
+def _dominates(left: ArmEvidence, right: ArmEvidence, scales: Sequence[float]) -> bool:
+    normalized_left = tuple(value / scale for value, scale in zip(_pareto_values(left), scales))
+    normalized_right = tuple(value / scale for value, scale in zip(_pareto_values(right), scales))
+    return all(a <= b for a, b in zip(normalized_left, normalized_right)) and any(
+        a < b * 0.95 for a, b in zip(normalized_left, normalized_right) if b > 0.0
+    )
 
 
 def _material_pareto_conflict(frontier: Sequence[ArmEvidence]) -> bool:
     if len(frontier) < 2:
         return False
-    scores = [item.worst_domain_score for item in frontier]
-    return max(scores) > min(scores) * 1.05
+    dimensions = tuple(zip(*(_pareto_values(item) for item in frontier)))
+    return any(max(values) > min(values) * 1.05 for values in dimensions if min(values) > 0.0)
+
+
 
 
 def _p99(values: Sequence[float]) -> float:
