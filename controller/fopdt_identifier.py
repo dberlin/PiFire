@@ -193,3 +193,90 @@ class RLSBank:
         diag = np.einsum("nii->ni", self.P)
         bad |= (diag <= 0.0).any(axis=1)
         self.reset(bad)
+
+
+#: Physical bounds a grill's identified model must satisfy.
+GAIN_MIN, GAIN_MAX = 50.0, 2000.0  # F per unit duty
+TAU_MIN, TAU_MAX = 300.0, 20000.0  # seconds
+RSE_K_MAX = 0.20
+RSE_TAU_MAX = 0.25
+#: A winner must beat the runner-up by this fraction of its residual.
+PROMOTION_MARGIN = 0.10
+
+
+def recover_parameters(Theta):
+    """Physical parameters from the scaled regression coefficients.
+
+    Undoes the fixed centering and scaling, then
+    tau = -1/beta_T, K = -beta_u/beta_T, T_offset = -beta_0/beta_T.
+    A candidate whose recovery is not finite comes back non-finite rather than
+    raising; gate_mask drops it.
+    """
+    Theta = np.atleast_2d(np.asarray(Theta, dtype=float))
+    c0, cT, cu = Theta[:, 0], Theta[:, 1], Theta[:, 2]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        beta_T = cT / T_SCALE
+        beta_0 = c0 - beta_T * T_REF
+        tau = -1.0 / beta_T
+        K = -cu / beta_T
+        T_offset = -beta_0 / beta_T
+    return {"K": K, "tau": tau, "T_offset": T_offset}
+
+
+def relative_standard_errors(Theta, P, resid_ew):
+    """Delta-method relative standard errors for K and tau.
+
+    tau is proportional to 1/c_T, so its relative error is c_T's. K is a ratio
+    of two estimated coefficients, so its relative variance carries their
+    covariance term.
+    """
+    Theta = np.atleast_2d(np.asarray(Theta, dtype=float))
+    P = np.asarray(P, dtype=float)
+    resid_ew = np.asarray(resid_ew, dtype=float)
+    cT, cu = Theta[:, 1], Theta[:, 2]
+    var_T = resid_ew * P[:, 1, 1]
+    var_u = resid_ew * P[:, 2, 2]
+    cov_uT = resid_ew * P[:, 2, 1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rel_T2 = var_T / cT**2
+        rel_u2 = var_u / cu**2
+        rse_tau = np.sqrt(np.maximum(rel_T2, 0.0))
+        rse_K = np.sqrt(np.maximum(rel_u2 + rel_T2 - 2.0 * cov_uT / (cu * cT), 0.0))
+    return rse_K, rse_tau
+
+
+def gate_mask(params, rse_K, rse_tau):
+    """Candidates whose estimate is finite, physical and sufficiently certain."""
+    K, tau = np.asarray(params["K"]), np.asarray(params["tau"])
+    rse_K, rse_tau = np.asarray(rse_K), np.asarray(rse_tau)
+    with np.errstate(invalid="ignore"):
+        mask = np.isfinite(K) & np.isfinite(tau) & np.isfinite(rse_K) & np.isfinite(rse_tau)
+        mask &= (K >= GAIN_MIN) & (K <= GAIN_MAX)
+        mask &= (tau >= TAU_MIN) & (tau <= TAU_MAX)
+        mask &= rse_K <= RSE_K_MAX
+        mask &= rse_tau <= RSE_TAU_MAX
+    return mask
+
+
+def promote(resid_ew, mask):
+    """The winning candidate index and its margin, or (None, 0.0).
+
+    A candidate is never promoted merely for having the lowest residual. If the
+    best two are statistically indistinguishable there is no evidence for either
+    delay, and refusing keeps the controller on measured temperature.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    if mask.sum() < 2:
+        return None, 0.0
+    resid = np.where(mask, np.asarray(resid_ew, dtype=float), np.inf)
+    best, runner_up = np.partition(resid, 1)[:2]
+    if not np.isfinite(runner_up) or runner_up <= 0.0:
+        return None, 0.0
+    margin = (runner_up - best) / runner_up
+    # Gate on the ratio directly rather than on `margin`: subtracting two
+    # decimal literals that are not exact in binary can land `margin` a couple
+    # of ULP below a literal threshold even when the true margin is exactly
+    # PROMOTION_MARGIN, which would wrongly refuse a boundary-exact winner.
+    if best > runner_up * (1.0 - PROMOTION_MARGIN):
+        return None, 0.0
+    return int(np.argmin(resid)), float(margin)

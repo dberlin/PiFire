@@ -9,7 +9,24 @@ implementation proves only that it agrees with itself.
 import numpy as np
 import pytest
 
-from controller.fopdt_identifier import DELAYS, EW_ALPHA, LAM, P0, DutyHistory, RLSBank
+from controller.fopdt_identifier import (
+    DELAYS,
+    EW_ALPHA,
+    GAIN_MAX,
+    GAIN_MIN,
+    LAM,
+    P0,
+    T_REF,
+    T_SCALE,
+    TAU_MAX,
+    TAU_MIN,
+    DutyHistory,
+    RLSBank,
+    gate_mask,
+    promote,
+    recover_parameters,
+    relative_standard_errors,
+)
 
 
 # ---------------------------------------------------------------- scalar oracle
@@ -156,3 +173,95 @@ def test_reset_clears_only_the_masked_candidates():
     np.testing.assert_allclose(bank.P[3], P0 * np.eye(3))
     assert bank.resid_ew[3] == 0.0
     np.testing.assert_allclose(bank.Theta[~mask], before[~mask])
+
+
+# --------------------------------------------------------- recovery and gates
+
+
+def _theta_for(K, tau, T_offset, n=1):
+    """Invert the recovery: build the coefficient row a true model produces."""
+    beta_T = -1.0 / tau
+    beta_u = -K * beta_T
+    beta_0 = -T_offset * beta_T
+    # scaled coefficients: c_T = beta_T * T_SCALE, c_0 = beta_0 + beta_T * T_REF
+    return np.tile([beta_0 + beta_T * T_REF, beta_T * T_SCALE, beta_u], (n, 1))
+
+
+def test_recovery_inverts_a_known_model():
+    theta = _theta_for(K=800.0, tau=600.0, T_offset=70.0, n=3)
+    params = recover_parameters(theta)
+    np.testing.assert_allclose(params["K"], 800.0)
+    np.testing.assert_allclose(params["tau"], 600.0)
+    np.testing.assert_allclose(params["T_offset"], 70.0)
+
+
+def test_recovery_masks_a_degenerate_candidate_instead_of_raising():
+    theta = np.array([[0.0, 0.0, 0.0]])  # beta_T == 0 -> tau is infinite
+    params = recover_parameters(theta)
+    assert not np.isfinite(params["tau"]).any() or params["tau"][0] > TAU_MAX
+
+
+@pytest.mark.parametrize(
+    "K,tau,expected",
+    [
+        (800.0, 600.0, True),
+        (GAIN_MIN - 1.0, 600.0, False),
+        (GAIN_MAX + 1.0, 600.0, False),
+        (-800.0, 600.0, False),
+        (800.0, TAU_MIN - 1.0, False),
+        (800.0, TAU_MAX + 1.0, False),
+        (800.0, -600.0, False),
+    ],
+)
+def test_gate_mask_rejects_unphysical_estimates(K, tau, expected):
+    params = recover_parameters(_theta_for(K=K, tau=tau, T_offset=70.0))
+    mask = gate_mask(params, rse_K=np.array([0.05]), rse_tau=np.array([0.05]))
+    assert bool(mask[0]) is expected
+
+
+def test_gate_mask_rejects_an_uncertain_estimate():
+    params = recover_parameters(_theta_for(K=800.0, tau=600.0, T_offset=70.0))
+    assert not gate_mask(params, rse_K=np.array([0.25]), rse_tau=np.array([0.05]))[0]
+    assert not gate_mask(params, rse_K=np.array([0.05]), rse_tau=np.array([0.30]))[0]
+
+
+def test_gate_mask_rejects_a_non_finite_estimate():
+    params = {"K": np.array([np.nan]), "tau": np.array([600.0]), "T_offset": np.array([70.0])}
+    assert not gate_mask(params, rse_K=np.array([0.05]), rse_tau=np.array([0.05]))[0]
+
+
+def test_relative_standard_errors_shrink_as_the_residual_shrinks():
+    theta = _theta_for(K=800.0, tau=600.0, T_offset=70.0, n=2)
+    P = np.tile(np.eye(3) * 1e-4, (2, 1, 1))
+    loud = relative_standard_errors(theta, P, np.array([1.0, 1.0]))
+    quiet = relative_standard_errors(theta, P, np.array([1e-6, 1e-6]))
+    assert quiet[0][0] < loud[0][0]
+    assert quiet[1][0] < loud[1][0]
+
+
+def test_promote_requires_a_clear_margin_over_the_runner_up():
+    mask = np.ones(4, dtype=bool)
+    # winner 10% below runner-up exactly: accepted at the boundary
+    winner, margin = promote(np.array([0.90, 1.00, 1.20, 1.50]), mask)
+    assert winner == 0
+    assert margin == pytest.approx(0.10)
+    # indistinguishable: refused
+    winner, margin = promote(np.array([0.99, 1.00, 1.20, 1.50]), mask)
+    assert winner is None
+
+
+def test_promote_ignores_gated_out_candidates():
+    mask = np.array([False, True, True, True])
+    winner, _ = promote(np.array([0.01, 0.90, 1.50, 1.60]), mask)
+    assert winner == 1
+
+
+def test_promote_refuses_when_nothing_passes_the_gates():
+    winner, _ = promote(np.array([0.1, 0.2]), np.zeros(2, dtype=bool))
+    assert winner is None
+
+
+def test_promote_refuses_with_a_single_surviving_candidate():
+    """One candidate cannot be 10% better than a runner-up that does not exist."""
+    winner, _ = promote(np.array([0.1, 0.2]), np.array([True, False]))
+    assert winner is None
