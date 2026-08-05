@@ -69,13 +69,13 @@ class _Candidate:
 
 
 class ScheduledARX:
-    """A temperature-scheduled ARX arm with delayed-input model selection.
+    """A temperature-scheduled incremental ARX arm with delay selection.
 
-    Each local model regresses the next temperature on lagged temperature
-    differences from ambient, delayed requested-input differences from zero duty,
-    the current ambient correction, and an intercept. Every candidate delay is
-    updated from the same observation; only the active delay is switched after
-    two independent validation-window wins.
+    Each local model regresses the chamber-temperature increment on lagged
+    temperature increments, delayed auger-duty increments, contemporaneous
+    ambient error, and an intercept. Every candidate delay is updated from the
+    same observation; only the active delay is switched after two independent
+    validation-window wins.
     """
 
     def __init__(self, config: ARXConfig) -> None:
@@ -109,7 +109,10 @@ class ScheduledARX:
         temperatures = np.asarray(record.temp_c, dtype=np.float64)
         inputs = np.asarray(record.q, dtype=np.float64)
         ambients = np.asarray(record.ambient_c, dtype=np.float64)
-        first_target = max(self._config.na, max(self._config.delays) + self._config.nb)
+        first_target = max(
+            self._config.na + 1,
+            max(self._config.delays) + self._config.nb + 1,
+        )
 
         for target_index in range(first_target, temperatures.size):
             self._assimilate(
@@ -144,8 +147,10 @@ class ScheduledARX:
         candidate = self._candidates[self._active_delay]
         theta = self._scheduled_theta(candidate, float(prefix.temp_c[-1]))
         temperatures = [float(value) for value in prefix.temp_c]
-        inputs = [float(value) for value in prefix.q] + future_q.tolist()
-        output = self._forecast_with_theta(theta, temperatures, inputs, future_ambient)
+        inputs = [float(value) for value in prefix.q]
+        output = self._forecast_with_theta(
+            theta, temperatures, inputs, future_q, future_ambient
+        )
         output.setflags(write=False)
         return output
     def observe(self, observation: Observation) -> UpdateOutcome:
@@ -155,13 +160,13 @@ class ScheduledARX:
 
         candidate = self._candidates[self._active_delay]
         theta = self._scheduled_theta(candidate, self._temperature_history[-1])
-        feature = self._feature(
+        prediction = self._predict_next(
+            theta,
             self._temperature_history,
             self._input_history,
             observation.ambient_c,
             candidate.delay_steps,
         )
-        prediction = float(theta @ feature)
         innovation = observation.temp_c - prediction
         self._assimilate(
             self._temperature_history,
@@ -187,7 +192,7 @@ class ScheduledARX:
         q_previous: float,
         ambient_future: FloatArray,
     ) -> AffinePrediction:
-        """Derive the active ARX companion recursion as an affine horizon map."""
+        """Derive the active incremental recursion as an affine horizon map."""
         if not self._temperature_history:
             raise RuntimeError("fit must be called before affine_prediction")
         if horizon_steps < 0:
@@ -215,22 +220,35 @@ class ScheduledARX:
 
         for step in range(horizon_steps):
             target = len(self._temperature_history) + step
-            constant = theta[-1] + theta[-2] * future_ambient[step]
-            response = np.zeros(horizon_steps, dtype=np.float64)
+            prior_value, prior_response = temperatures[target - 1]
+            delta_constant = theta[-1] + theta[-2] * (
+                future_ambient[step] - prior_value
+            )
+            delta_response = -theta[-2] * prior_response
             for lag in range(self._config.na):
                 value, coefficients = temperatures[target - 1 - lag]
-                constant += theta[lag] * (value - future_ambient[step])
-                response += theta[lag] * coefficients
+                previous_value, previous_coefficients = temperatures[target - 2 - lag]
+                delta_constant += theta[lag] * (value - previous_value)
+                delta_response += theta[lag] * (coefficients - previous_coefficients)
             input_offset = self._config.na
             for lag in range(self._config.nb):
                 value, coefficients = input_terms[
                     target - 1 - candidate.delay_steps - lag
                 ]
-                constant += theta[input_offset + lag] * value
-                response += theta[input_offset + lag] * coefficients
-            free_output[step] = constant
-            input_response[step] = response
-            temperatures.append((constant, response))
+                previous_value, previous_coefficients = input_terms[
+                    target - 2 - candidate.delay_steps - lag
+                ]
+                coefficient = theta[input_offset + lag]
+                delta_constant += coefficient * (value - previous_value)
+                delta_response += coefficient * (coefficients - previous_coefficients)
+            denominator = 1.0 + theta[-2]
+            if abs(denominator) < 1e-9:
+                raise RuntimeError("ambient-error coefficient makes the ARX recursion singular")
+            next_value = prior_value + delta_constant / denominator
+            next_response = prior_response + delta_response / denominator
+            free_output[step] = next_value
+            input_response[step] = next_response
+            temperatures.append((next_value, next_response))
 
         return AffinePrediction(free_output, input_response)
 
@@ -298,14 +316,27 @@ class ScheduledARX:
         target_temp_c: float,
         refresh_sample: int,
     ) -> None:
+        temperature_values = np.asarray(temperatures, dtype=np.float64)
+        target_increment = target_temp_c - float(temperature_values[-1])
         for candidate in self._candidates.values():
-            theta = self._scheduled_theta(candidate, float(temperatures[-1]))
-            feature = self._feature(temperatures, inputs, ambient_c, candidate.delay_steps)
-            error = target_temp_c - float(theta @ feature)
+            theta = self._scheduled_theta(candidate, float(temperature_values[-1]))
+            feature = self._feature(
+                temperatures,
+                inputs,
+                ambient_c,
+                target_temp_c,
+                candidate.delay_steps,
+            )
+            prediction = self._predict_next(
+                theta, temperatures, inputs, ambient_c, candidate.delay_steps
+            )
+            error = target_temp_c - prediction
             candidate.validation_error += error * error
             candidate.validation_samples += 1
-            for index, weight in self._region_weights(float(temperatures[-1])):
-                self._update_region(candidate.regions[index], feature, target_temp_c, weight)
+            for index, weight in self._region_weights(float(temperature_values[-1])):
+                self._update_region(
+                    candidate.regions[index], feature, target_increment, weight
+                )
         active_samples = self._candidates[self._active_delay].validation_samples
         if active_samples >= self._config.validation_window:
             self._refresh_delay(refresh_sample)
@@ -415,45 +446,73 @@ class ScheduledARX:
         temperatures: npt.ArrayLike,
         inputs: npt.ArrayLike,
         ambient_c: float,
+        target_temp_c: float,
         delay_steps: int,
     ) -> FloatArray:
         temperature_values = np.asarray(temperatures, dtype=np.float64)
         input_values = np.asarray(inputs, dtype=np.float64)
         feature = np.empty(self._feature_count, dtype=np.float64)
         for lag in range(self._config.na):
-            feature[lag] = temperature_values[-1 - lag] - ambient_c
+            feature[lag] = (
+                temperature_values[-1 - lag] - temperature_values[-2 - lag]
+            )
         input_offset = self._config.na
         for lag in range(self._config.nb):
-            feature[input_offset + lag] = input_values[-1 - delay_steps - lag]
-        feature[-2] = ambient_c
+            delayed_index = -1 - delay_steps - lag
+            feature[input_offset + lag] = (
+                input_values[delayed_index] - input_values[delayed_index - 1]
+            )
+        feature[-2] = ambient_c - target_temp_c
         feature[-1] = 1.0
         return feature
+
+    def _predict_next(
+        self,
+        theta: FloatArray,
+        temperatures: npt.ArrayLike,
+        inputs: npt.ArrayLike,
+        ambient_c: float,
+        delay_steps: int,
+    ) -> float:
+        temperature_values = np.asarray(temperatures, dtype=np.float64)
+        input_values = np.asarray(inputs, dtype=np.float64)
+        increment = float(theta[-1])
+        for lag in range(self._config.na):
+            increment += theta[lag] * (
+                temperature_values[-1 - lag] - temperature_values[-2 - lag]
+            )
+        input_offset = self._config.na
+        for lag in range(self._config.nb):
+            delayed_index = -1 - delay_steps - lag
+            increment += theta[input_offset + lag] * (
+                input_values[delayed_index] - input_values[delayed_index - 1]
+            )
+        ambient_coefficient = theta[-2]
+        denominator = 1.0 + ambient_coefficient
+        if abs(denominator) < 1e-9:
+            raise RuntimeError("ambient-error coefficient makes the ARX recursion singular")
+        increment += ambient_coefficient * (ambient_c - temperature_values[-1])
+        return float(temperature_values[-1] + increment / denominator)
 
     def _forecast_with_theta(
         self,
         theta: FloatArray,
         temperatures: list[float],
         inputs: list[float],
+        future_q: FloatArray,
         future_ambient: FloatArray,
     ) -> FloatArray:
         candidate = self._candidates[self._active_delay]
         output = np.empty(future_ambient.size, dtype=np.float64)
-        initial_length = len(temperatures)
-        for step, ambient_c in enumerate(future_ambient):
-            target = initial_length + step
-            feature = np.empty(self._feature_count, dtype=np.float64)
-            for lag in range(self._config.na):
-                feature[lag] = temperatures[target - 1 - lag] - ambient_c
-            input_offset = self._config.na
-            for lag in range(self._config.nb):
-                feature[input_offset + lag] = inputs[
-                    target - 1 - candidate.delay_steps - lag
-                ]
-            feature[-2] = ambient_c
-            feature[-1] = 1.0
-            prediction = float(theta @ feature)
+        for step, (q, ambient_c) in enumerate(
+            zip(future_q, future_ambient, strict=True)
+        ):
+            prediction = self._predict_next(
+                theta, temperatures, inputs, float(ambient_c), candidate.delay_steps
+            )
             output[step] = prediction
             temperatures.append(prediction)
+            inputs.append(float(q))
         return output
 
 

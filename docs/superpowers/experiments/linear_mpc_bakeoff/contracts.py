@@ -44,7 +44,12 @@ def _frozen_json_value(value: JSONInput) -> JSONValue:
 
 @dataclass(frozen=True, slots=True)
 class Sample:
-    """One synchronized measurement and requested normalized auger input."""
+    """One synchronized measurement and normalized auger duty.
+
+    Simulator records use realized mean duty. Requested-input-reconstructed
+    fixtures retain their requested-duty reconstruction, identified by record
+    provenance rather than by a different field or scale.
+    """
 
     time_s: float
     temp_c: float
@@ -60,7 +65,12 @@ class Sample:
 
 @dataclass(frozen=True, slots=True)
 class SignalRecord:
-    """A time-ordered experiment signal with explicit requested-input meaning."""
+    """A time-ordered signal whose q meaning is declared by provenance.
+
+    Simulator evidence records realized mean auger duty. Real-fixture records
+    may carry requested-input-reconstructed duty; values remain normalized in
+    both cases and consumers must not reinterpret them.
+    """
 
     time_s: FloatArray
     temp_c: FloatArray
@@ -93,7 +103,11 @@ class DatasetSplit:
 
 @dataclass(frozen=True, slots=True)
 class Observation:
-    """One online measurement used for a prequential model update."""
+    """One online measurement with normalized duty feedback.
+
+    Simulator observations provide realized mean duty; reconstructed fixtures
+    retain requested-duty provenance on their enclosing record.
+    """
 
     time_s: float
     temp_c: float

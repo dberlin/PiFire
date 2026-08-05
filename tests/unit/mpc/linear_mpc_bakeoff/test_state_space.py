@@ -84,6 +84,7 @@ def test_subspace_fit_recovers_order_two_dynamics() -> None:
     model.fit(split.fit)
 
     assert model.snapshot()["order"] == 2
+    assert model.snapshot()["delay_steps"] == 2
     assert max(abs(p) for p in model.snapshot()["poles"]) < 1.0
     assert free_run_rmse(model, split.test) < 0.25
 

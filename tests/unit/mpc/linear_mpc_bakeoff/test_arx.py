@@ -18,10 +18,15 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import (
 
 
 def synthetic_step(q: np.ndarray) -> np.ndarray:
-    y = np.zeros_like(q)
-    for k in range(2, len(q) - 1):
-        y[k + 1] = 0.92 * y[k] + 0.06 * q[k - 2]
-    return y
+    temperature = np.zeros_like(q)
+    delta_temperature = np.zeros_like(q)
+    delta_q = np.diff(q, prepend=q[0])
+    for index in range(3, len(q)):
+        delta_temperature[index] = (
+            0.92 * delta_temperature[index - 1] + 0.06 * delta_q[index - 3]
+        )
+        temperature[index] = temperature[index - 1] + delta_temperature[index]
+    return temperature
 
 
 def synthetic_record(
@@ -38,6 +43,33 @@ def synthetic_record(
     )
 
 
+def incremental_step(q: np.ndarray) -> np.ndarray:
+    """Return a stable delayed plant expressed in approved increment coordinates."""
+    temperature = np.full(q.size, 20.0)
+    delta_temperature = np.zeros(q.size)
+    delta_q = np.diff(q, prepend=q[0])
+    for index in range(3, q.size):
+        delta_temperature[index] = (
+            0.85 * delta_temperature[index - 1]
+            + 0.3 * delta_q[index - 3]
+            + 0.05 * (20.0 - temperature[index - 1])
+        ) / 1.05
+        temperature[index] = temperature[index - 1] + delta_temperature[index]
+    return temperature
+
+
+def incremental_record(*, samples: int, seed: int) -> SignalRecord:
+    rng = np.random.default_rng(seed)
+    q = rng.uniform(0.0, 1.0, samples)
+    return SignalRecord(
+        time_s=np.arange(samples, dtype=np.float64) * 20.0,
+        temp_c=incremental_step(q),
+        q=q,
+        ambient_c=np.full(samples, 20.0),
+        provenance="synthetic",
+    )
+
+
 def training_prefix() -> SignalRecord:
     return synthetic_record(synthetic_step, samples=400, seed=7)
 
@@ -49,7 +81,7 @@ def fitted_model(prefix: SignalRecord) -> ScheduledARX:
 
 
 def observation(*, temp_c: float, q: float) -> Observation:
-    return Observation(time_s=8_000.0, temp_c=temp_c, q=q, ambient_c=20.0)
+    return Observation(time_s=8_000.0, temp_c=temp_c, q=q, ambient_c=0.0)
 
 
 def test_model_protocol_has_only_shared_model_operations() -> None:
@@ -79,10 +111,61 @@ def test_arx_recovers_delay_and_stable_pole() -> None:
     assert abs(snapshot["regions"][0]["poles"][0]) < 1.0
 
 
+def test_arx_fits_incremental_temperature_and_input_regressors() -> None:
+    record = incremental_record(samples=1_200, seed=15)
+    model = ScheduledARX(ARXConfig(na=1, nb=1, delays=(1, 2, 3)))
+
+    model.fit(record)
+
+    snapshot = model.snapshot()
+    coefficients = snapshot["regions"][0]["coefficients"]
+    assert snapshot["delay_steps"] == 2
+    assert coefficients["ar"][0] == pytest.approx(0.85, abs=0.02)
+    assert coefficients["input"][0] == pytest.approx(0.3, abs=0.02)
+
+
+def test_arx_reconstructs_incremental_forecast_from_prefix_state() -> None:
+    record = incremental_record(samples=1_000, seed=16)
+    prefix_size = 700
+    prefix = SignalRecord(
+        record.time_s[:prefix_size],
+        record.temp_c[:prefix_size],
+        record.q[:prefix_size],
+        record.ambient_c[:prefix_size],
+        record.provenance,
+    )
+    model = ScheduledARX(ARXConfig(na=1, nb=1, delays=(1, 2, 3)))
+    model.fit(prefix)
+
+    forecast = model.forecast(
+        prefix,
+        record.q[prefix_size:],
+        record.ambient_c[prefix_size:],
+    )
+
+    npt.assert_allclose(forecast, record.temp_c[prefix_size:], atol=0.02)
+
+
+
+def test_arx_regressors_use_temperature_and_delayed_input_increments() -> None:
+    model = ScheduledARX(ARXConfig(na=1, nb=1, delays=(2,)))
+
+    feature = model._feature(
+        temperatures=np.array([20.0, 21.0, 23.0, 26.0]),
+        inputs=np.array([0.1, 0.2, 0.5, 0.4]),
+        ambient_c=20.0,
+        target_temp_c=27.0,
+        delay_steps=2,
+    )
+
+    assert feature[0] == pytest.approx(3.0)
+    assert feature[1] == pytest.approx(0.1)
+    assert feature[-2] == pytest.approx(-7.0)
+
 def test_arx_update_is_prequential() -> None:
     prefix = training_prefix()
     model = fitted_model(prefix)
-    before = model.forecast(prefix, np.array([0.4]), np.array([20.0]))
+    before = model.forecast(prefix, np.array([0.4]), np.array([0.0]))
 
     outcome = model.observe(observation(temp_c=999.0, q=0.4))
 
@@ -92,7 +175,7 @@ def test_arx_update_is_prequential() -> None:
 def test_arx_affine_prediction_matches_direct_forecast() -> None:
     prefix = training_prefix()
     model = fitted_model(prefix)
-    ambient = np.full(10, 20.0)
+    ambient = np.zeros(10)
     affine = model.affine_prediction(
         10, q_previous=prefix.q[-1], ambient_future=ambient
     )
@@ -168,7 +251,7 @@ def test_fit_refresh_records_its_actual_sample_index() -> None:
 
     model.fit(record)
 
-    assert model.snapshot()["update_timing"]["last_refresh_sample"] == 21
+    assert model.snapshot()["update_timing"]["last_refresh_sample"] == 22
 
 
 def test_snapshot_serializes_complex_poles_as_real_and_imaginary_parts() -> None:

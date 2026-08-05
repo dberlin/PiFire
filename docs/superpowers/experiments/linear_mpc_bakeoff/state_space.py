@@ -113,7 +113,7 @@ class InnovationStateSpace:
         return _output(fit, self._state, delayed, self._ambients[-1])
     @property
     def input_history(self) -> tuple[float, ...]:
-        """An immutable view of requested-input history for controller callers."""
+        """Immutable q history; semantics follow each record's provenance."""
         return tuple(self._inputs)
 
     @property
@@ -323,7 +323,21 @@ def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
                 continue
     if not candidates:
         raise ValueError("record is too short for configured state-space candidates")
-    return min(candidates, key=lambda candidate: (candidate.validation_error, candidate.order, candidate.delay))
+    best_error = min(candidate.validation_error for candidate in candidates)
+    statistically_equivalent = [
+        candidate
+        for candidate in candidates
+        if candidate.validation_error <= best_error * 1.12
+    ]
+    return min(
+        statistically_equivalent,
+        key=lambda candidate: (
+            abs(float(candidate.D[0])),
+            candidate.validation_error,
+            candidate.order,
+            candidate.delay,
+        ),
+    )
 
 
 def _fit_candidate(record: SignalRecord, order: int, delay: int, block_rows: int) -> SubspaceFit:
@@ -358,19 +372,21 @@ def _recover_projected_realization(
     targets = output[start:]
     design = np.column_stack((
         *(output[start - lag : output.size - lag] for lag in range(1, order + 1)),
-        *(centered_input[start - delay - lag : output.size - delay - lag] for lag in range(order + 1)),
+        centered_input[start - delay : output.size - delay],
+        *(centered_input[start - delay - lag : output.size - delay - lag] for lag in range(1, order + 1)),
         np.ones(targets.size, dtype=np.float64),
     ))
     coefficients = _svd_least_squares(design, targets)
     ar = coefficients[:order]
-    numerator = coefficients[order : 2 * order + 1]
+    direct = coefficients[order]
+    numerator = coefficients[order + 1 : 2 * order + 1]
     residuals = targets - design @ coefficients
     response = np.empty(2 * block_rows, dtype=np.float64)
-    response[0] = numerator[0]
+    response[0] = direct
     for step in range(1, response.size):
         response[step] = (
             ar[: min(order, step)] @ response[step - min(order, step) : step][::-1]
-            + (numerator[step] if step <= order else 0.0)
+            + (numerator[step - 1] if step <= order else 0.0)
         )
     hankel = _block_hankel(response[1:], block_rows)
     left, singular_values, right = np.linalg.svd(hankel, full_matrices=False)
