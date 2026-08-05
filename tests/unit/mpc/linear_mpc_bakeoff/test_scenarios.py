@@ -139,6 +139,27 @@ def test_fresh_matrix_discards_broken_checkpoint_but_resume_rejects_it(
     assert outside.read_bytes() == b"outside"
 
 
+@pytest.mark.parametrize("malformed", ([], None, "checkpoint", 42))
+def test_fresh_matrix_discards_nonobject_checkpoint_and_resume_rejects_it(
+    tmp_path: Path, malformed: object
+) -> None:
+    output = tmp_path / "artifact.manifest.json"
+    checkpoint = tmp_path / "artifact.checkpoint.manifest.json"
+    unrelated = tmp_path / "unrelated.gz"
+    unrelated.write_bytes(b"unrelated")
+    checkpoint.write_text(json.dumps(malformed))
+
+    run_tiny_matrix(tmp_path, resume=False, interrupt_after=1, output=output)
+
+    assert json.loads(checkpoint.read_text())["transport"] == "gzip-shards/v1"
+
+    checkpoint.write_text(json.dumps(malformed))
+    with pytest.raises(ValueError, match="object"):
+        run_tiny_matrix(tmp_path, resume=True, output=output)
+
+    assert unrelated.read_bytes() == b"unrelated"
+
+
 def test_checkpoint_matrix_covers_every_arm_and_wrong_initialization(tmp_path: Path) -> None:
     artifact = run_tiny_matrix(tmp_path, resume=False)
 

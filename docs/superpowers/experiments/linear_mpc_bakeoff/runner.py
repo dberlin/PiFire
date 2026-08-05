@@ -451,6 +451,9 @@ def _discard_checkpoint(path: Path | None) -> None:
     except (OSError, ValueError):
         path.unlink(missing_ok=True)
         return
+    if not isinstance(document, dict):
+        path.unlink(missing_ok=True)
+        return
     parts = document.get("parts") if document.get("transport") == "gzip-shards/v1" else None
     if not isinstance(parts, list):
         path.unlink()
@@ -564,6 +567,8 @@ def _read_artifact_text(path: Path) -> str:
         with gzip.open(path, "rt", encoding="utf-8") as source:
             return source.read()
     document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("artifact document must be a JSON object")
     if document.get("transport") != "gzip-shards/v1":
         return json.dumps(document, indent=2, sort_keys=True)
     parts = document["parts"]
