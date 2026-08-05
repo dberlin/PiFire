@@ -1,0 +1,222 @@
+{
+  "conditions": {
+    "allocator": {
+      "fan_behavior": "uncontrolled",
+      "fan_enabled": false,
+      "normalized_combustion_load": {
+        "cut": 0.0,
+        "preheat": 1.0
+      },
+      "u_max": 0.9
+    },
+    "calibration_mutations": false,
+    "coast_seconds": 3600,
+    "cut_target_tolerance_f": 5.0,
+    "plants": [
+      "GrillSim",
+      "MAKGrillSim"
+    ],
+    "pulse_scheduler": {
+      "actual_auger_feedback": "commanded",
+      "frame_seconds": 20.0,
+      "pulse_seconds": 2.0
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "targets_f": [
+      225.0,
+      350.0,
+      450.0
+    ],
+    "temperature_source": "GrillSim.true_Tc (noise-free chamber state)"
+  },
+  "experiment": "braking-horizon-coast-v2",
+  "maximum_measured_rise_c": 35.18251108023722,
+  "nominal_model_bound_s": 150.01211157822874,
+  "regeneration_command": "python -m docs.superpowers.experiments.braking_horizon",
+  "rows": [
+    {
+      "cut_temperature_c": 108.23032771895275,
+      "cut_was_rising": true,
+      "peak_temperature_c": 142.0707241988454,
+      "plant": "GrillSim",
+      "rise_c": 33.84039647989265,
+      "seconds_to_peak": 46,
+      "seed": 0,
+      "target_f": 225.0
+    },
+    {
+      "cut_temperature_c": 177.04586232769884,
+      "cut_was_rising": true,
+      "peak_temperature_c": 206.96973120642244,
+      "plant": "GrillSim",
+      "rise_c": 29.923868878723596,
+      "seconds_to_peak": 45,
+      "seed": 0,
+      "target_f": 350.0
+    },
+    {
+      "cut_temperature_c": 232.2657051774214,
+      "cut_was_rising": true,
+      "peak_temperature_c": 256.0209749043962,
+      "plant": "GrillSim",
+      "rise_c": 23.755269726974802,
+      "seconds_to_peak": 46,
+      "seed": 0,
+      "target_f": 450.0
+    },
+    {
+      "cut_temperature_c": 107.33690323158044,
+      "cut_was_rising": true,
+      "peak_temperature_c": 142.51941431181766,
+      "plant": "GrillSim",
+      "rise_c": 35.18251108023722,
+      "seconds_to_peak": 48,
+      "seed": 1,
+      "target_f": 225.0
+    },
+    {
+      "cut_temperature_c": 177.34915970070432,
+      "cut_was_rising": true,
+      "peak_temperature_c": 207.19055141999323,
+      "plant": "GrillSim",
+      "rise_c": 29.841391719288907,
+      "seconds_to_peak": 45,
+      "seed": 1,
+      "target_f": 350.0
+    },
+    {
+      "cut_temperature_c": 232.44781563323497,
+      "cut_was_rising": true,
+      "peak_temperature_c": 256.4190932495153,
+      "plant": "GrillSim",
+      "rise_c": 23.971277616280332,
+      "seconds_to_peak": 46,
+      "seed": 1,
+      "target_f": 450.0
+    },
+    {
+      "cut_temperature_c": 107.24807786127231,
+      "cut_was_rising": true,
+      "peak_temperature_c": 142.25344290673362,
+      "plant": "GrillSim",
+      "rise_c": 35.00536504546132,
+      "seconds_to_peak": 48,
+      "seed": 2,
+      "target_f": 225.0
+    },
+    {
+      "cut_temperature_c": 176.9008082226762,
+      "cut_was_rising": true,
+      "peak_temperature_c": 206.28515828548626,
+      "plant": "GrillSim",
+      "rise_c": 29.384350062810057,
+      "seconds_to_peak": 45,
+      "seed": 2,
+      "target_f": 350.0
+    },
+    {
+      "cut_temperature_c": 232.40705938539188,
+      "cut_was_rising": true,
+      "peak_temperature_c": 255.11011033109875,
+      "plant": "GrillSim",
+      "rise_c": 22.703050945706877,
+      "seconds_to_peak": 44,
+      "seed": 2,
+      "target_f": 450.0
+    },
+    {
+      "cut_temperature_c": 107.41825889335327,
+      "cut_was_rising": true,
+      "peak_temperature_c": 139.5045478351231,
+      "plant": "MAKGrillSim",
+      "rise_c": 32.08628894176984,
+      "seconds_to_peak": 148,
+      "seed": 0,
+      "target_f": 225.0
+    },
+    {
+      "cut_temperature_c": 176.82479995875002,
+      "cut_was_rising": true,
+      "peak_temperature_c": 206.24198707943373,
+      "plant": "MAKGrillSim",
+      "rise_c": 29.417187120683707,
+      "seconds_to_peak": 139,
+      "seed": 0,
+      "target_f": 350.0
+    },
+    {
+      "cut_temperature_c": 232.33071286697754,
+      "cut_was_rising": true,
+      "peak_temperature_c": 258.2683161506312,
+      "plant": "MAKGrillSim",
+      "rise_c": 25.937603283653687,
+      "seconds_to_peak": 133,
+      "seed": 0,
+      "target_f": 450.0
+    },
+    {
+      "cut_temperature_c": 107.38873571425421,
+      "cut_was_rising": true,
+      "peak_temperature_c": 139.83329621137557,
+      "plant": "MAKGrillSim",
+      "rise_c": 32.44456049712136,
+      "seconds_to_peak": 148,
+      "seed": 1,
+      "target_f": 225.0
+    },
+    {
+      "cut_temperature_c": 176.81966593540625,
+      "cut_was_rising": true,
+      "peak_temperature_c": 206.18290193560082,
+      "plant": "MAKGrillSim",
+      "rise_c": 29.363236000194576,
+      "seconds_to_peak": 140,
+      "seed": 1,
+      "target_f": 350.0
+    },
+    {
+      "cut_temperature_c": 232.3938325842115,
+      "cut_was_rising": true,
+      "peak_temperature_c": 258.63978876361347,
+      "plant": "MAKGrillSim",
+      "rise_c": 26.245956179401958,
+      "seconds_to_peak": 133,
+      "seed": 1,
+      "target_f": 450.0
+    },
+    {
+      "cut_temperature_c": 107.3945938767872,
+      "cut_was_rising": true,
+      "peak_temperature_c": 139.8685165212344,
+      "plant": "MAKGrillSim",
+      "rise_c": 32.4739226444472,
+      "seconds_to_peak": 147,
+      "seed": 2,
+      "target_f": 225.0
+    },
+    {
+      "cut_temperature_c": 176.882674910349,
+      "cut_was_rising": true,
+      "peak_temperature_c": 205.71947536761175,
+      "plant": "MAKGrillSim",
+      "rise_c": 28.83680045726274,
+      "seconds_to_peak": 138,
+      "seed": 2,
+      "target_f": 350.0
+    },
+    {
+      "cut_temperature_c": 232.29669252949583,
+      "cut_was_rising": true,
+      "peak_temperature_c": 257.5810643237048,
+      "plant": "MAKGrillSim",
+      "rise_c": 25.284371794208994,
+      "seconds_to_peak": 129,
+      "seed": 2,
+      "target_f": 450.0
+    }
+  ]
+}
