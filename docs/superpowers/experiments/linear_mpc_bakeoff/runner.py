@@ -459,7 +459,7 @@ def _read_artifact_text(path: Path) -> str:
 
 def _verified_part(manifest: Path, item: Mapping[str, Any], index: int) -> bytes:
     name = item["name"]
-    if name != f"{manifest.stem}.part{index:04d}.gz" or Path(name).name != name:
+    if Path(name).name != name or not name.startswith(f"{manifest.stem}.") or not name.endswith(".gz"):
         raise ValueError("unsafe or unordered artifact part")
     part = (manifest.parent / name).resolve()
     if part.parent != manifest.parent.resolve():
@@ -490,31 +490,31 @@ def write_artifact_atomically(
     path: Path, artifact: ExperimentArtifact, *, max_part_bytes: int = _MAX_ARTIFACT_PART_BYTES
 ) -> None:
     """Publish a deterministic manifest after bounded gzip shards are durable."""
-    payload = (artifact.to_json() + "\n").encode("utf-8")
+    if max_part_bytes < 1 or max_part_bytes > _MAX_ARTIFACT_PART_BYTES:
+        raise ValueError(f"max_part_bytes must be within 1..{_MAX_ARTIFACT_PART_BYTES}")
     if path.suffix == ".gz":
-        _write_text_atomically(path, payload.decode("utf-8"))
-        return
+        raise ValueError("artifact publication requires a bounded manifest path, not .gz")
+    payload = (artifact.to_json() + "\n").encode("utf-8")
     compressed = gzip.compress(payload, mtime=0)
-    if max_part_bytes < 1:
-        raise ValueError("max_part_bytes must be positive")
+    stream_hash = hashlib.sha256(compressed).hexdigest()
     path.parent.mkdir(parents=True, exist_ok=True)
     parts = []
     for index, offset in enumerate(range(0, len(compressed), max_part_bytes)):
         data = compressed[offset : offset + max_part_bytes]
-        name = f"{path.stem}.part{index:04d}.gz"
-        part = path.parent / name
-        _write_bytes_atomically(part, data)
-        parts.append({"name": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+        part_hash = hashlib.sha256(data).hexdigest()
+        name = f"{path.stem}.{stream_hash[:16]}.part{index:04d}.{part_hash[:16]}.gz"
+        _write_bytes_atomically(path.parent / name, data)
+        parts.append({"name": name, "bytes": len(data), "sha256": part_hash})
     manifest = {
         "transport": "gzip-shards/v1",
         "parts": parts,
-        "compressed_sha256": hashlib.sha256(compressed).hexdigest(),
+        "compressed_sha256": stream_hash,
         "canonical_json_sha256": hashlib.sha256(payload).hexdigest(),
         "canonical_json_bytes": len(payload),
     }
     _write_text_atomically(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     active = {item["name"] for item in parts}
-    for stale in path.parent.glob(f"{path.stem}.part*.gz"):
+    for stale in path.parent.glob(f"{path.stem}.*.part*.gz"):
         if stale.name not in active:
             stale.unlink()
 
@@ -680,6 +680,7 @@ def _run_scenario(
     promotion_history: list[Mapping[str, Any]] = []
     free_run_window: list[dict[str, Any]] = []
     previous_realized_duty = 0.0
+    previous_observation_target = definition.target_at(0)
     for second in range(duration_s):
         target = definition.target_at(second)
         if second % _FRAME_S == 0:
@@ -758,11 +759,11 @@ def _run_scenario(
                     "q": frame.realized_duty,
                     "ambient_c": simulator.T_amb,
                     "temp_c": temperatures[-1],
-                    "braking": state is OperatingState.COAST or (
-                        second > 0 and target < targets[-2]
-                    ),
+                    "braking": state is OperatingState.COAST
+                    or target < previous_observation_target,
                 }
             )
+            previous_observation_target = target
             challenger_refresh_before = _refresh_marker(manager.challenger.snapshot())
             learner_started = perf_counter()
             outcome = manager.observe(

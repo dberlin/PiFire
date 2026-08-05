@@ -1,6 +1,7 @@
 """Behavioral contracts for bake-off evidence and recommendation."""
 
 from __future__ import annotations
+import gzip
 
 import json
 import pytest
@@ -445,31 +446,11 @@ def test_normalized_artifact_round_trip_deduplicates_evidence_bundles() -> None:
     assert restored.to_document() == document
 
 
-def test_gzip_artifact_transport_is_lossless_and_compact(tmp_path) -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
-        load_artifact,
-        write_artifact_atomically,
-    )
-
-    artifact = artifact_with_scores()
-    output = tmp_path / "evidence.json.gz"
-    write_artifact_atomically(output, artifact)
-
-    assert output.read_bytes()[:2] == b"\x1f\x8b"
-    assert output.stat().st_size < len(artifact.to_json().encode())
-    assert load_artifact(output).to_document() == artifact.to_document()
-
-
-def test_gzip_transport_is_byte_identical_across_output_paths(tmp_path) -> None:
+def test_gzip_output_is_load_only_and_artifact_writer_requires_manifest(tmp_path) -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import write_artifact_atomically
 
-    artifact = artifact_with_scores()
-    left = tmp_path / "left.json.gz"
-    right = tmp_path / "right.json.gz"
-    write_artifact_atomically(left, artifact)
-    write_artifact_atomically(right, artifact)
-
-    assert left.read_bytes() == right.read_bytes()
+    with pytest.raises(ValueError, match="bounded manifest"):
+        write_artifact_atomically(tmp_path / "evidence.json.gz", artifact_with_scores())
 
 
 def test_manifest_shards_are_bounded_deterministic_and_verified(tmp_path) -> None:
@@ -487,8 +468,7 @@ def test_manifest_shards_are_bounded_deterministic_and_verified(tmp_path) -> Non
     assert len(manifest["parts"]) >= 3
     assert all(item["bytes"] <= 10 for item in manifest["parts"])
     assert load_artifact(left).to_document() == artifact.to_document()
-    assert left.read_text() == right.read_text()
-    stale = left.parent / f"{left.stem}.part9999.gz"
+    stale = left.parent / f"{left.stem}.old.part9999.old.gz"
     stale.write_bytes(b"stale")
     write_artifact_atomically(left, artifact, max_part_bytes=10)
     assert not stale.exists()
@@ -503,15 +483,12 @@ def test_manifest_shards_are_bounded_deterministic_and_verified(tmp_path) -> Non
     with pytest.raises(ValueError, match="checksum"):
         load_artifact(left)
 def test_loader_accepts_legacy_json_and_gzip_transport(tmp_path) -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
-        load_artifact,
-        write_artifact_atomically,
-    )
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import load_artifact
 
     artifact = artifact_with_scores()
     legacy = tmp_path / "legacy.json"
     legacy.write_text(artifact.to_json())
     compressed = tmp_path / "legacy.json.gz"
-    write_artifact_atomically(compressed, artifact)
+    compressed.write_bytes(gzip.compress(artifact.to_json().encode(), mtime=0))
     assert load_artifact(legacy).to_document() == artifact.to_document()
     assert load_artifact(compressed).to_document() == artifact.to_document()
