@@ -106,6 +106,25 @@ def test_batched_bank_matches_the_scalar_loop():
         observations.append((phi_all, float(rng.normal(0.0, 0.05))))
 
     bank = RLSBank(n)
+    # _oracle_rls models no degeneracy reset. If a candidate ever trips
+    # RLSBank._reset_degenerate during this run, the two diverge for a reason
+    # that has nothing to do with batching -- catch that here, not as an
+    # unexplained assert_allclose mismatch below.
+    original_reset = bank.reset
+
+    def guarded_reset(mask):
+        mask = np.asarray(mask, dtype=bool)
+        assert not mask.any(), (
+            "RLSBank._reset_degenerate fired during this parity run (candidates "
+            f"{np.flatnonzero(mask).tolist()}) -- _oracle_rls does not model a reset, "
+            "so any mismatch is that divergence, not a batching bug. Regenerate the "
+            "fixture (seed, observation count, or regressor range) rather than loosening "
+            "this assertion or the tolerances below."
+        )
+        return original_reset(mask)
+
+    bank.reset = guarded_reset
+
     for phi_all, y in observations:
         bank.update(phi_all, y)
     theta, p, resid = _oracle_rls(observations, n)

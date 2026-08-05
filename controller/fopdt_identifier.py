@@ -184,8 +184,9 @@ class RLSBank:
         self.resid_ew[mask] = 0.0
 
     def _reset_degenerate(self):
-        """A candidate that has lost positive-definiteness or gone non-finite
-        starts over rather than poisoning the bank."""
+        """A candidate whose covariance diagonal has gone non-positive, or whose
+        Theta/P/resid_ew has gone non-finite, starts over rather than poisoning
+        the bank."""
         bad = ~np.isfinite(self.Theta).all(axis=1)
         bad |= ~np.isfinite(self.P).all(axis=(1, 2))
         bad |= ~np.isfinite(self.resid_ew)
