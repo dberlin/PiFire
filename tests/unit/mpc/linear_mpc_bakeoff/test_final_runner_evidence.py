@@ -170,14 +170,24 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
     assert all(
         isfinite(item["candidate_prediction_score"])
         and isfinite(item["incumbent_prediction_score"])
-        and set(item["horizon_metrics"]) >= {"60", "300"}
         for item in evaluations
     )
+    assert set(evaluations[0]["horizon_metrics"]) == {"60"}
+    assert set(evaluations[1]["horizon_metrics"]) == {"60", "300"}
+    assert evaluations[0]["sample_count"] == len(evaluations[0]["score_frame_ids"]) == 12
+    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 30
     assert all(
-        len(item["score_frame_ids"]) == item["sample_count"]
-        and item["score_frame_ids"] == sorted(item["score_frame_ids"])
+        item["score_frame_ids"] == sorted(item["score_frame_ids"])
         and item["score_role_generations"] == [item["score_role_generation"]]
         for item in evaluations
+    )
+    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(
+        evaluations[1]["score_frame_ids"]
+    )
+    assert all(
+        set(metrics["origin_frame_ids"]) <= set(item["score_frame_ids"])
+        for item in evaluations
+        for metrics in item["horizon_metrics"].values()
     )
     assert any(
         item["candidate_prediction_score"] != item["incumbent_prediction_score"]
@@ -273,10 +283,18 @@ def test_runner_scores_untouched_multi_horizon_free_runs_and_clears_windows() ->
     evaluations = [
         item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
     ]
-    assert evaluations
-    assert all(set(item["horizon_metrics"]) >= {"60", "300"} for item in evaluations)
-    assert all(item["score_frame_ids"] == sorted(item["score_frame_ids"]) for item in evaluations)
-    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(evaluations[1]["score_frame_ids"])
+    assert len(evaluations) == 2
+    assert set(evaluations[0]["horizon_metrics"]) == {"60"}
+    assert set(evaluations[1]["horizon_metrics"]) == {"60", "300"}
+    assert evaluations[0]["sample_count"] == len(evaluations[0]["score_frame_ids"]) == 12
+    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 30
+    assert all(
+        item["score_frame_ids"] == sorted(item["score_frame_ids"])
+        for item in evaluations
+    )
+    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(
+        evaluations[1]["score_frame_ids"]
+    )
 
 
 

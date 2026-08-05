@@ -117,6 +117,12 @@ class ScheduledARX:
     def config(self) -> ScheduledARXConfig:
         """Return the immutable learner configuration."""
         return self._config
+    def reset_lag_history(self) -> None:
+        """Discard only lag values after discontinuous or unknown actuation."""
+        self._temperature_history.clear()
+        self._input_history.clear()
+        self._ambient_history.clear()
+        self._last_observation_time_s = None
 
     def fit(self, observations: Sequence[FrameObservation]) -> None:
         """Reset and identify every delay candidate from complete frame history."""
@@ -153,9 +159,22 @@ class ScheduledARX:
 
     def track(self, observation: FrameObservation) -> ModelUpdate:
         """Advance bounded history without changing ARX sufficient statistics."""
+        if len(self._temperature_history) < self._history_limit:
+            self._append_observation(observation)
+            return ModelUpdate(
+                observation.temp_c,
+                observation.temp_c,
+                0.0,
+                False,
+            )
         prediction = self._next_prediction(observation)
         self._append_observation(observation)
-        return ModelUpdate(prediction, observation.temp_c, observation.temp_c - prediction, False)
+        return ModelUpdate(
+            prediction,
+            observation.temp_c,
+            observation.temp_c - prediction,
+            False,
+        )
 
     def forecast(
         self,

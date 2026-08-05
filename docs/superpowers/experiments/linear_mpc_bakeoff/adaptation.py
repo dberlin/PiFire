@@ -1,4 +1,9 @@
-"""Passive online update gating, replay balancing, and model promotion policy."""
+"""Legacy replay adaptation for non-Scheduled-ARX bakeoff arms.
+
+Production scheduled-ARX gating and prequential promotion live in
+``controller.linear_mpc.adaptation``; this module retains only the
+experiment-specific replay policy still used by DMC and state-space arms.
+"""
 
 from __future__ import annotations
 

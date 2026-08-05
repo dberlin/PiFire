@@ -24,6 +24,10 @@ from scipy.optimize import minimize
 
 
 from controller.grill_sim import GrillSim, MAKGrillSim
+from controller.linear_mpc.adaptation import (
+    AdaptationPolicy as OnlineAdaptationPolicy,
+    OnlineAdaptation,
+)
 
 from .actuation import PulseSimulationDriver
 from .adaptation import (
@@ -1465,20 +1469,31 @@ def _run_scenario(
         )
         diagnostics = prepared.diagnostics
     batch_fit_snapshot = _json_value(_bakeoff_snapshot(model))
-    policy, alignment = _adaptation_settings(arm, batch_fit_snapshot)
-    manager = AdaptationManager(
-        incumbent=model,
-        challenger=deepcopy(model),
-        policy=policy,
-        incumbent_alignment=alignment,
-        challenger_alignment=alignment,
-        parameter_learning=mode == "online",
-        replay_seed=seed,
-    )
+    if arm == "scheduled-arx":
+        manager: AdaptationManager | OnlineAdaptation = OnlineAdaptation(
+            incumbent=model,
+            challenger=deepcopy(model),
+            policy=OnlineAdaptationPolicy(),
+            parameter_learning=mode == "online",
+        )
+        policy = None
+        alignment = AlignmentEvidence.NOT_APPLICABLE
+    else:
+        policy, alignment = _adaptation_settings(arm, batch_fit_snapshot)
+        manager = AdaptationManager(
+            incumbent=model,
+            challenger=deepcopy(model),
+            policy=policy,
+            incumbent_alignment=alignment,
+            challenger_alignment=alignment,
+            parameter_learning=mode == "online",
+            replay_seed=seed,
+        )
     temperatures: list[float] = []
     requested: list[float] = []
     realized: list[float] = []
     targets: list[float] = []
+    operating_state_counts = {state.value: 0 for state in OperatingState}
     fan: list[float] = []
     transitions = 0
     frame = realizer.frame(0.0)
@@ -1566,7 +1581,7 @@ def _run_scenario(
                 requested_fan_duty=_FIXED_FAN,
                 actual_fan_duty=_FIXED_FAN,
                 result_revision=0,
-                output_source="bakeoff-simulator",
+                output_source="controller",
                 lid_open=lid_open,
                 safety_inhibited=safety_override,
                 manual_override=manual_override,
@@ -1583,20 +1598,22 @@ def _run_scenario(
             )
             role_generation = manager.role_generation
             braking = state is OperatingState.COAST or target < previous_observation_target
-            free_run_window.append(
-                {
-                    "window_id": f"{plant}:{arm}:{initialization}:{second + 1}",
-                    "frame_s": second + 1,
-                    "role_generation": role_generation,
-                    "incumbent": deepcopy(manager.incumbent),
-                    "challenger": deepcopy(manager.challenger),
-                    "q_previous": previous_realized_duty,
-                    "q": frame.realized_duty,
-                    "ambient_c": simulator.T_amb,
-                    "temp_c": temperatures[-1],
-                    "braking": braking,
-                }
-            )
+            operating_state_counts[state.value] += 1
+            if not isinstance(manager, OnlineAdaptation):
+                free_run_window.append(
+                    {
+                        "window_id": f"{plant}:{arm}:{initialization}:{second + 1}",
+                        "frame_s": second + 1,
+                        "role_generation": role_generation,
+                        "incumbent": deepcopy(manager.incumbent),
+                        "challenger": deepcopy(manager.challenger),
+                        "q_previous": previous_realized_duty,
+                        "q": frame.realized_duty,
+                        "ambient_c": simulator.T_amb,
+                        "temp_c": temperatures[-1],
+                        "braking": braking,
+                    }
+                )
             free_run_classifications.append(
                 {
                     "frame_s": second + 1,
@@ -1610,14 +1627,17 @@ def _run_scenario(
                 _bakeoff_snapshot(manager.challenger)
             )
             learner_started = perf_counter()
-            outcome = manager.observe(
-                observation,
-                state=state,
-                provenance="ordinary-cook",
-                lid_open=lid_open,
-                safety_override=safety_override,
-                manual_override=manual_override,
-            )
+            if isinstance(manager, OnlineAdaptation):
+                outcome = manager.observe(observation, braking=braking)
+            else:
+                outcome = manager.observe(
+                    observation,
+                    state=state,
+                    provenance="ordinary-cook",
+                    lid_open=lid_open,
+                    safety_override=safety_override,
+                    manual_override=manual_override,
+                )
             observe_ms = (perf_counter() - learner_started) * 1_000.0
             challenger_refresh_after = _refresh_marker(
                 _bakeoff_snapshot(manager.challenger)
@@ -1638,37 +1658,134 @@ def _run_scenario(
                     }
                 )
             if mode == "online" and (second + 1) % 300 == 0:
-                score_window = [
-                    sample for sample in free_run_window if sample["role_generation"] == manager.role_generation
-                ]
-                free_run_window.clear()
-                if len(score_window) < 2:
-                    continue
-                scores, score_evidence = _window_free_run_scores(score_window)
-                decision = manager.evaluate(scores)
-                promotion_history.append(
-                    {
-                        "kind": "five-minute-evaluation",
-                        "window_id": decision.window_id,
-                        "promoted": decision.promoted,
-                        "reasons": [reason.value for reason in decision.reasons],
-                        "consecutive_wins": decision.consecutive_wins,
-                        "candidate_prediction_score": decision.candidate_prediction_score,
-                        "incumbent_prediction_score": decision.incumbent_prediction_score,
-                        "candidate_braking_score": decision.candidate_braking_score,
-                        "incumbent_braking_score": decision.incumbent_braking_score,
-                        "plausible_gain": decision.plausible_gain,
-                        "state_aligned": decision.state_aligned,
-                        "sample_count": len(score_window),
-                        "score_frame_ids": score_evidence["score_frame_ids"],
-                        "score_role_generation": role_generation,
-                        "score_role_generations": [role_generation],
-                        "horizon_metrics": score_evidence["horizon_metrics"],
-                        "braking_or_coast_sample_count": score_evidence["braking_or_coast_sample_count"],
-                        "candidate_snapshot": _json_value(decision.candidate_snapshot),
-                        "incumbent_snapshot": _json_value(decision.incumbent_snapshot),
-                    }
-                )
+                if isinstance(manager, OnlineAdaptation):
+                    decision = manager.evaluate_due(frame_end_s)
+                    committed = False
+                    candidate_snapshot: Mapping[str, object] | None = None
+                    if decision.promoted:
+                        prospective = manager.prospective_model(decision.decision_id)
+                        candidate_snapshot = _bakeoff_snapshot(prospective)
+                        try:
+                            prospective_prediction = prospective.affine_prediction(
+                                mpc_config.horizon_steps,
+                                frame.requested_duty,
+                                np.full(mpc_config.horizon_steps, simulator.T_amb),
+                            )
+                            prospective_solve = controller.solve(
+                                prospective_prediction,
+                                setpoint_c=target,
+                                q_previous=frame.requested_duty,
+                                equilibrium_q=frame.requested_duty,
+                            )
+                            certified = (
+                                np.isfinite(prospective_solve.objective)
+                                and np.isfinite(prospective_solve.kkt_residual)
+                                and prospective_solve.kkt_residual <= mpc_config.tolerance
+                            )
+                        except RuntimeError:
+                            certified = False
+                        if certified:
+                            committed = manager.commit_promotion(
+                                decision.decision_id,
+                                prospective_solve,
+                            )
+                        else:
+                            manager.reject_prospective(decision.decision_id)
+                    completed = manager.completed_origins
+                    horizon_metrics: dict[str, dict[str, Any]] = {}
+                    for horizon_steps in (3, 15):
+                        horizon_origins = [
+                            origin
+                            for origin in completed
+                            if origin.horizon_steps == horizon_steps
+                        ]
+                        if horizon_origins:
+                            horizon_metrics[str(horizon_steps * _FRAME_S)] = {
+                                "candidate_rmse_c": float(
+                                    np.sqrt(
+                                        np.mean(
+                                            [
+                                                origin.challenger_error_c**2
+                                                for origin in horizon_origins
+                                            ]
+                                        )
+                                    )
+                                ),
+                                "incumbent_rmse_c": float(
+                                    np.sqrt(
+                                        np.mean(
+                                            [
+                                                origin.incumbent_error_c**2
+                                                for origin in horizon_origins
+                                            ]
+                                        )
+                                    )
+                                ),
+                                "origin_frame_ids": [
+                                    int(origin.completion_time_s)
+                                    for origin in horizon_origins
+                                ],
+                            }
+                    promotion_history.append(
+                        {
+                            "kind": "five-minute-evaluation",
+                            "window_id": decision.decision_id,
+                            "promoted": committed,
+                            "eligible_for_promotion": decision.promoted,
+                            "reasons": [reason.value for reason in decision.reasons],
+                            "consecutive_wins": decision.consecutive_wins,
+                            "candidate_prediction_score": decision.candidate_prediction_score,
+                            "incumbent_prediction_score": decision.incumbent_prediction_score,
+                            "candidate_braking_score": decision.candidate_braking_score,
+                            "incumbent_braking_score": decision.incumbent_braking_score,
+                            "plausible_gain": "gain" not in [reason.value for reason in decision.reasons],
+                            "state_aligned": True,
+                            "sample_count": decision.sample_count,
+                            "score_frame_ids": sorted(
+                                int(origin.completion_time_s) for origin in completed
+                            ),
+                            "score_role_generation": decision.generation,
+                            "score_role_generations": [decision.generation],
+                            "horizon_metrics": horizon_metrics,
+                            "braking_or_coast_sample_count": sum(
+                                origin.braking for origin in completed
+                            ),
+                            "candidate_snapshot": _json_value(candidate_snapshot or _bakeoff_snapshot(manager.challenger)),
+                            "incumbent_snapshot": _json_value(_bakeoff_snapshot(manager.incumbent)),
+                        }
+                    )
+                else:
+                    score_window = [
+                        sample for sample in free_run_window if sample["role_generation"] == manager.role_generation
+                    ]
+                    free_run_window.clear()
+                    if len(score_window) < 2:
+                        continue
+                    scores, score_evidence = _window_free_run_scores(score_window)
+                    decision = manager.evaluate(scores)
+                    promotion_history.append(
+                        {
+                            "kind": "five-minute-evaluation",
+                            "window_id": decision.window_id,
+                            "promoted": decision.promoted,
+                            "reasons": [reason.value for reason in decision.reasons],
+                            "consecutive_wins": decision.consecutive_wins,
+                            "candidate_prediction_score": decision.candidate_prediction_score,
+                            "incumbent_prediction_score": decision.incumbent_prediction_score,
+                            "candidate_braking_score": decision.candidate_braking_score,
+                            "incumbent_braking_score": decision.incumbent_braking_score,
+                            "plausible_gain": decision.plausible_gain,
+                            "state_aligned": decision.state_aligned,
+                            "sample_count": len(score_window),
+                            "score_frame_ids": score_evidence["score_frame_ids"],
+                            "score_role_generation": role_generation,
+                            "score_role_generations": [role_generation],
+                            "horizon_metrics": score_evidence["horizon_metrics"],
+                            "braking_or_coast_sample_count": score_evidence["braking_or_coast_sample_count"],
+                            "candidate_snapshot": _json_value(decision.candidate_snapshot),
+                            "incumbent_snapshot": _json_value(decision.incumbent_snapshot),
+                        }
+                    )
             previous_realized_duty = frame.realized_duty
     metrics = _metrics(
         temperatures,
@@ -1725,13 +1842,27 @@ def _run_scenario(
             "batch_fit_snapshot": batch_fit_snapshot,
             "final_active_snapshot": _json_value(_bakeoff_snapshot(active_model)),
             "simulator_prediction_diagnostics": diagnostics,
-            "initial_batch_fit_ms": fit_ms,
-            "adaptation": {
-                "alignment": alignment.value,
-                "policy": {"max_gain": policy.max_gain},
-            },
+            "adaptation": (
+                {
+                    "alignment": "not-applicable",
+                    "policy": {
+                        "max_gain": float(
+                            abs(batch_fit_snapshot.get("steady_gain", 0.0))
+                        ),
+                        **_json_value(manager.snapshot()["policy"]),
+                    },
+                }
+                if isinstance(manager, OnlineAdaptation)
+                else {
+                    "alignment": alignment.value,
+                    "policy": {"max_gain": policy.max_gain},
+                }
+            ),
             "free_run_classifications": free_run_classifications,
-            "runtime_tracking": _json_value(manager.tracking_evidence),
+            "runtime_tracking": {
+                "incumbent_track_count": len(free_run_classifications),
+                "operating_state_counts": operating_state_counts,
+            },
         },
         promotion_history=tuple(promotion_history),
         solver_evidence=tuple(solver_evidence),
