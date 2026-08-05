@@ -798,12 +798,19 @@ def test_mpc_session_requires_divisible_pulse_authority():
         replace(session, pulse_frame_seconds=21.0)
 
 
-def test_controller_updates_require_their_matching_actuation_mode():
+def test_controller_updates_accept_either_actuation_mode():
+    """A controller's identity no longer fixes its actuation mode.
+
+    PID-family controllers ask for framed pulses now, because a fixed cycle
+    floors the auger at u_min and that floor is a floor on temperature. Both
+    modes are durable trace contract values for every controller, and it is the
+    recorded session that says which one applied.
+    """
     pid_update = _pid_update_payload()
     mpc_update = _mpc_update_payload()
-    with pytest.raises(ValidationError, match="FIXED_CYCLE"):
-        replace(pid_update, actuation_mode=ActuationMode.FRAMED_PULSE)
-    assert replace(mpc_update, actuation_mode=ActuationMode.FIXED_CYCLE).actuation_mode is ActuationMode.FIXED_CYCLE
+    for mode in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
+        assert replace(pid_update, actuation_mode=mode).actuation_mode is mode
+        assert replace(mpc_update, actuation_mode=mode).actuation_mode is mode
 
 
 def test_fixed_cycle_frame_records_typed_inhibit_cause_without_boolean_alias():
@@ -887,3 +894,33 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
     )
 
     assert ControlTraceRecord.from_db_row(row) == record
+
+
+def test_a_session_declares_exactly_one_actuation_authority():
+    """The fields present ARE the declaration, so a session cannot claim both.
+
+    A framed session carries pulse slot and frame timing and no cycle floor; a
+    fixed-cycle one carries the floor and the cycle. Before PID moved to framed
+    pulses this was keyed on the controller being MPC, which made a framed PID
+    session unrepresentable and let a framed MPC session carry a cycle floor
+    that could not apply to it.
+    """
+    framed = _mpc_session_payload()
+    with pytest.raises(ValidationError, match="one actuation authority"):
+        replace(framed, hold_cycle_seconds=20.0, u_min=0.1, u_max=0.9)
+    with pytest.raises(ValidationError, match="one actuation authority"):
+        replace(framed, u_min=0.1, u_max=0.9)
+
+
+def test_a_pid_session_may_declare_framed_pulse_authority():
+    fixed = _pid_session_payload()
+    framed = replace(
+        fixed,
+        hold_cycle_seconds=None,
+        u_min=None,
+        u_max=None,
+        pulse_slot_seconds=2.0,
+        pulse_frame_seconds=20.0,
+    )
+    assert framed.pulse_frame_seconds == 20.0
+    assert framed.hold_cycle_seconds is None

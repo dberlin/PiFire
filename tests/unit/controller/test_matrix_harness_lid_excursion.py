@@ -80,14 +80,25 @@ def test_the_chamber_recovers_on_the_pause_timer_not_the_lid_window(monkeypatch)
 def test_a_lidless_plant_misses_the_threshold(monkeypatch):
     """Negative control for depth: the pre-fix plant, where an open lid leaks
     no heat."""
+    # Taken before the lidless plant is patched in: _lid_results installs its
+    # h_lid override on GrillSim for the rest of the test, so a leaking baseline
+    # measured after it would silently be a second lidless run.
+    leaking = [r["lid_min_temp_f"] for r in _lid_results(monkeypatch)]
     mins = [r["lid_min_temp_f"] for r in _lid_results(monkeypatch, h_lid=0.0)]
 
     assert all(t > TRIGGER_F for t in mins), (
         f"the no-heat-leak plant was expected to miss the {TRIGGER_F:.2f} F trigger, "
         f"so the assertion above measures the lid model; coldest readings were {mins}"
     )
-    # And it barely moves the chamber at all, which is the defect itself.
-    assert all(t > SETPOINT - 10.0 for t in mins), mins
+    # And its trough is shallower than the leaking plant's, which is what makes
+    # the depth attributable to the lid model rather than to the actuator pause.
+    # Stated as a comparison rather than against a fixed margin: the pause alone
+    # digs a real trough now that a framed scheduler stops the auger outright
+    # instead of cycling it at a minimum, so any absolute bound would be
+    # measuring the actuation rather than the lid.
+    assert min(mins) > min(leaking), (
+        f"a plant that leaks no heat must not fall as far as one that does; lidless {mins} against leaking {leaking}"
+    )
 
 
 def test_a_pause_lasting_the_whole_lid_window_recovers_too_slowly(monkeypatch):

@@ -149,12 +149,23 @@ class SessionPayload:
             raise ValueError("u_min and u_max must be present together")
         if self.u_min is not None and self.u_max is not None and self.u_min > self.u_max:
             raise ValueError("u_min must not exceed u_max")
-        if self.controller is ControllerType.MPC:
+        # Which authority a session declares is a property of its actuation
+        # mode, not of which controller runs: PID-family controllers ask for
+        # framed pulses now, because a fixed cycle floors the auger at u_min and
+        # that floor is a floor on temperature. The fields present ARE the
+        # declaration, so a session carries one set or the other and never both.
+        framed = self.pulse_slot_seconds is not None or self.pulse_frame_seconds is not None
+        fixed = self.hold_cycle_seconds is not None or self.u_min is not None or self.u_max is not None
+        if framed and fixed:
+            raise ValueError("a session declares one actuation authority, not both")
+        if self.controller is ControllerType.MPC and not framed:
+            raise ValueError("MPC session requires pulse timing authority")
+        if framed:
             if self.pulse_slot_seconds is None or self.pulse_frame_seconds is None:
-                raise ValueError("MPC session requires pulse timing authority")
+                raise ValueError("framed-pulse session requires both pulse slot and frame timing")
             slots = self.pulse_frame_seconds / self.pulse_slot_seconds
             if not math.isclose(slots, round(slots), rel_tol=0, abs_tol=1e-9):
-                raise ValueError("MPC pulse frame must be divisible by pulse slot")
+                raise ValueError("pulse frame must be divisible by pulse slot")
         elif self.hold_cycle_seconds is None or self.u_min is None or self.u_max is None:
             raise ValueError("fixed-cycle session requires hold_cycle_seconds, u_min, and u_max")
         return self
@@ -202,8 +213,11 @@ class PidUpdatePayload(_ControlUpdatePayload):
 
     @model_validator(mode="after")
     def validate_actuation_mode(self) -> PidUpdatePayload:
-        if self.actuation_mode is not ActuationMode.FIXED_CYCLE:
-            raise ValueError("PID diagnostics require FIXED_CYCLE actuation")
+        # PID-family controllers ask for framed pulses now, so the mode is no
+        # longer fixed by the controller's identity. Both remain durable trace
+        # contract values and a recorded session says which one applied.
+        if self.actuation_mode not in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
+            raise ValueError("PID diagnostics require a supported actuation mode")
         return self
 
 
@@ -240,8 +254,11 @@ class PidSpUpdatePayload(_ControlUpdatePayload):
 
     @model_validator(mode="after")
     def validate_actuation_mode(self) -> PidSpUpdatePayload:
-        if self.actuation_mode is not ActuationMode.FIXED_CYCLE:
-            raise ValueError("PID-SP diagnostics require FIXED_CYCLE actuation")
+        # PID-family controllers ask for framed pulses now, so the mode is no
+        # longer fixed by the controller's identity. Both remain durable trace
+        # contract values and a recorded session says which one applied.
+        if self.actuation_mode not in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
+            raise ValueError("PID-SP diagnostics require a supported actuation mode")
         return self
 
 

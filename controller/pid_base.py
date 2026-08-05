@@ -14,6 +14,7 @@
 """
 
 import time
+from common.control_trace import ActuationMode
 from controller.base import ControllerBase
 
 # Floor for the elapsed-time denominator PID variants divide by. Real control
@@ -43,6 +44,26 @@ class PIDControllerBase(ControllerBase):
         cancellation to protect them.
         """
         return max(current_time - self.last_update, MIN_ELAPSED_SECONDS)
+
+    def actuation_mode(self) -> ActuationMode:
+        """PID-family controllers ask for framed pulses.
+
+        A fixed cycle floors the auger at `u_min`, and that floor is a floor on
+        temperature: the lowest heat the grill can command is the lowest it can
+        hold. On a plant fitted to a logged MAK cook the shipped 25 s cycle
+        floors at 0.10 duty while a 225 F hold needs 0.092, so the chamber
+        settles near 283 F and no tuning of the loop can reach the set point.
+
+        Framed pulses carry the shortfall as credit instead of rounding it up,
+        so a request below one pulse is delivered as a pulse every few frames
+        rather than as a floor. Measured on that plant, 225 F goes from 0.2% of
+        the cook within 5 F to 84% for this controller and 90% for the Smith
+        variant, and 350 F improves for both. It also matches the hardware
+        better than a fixed cycle does: the auger is relay-switched and has
+        mechanical inertia, so arbitrarily fine on-times are a property of the
+        model rather than of the grill.
+        """
+        return ActuationMode.FRAMED_PULSE
 
     def set_target(self, set_point):
         self.set_point = set_point

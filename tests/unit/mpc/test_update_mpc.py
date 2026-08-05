@@ -43,8 +43,10 @@ def _session() -> ControlTraceRecord:
             control_period_seconds=5.0,
             model_revision=1,
             model_provenance="configured",
-            u_min=0.1,
-            u_max=0.9,
+            # Framed pulses carry no cycle floor: a session declares one
+            # actuation authority, and this one's is the pulse timing below.
+            u_min=None,
+            u_max=None,
             hold_cycle_seconds=None,
             pulse_slot_seconds=2.0,
             pulse_frame_seconds=20.0,

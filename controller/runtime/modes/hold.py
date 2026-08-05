@@ -108,6 +108,11 @@ class HoldMode(ControlMode):
     def _framed_pulse(self) -> bool:
         return self._actuation_mode is ActuationMode.FRAMED_PULSE
 
+    def _pulse_frame_seconds(self) -> float:
+        """The scheduler's frame, or zero before one has been built."""
+        scheduler = self._pulse_scheduler
+        return 0.0 if scheduler is None else float(scheduler.timing.frame_s)
+
     def _observe_reachability_advisory(self, diagnostics: MpcTraceDiagnostics) -> None:
         report = diagnostics.feasibility
         if report is None:
@@ -997,8 +1002,13 @@ class HoldMode(ControlMode):
         # so the value read at the gate below is unchanged.
         self._runner.submit(ptemp)
         # Check to see if it's time to update pid and update if needed.
+        # A controller that names its own cadence gets it. Otherwise the cadence
+        # is the actuation's: a framed scheduler latches one request per frame,
+        # so deciding more often than that is discarded work, and a PID asked to
+        # decide every tick would integrate at the loop rate its gains were
+        # never tuned for.
         controller_interval = self._runner.control_period() or (
-            0.0 if self._framed_pulse() else self.state.cycle.cycle_time
+            self._pulse_frame_seconds() if self._framed_pulse() else self.state.cycle.cycle_time
         )
         framed_feedback_due = False
         if (now - self.state.controller.cycle_start) > controller_interval:
