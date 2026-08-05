@@ -293,7 +293,7 @@ class AdaptationManager:
         probe_age_s: float = 0.0,
         actuation_known: bool = True,
     ) -> AdaptationOutcome:
-        """Score first, then update both arms only when one frame is trustworthy."""
+        """Score first, track the incumbent, and learn only on the shadow arm."""
         with self._lock:
             hard_rejection = _hard_update_rejection(
                 provenance=provenance,
@@ -316,13 +316,13 @@ class AdaptationManager:
             if not gate.permitted:
                 return AdaptationOutcome(False, gate, None, None)
 
-            incumbent_outcome = self._incumbent.observe(observation)
+            incumbent_outcome = self._incumbent.track(observation)
             challenger_outcome = self._challenger.observe(observation)
             if challenger_outcome.updated:
                 self._challenger_effective_updates += 1
             self._replay.add(ReplaySample(observation, state))
             return AdaptationOutcome(
-                incumbent_outcome.updated and challenger_outcome.updated,
+                challenger_outcome.updated,
                 gate,
                 incumbent_outcome,
                 challenger_outcome,

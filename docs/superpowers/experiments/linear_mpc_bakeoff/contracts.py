@@ -163,6 +163,8 @@ class AdaptiveLinearModel(Protocol):
 
     def observe(self, observation: Observation) -> UpdateOutcome: ...
 
+    def track(self, observation: Observation) -> UpdateOutcome: ...
+
     def affine_prediction(
         self,
         horizon_steps: int,

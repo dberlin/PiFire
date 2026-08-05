@@ -195,28 +195,56 @@ class InnovationStateSpace:
         return prediction
 
     def observe(self, observation: Observation) -> UpdateOutcome:
-        """Score one 20-second sample, then apply its scalar Kalman innovation."""
+        """Track one frame and refresh only this learning challenger."""
+        return self._assimilate_runtime(observation, allow_refresh=True)
+
+    def track(self, observation: Observation) -> UpdateOutcome:
+        """Apply a Kalman state correction without changing fitted matrices."""
+        return self._assimilate_runtime(observation, allow_refresh=False)
+
+    def _assimilate_runtime(
+        self, observation: Observation, *, allow_refresh: bool
+    ) -> UpdateOutcome:
         fit = self._require_fit()
         target = len(self._inputs)
-        transition_delayed = _delayed_input(self._inputs, np.empty(0), target - 1, fit.delay)
+        transition_delayed = _delayed_input(
+            self._inputs, np.empty(0), target - 1, fit.delay
+        )
         output_delayed = _delayed_input(self._inputs, np.empty(0), target, fit.delay)
         predicted_state = _advance(fit, self._state, transition_delayed)
-        predicted_covariance = fit.A @ self._covariance @ fit.A.T + np.eye(fit.order) * fit.covariance
-        predicted_temp = _output(fit, predicted_state, output_delayed, observation.ambient_c)
+        predicted_covariance = (
+            fit.A @ self._covariance @ fit.A.T + np.eye(fit.order) * fit.covariance
+        )
+        predicted_temp = _output(
+            fit, predicted_state, output_delayed, observation.ambient_c
+        )
         innovation = float(observation.temp_c - predicted_temp)
-        innovation_variance = float(fit.C @ predicted_covariance @ fit.C.T + fit.covariance)
+        innovation_variance = float(
+            fit.C @ predicted_covariance @ fit.C.T + fit.covariance
+        )
         gain = (predicted_covariance @ fit.C) / max(innovation_variance, 1e-12)
         self._state = predicted_state + gain * innovation
-        self._covariance = (np.eye(fit.order) - np.outer(gain, fit.C)) @ predicted_covariance
+        self._covariance = (
+            np.eye(fit.order) - np.outer(gain, fit.C)
+        ) @ predicted_covariance
         self._covariance = 0.5 * (self._covariance + self._covariance.T)
         self._times.append(observation.time_s)
         self._temperatures.append(observation.temp_c)
         self._inputs.append(observation.q)
         self._ambients.append(observation.ambient_c)
         self._trim_history()
-        if self._last_refresh_time_s is not None and observation.time_s - self._last_refresh_time_s >= self._config.refresh_interval_s:
+        refreshed = False
+        if (
+            allow_refresh
+            and self._last_refresh_time_s is not None
+            and observation.time_s - self._last_refresh_time_s
+            >= self._config.refresh_interval_s
+        ):
             self.refresh(self.history_record)
-        return UpdateOutcome(predicted_temp, observation.temp_c, innovation, True)
+            refreshed = True
+        return UpdateOutcome(
+            predicted_temp, observation.temp_c, innovation, allow_refresh or refreshed
+        )
 
     def refresh(self, record: SignalRecord) -> RefreshOutcome:
         """Atomically replace the realization only when aligned prediction is continuous."""

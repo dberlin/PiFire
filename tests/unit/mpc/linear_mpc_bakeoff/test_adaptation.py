@@ -36,6 +36,7 @@ class SpyModel:
         successful_updates: bool = True,
     ) -> None:
         self.observe_calls = 0
+        self.track_calls = 0
         self._snapshot = dict(snapshot or viable_snapshot())
         self._successful_updates = successful_updates
 
@@ -58,6 +59,15 @@ class SpyModel:
             observed_temp_c=observation.temp_c,
             innovation_c=0.0,
             updated=self._successful_updates,
+        )
+
+    def track(self, observation: Observation) -> UpdateOutcome:
+        self.track_calls += 1
+        return UpdateOutcome(
+            predicted_temp_c=observation.temp_c,
+            observed_temp_c=observation.temp_c,
+            innovation_c=0.0,
+            updated=False,
         )
 
     def affine_prediction(
@@ -231,7 +241,7 @@ def test_untrusted_inputs_never_seed_excitation_history() -> None:
     assert challenger.observe_calls == 1
 
 
-def test_excited_samples_update_both_separate_model_arms() -> None:
+def test_excited_samples_only_train_the_challenger_and_track_the_incumbent() -> None:
     manager, challenger = manager_with_spy_model()
     incumbent = manager.incumbent
 
@@ -240,9 +250,10 @@ def test_excited_samples_update_both_separate_model_arms() -> None:
 
     assert outcome.updated is True
     assert challenger.observe_calls == 1
+    assert challenger.track_calls == 0
     assert isinstance(incumbent, SpyModel)
-    assert incumbent.observe_calls == 1
-
+    assert incumbent.observe_calls == 0
+    assert incumbent.track_calls == 1
 
 def test_replay_retains_temperature_and_transient_strata() -> None:
     replay = StratifiedReplay(capacity=120, seed=1)

@@ -174,21 +174,9 @@ class LaguerreDMC:
         return prediction
 
     def observe(self, observation: Observation) -> UpdateOutcome:
-        """Return a pre-update prediction, then assimilate an informative frame."""
-        if not self._input_history:
-            raise RuntimeError("fit must be called before observe")
+        """Score and learn one informative observation."""
+        prediction = self._next_prediction(observation)
         prefix_q = np.asarray(self._input_history, dtype=np.float64)
-        prefix_temp = np.asarray(self._temperature_history, dtype=np.float64)
-        prefix_ambient = np.asarray(self._ambient_history, dtype=np.float64)
-        free, response = self._affine_components(
-            self._active,
-            prefix_q,
-            prefix_temp,
-            prefix_ambient,
-            float(prefix_q[-1]),
-            np.asarray([observation.ambient_c], dtype=np.float64),
-        )
-        prediction = float(free[0] + response[0, 0] * observation.q)
         updated = False
         for candidate in self._candidates:
             feature = self._feature(candidate, prefix_q, observation.ambient_c)
@@ -200,10 +188,7 @@ class LaguerreDMC:
                 self._rls_update(candidate, feature, observation.temp_c)
                 updated = True
 
-        self._time_history.append(observation.time_s)
-        self._temperature_history.append(observation.temp_c)
-        self._input_history.append(observation.q)
-        self._ambient_history.append(observation.ambient_c)
+        self._append_observation(observation)
         if (
             self._last_refresh_time_s is None
             or observation.time_s - self._last_refresh_time_s >= _REFRESH_SECONDS
@@ -215,6 +200,37 @@ class LaguerreDMC:
             innovation_c=observation.temp_c - prediction,
             updated=updated,
         )
+
+    def track(self, observation: Observation) -> UpdateOutcome:
+        """Assimilate runtime history without updating DMC coefficients."""
+        prediction = self._next_prediction(observation)
+        self._append_observation(observation)
+        return UpdateOutcome(
+            predicted_temp_c=prediction,
+            observed_temp_c=observation.temp_c,
+            innovation_c=observation.temp_c - prediction,
+            updated=False,
+        )
+
+    def _next_prediction(self, observation: Observation) -> float:
+        if not self._input_history:
+            raise RuntimeError("fit must be called before observe")
+        prefix_q = np.asarray(self._input_history, dtype=np.float64)
+        free, response = self._affine_components(
+            self._active,
+            prefix_q,
+            np.asarray(self._temperature_history, dtype=np.float64),
+            np.asarray(self._ambient_history, dtype=np.float64),
+            float(prefix_q[-1]),
+            np.asarray([observation.ambient_c], dtype=np.float64),
+        )
+        return float(free[0] + response[0, 0] * observation.q)
+
+    def _append_observation(self, observation: Observation) -> None:
+        self._time_history.append(observation.time_s)
+        self._temperature_history.append(observation.temp_c)
+        self._input_history.append(observation.q)
+        self._ambient_history.append(observation.ambient_c)
 
     def affine_prediction(
         self,

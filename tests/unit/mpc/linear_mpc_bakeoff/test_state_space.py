@@ -7,7 +7,10 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
-from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import SignalRecord
+from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import (
+    Observation,
+    SignalRecord,
+)
 from docs.superpowers.experiments.linear_mpc_bakeoff.data import chronological_split
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     _identification_records,
@@ -83,6 +86,25 @@ def fitted_then_extended_record() -> tuple[InnovationStateSpace, SignalRecord]:
             record.provenance,
         ),
     )
+
+def test_track_corrects_state_without_refreshing_fitted_state_space_matrices() -> None:
+    """A frozen state-space incumbent may filter observations but cannot refresh."""
+    model, extension = fitted_then_extended_record()
+    before = model.snapshot()
+
+    outcome = model.track(
+        Observation(
+            extension.time_s[0],
+            extension.temp_c[0],
+            extension.q[0],
+            extension.ambient_c[0],
+        )
+    )
+    after = model.snapshot()
+
+    assert outcome.updated is False
+    assert after["matrices"] == before["matrices"]
+    assert after["refreshes"] == before["refreshes"]
 
 
 def test_subspace_fit_recovers_order_two_dynamics() -> None:

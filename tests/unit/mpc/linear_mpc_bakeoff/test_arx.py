@@ -96,6 +96,7 @@ def test_model_protocol_has_only_shared_model_operations() -> None:
         "fit",
         "forecast",
         "observe",
+        "track",
         "snapshot",
     }
 
@@ -258,6 +259,34 @@ def test_arx_regularizes_explosive_sixty_minute_input_response() -> None:
     assert np.max(np.abs(prediction.free_output_c - prefix.temp_c[-1])) <= (
         model._max_forecast_deviation
     )
+
+def test_affine_prediction_never_mutates_fitted_arx_regions() -> None:
+    """Forecast-envelope limiting must not rewrite fitted theta or RLS state."""
+    prefix = training_prefix()
+    model = ScheduledARX(ARXConfig(na=2, nb=2, delays=(1,)))
+    model.fit(prefix)
+    for region in model._candidates[1].regions:
+        region.theta[:2] = (0.995, 0.0)
+        region.theta[-2] = -0.999
+        region.theta[2:4] = (100.0, 0.0)
+    model._max_forecast_deviation = 0.01
+
+    before = model.snapshot()
+    model.affine_prediction(180, prefix.q[-1], np.zeros(180))
+    model.affine_prediction(180, prefix.q[-1], np.zeros(180))
+
+    assert model.snapshot() == before
+
+def test_track_updates_arx_history_without_rewriting_fitted_regions() -> None:
+    """A frozen ARX incumbent advances prediction history without an RLS update."""
+    prefix = training_prefix()
+    model = fitted_model(prefix)
+    before = model.snapshot()
+
+    outcome = model.track(observation(temp_c=100.0, q=0.4))
+
+    assert outcome.updated is False
+    assert model.snapshot()["regions"] == before["regions"]
 
 def test_forecast_output_is_read_only() -> None:
     prefix = training_prefix()

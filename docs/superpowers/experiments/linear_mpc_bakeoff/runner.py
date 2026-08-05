@@ -8,7 +8,7 @@ import importlib.metadata
 import json
 import os
 import sys
-from collections import defaultdict
+from collections import defaultdict, deque
 from time import perf_counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -491,6 +491,7 @@ def _run_scenario(
     solve_ms: list[float] = []
     solver_evidence: list[Mapping[str, Any]] = []
     promotion_history: list[Mapping[str, Any]] = []
+    pre_assimilation_scores: deque[dict[str, float | bool | int]] = deque(maxlen=15)
     for second in range(duration_s):
         target = definition.target_at(second)
         if second % _FRAME_S == 0:
@@ -541,14 +542,15 @@ def _run_scenario(
         fan.append(_FIXED_FAN)
         if manager is not None and (second + 1) % _FRAME_S == 0:
             observation = Observation(
-                12_000.0 + float(second + 1),
+                float(calibration.time_s[-1] + second + 1),
                 temperatures[-1],
                 frame.realized_duty,
                 simulator.T_amb,
             )
-            learner_started = perf_counter()
             safety_override = definition.safety_override_at(second)
             manual_override = definition.manual_override_at(second)
+            challenger_refresh_before = _refresh_marker(manager.challenger.snapshot())
+            learner_started = perf_counter()
             outcome = manager.observe(
                 observation,
                 state=OperatingState.HOLD if target == definition.target_low_c else OperatingState.TRANSIENT,
@@ -557,8 +559,26 @@ def _run_scenario(
                 safety_override=safety_override,
                 manual_override=manual_override,
             )
+            observe_ms = (perf_counter() - learner_started) * 1_000.0
+            challenger_refresh_after = _refresh_marker(manager.challenger.snapshot())
             if outcome.gate.permitted:
-                learner_ms.append((perf_counter() - learner_started) * 1_000.0)
+                if challenger_refresh_after != challenger_refresh_before:
+                    refresh_ms.append(observe_ms)
+                else:
+                    learner_ms.append(observe_ms)
+                if outcome.incumbent is None or outcome.challenger is None:
+                    raise RuntimeError("permitted update must expose both pre-assimilation predictions")
+                pre_assimilation_scores.append(
+                    {
+                        "frame_s": second + 1,
+                        "candidate_abs_error_c": abs(outcome.challenger.innovation_c),
+                        "incumbent_abs_error_c": abs(outcome.incumbent.innovation_c),
+                        "braking_or_coast": (
+                            frame.realized_duty <= 0.05
+                            or (second > 0 and target < targets[-2])
+                        ),
+                    }
+                )
             if not outcome.gate.permitted:
                 promotion_history.append(
                     {
@@ -570,18 +590,43 @@ def _run_scenario(
                     }
                 )
             if (second + 1) % 300 == 0:
-                refresh_started = perf_counter()
-                incumbent_score = float(np.mean(np.abs(temperatures[-min(15, len(temperatures)): ] - np.asarray(targets[-min(15, len(targets)):]))))
+                score_window = tuple(pre_assimilation_scores)
+                if not score_window:
+                    continue
+                braking_window = tuple(
+                    sample for sample in score_window if sample["braking_or_coast"]
+                ) or score_window
+                candidate_score = float(
+                    np.mean([float(sample["candidate_abs_error_c"]) for sample in score_window])
+                )
+                incumbent_score = float(
+                    np.mean([float(sample["incumbent_abs_error_c"]) for sample in score_window])
+                )
+                candidate_braking_score = float(
+                    np.mean(
+                        [
+                            float(sample["candidate_abs_error_c"])
+                            for sample in braking_window
+                        ]
+                    )
+                )
+                incumbent_braking_score = float(
+                    np.mean(
+                        [
+                            float(sample["incumbent_abs_error_c"])
+                            for sample in braking_window
+                        ]
+                    )
+                )
                 decision = manager.evaluate(
                     WindowScores(
                         window_id=f"{plant}:{arm}:{initialization}:{second + 1}",
-                        candidate_prediction_score=incumbent_score,
+                        candidate_prediction_score=candidate_score,
                         incumbent_prediction_score=incumbent_score,
-                        candidate_braking_score=0.0,
-                        incumbent_braking_score=0.0,
+                        candidate_braking_score=candidate_braking_score,
+                        incumbent_braking_score=incumbent_braking_score,
                     )
                 )
-                refresh_ms.append((perf_counter() - refresh_started) * 1_000.0)
                 promotion_history.append(
                     {
                         "kind": "five-minute-evaluation",
@@ -589,6 +634,14 @@ def _run_scenario(
                         "promoted": decision.promoted,
                         "reasons": [reason.value for reason in decision.reasons],
                         "consecutive_wins": decision.consecutive_wins,
+                        "candidate_prediction_score": decision.candidate_prediction_score,
+                        "incumbent_prediction_score": decision.incumbent_prediction_score,
+                        "candidate_braking_score": decision.candidate_braking_score,
+                        "incumbent_braking_score": decision.incumbent_braking_score,
+                        "sample_count": len(score_window),
+                        "braking_or_coast_sample_count": sum(
+                            bool(sample["braking_or_coast"]) for sample in score_window
+                        ),
                         "candidate_snapshot": _json_value(decision.candidate_snapshot),
                         "incumbent_snapshot": _json_value(decision.incumbent_snapshot),
                     }
@@ -634,6 +687,9 @@ def _run_scenario(
             "calibration_metadata": dict(calibration.metadata),
             "batch_fit_snapshot": batch_fit_snapshot,
             "final_active_snapshot": _json_value(active_model.snapshot()),
+            "simulator_prediction_diagnostics": _simulator_prediction_diagnostics(
+                arm, plant, seed, initialization
+            ),
             "initial_batch_fit_ms": fit_ms,
         },
         promotion_history=tuple(promotion_history),
@@ -750,10 +806,10 @@ def _model_for_initialization(arm: str, initialization: str):
         return LaguerreDMC(configs[initialization])
     if arm == "state-space":
         configs = {
-            "correct": StateSpaceConfig(orders=(1,), delays=(2,), refresh_interval_s=1e12),
-            "wrong-gain": StateSpaceConfig(orders=(1,), delays=(2,), parameter_penalty=0.1, refresh_interval_s=1e12),
-            "wrong-pole": StateSpaceConfig(orders=(1,), delays=(2,), block_rows=12, refresh_interval_s=1e12),
-            "wrong-delay": StateSpaceConfig(orders=(1, 2, 3), delays=(1, 3), refresh_interval_s=1e12),
+            "correct": StateSpaceConfig(orders=(1,), delays=(2,), refresh_interval_s=300.0),
+            "wrong-gain": StateSpaceConfig(orders=(1,), delays=(2,), parameter_penalty=0.1, refresh_interval_s=300.0),
+            "wrong-pole": StateSpaceConfig(orders=(1,), delays=(2,), block_rows=12, refresh_interval_s=300.0),
+            "wrong-delay": StateSpaceConfig(orders=(1, 2, 3), delays=(1, 3), refresh_interval_s=300.0),
         }
         return InnovationStateSpace(configs[initialization])
     raise ValueError(f"unknown arm {arm}")
@@ -807,6 +863,109 @@ def _horizon_residuals(
             values.append(float(np.mean(np.abs(predicted - record.temp_c[start : start + steps]))))
         residuals[horizon_s] = values
     return residuals
+
+
+@lru_cache(maxsize=None)
+def _simulator_prediction_diagnostics(
+    arm: str, plant: str, seed: int, initialization: str
+) -> dict[str, Any]:
+    """Publish raw untouched simulator residuals and horizon metrics per model fit."""
+    model, _, _, _, record = _prepared_model(arm, plant, seed, initialization)
+    test_start = int(record.temp_c.size * 0.75)
+    diagnostics: dict[str, Any] = {}
+    for horizon_s in (60, 300, 900, 1800, 3600):
+        steps = horizon_s // _FRAME_S
+        origins: list[dict[str, Any]] = []
+        residuals: list[float] = []
+        coast_residuals: list[float] = []
+        for start in range(test_start, record.temp_c.size - steps + 1, max(1, steps // 6)):
+            predicted = model.forecast(
+                _record_slice(record, 0, start),
+                record.q[start : start + steps],
+                record.ambient_c[start : start + steps],
+            )
+            errors = predicted - record.temp_c[start : start + steps]
+            values = [float(value) for value in errors]
+            residuals.extend(values)
+            coast = bool(np.any(record.q[start : start + steps] <= 0.05))
+            if coast:
+                coast_residuals.extend(values)
+            origins.append(
+                {
+                    "origin_index": start,
+                    "origin_time_s": float(record.time_s[start]),
+                    "coast_or_braking": coast,
+                    "residuals_c": values,
+                }
+            )
+        if not residuals:
+            diagnostics[str(horizon_s)] = None
+            continue
+        values = np.asarray(residuals, dtype=np.float64)
+        coast_values = np.asarray(
+            coast_residuals if coast_residuals else residuals, dtype=np.float64
+        )
+        diagnostics[str(horizon_s)] = {
+            "origins": origins,
+            "rmse_c": float(np.sqrt(np.mean(values * values))),
+            "max_abs_error_c": float(np.max(np.abs(values))),
+            "bias_c": float(np.mean(values)),
+            "p90_abs_error_c": float(np.percentile(np.abs(values), 90.0)),
+            "coast_braking_temperature_error_c": float(
+                np.mean(np.abs(coast_values))
+            ),
+            "steady_gain_error_c_per_q": _steady_gain_error(model.snapshot(), record),
+            "delay_error_s": _delay_error_s(model.snapshot(), record),
+        }
+    return diagnostics
+
+
+def _steady_gain_error(snapshot: Mapping[str, object], record: SignalRecord) -> float:
+    """Compare model gain with a tail finite-difference measured from this simulator record."""
+    half = record.temp_c.size // 2
+    observed_delta_q = float(np.mean(record.q[half:]) - np.mean(record.q[:half]))
+    observed = (
+        float(np.mean(record.temp_c[half:]) - np.mean(record.temp_c[:half]))
+        / observed_delta_q
+        if abs(observed_delta_q) > 1e-9
+        else 0.0
+    )
+    fitted = snapshot.get("steady_gain")
+    if not isinstance(fitted, (int, float)):
+        fitted = snapshot.get("final_gain", 0.0)
+    return float(abs(float(fitted) - observed))
+
+
+def _delay_error_s(snapshot: Mapping[str, object], record: SignalRecord) -> float:
+    """Estimate a deterministic input/output lag from the held-out simulator suffix."""
+    delay_steps = snapshot.get("delay_steps", 0)
+    fitted = int(delay_steps) if isinstance(delay_steps, (int, float)) else 0
+    start = int(record.temp_c.size * 0.75)
+    inputs = np.diff(record.q[start:])
+    outputs = np.diff(record.temp_c[start:])
+    if not np.any(np.abs(inputs) > 1e-9) or not np.any(np.abs(outputs) > 1e-9):
+        return float(fitted * _FRAME_S)
+    limit = min(15, inputs.size - 1)
+    observed = max(
+        range(limit + 1),
+        key=lambda lag: abs(float(np.dot(inputs[: inputs.size - lag], outputs[lag:]))),
+    )
+    return float(abs(fitted - observed) * _FRAME_S)
+
+
+def _refresh_marker(snapshot: Mapping[str, object]) -> tuple[int, float | None]:
+    """Identify either an accepted refresh or a measured re-identification attempt."""
+    direct = snapshot.get("refreshes")
+    count = direct if isinstance(direct, int) else 0
+    timing = snapshot.get("update_timing")
+    if isinstance(timing, Mapping):
+        nested = timing.get("refreshes")
+        if isinstance(nested, int):
+            count = nested
+        attempt = timing.get("last_attempt_time_s")
+        if isinstance(attempt, (int, float)):
+            return count, float(attempt)
+    return count, None
 
 
 def _row_key(row: ScenarioResult) -> tuple[str, str, str, str, str, int, int]:
@@ -1101,46 +1260,87 @@ def _real_mak_record() -> SignalRecord:
 
 @lru_cache(maxsize=None)
 def _real_mak_evidence(arm: str) -> dict[str, Any]:
-    """Fit each arm against reconstructed historic MAK requested input evidence."""
+    """Keep compact-model selection, validation, and test chronology disjoint."""
     record = _real_mak_record()
-    fit_end = min(16, record.temp_c.size - 46)
+    fit_end, validation_end = _real_mak_boundaries(record.temp_c.size)
     result: dict[str, Any] = {
         "provenance": record.provenance,
         "metadata": dict(record.metadata),
+        "boundaries": {
+            "fit": [0, fit_end],
+            "validation": [fit_end, validation_end],
+            "test": [validation_end, int(record.temp_c.size)],
+        },
         "diagnostics_c": {"60": None, "300": None, "900": None, "1800": None, "3600": None},
     }
-    if fit_end < 2:
-        result["failure"] = "fixture cannot support chronological fit"
-        return result
     try:
-        model = (
-            InnovationStateSpace(
-                StateSpaceConfig(
-                    orders=(1,),
-                    delays=(1,),
-                    block_rows=2,
-                    refresh_interval_s=1e12,
-                )
+        fit_record = _record_slice(record, 0, fit_end)
+        validation_starts = tuple(range(fit_end, validation_end))
+        candidates: tuple[Any, ...]
+        if arm == "state-space":
+            candidates = (
+                InnovationStateSpace(
+                    StateSpaceConfig(
+                        orders=(1,),
+                        delays=(1,),
+                        block_rows=2,
+                        refresh_interval_s=1e12,
+                    )
+                ),
+                InnovationStateSpace(
+                    StateSpaceConfig(
+                        orders=(1,),
+                        delays=(2,),
+                        block_rows=2,
+                        refresh_interval_s=1e12,
+                    )
+                ),
             )
-            if arm == "state-space"
-            else _model_for_initialization(arm, "correct")
-        )
-        model.fit(_record_slice(record, 0, fit_end))
+        else:
+            candidates = (_model_for_initialization(arm, "correct"),)
+        scored_candidates: list[tuple[float, Any]] = []
+        for candidate in candidates:
+            candidate.fit(fit_record)
+            validation = _horizon_residuals(
+                candidate, record, starts=validation_starts, horizons_s=(60, 300)
+            )
+            score = _mean_or_none(validation[300]) or _mean_or_none(validation[60])
+            if score is not None:
+                scored_candidates.append((score, candidate))
+        if not scored_candidates:
+            raise ValueError("fixture validation segment cannot score compact candidates")
+        _, model = min(scored_candidates, key=lambda item: item[0])
         diagnostics = _horizon_residuals(
             model,
             record,
-            starts=tuple(range(fit_end, record.temp_c.size)),
+            starts=tuple(range(validation_end, record.temp_c.size)),
             horizons_s=(60, 300, 900, 1800, 3600),
         )
         result["diagnostics_c"] = {
             str(horizon): _mean_or_none(values)
             for horizon, values in sorted(diagnostics.items())
         }
+        result["origins"] = {
+            str(horizon): list(values) for horizon, values in sorted(diagnostics.items())
+        }
+        result["validation_candidate_scores"] = [
+            float(score) for score, _ in scored_candidates
+        ]
         result["fitted"] = _json_value(model.snapshot())
     except Exception as error:
         result["failure"] = f"{type(error).__name__}: {error}"
     return result
 
+
+def _real_mak_boundaries(samples: int) -> tuple[int, int]:
+    """Reserve a contiguous test tail; never borrow it for compact-model choice."""
+    if samples < 6:
+        raise ValueError("fixture cannot support fit, validation, and test segments")
+    fit_end = min(16, samples - 4)
+    validation_end = min(fit_end + 19, samples - 2)
+    if not 2 <= fit_end < validation_end < samples:
+        raise ValueError("fixture cannot support chronological fit, validation, and test")
+    return fit_end, validation_end
 
 def _split_evidence(config: ExperimentConfig) -> dict[str, Any]:
     """Persist actual index/time boundaries for every immutable domain record."""
@@ -1157,8 +1357,11 @@ def _split_evidence(config: ExperimentConfig) -> dict[str, Any]:
                 "provenance": record.provenance,
             }
     real = _real_mak_record()
+    fit_end, validation_end = _real_mak_boundaries(real.temp_c.size)
     domains["real-MAK"] = {
-        "fit": [0, min(16, real.temp_c.size - 46)],
+        "fit": [0, fit_end],
+        "validation": [fit_end, validation_end],
+        "test": [validation_end, int(real.temp_c.size)],
         "provenance": real.provenance,
         "diagnostic_horizons_s": [60, 300, 900, 1800, 3600],
     }

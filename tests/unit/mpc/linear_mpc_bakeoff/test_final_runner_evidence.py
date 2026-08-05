@@ -66,9 +66,12 @@ def test_quick_artifact_persists_one_horizon_and_real_mak_provenance() -> None:
         assert set(real["diagnostics_c"]) == {"60", "300", "900", "1800", "3600"}
         assert real["diagnostics_c"]["60"] is not None
         assert real["diagnostics_c"]["300"] is not None
-        assert real["diagnostics_c"]["900"] is not None
+        assert real["diagnostics_c"]["900"] is None
         assert real["diagnostics_c"]["1800"] is None
         assert real["diagnostics_c"]["3600"] is None
+    real_split = artifact.splits["real-MAK"]
+    assert real_split["fit"][1] <= real_split["validation"][0] <= real_split["validation"][1]
+    assert real_split["validation"][1] <= real_split["test"][0]
     assert all(
         key.count(":") == 2 and key.split(":", 1)[0] in {"online", "frozen"}
         for arm in artifact.arms
@@ -106,23 +109,49 @@ def test_override_frames_are_recorded_as_non_updates_for_both_models() -> None:
     assert row.model_evidence["final_active_snapshot"]
 
 
-def test_online_refresh_is_a_five_minute_evaluation_and_solver_timing_is_solve_only() -> None:
+def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_work() -> None:
+    from math import isfinite
+
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
 
-    definition = next(item for item in SCENARIOS if item.name == "low-step")
+    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
     row = _run_scenario(
         definition,
         plant="GrillSim",
         seed=2,
         mode="online",
-        duration_s=320,
+        duration_s=620,
         arm="scheduled-arx",
-        initialization="correct",
+        initialization="wrong-gain",
         horizon_s=600,
     )
 
-    assert len(row.raw_refresh_ms) == 1
-    assert any(item["kind"] == "five-minute-evaluation" for item in row.promotion_history)
+    evaluations = [
+        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
+    ]
+    assert len(evaluations) == 2
+    assert all(
+        isfinite(item["candidate_prediction_score"])
+        and isfinite(item["incumbent_prediction_score"])
+        and isfinite(item["candidate_braking_score"])
+        and isfinite(item["incumbent_braking_score"])
+        for item in evaluations
+    )
+    assert any(
+        item["candidate_prediction_score"] != item["incumbent_prediction_score"]
+        for item in evaluations
+    )
+    state_space_row = _run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=620,
+        arm="state-space",
+        initialization="wrong-gain",
+        horizon_s=600,
+    )
+    assert state_space_row.raw_refresh_ms
     assert all("iterations" in item and "kkt_residual" in item for item in row.solver_evidence)
     assert any(item.get("reference_method") == "scipy-l-bfgs-b" for item in row.solver_evidence)
 

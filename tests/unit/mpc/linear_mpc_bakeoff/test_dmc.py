@@ -6,7 +6,10 @@ import numpy as np
 import numpy.testing as npt
 
 import pytest
-from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import SignalRecord
+from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import (
+    Observation,
+    SignalRecord,
+)
 from docs.superpowers.experiments.linear_mpc_bakeoff.data import chronological_split
 from docs.superpowers.experiments.linear_mpc_bakeoff.dmc import (
     DMCConfig,
@@ -57,6 +60,22 @@ def fitted_model_with_forced_negative_gain() -> LaguerreDMC:
     model._active.coefficients.fill(-1.0)
     model._project_gain(model._active)
     return model
+
+def test_track_updates_dmc_runtime_history_without_rewriting_parameters() -> None:
+    """The frozen incumbent's state may advance, but its fitted response cannot."""
+    record = delayed_first_order_record(delay_steps=3, pole=0.95, samples=300)
+    model = LaguerreDMC(DMCConfig(terms=(8,), poles=(0.92,)))
+    model.fit(record)
+    before = model.snapshot()
+
+    outcome = model.track(
+        Observation(record.time_s[-1] + 20.0, 1.0, 0.3, 0.0)
+    )
+
+    assert outcome.updated is False
+    after = model.snapshot()
+    assert after["terms"] == before["terms"]
+    npt.assert_array_equal(after["step_response"], before["step_response"])
 
 
 def test_laguerre_basis_is_deterministic_and_well_conditioned() -> None:

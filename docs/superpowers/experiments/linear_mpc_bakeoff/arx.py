@@ -166,20 +166,8 @@ class ScheduledARX:
         output.setflags(write=False)
         return output
     def observe(self, observation: Observation) -> UpdateOutcome:
-        """Score the observation before incorporating it into every candidate."""
-        if not self._temperature_history:
-            raise RuntimeError("fit must be called before observe")
-
-        candidate = self._candidates[self._active_delay]
-        theta = self._scheduled_theta(candidate, self._temperature_history[-1])
-        prediction = self._predict_next(
-            theta,
-            self._temperature_history,
-            self._input_history,
-            observation.ambient_c,
-            candidate.delay_steps,
-        )
-        innovation = observation.temp_c - prediction
+        """Score and learn one observation after preserving its pre-update error."""
+        prediction = self._next_prediction(observation)
         self._assimilate(
             self._temperature_history,
             self._input_history,
@@ -187,16 +175,43 @@ class ScheduledARX:
             observation.temp_c,
             len(self._temperature_history),
         )
+        self._append_observation(observation)
+        return UpdateOutcome(
+            predicted_temp_c=prediction,
+            observed_temp_c=observation.temp_c,
+            innovation_c=observation.temp_c - prediction,
+            updated=True,
+        )
+
+    def track(self, observation: Observation) -> UpdateOutcome:
+        """Assimilate runtime history without changing fitted ARX parameters."""
+        prediction = self._next_prediction(observation)
+        self._append_observation(observation)
+        return UpdateOutcome(
+            predicted_temp_c=prediction,
+            observed_temp_c=observation.temp_c,
+            innovation_c=observation.temp_c - prediction,
+            updated=False,
+        )
+
+    def _next_prediction(self, observation: Observation) -> float:
+        if not self._temperature_history:
+            raise RuntimeError("fit must be called before observe")
+        candidate = self._candidates[self._active_delay]
+        theta = self._scheduled_theta(candidate, self._temperature_history[-1])
+        return self._predict_next(
+            theta,
+            self._temperature_history,
+            self._input_history,
+            observation.ambient_c,
+            candidate.delay_steps,
+        )
+
+    def _append_observation(self, observation: Observation) -> None:
         self._temperature_history.append(observation.temp_c)
         self._input_history.append(observation.q)
         self._ambient_history.append(observation.ambient_c)
         self._last_observation_time_s = observation.time_s
-        return UpdateOutcome(
-            predicted_temp_c=prediction,
-            observed_temp_c=observation.temp_c,
-            innovation_c=innovation,
-            updated=True,
-        )
 
     def affine_prediction(
         self,
@@ -268,10 +283,9 @@ class ScheduledARX:
             and response_peak > self._max_forecast_deviation
         ):
             scale = self._max_forecast_deviation / response_peak
-            input_slice = slice(self._config.na, self._config.na + self._config.nb)
-            for index, _ in self._region_weights(self._temperature_history[-1]):
-                candidate.regions[index].theta[input_slice] *= scale
-            return self.affine_prediction(horizon_steps, q_previous, ambient_future)
+            baseline = self._temperature_history[-1]
+            free_output = baseline + (free_output - baseline) * scale
+            input_response *= scale
         if not np.isfinite(free_output).all() or not np.isfinite(input_response).all():
             raise RuntimeError("ARX horizon forecast is non-finite")
         return AffinePrediction(free_output, input_response)
