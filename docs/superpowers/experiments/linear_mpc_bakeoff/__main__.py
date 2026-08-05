@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .artifact import render_table
-from .runner import ExperimentConfig, default_output_path, run_experiment
+from .runner import ExperimentConfig, _checkpoint_path, default_output_path, run_experiment
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,8 +21,9 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or (default_output_path().with_name("_linear_mpc_bakeoff_quick.manifest.json") if args.quick else default_output_path())
     if not output.name.endswith(".manifest.json"):
         parser.error("--output must end with .manifest.json; legacy .gz is load-only")
-    if args.resume and not output.exists():
-        parser.error(f"checkpoint does not exist: {output}")
+    checkpoint = _checkpoint_path(output)
+    if args.resume and not checkpoint.exists():
+        parser.error(f"checkpoint does not exist: {checkpoint}")
     config = ExperimentConfig.quick() if args.quick else ExperimentConfig()
     artifact = run_experiment(replace(config, output=output), resume=args.resume)
     print(render_table(artifact))

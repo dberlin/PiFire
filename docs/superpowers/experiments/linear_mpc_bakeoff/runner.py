@@ -304,9 +304,10 @@ def _run_matrix(
         for seed in sorted(config.seeds)
     ]
     rows: list[ScenarioResult] = []
+    checkpoint_path = _checkpoint_path(checkpoint) if checkpoint is not None else None
     failures = []
-    if resume and checkpoint is not None and checkpoint.exists():
-        checkpoint_document = _read_artifact_document(checkpoint)
+    if resume and checkpoint_path is not None and checkpoint_path.exists():
+        checkpoint_document = _read_artifact_document(checkpoint_path)
         evidence_bundles = checkpoint_document.get("evidence_bundles", {})
         stored_rows = checkpoint_document.get("rows", checkpoint_document.get("scenarios", ()))
         rows = []
@@ -378,13 +379,14 @@ def _run_matrix(
                     MatrixKey(arm, initialization, plant, mode, definition.name, seed, horizon_s),
                 )
             )
-        if checkpoint is not None:
-            _write_checkpoint(checkpoint, config, rows, failures, complete=False)
+        if checkpoint_path is not None:
+            _write_checkpoint(checkpoint_path, config, rows, failures, complete=False)
         if interrupt_after is not None and len(rows) + len(failures) >= interrupt_after and not resume:
             return _artifact_from_rows(config, rows, failures)
     artifact = _artifact_from_rows(config, rows, failures)
     if checkpoint is not None:
         write_artifact_atomically(checkpoint, artifact)
+        _remove_transport(checkpoint_path)
     return artifact
 
 
@@ -429,6 +431,62 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
 
 
 _MAX_ARTIFACT_PART_BYTES = 90 * 1024 * 1024
+
+def _checkpoint_path(output: Path) -> Path:
+    """Keep in-progress evidence separate from the canonical final manifest."""
+    suffix = ".manifest.json"
+    if not output.name.endswith(suffix):
+        raise ValueError("checkpoint output requires a .manifest.json path")
+    return output.with_name(f"{output.name.removesuffix(suffix)}.checkpoint{suffix}")
+
+
+def _remove_transport(path: Path | None) -> None:
+    """Delete only one published transport manifest and its content-addressed shards."""
+    if path is None:
+        return
+    path.unlink(missing_ok=True)
+    for part in path.parent.glob(f"{path.stem}.*.part*.gz"):
+        part.unlink()
+
+
+def _write_transport_atomically(
+    path: Path,
+    payload: bytes,
+    *,
+    max_part_bytes: int = _MAX_ARTIFACT_PART_BYTES,
+    before_publish: Callable[[], None] | None = None,
+) -> None:
+    """Publish arbitrary canonical JSON through the bounded gzip shard transport."""
+    if max_part_bytes < 1 or max_part_bytes > _MAX_ARTIFACT_PART_BYTES:
+        raise ValueError(f"max_part_bytes must be within 1..{_MAX_ARTIFACT_PART_BYTES}")
+    if not path.name.endswith(".manifest.json"):
+        raise ValueError("artifact publication requires a .manifest.json path")
+    compressed = gzip.compress(payload, mtime=0)
+    stream_hash = hashlib.sha256(compressed).hexdigest()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    parts = []
+    for index, offset in enumerate(range(0, len(compressed), max_part_bytes)):
+        data = compressed[offset : offset + max_part_bytes]
+        part_hash = hashlib.sha256(data).hexdigest()
+        name = f"{path.stem}.{stream_hash[:16]}.part{index:04d}.{part_hash[:16]}.gz"
+        _write_bytes_atomically(path.parent / name, data)
+        parts.append({"name": name, "bytes": len(data), "sha256": part_hash})
+    manifest = {
+        "transport": "gzip-shards/v1",
+        "parts": parts,
+        "compressed_sha256": stream_hash,
+        "canonical_json_sha256": hashlib.sha256(payload).hexdigest(),
+        "canonical_json_bytes": len(payload),
+    }
+    if before_publish is not None:
+        before_publish()
+    _write_text_atomically(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    active = {item["name"] for item in parts}
+    for stale in path.parent.glob(f"{path.stem}.*.part*.gz"):
+        if stale.name not in active:
+            stale.unlink()
+
+
 def load_artifact(path: Path) -> ExperimentArtifact:
     """Load either canonical gzip transport or a legacy JSON manifest exactly."""
     return ExperimentArtifact.from_json(_read_artifact_text(path))
@@ -489,35 +547,12 @@ def write_artifact_atomically(
     before_publish: Callable[[], None] | None = None,
 ) -> None:
     """Publish a deterministic manifest after bounded gzip shards are durable."""
-    if max_part_bytes < 1 or max_part_bytes > _MAX_ARTIFACT_PART_BYTES:
-        raise ValueError(f"max_part_bytes must be within 1..{_MAX_ARTIFACT_PART_BYTES}")
-    if not path.name.endswith(".manifest.json"):
-        raise ValueError("artifact publication requires a .manifest.json path")
-    payload = (artifact.to_json() + "\n").encode("utf-8")
-    compressed = gzip.compress(payload, mtime=0)
-    stream_hash = hashlib.sha256(compressed).hexdigest()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    parts = []
-    for index, offset in enumerate(range(0, len(compressed), max_part_bytes)):
-        data = compressed[offset : offset + max_part_bytes]
-        part_hash = hashlib.sha256(data).hexdigest()
-        name = f"{path.stem}.{stream_hash[:16]}.part{index:04d}.{part_hash[:16]}.gz"
-        _write_bytes_atomically(path.parent / name, data)
-        parts.append({"name": name, "bytes": len(data), "sha256": part_hash})
-    manifest = {
-        "transport": "gzip-shards/v1",
-        "parts": parts,
-        "compressed_sha256": stream_hash,
-        "canonical_json_sha256": hashlib.sha256(payload).hexdigest(),
-        "canonical_json_bytes": len(payload),
-    }
-    if before_publish is not None:
-        before_publish()
-    _write_text_atomically(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    active = {item["name"] for item in parts}
-    for stale in path.parent.glob(f"{path.stem}.*.part*.gz"):
-        if stale.name not in active:
-            stale.unlink()
+    _write_transport_atomically(
+        path,
+        (artifact.to_json() + "\n").encode("utf-8"),
+        max_part_bytes=max_part_bytes,
+        before_publish=before_publish,
+    )
 
 
 def _write_bytes_atomically(path: Path, data: bytes) -> None:
@@ -549,7 +584,14 @@ def _write_checkpoint(
         "rows": [row.to_document() for row in sorted(rows, key=_row_key)],
         "schema_version": 1,
     }
-    _write_text_atomically(path, json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
+    _write_transport_atomically(
+        path,
+        (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(
+            "utf-8"
+        ),
+    )
+
+
 def _adaptation_settings(
     arm: str, snapshot: Mapping[str, Any]
 ) -> tuple[AdaptationPolicy, AlignmentEvidence]:

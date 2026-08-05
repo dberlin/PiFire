@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,6 +12,7 @@ import pytest
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     ExperimentConfig,
     _artifact_from_rows,
+    load_artifact,
     run_experiment,
     run_tiny_matrix,
     run_tiny_scenario,
@@ -50,6 +53,32 @@ def test_checkpoint_is_atomic_and_does_not_leave_temporary_file(tmp_path: Path) 
 
     assert output.exists()
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_interrupted_matrix_keeps_only_a_sharded_checkpoint(tmp_path: Path) -> None:
+    output = tmp_path / "artifact.manifest.json"
+
+    partial = run_tiny_matrix(
+        tmp_path, resume=False, interrupt_after=3, output=output
+    )
+
+    checkpoint = tmp_path / "artifact.checkpoint.manifest.json"
+    checkpoint_manifest = json.loads(checkpoint.read_text())
+    assert len(partial.scenarios) == 3
+    assert not output.exists()
+    assert checkpoint_manifest["transport"] == "gzip-shards/v1"
+    assert checkpoint_manifest["parts"]
+    assert all(
+        part["bytes"] <= 90 * 1024 * 1024
+        and (checkpoint.parent / part["name"]).is_file()
+        for part in checkpoint_manifest["parts"]
+    )
+
+    resumed = run_tiny_matrix(tmp_path, resume=True, output=output)
+
+    assert load_artifact(output).canonical_document() == resumed.canonical_document()
+    assert not checkpoint.exists()
+    assert not list(tmp_path.glob("artifact.checkpoint.manifest.*.part*.gz"))
 
 
 def test_checkpoint_matrix_covers_every_arm_and_wrong_initialization(tmp_path: Path) -> None:
