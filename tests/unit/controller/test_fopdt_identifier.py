@@ -265,3 +265,35 @@ def test_promote_refuses_with_a_single_surviving_candidate():
     """One candidate cannot be 10% better than a runner-up that does not exist."""
     winner, _ = promote(np.array([0.1, 0.2]), np.array([True, False]))
     assert winner is None
+
+
+def test_relative_standard_errors_reports_the_covariance_cross_term():
+    """A P with a genuinely non-zero cu/cT covariance must move rse_K by the
+    delta-method cross term, not just by the two diagonal variances -- the
+    only existing coverage used a diagonal P, where this term vanishes
+    identically and a sign flip or deletion would go unnoticed."""
+    theta = _theta_for(K=800.0, tau=600.0, T_offset=70.0)
+    P = np.array([[[1e-4, 0.0, 0.0], [0.0, 1e-4, 3e-5], [0.0, 3e-5, 1e-4]]])
+    rse_K, rse_tau = relative_standard_errors(theta, P, np.array([1.0]))
+    # rel_u2 + rel_T2 - 2*cov_uT/(cu*cT), worked by hand from cT = -1/6,
+    # cu = 4/3, var_T = var_u = 1e-4, cov_uT = 3e-5: 5.625e-5 + 0.0036 +
+    # 2.7e-4 = 0.00392625. Flipping the cross term's sign gives 0.00338625
+    # (rse_K 0.05819...) and dropping it gives 0.00365625 (rse_K 0.06047...)
+    # -- both about 4-8% away from the value below, not a last-ulp difference.
+    assert rse_K[0] == pytest.approx(0.06265979572261626)
+    assert rse_tau[0] == pytest.approx(0.06)
+
+
+def test_relative_standard_errors_negative_variance_is_not_finite():
+    """A P whose off-diagonal is large enough that the delta-method K variance
+    goes negative -- only possible when P is not actually positive
+    semi-definite, i.e. the estimate is numerically broken -- must come back
+    non-finite, never floored to 0.0. A floored 0.0 reads as perfect certainty
+    and gate_mask would then promote the single most broken candidate in the
+    bank."""
+    theta = _theta_for(K=800.0, tau=600.0, T_offset=70.0)
+    P = np.array([[[1e-4, 0.0, 0.0], [0.0, 1e-4, -9e-4], [0.0, -9e-4, 1e-4]]])
+    rse_K, rse_tau = relative_standard_errors(theta, P, np.array([1.0]))
+    assert not np.isfinite(rse_K).any()
+    params = recover_parameters(theta)
+    assert not gate_mask(params, rse_K, rse_tau)[0]

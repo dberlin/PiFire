@@ -240,8 +240,14 @@ def relative_standard_errors(Theta, P, resid_ew):
     with np.errstate(divide="ignore", invalid="ignore"):
         rel_T2 = var_T / cT**2
         rel_u2 = var_u / cu**2
+        # rel_T2 is a variance over a square and cannot go negative for a sane
+        # resid_ew/P[1,1], so flooring it is harmless. The combined K variance
+        # is a variance of a difference and stays non-negative only while P is
+        # genuinely PSD; when it is not, the floor must NOT hide that by
+        # reporting perfect certainty -- let it go negative so sqrt reports
+        # non-finite and gate_mask's isfinite check drops the candidate.
         rse_tau = np.sqrt(np.maximum(rel_T2, 0.0))
-        rse_K = np.sqrt(np.maximum(rel_u2 + rel_T2 - 2.0 * cov_uT / (cu * cT), 0.0))
+        rse_K = np.sqrt(rel_u2 + rel_T2 - 2.0 * cov_uT / (cu * cT))
     return rse_K, rse_tau
 
 
