@@ -725,8 +725,7 @@ def _prepared_model(arm: str, plant: str, seed: int, initialization: str):
     """Fit a domain-specific model, validate without leakage, then evaluate test."""
     record, initialized_record = _identification_records(plant, seed, initialization)
     samples = record.temp_c.size
-    fit_end = int(samples * 0.35)
-    validation_end = int(samples * 0.75)
+    fit_end, validation_end = _simulator_boundaries(plant, samples)
     if min(fit_end, validation_end - fit_end, samples - validation_end) < 2:
         raise ValueError(f"{plant} calibration record cannot support chronological splits")
     model = _model_for_initialization(arm, initialization)
@@ -772,6 +771,17 @@ def _calibration_record(plant: str, seed: int) -> SignalRecord:
     program = DEFAULT_CALIBRATION_PROGRAM if plant == "GrillSim" else MAK_CALIBRATION_PROGRAM
     return generate_calibration_record(plant, seed, program)
 
+
+
+def _simulator_boundaries(plant: str, samples: int) -> tuple[int, int]:
+    """Return fixed chronological endpoints independent of scenario duration."""
+    if plant == "MAKGrillSim":
+        fit_end, validation_end = 147, 315
+    else:
+        fit_end, validation_end = int(samples * 0.35), int(samples * 0.75)
+    if not 2 <= fit_end < validation_end < samples:
+        raise ValueError(f"{plant} calibration record cannot support fixed splits")
+    return fit_end, validation_end
 
 def _identification_records(plant: str, seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:
     """Return deterministic per-domain calibration evidence and an initial mismatch."""
@@ -879,90 +889,134 @@ def _horizon_residuals(
     return residuals
 
 
-@lru_cache(maxsize=None)
 def _simulator_prediction_diagnostics(
     arm: str, plant: str, seed: int, initialization: str
 ) -> dict[str, Any]:
-    """Publish raw untouched simulator residuals and horizon metrics per model fit."""
+    """Publish raw untouched suffix forecasts with timestamp-level masks."""
     model, _, _, _, record = _prepared_model(arm, plant, seed, initialization)
-    test_start = int(record.temp_c.size * 0.75)
+    fit_end, validation_end = _simulator_boundaries(plant, record.temp_c.size)
     diagnostics: dict[str, Any] = {}
     for horizon_s in (60, 300, 900, 1800, 3600):
         steps = horizon_s // _FRAME_S
         origins: list[dict[str, Any]] = []
         residuals: list[float] = []
-        coast_residuals: list[float] = []
-        for start in range(test_start, record.temp_c.size - steps + 1, max(1, steps // 6)):
+        coast_braking_residuals: list[float] = []
+        for start in range(
+            validation_end, record.temp_c.size - steps + 1, max(1, steps // 6)
+        ):
             predicted = model.forecast(
                 _record_slice(record, 0, start),
                 record.q[start : start + steps],
                 record.ambient_c[start : start + steps],
             )
-            errors = predicted - record.temp_c[start : start + steps]
-            values = [float(value) for value in errors]
+            values = [
+                float(value)
+                for value in predicted - record.temp_c[start : start + steps]
+            ]
+            coast_mask, braking_mask = _coast_braking_masks(record, start, steps)
+            selected = [
+                value
+                for value, coast, braking in zip(
+                    values, coast_mask, braking_mask, strict=True
+                )
+                if coast or braking
+            ]
             residuals.extend(values)
-            coast = bool(np.any(record.q[start : start + steps] <= 0.05))
-            if coast:
-                coast_residuals.extend(values)
+            coast_braking_residuals.extend(selected)
             origins.append(
                 {
                     "origin_index": start,
                     "origin_time_s": float(record.time_s[start]),
-                    "coast_or_braking": coast,
+                    "coast_mask": coast_mask,
+                    "braking_mask": braking_mask,
+                    "coast_or_braking_mask": [
+                        coast or braking
+                        for coast, braking in zip(coast_mask, braking_mask, strict=True)
+                    ],
                     "residuals_c": values,
+                    "coast_braking_residuals_c": selected,
                 }
             )
         if not residuals:
             diagnostics[str(horizon_s)] = None
             continue
         values = np.asarray(residuals, dtype=np.float64)
-        coast_values = np.asarray(
-            coast_residuals if coast_residuals else residuals, dtype=np.float64
-        )
+        masked = np.asarray(coast_braking_residuals, dtype=np.float64)
         diagnostics[str(horizon_s)] = {
             "origins": origins,
+            "origin_count": len(origins),
+            "coast_braking_sample_count": int(masked.size),
             "rmse_c": float(np.sqrt(np.mean(values * values))),
             "max_abs_error_c": float(np.max(np.abs(values))),
             "bias_c": float(np.mean(values)),
             "p90_abs_error_c": float(np.percentile(np.abs(values), 90.0)),
-            "coast_braking_temperature_error_c": float(
-                np.mean(np.abs(coast_values))
+            "coast_braking_temperature_error_c": (
+                float(np.mean(np.abs(masked))) if masked.size else None
             ),
             "steady_gain_error_c_per_q": _steady_gain_error(model.snapshot(), record),
-            "delay_error_s": _delay_error_s(model.snapshot(), record),
+            "delay_error_s": _delay_error_s(
+                model.snapshot(), record, validation_end
+            ),
         }
-    return diagnostics
+    return {
+        "boundaries": {
+            "fit": [0, fit_end],
+            "validation": [fit_end, validation_end],
+            "test": [validation_end, int(record.temp_c.size)],
+        },
+        "diagnostics_c": diagnostics,
+    }
+
+
+def _coast_braking_masks(
+    record: SignalRecord, start: int, steps: int
+) -> tuple[list[bool], list[bool]]:
+    """Classify each future point; never apply a horizon-wide surrogate label."""
+    future_q = record.q[start : start + steps]
+    preceding_q = np.concatenate(([record.q[start - 1]], future_q[:-1]))
+    return (
+        [bool(value <= 0.05) for value in future_q],
+        [
+            bool(value < previous - 1e-9)
+            for value, previous in zip(future_q, preceding_q, strict=True)
+        ],
+    )
 
 
 def _steady_gain_error(snapshot: Mapping[str, object], record: SignalRecord) -> float:
-    """Compare model gain with a tail finite-difference measured from this simulator record."""
+    """Compare the arm-neutral fitted gain to a measured simulator gain."""
     half = record.temp_c.size // 2
     observed_delta_q = float(np.mean(record.q[half:]) - np.mean(record.q[:half]))
-    observed = (
-        float(np.mean(record.temp_c[half:]) - np.mean(record.temp_c[:half]))
-        / observed_delta_q
-        if abs(observed_delta_q) > 1e-9
-        else 0.0
-    )
+    if abs(observed_delta_q) <= 1e-9:
+        raise ValueError("simulator record cannot measure steady gain")
     fitted = snapshot.get("steady_gain")
-    if not isinstance(fitted, (int, float)):
-        fitted = snapshot.get("final_gain", 0.0)
+    if not isinstance(fitted, (int, float)) or not np.isfinite(fitted):
+        raise ValueError("fitted model lacks a finite steady_gain diagnostic")
+    observed = float(
+        (np.mean(record.temp_c[half:]) - np.mean(record.temp_c[:half]))
+        / observed_delta_q
+    )
     return float(abs(float(fitted) - observed))
 
 
-def _delay_error_s(snapshot: Mapping[str, object], record: SignalRecord) -> float:
-    """Estimate a deterministic input/output lag from the held-out simulator suffix."""
-    delay_steps = snapshot.get("delay_steps", 0)
-    fitted = int(delay_steps) if isinstance(delay_steps, (int, float)) else 0
-    start = int(record.temp_c.size * 0.75)
-    inputs = np.diff(record.q[start:])
-    outputs = np.diff(record.temp_c[start:])
+def _delay_error_s(
+    snapshot: Mapping[str, object], record: SignalRecord, test_start: int
+) -> float:
+    """Estimate delay against the untouched simulator suffix."""
+    delay_steps = snapshot.get("delay_steps")
+    if not isinstance(delay_steps, (int, float)):
+        raise ValueError("fitted model lacks a delay_steps diagnostic")
+    fitted = int(delay_steps)
+    inputs = np.diff(record.q[test_start:])
+    outputs = np.diff(record.temp_c[test_start:])
     if not np.any(np.abs(inputs) > 1e-9) or not np.any(np.abs(outputs) > 1e-9):
         return float(fitted * _FRAME_S)
     limit = min(15, inputs.size - 1)
     observed = max(
         range(limit + 1),
-        key=lambda lag: abs(float(np.dot(inputs[: inputs.size - lag], outputs[lag:]))),
+        key=lambda lag: abs(
+            float(np.dot(inputs[: inputs.size - lag], outputs[lag:]))
+        ),
     )
     return float(abs(fitted - observed) * _FRAME_S)
 
@@ -1150,6 +1204,72 @@ def _independent_box_qp_reference(
         }
 
 
+def _aggregate_simulator_diagnostics(
+    by_domain: Mapping[str, Mapping[str, Any]]
+) -> tuple[dict[str, Any], bool]:
+    """Aggregate every simulator arm/domain/mode/initialization diagnostic."""
+    metric_names = (
+        "rmse_c",
+        "max_abs_error_c",
+        "bias_c",
+        "p90_abs_error_c",
+        "steady_gain_error_c_per_q",
+        "delay_error_s",
+        "coast_braking_temperature_error_c",
+    )
+    domains: dict[str, Any] = {}
+    valid = bool(by_domain)
+    for domain, document in sorted(by_domain.items()):
+        diagnostics = document.get("diagnostics_c")
+        if not isinstance(diagnostics, Mapping):
+            valid = False
+            continue
+        domain_values: dict[str, Any] = {}
+        for horizon, evidence in sorted(diagnostics.items(), key=lambda item: int(item[0])):
+            if not isinstance(evidence, Mapping):
+                valid = False
+                continue
+            values = {
+                metric: evidence.get(metric)
+                for metric in metric_names
+            }
+            values["origin_count"] = evidence.get("origin_count")
+            values["coast_braking_sample_count"] = evidence.get(
+                "coast_braking_sample_count"
+            )
+            domain_values[str(horizon)] = values
+            valid = valid and all(
+                isinstance(value, (int, float)) and np.isfinite(value)
+                for value in values.values()
+            ) and values["origin_count"] > 0 and values["coast_braking_sample_count"] > 0
+        domains[domain] = domain_values
+    aggregate: dict[str, Any] = {}
+    for horizon in ("60", "300", "900", "1800", "3600"):
+        values = [
+            diagnostics[horizon]
+            for diagnostics in domains.values()
+            if horizon in diagnostics
+        ]
+        if len(values) != len(domains):
+            valid = False
+            continue
+        aggregate[horizon] = {
+            metric: (
+                float(max(value[metric] for value in values))
+                if metric == "max_abs_error_c"
+                else float(np.mean([value[metric] for value in values]))
+            )
+            for metric in metric_names
+        }
+        aggregate[horizon]["origin_count"] = int(
+            sum(value["origin_count"] for value in values)
+        )
+        aggregate[horizon]["coast_braking_sample_count"] = int(
+            sum(value["coast_braking_sample_count"] for value in values)
+        )
+    return {"by_domain": domains, "aggregate": aggregate}, valid
+
+
 def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], failures=()) -> ExperimentArtifact:
     by_arm: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     prediction_origins: dict[str, dict[str, dict[str, tuple[float, ...]]]] = defaultdict(
@@ -1159,9 +1279,13 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
     timings: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     seen_evidence: set[tuple[str, str]] = set()
     correct_scores: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    simulator_documents: dict[str, dict[str, Mapping[str, Any]]] = defaultdict(dict)
     for row in rows:
         domain = f"{row.mode}:{row.initialization}:{row.plant}"
         by_arm[row.arm][domain].append(_metric_float(row.metrics, "control_score"))
+        diagnostic = (row.model_evidence or {}).get("simulator_prediction_diagnostics")
+        if isinstance(diagnostic, Mapping):
+            simulator_documents[row.arm].setdefault(domain, diagnostic)
         if row.initialization == "correct":
             correct_scores[(row.arm, row.plant, row.mode)].append(
                 _metric_float(row.metrics, "control_score")
@@ -1183,42 +1307,68 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
         timings[row.arm]["learner"].extend(row.raw_learner_ms)
         timings[row.arm]["refresh"].extend(row.raw_refresh_ms)
         timings[row.arm]["solve"].extend(row.raw_solve_ms)
-    arms = tuple(
-        ArmEvidence(
-            name=arm,
-            domain_median_scores={
-                domain: float(median(scores)) for domain, scores in sorted(domains.items())
-            },
-            ranking_domain_scores={
-                plant: float(median(scores))
-                for (candidate_arm, plant, mode), scores in sorted(correct_scores.items())
-                if candidate_arm == arm and mode == "online"
-            },
-            correct_baseline_no_degradation=all(
-                float(median(scores))
-                <= float(median(correct_scores[(arm, plant, "frozen")])) * 1.01
-                for (candidate_arm, plant, mode), scores in correct_scores.items()
-                if candidate_arm == arm
-                and mode == "online"
-                and (arm, plant, "frozen") in correct_scores
-            ),
-            prediction_error=_mean_or_none(
-                _flatten_origins(prediction_origins[arm].get("600", {}))
-            )
-            or 0.0,
-            before_mae=_mean_or_none(recovery[arm]["recovery_before_mae_c"]) or 0.0,
-            after_mae=_mean_or_none(recovery[arm]["recovery_after_mae_c"]) or 0.0,
-            recovery_improvement_ratio=_mean_or_none(recovery[arm]["recovery_improvement_ratio"])
-            or 0.0,
-            recovery_improvement_delta=_mean_or_none(recovery[arm]["recovery_improvement_delta_c"])
-            or 0.0,
-            raw_solve_p99_ms=_p99(timings[arm]["solve"]),
-            raw_learner_ms=tuple(timings[arm]["learner"]),
-            raw_refresh_ms=tuple(timings[arm]["refresh"]),
-            raw_solve_ms=tuple(timings[arm]["solve"]),
+    simulator_aggregates = {
+        arm: _aggregate_simulator_diagnostics(simulator_documents[arm])
+        for arm in by_arm
+    }
+    arm_values: list[ArmEvidence] = []
+    for arm, domains in sorted(by_arm.items()):
+        diagnostics, diagnostics_valid = simulator_aggregates[arm]
+        sixty_minute = diagnostics["aggregate"].get("3600")
+        prediction_error = (
+            float(sixty_minute["rmse_c"])
+            if isinstance(sixty_minute, Mapping)
+            else _mean_or_none(_flatten_origins(prediction_origins[arm].get("600", {})))
+            or 0.0
         )
-        for arm, domains in sorted(by_arm.items())
-    )
+        diagnostic_values = sixty_minute if isinstance(sixty_minute, Mapping) else {}
+        arm_values.append(
+            ArmEvidence(
+                name=arm,
+                domain_median_scores={
+                    domain: float(median(scores))
+                    for domain, scores in sorted(domains.items())
+                },
+                ranking_domain_scores={
+                    plant: float(median(scores))
+                    for (candidate_arm, plant, mode), scores in sorted(correct_scores.items())
+                    if candidate_arm == arm and mode == "online"
+                },
+                correct_baseline_no_degradation=all(
+                    float(median(scores))
+                    <= float(median(correct_scores[(arm, plant, "frozen")])) * 1.01
+                    for (candidate_arm, plant, mode), scores in correct_scores.items()
+                    if candidate_arm == arm
+                    and mode == "online"
+                    and (arm, plant, "frozen") in correct_scores
+                ),
+                prediction_error=prediction_error,
+                before_mae=_mean_or_none(recovery[arm]["recovery_before_mae_c"]) or 0.0,
+                after_mae=_mean_or_none(recovery[arm]["recovery_after_mae_c"]) or 0.0,
+                recovery_improvement_ratio=(
+                    _mean_or_none(recovery[arm]["recovery_improvement_ratio"]) or 0.0
+                ),
+                recovery_improvement_delta=(
+                    _mean_or_none(recovery[arm]["recovery_improvement_delta_c"]) or 0.0
+                ),
+                raw_solve_p99_ms=_p99(timings[arm]["solve"]),
+                raw_learner_ms=tuple(timings[arm]["learner"]),
+                raw_refresh_ms=tuple(timings[arm]["refresh"]),
+                raw_solve_ms=tuple(timings[arm]["solve"]),
+                runtime_validity="not_measured",
+                simulator_diagnostics=diagnostics,
+                simulator_diagnostics_available=bool(diagnostics["aggregate"]),
+                simulator_diagnostics_valid=diagnostics_valid,
+                simulator_gain_error_c_per_q=float(
+                    diagnostic_values.get("steady_gain_error_c_per_q", 0.0)
+                ),
+                simulator_delay_error_s=float(diagnostic_values.get("delay_error_s", 0.0)),
+                simulator_coast_braking_error_c=float(
+                    diagnostic_values.get("coast_braking_temperature_error_c", 0.0)
+                ),
+            )
+        )
+    arms = tuple(arm_values)
     horizon_evidence = {
         arm.name: {
             "mpc_validation_candidates": {
@@ -1229,6 +1379,7 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
                 for horizon in ("600", "800", "1000")
             },
             "real": _real_mak_evidence(arm.name),
+            "simulator": arm.simulator_diagnostics,
         }
         for arm in arms
     }
@@ -1239,6 +1390,11 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
             "horizon_selection": selection,
             "horizon_selection_window": "per-domain chronological validation partitions",
             "horizon_tie_rule": "shortest horizon within 1% of pooled validation best",
+            "runtime_measurement": {
+                "status": "not_measured",
+                "reason": "concurrent workstation workloads contaminated timing evidence",
+                "required_follow_up": "repeat timing evidence in an isolated rerun",
+            },
         },
         seeds=config.seeds,
         splits=_split_evidence(config),
@@ -1362,8 +1518,7 @@ def _split_evidence(config: ExperimentConfig) -> dict[str, Any]:
     for plant in ("GrillSim", "MAKGrillSim"):
         for seed in sorted(config.seeds):
             record = _calibration_record(plant, seed)
-            fit_end = int(record.temp_c.size * 0.35)
-            validation_end = int(record.temp_c.size * 0.75)
+            fit_end, validation_end = _simulator_boundaries(plant, record.temp_c.size)
             domains[f"{plant}:{seed}"] = {
                 "fit": [0, fit_end],
                 "validation": [fit_end, validation_end],

@@ -74,9 +74,9 @@ DEFAULT_CALIBRATION_PROGRAM: Final = CalibrationProgram(
 
 MAK_CALIBRATION_PROGRAM: Final = CalibrationProgram(
     segments=(
-        ProgramSegment(2_400, 0.15, 0.08, 120),
-        ProgramSegment(2_400, 0.35, 0.08, 120),
-        ProgramSegment(2_400, 0.65, 0.08, 120),
+        ProgramSegment(4_800, 0.15, 0.08, 120),
+        ProgramSegment(4_800, 0.35, 0.08, 120),
+        ProgramSegment(4_800, 0.65, 0.08, 120),
     ),
     coast_duration_s=1_200,
 )

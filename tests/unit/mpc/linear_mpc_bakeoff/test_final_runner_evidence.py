@@ -79,6 +79,42 @@ def test_quick_artifact_persists_one_horizon_and_real_mak_provenance() -> None:
     )
 
 
+def test_quick_simulator_diagnostics_cover_all_horizons_without_unmasked_coast_leakage() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_experiment
+
+    artifact = run_experiment(ExperimentConfig.quick())
+
+    for row in artifact.scenarios:
+        if row.plant not in {"GrillSim", "MAKGrillSim"}:
+            continue
+        document = row.model_evidence["simulator_prediction_diagnostics"]
+        split = artifact.splits[f"{row.plant}:{row.seed}"]
+        assert document["boundaries"] == {
+            name: list(split[name]) for name in ("fit", "validation", "test")
+        }
+        diagnostics = document["diagnostics_c"]
+        assert tuple(diagnostics) == ("60", "300", "900", "1800", "3600")
+        for horizon, evidence in diagnostics.items():
+            assert evidence is not None, horizon
+            assert evidence["origins"]
+            assert evidence["coast_braking_sample_count"] > 0
+            for origin in evidence["origins"]:
+                mask = origin["coast_or_braking_mask"]
+                assert len(mask) == len(origin["residuals_c"])
+                assert origin["coast_braking_residuals_c"] == [
+                    residual
+                    for residual, selected in zip(origin["residuals_c"], mask, strict=True)
+                    if selected
+                ]
+        snapshot = row.model_evidence["batch_fit_snapshot"]
+        assert snapshot["steady_gain"] != 0.0
+
+    for arm in artifact.arms:
+        assert arm.simulator_diagnostics_available
+        assert arm.simulator_diagnostics_valid
+        assert arm.prediction_error == arm.simulator_diagnostics["aggregate"]["3600"]["rmse_c"]
+
+
 def test_scenario_envelope_restores_down_step_and_limits_600f_to_eligible_plant() -> None:
     scenarios = {item.name: item for item in SCENARIOS}
 
@@ -129,12 +165,12 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
     evaluations = [
         item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
     ]
-    assert len(evaluations) == 2
+    assert len(evaluations) == 1
     assert all(
         isfinite(item["candidate_prediction_score"])
         and isfinite(item["incumbent_prediction_score"])
-        and isfinite(item["candidate_braking_score"])
-        and isfinite(item["incumbent_braking_score"])
+        and item["candidate_braking_score"] is None
+        and item["incumbent_braking_score"] is None
         for item in evaluations
     )
     assert any(

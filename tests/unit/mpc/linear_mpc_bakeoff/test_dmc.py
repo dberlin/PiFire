@@ -132,6 +132,15 @@ def test_dmc_projects_the_exposed_delayed_snapshot_endpoint() -> None:
     assert snapshot["final_gain"] == pytest.approx(0.6)
     assert snapshot["step_response"][-1] == pytest.approx(0.6)
 
+def test_snapshot_exposes_arm_neutral_gain_diagnostic() -> None:
+    model = LaguerreDMC(DMCConfig(terms=(8,), poles=(0.92,)))
+    model.fit(delayed_first_order_record(delay_steps=3, pole=0.95, samples=600))
+
+    snapshot = model.snapshot()
+
+    assert snapshot["steady_gain"] == snapshot["final_gain"]
+    assert snapshot["delay_seconds"] == snapshot["delay_steps"] * 20.0
+
 
 def test_dmc_affine_prediction_matches_shifted_step_response() -> None:
     record = delayed_first_order_record(delay_steps=4, pole=0.96, samples=600)

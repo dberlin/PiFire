@@ -124,6 +124,12 @@ def test_arx_fits_incremental_temperature_and_input_regressors() -> None:
     assert coefficients["ar"][0] == pytest.approx(0.85, abs=0.02)
     assert coefficients["input"][0] == pytest.approx(0.3, abs=0.02)
 
+def test_snapshot_exposes_arm_neutral_gain_and_delay_diagnostics() -> None:
+    snapshot = fitted_model(training_prefix()).snapshot()
+
+    assert snapshot["steady_gain"] > 0.0
+    assert snapshot["delay_seconds"] == snapshot["delay_steps"] * 20.0
+
 
 def test_arx_reconstructs_incremental_forecast_from_prefix_state() -> None:
     record = incremental_record(samples=1_000, seed=16)

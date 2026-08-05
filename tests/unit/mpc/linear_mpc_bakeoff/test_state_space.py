@@ -15,6 +15,7 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.data import chronological_s
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     _identification_records,
     _record_slice,
+    _simulator_boundaries,
 )
 from docs.superpowers.experiments.linear_mpc_bakeoff.state_space import (
     InnovationStateSpace,
@@ -117,6 +118,14 @@ def test_subspace_fit_recovers_order_two_dynamics() -> None:
     assert model.snapshot()["delay_steps"] == 2
     assert max(abs(p) for p in model.snapshot()["poles"]) < 1.0
     assert free_run_rmse(model, split.test) < 0.25
+
+def test_snapshot_exposes_arm_neutral_delay_seconds() -> None:
+    model, _ = fitted_then_extended_record()
+
+    snapshot = model.snapshot()
+
+    assert snapshot["steady_gain"] > 0.0
+    assert snapshot["delay_seconds"] == snapshot["delay_steps"] * 20.0
 
 
 def test_refresh_aligns_state_without_output_jump() -> None:
@@ -293,7 +302,8 @@ def test_no_viable_candidate_preserves_detailed_rejection_reason() -> None:
 def test_mak_correct_calibration_accepts_data_scaled_high_gain_candidate() -> None:
     """A correct MAK prefix has a valid gain above the retired global 1,000 cap."""
     record, initialized = _identification_records("MAKGrillSim", 2, "correct")
-    fit_record = _record_slice(initialized, 0, int(record.temp_c.size * 0.35))
+    fit_end, _ = _simulator_boundaries("MAKGrillSim", record.temp_c.size)
+    fit_record = _record_slice(initialized, 0, fit_end)
     model = InnovationStateSpace(
         StateSpaceConfig(orders=(1,), delays=(2,), refresh_interval_s=1e12)
     )

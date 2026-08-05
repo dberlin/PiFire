@@ -321,12 +321,16 @@ class InnovationStateSpace:
         fit = self._require_fit()
         poles = np.linalg.eigvals(fit.A)
         return _freeze({
-            "schema": "innovation-state-space/v1", "order": fit.order, "delay_steps": fit.delay,
+            "schema": "innovation-state-space/v1",
+            "order": fit.order,
+            "delay_steps": fit.delay,
+            "delay_seconds": fit.delay * 20.0,
             "matrices": {
                 "A": fit.A.tolist(), "B": fit.B.tolist(), "C": fit.C.tolist(),
                 "D": fit.D.tolist(), "state_offset": fit.state_offset.tolist(),
             },
-            "poles": [float(abs(pole)) for pole in poles], "steady_gain": _steady_gain(fit),
+            "poles": [float(abs(pole)) for pole in poles],
+            "steady_gain": _steady_gain(fit),
             "plausibility_bounds": (
                 self._plausibility_bounds.to_document()
                 if self._plausibility_bounds is not None

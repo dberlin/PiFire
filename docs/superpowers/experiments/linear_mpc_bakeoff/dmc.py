@@ -275,6 +275,7 @@ class LaguerreDMC:
                 "delay_seconds": active.delay_steps * self._frame_seconds,
                 "step_response": response,
                 "final_gain": float(response[-1]),
+                "steady_gain": float(response[-1]),
                 "gain_projected": active.projected_gain,
                 "promotion_eligible": active.promotion_eligible,
                 "update_timing": {

@@ -315,11 +315,14 @@ class ScheduledARX:
                     "effective_samples": region.effective_samples,
                 }
             )
+        steady_gain = float(np.mean([region["dc_gain"] for region in regions]))
         return _freeze_snapshot(
             {
                 "schema": "scheduled-arx/v1",
                 "order": {"na": self._config.na, "nb": self._config.nb},
                 "delay_steps": self._active_delay,
+                "delay_seconds": self._active_delay * 20.0,
+                "steady_gain": steady_gain,
                 "knots_c": list(TEMPERATURE_KNOTS_C),
                 "regions": regions,
                 "plausibility_bounds": {

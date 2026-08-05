@@ -64,6 +64,36 @@ def test_runtime_only_disqualifies_beyond_five_times_budget() -> None:
     assert recommend(artifact).arms["scheduled-arx"].reasons == ("runtime beyond hard limits",)
 
 
+def test_unisolated_runtime_evidence_is_deferred_not_a_disqualifier() -> None:
+    artifact = ExperimentArtifact(
+        config={"control_budget_ms": 50.0},
+        seeds=(2,),
+        splits={},
+        model_snapshots={},
+        scenarios=(),
+        arms=(
+            ArmEvidence(
+                "scheduled-arx",
+                {"GrillSim": 10.0},
+                prediction_error=1.0,
+                before_mae=1.0,
+                after_mae=1.0,
+                recovery_improvement_ratio=1.0,
+                recovery_improvement_delta=0.0,
+                raw_solve_p99_ms=100.0,
+                runtime_validity="not_measured",
+            ),
+        ),
+        source_revision="abc123",
+        environment={"python": "test"},
+    )
+
+    evidence = artifact.to_document()["arms"]["scheduled-arx"]
+
+    assert evidence["runtime_validity"] == "not_measured"
+    assert recommend(artifact).arms["scheduled-arx"].valid
+
+
 def test_simplest_arm_wins_within_five_percent() -> None:
     artifact = artifact_with_scores(arx=10.4, state_space=10.0, dmc=12.0)
 
@@ -177,6 +207,68 @@ def test_runtime_gates_apply_to_five_times_learner_and_refresh_p99() -> None:
 
     assert not recommend(artifact).arms["scheduled-arx"].valid
 
+
+def test_simulator_diagnostics_change_validity_and_selection_at_equal_control() -> None:
+    artifact = ExperimentArtifact(
+        config={"control_budget_ms": 50.0},
+        seeds=(2,),
+        splits={},
+        model_snapshots={},
+        scenarios=(),
+        arms=(
+            ArmEvidence(
+                "scheduled-arx",
+                {"GrillSim": 10.0},
+                prediction_error=1.0,
+                before_mae=1.0,
+                after_mae=1.0,
+                recovery_improvement_ratio=1.0,
+                recovery_improvement_delta=0.0,
+                raw_solve_p99_ms=1.0,
+                simulator_diagnostics_available=True,
+                simulator_gain_error_c_per_q=4.0,
+                simulator_delay_error_s=40.0,
+                simulator_coast_braking_error_c=3.0,
+            ),
+            ArmEvidence(
+                "dmc",
+                {"GrillSim": 10.0},
+                prediction_error=0.5,
+                before_mae=1.0,
+                after_mae=1.0,
+                recovery_improvement_ratio=1.0,
+                recovery_improvement_delta=0.0,
+                raw_solve_p99_ms=1.0,
+                simulator_diagnostics_available=True,
+                simulator_gain_error_c_per_q=0.1,
+                simulator_delay_error_s=1.0,
+                simulator_coast_braking_error_c=0.2,
+            ),
+            ArmEvidence(
+                "state-space",
+                {"GrillSim": 10.0},
+                prediction_error=0.5,
+                before_mae=1.0,
+                after_mae=1.0,
+                recovery_improvement_ratio=1.0,
+                recovery_improvement_delta=0.0,
+                raw_solve_p99_ms=1.0,
+                simulator_diagnostics_available=True,
+                simulator_gain_error_c_per_q=0.1,
+                simulator_delay_error_s=1.0,
+                simulator_coast_braking_error_c=0.2,
+                simulator_diagnostics_valid=False,
+            ),
+        ),
+        source_revision="abc123",
+        environment={"python": "test"},
+    )
+
+    recommendation = recommend(artifact)
+
+    assert not recommendation.arms["state-space"].valid
+    assert recommendation.pareto_frontier == ("dmc",)
+    assert recommendation.selected_arm == "dmc"
 def document_has_failure(artifact: ExperimentArtifact, category: str) -> bool:
     return any(failure["category"] == category for failure in artifact.to_document()["failures"])
 

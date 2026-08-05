@@ -109,6 +109,13 @@ class ArmEvidence:
     raw_solve_ms: Sequence[float] = ()
     ranking_domain_scores: Mapping[str, float] = field(default_factory=dict)
     correct_baseline_no_degradation: bool = True
+    runtime_validity: str = "measured"
+    simulator_diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    simulator_diagnostics_available: bool = False
+    simulator_diagnostics_valid: bool = True
+    simulator_gain_error_c_per_q: float = 0.0
+    simulator_delay_error_s: float = 0.0
+    simulator_coast_braking_error_c: float = 0.0
 
     def __post_init__(self) -> None:
         if self.name not in _COMPLEXITY:
@@ -144,6 +151,13 @@ class ArmEvidence:
             refresh_p99,
             solve_p99,
         )
+        diagnostic_values = (
+            self.simulator_gain_error_c_per_q,
+            self.simulator_delay_error_s,
+            self.simulator_coast_braking_error_c,
+        )
+        if not all(isfinite(float(value)) and float(value) >= 0.0 for value in diagnostic_values):
+            raise ValueError("simulator diagnostic values must be finite and non-negative")
         if not all(isfinite(float(value)) and float(value) >= 0.0 for value in values):
             raise ValueError("arm evidence values must be finite and non-negative")
         if not isfinite(float(self.recovery_improvement_delta)):
@@ -151,6 +165,8 @@ class ArmEvidence:
         projected = solve_p99 * 5.0 if self.projected_solve_p99_ms < 0.0 else self.projected_solve_p99_ms
         if not isfinite(float(projected)) or float(projected) < 0.0:
             raise ValueError("projected solve timing must be finite and non-negative")
+        if self.runtime_validity not in {"measured", "not_measured"}:
+            raise ValueError("runtime_validity must be measured or not_measured")
         object.__setattr__(self, "domain_median_scores", MappingProxyType(dict(sorted(scores.items()))))
         object.__setattr__(self, "ranking_domain_scores", MappingProxyType(dict(sorted(ranking_scores.items()))))
         object.__setattr__(self, "prediction_error", float(self.prediction_error))
@@ -162,6 +178,25 @@ class ArmEvidence:
         object.__setattr__(self, "raw_refresh_p99_ms", refresh_p99)
         object.__setattr__(self, "raw_solve_p99_ms", solve_p99)
         object.__setattr__(self, "projected_solve_p99_ms", float(projected))
+        object.__setattr__(self, "runtime_validity", self.runtime_validity)
+        object.__setattr__(self, "simulator_diagnostics", _freeze(self.simulator_diagnostics))
+        object.__setattr__(
+            self, "simulator_diagnostics_available", bool(self.simulator_diagnostics_available)
+        )
+        object.__setattr__(
+            self, "simulator_diagnostics_valid", bool(self.simulator_diagnostics_valid)
+        )
+        object.__setattr__(
+            self,
+            "simulator_gain_error_c_per_q",
+            float(self.simulator_gain_error_c_per_q),
+        )
+        object.__setattr__(self, "simulator_delay_error_s", float(self.simulator_delay_error_s))
+        object.__setattr__(
+            self,
+            "simulator_coast_braking_error_c",
+            float(self.simulator_coast_braking_error_c),
+        )
 
     @property
     def worst_domain_score(self) -> float:
@@ -180,7 +215,14 @@ class ArmEvidence:
             "domain_median_control_scores": _document(self.domain_median_scores),
             "ranking_domain_control_scores": _document(self.ranking_domain_scores),
             "correct_baseline_no_degradation": self.correct_baseline_no_degradation,
+            "runtime_validity": self.runtime_validity,
             "prediction_error": self.prediction_error,
+            "simulator_diagnostics": _document(self.simulator_diagnostics),
+            "simulator_diagnostics_available": self.simulator_diagnostics_available,
+            "simulator_diagnostics_valid": self.simulator_diagnostics_valid,
+            "simulator_gain_error_c_per_q": self.simulator_gain_error_c_per_q,
+            "simulator_delay_error_s": self.simulator_delay_error_s,
+            "simulator_coast_braking_error_c": self.simulator_coast_braking_error_c,
             "projected_solve_p99_ms": self.projected_solve_p99_ms,
             "projected_timing_ms": {
                 "learner": [value * 5.0 for value in self.raw_learner_ms],
@@ -299,7 +341,7 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
     valid_evidence: list[ArmEvidence] = []
     for evidence in artifact.arms:
         reasons = sorted(set(failures_by_arm.get(evidence.name, ())))
-        if (
+        if evidence.runtime_validity == "measured" and (
             evidence.raw_learner_p99_ms * 5.0 > 25.0
             or evidence.raw_refresh_p99_ms * 5.0 > 1_250.0
             or evidence.projected_solve_p99_ms > min(budget * 5.0, 250.0)
@@ -307,22 +349,34 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
             reasons.append("runtime beyond hard limits")
         if not evidence.correct_baseline_no_degradation:
             reasons.append("correct-baseline online degradation")
+        if evidence.simulator_diagnostics_available and not evidence.simulator_diagnostics_valid:
+            reasons.append("invalid simulator gain/delay/coast diagnostics")
         valid = not reasons
         recommendations[evidence.name] = ArmRecommendation(valid, tuple(reasons), evidence.worst_domain_score)
         if valid:
             valid_evidence.append(evidence)
     frontier = _pareto_frontier(valid_evidence)
+    ranking_pool = (
+        list(frontier)
+        if any(item.simulator_diagnostics_available for item in valid_evidence)
+        else valid_evidence
+    )
     selected: str | None = None
-    if valid_evidence and not _material_pareto_conflict(frontier):
-        best_score = min(item.worst_domain_score for item in valid_evidence)
-        contenders = [item for item in valid_evidence if item.worst_domain_score <= best_score * 1.05]
+    if ranking_pool and not _material_pareto_conflict(frontier):
+        best_score = min(item.worst_domain_score for item in ranking_pool)
+        contenders = [
+            item for item in ranking_pool if item.worst_domain_score <= best_score * 1.05
+        ]
         selected = min(
             contenders,
             key=lambda item: (
-                _COMPLEXITY[item.name],
                 item.prediction_error,
                 item.recovery_improvement_ratio,
                 item.projected_solve_p99_ms,
+                item.simulator_gain_error_c_per_q,
+                item.simulator_delay_error_s,
+                item.simulator_coast_braking_error_c,
+                _COMPLEXITY[item.name],
                 item.name,
             ),
         ).name
@@ -359,12 +413,15 @@ def _pareto_frontier(evidence: Sequence[ArmEvidence]) -> tuple[ArmEvidence, ...]
     )
 
 
-def _pareto_values(evidence: ArmEvidence) -> tuple[float, float, float, float]:
+def _pareto_values(evidence: ArmEvidence) -> tuple[float, ...]:
     return (
         evidence.worst_domain_score,
         evidence.prediction_error,
         evidence.recovery_improvement_ratio,
         evidence.projected_solve_p99_ms,
+        evidence.simulator_gain_error_c_per_q,
+        evidence.simulator_delay_error_s,
+        evidence.simulator_coast_braking_error_c,
     )
 
 
