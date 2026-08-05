@@ -91,9 +91,11 @@ class Controller(PIDControllerBase):
         current_time = time.time()
         previous_update_time = self.last_update
         previous_temperature = self.last
-        dt = current_time - previous_update_time
+        dt = self._elapsed_since_last_update(current_time)
         branch = ControllerBranch.NONE
         new_target_before = self.new_target
+
+        # Fix self.last being set to 0.0 on set point change
         if self.last == 0.0 and self.new_target:
             self.last = current
             previous_temperature = current
