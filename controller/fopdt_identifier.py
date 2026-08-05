@@ -600,7 +600,13 @@ class FOPDTIdentifier:
             imask = integrating_gate_mask(iparams, irse)
             iwinner, _ = promote(self._ibank.resid_ew, imask)
             if iwinner is None:
-                self._confirm = None
+                # One evaluation with no gated winner is a noisy sample, not a
+                # verdict on the samples already agreeing: discarding the window
+                # here made a 19-deep confirmation die one short and start over,
+                # so whether a chamber was ever identified came down to the
+                # noise draw. Pause instead, as a loss of excitation already
+                # does above -- the parameter agreement `_confirmed` demands is
+                # what keeps a window honest across the gap.
                 return
             candidate = {
                 "form": FORM_IPDT,

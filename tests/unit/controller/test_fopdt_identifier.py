@@ -517,6 +517,28 @@ def test_restore_adopts_a_valid_model_and_rejects_an_impossible_one():
     assert identifier.restore({"K": 800.0, "tau": 600.0}) is False
 
 
+def test_a_single_gateless_evaluation_does_not_destroy_the_confirmation_window(monkeypatch):
+    """Confirmation progress is earned over many samples and was thrown away by
+    one that gated nothing, so whether a chamber ever got identified came down
+    to the noise draw. Measured on MAKGrillSim before this: windows died at
+    depth 19 twice in a cook that eventually promoted, and never got past 15 in
+    one that never did -- same plant, same excitation, different seed.
+
+    Losing excitation altogether already only pauses the window, so the milder
+    condition must not be the harsher one.
+    """
+    identifier = FOPDTIdentifier()
+    monkeypatch.setattr(identifier, "_excited", lambda: True)
+    # This evaluation gates nothing, in either form.
+    monkeypatch.setattr("controller.fopdt_identifier.promote", lambda resid, mask: (None, None))
+    window = {"n": CONFIRM_WINDOW - 1, "form": FORM_IPDT, "K_i": 0.46, "c0": -0.033, "theta": 90.0}
+    identifier._confirm = dict(window)
+
+    identifier._evaluate()
+
+    assert identifier._confirm == window
+
+
 def test_every_promotable_form_can_be_restored():
     """A form the identifier can promote but not restore is learning that cannot
     outlive the cook that earned it: it drives the predictor until the cook ends
