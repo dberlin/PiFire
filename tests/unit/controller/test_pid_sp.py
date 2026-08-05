@@ -227,6 +227,56 @@ def test_a_last_selected_temperature_of_exactly_zero_is_repaired_on_a_new_target
     assert sp.kd * 220.0 / dt != pytest.approx(0.0)
 
 
+def test_a_first_approach_that_misses_the_band_still_clears_new_target(clock):
+    """Reaching the set point is a crossing, not a band.
+
+    `new_target` gates the integral-reset rule below it. While it is set, that
+    rule fires on every tick and the integral is wiped before it can accumulate,
+    so the loop has no way to remove a standing offset. A chamber that steps
+    over a narrow band on its way up -- 20 F per tick here, so the closest
+    approach either side of the set point is 5 F -- would latch `new_target` for
+    the rest of the cook and park at that offset permanently. Measured on the
+    MAK plant before this was fixed: two cooks differing only in starting
+    temperature settled 8 F apart, one of them never once inside the band.
+    """
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    # Every sample sits at least 5 F from the set point, so `abs(error) <= 3`
+    # is never satisfied at any point on the approach.
+    for temp in (200.0, 220.0, 230.0):
+        clock.t += 20.0
+        sp.update(temp)
+        assert abs(temp - 225.0) >= 5.0
+
+    assert not sp.new_target
+
+
+def test_the_integral_accumulates_once_the_set_point_has_been_crossed(clock):
+    """The consequence of the latch, pinned on the accumulator itself.
+
+    While `new_target` is set the reset fires every tick, so the accumulator
+    only ever holds the single tick added after it -- it cannot grow, whatever
+    the error is. Past the crossing it integrates, which is what lets the loop
+    pull out a standing offset. Asserted as growth between ticks rather than an
+    absolute value, because the approach leaves it wherever it leaves it.
+    """
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    for temp in (200.0, 220.0, 230.0):
+        clock.t += 20.0
+        sp.update(temp)
+
+    clock.t += 20.0
+    sp.update(233.0)
+    after_one = sp.inter
+    for _ in range(2):
+        clock.t += 20.0
+        sp.update(233.0)
+
+    # Two further ticks at +8 F over 20 s each.
+    assert sp.inter - after_one == pytest.approx(2 * 8.0 * 20.0)
+
+
 def test_set_output_feeds_the_identifier_as_well_as_the_predictor(clock):
     """Dropping predictor.record_output is caught by the divergence tests
     above; dropping identifier.record_output is not caught anywhere else.

@@ -198,8 +198,17 @@ class Controller(PIDControllerBase):
                 branch = ControllerBranch.OVERSHOOT
         else:
             # Reset integral term when the temperature first reaches or exceeds
-            # set point after a set point change
-            if self.new_target and abs(error) <= 3:
+            # set point after a set point change.
+            #
+            # Reaching the set point is a crossing, not a band. A band can be
+            # stepped over: a chamber whose closest approach is 4.8 F never
+            # clears this, so `new_target` latches for the rest of the cook, the
+            # reset below then fires on every tick, and the integral is wiped
+            # before it can accumulate. Without integral action the loop parks
+            # at a standing offset, which is itself far enough out to keep the
+            # band unreached -- the state sustains itself, and two cooks
+            # differing only in starting temperature settle 8 F apart.
+            if self.new_target and (error >= 0.0 or abs(error) <= 3):
                 self.new_target = False
                 if branch is ControllerBranch.NONE:
                     branch = ControllerBranch.TARGET_REACHED
