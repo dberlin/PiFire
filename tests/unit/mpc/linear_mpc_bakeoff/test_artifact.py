@@ -365,3 +365,78 @@ def test_recommendation_uses_recovery_improvement_ratio_not_absolute_after_error
     assert evidence["recovery_improvement_ratio"] == 0.1
     assert evidence["recovery_improvement_delta"] == 90.0
     assert recommend(artifact).pareto_frontier == ("dmc",)
+
+
+
+def test_target_miss_is_explicit_and_table_labels_timing_raw_only() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import render_table
+
+    artifact = ExperimentArtifact(
+        config={"control_budget_ms": 50.0},
+        seeds=(2,),
+        splits={},
+        model_snapshots={},
+        scenarios=(),
+        arms=(
+            ArmEvidence(
+                "scheduled-arx",
+                {"GrillSim": 10.0},
+                7.0,
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                1.0,
+                runtime_validity="not_measured",
+                target_missed=True,
+                operational_consequence="not deployment-ready for 60-minute prediction",
+            ),
+        ),
+        source_revision="abc123",
+        environment={"python": "test"},
+    )
+
+    document = artifact.to_document()["arms"]["scheduled-arx"]
+    assert document["target_missed"] is True
+    assert "not deployment-ready" in document["operational_consequence"]
+    table = render_table(artifact)
+    assert "not_measured/raw-only" in table
+    assert "target_missed" in table
+
+
+def test_normalized_artifact_round_trip_deduplicates_evidence_bundles() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import ScenarioResult
+
+    common = dict(
+        arm="scheduled-arx",
+        plant="GrillSim",
+        scenario="low-step",
+        seed=2,
+        initialization="correct",
+        fan_fraction=(1.0,),
+        requested_q=(0.0,),
+        realized_q=(0.0,),
+        temperature_c=(20.0,),
+        target_c=(80.0,),
+        metrics={"control_score": 1.0},
+        model_evidence={"raw_origin": [1, 2, 3]},
+    )
+    artifact = ExperimentArtifact(
+        config={"control_budget_ms": 50.0},
+        seeds=(2,),
+        splits={},
+        model_snapshots={},
+        scenarios=(
+            ScenarioResult(mode="frozen", **common),
+            ScenarioResult(mode="online", **common),
+        ),
+        arms=(ArmEvidence("scheduled-arx", {"GrillSim": 1.0}, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0),),
+        source_revision="abc123",
+        environment={"python": "test"},
+    )
+
+    document = artifact.to_document()
+    assert len(document["evidence_bundles"]) == 1
+    assert all("model_evidence" not in row for row in document["scenarios"])
+    restored = ExperimentArtifact.from_json(artifact.to_json())
+    assert restored.to_document() == document

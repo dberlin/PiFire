@@ -248,6 +248,7 @@ class AdaptationManager:
         policy: AdaptationPolicy | None = None,
         incumbent_alignment: AlignmentEvidence = AlignmentEvidence.MEASURED,
         challenger_alignment: AlignmentEvidence = AlignmentEvidence.MEASURED,
+        parameter_learning: bool = True,
         replay_capacity: int = 360,
         replay_seed: int = 0,
     ) -> None:
@@ -258,11 +259,16 @@ class AdaptationManager:
         self._challenger = challenger
         self._incumbent_alignment = incumbent_alignment
         self._challenger_alignment = challenger_alignment
+        self._parameter_learning = parameter_learning
         self._inputs: deque[float] = deque(maxlen=self._policy.excitation_window)
         self._replay = StratifiedReplay(replay_capacity, replay_seed)
         self._challenger_effective_updates = 0
         self._consecutive_wins = 0
         self._role_generation = 0
+        self._tracking_events = 0
+        self._operating_state_counts: dict[OperatingState, int] = {
+            state: 0 for state in OperatingState
+        }
         self._lock = Lock()
 
     @property
@@ -287,6 +293,19 @@ class AdaptationManager:
     def replay(self) -> StratifiedReplay:
         """Return the manager-owned replay store."""
         return self._replay
+    @property
+    def tracking_evidence(self) -> Mapping[str, object]:
+        """Return auditable non-parameter runtime state tracking evidence."""
+        with self._lock:
+            return MappingProxyType(
+                {
+                    "incumbent_track_count": self._tracking_events,
+                    "operating_state_counts": {
+                        state.value: self._operating_state_counts[state]
+                        for state in OperatingState
+                    },
+                }
+            )
 
     def observe(
         self,
@@ -300,8 +319,11 @@ class AdaptationManager:
         probe_age_s: float = 0.0,
         actuation_known: bool = True,
     ) -> AdaptationOutcome:
-        """Score first, track the incumbent, and learn only on the shadow arm."""
+        """Track every frame; gate only challenger parameter assimilation."""
         with self._lock:
+            incumbent_outcome = self._incumbent.track(observation)
+            self._tracking_events += 1
+            self._operating_state_counts[state] += 1
             hard_rejection = _hard_update_rejection(
                 provenance=provenance,
                 lid_open=lid_open,
@@ -312,18 +334,19 @@ class AdaptationManager:
                 max_probe_age_s=self._policy.max_probe_age_s,
             )
             if hard_rejection is not None:
+                self._challenger.track(observation)
                 variance, levels = _excitation(self._inputs)
                 gate = UpdateGate(False, (hard_rejection,), variance, levels)
-                return AdaptationOutcome(False, gate, None, None)
+                return AdaptationOutcome(False, gate, incumbent_outcome, None)
 
             candidate_inputs = (*self._inputs, observation.q)
             variance, levels = _excitation(candidate_inputs)
             self._inputs.append(observation.q)
             gate = self._excitation_gate(variance, levels)
-            if not gate.permitted:
-                return AdaptationOutcome(False, gate, None, None)
+            if not gate.permitted or not self._parameter_learning:
+                self._challenger.track(observation)
+                return AdaptationOutcome(False, gate, incumbent_outcome, None)
 
-            incumbent_outcome = self._incumbent.track(observation)
             challenger_outcome = self._challenger.observe(observation)
             if challenger_outcome.updated:
                 self._challenger_effective_updates += 1
@@ -493,6 +516,8 @@ def _strict_score_win(candidate: float, incumbent: float) -> bool:
 def _not_worse(
     candidate: float | None, incumbent: float | None, tolerance: float
 ) -> bool:
+    if candidate is None and incumbent is None:
+        return True
     return (
         candidate is not None
         and incumbent is not None

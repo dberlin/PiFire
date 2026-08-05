@@ -101,6 +101,7 @@ class ArmEvidence:
     recovery_improvement_ratio: float
     recovery_improvement_delta: float
     raw_solve_p99_ms: float
+    recovery_available: bool = False
     projected_solve_p99_ms: float = -1.0
     raw_learner_p99_ms: float = 0.0
     raw_refresh_p99_ms: float = 0.0
@@ -116,6 +117,8 @@ class ArmEvidence:
     simulator_gain_error_c_per_q: float = 0.0
     simulator_delay_error_s: float = 0.0
     simulator_coast_braking_error_c: float = 0.0
+    target_missed: bool = False
+    operational_consequence: str | None = None
 
     def __post_init__(self) -> None:
         if self.name not in _COMPLEXITY:
@@ -197,6 +200,11 @@ class ArmEvidence:
             "simulator_coast_braking_error_c",
             float(self.simulator_coast_braking_error_c),
         )
+        if self.target_missed and not self.operational_consequence:
+            raise ValueError("target-missed evidence requires an operational consequence")
+        object.__setattr__(self, "target_missed", bool(self.target_missed))
+        object.__setattr__(self, "operational_consequence", self.operational_consequence)
+        object.__setattr__(self, "recovery_available", bool(self.recovery_available))
 
     @property
     def worst_domain_score(self) -> float:
@@ -223,6 +231,9 @@ class ArmEvidence:
             "simulator_gain_error_c_per_q": self.simulator_gain_error_c_per_q,
             "simulator_delay_error_s": self.simulator_delay_error_s,
             "simulator_coast_braking_error_c": self.simulator_coast_braking_error_c,
+            "target_missed": self.target_missed,
+            "operational_consequence": self.operational_consequence,
+            "recovery_available": self.recovery_available,
             "projected_solve_p99_ms": self.projected_solve_p99_ms,
             "projected_timing_ms": {
                 "learner": [value * 5.0 for value in self.raw_learner_ms],
@@ -281,14 +292,45 @@ class ExperimentArtifact:
         return replace(self, horizon_evidence=horizon_evidence)
 
     def to_document(self) -> dict[str, Any]:
+        """Serialize rows once while storing repeated fitted evidence by identity."""
+        bundles: dict[str, Any] = {}
+        scenarios: list[dict[str, Any]] = []
+        for scenario in self.scenarios:
+            row = _scenario_document(scenario)
+            evidence_id = row.get("evidence_id")
+            model_evidence = row.pop("model_evidence", None)
+            if evidence_id is not None and model_evidence is not None:
+                shared_keys = (
+                    "calibration_provenance",
+                    "calibration_metadata",
+                    "batch_fit_snapshot",
+                    "simulator_prediction_diagnostics",
+                    "adaptation",
+                )
+                shared = {
+                    key: model_evidence[key]
+                    for key in shared_keys
+                    if key in model_evidence
+                }
+                runtime = {
+                    key: value
+                    for key, value in model_evidence.items()
+                    if key not in shared_keys
+                }
+                previous = bundles.setdefault(str(evidence_id), shared)
+                if previous != shared:
+                    raise ValueError(f"evidence_id {evidence_id!r} has conflicting raw origins")
+                row["runtime_model_evidence"] = runtime
+            scenarios.append(row)
         return {
             "arms": {arm.name: arm.to_document() for arm in self.arms},
             "config": _document(self.config),
             "environment": _document(self.environment),
+            "evidence_bundles": dict(sorted(bundles.items())),
             "failures": [failure.to_document() for failure in self.failures],
             "horizon_evidence": _normalize_horizon_document(self.horizon_evidence),
             "model_snapshots": _document(self.model_snapshots),
-            "scenarios": [_scenario_document(scenario) for scenario in self.scenarios],
+            "scenarios": scenarios,
             "schema_version": SCHEMA_VERSION,
             "seeds": list(self.seeds),
             "source_revision": self.source_revision,
@@ -296,7 +338,81 @@ class ExperimentArtifact:
         }
 
     def to_json(self) -> str:
-        return json.dumps(self.to_document(), allow_nan=False, sort_keys=True, separators=(",", ":"))
+        return json.dumps(self.to_document(), allow_nan=False, indent=2, sort_keys=True)
+
+    @classmethod
+    def from_json(cls, payload: str) -> "ExperimentArtifact":
+        """Losslessly reconstruct a normalized artifact, including raw row origins."""
+        document = json.loads(payload)
+        bundles = document.get("evidence_bundles", {})
+        if not isinstance(bundles, Mapping):
+            raise ValueError("evidence_bundles must be a mapping")
+        from .runner import _scenario_from_document
+
+        rows = []
+        for stored in document.get("scenarios", ()):
+            row = dict(stored)
+            evidence_id = row.get("evidence_id")
+            runtime = row.pop("runtime_model_evidence", {})
+            if evidence_id is not None:
+                try:
+                    row["model_evidence"] = {**bundles[str(evidence_id)], **runtime}
+                except KeyError as exc:
+                    raise ValueError(f"missing evidence bundle {evidence_id!r}") from exc
+            rows.append(_scenario_from_document(row))
+        arms = []
+        for name, evidence in document["arms"].items():
+            raw = evidence.get("raw_timing_ms", {})
+            arms.append(
+                ArmEvidence(
+                    name=name,
+                    domain_median_scores=evidence["domain_median_control_scores"],
+                    ranking_domain_scores=evidence.get("ranking_domain_control_scores", {}),
+                    correct_baseline_no_degradation=evidence.get("correct_baseline_no_degradation", True),
+                    runtime_validity=evidence.get("runtime_validity", "measured"),
+                    prediction_error=evidence["prediction_error"],
+                    before_mae=evidence["before_mae"],
+                    after_mae=evidence["after_mae"],
+                    recovery_improvement_ratio=evidence["recovery_improvement_ratio"],
+                    recovery_improvement_delta=evidence["recovery_improvement_delta"],
+                    recovery_available=evidence.get("recovery_available", False),
+                    raw_solve_p99_ms=evidence["raw_solve_p99_ms"],
+                    projected_solve_p99_ms=evidence.get("projected_solve_p99_ms", -1.0),
+                    raw_learner_ms=raw.get("learner", ()),
+                    raw_refresh_ms=raw.get("refresh", ()),
+                    raw_solve_ms=raw.get("solve", ()),
+                    simulator_diagnostics=evidence.get("simulator_diagnostics", {}),
+                    simulator_diagnostics_available=evidence.get("simulator_diagnostics_available", False),
+                    simulator_diagnostics_valid=evidence.get("simulator_diagnostics_valid", True),
+                    simulator_gain_error_c_per_q=evidence.get("simulator_gain_error_c_per_q", 0.0),
+                    simulator_delay_error_s=evidence.get("simulator_delay_error_s", 0.0),
+                    simulator_coast_braking_error_c=evidence.get("simulator_coast_braking_error_c", 0.0),
+                    target_missed=evidence.get("target_missed", False),
+                    operational_consequence=evidence.get("operational_consequence"),
+                )
+            )
+        failures = tuple(
+            ArmFailure(
+                item["arm"],
+                item["scenario"],
+                item["category"],
+                item["detail"],
+                MatrixKey(**item["matrix_key"]) if "matrix_key" in item else None,
+            )
+            for item in document.get("failures", ())
+        )
+        return cls(
+            config=document["config"],
+            seeds=document["seeds"],
+            splits=document["splits"],
+            model_snapshots=document["model_snapshots"],
+            scenarios=tuple(rows),
+            arms=tuple(arms),
+            source_revision=document["source_revision"],
+            environment=document["environment"],
+            failures=failures,
+            horizon_evidence=document.get("horizon_evidence", {}),
+        )
 
     def canonical_document(self) -> dict[str, Any]:
         """Return deterministic scientific evidence while retaining timing evidence in ``to_document``."""
@@ -350,8 +466,6 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
             or evidence.projected_solve_p99_ms > min(budget * 5.0, 250.0)
         ):
             reasons.append("runtime beyond hard limits")
-        if not evidence.correct_baseline_no_degradation:
-            reasons.append("correct-baseline online degradation")
         if diagnostics_present and not evidence.simulator_diagnostics_available:
             reasons.append("simulator diagnostics unavailable")
         elif evidence.simulator_diagnostics_available and not evidence.simulator_diagnostics_valid:
@@ -395,15 +509,25 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
 
 
 def render_table(artifact: ExperimentArtifact, recommendation: Recommendation | None = None) -> str:
-    """Render a concise deterministic comparison suitable for the command line."""
+    """Render concise evidence without presenting raw timing as a measurement."""
     recommendation = recommend(artifact) if recommendation is None else recommendation
-    lines = ["arm              valid  worst-score  projected-p99-ms  reasons"]
+    lines = ["arm              valid  worst-score  timing                   target_missed  reasons"]
     for evidence in artifact.arms:
         result = recommendation.arms[evidence.name]
         reasons = ", ".join(result.reasons) or "-"
+        timing = (
+            "not_measured/raw-only"
+            if evidence.runtime_validity == "not_measured"
+            else f"projected-p99={evidence.projected_solve_p99_ms:.3f}ms"
+        )
+        miss = (
+            f"true ({evidence.operational_consequence})"
+            if evidence.target_missed
+            else "false"
+        )
         lines.append(
             f"{evidence.name:<17}{str(result.valid):<7}{evidence.worst_domain_score:<13.3f}"
-            f"{evidence.projected_solve_p99_ms:<18.3f}{reasons}"
+            f"{timing:<25}{miss:<15}{reasons}"
         )
     lines.append(f"selected: {recommendation.selected_arm or 'none'}")
     lines.append(f"pareto: {', '.join(recommendation.pareto_frontier) or 'none'}")

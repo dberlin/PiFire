@@ -22,7 +22,13 @@ from scipy.optimize import minimize
 from controller.grill_sim import GrillSim, MAKGrillSim
 
 from .actuation import PulseRealizer
-from .adaptation import AdaptationManager, OperatingState, WindowScores
+from .adaptation import (
+    AdaptationManager,
+    AdaptationPolicy,
+    AlignmentEvidence,
+    OperatingState,
+    WindowScores,
+)
 from .arx import ARXConfig, ScheduledARX
 from .data import reconstruct_mak_fixture, resample_record
 from .datasets import (
@@ -299,7 +305,15 @@ def _run_matrix(
     failures = []
     if resume and checkpoint is not None and checkpoint.exists():
         checkpoint_document = json.loads(checkpoint.read_text(encoding="utf-8"))
-        rows = [_scenario_from_document(row) for row in checkpoint_document.get("rows", ())]
+        evidence_bundles = checkpoint_document.get("evidence_bundles", {})
+        stored_rows = checkpoint_document.get("rows", checkpoint_document.get("scenarios", ()))
+        rows = []
+        for stored in stored_rows:
+            document = dict(stored)
+            evidence_id = document.get("evidence_id")
+            if evidence_id is not None and "model_evidence" not in document:
+                document["model_evidence"] = evidence_bundles[str(evidence_id)]
+            rows.append(_scenario_from_document(document))
         from .artifact import ArmFailure
 
         failures = [
@@ -442,6 +456,82 @@ def _write_checkpoint(
     finally:
         if temporary.exists():
             temporary.unlink()
+def _adaptation_settings(
+    arm: str, snapshot: Mapping[str, Any]
+) -> tuple[AdaptationPolicy, AlignmentEvidence]:
+    """Derive arm-local promotion limits from the retained training snapshot."""
+    bounds = snapshot.get("plausibility_bounds")
+    if not isinstance(bounds, Mapping):
+        raise ValueError(f"{arm} snapshot omitted training plausibility bounds")
+    maximum = bounds.get("max_steady_gain_c_per_q", bounds.get("max_dc_gain_c_per_q"))
+    if not isinstance(maximum, (int, float)) or not np.isfinite(maximum) or maximum <= 0.0:
+        raise ValueError(f"{arm} snapshot has no finite training gain bound")
+    alignment = (
+        AlignmentEvidence.MEASURED
+        if arm == "state-space"
+        else AlignmentEvidence.NOT_APPLICABLE
+    )
+    return AdaptationPolicy(max_gain=float(maximum)), alignment
+
+
+def _window_free_run_scores(
+    samples: list[Mapping[str, Any]],
+) -> tuple[WindowScores, dict[str, Any]]:
+    """Score role snapshots before their untouched 60/300-second targets arrived."""
+    horizon_steps = (3, 15)
+    per_horizon: dict[str, dict[str, Any]] = {}
+    candidate_means: list[float] = []
+    incumbent_means: list[float] = []
+    coast_candidate: list[float] = []
+    coast_incumbent: list[float] = []
+    for steps in horizon_steps:
+        candidate_errors: list[float] = []
+        incumbent_errors: list[float] = []
+        origins: list[int] = []
+        for index in range(len(samples) - steps + 1):
+            origin = samples[index]
+            future = samples[index : index + steps]
+            q = np.asarray([float(item["q"]) for item in future], dtype=np.float64)
+            ambient = np.asarray([float(item["ambient_c"]) for item in future], dtype=np.float64)
+            actual = np.asarray([float(item["temp_c"]) for item in future], dtype=np.float64)
+            candidate = origin["challenger"].affine_prediction(
+                steps, float(origin["q_previous"]), ambient
+            )
+            incumbent = origin["incumbent"].affine_prediction(
+                steps, float(origin["q_previous"]), ambient
+            )
+            candidate_error = float(np.sqrt(np.mean((candidate.free_output_c + candidate.input_response_c @ q - actual) ** 2)))
+            incumbent_error = float(np.sqrt(np.mean((incumbent.free_output_c + incumbent.input_response_c @ q - actual) ** 2)))
+            candidate_errors.append(candidate_error)
+            incumbent_errors.append(incumbent_error)
+            origins.append(int(origin["frame_s"]))
+            if any(bool(item["coast"]) for item in future):
+                coast_candidate.append(candidate_error)
+                coast_incumbent.append(incumbent_error)
+        per_horizon[str(steps * _FRAME_S)] = {
+            "candidate_rmse_c": float(np.mean(candidate_errors)),
+            "incumbent_rmse_c": float(np.mean(incumbent_errors)),
+            "origin_frame_ids": origins,
+        }
+        candidate_means.append(float(np.mean(candidate_errors)))
+        incumbent_means.append(float(np.mean(incumbent_errors)))
+    frame_ids = [int(sample["frame_s"]) for sample in samples]
+    return (
+        WindowScores(
+            window_id=str(samples[-1]["window_id"]),
+            candidate_prediction_score=float(np.mean(candidate_means)),
+            incumbent_prediction_score=float(np.mean(incumbent_means)),
+            candidate_braking_score=_mean_or_none(coast_candidate),
+            incumbent_braking_score=_mean_or_none(coast_incumbent),
+        ),
+        {
+            "horizon_metrics": per_horizon,
+            "score_frame_ids": frame_ids,
+            "braking_or_coast_sample_count": int(sum(bool(sample["coast"]) for sample in samples)),
+        },
+    )
+
+
 
 
 
@@ -470,14 +560,15 @@ def _run_scenario(
         arm, plant, seed, initialization
     )
     batch_fit_snapshot = _json_value(model.snapshot())
-    manager = (
-        AdaptationManager(
-            incumbent=model,
-            challenger=deepcopy(model),
-            replay_seed=seed,
-        )
-        if mode == "online"
-        else None
+    policy, alignment = _adaptation_settings(arm, batch_fit_snapshot)
+    manager = AdaptationManager(
+        incumbent=model,
+        challenger=deepcopy(model),
+        policy=policy,
+        incumbent_alignment=alignment,
+        challenger_alignment=alignment,
+        parameter_learning=mode == "online",
+        replay_seed=seed,
     )
     temperatures: list[float] = []
     requested: list[float] = []
@@ -491,7 +582,8 @@ def _run_scenario(
     solve_ms: list[float] = []
     solver_evidence: list[Mapping[str, Any]] = []
     promotion_history: list[Mapping[str, Any]] = []
-    pre_assimilation_scores: deque[dict[str, float | bool | int]] = deque(maxlen=15)
+    free_run_window: list[dict[str, Any]] = []
+    previous_realized_duty = 0.0
     for second in range(duration_s):
         target = definition.target_at(second)
         if second % _FRAME_S == 0:
@@ -540,7 +632,7 @@ def _run_scenario(
         realized.append(frame.realized_duty)
         targets.append(target)
         fan.append(_FIXED_FAN)
-        if manager is not None and (second + 1) % _FRAME_S == 0:
+        if (second + 1) % _FRAME_S == 0:
             observation = Observation(
                 float(calibration.time_s[-1] + second + 1),
                 temperatures[-1],
@@ -549,11 +641,35 @@ def _run_scenario(
             )
             safety_override = definition.safety_override_at(second)
             manual_override = definition.manual_override_at(second)
+            state = (
+                OperatingState.COAST
+                if frame.realized_duty <= 0.05
+                else (
+                    OperatingState.HOLD
+                    if target == definition.target_low_c
+                    else OperatingState.TRANSIENT
+                )
+            )
+            role_generation = manager.role_generation
+            free_run_window.append(
+                {
+                    "window_id": f"{plant}:{arm}:{initialization}:{second + 1}",
+                    "frame_s": second + 1,
+                    "role_generation": role_generation,
+                    "incumbent": deepcopy(manager.incumbent),
+                    "challenger": deepcopy(manager.challenger),
+                    "q_previous": previous_realized_duty,
+                    "q": frame.realized_duty,
+                    "ambient_c": simulator.T_amb,
+                    "temp_c": temperatures[-1],
+                    "coast": state is OperatingState.COAST,
+                }
+            )
             challenger_refresh_before = _refresh_marker(manager.challenger.snapshot())
             learner_started = perf_counter()
             outcome = manager.observe(
                 observation,
-                state=OperatingState.HOLD if target == definition.target_low_c else OperatingState.TRANSIENT,
+                state=state,
                 provenance="ordinary-cook",
                 lid_open=lid_open,
                 safety_override=safety_override,
@@ -561,25 +677,11 @@ def _run_scenario(
             )
             observe_ms = (perf_counter() - learner_started) * 1_000.0
             challenger_refresh_after = _refresh_marker(manager.challenger.snapshot())
-            if outcome.gate.permitted:
+            if mode == "online" and outcome.gate.permitted:
                 if challenger_refresh_after != challenger_refresh_before:
                     refresh_ms.append(observe_ms)
                 else:
                     learner_ms.append(observe_ms)
-                if outcome.incumbent is None or outcome.challenger is None:
-                    raise RuntimeError("permitted update must expose both pre-assimilation predictions")
-                pre_assimilation_scores.append(
-                    {
-                        "frame_s": second + 1,
-                        "role_generation": manager.role_generation,
-                        "candidate_abs_error_c": abs(outcome.challenger.innovation_c),
-                        "incumbent_abs_error_c": abs(outcome.incumbent.innovation_c),
-                        "braking_or_coast": (
-                            frame.realized_duty <= 0.05
-                            or (second > 0 and target < targets[-2])
-                        ),
-                    }
-                )
             if not outcome.gate.permitted:
                 promotion_history.append(
                     {
@@ -590,57 +692,17 @@ def _run_scenario(
                         "challenger_updated": False,
                     }
                 )
-            if (second + 1) % 300 == 0:
-                score_window = tuple(
+            if mode == "online" and (second + 1) % 300 == 0:
+                score_window = [
                     sample
-                    for sample in pre_assimilation_scores
+                    for sample in free_run_window
                     if sample["role_generation"] == manager.role_generation
-                )
-                pre_assimilation_scores.clear()
+                ]
+                free_run_window.clear()
                 if len(score_window) < 2:
                     continue
-                braking_window = tuple(
-                    sample for sample in score_window if sample["braking_or_coast"]
-                )
-                candidate_score = float(
-                    np.mean([float(sample["candidate_abs_error_c"]) for sample in score_window])
-                )
-                incumbent_score = float(
-                    np.mean([float(sample["incumbent_abs_error_c"]) for sample in score_window])
-                )
-                candidate_braking_score = (
-                    float(
-                        np.mean(
-                            [
-                                float(sample["candidate_abs_error_c"])
-                                for sample in braking_window
-                            ]
-                        )
-                    )
-                    if braking_window
-                    else None
-                )
-                incumbent_braking_score = (
-                    float(
-                        np.mean(
-                            [
-                                float(sample["incumbent_abs_error_c"])
-                                for sample in braking_window
-                            ]
-                        )
-                    )
-                    if braking_window
-                    else None
-                )
-                decision = manager.evaluate(
-                    WindowScores(
-                        window_id=f"{plant}:{arm}:{initialization}:{second + 1}",
-                        candidate_prediction_score=candidate_score,
-                        incumbent_prediction_score=incumbent_score,
-                        candidate_braking_score=candidate_braking_score,
-                        incumbent_braking_score=incumbent_braking_score,
-                    )
-                )
+                scores, score_evidence = _window_free_run_scores(score_window)
+                decision = manager.evaluate(scores)
                 promotion_history.append(
                     {
                         "kind": "five-minute-evaluation",
@@ -652,26 +714,21 @@ def _run_scenario(
                         "incumbent_prediction_score": decision.incumbent_prediction_score,
                         "candidate_braking_score": decision.candidate_braking_score,
                         "incumbent_braking_score": decision.incumbent_braking_score,
+                        "plausible_gain": decision.plausible_gain,
+                        "state_aligned": decision.state_aligned,
                         "sample_count": len(score_window),
-                        "score_frame_ids": [
-                            int(sample["frame_s"]) for sample in score_window
+                        "score_frame_ids": score_evidence["score_frame_ids"],
+                        "score_role_generation": role_generation,
+                        "score_role_generations": [role_generation],
+                        "horizon_metrics": score_evidence["horizon_metrics"],
+                        "braking_or_coast_sample_count": score_evidence[
+                            "braking_or_coast_sample_count"
                         ],
-                        "score_role_generation": int(
-                            score_window[0]["role_generation"]
-                        ),
-                        "score_role_generations": sorted(
-                            {
-                                int(sample["role_generation"])
-                                for sample in score_window
-                            }
-                        ),
-                        "braking_or_coast_sample_count": sum(
-                            bool(sample["braking_or_coast"]) for sample in score_window
-                        ),
                         "candidate_snapshot": _json_value(decision.candidate_snapshot),
                         "incumbent_snapshot": _json_value(decision.incumbent_snapshot),
                     }
                 )
+            previous_realized_duty = frame.realized_duty
     metrics = _metrics(
         temperatures,
         targets,
@@ -686,6 +743,19 @@ def _run_scenario(
         before_residuals,
         fit_ms,
         sum(1 for item in promotion_history if item.get("promoted") is True),
+        managed_recovery=next(
+            (
+                (
+                    float(item["incumbent_prediction_score"]),
+                    float(item["candidate_prediction_score"]),
+                )
+                for item in reversed(promotion_history)
+                if item.get("kind") == "five-minute-evaluation"
+                and item.get("promoted") is True
+                and initialization != "correct"
+            ),
+            None,
+        ),
     )
     active_model = manager.incumbent if manager is not None else model
     return ScenarioResult(
@@ -717,6 +787,11 @@ def _run_scenario(
                 arm, plant, seed, initialization
             ),
             "initial_batch_fit_ms": fit_ms,
+            "adaptation": {
+                "alignment": alignment.value,
+                "policy": {"max_gain": policy.max_gain},
+            },
+            "runtime_tracking": _json_value(manager.tracking_evidence),
         },
         promotion_history=tuple(promotion_history),
         solver_evidence=tuple(solver_evidence),
@@ -760,15 +835,6 @@ def _prepared_model(arm: str, plant: str, seed: int, initialization: str):
         )[horizon_s]
         for horizon_s in (600, 800, 1_000)
     }
-    for index in range(fit_end, validation_end):
-        model.observe(
-            Observation(
-                float(record.time_s[index]),
-                float(record.temp_c[index]),
-                float(record.q[index]),
-                float(record.ambient_c[index]),
-            )
-        )
     after = _horizon_residuals(
         model,
         record,
@@ -1095,6 +1161,7 @@ def _metrics(
     before_residuals: dict[int, list[float]],
     initial_fit_ms: float,
     promotion_events: int,
+    managed_recovery: tuple[float, float] | None = None,
 ) -> dict[str, float | int | None]:
     error = np.asarray(temperatures) - np.asarray(targets)
     absolute = np.abs(error)
@@ -1103,8 +1170,7 @@ def _metrics(
     hold = np.asarray(temperatures[-min(60, len(temperatures)):])
     settled = next((index for index in range(len(error)) if np.all(absolute[index:] <= 3.0)), None)
     score = float(np.sqrt(np.mean(error**2)) + np.mean(absolute) + 0.5 * max(overshoot, 0.0))
-    before_mae = _mean_or_none(before_residuals.get(600, ()))
-    after_mae = _mean_or_none(residuals.get(600, ()))
+    before_mae, after_mae = managed_recovery if managed_recovery is not None else (None, None)
     recovery_ratio = (
         after_mae / before_mae
         if before_mae is not None and after_mae is not None and before_mae > 0.0
@@ -1363,6 +1429,7 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
                 recovery_improvement_delta=(
                     _mean_or_none(recovery[arm]["recovery_improvement_delta_c"]) or 0.0
                 ),
+                recovery_available=bool(recovery[arm]["recovery_improvement_ratio"]),
                 raw_solve_p99_ms=_p99(timings[arm]["solve"]),
                 raw_learner_ms=tuple(timings[arm]["learner"]),
                 raw_refresh_ms=tuple(timings[arm]["refresh"]),
@@ -1377,6 +1444,12 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
                 simulator_delay_error_s=float(diagnostic_values.get("delay_error_s", 0.0)),
                 simulator_coast_braking_error_c=float(
                     diagnostic_values.get("coast_braking_temperature_error_c", 0.0)
+                ),
+                target_missed=prediction_error > 5.0,
+                operational_consequence=(
+                    "not deployment-ready for 60-minute prediction; retain experiment-only use"
+                    if prediction_error > 5.0
+                    else None
                 ),
             )
         )

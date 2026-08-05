@@ -103,6 +103,7 @@ class LaguerreDMC:
         self._last_refresh_time_s: float | None = None
         self._refreshes = 0
 
+        self._max_plausible_gain: float | None = None
     @property
     def _active(self) -> _Candidate:
         if not self._candidates:
@@ -122,6 +123,12 @@ class LaguerreDMC:
         candidates = self._new_candidates(response_length)
         validation_start = max(1, int(record.time_s.size * 0.75))
         train = slice(0, validation_start)
+        input_span = max(float(np.ptp(record.q[:validation_start])), np.finfo(np.float64).eps)
+        output_span = max(
+            float(np.ptp(record.temp_c[:validation_start])),
+            np.finfo(np.float64).eps,
+        )
+        self._max_plausible_gain = 16.0 * output_span / input_span
 
         for candidate in candidates:
             self._fit_candidate(candidate, record, train)
@@ -276,6 +283,9 @@ class LaguerreDMC:
                 "step_response": response,
                 "final_gain": float(response[-1]),
                 "steady_gain": float(response[-1]),
+                "plausibility_bounds": {
+                    "max_steady_gain_c_per_q": self._max_plausible_gain,
+                },
                 "gain_projected": active.projected_gain,
                 "promotion_eligible": active.promotion_eligible,
                 "update_timing": {

@@ -11,6 +11,7 @@ from pathlib import Path
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _select_validation_horizon
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _source_revision
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_tiny_matrix
+from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import ExperimentArtifact
 
 
 def test_quick_mode_writes_requested_output_and_table(tmp_path: Path) -> None:
@@ -80,6 +81,7 @@ def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(t
     assert completed.returncode == 0, completed.stderr
     resumed = json.loads(output.read_text(encoding="utf-8"))
     assert len(resumed["scenarios"]) + len(resumed["failures"]) == 144
+    restored = ExperimentArtifact.from_json(output.read_text(encoding="utf-8"))
     key = lambda row: (row["arm"], row["initialization"], row["plant"], row["scenario"], row["mode"], row["seed"])
-    resumed_rows = {key(row): row for row in resumed["scenarios"]}
-    assert all(resumed_rows[key(row)] == row for row in partial["rows"])
+    restored_rows = {key(row.to_document()): row.to_document() for row in restored.scenarios}
+    assert all(restored_rows[key(row)] == row for row in partial["rows"])

@@ -166,12 +166,11 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
     evaluations = [
         item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
     ]
-    assert len(evaluations) == 1
+    assert len(evaluations) == 2
     assert all(
         isfinite(item["candidate_prediction_score"])
         and isfinite(item["incumbent_prediction_score"])
-        and item["candidate_braking_score"] is None
-        and item["incumbent_braking_score"] is None
+        and set(item["horizon_metrics"]) >= {"60", "300"}
         for item in evaluations
     )
     assert all(
@@ -199,60 +198,72 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
     assert any(item.get("reference_method") == "scipy-l-bfgs-b" for item in row.solver_evidence)
 
 
-def test_runner_clears_promoted_window_samples_and_role_generations(
-    monkeypatch,
-) -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff import runner
-    from docs.superpowers.experiments.linear_mpc_bakeoff.adaptation import (
-        AdaptationManager as RealAdaptationManager,
-        AdaptationOutcome,
-        AlignmentEvidence,
-        UpdateGate,
-    )
-    from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import UpdateOutcome
+def test_runner_clears_real_promotion_window_samples_and_role_generations() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
 
-
-    class ControlledAdaptationManager(RealAdaptationManager):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self._policy = replace(self._policy, max_gain=1e12)
-            self._challenger_alignment = AlignmentEvidence.NOT_APPLICABLE
-
-        def observe(self, observation, *args, **kwargs):
-            self._challenger_effective_updates += 1
-            gate = UpdateGate(True, (), 0.1, 2)
-            return AdaptationOutcome(
-                True,
-                gate,
-                UpdateOutcome(
-                    observation.temp_c - 1.0, observation.temp_c, 1.0, False
-                ),
-                UpdateOutcome(
-                    observation.temp_c - 0.1, observation.temp_c, 0.1, True
-                ),
-            )
-
-
-        def evaluate(self, scores):
-            self._challenger_effective_updates = 100
-            return super().evaluate(
-                replace(
-                    scores,
-                    candidate_prediction_score=0.1,
-                    incumbent_prediction_score=1.0,
-                    candidate_braking_score=0.1,
-                    incumbent_braking_score=1.0,
-                )
-            )
-
-    monkeypatch.setattr(runner, "AdaptationManager", ControlledAdaptationManager)
     definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
-    row = runner._run_scenario(
+    row = _run_scenario(
         definition,
         plant="GrillSim",
         seed=2,
         mode="online",
-        duration_s=920,
+        duration_s=1820,
+        arm="scheduled-arx",
+        initialization="wrong-pole",
+        horizon_s=600,
+    )
+    evaluations = [
+        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
+    ]
+    promoted_index = next(index for index, item in enumerate(evaluations) if item["promoted"])
+    assert evaluations[promoted_index - 1]["consecutive_wins"] == 1
+    assert evaluations[promoted_index]["consecutive_wins"] == 2
+    assert evaluations[promoted_index + 1]["score_role_generation"] == 1
+    frame_sets = [set(item["score_frame_ids"]) for item in evaluations]
+    assert all(left.isdisjoint(right) for left, right in zip(frame_sets, frame_sets[1:]))
+
+def test_runner_constructs_real_arm_managers_with_snapshot_bounds_and_alignment() -> None:
+    """Production wiring, rather than a test policy override, must admit fitted arms."""
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
+    rows = {
+        arm: _run_scenario(
+            definition,
+            plant="GrillSim",
+            seed=2,
+            mode="online",
+            duration_s=320,
+            arm=arm,
+            initialization="wrong-gain",
+            horizon_s=600,
+        )
+        for arm in ("scheduled-arx", "dmc", "state-space")
+    }
+    assert rows["scheduled-arx"].model_evidence["adaptation"]["alignment"] == "not-applicable"
+    assert rows["dmc"].model_evidence["adaptation"]["alignment"] == "not-applicable"
+    assert rows["state-space"].model_evidence["adaptation"]["alignment"] == "measured"
+    for row in rows.values():
+        assert row.model_evidence["adaptation"]["policy"]["max_gain"] >= abs(
+            row.model_evidence["batch_fit_snapshot"]["steady_gain"]
+        )
+    assert all(
+        item["plausible_gain"] and item["state_aligned"]
+        for item in rows["dmc"].promotion_history
+        if item["kind"] == "five-minute-evaluation"
+    )
+
+
+def test_runner_scores_untouched_multi_horizon_free_runs_and_clears_windows() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
+    row = _run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=620,
         arm="scheduled-arx",
         initialization="wrong-gain",
         horizon_s=600,
@@ -260,16 +271,70 @@ def test_runner_clears_promoted_window_samples_and_role_generations(
     evaluations = [
         item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
     ]
+    assert evaluations
+    assert all(set(item["horizon_metrics"]) >= {"60", "300"} for item in evaluations)
+    assert all(item["score_frame_ids"] == sorted(item["score_frame_ids"]) for item in evaluations)
+    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(evaluations[1]["score_frame_ids"])
 
-    assert len(evaluations) == 3
-    assert not evaluations[0]["reasons"], evaluations[0]["reasons"]
-    assert evaluations[0]["consecutive_wins"] == 1
-    assert evaluations[1]["promoted"], evaluations
-    assert [item["score_role_generation"] for item in evaluations] == [0, 0, 1]
-    assert len({item["window_id"] for item in evaluations}) == 3
-    assert all(item["sample_count"] >= 2 for item in evaluations)
-    frame_sets = [set(item["score_frame_ids"]) for item in evaluations]
-    assert frame_sets[0].isdisjoint(frame_sets[1])
-    assert frame_sets[1].isdisjoint(frame_sets[2])
-    assert all(frame > 600 for frame in frame_sets[2])
 
+def test_online_and_frozen_paths_track_identical_realized_history() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    definition = next(item for item in SCENARIOS if item.name == "low-step")
+    common = dict(
+        definition=definition,
+        plant="GrillSim",
+        seed=2,
+        duration_s=320,
+        arm="scheduled-arx",
+        initialization="correct",
+        horizon_s=600,
+    )
+    frozen = _run_scenario(mode="frozen", **common)
+    online = _run_scenario(mode="online", **common)
+    assert frozen.realized_q == online.realized_q
+    assert frozen.model_evidence["runtime_tracking"] == online.model_evidence["runtime_tracking"]
+
+
+def test_runner_classifies_realized_zero_duty_frames_as_coast() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    definition = next(item for item in SCENARIOS if item.name == "low-step")
+    row = _run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=320,
+        arm="scheduled-arx",
+        initialization="correct",
+        horizon_s=600,
+    )
+    assert row.model_evidence["runtime_tracking"]["operating_state_counts"]["coast"] > 0
+
+
+
+def test_wrong_model_recovery_requires_real_shadow_promotion() -> None:
+    """A wrong model earns recovery evidence only from two managed free-run wins."""
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
+    row = _run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=1820,
+        arm="scheduled-arx",
+        initialization="wrong-pole",
+        horizon_s=600,
+    )
+    evaluations = [
+        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
+    ]
+    promoted = [item for item in evaluations if item["promoted"]]
+    assert len(promoted) == 1
+    assert promoted[0]["consecutive_wins"] == 2
+    assert evaluations[evaluations.index(promoted[0]) - 1]["consecutive_wins"] == 1
+    assert row.metrics["recovery_after_mae_c"] < row.metrics["recovery_before_mae_c"]
+    assert row.metrics["recovery_improvement_ratio"] < 1.0
