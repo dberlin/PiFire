@@ -294,3 +294,73 @@ def test_a_celsius_install_scales_error_and_corrections_from_fahrenheit(clock):
     correction_f = after_f - before_f
     assert correction_f != 0.0, "the predictor is not correcting; the test proves nothing"
     assert correction_c == pytest.approx(correction_f * 5 / 9)
+
+
+import json
+
+from common.controller_model_state import MAX_SNAPSHOT_BYTES, ControllerModelStore
+
+
+class _FakeBlobs:
+    def __init__(self):
+        self.blobs = {}
+
+    def read(self, key):
+        # An absent key raises TypeError, matching the real reader's contract
+        # (controller/runtime/store.py:read_generic_key): ControllerModelStore
+        # catches precisely TypeError to mean "nothing stored yet".
+        return json.loads(self.blobs[key]) if key in self.blobs else json.loads(None)
+
+    def write(self, key, value):
+        self.blobs[key] = json.dumps(value)
+
+
+def test_a_snapshot_survives_the_store_round_trip(clock):
+    sp = _controller("pid_sp", clock)
+    sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3})
+    blobs = _FakeBlobs()
+    store = ControllerModelStore(reader=blobs.read, writer=blobs.write)
+
+    assert store.save("pid_sp", sp.get_model_snapshot()) is True
+
+    fresh = _controller("pid_sp", clock)
+    assert fresh.get_model_snapshot() is None
+    assert fresh.restore_model(store.load("pid_sp")) is True
+    assert fresh.get_model_snapshot() == {"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3}
+
+
+def test_a_restored_model_is_active_on_the_first_tick(clock):
+    """From the second cook onward there is no hour of plain PID."""
+    blobs = _FakeBlobs()
+    store = ControllerModelStore(reader=blobs.read, writer=blobs.write)
+    store.save("pid_sp", {"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3})
+
+    sp = _controller("pid_sp", clock)
+    sp.restore_model(store.load("pid_sp"))
+    sp.set_target(225.0)
+    clock.t += 20.0
+    sp.update(200.0)
+    assert sp.get_status()["predictor"]["active"] is True
+
+
+def test_the_snapshot_satisfies_the_store_s_envelope_rules(clock):
+    sp = _controller("pid_sp", clock)
+    sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3})
+    snapshot = sp.get_model_snapshot()
+    encoded = json.dumps(snapshot, allow_nan=False)
+    assert len(encoded.encode("utf-8")) <= MAX_SNAPSHOT_BYTES
+    # bool is an int subclass, and the store rejects it separately, so an
+    # isinstance check alone would accept a revision the store refuses.
+    assert isinstance(snapshot["revision"], int) and not isinstance(snapshot["revision"], bool)
+
+
+def test_an_untrusted_controller_offers_nothing_to_persist(clock):
+    assert _controller("pid_sp", clock).get_model_snapshot() is None
+
+
+def test_get_status_survives_the_mqtt_encoder(clock):
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    clock.t += 20.0
+    sp.update(200.0)
+    json.dumps(sp.get_status(), allow_nan=False)
