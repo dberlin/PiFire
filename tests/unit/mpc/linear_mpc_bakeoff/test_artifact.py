@@ -94,6 +94,58 @@ def test_unisolated_runtime_evidence_is_deferred_not_a_disqualifier() -> None:
     assert recommend(artifact).arms["scheduled-arx"].valid
 
 
+def test_unmeasured_timing_cannot_change_frontier_or_selection() -> None:
+    def artifact(arx_timing: float, dmc_timing: float) -> ExperimentArtifact:
+        return ExperimentArtifact(
+            config={"control_budget_ms": 50.0},
+            seeds=(2,),
+            splits={},
+            model_snapshots={},
+            scenarios=(),
+            arms=(
+                ArmEvidence("scheduled-arx", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, arx_timing, runtime_validity="not_measured"),
+                ArmEvidence("dmc", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, dmc_timing, runtime_validity="not_measured"),
+            ),
+            source_revision="abc123",
+            environment={"python": "test"},
+        )
+
+    baseline = recommend(artifact(1.0, 1_000_000.0))
+    reversed_timing = recommend(artifact(1_000_000.0, 1.0))
+
+    assert baseline.pareto_frontier == reversed_timing.pareto_frontier
+    assert baseline.selected_arm == reversed_timing.selected_arm
+
+
+def test_mixed_diagnostic_availability_is_not_a_zero_error_advantage() -> None:
+    artifact = ExperimentArtifact(
+        config={"control_budget_ms": 50.0},
+        seeds=(2,),
+        splits={},
+        model_snapshots={},
+        scenarios=(),
+        arms=(
+            ArmEvidence("scheduled-arx", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0),
+            ArmEvidence(
+                "dmc", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0,
+                simulator_diagnostics_available=True,
+                simulator_gain_error_c_per_q=1.0,
+                simulator_delay_error_s=1.0,
+                simulator_coast_braking_error_c=1.0,
+            ),
+        ),
+        source_revision="abc123",
+        environment={"python": "test"},
+    )
+
+    recommendation = recommend(artifact)
+
+    assert not recommendation.arms["scheduled-arx"].valid
+    assert recommendation.arms["scheduled-arx"].reasons == (
+        "simulator diagnostics unavailable",
+    )
+    assert recommendation.selected_arm == "dmc"
+
 def test_simplest_arm_wins_within_five_percent() -> None:
     artifact = artifact_with_scores(arx=10.4, state_space=10.0, dmc=12.0)
 

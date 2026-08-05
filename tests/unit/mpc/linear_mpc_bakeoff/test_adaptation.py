@@ -102,10 +102,11 @@ def score_bundle(
     incumbent_prediction: float = 1.0,
     candidate_braking: float | None = 0.8,
     incumbent_braking: float | None = 1.0,
+    window_id: str = "rolling-window-7",
 ) -> WindowScores:
     """Return all promotion evidence for one immutable untouched window."""
     return WindowScores(
-        window_id="rolling-window-7",
+        window_id=window_id,
         candidate_prediction_score=candidate_prediction,
         incumbent_prediction_score=incumbent_prediction,
         candidate_braking_score=candidate_braking,
@@ -284,6 +285,26 @@ def test_candidate_needs_two_validation_wins_from_one_window_bundle() -> None:
 
     assert decision.promoted is True
     assert decision.window_id == "rolling-window-7"
+
+
+def test_promotion_requires_two_distinct_windows_then_starts_a_new_generation() -> None:
+    manager = promotion_fixture()
+
+    first = manager.evaluate(score_bundle(window_id="interval-300"))
+    second = manager.evaluate(score_bundle(window_id="interval-600"))
+
+    assert not first.promoted
+    assert second.promoted
+    assert (first.window_id, second.window_id) == ("interval-300", "interval-600")
+    assert manager.role_generation == 1
+
+    manager.observe(Observation(60.0, 103.0, 0.4, 20.0))
+    manager.observe(Observation(80.0, 104.0, 0.0, 20.0))
+    later = manager.evaluate(score_bundle(window_id="interval-900"))
+
+    assert not later.promoted
+    assert later.consecutive_wins == 1
+    assert later.window_id == "interval-900"
 
 
 def test_promotion_api_rejects_independent_scalar_scores() -> None:

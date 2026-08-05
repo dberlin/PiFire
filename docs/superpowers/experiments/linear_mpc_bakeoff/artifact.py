@@ -339,6 +339,9 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
             failures_by_arm.setdefault(failure.arm, []).append(reason)
     recommendations: dict[str, ArmRecommendation] = {}
     valid_evidence: list[ArmEvidence] = []
+    diagnostics_present = any(
+        evidence.simulator_diagnostics_available for evidence in artifact.arms
+    )
     for evidence in artifact.arms:
         reasons = sorted(set(failures_by_arm.get(evidence.name, ())))
         if evidence.runtime_validity == "measured" and (
@@ -349,38 +352,46 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
             reasons.append("runtime beyond hard limits")
         if not evidence.correct_baseline_no_degradation:
             reasons.append("correct-baseline online degradation")
-        if evidence.simulator_diagnostics_available and not evidence.simulator_diagnostics_valid:
+        if diagnostics_present and not evidence.simulator_diagnostics_available:
+            reasons.append("simulator diagnostics unavailable")
+        elif evidence.simulator_diagnostics_available and not evidence.simulator_diagnostics_valid:
             reasons.append("invalid simulator gain/delay/coast diagnostics")
         valid = not reasons
-        recommendations[evidence.name] = ArmRecommendation(valid, tuple(reasons), evidence.worst_domain_score)
+        recommendations[evidence.name] = ArmRecommendation(
+            valid, tuple(reasons), evidence.worst_domain_score
+        )
         if valid:
             valid_evidence.append(evidence)
-    frontier = _pareto_frontier(valid_evidence)
-    ranking_pool = (
-        list(frontier)
-        if any(item.simulator_diagnostics_available for item in valid_evidence)
-        else valid_evidence
+    include_runtime = all(
+        item.runtime_validity == "measured" for item in valid_evidence
     )
+    include_diagnostics = bool(valid_evidence) and all(
+        item.simulator_diagnostics_available and item.simulator_diagnostics_valid
+        for item in valid_evidence
+    )
+    frontier = _pareto_frontier(
+        valid_evidence, include_runtime, include_diagnostics
+    )
+    ranking_pool = list(frontier) if include_diagnostics else valid_evidence
     selected: str | None = None
-    if ranking_pool and not _material_pareto_conflict(frontier):
+    if ranking_pool and not _material_pareto_conflict(
+        frontier, include_runtime, include_diagnostics
+    ):
         best_score = min(item.worst_domain_score for item in ranking_pool)
         contenders = [
             item for item in ranking_pool if item.worst_domain_score <= best_score * 1.05
         ]
         selected = min(
             contenders,
-            key=lambda item: (
-                item.prediction_error,
-                item.recovery_improvement_ratio,
-                item.projected_solve_p99_ms,
-                item.simulator_gain_error_c_per_q,
-                item.simulator_delay_error_s,
-                item.simulator_coast_braking_error_c,
-                _COMPLEXITY[item.name],
-                item.name,
+            key=lambda item: _selection_key(
+                item, include_runtime, include_diagnostics
             ),
         ).name
-    return Recommendation(MappingProxyType(dict(sorted(recommendations.items()))), selected, tuple(item.name for item in frontier))
+    return Recommendation(
+        MappingProxyType(dict(sorted(recommendations.items()))),
+        selected,
+        tuple(item.name for item in frontier),
+    )
 
 
 def render_table(artifact: ExperimentArtifact, recommendation: Recommendation | None = None) -> str:
@@ -399,44 +410,111 @@ def render_table(artifact: ExperimentArtifact, recommendation: Recommendation | 
     return "\n".join(lines)
 
 
-def _pareto_frontier(evidence: Sequence[ArmEvidence]) -> tuple[ArmEvidence, ...]:
+def _pareto_frontier(
+    evidence: Sequence[ArmEvidence],
+    include_runtime: bool,
+    include_diagnostics: bool,
+) -> tuple[ArmEvidence, ...]:
     if not evidence:
         return ()
     scales = tuple(
         max(min(values), 1e-12)
-        for values in zip(*(_pareto_values(item) for item in evidence))
+        for values in zip(
+            *(
+                _pareto_values(item, include_runtime, include_diagnostics)
+                for item in evidence
+            )
+        )
     )
     return tuple(
         item
         for item in sorted(evidence, key=lambda value: value.name)
-        if not any(_dominates(other, item, scales) for other in evidence if other is not item)
+        if not any(
+            _dominates(other, item, scales, include_runtime, include_diagnostics)
+            for other in evidence
+            if other is not item
+        )
     )
 
 
-def _pareto_values(evidence: ArmEvidence) -> tuple[float, ...]:
-    return (
+def _pareto_values(
+    evidence: ArmEvidence, include_runtime: bool, include_diagnostics: bool
+) -> tuple[float, ...]:
+    values = [
         evidence.worst_domain_score,
         evidence.prediction_error,
         evidence.recovery_improvement_ratio,
-        evidence.projected_solve_p99_ms,
-        evidence.simulator_gain_error_c_per_q,
-        evidence.simulator_delay_error_s,
-        evidence.simulator_coast_braking_error_c,
+    ]
+    if include_runtime:
+        values.append(evidence.projected_solve_p99_ms)
+    if include_diagnostics:
+        values.extend(
+            (
+                evidence.simulator_gain_error_c_per_q,
+                evidence.simulator_delay_error_s,
+                evidence.simulator_coast_braking_error_c,
+            )
+        )
+    return tuple(values)
+
+
+def _selection_key(
+    evidence: ArmEvidence, include_runtime: bool, include_diagnostics: bool
+) -> tuple[float | int | str, ...]:
+    values: list[float | int | str] = [
+        evidence.prediction_error,
+        evidence.recovery_improvement_ratio,
+    ]
+    if include_runtime:
+        values.append(evidence.projected_solve_p99_ms)
+    if include_diagnostics:
+        values.extend(
+            (
+                evidence.simulator_gain_error_c_per_q,
+                evidence.simulator_delay_error_s,
+                evidence.simulator_coast_braking_error_c,
+            )
+        )
+    return (*values, _COMPLEXITY[evidence.name], evidence.name)
+
+
+def _dominates(
+    left: ArmEvidence,
+    right: ArmEvidence,
+    scales: Sequence[float],
+    include_runtime: bool,
+    include_diagnostics: bool,
+) -> bool:
+    normalized_left = tuple(
+        value / scale
+        for value, scale in zip(
+            _pareto_values(left, include_runtime, include_diagnostics), scales
+        )
     )
-
-
-def _dominates(left: ArmEvidence, right: ArmEvidence, scales: Sequence[float]) -> bool:
-    normalized_left = tuple(value / scale for value, scale in zip(_pareto_values(left), scales))
-    normalized_right = tuple(value / scale for value, scale in zip(_pareto_values(right), scales))
+    normalized_right = tuple(
+        value / scale
+        for value, scale in zip(
+            _pareto_values(right, include_runtime, include_diagnostics), scales
+        )
+    )
     return all(a <= b for a, b in zip(normalized_left, normalized_right)) and any(
         a < b * 0.95 for a, b in zip(normalized_left, normalized_right) if b > 0.0
     )
 
 
-def _material_pareto_conflict(frontier: Sequence[ArmEvidence]) -> bool:
+def _material_pareto_conflict(
+    frontier: Sequence[ArmEvidence],
+    include_runtime: bool,
+    include_diagnostics: bool,
+) -> bool:
     if len(frontier) < 2:
         return False
-    for values in zip(*(_pareto_values(item) for item in frontier)):
+    for values in zip(
+        *(
+            _pareto_values(item, include_runtime, include_diagnostics)
+            for item in frontier
+        )
+    ):
         scale = max(1e-12, max(abs(value) for value in values))
         if (max(values) - min(values)) / scale > 0.05:
             return True

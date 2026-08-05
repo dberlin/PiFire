@@ -653,6 +653,18 @@ def _run_scenario(
                         "candidate_braking_score": decision.candidate_braking_score,
                         "incumbent_braking_score": decision.incumbent_braking_score,
                         "sample_count": len(score_window),
+                        "score_frame_ids": [
+                            int(sample["frame_s"]) for sample in score_window
+                        ],
+                        "score_role_generation": int(
+                            score_window[0]["role_generation"]
+                        ),
+                        "score_role_generations": sorted(
+                            {
+                                int(sample["role_generation"])
+                                for sample in score_window
+                            }
+                        ),
                         "braking_or_coast_sample_count": sum(
                             bool(sample["braking_or_coast"]) for sample in score_window
                         ),

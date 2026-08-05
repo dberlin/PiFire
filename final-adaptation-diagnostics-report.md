@@ -8,7 +8,6 @@
 - Simulator model evidence now records 60/300/900/1800/3600-second supported-horizon origin residual vectors and RMSE, maximum absolute error, bias, p90 absolute error, coast/braking error, steady-gain error, and delay error for each arm/domain/mode/initialization row. MPC 600/800/1000-second validation evidence remains separate.
 - Follow-up: evaluation buffers are interval-local and are cleared before every five-minute decision. Braking evidence is absent (`null`) when no frame in that interval carries braking/coast status; it is never synthesized from general prediction error.
 - Follow-up: every score sample carries the manager role generation. Evaluations reject fewer than two fresh samples and discard data from prior promotions, preventing either overlapping frames or stale arm labels from contributing to a second win.
-- 650-second online wrong-gain smoke produced distinct fresh windows at 300 and 600 seconds (4 and 15 eligible samples); both candidates were evidence-backed rejections, not score-placeholder outcomes.
 
 Verification:
 
@@ -26,10 +25,13 @@ The short quick matrix is 140 seconds and does not reach a five-minute promotion
 - Scheduled ARX, Laguerre DMC, and innovation state-space snapshots all expose the same fitted `steady_gain`, `delay_steps`, and `delay_seconds` contract. Missing gain or delay diagnostics now raise evidence errors rather than silently substituting zero.
 - Arm evidence aggregates simulator diagnostics by arm, mode, initialization, and simulator domain. The recommendation uses 60-minute simulator prediction when available; gain, delay, and coast/braking diagnostics participate in validity and Pareto dominance.
 - Workstation timing distributions are retained as raw evidence but are marked `not_measured`: concurrent workloads contaminated this run. Runtime cannot disqualify, select, or reject an arm until an isolated rerun; the artifact records that provenance and required follow-up.
+- A contaminated timing distribution is omitted from selection and Pareto dimensions unless every compared arm has isolated measured timing. Mixed simulator-diagnostic availability cannot create a zero-error advantage: an unavailable arm is explicitly deferred when other arms have diagnostics, while diagnostic dimensions are omitted only when all contenders lack them.
+- Promotion evidence now records each score window's source frame IDs and role generation. The deterministic promotion regression uses two distinct windows to promote, then demonstrates that the next generation begins a fresh one-win streak; no historical 650-second smoke claim is retained.
 
 Verification:
 
 - `python -m pytest tests/unit/mpc/linear_mpc_bakeoff/test_artifact.py tests/unit/mpc/linear_mpc_bakeoff/test_arx.py tests/unit/mpc/linear_mpc_bakeoff/test_dmc.py tests/unit/mpc/linear_mpc_bakeoff/test_state_space.py tests/unit/mpc/linear_mpc_bakeoff/test_final_runner_evidence.py -q` — 62 passed in 143.69 seconds.
 - `python -m ruff check docs/superpowers/experiments/linear_mpc_bakeoff tests/unit/mpc/linear_mpc_bakeoff` — OK.
+- `python -m pytest tests/unit/mpc/linear_mpc_bakeoff/test_artifact.py tests/unit/mpc/linear_mpc_bakeoff/test_adaptation.py tests/unit/mpc/linear_mpc_bakeoff/test_final_runner_evidence.py -q` — 49 passed in 142.55 seconds; the same command's Ruff check was OK.
 - `python -m docs.superpowers.experiments.linear_mpc_bakeoff --quick` regenerated the quick artifact. Programmatic inspection found 144 simulator rows, 720 populated simulator horizon cells, and 79,272 raw origins; all three arms retain real-MAK 60/300 only and null 900/1800/3600 diagnostics.
 - The complete bakeoff command ran for 900 seconds and was terminated by its deadline after approximately 94% progress without emitting a failure. It is not claimed as a full-suite pass.

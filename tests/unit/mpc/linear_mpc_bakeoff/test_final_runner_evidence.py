@@ -173,6 +173,12 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
         and item["incumbent_braking_score"] is None
         for item in evaluations
     )
+    assert all(
+        len(item["score_frame_ids"]) == item["sample_count"]
+        and item["score_frame_ids"] == sorted(item["score_frame_ids"])
+        and item["score_role_generations"] == [item["score_role_generation"]]
+        for item in evaluations
+    )
     assert any(
         item["candidate_prediction_score"] != item["incumbent_prediction_score"]
         for item in evaluations
