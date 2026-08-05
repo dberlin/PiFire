@@ -1,0 +1,33 @@
+"""Command line entry point for the deterministic linear-MPC bake-off."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import replace
+from pathlib import Path
+
+from .artifact import render_table
+from .runner import ExperimentConfig, default_output_path, run_experiment, run_tiny_matrix
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the linear-MPC model bake-off.")
+    parser.add_argument("--quick", action="store_true", help="run deterministic tiny smoke scenarios")
+    parser.add_argument("--output", type=Path, help="artifact or checkpoint JSON path")
+    parser.add_argument("--resume", action="store_true", help="resume from an existing checkpoint")
+    args = parser.parse_args(argv)
+    output = args.output or (default_output_path().with_name("_linear_mpc_bakeoff_quick.json") if args.quick else default_output_path())
+    if args.resume and not output.exists():
+        parser.error(f"checkpoint does not exist: {output}")
+    config = ExperimentConfig.quick() if args.quick else ExperimentConfig()
+    artifact = (
+        run_tiny_matrix(output.parent, resume=True, output=output)
+        if args.resume and args.quick
+        else run_experiment(replace(config, output=output))
+    )
+    print(render_table(artifact))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
