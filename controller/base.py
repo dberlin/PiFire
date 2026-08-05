@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import TypeAlias
 
-from common.control_trace import ControllerBranch, MpcFailureState
+from common.control_trace import ActuationMode, ControllerBranch, MpcFailureState, ResultStaleState
 from controller.mpc_allocator import AllocationResult
 
 
@@ -78,6 +78,11 @@ class MpcTraceDiagnostics:
     solve_start_monotonic: float
     solve_end_monotonic: float
     solve_duration_seconds: float
+    result_age_seconds: float = 0.0
+    deadline_miss_count: int = 0
+    consecutive_deadline_miss_count: int = 0
+    stale_state: ResultStaleState = ResultStaleState.FRESH
+    recovered: bool = False
 
 
 ControllerTraceDiagnostics: TypeAlias = PidTraceDiagnostics | PidSpTraceDiagnostics | MpcTraceDiagnostics
@@ -117,6 +122,10 @@ class ControllerBase:
         auger cycle (e.g. MPC) return a fixed period such as 5.0.
         """
         return None
+
+    def actuation_mode(self) -> ActuationMode:
+        """The timing discipline Hold must use for this controller's request."""
+        return ActuationMode.FIXED_CYCLE
 
     def commands_fan(self):
         """Whether this controller issues fan duty commands (vs. auger-only)."""

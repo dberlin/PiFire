@@ -2,6 +2,7 @@ import json
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner, build_runner, _build_core
+from common.control_trace import ActuationMode, ResultStaleState
 
 
 class _Core:
@@ -45,6 +46,49 @@ def test_sync_runner_float_output_has_no_fan():
 
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
+
+
+def test_sync_runner_preserves_actuation_mode_and_reports_solve_quality():
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+
+        def __call__(self):
+            return self.value
+
+        def advance(self, seconds):
+            self.value += seconds
+
+    class TimedCore(_Core):
+        def __init__(self, clock):
+            super().__init__()
+            self.clock = clock
+            self.duration = 6.0
+
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
+        def update(self, temp):
+            self.clock.advance(self.duration)
+            return 0.25
+
+    clock = Clock()
+    core = TimedCore(clock)
+    runner = SyncControllerRunner(core, monotonic_clock=clock, wall_clock=clock)
+
+    first = runner.latest_from(190.0)
+    assert runner.actuation_mode() is ActuationMode.FRAMED_PULSE
+    assert first.solve_duration_seconds == 6.0
+    assert first.result_age_seconds == 0.0
+    assert first.deadline_miss_count == first.consecutive_deadline_miss_count == 1
+    assert first.stale_state is ResultStaleState.FRESH
+
+    core.duration = 0.0
+    second = runner.latest_from(191.0)
+    assert second.revision == first.revision + 1
+    assert second.deadline_miss_count == 1
+    assert second.consecutive_deadline_miss_count == 0
+    assert runner.controller_state()["result_stale_state"] == ResultStaleState.FRESH.value
 
 
 def test_sync_runner_result_revision_and_status_match_one_completed_update():

@@ -5,6 +5,7 @@ import json
 
 
 from controller.applied_output import AppliedOutput, OutputSource
+from common.control_trace import ActuationMode, ResultStaleState
 from controller.runtime.runner import (
     ThreadedControllerRunner,
     build_runner,
@@ -124,7 +125,7 @@ def test_threaded_result_retains_consumed_temperature_after_newer_submit():
         runner.stop()
 
 
-def test_threaded_runner_repoll_returns_same_completed_result_revision():
+def test_threaded_runner_repoll_preserves_completed_revision_and_advances_age():
     core = FakeCore()
     runner = ThreadedControllerRunner(core)
     try:
@@ -132,8 +133,8 @@ def test_threaded_runner_repoll_returns_same_completed_result_revision():
         assert core.updated.wait(2.0)
         first = runner.latest()
         second = runner.latest()
-        assert first is second
-        assert first.revision >= 1
+        assert second.revision == first.revision >= 1
+        assert second.result_age_seconds >= first.result_age_seconds
         assert first.solve_duration_seconds == first.solve_end_monotonic - first.solve_start_monotonic
     finally:
         runner.stop()
@@ -159,11 +160,13 @@ def test_threaded_result_recursively_freezes_nested_status_across_repolls():
 
         repolled = runner.latest()
         state = runner.controller_state()
-        assert repolled is result
+        assert repolled.revision == result.revision
+        assert repolled.result_age_seconds >= result.result_age_seconds
         assert state == {"nested": {"samples": [1.0]}, "pending_dropped": 0}
         assert json.loads(json.dumps(state)) == state
         state["nested"]["samples"].append(3.0)
         assert result.status == {"nested": {"samples": (1.0,)}}
+        assert repolled.status == {"nested": {"samples": (1.0,)}}
         assert runner.controller_state() == {"nested": {"samples": [1.0]}, "pending_dropped": 0}
     finally:
         runner.stop()
@@ -184,6 +187,176 @@ def test_threaded_runner_latest_does_not_block_during_solve():
     finally:
         core.gate.set()
         r.stop()
+
+
+def test_threaded_runner_publishes_one_atomic_quality_snapshot_without_blocking():
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+
+        def __call__(self):
+            return self.value
+
+        def advance(self, seconds):
+            self.value += seconds
+
+    class PeriodBarrier:
+        def __init__(self):
+            self.release = threading.Event()
+            self.first_waiting = threading.Event()
+            self.first_publish_complete = threading.Event()
+            self.recovery_publish_complete = threading.Event()
+            self.calls = 0
+            self.lock = threading.Lock()
+
+        def __call__(self, seconds):
+            with self.lock:
+                self.calls += 1
+                call = self.calls
+            if call == 1:
+                self.first_waiting.set()
+            elif call == 2:
+                self.first_publish_complete.set()
+            elif call == 3:
+                self.recovery_publish_complete.set()
+            assert self.release.wait(2.0)
+            self.release.clear()
+
+    class BarrierCore(FakeCore):
+        def __init__(self, clock):
+            super().__init__(period=5.0)
+            self.clock = clock
+            self.entered = threading.Event()
+            self.solve_duration = 6.0
+
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
+        def update(self, temp):
+            self.entered.set()
+            self.clock.advance(self.solve_duration)
+            return super().update(temp)
+
+    clock = Clock()
+    warnings = []
+    barrier = PeriodBarrier()
+    core = BarrierCore(clock)
+    runner = ThreadedControllerRunner(
+        core,
+        monotonic_clock=clock,
+        wall_clock=clock,
+        warning_callback=warnings.append,
+        wait_for_period=barrier,
+    )
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        runner.submit(70.0)
+        barrier.release.set()
+        assert core.entered.wait(2.0)
+        assert barrier.first_publish_complete.wait(2.0)
+        completed = runner.latest()
+        assert completed.revision == 1
+        assert runner.actuation_mode() is ActuationMode.FRAMED_PULSE
+        assert completed.solve_duration_seconds == 6.0
+        assert completed.deadline_miss_count == completed.consecutive_deadline_miss_count == 1
+
+        clock.advance(10.0)
+        stale = runner.latest()
+        assert stale.revision == completed.revision
+        assert stale.result_age_seconds == 10.0
+        assert stale.stale_state is ResultStaleState.STALE
+        assert warnings == [ResultStaleState.STALE]
+        assert runner.latest() is stale
+        assert warnings == [ResultStaleState.STALE]
+        clock.advance(1.0)
+        aged = runner.latest()
+        assert aged.revision == stale.revision
+        assert aged.result_age_seconds == 11.0
+        assert aged.stale_state is ResultStaleState.STALE
+        assert warnings == [ResultStaleState.STALE]
+
+        core.solve_duration = 0.0
+        barrier.release.set()
+        assert barrier.recovery_publish_complete.wait(2.0)
+        recovered = runner.latest()
+        assert recovered.revision == completed.revision + 1
+        assert recovered.deadline_miss_count == 1
+        assert recovered.consecutive_deadline_miss_count == 0
+        assert recovered.stale_state is ResultStaleState.FRESH
+        assert recovered.recovered is True
+        assert warnings == [ResultStaleState.STALE, ResultStaleState.FRESH]
+        assert runner.latest() is recovered
+        assert recovered.recovered is True
+        assert warnings == [ResultStaleState.STALE, ResultStaleState.FRESH]
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+def test_threaded_reconfigure_atomically_refreshes_capabilities_and_stale_budget(monkeypatch):
+    import controller.runtime.runner as runner_module
+
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+
+        def __call__(self):
+            return self.value
+
+        def advance(self, seconds):
+            self.value += seconds
+
+    class PeriodBarrier:
+        def __init__(self):
+            self.release = threading.Event()
+            self.first_waiting = threading.Event()
+            self.swapped_waiting = threading.Event()
+            self.calls = 0
+
+        def __call__(self, seconds):
+            self.calls += 1
+            if self.calls == 1:
+                self.first_waiting.set()
+            elif self.calls == 2:
+                self.swapped_waiting.set()
+            assert self.release.wait(2.0)
+            self.release.clear()
+
+    class Core(FakeCore):
+        def __init__(self, *, period, commands_fan, mode):
+            super().__init__(period=period, commands_fan=commands_fan)
+            self._mode = mode
+
+        def actuation_mode(self):
+            return self._mode
+
+    clock = Clock()
+    barrier = PeriodBarrier()
+    replacement = Core(period=2.0, commands_fan=True, mode=ActuationMode.FRAMED_PULSE)
+    monkeypatch.setattr(runner_module, "_build_core", lambda *args, **kwargs: (replacement, "Active"))
+    runner = ThreadedControllerRunner(
+        Core(period=5.0, commands_fan=False, mode=ActuationMode.FIXED_CYCLE),
+        monotonic_clock=clock,
+        wall_clock=clock,
+        wait_for_period=barrier,
+    )
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        assert runner.reconfigure({}, {}) == "Active"
+        runner.submit(70.0)
+        barrier.release.set()
+        assert barrier.swapped_waiting.wait(2.0)
+        assert runner.control_period() == 2.0
+        assert runner.commands_fan() is True
+        assert runner.actuation_mode() is ActuationMode.FRAMED_PULSE
+
+        clock.advance(4.0)
+        stale = runner.latest()
+        assert stale.revision == 1
+        assert stale.stale_state is ResultStaleState.STALE
+    finally:
+        barrier.release.set()
+        runner.stop()
 
 
 def test_threaded_runner_stop_terminates_thread():

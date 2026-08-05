@@ -15,6 +15,7 @@ from common.control_trace import (
     InhibitReason,
     MpcFailureState,
     MpcUpdatePayload,
+    ResultStaleState,
     SessionPayload,
     TraceEventKind,
     TraceSetting,
@@ -154,6 +155,9 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                     recovered=False,
                     predicted_feasible=True,
                     predicted_steady_load=load,
+                    solve_duration_ms=0,
+                    consecutive_deadline_miss_count=0,
+                    stale_state=ResultStaleState.FRESH,
                 ),
             )
         )

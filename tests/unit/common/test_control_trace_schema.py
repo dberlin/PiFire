@@ -24,6 +24,7 @@ from common.control_trace import (
     ModelEventPayload,
     ModelEventType,
     MpcUpdatePayload,
+    ResultStaleState,
     PidSpUpdatePayload,
     PidUpdatePayload,
     RecorderGapPayload,
@@ -49,6 +50,7 @@ def test_trace_enums_have_exact_members():
         TraceEventKind.RECORDER_GAP,
     }
     assert set(ActuationMode) == {ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE}
+    assert set(ResultStaleState) == {ResultStaleState.FRESH, ResultStaleState.STALE}
     assert set(InhibitReason) == {
         InhibitReason.NONE,
         InhibitReason.LID_OPEN,
@@ -227,6 +229,9 @@ def _payload_cases():
                 recovered=False,
                 predicted_feasible=True,
                 predicted_steady_load=0.55,
+                solve_duration_ms=2,
+                consecutive_deadline_miss_count=0,
+                stale_state=ResultStaleState.FRESH,
             ),
         ),
         (

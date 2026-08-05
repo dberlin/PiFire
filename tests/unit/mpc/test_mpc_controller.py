@@ -13,6 +13,7 @@ from common.modes import Mode
 from controller.mpc import Controller, _DEFAULTS, _warn_about_model
 from controller.runtime.runner import ThreadedControllerRunner
 from controller.applied_output import AppliedOutput, OutputSource
+from common.control_trace import ActuationMode
 
 CONFIG = dict(
     n_horizon=20,
@@ -90,6 +91,19 @@ def test_below_setpoint_demands_more_than_at_setpoint():
 
 def test_control_period_advertised():
     assert _make().get_control_period() == 1.0
+
+
+def test_mpc_advertises_framed_pulse_actuation_and_typed_fresh_diagnostics():
+    controller = _make()
+    controller.update(100.0)
+    diagnostics = controller.trace_diagnostics()
+
+    assert controller.actuation_mode() is ActuationMode.FRAMED_PULSE
+    assert math.isfinite(diagnostics.solve_duration_seconds)
+    assert diagnostics.result_age_seconds == 0.0
+    assert diagnostics.deadline_miss_count == diagnostics.consecutive_deadline_miss_count == 0
+    assert diagnostics.stale_state.value == "fresh"
+    assert diagnostics.recovered is False
 
 
 def test_fahrenheit_setpoint_converted():

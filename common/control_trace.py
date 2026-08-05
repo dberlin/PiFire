@@ -50,6 +50,13 @@ class ActuationMode(StrEnum):
     FRAMED_PULSE = "framed_pulse"
 
 
+class ResultStaleState(StrEnum):
+    """Freshness of a completed controller result at its last observation."""
+
+    FRESH = "fresh"
+    STALE = "stale"
+
+
 class InhibitReason(StrEnum):
     NONE = "none"
     LID_OPEN = "lid_open"
@@ -258,6 +265,9 @@ class MpcUpdatePayload(_ControlUpdatePayload):
     recovered: bool
     predicted_feasible: bool | None
     predicted_steady_load: FiniteFloat | None
+    solve_duration_ms: NonNegativeInt
+    consecutive_deadline_miss_count: NonNegativeInt
+    stale_state: ResultStaleState
     payload_type: Literal["mpc_update"] = "mpc_update"
 
     @model_validator(mode="after")

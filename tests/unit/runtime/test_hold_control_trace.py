@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from common.control_trace import ControllerBranch, ControllerType, PidSpUpdatePayload, TraceEventKind
+from common.control_trace import ControllerBranch, ControllerType, PidSpUpdatePayload, ResultStaleState, TraceEventKind
 from common.datastore_accessors import read_control_trace_session
 from controller.applied_output import OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
@@ -120,6 +120,8 @@ def _mpc_result(
     requested_auger_duty=None,
     enable_fan=True,
     applied_combustion_load=0.4,
+    stale_state=ResultStaleState.FRESH,
+    recovered=False,
 ):
     diagnostics = MpcTraceDiagnostics(
         state_names=("temperature",),
@@ -159,6 +161,8 @@ def _mpc_result(
         solve_end_monotonic=1.1,
         solve_duration_seconds=1.1 - 1.0,
         completed_wall_time=1.1,
+        stale_state=stale_state,
+        recovered=recovered,
     )
 
 
@@ -251,10 +255,13 @@ def test_mpc_allocation_trace_preserves_disabled_fan_evidence(hold_cycle, monkey
     assert allocation.fan_enabled is False
 
 
-def test_mpc_trace_marks_the_first_success_after_staleness_recovered(hold_cycle, monkeypatch):
+def test_mpc_trace_marks_the_first_fresh_result_after_runner_staleness(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, commands_fan=True).script(
-        [_mpc_result(1, consecutive_policy_failures=1), _mpc_result(2)]
+        [
+            _mpc_result(1, stale_state=ResultStaleState.STALE),
+            _mpc_result(2, recovered=True),
+        ]
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
@@ -266,7 +273,9 @@ def test_mpc_trace_marks_the_first_success_after_staleness_recovered(hold_cycle,
     updates = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
 
     assert updates[0].stale is True
+    assert updates[0].stale_state is ResultStaleState.STALE
     assert updates[1].stale is False
+    assert updates[1].stale_state is ResultStaleState.FRESH
     assert updates[1].recovered is True
 
 

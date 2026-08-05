@@ -23,12 +23,14 @@ import math
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TypeAlias
 
-from controller.base import ControllerTraceDiagnostics, normalize_controller_output
+from common.control_trace import ActuationMode, ResultStaleState
+
+from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
 
 
@@ -80,6 +82,88 @@ def _thaw_status(status: Mapping[str, object]) -> dict[str, MutableStatusValue]:
     return thawed
 
 
+def _control_period_seconds(value: object) -> float | None:
+    """Return the quality budget, or disable budget checks for legacy cores."""
+    if value is None:
+        return None
+    period = float(value)
+    if not math.isfinite(period) or period <= 0:
+        return None
+    return period
+
+
+@dataclass(slots=True)
+class _ResultQualityTracker:
+    """State that belongs to completed runner results, never the solver."""
+
+    control_period: float | None
+    deadline_miss_count: int = 0
+    consecutive_deadline_miss_count: int = 0
+    stale_state: ResultStaleState = ResultStaleState.FRESH
+
+    def completed(self, result: "ControllerUpdateResult") -> tuple["ControllerUpdateResult", ResultStaleState | None]:
+        deadline_missed = self.control_period is not None and result.solve_duration_seconds > self.control_period
+        if deadline_missed:
+            self.deadline_miss_count += 1
+            self.consecutive_deadline_miss_count += 1
+        else:
+            self.consecutive_deadline_miss_count = 0
+        recovered = self.stale_state is ResultStaleState.STALE
+        self.stale_state = ResultStaleState.FRESH
+        quality_result = replace(
+            result,
+            result_age_seconds=0.0,
+            deadline_miss_count=self.deadline_miss_count,
+            consecutive_deadline_miss_count=self.consecutive_deadline_miss_count,
+            stale_state=ResultStaleState.FRESH,
+            recovered=recovered,
+        )
+        return (
+            _with_result_quality(quality_result),
+            ResultStaleState.FRESH if recovered else None,
+        )
+
+    def polled(
+        self, result: "ControllerUpdateResult", monotonic_now: float
+    ) -> tuple["ControllerUpdateResult", ResultStaleState | None]:
+        if result.revision == 0 or self.control_period is None:
+            return result, None
+        age = max(0.0, monotonic_now - result.solve_end_monotonic)
+        stale = age >= 2.0 * self.control_period
+        next_state = ResultStaleState.STALE if stale else ResultStaleState.FRESH
+        transition = next_state is not self.stale_state
+        if transition:
+            self.stale_state = next_state
+        if not transition and age == result.result_age_seconds and next_state is result.stale_state:
+            return result, None
+        quality_result = replace(
+            result,
+            result_age_seconds=age,
+            stale_state=next_state,
+            recovered=result.recovered if next_state is ResultStaleState.FRESH and not transition else False,
+        )
+        return _with_result_quality(quality_result), next_state if transition else None
+
+
+def _quality_status(result: "ControllerUpdateResult") -> dict[str, StatusScalar]:
+    return {
+        "solve_duration_seconds": result.solve_duration_seconds,
+        "result_age_seconds": result.result_age_seconds,
+        "deadline_miss_count": result.deadline_miss_count,
+        "consecutive_deadline_miss_count": result.consecutive_deadline_miss_count,
+        "result_stale_state": result.stale_state.value,
+        "result_recovered": result.recovered,
+    }
+
+
+def _actuation_mode_for(core) -> ActuationMode:
+    mode = getattr(core, "actuation_mode", None)
+    value = ActuationMode.FIXED_CYCLE if mode is None else mode()
+    if not isinstance(value, ActuationMode):
+        raise TypeError("controller actuation_mode() must return ActuationMode")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class ControllerUpdateResult:
     """One atomically captured controller completion."""
@@ -95,6 +179,11 @@ class ControllerUpdateResult:
     solve_end_monotonic: float | None = None
     solve_duration_seconds: float | None = None
     completed_wall_time: float | None = None
+    result_age_seconds: float = 0.0
+    deadline_miss_count: int = 0
+    consecutive_deadline_miss_count: int = 0
+    stale_state: ResultStaleState = ResultStaleState.FRESH
+    recovered: bool = False
 
     def __post_init__(self):
         if self.fan is not None:
@@ -105,6 +194,12 @@ class ControllerUpdateResult:
             raise ValueError("input_temperature must be finite")
         if self.revision < 0:
             raise ValueError("revision must be non-negative")
+        if not math.isfinite(self.result_age_seconds) or self.result_age_seconds < 0:
+            raise ValueError("result age must be finite and non-negative")
+        if self.deadline_miss_count < 0 or self.consecutive_deadline_miss_count < 0:
+            raise ValueError("deadline miss counts must be non-negative")
+        if not isinstance(self.stale_state, ResultStaleState):
+            raise TypeError("stale_state must be ResultStaleState")
         solve_start = self.solve_start_monotonic
         solve_end = self.solve_end_monotonic
         solve_duration = self.solve_duration_seconds
@@ -120,16 +215,39 @@ class ControllerUpdateResult:
             return
         if solve_start is None or solve_end is None or solve_duration is None or completion_wall_time is None:
             raise ValueError("a completed result requires all completion timestamps")
+        if not all(math.isfinite(value) for value in (solve_start, solve_end, solve_duration, completion_wall_time)):
+            raise ValueError("completion timestamps must be finite")
         if solve_end < solve_start:
             raise ValueError("solve end must not precede solve start")
         if solve_duration != solve_end - solve_start:
             raise ValueError("solve duration must equal its monotonic interval")
 
 
-def _capture_completed_result(core, temp, revision):
-    solve_start = time.monotonic()
+def _with_result_quality(result: ControllerUpdateResult) -> ControllerUpdateResult:
+    """Copy runner-owned timing into the immutable MPC trace diagnostics."""
+    diagnostics = result.diagnostics
+    if not isinstance(diagnostics, MpcTraceDiagnostics):
+        return result
+    return replace(
+        result,
+        diagnostics=replace(
+            diagnostics,
+            solve_start_monotonic=result.solve_start_monotonic,
+            solve_end_monotonic=result.solve_end_monotonic,
+            solve_duration_seconds=result.solve_duration_seconds,
+            result_age_seconds=result.result_age_seconds,
+            deadline_miss_count=result.deadline_miss_count,
+            consecutive_deadline_miss_count=result.consecutive_deadline_miss_count,
+            stale_state=result.stale_state,
+            recovered=result.recovered,
+        ),
+    )
+
+
+def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clock):
+    solve_start = monotonic_clock()
     raw = core.update(temp)
-    solve_end = time.monotonic()
+    solve_end = monotonic_clock()
     cycle_ratio, fan = normalize_controller_output(raw)
     status = core.get_status()
     diagnostics = core.trace_diagnostics()
@@ -145,7 +263,7 @@ def _capture_completed_result(core, temp, revision):
         solve_start_monotonic=solve_start,
         solve_end_monotonic=solve_end,
         solve_duration_seconds=solve_end - solve_start,
-        completed_wall_time=time.time(),
+        completed_wall_time=wall_clock(),
     )
 
 
@@ -165,6 +283,8 @@ class ControllerRunner(ABC):
     @abstractmethod
     def wants_async(self): ...
     @abstractmethod
+    def actuation_mode(self) -> ActuationMode: ...
+    @abstractmethod
     def runs_async(self) -> bool: ...
     @abstractmethod
     def set_output(self, applied): ...
@@ -181,11 +301,23 @@ class ControllerRunner(ABC):
 
 
 class SyncControllerRunner(ControllerRunner):
-    def __init__(self, core):
+    def __init__(
+        self,
+        core,
+        *,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
+        warning_callback: Callable[[ResultStaleState], None] | None = None,
+    ):
         self._core = core
         self._temp = None
         self._revision = 0
         self._latest_result = None
+        self._monotonic_clock = monotonic_clock
+        self._wall_clock = wall_clock
+        self._warning_callback = warning_callback
+        period = getattr(core, "get_control_period", lambda: None)()
+        self._quality = _ResultQualityTracker(_control_period_seconds(period))
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
@@ -195,7 +327,16 @@ class SyncControllerRunner(ControllerRunner):
 
     def latest(self) -> ControllerUpdateResult:
         self._revision += 1
-        self._latest_result = _capture_completed_result(self._core, self._temp, self._revision)
+        result = _capture_completed_result(
+            self._core,
+            self._temp,
+            self._revision,
+            monotonic_clock=self._monotonic_clock,
+            wall_clock=self._wall_clock,
+        )
+        self._latest_result, transition = self._quality.completed(result)
+        if transition is not None and self._warning_callback is not None:
+            self._warning_callback(transition)
         return self._latest_result
 
     def latest_from(self, temp):
@@ -206,6 +347,7 @@ class SyncControllerRunner(ControllerRunner):
         core, status = _build_core(settings, control, logger=logger)
         if status == "Active":
             self._core = core
+            self._quality.control_period = _control_period_seconds(core.get_control_period())
         else:
             report_reconfigure_failure(settings, logger=logger)
         return status
@@ -218,6 +360,9 @@ class SyncControllerRunner(ControllerRunner):
 
     def wants_async(self):
         return self._core.wants_async()
+
+    def actuation_mode(self) -> ActuationMode:
+        return _actuation_mode_for(self._core)
 
     def runs_async(self) -> bool:
         return False
@@ -246,7 +391,13 @@ class SyncControllerRunner(ControllerRunner):
     def controller_state(self):
         """A mutable, JSON-safe copy of the current status snapshot."""
         if self._latest_result is not None:
-            return {} if self._latest_result.status is None else _thaw_status(self._latest_result.status)
+            self._latest_result, transition = self._quality.polled(self._latest_result, self._monotonic_clock())
+            if transition is not None and self._warning_callback is not None:
+                self._warning_callback(transition)
+            state = {} if self._latest_result.status is None else _thaw_status(self._latest_result.status)
+            if self.actuation_mode() is ActuationMode.FRAMED_PULSE:
+                state.update(_quality_status(self._latest_result))
+            return state
         status = self._core.get_status()
         return {} if status is None else _thaw_status(status)
 
@@ -285,7 +436,15 @@ class ThreadedControllerRunner(ControllerRunner):
     an expensive solve never blocks the caller. submit()/latest() are
     non-blocking snapshots; the running core is mutated only by the thread."""
 
-    def __init__(self, core):
+    def __init__(
+        self,
+        core,
+        *,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
+        warning_callback: Callable[[ResultStaleState], None] | None = None,
+        wait_for_period: Callable[[float], None] | None = None,
+    ):
         self._core = core
         self._lock = threading.Lock()
         self._temp = None
@@ -311,7 +470,13 @@ class ThreadedControllerRunner(ControllerRunner):
         self._initial_status = _safe_initial_status(core)
         self._control_period = core.get_control_period()
         self._commands_fan = core.commands_fan()
+        self._actuation_mode = _actuation_mode_for(core)
+        self._quality = _ResultQualityTracker(_control_period_seconds(self._control_period))
+        self._monotonic_clock = monotonic_clock
+        self._wall_clock = wall_clock
+        self._warning_callback = warning_callback
         self._stop_event = threading.Event()
+        self._wait_for_period = self._stop_event.wait if wait_for_period is None else wait_for_period
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -328,7 +493,15 @@ class ThreadedControllerRunner(ControllerRunner):
                 restore = self._pending_restore
                 self._pending_restore = None
             if new_core is not None:
-                self._core = new_core
+                new_period = new_core.get_control_period()
+                new_commands_fan = new_core.commands_fan()
+                new_actuation_mode = _actuation_mode_for(new_core)
+                with self._lock:
+                    self._core = new_core
+                    self._control_period = new_period
+                    self._commands_fan = new_commands_fan
+                    self._actuation_mode = new_actuation_mode
+                    self._quality.control_period = _control_period_seconds(new_period)
             if restore is not None:
                 self._core.restore_model(restore)
             if target is not _UNSET:
@@ -338,14 +511,23 @@ class ThreadedControllerRunner(ControllerRunner):
             for applied in sorted(pending_outputs, key=lambda a: a.timestamp):
                 self._core.set_output(applied)
             if temp is not None:
-                result = _capture_completed_result(self._core, temp, self._revision + 1)
+                result = _capture_completed_result(
+                    self._core,
+                    temp,
+                    self._revision + 1,
+                    monotonic_clock=self._monotonic_clock,
+                    wall_clock=self._wall_clock,
+                )
                 model = _owned_model_snapshot(self._core.get_model_snapshot())
                 with self._lock:
+                    result, transition = self._quality.completed(result)
                     self._revision = result.revision
                     self._output = result
                     self._model_snapshot = model
+                if transition is not None and self._warning_callback is not None:
+                    self._warning_callback(transition)
             # Interruptible sleep; wait(None/0) would block forever, so floor it.
-            self._stop_event.wait(self._control_period or 1.0)
+            self._wait_for_period(self._control_period or 1.0)
 
     def set_target(self, setpoint):
         with self._lock:
@@ -357,7 +539,11 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def latest(self) -> ControllerUpdateResult:
         with self._lock:
-            return self._output
+            self._output, transition = self._quality.polled(self._output, self._monotonic_clock())
+            result = self._output
+        if transition is not None and self._warning_callback is not None:
+            self._warning_callback(transition)
+        return result
 
     def reconfigure(self, settings, control, logger=None):
         core, status = _build_core(settings, control, logger=logger)
@@ -377,16 +563,25 @@ class ThreadedControllerRunner(ControllerRunner):
     def wants_async(self):
         return True
 
+    def actuation_mode(self) -> ActuationMode:
+        with self._lock:
+            return self._actuation_mode
+
     def runs_async(self) -> bool:
         return True
 
     def controller_state(self):
         with self._lock:
+            self._output, transition = self._quality.polled(self._output, self._monotonic_clock())
             status = self._output.status
             source = self._initial_status if status is None else status
             state = {} if source is None else _thaw_status(source)
+            if self._actuation_mode is ActuationMode.FRAMED_PULSE and self._output.revision > 0:
+                state.update(_quality_status(self._output))
             state["pending_dropped"] = self._pending_dropped
-            return state
+        if transition is not None and self._warning_callback is not None:
+            self._warning_callback(transition)
+        return state
 
     def set_output(self, applied):
         with self._lock:

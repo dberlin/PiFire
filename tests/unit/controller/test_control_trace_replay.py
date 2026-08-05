@@ -19,6 +19,7 @@ from common.control_trace import (
     InhibitReason,
     MpcFailureState,
     MpcUpdatePayload,
+    ResultStaleState,
     ModelEventPayload,
     ModelEventType,
     PidSpUpdatePayload,
@@ -221,6 +222,9 @@ def _mpc_update(revision=1, *, mode=ActuationMode.FIXED_CYCLE):
         recovered=False,
         predicted_feasible=True,
         predicted_steady_load=0.5,
+        solve_duration_ms=1,
+        consecutive_deadline_miss_count=0,
+        stale_state=ResultStaleState.FRESH,
     )
 
 

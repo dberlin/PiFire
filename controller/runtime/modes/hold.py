@@ -15,6 +15,7 @@ from common.control_trace import (
     ModelEventPayload,
     ModelEventType,
     MpcUpdatePayload,
+    ResultStaleState,
     PidSpUpdatePayload,
     PidUpdatePayload,
     SafetyEventPayload,
@@ -344,8 +345,9 @@ class HoldMode(ControlMode):
                 previous_update_ms=max(0, int(diagnostics.previous_update_time * 1_000)),
             )
         elif isinstance(diagnostics, MpcTraceDiagnostics):
+            mpc_common = dict(common, result_age_ms=max(0, int(result.result_age_seconds * 1_000)))
             payload = MpcUpdatePayload(
-                **common,
+                **mpc_common,
                 state_names=diagnostics.state_names,
                 state_values=diagnostics.state_values,
                 disturbance_estimate=diagnostics.disturbance_estimate,
@@ -359,11 +361,14 @@ class HoldMode(ControlMode):
                 failure_state=diagnostics.failure_state,
                 solve_start_ms=max(0, int(diagnostics.solve_start_monotonic * 1_000)),
                 solve_end_ms=max(0, int(diagnostics.solve_end_monotonic * 1_000)),
-                deadline_miss_count=diagnostics.consecutive_policy_failures,
-                stale=diagnostics.consecutive_policy_failures > 0,
-                recovered=(self.state.controller.trace_mpc_stale and diagnostics.consecutive_policy_failures == 0),
+                deadline_miss_count=result.deadline_miss_count,
+                stale=result.stale_state is ResultStaleState.STALE,
+                recovered=result.recovered,
                 predicted_feasible=None,
                 predicted_steady_load=None,
+                solve_duration_ms=max(0, int(result.solve_duration_seconds * 1_000)),
+                consecutive_deadline_miss_count=result.consecutive_deadline_miss_count,
+                stale_state=result.stale_state,
             )
             realized_combustion_load = diagnostics.applied_combustion_load
             allocation = result.allocation

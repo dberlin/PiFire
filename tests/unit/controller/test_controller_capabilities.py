@@ -10,6 +10,7 @@ import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerBase
+from common.control_trace import ActuationMode
 
 # Controllers with no optional dependency, so this runs on every install.
 PLAIN_CONTROLLERS = ["pid", "pid_sp"]
@@ -19,6 +20,7 @@ CYCLE_DATA = {"HoldCycleTime": 20}
 
 def test_base_defaults_are_inert():
     core = ControllerBase({}, "F", dict(CYCLE_DATA))
+    assert core.actuation_mode() is ActuationMode.FIXED_CYCLE
     assert core.set_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 1.0)) is None
     assert core.get_status() is None
     assert core.trace_diagnostics() is None
@@ -37,5 +39,12 @@ def test_set_output_does_not_change_a_plain_controller_s_output():
 def test_every_shipped_controller_answers_all_typed_capabilities(name):
     mod = importlib.import_module(f"controller.{name}")
     core = mod.Controller({}, "F", dict(CYCLE_DATA))
-    for method in ("set_output", "get_status", "trace_diagnostics", "get_model_snapshot", "restore_model"):
+    for method in (
+        "actuation_mode",
+        "set_output",
+        "get_status",
+        "trace_diagnostics",
+        "get_model_snapshot",
+        "restore_model",
+    ):
         assert callable(getattr(core, method)), f"{name} is missing {method}"
