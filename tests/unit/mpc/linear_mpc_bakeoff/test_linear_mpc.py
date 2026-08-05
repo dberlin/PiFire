@@ -11,12 +11,14 @@ from docs.superpowers.experiments.linear_mpc_bakeoff import actuation
 
 from docs.superpowers.experiments.linear_mpc_bakeoff.actuation import PulseSimulationDriver
 from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import AffinePrediction
-from docs.superpowers.experiments.linear_mpc_bakeoff import linear_mpc
-from docs.superpowers.experiments.linear_mpc_bakeoff.linear_mpc import (
-    MPCConfig,
+import controller.linear_mpc.policy as linear_mpc
+from controller.linear_mpc.policy import (
     LinearMPC,
+    LinearMPCConfig,
+    LinearSolve,
     projected_gradient_qp,
-    SolveResult,
+)
+from docs.superpowers.experiments.linear_mpc_bakeoff.linear_mpc import (
     select_validation_horizon,
 )
 
@@ -60,18 +62,18 @@ def test_projected_gradient_matches_scipy_reference() -> None:
 
 
 @pytest.mark.parametrize("invalid", (np.nan, np.inf, -np.inf))
-def test_solver_result_rejects_nonfinite_sequence(invalid: float) -> None:
+def test_linear_solve_rejects_nonfinite_sequence(invalid: float) -> None:
     with pytest.raises(ValueError, match="finite"):
-        SolveResult(np.array([invalid]), 0.0, 0, 0.0)
+        LinearSolve(np.array([invalid]), 0.0, 0.0, 0, 1.0)
 
 
 @pytest.mark.parametrize(
     ("objective", "kkt_residual"),
     ((np.nan, 0.0), (0.0, np.inf)),
 )
-def test_solver_result_rejects_nonfinite_certificate(objective: float, kkt_residual: float) -> None:
+def test_linear_solve_rejects_nonfinite_certificate(objective: float, kkt_residual: float) -> None:
     with pytest.raises(ValueError, match="finite"):
-        SolveResult(np.array([0.5]), objective, 0, kkt_residual)
+        LinearSolve(np.array([0.5]), objective, kkt_residual, 0, 1.0)
 
 
 def test_diagonally_scaled_active_set_certifies_ill_conditioned_box_qp() -> None:
@@ -245,28 +247,35 @@ def test_zero_curvature_qp_selects_the_deterministic_bounded_linear_optimum() ->
     assert result.kkt_residual == 0.0
 
 
-def test_solve_result_arrays_are_defensive_read_only_copies() -> None:
-    result = LinearMPC(MPCConfig(horizon_s=800, frame_s=20)).solve(affine_integrator_model(steps=40), setpoint_c=120.0)
+def test_linear_solve_arrays_are_defensive_read_only_copies() -> None:
+    result = LinearMPC(LinearMPCConfig(horizon_steps=40)).solve(
+        affine_integrator_model(steps=40),
+        setpoint_c=120.0,
+        q_previous=0.0,
+        equilibrium_q=0.0,
+    )
 
     with pytest.raises(ValueError):
-        result.x[0] = 0.0
-    with pytest.raises(ValueError):
-        assert result.predicted_c is not None
-        result.predicted_c[0] = 0.0
+        result.sequence_q[0] = 0.0
 
 
-def test_mpc_uses_only_selected_horizon() -> None:
+def test_mpc_uses_only_configured_horizon() -> None:
     model = affine_integrator_model(steps=40)
-    mpc = LinearMPC(MPCConfig(horizon_s=800, frame_s=20))
+    mpc = LinearMPC(LinearMPCConfig(horizon_steps=40))
 
-    result = mpc.solve(model, setpoint_c=120.0)
+    result = mpc.solve(
+        model,
+        setpoint_c=120.0,
+        q_previous=0.0,
+        equilibrium_q=0.0,
+    )
 
     assert result.sequence_q.shape == (40,)
 
 
-@pytest.mark.parametrize("horizon_s", (600, 800, 1000))
-def test_mpc_accepts_only_candidate_horizons(horizon_s: int) -> None:
-    assert MPCConfig(horizon_s=horizon_s, frame_s=20).horizon_steps == horizon_s // 20
+@pytest.mark.parametrize("horizon_steps", (30, 40, 50))
+def test_mpc_accepts_nonnegative_horizons(horizon_steps: int) -> None:
+    assert LinearMPCConfig(horizon_steps=horizon_steps).horizon_steps == horizon_steps
 
 
 def test_validation_horizon_tie_breaks_to_shorter_candidate() -> None:
@@ -275,17 +284,27 @@ def test_validation_horizon_tie_breaks_to_shorter_candidate() -> None:
     assert selected == 600
 
 
-def test_mpc_rejects_non_candidate_horizon() -> None:
-    with pytest.raises(ValueError, match="600, 800, or 1000"):
-        MPCConfig(horizon_s=700, frame_s=20)
+def test_mpc_rejects_negative_horizon() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        LinearMPCConfig(horizon_steps=-1)
 
 
 def test_mpc_warm_start_is_deterministic() -> None:
     model = affine_integrator_model(steps=40)
-    config = MPCConfig(horizon_s=800, frame_s=20)
+    config = LinearMPCConfig(horizon_steps=40)
 
-    first = LinearMPC(config).solve(model, setpoint_c=120.0)
-    second = LinearMPC(config).solve(model, setpoint_c=120.0)
+    first = LinearMPC(config).solve(
+        model,
+        setpoint_c=120.0,
+        q_previous=0.0,
+        equilibrium_q=0.0,
+    )
+    second = LinearMPC(config).solve(
+        model,
+        setpoint_c=120.0,
+        q_previous=0.0,
+        equilibrium_q=0.0,
+    )
 
     npt.assert_allclose(first.sequence_q, second.sequence_q, atol=1e-12)
 

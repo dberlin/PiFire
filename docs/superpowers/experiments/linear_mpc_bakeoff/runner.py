@@ -46,13 +46,13 @@ from .artifact import ArmEvidence, ExperimentArtifact, MatrixKey
 from .contracts import SignalRecord
 from controller.linear_mpc.contracts import AffinePrediction, FrameObservation
 from .scenarios import SCENARIOS, ScenarioDefinition, quick_scenarios
-from .linear_mpc import (
+from controller.linear_mpc.policy import (
     LinearMPC,
-    MPCConfig,
+    LinearMPCConfig,
     condense_cost,
     projected_gradient_qp,
-    select_validation_horizon,
 )
+from .linear_mpc import select_validation_horizon
 
 _FRAME_S = 20
 _FIXED_FAN = 1.0
@@ -1440,7 +1440,10 @@ def _run_scenario(
         raise ValueError(f"unknown mode {mode!r}")
     simulator = plant_type(seed=seed, fixed_fan=_FIXED_FAN)
     realizer = PulseSimulationDriver()
-    mpc_config = MPCConfig(horizon_s=horizon_s, frame_s=_FRAME_S, tolerance=1e-3)
+    mpc_config = LinearMPCConfig(
+        horizon_steps=horizon_s // _FRAME_S,
+        tolerance=1e-3,
+    )
     controller = LinearMPC(mpc_config)
     if prepared is None:
         model, fit_ms, before_residuals, after_residuals, calibration = _fitted_model(arm, plant, seed, initialization)
@@ -1499,7 +1502,12 @@ def _run_scenario(
                 np.full(mpc_config.horizon_steps, simulator.T_amb),
             )
             solve_started = perf_counter()
-            solve = controller.solve(prediction, setpoint_c=target, q_previous=frame.requested_duty)
+            solve = controller.solve(
+                prediction,
+                setpoint_c=target,
+                q_previous=frame.requested_duty,
+                equilibrium_q=frame.requested_duty,
+            )
             elapsed_solve_ms = (perf_counter() - solve_started) * 1_000.0
             solve_ms.append(elapsed_solve_ms)
             if (
@@ -1519,7 +1527,12 @@ def _run_scenario(
                 "converged": True,
             }
             if second % 100 == 0:
-                hessian, linear = condense_cost(prediction, target, frame.requested_duty, mpc_config.weights)
+                hessian, linear = condense_cost(
+                    prediction,
+                    target,
+                    frame.requested_duty,
+                    mpc_config,
+                )
                 reference = _independent_box_qp_reference(hessian, linear, solve.sequence_q)
                 evidence.update(reference)
                 if reference["reference_converged"]:

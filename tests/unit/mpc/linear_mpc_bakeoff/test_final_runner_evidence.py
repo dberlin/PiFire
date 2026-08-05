@@ -196,6 +196,8 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
     assert state_space_row.raw_refresh_ms
     assert all("iterations" in item and "kkt_residual" in item for item in row.solver_evidence)
     assert any(item.get("reference_method") == "scipy-l-bfgs-b" for item in row.solver_evidence)
+    reference_frame = next(item for item in row.solver_evidence if item["frame_s"] == 100)
+    assert reference_frame["reference_method"] == "scipy-l-bfgs-b"
 
 
 def test_runner_clears_real_promotion_window_samples_and_role_generations() -> None:
