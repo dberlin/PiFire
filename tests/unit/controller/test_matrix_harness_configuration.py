@@ -191,6 +191,23 @@ def test_mpc_framed_path_uses_the_production_scheduler_and_reports_completed_del
     assert [report.timestamp for report in reports] == [20.0, 40.0]
     assert [report.ratio for report in reports] == pytest.approx([0.0, 0.1])
     assert any(0.0 < auger_on <= 1.0 for auger_on, _, _ in _Plant.instances[-1].steps)
+    # Fractional credit misses the first frame by one second and repays it in
+    # the second; cumulative requested and delivered duty therefore match.
+    assert row["requested_realized_load_error"] == pytest.approx(0.0)
+
+
+def test_framed_feedback_windows_do_not_recount_prior_delivery(monkeypatch):
+    _install(monkeypatch, _FramedCore)
+    monkeypatch.setattr(
+        defaults,
+        "default_settings",
+        lambda: _settings(config={"ratio": 0.5, "period": 20}),
+    )
+
+    matrix.run_scenario("_matrix_probe", matrix.Scenario("framed_windows", 41, [(0, 120.0)]), seed=0)
+
+    reports = [report for report in _FramedCore.instances[-1].reports if report.source is OutputSource.CONTROLLER]
+    assert [report.ratio for report in reports] == pytest.approx([0.5, 0.5])
 
 
 def test_fixed_cycle_manual_inhibit_reports_once_and_resumes_from_its_existing_phase(monkeypatch):

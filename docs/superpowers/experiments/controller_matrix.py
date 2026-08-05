@@ -374,11 +374,12 @@ def run_scenario(
         requested, ratio, fan_frac = 0.0, (0.0 if scheduler else u_min), 1.0
         next_solve = 0.0
         auger_on, auger_toggle, actual_auger_on = False, 0.0, False
-        feedback_start, feedback_delivered = 0.0, 0.0
+        feedback_start, feedback_delivered, feedback_requested = 0.0, 0.0, 0.0
         latest_result = None
         if scheduler is None:
             _report(core, u_min, "seed", 0)
-        temps, duties, requested_duties = [], [], []
+        temps, duties = [], []
+        delivered_request_s = delivered_actual_s = delivered_window_s = 0.0
         solve_durations, deadline_misses, stale_episodes, settle_from = [], [], 0, None
         for t in range(scenario.duration_s):
             clock.t = float(t)
@@ -460,13 +461,18 @@ def run_scenario(
                     )
                 if solved and not manual_inhibit and t > feedback_start:
                     delivered = feedback_delivered / (t - feedback_start)
-                    _report(core, delivered, source, t, requested=requested)
+                    _report(core, delivered, source, t, requested=feedback_requested)
+                    if source == "controller":
+                        window_s = float(t) - feedback_start
+                        delivered_request_s += feedback_requested * window_s
+                        delivered_actual_s += delivered * window_s
+                        delivered_window_s += window_s
                     if trace_sink is not None and latest_result is not None:
                         trace_sink.applied(
                             interval_start_s=feedback_start,
                             interval_end_s=float(t),
                             result=latest_result,
-                            requested=requested,
+                            requested=feedback_requested,
                             realized=delivered,
                         )
                     feedback_start = float(t)
@@ -484,13 +490,19 @@ def run_scenario(
                             revision=latest_result.revision,
                             frames=decision.completed_frames,
                         )
+                    for frame in decision.completed_frames:
+                        if frame.complete:
+                            window_s = frame.nominal_end_s - frame.nominal_start_s
+                            delivered_request_s += frame.latched_request * window_s
+                            delivered_actual_s += frame.delivered_on_s
+                            delivered_window_s += window_s
                     if trace_sink is not None and latest_result is not None and t > feedback_start:
                         delivered = decision.delivered_on_s - feedback_delivered
                         trace_sink.applied(
                             interval_start_s=feedback_start,
                             interval_end_s=float(t),
                             result=latest_result,
-                            requested=requested,
+                            requested=feedback_requested,
                             realized=delivered / (t - feedback_start),
                             sample_complete=False,
                         )
@@ -511,6 +523,12 @@ def run_scenario(
                             revision=latest_result.revision,
                             frames=decision.completed_frames,
                         )
+                    for frame in decision.completed_frames:
+                        if frame.complete:
+                            window_s = frame.nominal_end_s - frame.nominal_start_s
+                            delivered_request_s += frame.latched_request * window_s
+                            delivered_actual_s += frame.delivered_on_s
+                            delivered_window_s += window_s
                     actual_auger_on = decision.command_on
                     if solved and t > feedback_start:
                         delivered = decision.delivered_on_s - feedback_delivered
@@ -520,14 +538,14 @@ def run_scenario(
                             realized,
                             "controller",
                             t,
-                            requested=requested,
+                            requested=feedback_requested,
                         )
                         if trace_sink is not None and latest_result is not None:
                             trace_sink.applied(
                                 interval_start_s=feedback_start,
                                 interval_end_s=float(t),
                                 result=latest_result,
-                                requested=requested,
+                                requested=feedback_requested,
                                 realized=realized,
                             )
                         feedback_start = float(t)
@@ -536,6 +554,8 @@ def run_scenario(
                 ratio = auger_frac
             if scheduler is None:
                 feedback_delivered += auger_frac
+            if solved:
+                feedback_requested = requested
 
             plant_instance.step(
                 auger_on=auger_frac,
@@ -544,21 +564,28 @@ def run_scenario(
             )
             temps.append(temp_f)
             duties.append(auger_frac)
-            requested_duties.append(requested * effective_max if scheduler is not None else requested)
             if abs(temp_f - setpoint) <= 5.0:
                 if settle_from is None:
                     settle_from = t
             else:
                 settle_from = None
 
+        final_decision = None
+        if scheduler is not None:
+            final_decision = scheduler.advance(requested, float(scenario.duration_s), actual_auger_on)
+            for frame in final_decision.completed_frames:
+                if frame.complete:
+                    window_s = frame.nominal_end_s - frame.nominal_start_s
+                    delivered_request_s += frame.latched_request * window_s
+                    delivered_actual_s += frame.delivered_on_s
+                    delivered_window_s += window_s
+
         temps = np.asarray(temps)
         duties = np.asarray(duties)
-        requested_duties = np.asarray(requested_duties)
         sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
         err = temps - sp_series
         if trace_sink is not None and latest_result is not None and float(scenario.duration_s) > feedback_start:
-            if scheduler is not None:
-                final_decision = scheduler.advance(requested, float(scenario.duration_s), actual_auger_on)
+            if final_decision is not None:
                 trace_sink.frames(
                     t=float(scenario.duration_s),
                     revision=latest_result.revision,
@@ -572,7 +599,7 @@ def run_scenario(
                 interval_start_s=feedback_start,
                 interval_end_s=float(scenario.duration_s),
                 result=latest_result,
-                requested=requested,
+                requested=feedback_requested,
                 realized=realized,
             )
 
@@ -599,7 +626,9 @@ def run_scenario(
             "steady_peak_to_peak_f": float(np.ptp(temps[-min(len(temps), STEADY_TAIL_S) :])),
             "auger_on_time_s": float(duties.sum()),
             "pellet_proxy": float(duties.sum()),
-            "requested_realized_load_error": float(np.abs(requested_duties - duties).mean()),
+            "requested_realized_load_error": (
+                abs(delivered_request_s - delivered_actual_s) / delivered_window_s if delivered_window_s else 0.0
+            ),
             "solver_duration_seconds": tuple(solve_durations),
             "deadline_misses": max(deadline_misses, default=0),
             "stale_result_episodes": stale_episodes,

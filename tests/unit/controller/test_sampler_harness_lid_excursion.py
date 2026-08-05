@@ -126,14 +126,14 @@ def _coldest_c(plant):
 
 
 def _recovery_s(plant):
-    """Seconds from the lid opening until the chamber, having left the band
-    around setpoint, is back inside it. None if the episode ends first."""
-    err = np.abs(np.asarray(plant.true_temps[LID_START_STEP * CYCLE_S :]) - SETPOINT_C)
-    outside = np.flatnonzero(err > BAND_C)
-    if not len(outside):
+    """Seconds from lid opening until the chamber recovers from the cold-side
+    excursion into the setpoint band. None if the episode ends first."""
+    temps = np.asarray(plant.true_temps[LID_START_STEP * CYCLE_S :])
+    below = np.flatnonzero(temps < SETPOINT_C - BAND_C)
+    if not len(below):
         return 0
-    back = np.flatnonzero(err[outside[0] :] <= BAND_C)
-    return int(outside[0] + back[0]) if len(back) else None
+    back = np.flatnonzero(np.abs(temps[below[0] :] - SETPOINT_C) <= BAND_C)
+    return int(below[0] + back[0]) if len(back) else None
 
 
 # ----- the split itself ------------------------------------------------------

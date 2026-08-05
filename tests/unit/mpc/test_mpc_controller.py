@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import controller.mpc as mpc_module
 import notify.mqtt_handler as mh
 from common.modes import Mode
 from controller.mpc import Controller, _DEFAULTS, _warn_about_model
@@ -584,12 +585,6 @@ def _residual_controller(*, feed_forward=True):
     )
     controller.set_target(120.0)
     controller.estimator.update = lambda applied, measured: np.asarray((measured, 10.0))
-    if feed_forward:
-        controller._equilibrium_load = lambda target, disturbance: steady_combustion_load(
-            controller.cfg,
-            target,
-            disturbance,
-        )
     return controller
 
 
@@ -644,15 +639,66 @@ def test_residual_policy_clamps_only_the_combined_load_once(residual, raw_total,
     assert diagnostics.bounded_firing_load == pytest.approx(bounded_total)
 
 
-def test_unrecognized_feed_forward_config_cannot_override_the_measured_production_default():
+def test_identified_model_refuses_a_net_without_residual_objective_provenance(monkeypatch):
+    controller = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
+    legacy_net = object()
+    built = {}
+    monkeypatch.setattr(mpc_module, "_load_net_policy", lambda cfg, n_horizon: legacy_net)
+
+    def build_nlp(cfg, n_delay, n_horizon, *, residual_weight):
+        built["residual_weight"] = residual_weight
+        return "model", "mpc"
+
+    monkeypatch.setattr(controller, "_build_nlp", build_nlp)
+
+    _, net, model, policy = controller._build_for(
+        dict(_DEFAULTS, policy="net"),
+        model_identified=True,
+    )
+
+    assert net is None
+    assert (model, policy) == ("model", "mpc")
+    assert built["residual_weight"] == mpc_module._LEARNED_RESIDUAL_WEIGHT
+
+
+def test_restored_model_regularizes_residual_demand_without_changing_first_cook_defaults():
+    fresh = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
+    learned = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
+    snapshot = {
+        "version": learned._MODEL_SCHEMA,
+        "revision": 1,
+        "params": {key: float(_DEFAULTS[key]) for key in learned._MODEL_PARAM_KEYS},
+        "rmse": 1.0,
+        "samples": 120,
+        "band_c": [20.0, 170.0],
+        "nfev": 3,
+    }
+    assert learned.restore_model(snapshot) is True
+
+    state = np.asarray([0.0] * int(_DEFAULTS["n_delay"]) + [150.0, 0.0])
+    for controller in (fresh, learned):
+        controller.set_target(162.7778)
+        controller.estimator.update = lambda applied, measured: state
+
+    fresh.update(150.0)
+    learned.update(150.0)
+    fresh_diagnostics = fresh.trace_diagnostics()
+    learned_diagnostics = learned.trace_diagnostics()
+
+    assert fresh_diagnostics.equilibrium_feed_forward == 0.0
+    assert learned_diagnostics.equilibrium_feed_forward > 0.0
+    assert learned_diagnostics.raw_policy_firing_load < fresh_diagnostics.raw_policy_firing_load
+
+
+def test_retired_feed_forward_config_cannot_disable_the_identified_model_baseline():
     controller = _residual_controller(feed_forward=False)
     controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
 
     controller.update(100.0)
 
     assert "feed_forward" not in controller.cfg
-    assert controller.trace_diagnostics().equilibrium_feed_forward == 0.0
-    assert controller.trace_diagnostics().bounded_firing_load == 0.0
+    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.4)
+    assert controller.trace_diagnostics().bounded_firing_load == pytest.approx(0.4)
 
 
 def test_nondefault_configured_model_is_reachability_known_while_exact_defaults_remain_unknown():
@@ -669,6 +715,7 @@ def test_nondefault_configured_model_is_reachability_known_while_exact_defaults_
     defaults.estimator.update = lambda applied, measured: np.zeros(int(defaults.cfg["n_delay"]) + 2)
     defaults._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
     defaults.update(100.0)
+    assert defaults.trace_diagnostics().equilibrium_feed_forward == 0.0
 
     default_report = defaults.trace_diagnostics().feasibility
     assert default_report.state.value == "unknown_model"

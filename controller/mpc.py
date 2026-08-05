@@ -218,6 +218,14 @@ def _load_net_policy(cfg, n_horizon):
 
 _PHYSICAL_PARAMS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
 
+_LEARNED_RESIDUAL_WEIGHT = 1_000.0
+
+
+def _model_is_identified(cfg, model_meta=None):
+    """Whether thermal parameters came from calibration rather than shipped defaults."""
+    return model_meta is not None or any(cfg.get(key) != _DEFAULTS[key] for key in _PHYSICAL_PARAMS)
+
+
 #: Parameters of the two-lump model this controller used to plan against. A
 #: settings record written before the firepot state was dropped still carries
 #: them, and an operator's own calibration may too. They are reported and
@@ -266,9 +274,6 @@ def requires_modules(config):
     return ("do_mpc",)
 
 
-_SHIP_EQUILIBRIUM_FEED_FORWARD = False
-
-
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
@@ -302,16 +307,25 @@ class Controller(ControllerBase):
 
         self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
 
-    def _build_for(self, cfg):
+    def _build_for(self, cfg, *, model_identified=None):
         """Build thermal components at the configured planning horizon."""
+        if model_identified is None:
+            model_identified = _model_is_identified(cfg, self._model_meta)
         n_delay = int(cfg["n_delay"])
         n_horizon = int(cfg["n_horizon"])
         estimator = self._build_estimator(cfg, n_delay)
         net, model, mpc = None, None, None
         if str(cfg.get("policy", "nlp")).lower() == "net":
-            net = _load_net_policy(cfg, n_horizon)
+            if model_identified:
+                print(
+                    "[mpc] net policy artifacts do not encode the learned residual objective; "
+                    "using NLP for the identified model"
+                )
+            else:
+                net = _load_net_policy(cfg, n_horizon)
         if net is None:
-            model, mpc = self._build_nlp(cfg, n_delay, n_horizon)
+            residual_weight = _LEARNED_RESIDUAL_WEIGHT if model_identified else 0.0
+            model, mpc = self._build_nlp(cfg, n_delay, n_horizon, residual_weight=residual_weight)
         return estimator, net, model, mpc
 
     def _build_estimator(self, cfg, n_delay):
@@ -360,7 +374,7 @@ class Controller(ControllerBase):
             r_meas=cfg["est_r_meas"],
         )
 
-    def _build_nlp(self, cfg, n_delay, n_horizon):
+    def _build_nlp(self, cfg, n_delay, n_horizon, *, residual_weight):
         """Build the do-mpc NLP policy at the configured horizon."""
         import do_mpc
 
@@ -394,8 +408,10 @@ class Controller(ControllerBase):
         )
         T_c = model.x["T_c"]
         T_set = model.tvp["T_set"]
-        mpc.set_objective(mterm=cfg["Q_w"] * (T_c - T_set) ** 2, lterm=cfg["Q_w"] * (T_c - T_set) ** 2)
         combustion_residual = model.u["combustion_residual"]
+        tracking_cost = cfg["Q_w"] * (T_c - T_set) ** 2
+        stage_cost = tracking_cost + residual_weight * combustion_residual**2
+        mpc.set_objective(mterm=tracking_cost, lterm=stage_cost)
         total_load = model.tvp["equilibrium_load"] + combustion_residual
         mpc.set_rterm(combustion_residual=cfg["R_dQ"])
         mpc.set_nl_cons("normalized_load_upper", total_load, ub=1.0)
@@ -599,7 +615,7 @@ class Controller(ControllerBase):
         # committed so a build that fails leaves the controller solving the
         # model it already had.
         try:
-            rebuilt = self._build_for(merged)
+            rebuilt = self._build_for(merged, model_identified=True)
         except Exception as exc:
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
@@ -732,8 +748,8 @@ class Controller(ControllerBase):
         self._applied_combustion_load = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
 
     def _equilibrium_load(self, target, disturbance):
-        """Private experiment seam; the measured shipment gate owns the production default."""
-        if not _SHIP_EQUILIBRIUM_FEED_FORWARD:
+        """Private experiment seam for the identified-model equilibrium baseline."""
+        if not _model_is_identified(self.cfg, self._model_meta):
             return 0.0
         return steady_combustion_load(self.cfg, target, disturbance)
 
@@ -755,9 +771,7 @@ class Controller(ControllerBase):
         self._history.append((time.time(), float(y), float(applied_combustion_load)))
         self._policy_u_prev = self._applied_combustion_load
         model_provenance = "adopted" if self._model_meta is not None else "configured"
-        model_identified = self._model_meta is not None or any(
-            self.cfg.get(key) != _DEFAULTS[key] for key in _PHYSICAL_PARAMS
-        )
+        model_identified = _model_is_identified(self.cfg, self._model_meta)
         feasibility = feasibility_report(
             self.cfg if model_identified else None,
             self._set_point_c,
