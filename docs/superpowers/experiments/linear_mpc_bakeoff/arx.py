@@ -18,6 +18,8 @@ from .contracts import (
     UpdateOutcome,
 )
 
+_MAX_AR_POLE: Final = 0.999
+_DC_GAIN_SCALE: Final = 16.0
 TEMPERATURE_KNOTS_C: Final = (82.2, 162.8, 232.2, 315.6)
 
 
@@ -91,6 +93,8 @@ class ScheduledARX:
         self._last_observation_time_s: float | None = None
         self._refreshes = 0
         self._last_refresh_sample: int | None = None
+        self._max_dc_gain: float | None = None
+        self._max_forecast_deviation: float | None = None
 
     def fit(self, record: SignalRecord) -> None:
         """Reset and identify all delay candidates from a complete record."""
@@ -109,6 +113,14 @@ class ScheduledARX:
         temperatures = np.asarray(record.temp_c, dtype=np.float64)
         inputs = np.asarray(record.q, dtype=np.float64)
         ambients = np.asarray(record.ambient_c, dtype=np.float64)
+        input_span = float(np.ptp(inputs))
+        observed_span = float(np.ptp(temperatures))
+        self._max_dc_gain = _DC_GAIN_SCALE * max(
+            observed_span, np.finfo(np.float64).eps
+        ) / max(input_span, np.finfo(np.float64).eps)
+        self._max_forecast_deviation = _DC_GAIN_SCALE * max(
+            observed_span, np.finfo(np.float64).eps
+        )
         first_target = max(
             self._config.na + 1,
             max(self._config.delays) + self._config.nb + 1,
@@ -250,6 +262,18 @@ class ScheduledARX:
             input_response[step] = next_response
             temperatures.append((next_value, next_response))
 
+        response_peak = float(np.max(np.abs(input_response))) if input_response.size else 0.0
+        if (
+            self._max_forecast_deviation is not None
+            and response_peak > self._max_forecast_deviation
+        ):
+            scale = self._max_forecast_deviation / response_peak
+            input_slice = slice(self._config.na, self._config.na + self._config.nb)
+            for index, _ in self._region_weights(self._temperature_history[-1]):
+                candidate.regions[index].theta[input_slice] *= scale
+            return self.affine_prediction(horizon_steps, q_previous, ambient_future)
+        if not np.isfinite(free_output).all() or not np.isfinite(input_response).all():
+            raise RuntimeError("ARX horizon forecast is non-finite")
         return AffinePrediction(free_output, input_response)
 
     def snapshot(self) -> Mapping[str, object]:
@@ -284,9 +308,14 @@ class ScheduledARX:
                 "delay_steps": self._active_delay,
                 "knots_c": list(TEMPERATURE_KNOTS_C),
                 "regions": regions,
+                "plausibility_bounds": {
+                    "max_dc_gain_c_per_q": self._max_dc_gain,
+                    "max_ar_pole": _MAX_AR_POLE,
+                },
                 "update_timing": {
                     "last_observation_time_s": self._last_observation_time_s,
                     "refreshes": self._refreshes,
+                    "max_forecast_deviation_c": self._max_forecast_deviation,
                     "last_refresh_sample": self._last_refresh_sample,
                 },
             }
@@ -403,12 +432,13 @@ class ScheduledARX:
         )
 
     def _project_physical_parameters(self, theta: FloatArray) -> None:
+        theta[-2] = max(0.0, float(theta[-2]))
         ar = theta[: self._config.na]
         roots = np.roots(np.concatenate(([1.0], -ar)))
-        if roots.size and np.max(np.abs(roots)) > 0.999:
+        if roots.size and np.max(np.abs(roots)) > _MAX_AR_POLE:
             roots = np.where(
-                np.abs(roots) > 0.999,
-                roots / np.abs(roots) * 0.999,
+                np.abs(roots) > _MAX_AR_POLE,
+                roots / np.abs(roots) * _MAX_AR_POLE,
                 roots,
             )
             theta[: self._config.na] = -np.real_if_close(np.poly(roots)[1:])
@@ -419,9 +449,12 @@ class ScheduledARX:
                 1e-12, abs(float(np.sum(theta[: self._config.na])))
             )
             denominator = 1.0 - float(np.sum(theta[: self._config.na]))
-        if float(np.sum(theta[input_slice])) / denominator <= 0.0:
+        gain = float(np.sum(theta[input_slice])) / denominator
+        if gain <= 0.0:
             theta[input_slice] = 0.0
             theta[self._config.na] = max(1e-9, denominator * 1e-6)
+        elif self._max_dc_gain is not None and gain > self._max_dc_gain:
+            theta[input_slice] *= self._max_dc_gain / gain
     def _scheduled_theta(self, candidate: _Candidate, temp_c: float) -> FloatArray:
         theta = np.zeros(self._feature_count, dtype=np.float64)
         for index, weight in self._region_weights(temp_c):

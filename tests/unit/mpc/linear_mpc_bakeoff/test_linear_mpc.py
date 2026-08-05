@@ -95,6 +95,22 @@ def test_diagonally_scaled_active_set_certifies_ill_conditioned_box_qp() -> None
     npt.assert_allclose(actual.x, target, atol=1e-5)
 
 
+def test_solver_tolerates_roundoff_negative_eigenvalue_in_constructed_psd_hessian() -> None:
+    """A relative roundoff eigenvalue must not reject an exact zero-gradient QP."""
+    generator = np.random.default_rng(0)
+    basis, _ = np.linalg.qr(generator.normal(size=(20, 20)))
+    hessian = basis @ np.diag(np.geomspace(1.0, 1e19, 20)) @ basis.T
+    hessian = 0.5 * (hessian + hessian.T)
+    assert np.linalg.eigvalsh(hessian)[0] < 0.0
+
+    result = projected_gradient_qp(
+        hessian, np.zeros(20), np.zeros(20), np.ones(20), np.zeros(20)
+    )
+
+    npt.assert_array_equal(result.x, np.zeros(20))
+    assert result.kkt_residual == 0.0
+
+
 def test_projected_gradient_respects_exact_box_bounds() -> None:
     result = projected_gradient_qp(
         np.eye(3), np.array([2.0, -2.0, -0.5]), np.zeros(3), np.ones(3), np.full(3, 0.5)

@@ -223,6 +223,42 @@ def test_scheduled_interpolation_projects_high_order_ar_poles() -> None:
     assert np.max(np.abs(np.roots(np.concatenate(([1.0], -theta[:3]))))) <= 0.999
 
 
+
+def test_scheduled_interpolation_retains_slow_poles_and_limits_dc_gain() -> None:
+    """Data-scaled gain regularization must not flatten legitimate slow dynamics."""
+    model = ScheduledARX(ARXConfig(na=2, nb=2, delays=(1,)))
+    model.fit(training_prefix())
+    candidate = model._candidates[1]
+    candidate.regions[0].theta[:2] = (0.995, 0.0)
+    candidate.regions[0].theta[2:4] = (100.0, 0.0)
+
+    theta = model._scheduled_theta(candidate, 80.0)
+    dc_gain = float(np.sum(theta[2:4]) / (1.0 - np.sum(theta[:2])))
+
+    assert np.max(np.abs(np.roots(np.concatenate(([1.0], -theta[:2]))))) >= 0.99
+    assert model._max_dc_gain is not None
+    assert 0.0 < dc_gain <= model._max_dc_gain
+
+
+def test_arx_regularizes_explosive_sixty_minute_input_response() -> None:
+    """An online candidate must stay inside its training-derived horizon envelope."""
+    prefix = training_prefix()
+    model = ScheduledARX(ARXConfig(na=2, nb=2, delays=(1,)))
+    model.fit(prefix)
+    for region in model._candidates[1].regions:
+        region.theta[:2] = (0.995, 0.0)
+        region.theta[-2] = -0.999
+        region.theta[2:4] = (100.0, 0.0)
+
+    prediction = model.affine_prediction(180, prefix.q[-1], np.zeros(180))
+
+    assert model._max_forecast_deviation is not None
+    assert np.isfinite(prediction.input_response_c).all()
+    assert np.max(np.abs(prediction.input_response_c)) <= model._max_forecast_deviation
+    assert np.max(np.abs(prediction.free_output_c - prefix.temp_c[-1])) <= (
+        model._max_forecast_deviation
+    )
+
 def test_forecast_output_is_read_only() -> None:
     prefix = training_prefix()
     forecast = fitted_model(prefix).forecast(

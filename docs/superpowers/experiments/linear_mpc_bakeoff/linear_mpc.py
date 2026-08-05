@@ -297,11 +297,13 @@ def projected_gradient_qp(
         raise ValueError("tolerance must be finite and positive")
 
     eigenvalues = np.linalg.eigvalsh(hessian)
-    if float(eigenvalues[0]) < -_EPSILON:
+    spectral_scale = max(1.0, float(abs(eigenvalues[-1])))
+    semidefinite_tolerance = 64.0 * _EPSILON * spectral_scale
+    if float(eigenvalues[0]) < -semidefinite_tolerance:
         raise ValueError("H must be positive semidefinite")
     condition = (
         float(eigenvalues[-1] / eigenvalues[0])
-        if float(eigenvalues[0]) > _EPSILON
+        if float(eigenvalues[0]) > semidefinite_tolerance
         else None
     )
     if np.all(lo == hi):
