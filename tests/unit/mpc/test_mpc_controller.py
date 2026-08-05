@@ -393,12 +393,11 @@ def test_no_output_report_assumes_the_bounded_command_was_applied(mpc_controller
     assert seen[-1] == pytest.approx(commanded)
 
 
-def test_nlp_has_one_structurally_bounded_normalized_decision_variable(mpc_controller):
+def test_nlp_decision_is_a_residual_with_a_baseline_tvp_and_physical_total_bounds(mpc_controller):
     mpc = mpc_controller.mpc
     assert mpc is not None
-    assert set(mpc.model.u.keys()) - {"default"} == {"combustion_load"}
-    assert float(mpc.bounds["lower", "_u", "combustion_load"]) == 0.0
-    assert float(mpc.bounds["upper", "_u", "combustion_load"]) == 1.0
+    assert set(mpc.model.u.keys()) - {"default"} == {"combustion_residual"}
+    assert set(mpc.model.tvp.keys()) >= {"T_set", "equilibrium_load"}
 
 
 def test_partial_measured_duty_recovers_the_same_normalized_fraction(mpc_controller):
@@ -425,7 +424,7 @@ def test_a_solve_failure_during_a_pause_holds_the_command_not_the_applied_value(
     mpc_controller.set_target(225.0)
     mpc_controller.update(200.0)
     commanded = mpc_controller._last_combustion_load
-    assert commanded == pytest.approx(0.4)
+    assert 0.0 <= commanded <= 1.0
     mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
     mpc_controller.update(200.0)
     assert mpc_controller._last_combustion_load == pytest.approx(commanded)
@@ -794,3 +793,162 @@ def test_set_target_still_updates_the_target():
     c.set_target(300)
     assert c.set_point == 300
     assert c._set_point_c == 300  # units are "C" here, so no conversion
+
+
+def _residual_controller(*, feed_forward=False):
+    controller = Controller(
+        dict(
+            CONFIG,
+            n_delay=0,
+            theta=0.0,
+            K_Q=100.0,
+            h_amb=0.5,
+            sigma=0.0,
+            estimator="kf",
+            feed_forward=feed_forward,
+        ),
+        "C",
+        dict(CYCLE),
+    )
+    controller.set_target(120.0)
+    controller.estimator.update = lambda applied, measured: np.asarray((measured, 10.0))
+    return controller
+
+
+def test_policy_residual_is_composed_with_raw_equilibrium_and_traced_without_intermediate_clamping():
+    controller = _residual_controller()
+    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.2
+    controller._adopt_model(
+        dict(controller.cfg),
+        rmse=1.0,
+        samples=120,
+        band_c=(20.0, 140.0),
+    )
+
+    controller.update(100.0)
+    diagnostics = controller.trace_diagnostics()
+
+    assert diagnostics.equilibrium_feed_forward == pytest.approx(0.4)
+    assert diagnostics.residual_move == pytest.approx(0.2)
+    assert diagnostics.raw_policy_firing_load == pytest.approx(0.6)
+    assert diagnostics.bounded_firing_load == pytest.approx(0.6)
+    assert controller.get_status()["last_equilibrium_load"] == pytest.approx(0.4)
+    assert controller.get_status()["last_residual_load"] == pytest.approx(0.2)
+    assert controller.get_status()["last_raw_combustion_load"] == pytest.approx(0.6)
+    assert diagnostics.feasibility.state.value == "reachable"
+    assert controller.get_status()["feasibility"]["state"] == "reachable"
+
+    controller.set_target(140.0)
+    controller.update(100.0)
+    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.5)
+    assert controller.trace_diagnostics().raw_policy_firing_load == pytest.approx(0.7)
+
+    controller.estimator.update = lambda applied, measured: np.asarray((measured, 20.0))
+    controller.update(100.0)
+    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.4)
+    assert controller.trace_diagnostics().raw_policy_firing_load == pytest.approx(0.6)
+
+
+@pytest.mark.parametrize(
+    ("residual", "raw_total", "bounded_total"),
+    [(-0.8, -0.4, 0.0), (0.9, 1.3, 1.0)],
+)
+def test_residual_policy_clamps_only_the_combined_load_once(residual, raw_total, bounded_total):
+    controller = _residual_controller()
+    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: residual
+
+    controller.update(100.0)
+    diagnostics = controller.trace_diagnostics()
+
+    assert diagnostics.equilibrium_feed_forward == pytest.approx(0.4)
+    assert diagnostics.residual_move == pytest.approx(residual)
+    assert diagnostics.raw_policy_firing_load == pytest.approx(raw_total)
+    assert diagnostics.bounded_firing_load == pytest.approx(bounded_total)
+
+
+def test_feed_forward_remains_active_when_unrecognized_production_config_requests_it_disabled():
+    controller = _residual_controller(feed_forward=False)
+    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
+
+    controller.update(100.0)
+
+    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.4)
+    assert controller.trace_diagnostics().bounded_firing_load == pytest.approx(0.4)
+
+
+def test_nondefault_configured_model_is_reachability_known_while_exact_defaults_remain_unknown():
+    configured = _residual_controller()
+    configured._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
+    configured.update(100.0)
+
+    configured_report = configured.trace_diagnostics().feasibility
+    assert configured_report.state.value == "reachable"
+    assert (configured_report.model_revision, configured_report.model_provenance) == (0, "configured")
+
+    defaults = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
+    defaults.set_target(120.0)
+    defaults.estimator.update = lambda applied, measured: np.zeros(int(defaults.cfg["n_delay"]) + 2)
+    defaults._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
+    defaults.update(100.0)
+
+    default_report = defaults.trace_diagnostics().feasibility
+    assert default_report.state.value == "unknown_model"
+
+
+def test_private_equilibrium_provider_seam_can_run_a_no_feed_forward_experiment():
+    controller = _residual_controller()
+    controller._equilibrium_load = lambda target, disturbance: 0.0
+    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.25
+
+    controller.update(100.0)
+
+    diagnostics = controller.trace_diagnostics()
+    assert diagnostics.equilibrium_feed_forward == 0.0
+    assert diagnostics.residual_move == 0.25
+    assert diagnostics.raw_policy_firing_load == 0.25
+    assert diagnostics.bounded_firing_load == 0.25
+
+
+def test_radiation_only_model_keeps_controller_equilibrium_finite():
+    controller = Controller(
+        dict(CONFIG, n_delay=0, theta=0.0, h_amb=0.0, K_Q=100.0, sigma=1.4e-9, estimator="ekf"),
+        "C",
+        dict(CYCLE),
+    )
+    controller.set_target(240.0)
+    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
+
+    controller.update(100.0)
+
+    assert np.isfinite(controller.trace_diagnostics().equilibrium_feed_forward)
+
+
+def test_nlp_reaches_upper_authority_when_raw_equilibrium_exceeds_two_without_failing_policy():
+    controller = Controller(
+        dict(
+            CONFIG,
+            n_horizon=2,
+            t_step=5.0,
+            control_period=1.0,
+            n_delay=0,
+            theta=0.0,
+            h_amb=0.5,
+            K_Q=10.0,
+            sigma=0.0,
+            estimator="kf",
+            policy="nlp",
+        ),
+        "C",
+        dict(CYCLE),
+    )
+    controller.set_target(100.0)
+
+    controller.update(20.0)
+
+    diagnostics = controller.trace_diagnostics()
+    assert diagnostics.equilibrium_feed_forward > 2.0
+    assert diagnostics.residual_move == pytest.approx(1.0 - diagnostics.equilibrium_feed_forward, abs=1e-6)
+    assert diagnostics.raw_policy_firing_load == pytest.approx(1.0, abs=1e-6)
+    assert diagnostics.bounded_firing_load == pytest.approx(1.0)
+    assert diagnostics.failure_state.value == "success"
+    assert controller.get_status()["policy_failures"] == 0

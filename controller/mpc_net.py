@@ -28,9 +28,8 @@
 import os
 import numpy as np
 
-from controller.mpc_model import MODEL_SCHEMA
+from controller.mpc_model import MODEL_SCHEMA, steady_combustion_load
 
-_KELVIN = 273.15
 # Calibration the net policy depends on. The net approximates the MPC's policy,
 # which is a function of the full grey-box model, the MPC tuning AND the bounds --
 # so ALL of these must match the active config or the net is stale.
@@ -154,10 +153,6 @@ class NetPolicy:
                 return False
         return True
 
-    def _q_ss(self, d, set_c):
-        rad = self.calib["sigma"] * ((set_c + _KELVIN) ** 4 - (self.calib["T_amb"] + _KELVIN) ** 4)
-        return (self.calib["h_amb"] * (set_c - self.calib["T_amb"]) + rad - d) / self.calib["K_Q"]
-
     def _net_residual(self, x_in):
         z = (x_in - self.x_mean) / self.x_std
         for W, b in self.weights[:-1]:
@@ -166,17 +161,23 @@ class NetPolicy:
         out = float(np.reshape(z @ W + b, -1)[0])
         return out * self.r_std + self.r_mean
 
-    def firing_rate(self, x_hat, u_prev, set_point_c):
-        """Normalized combustion-load demand for the estimated state and target."""
-        combustion_load = self.firing_rate_raw(x_hat, u_prev, set_point_c)
-        return float(np.clip(combustion_load, 0.0, 1.0))
-
-    def firing_rate_raw(self, x_hat, u_prev, set_point_c):
-        """Return the unclipped normalized combustion-load demand."""
+    def residual(self, x_hat, u_prev, set_point_c):
+        """Return the learned transient move around the analytic steady load."""
         x = np.asarray(x_hat, dtype=float).reshape(-1)
-        d = x[self.n_delay + 1]
-        # the net only saw T_set in [sp_lo, sp_hi]; clip its input to avoid
-        # extrapolation, but anchor Q_ss on the ACTUAL target (analytic, exact)
+        # The net only saw T_set in [sp_lo, sp_hi]; clip its input to avoid
+        # extrapolation while the controller anchors the baseline on the actual
+        # target through the shared thermal primitive.
         ts_net = float(np.clip(set_point_c, self.sp_lo, self.sp_hi))
         inp = np.concatenate([x, [float(u_prev), ts_net]])
-        return self._q_ss(d, float(set_point_c)) + self._net_residual(inp)
+        return self._net_residual(inp)
+
+    def firing_rate(self, x_hat, u_prev, set_point_c):
+        """Compatibility inspection helper for the composed normalized command."""
+        return float(np.clip(self.firing_rate_raw(x_hat, u_prev, set_point_c), 0.0, 1.0))
+
+    def firing_rate_raw(self, x_hat, u_prev, set_point_c):
+        """Return the unclipped baseline plus learned transient residual."""
+        x = np.asarray(x_hat, dtype=float).reshape(-1)
+        disturbance = x[self.n_delay + 1]
+        baseline = steady_combustion_load(self.calib, float(set_point_c), disturbance)
+        return baseline + self.residual(x, u_prev, set_point_c)

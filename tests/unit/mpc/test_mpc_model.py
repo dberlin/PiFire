@@ -1,14 +1,17 @@
 import numpy as np
+import pytest
 
-from controller.mpc_model import build_do_mpc_model, GreyBoxKF, simulate_grey_box
+import controller.mpc_model as mpc_model
+from controller.mpc_model import GreyBoxKF, build_do_mpc_model, simulate_grey_box
 
 PARAMS = dict(C_c=306.0, h_amb=0.55, T_amb=20.0)
 
 
-def test_model_exposes_one_normalized_combustion_load_input():
+def test_model_exposes_one_residual_input_and_an_equilibrium_tvp():
     m = build_do_mpc_model(**PARAMS)
     assert set(m.x.keys()) >= {"T_c", "d"}
-    assert set(m.u.keys()) - {"default"} == {"combustion_load"}
+    assert set(m.u.keys()) - {"default"} == {"combustion_residual"}
+    assert set(m.tvp.keys()) >= {"T_set", "equilibrium_load"}
 
 
 def test_kf_rejects_an_applied_load_outside_the_normalized_domain():
@@ -166,3 +169,49 @@ def test_the_delay_chain_carries_no_discretization_error_of_its_own():
     # 0.81 C as shipped, all of it the chamber's; an Euler chain moves 10.9 C
     # over the same change of sub-step, which is the 8 s of delay it loses.
     assert float(np.max(np.abs(coarse - shipped))) < 2.0
+
+
+def test_steady_combustion_load_is_closed_form_and_disturbance_is_offset_free():
+    params = dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=100.0, sigma=0.0)
+
+    assert mpc_model.steady_combustion_load(params, 20.0) == pytest.approx(0.0)
+    assert mpc_model.steady_combustion_load(params, 120.0) == pytest.approx(0.5)
+    # A positive additive disturbance supplies heat, so it lowers required fire.
+    assert mpc_model.steady_combustion_load(params, 120.0, disturbance=10.0) == pytest.approx(0.4)
+
+
+@pytest.mark.parametrize(
+    ("params", "setpoint", "disturbance"),
+    [
+        (dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=100.0, sigma=0.0), 20.0, 0.0),
+        (dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=100.0, sigma=0.0), 120.0, 10.0),
+        (dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=350.0, sigma=1.4e-9), 240.0, -8.0),
+        (dict(C_c=306.0, h_amb=0.0, T_amb=20.0, K_Q=100.0, sigma=1.4e-9), 240.0, -8.0),
+        (
+            dict(C_c=3591.95, h_amb=0.5, T_amb=20.0, theta=111.32, n_delay=8, K_Q=992.08, sigma=1.4e-9),
+            232.2222222222,
+            12.5,
+        ),
+    ],
+)
+def test_steady_temperature_inverts_the_shared_equilibrium_load(params, setpoint, disturbance):
+    load = mpc_model.steady_combustion_load(params, setpoint, disturbance)
+
+    assert mpc_model.steady_temperature(params, load, disturbance) == pytest.approx(setpoint, abs=1e-7)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        None,
+        {},
+        dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=0.0, sigma=0.0),
+        dict(C_c=306.0, h_amb=float("nan"), T_amb=20.0, K_Q=100.0, sigma=0.0),
+        dict(C_c=306.0, h_amb=0.0, T_amb=20.0, K_Q=100.0, sigma=0.0),
+    ],
+)
+def test_equilibrium_primitives_reject_absent_or_nonphysical_models(params):
+    with pytest.raises(ValueError):
+        mpc_model.steady_combustion_load(params, 120.0)
+    with pytest.raises(ValueError):
+        mpc_model.steady_temperature(params, 0.5)

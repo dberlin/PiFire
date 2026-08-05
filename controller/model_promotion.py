@@ -15,6 +15,9 @@
 
 import math
 from dataclasses import dataclass
+from enum import StrEnum
+
+from controller.mpc_model import steady_combustion_load, steady_temperature
 
 #: Ranges a fitted parameter must fall inside to be considered at all. Wide on
 #: purpose -- this rejects nonsense, it does not express a preference. T_amb
@@ -126,6 +129,86 @@ _KELVIN = 273.15
 #: A full combustion command is the normalized scalar 1.0. It appears here
 #: because the braking distance depends on heat in flight when fuel is cut.
 NORMALIZED_FULL_LOAD = 1.0
+
+
+class ReachabilityState(StrEnum):
+    REACHABLE = "reachable"
+    UNREACHABLE_HIGH = "unreachable_high"
+    UNKNOWN_MODEL = "unknown_model"
+
+
+@dataclass(frozen=True, slots=True)
+class FeasibilityReport:
+    state: ReachabilityState
+    target_temperature: float
+    required_load: float | None
+    maximum_authority: float
+    predicted_steady_temperature: float | None
+    predicted_steady_load: float | None
+    model_revision: int | None
+    model_provenance: str | None
+    binding_reason: str | None
+
+    def as_status(self) -> dict[str, float | int | str | None]:
+        return {
+            "state": self.state.value,
+            "target_temperature": self.target_temperature,
+            "required_load": self.required_load,
+            "maximum_authority": self.maximum_authority,
+            "predicted_steady_temperature": self.predicted_steady_temperature,
+            "predicted_steady_load": self.predicted_steady_load,
+            "model_revision": self.model_revision,
+            "model_provenance": self.model_provenance,
+            "binding_reason": self.binding_reason,
+        }
+
+
+_REACHABILITY_TOLERANCE = 1e-6
+
+
+def feasibility_report(params, target_temperature, *, disturbance=0.0, model_revision=None, model_provenance=None):
+    """Report only the model-supported upper authority limit for a target."""
+    target = float(target_temperature)
+    if not math.isfinite(target):
+        raise ValueError("reachability target must be finite")
+    identified = (
+        params is not None
+        and isinstance(model_revision, int)
+        and model_revision >= 0
+        and isinstance(model_provenance, str)
+        and bool(model_provenance.strip())
+    )
+    if not identified:
+        return FeasibilityReport(
+            ReachabilityState.UNKNOWN_MODEL,
+            target,
+            None,
+            NORMALIZED_FULL_LOAD,
+            None,
+            None,
+            None,
+            None,
+            "unidentified_model",
+        )
+    required_load = steady_combustion_load(params, target, disturbance)
+    maximum_temperature = steady_temperature(params, NORMALIZED_FULL_LOAD, disturbance)
+    state = (
+        ReachabilityState.UNREACHABLE_HIGH
+        if required_load > NORMALIZED_FULL_LOAD + _REACHABILITY_TOLERANCE
+        else ReachabilityState.REACHABLE
+    )
+    return FeasibilityReport(
+        state,
+        target,
+        required_load,
+        NORMALIZED_FULL_LOAD,
+        maximum_temperature,
+        NORMALIZED_FULL_LOAD,
+        model_revision,
+        model_provenance,
+        "maximum_authority" if state is ReachabilityState.UNREACHABLE_HIGH else None,
+    )
+
 
 #: Bisection steps used to invert the lag chain's survival. The bracket halves
 #: each step, so this resolves the answer to about a part in 10**15 of it --
@@ -442,48 +525,15 @@ _STEADY_STATE_CEILING_C = 100000.0
 
 
 def steady_state_at_full_fire(params, *, q_full=NORMALIZED_FULL_LOAD):
-    """The chamber temperature this model settles at under sustained full fire.
-
-    The asymptote the fitted parameters imply: where the chamber's loss,
-    h_amb*(T-T_amb) plus the radiative term, has risen to meet K_Q*q_full. Loss
-    is strictly increasing in T above ambient, so there is one such point and
-    bisection finds it.
-
-    A cook that never approaches steady state does not determine this, which is
-    exactly why it is worth looking at: it is where a fit that has traded the
-    chamber's parameters against each other along a direction the log cannot
-    see says something visibly absurd. A grill that peaks at 520 F can be fitted
-    to imply anything from 1067 F to 5664 F depending on which parameters are
-    free.
-
-    It is reported and not enforced. Sound and absurd fits of the same cook sit
-    only about 1.6x apart on this quantity and both are far above the hazard
-    limit, so a refusal drawn here would be a guess; separating them needs the
-    temperature band the cook actually visited, which `evaluate` is not given.
-    """
-    t_amb = float(params["T_amb"])
-    h_amb, sigma = float(params["h_amb"]), float(params["sigma"])
-    target = float(params["K_Q"]) * float(q_full)
-    if target <= 0.0:
-        return t_amb
-    if not (h_amb > 0.0 or sigma > 0.0):
+    """The chamber temperature this model settles at under sustained full fire."""
+    try:
+        return steady_temperature(params, q_full)
+    except ValueError:
+        t_amb = float(params["T_amb"])
+        target = float(params["K_Q"]) * float(q_full)
+        if target <= 0.0:
+            return t_amb
         return math.inf
-
-    def loss(t_c):
-        return h_amb * (t_c - t_amb) + sigma * ((t_c + _KELVIN) ** 4 - (t_amb + _KELVIN) ** 4)
-
-    lo, hi = t_amb, t_amb + 1.0
-    while loss(hi) < target:
-        hi = t_amb + (hi - t_amb) * 2.0
-        if hi - t_amb > _STEADY_STATE_CEILING_C:
-            return math.inf
-    for _ in range(_BISECT_STEPS):
-        mid = 0.5 * (lo + hi)
-        if loss(mid) < target:
-            lo = mid
-        else:
-            hi = mid
-    return hi
 
 
 def longest_braking_distance(params, *, q_full=NORMALIZED_FULL_LOAD):

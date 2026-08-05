@@ -152,6 +152,72 @@ def _normalized_load(value):
     return load
 
 
+def _thermal_parameters(params):
+    """Return the finite physical coefficients shared by steady-state helpers."""
+    if not isinstance(params, dict):
+        raise ValueError("a thermal model parameter mapping is required")
+    try:
+        h_amb = float(params["h_amb"])
+        t_amb = float(params["T_amb"])
+        k_q = float(params["K_Q"])
+        sigma = float(params.get("sigma", 0.0))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("thermal model is missing required steady-state parameters") from error
+    if not all(np.isfinite(value) for value in (h_amb, t_amb, k_q, sigma)):
+        raise ValueError("thermal model steady-state parameters must be finite")
+    if h_amb < 0.0 or k_q <= 0.0 or sigma < 0.0 or (h_amb == 0.0 and sigma == 0.0):
+        raise ValueError("thermal model steady-state parameters must be physical")
+    return h_amb, t_amb, k_q, sigma
+
+
+def steady_combustion_load(params, setpoint, disturbance=0):
+    """Return the unclipped normalized load that holds ``setpoint`` steady."""
+    h_amb, t_amb, k_q, sigma = _thermal_parameters(params)
+    try:
+        t_set = float(setpoint)
+        d = float(disturbance)
+    except (TypeError, ValueError) as error:
+        raise ValueError("steady-state target and disturbance must be finite") from error
+    if not np.isfinite(t_set) or not np.isfinite(d):
+        raise ValueError("steady-state target and disturbance must be finite")
+    return (h_amb * (t_set - t_amb) + _rad_loss(t_set, t_amb, sigma) - d) / k_q
+
+
+def steady_temperature(params, combustion_load, disturbance=0):
+    """Invert :func:`steady_combustion_load` on the same physical model."""
+    h_amb, t_amb, k_q, sigma = _thermal_parameters(params)
+    try:
+        load = float(combustion_load)
+        d = float(disturbance)
+    except (TypeError, ValueError) as error:
+        raise ValueError("steady-state load and disturbance must be finite") from error
+    if not np.isfinite(load) or not np.isfinite(d):
+        raise ValueError("steady-state load and disturbance must be finite")
+    heat_required = k_q * load + d
+    if sigma == 0.0:
+        return t_amb + heat_required / h_amb
+
+    lower = -_KELVIN + 1e-9
+
+    def residual(t_c):
+        return h_amb * (t_c - t_amb) + _rad_loss(t_c, t_amb, sigma) - heat_required
+
+    if residual(lower) > 0.0:
+        raise ValueError("steady-state load has no physical temperature inverse")
+    upper = max(t_amb, lower + 1.0)
+    while residual(upper) < 0.0:
+        upper = lower + 2.0 * (upper - lower)
+        if upper > 1e9:
+            raise ValueError("steady-state load has no finite temperature inverse")
+    for _ in range(80):
+        midpoint = 0.5 * (lower + upper)
+        if residual(midpoint) < 0.0:
+            lower = midpoint
+        else:
+            upper = midpoint
+    return 0.5 * (lower + upper)
+
+
 def _erlang_coefficients(n, a):
     """exp(-a) * a**m / m! for m = 0 .. n-1, evaluated over a vector of a.
 
@@ -264,8 +330,10 @@ def build_do_mpc_model(*, C_c, h_amb, T_amb, theta=0.0, n_delay=0, K_Q=1.0, sigm
     q = [model.set_variable("_x", f"q{i}") for i in range(n_delay)]
     T_c = model.set_variable("_x", "T_c")
     d = model.set_variable("_x", "d")
-    combustion_load = model.set_variable("_u", "combustion_load")
+    combustion_residual = model.set_variable("_u", "combustion_residual")
+    equilibrium_load = model.set_variable("_tvp", "equilibrium_load")
     model.set_variable("_tvp", "T_set")
+    combustion_load = equilibrium_load + combustion_residual
     if n_delay > 0:
         tau_d = theta / n_delay
         model.set_rhs("q0", (combustion_load - q[0]) / tau_d)

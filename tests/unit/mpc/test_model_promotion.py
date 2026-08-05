@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+import controller.model_promotion as model_promotion
 from controller.model_promotion import (
     PROMOTION_BOUNDS,
     _COAST_BOUND,
@@ -1130,3 +1131,67 @@ def test_each_bound_is_enforced_at_its_edge(key, lo, hi):
 
     assert _ev(dict(GOOD, **{key: hi})).accepted is True
     assert _ev(dict(GOOD, **{key: hi + abs(hi) * 1e-6 + 1e-9})).accepted is False
+
+
+_REACHABILITY_MODEL = dict(C_c=306.0, h_amb=0.5, T_amb=20.0, theta=0.0, n_delay=0, K_Q=100.0, sigma=0.0)
+
+
+def test_feasibility_report_is_frozen_json_safe_and_unknown_without_an_identified_model():
+    report = model_promotion.feasibility_report(None, 120.0, model_revision=None, model_provenance=None)
+
+    assert isinstance(report, model_promotion.FeasibilityReport)
+    assert report.state is model_promotion.ReachabilityState.UNKNOWN_MODEL
+    assert report.required_load is None
+    assert report.model_revision is None
+    assert report.model_provenance is None
+    json.dumps(report.as_status(), allow_nan=False)
+    with pytest.raises(AttributeError):
+        report.target_temperature = 130.0
+
+
+def test_feasibility_report_marks_only_upper_authority_as_unreachable_with_explicit_boundary_tolerance():
+    at_boundary = model_promotion.feasibility_report(
+        _REACHABILITY_MODEL, 220.0001, model_revision=7, model_provenance="mak-fit"
+    )
+    above_boundary = model_promotion.feasibility_report(
+        _REACHABILITY_MODEL, 220.001, model_revision=7, model_provenance="mak-fit"
+    )
+
+    assert at_boundary.state is model_promotion.ReachabilityState.REACHABLE
+    assert at_boundary.required_load == pytest.approx(1.0000005)
+    assert above_boundary.state is model_promotion.ReachabilityState.UNREACHABLE_HIGH
+    assert above_boundary.required_load == pytest.approx(1.000005)
+    assert above_boundary.maximum_authority == pytest.approx(1.0)
+    assert above_boundary.predicted_steady_load == pytest.approx(1.0)
+    assert above_boundary.predicted_steady_temperature == pytest.approx(220.0)
+    assert above_boundary.binding_reason == "maximum_authority"
+    assert (above_boundary.model_revision, above_boundary.model_provenance) == (7, "mak-fit")
+
+
+def test_low_targets_are_reachable_without_a_floor_or_settings_recommendation():
+    report = model_promotion.feasibility_report(_REACHABILITY_MODEL, 0.0, model_revision=3, model_provenance="mak-fit")
+
+    assert report.state is model_promotion.ReachabilityState.REACHABLE
+    assert report.required_load == pytest.approx(-0.1)
+    assert report.binding_reason is None
+
+
+def test_reachability_recovers_and_rearms_when_target_or_model_identity_changes():
+    unreachable = model_promotion.feasibility_report(
+        _REACHABILITY_MODEL, 240.0, model_revision=3, model_provenance="mak-fit"
+    )
+    recovered = model_promotion.feasibility_report(
+        _REACHABILITY_MODEL, 120.0, model_revision=3, model_provenance="mak-fit"
+    )
+    refit = model_promotion.feasibility_report(
+        _REACHABILITY_MODEL, 240.0, model_revision=4, model_provenance="mak-fit-v2"
+    )
+
+    assert unreachable.state is model_promotion.ReachabilityState.UNREACHABLE_HIGH
+    assert recovered.state is model_promotion.ReachabilityState.REACHABLE
+    assert refit.state is model_promotion.ReachabilityState.UNREACHABLE_HIGH
+    assert unreachable.target_temperature != recovered.target_temperature
+    assert (unreachable.model_revision, unreachable.model_provenance) != (
+        refit.model_revision,
+        refit.model_provenance,
+    )

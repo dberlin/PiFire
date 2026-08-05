@@ -16,10 +16,13 @@ Imported Libraries
 """
 import time
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from common.control_trace import ActuationMode, ControllerBranch, MpcFailureState, ResultStaleState
 from controller.mpc_allocator import AllocationResult
+
+if TYPE_CHECKING:
+    from controller.model_promotion import FeasibilityReport
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +86,7 @@ class MpcTraceDiagnostics:
     consecutive_deadline_miss_count: int = 0
     stale_state: ResultStaleState = ResultStaleState.FRESH
     recovered: bool = False
+    feasibility: "FeasibilityReport | None" = None
 
 
 ControllerTraceDiagnostics: TypeAlias = PidTraceDiagnostics | PidSpTraceDiagnostics | MpcTraceDiagnostics

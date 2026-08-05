@@ -32,8 +32,20 @@ import numpy as np
 from common.control_trace import ActuationMode
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
-from controller.model_promotion import _MAX_CONFIGURABLE_HORIZON_S, built_n_horizon, longest_braking_distance
-from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
+from controller.model_promotion import (
+    _MAX_CONFIGURABLE_HORIZON_S,
+    built_n_horizon,
+    feasibility_report,
+    longest_braking_distance,
+)
+from controller.mpc_model import (
+    MODEL_SCHEMA,
+    GreyBoxEKF,
+    GreyBoxKF,
+    GreyBoxMHE,
+    build_do_mpc_model,
+    steady_combustion_load,
+)
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 
 _DEFAULTS = dict(
@@ -325,6 +337,7 @@ class Controller(ControllerBase):
 
         cfg = dict(_DEFAULTS)
         cfg.update(config or {})
+        cfg.pop("feed_forward", None)
         self.cfg = cfg
         _warn_about_model(cfg)
         self.u_max = float(cycle_data.get("u_max", 0.9))
@@ -335,6 +348,10 @@ class Controller(ControllerBase):
         self._x_hat = None
         self._policy_u_prev = 0.0
         self._last_raw_combustion_load = 0.0
+        self._last_equilibrium_load = None
+        self._last_residual_load = None
+        self._last_feasibility = None
+        self._policy_equilibrium_load = 0.0
         self._last_solve_failed = False
         # How long the output has been frozen. A single failure is a hiccup the
         # held command covers; a run of them means nothing is steering.
@@ -466,15 +483,18 @@ class Controller(ControllerBase):
         T_c = model.x["T_c"]
         T_set = model.tvp["T_set"]
         mpc.set_objective(mterm=cfg["Q_w"] * (T_c - T_set) ** 2, lterm=cfg["Q_w"] * (T_c - T_set) ** 2)
-        mpc.set_rterm(combustion_load=cfg["R_dQ"])
-        mpc.bounds["lower", "_u", "combustion_load"] = 0.0
-        mpc.bounds["upper", "_u", "combustion_load"] = 1.0
+        combustion_residual = model.u["combustion_residual"]
+        total_load = model.tvp["equilibrium_load"] + combustion_residual
+        mpc.set_rterm(combustion_residual=cfg["R_dQ"])
+        mpc.set_nl_cons("normalized_load_upper", total_load, ub=1.0)
+        mpc.set_nl_cons("normalized_load_lower", -total_load, ub=0.0)
 
         tvp_template = mpc.get_tvp_template()
 
         def tvp_fun(t_now):
             for k in range(int(n_horizon) + 1):
                 tvp_template["_tvp", k, "T_set"] = self._set_point_c
+                tvp_template["_tvp", k, "equilibrium_load"] = self._policy_equilibrium_load
             return tvp_template
 
         mpc.set_tvp_fun(tvp_fun)
@@ -507,6 +527,9 @@ class Controller(ControllerBase):
             "set_point": _finite_float(self.set_point),
             "set_point_c": _finite_float(self._set_point_c),
             "last_combustion_load": _finite_float(self._last_combustion_load),
+            "last_raw_combustion_load": _optional_float(self._last_raw_combustion_load),
+            "last_equilibrium_load": _optional_float(self._last_equilibrium_load),
+            "last_residual_load": _optional_float(self._last_residual_load),
             "applied_combustion_load": _finite_float(self._applied_combustion_load),
             "policy": "net" if self._net is not None else "nlp",
             # Non-zero means update() is returning a held command rather than a
@@ -534,6 +557,7 @@ class Controller(ControllerBase):
                 "band_c": [_finite_float(v) for v in self._model_meta["band_c"]],
                 "rmse": _optional_float(self._model_meta["rmse"]),
             },
+            "feasibility": None if self._last_feasibility is None else self._last_feasibility.as_status(),
         }
 
     #: The model structure a snapshot describes, shared with every other thing
@@ -806,6 +830,21 @@ class Controller(ControllerBase):
         """Recover the normalized applied load from measured mean auger duty."""
         self._applied_combustion_load = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
 
+    def _equilibrium_load(self, target, disturbance):
+        """Private experiment seam for replacing the analytic feed-forward arm."""
+        return steady_combustion_load(self.cfg, target, disturbance)
+
+    def _policy_residual(self, x_hat, previous_load, equilibrium_load):
+        """Return only the policy's transient move around the analytic baseline."""
+        self._policy_equilibrium_load = equilibrium_load
+        if self._net is not None:
+            residual = getattr(self._net, "residual", None)
+            if residual is not None:
+                return float(residual(x_hat, previous_load, self._set_point_c))
+            raw_policy = getattr(self._net, "firing_rate_raw", self._net.firing_rate)
+            return float(raw_policy(x_hat, previous_load, self._set_point_c)) - equilibrium_load
+        return float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+
     def update(self, current):
         y = _to_c(current, self.units)
         applied_combustion_load = self._applied_combustion_load
@@ -816,22 +855,34 @@ class Controller(ControllerBase):
         disturbance = state_values[-1]
         self._history.append((time.time(), float(y), float(applied_combustion_load)))
         self._policy_u_prev = self._applied_combustion_load
+        model_provenance = "adopted" if self._model_meta is not None else "configured"
+        model_identified = self._model_meta is not None or any(
+            self.cfg.get(key) != _DEFAULTS[key] for key in _PHYSICAL_PARAMS
+        )
+        feasibility = feasibility_report(
+            self.cfg if model_identified else None,
+            self._set_point_c,
+            disturbance=disturbance,
+            model_revision=self._model_revision if model_identified else None,
+            model_provenance=model_provenance if model_identified else None,
+        )
+        self._last_feasibility = feasibility
+        equilibrium = self._equilibrium_load(self._set_point_c, disturbance)
 
         solve_start = time.monotonic()
         failure_state = MpcFailureState.SUCCESS
         failure_error = None
         try:
-            if self._net is not None:
-                raw_policy = (
-                    self._net.firing_rate_raw if hasattr(self._net, "firing_rate_raw") else self._net.firing_rate
-                )
-                combustion_load = raw_policy(x_hat, self._policy_u_prev, self._set_point_c)
-            else:
-                combustion_load = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+            residual_move = self._policy_residual(x_hat, self._policy_u_prev, equilibrium)
+            raw_firing_load = equilibrium + residual_move
+            combustion_load = float(np.clip(raw_firing_load, 0.0, 1.0))
         except Exception as error:
             combustion_load = self._last_combustion_load
             failure_state = MpcFailureState.POLICY_EXCEPTION
             failure_error = error
+            equilibrium = None
+            residual_move = None
+            raw_firing_load = None
         finally:
             solve_end = time.monotonic()
 
@@ -840,8 +891,6 @@ class Controller(ControllerBase):
                 print(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")
             self._consecutive_policy_failures = 0
             self._last_solve_failed = False
-            raw_firing_load = float(combustion_load)
-            self._last_raw_combustion_load = raw_firing_load
         else:
             self._last_solve_failed = True
             self._consecutive_policy_failures += 1
@@ -852,9 +901,10 @@ class Controller(ControllerBase):
                     f"holding normalized combustion load {combustion_load:.3f}. The grill is not being controlled to "
                     "setpoint -- check the policy artifact and the model configuration."
                 )
-            raw_firing_load = None
 
-        combustion_load = float(np.clip(combustion_load, 0.0, 1.0))
+        self._last_equilibrium_load = equilibrium
+        self._last_residual_load = residual_move
+        self._last_raw_combustion_load = raw_firing_load
         self._last_combustion_load = combustion_load
         self._applied_combustion_load = combustion_load
         allocation = allocate(
@@ -867,23 +917,12 @@ class Controller(ControllerBase):
         auger = allocation.auger_duty
         self._trace_allocation = allocation
         fan_duty = allocation.fan_duty
-        if raw_firing_load is None:
-            equilibrium = None
-            residual_move = None
-        else:
-            equilibrium = (
-                self.cfg["h_amb"] * (self._set_point_c - self.cfg["T_amb"])
-                + self.cfg["sigma"] * ((self._set_point_c + 273.15) ** 4 - (self.cfg["T_amb"] + 273.15) ** 4)
-                - disturbance
-            ) / self.cfg["K_Q"]
-            equilibrium = float(equilibrium)
-            residual_move = raw_firing_load - equilibrium
         self._trace_diagnostics = MpcTraceDiagnostics(
             state_names=state_names,
             state_values=state_values,
             disturbance_estimate=disturbance,
             model_revision=self._model_revision,
-            model_provenance="adopted" if self._model_meta is not None else "configured",
+            model_provenance=model_provenance,
             raw_policy_firing_load=raw_firing_load,
             equilibrium_feed_forward=equilibrium,
             residual_move=residual_move,
@@ -895,6 +934,7 @@ class Controller(ControllerBase):
             solve_start_monotonic=solve_start,
             solve_end_monotonic=solve_end,
             solve_duration_seconds=solve_end - solve_start,
+            feasibility=feasibility,
         )
         return {"cycle_ratio": auger, "fan": {"duty": fan_duty}}
 

@@ -37,6 +37,7 @@ from controller.runtime.logic.pulse import (
 from controller.runtime.logic.cycle import hold_initial_cycle
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.model_promotion import ReachabilityState
 from controller.runtime.logic.fan import (
     controller_fan_authority,
     fan_assist_times,
@@ -102,9 +103,28 @@ class HoldMode(ControlMode):
     _runner_configuration_revision: int = 0
     _actuation_mode: ActuationMode = ActuationMode.FIXED_CYCLE
     _pulse_scheduler: PulseScheduler | None = None
+    _reachability_advisory_key: tuple[float, int, str] | None = None
 
     def _framed_pulse(self) -> bool:
         return self._actuation_mode is ActuationMode.FRAMED_PULSE
+
+    def _observe_reachability_advisory(self, diagnostics: MpcTraceDiagnostics) -> None:
+        report = diagnostics.feasibility
+        if report is None:
+            return
+        if report.state is not ReachabilityState.UNREACHABLE_HIGH:
+            self._reachability_advisory_key = None
+            return
+        key = (report.target_temperature, report.model_revision, report.model_provenance)
+        if key == self._reachability_advisory_key:
+            return
+        self._reachability_advisory_key = key
+        import control as _control
+
+        _control.eventLogger.warning(
+            "MPC learned model predicts the target cannot be reached at maximum safe combustion authority "
+            f"(target {report.target_temperature:.1f}, model {report.model_provenance} r{report.model_revision})."
+        )
 
     def _configure_actuation_mode(self) -> None:
         self._actuation_mode = self._runner.actuation_mode()
@@ -590,8 +610,15 @@ class HoldMode(ControlMode):
                 deadline_miss_count=result.deadline_miss_count,
                 stale=result.stale_state is ResultStaleState.STALE,
                 recovered=result.recovered,
-                predicted_feasible=None,
-                predicted_steady_load=None,
+                predicted_feasible=(
+                    None
+                    if diagnostics.feasibility is None
+                    or diagnostics.feasibility.state is ReachabilityState.UNKNOWN_MODEL
+                    else diagnostics.feasibility.state is ReachabilityState.REACHABLE
+                ),
+                predicted_steady_load=None
+                if diagnostics.feasibility is None
+                else diagnostics.feasibility.predicted_steady_load,
                 solve_duration_ms=max(0, int(result.solve_duration_seconds * 1_000)),
                 consecutive_deadline_miss_count=result.consecutive_deadline_miss_count,
                 stale_state=result.stale_state,
@@ -774,6 +801,7 @@ class HoldMode(ControlMode):
         self._clear_trace_session_model_authority()
         self._trace_runner_snapshot_fallback_safe = True
         self._trace_last_update_payload = None
+        self._reachability_advisory_key = None
         try:
             self._trace_recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
@@ -950,6 +978,8 @@ class HoldMode(ControlMode):
         framed_feedback_due = False
         if (now - self.state.controller.cycle_start) > controller_interval:
             result = self._runner.latest()
+            if isinstance(result.diagnostics, MpcTraceDiagnostics):
+                self._observe_reachability_advisory(result.diagnostics)
             if self._framed_pulse():
                 controller = self.state.controller
                 controller.cycle_start = now
