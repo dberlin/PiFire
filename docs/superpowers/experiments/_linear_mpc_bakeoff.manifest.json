@@ -1,0 +1,13 @@
+{
+  "canonical_json_bytes": 516299529,
+  "canonical_json_sha256": "98eb98a179cc4644373297acff966f303b8d73853a1458bc9e6771433786f916",
+  "compressed_sha256": "3232522237904826dac04af0e6bb8031fb4cf3d577e60193e0f8848fe4f743fd",
+  "parts": [
+    {
+      "bytes": 61743056,
+      "name": "_linear_mpc_bakeoff.manifest.3232522237904826.part0000.3232522237904826.gz",
+      "sha256": "3232522237904826dac04af0e6bb8031fb4cf3d577e60193e0f8848fe4f743fd"
+    }
+  ],
+  "transport": "gzip-shards/v1"
+}
