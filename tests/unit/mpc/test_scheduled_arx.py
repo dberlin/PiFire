@@ -127,6 +127,27 @@ def test_scheduled_arx_snapshot_restores_exact_next_prediction_and_update() -> N
     )
     assert actual_update.updated is expected_update.updated
 
+    following_frame = frame(93)
+    expected_after_update = model.affine_prediction(
+        4, following_frame.realized_q, np.full(4, following_frame.ambient_c)
+    )
+    actual_after_update = restored.affine_prediction(
+        4, following_frame.realized_q, np.full(4, following_frame.ambient_c)
+    )
+    npt.assert_allclose(
+        actual_after_update.free_output_c,
+        expected_after_update.free_output_c,
+        atol=1e-12,
+    )
+    npt.assert_allclose(
+        actual_after_update.input_response_c,
+        expected_after_update.input_response_c,
+        atol=1e-12,
+    )
+    model.observe(following_frame)
+    restored.observe(following_frame)
+    assert restored.snapshot() == model.snapshot()
+
 
 def test_two_populated_scheduled_arx_snapshots_fit_persisted_envelope() -> None:
     snapshots = []

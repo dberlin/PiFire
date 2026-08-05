@@ -243,12 +243,6 @@ class ScheduledARX:
 
     def snapshot(self) -> dict[str, object]:
         """Serialize all learning state into independently owned JSON data."""
-        candidates = [self._candidate_snapshot(candidate) for candidate in self._candidates.values()]
-        active = self._candidates[self._active_delay]
-        active_regions = [self._region_status(region, knot) for knot, region in zip(_TEMPERATURE_KNOTS_C, active.regions, strict=True)]
-        steady_gain = sum(float(region["dc_gain"]) for region in active_regions) / len(
-            active_regions
-        )
         return {
             "schema": _SCHEMA,
             "config": {
@@ -266,18 +260,35 @@ class ScheduledARX:
                 "realized_q": list(self._input_history),
                 "ambient_c": list(self._ambient_history),
             },
-            "candidates": candidates,
-            "status": {
-                "knots_c": list(_TEMPERATURE_KNOTS_C),
-                "regions": active_regions,
-                "steady_gain": steady_gain,
-                "max_dc_gain_c_per_q": self._max_dc_gain,
-                "max_ar_pole": _MAX_AR_POLE,
-                "last_observation_time_s": self._last_observation_time_s,
-                "refreshes": self._refreshes,
-                "last_refresh_sample": self._last_refresh_sample,
-                "max_forecast_deviation_c": self._max_forecast_deviation,
-            },
+            "candidates": [
+                self._candidate_snapshot(candidate)
+                for candidate in self._candidates.values()
+            ],
+            "status": self._status_snapshot(),
+        }
+
+    def _status_snapshot(self) -> dict[str, object]:
+        """Derive evidence-only status from the authoritative learner state."""
+        active = self._candidates[self._active_delay]
+        active_regions = [
+            self._region_status(region, knot)
+            for knot, region in zip(
+                _TEMPERATURE_KNOTS_C, active.regions, strict=True
+            )
+        ]
+        return {
+            "knots_c": list(_TEMPERATURE_KNOTS_C),
+            "regions": active_regions,
+            "steady_gain": sum(
+                float(region["dc_gain"]) for region in active_regions
+            )
+            / len(active_regions),
+            "max_dc_gain_c_per_q": self._max_dc_gain,
+            "max_ar_pole": _MAX_AR_POLE,
+            "last_observation_time_s": self._last_observation_time_s,
+            "refreshes": self._refreshes,
+            "last_refresh_sample": self._last_refresh_sample,
+            "max_forecast_deviation_c": self._max_forecast_deviation,
         }
 
     @classmethod
@@ -338,6 +349,8 @@ class ScheduledARX:
         model._last_observation_time_s = last_observation
         model._refreshes = refreshes
         model._last_refresh_sample = last_refresh
+        if status != model._status_snapshot():
+            raise ValueError("snapshot status must exactly match restored learner state")
         return model
 
     def _new_candidates(self) -> dict[int, _Candidate]:

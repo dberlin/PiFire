@@ -129,6 +129,9 @@ def test_snapshot_exposes_arm_neutral_gain_and_delay_diagnostics() -> None:
 
     assert snapshot["steady_gain"] > 0.0
     assert snapshot["delay_seconds"] == snapshot["delay_steps"] * 20.0
+    bounds = snapshot["plausibility_bounds"]
+    assert bounds["max_dc_gain_c_per_q"] > 0.0
+    assert snapshot["update_timing"]["refreshes"] >= 0
 
 
 def test_arx_reconstructs_incremental_forecast_from_prefix_state() -> None:

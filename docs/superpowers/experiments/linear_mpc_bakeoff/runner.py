@@ -43,6 +43,7 @@ from .datasets import (
 from .dmc import DMCConfig, LaguerreDMC
 from .state_space import InnovationStateSpace, StateSpaceConfig
 from .artifact import ArmEvidence, ExperimentArtifact, MatrixKey
+from .contracts import SignalRecord
 from controller.linear_mpc.contracts import AffinePrediction, FrameObservation
 from .scenarios import SCENARIOS, ScenarioDefinition, quick_scenarios
 from .linear_mpc import (
@@ -1460,7 +1461,7 @@ def _run_scenario(
             metadata=prepared.calibration_metadata,
         )
         diagnostics = prepared.diagnostics
-    batch_fit_snapshot = _json_value(model.snapshot())
+    batch_fit_snapshot = _json_value(_bakeoff_snapshot(model))
     policy, alignment = _adaptation_settings(arm, batch_fit_snapshot)
     manager = AdaptationManager(
         incumbent=model,
@@ -1592,7 +1593,9 @@ def _run_scenario(
                 }
             )
             previous_observation_target = target
-            challenger_refresh_before = _refresh_marker(manager.challenger.snapshot())
+            challenger_refresh_before = _refresh_marker(
+                _bakeoff_snapshot(manager.challenger)
+            )
             learner_started = perf_counter()
             outcome = manager.observe(
                 observation,
@@ -1603,7 +1606,9 @@ def _run_scenario(
                 manual_override=manual_override,
             )
             observe_ms = (perf_counter() - learner_started) * 1_000.0
-            challenger_refresh_after = _refresh_marker(manager.challenger.snapshot())
+            challenger_refresh_after = _refresh_marker(
+                _bakeoff_snapshot(manager.challenger)
+            )
             if mode == "online" and outcome.gate.permitted:
                 if challenger_refresh_after != challenger_refresh_before:
                     refresh_ms.append(observe_ms)
@@ -1705,7 +1710,7 @@ def _run_scenario(
             "calibration_provenance": calibration.provenance,
             "calibration_metadata": dict(calibration.metadata),
             "batch_fit_snapshot": batch_fit_snapshot,
-            "final_active_snapshot": _json_value(active_model.snapshot()),
+            "final_active_snapshot": _json_value(_bakeoff_snapshot(active_model)),
             "simulator_prediction_diagnostics": diagnostics,
             "initial_batch_fit_ms": fit_ms,
             "adaptation": {
@@ -1914,6 +1919,34 @@ def _forecast_model(
         return model.forecast(_record_frames(prefix), q_future, ambient_future)
     return model.forecast(prefix, q_future, ambient_future)
 
+def _bakeoff_snapshot(model: Any) -> Mapping[str, object]:
+    """Adapt a production v2 model snapshot to legacy evidence diagnostics."""
+    snapshot = model.snapshot()
+    if snapshot.get("schema") != "scheduled-arx/v2":
+        return snapshot
+    status = snapshot.get("status")
+    active_delay = snapshot.get("active_delay")
+    if not isinstance(status, Mapping) or not isinstance(active_delay, int):
+        raise ValueError("production scheduled-ARX snapshot lacks status diagnostics")
+    return {
+        **snapshot,
+        "delay_steps": active_delay,
+        "delay_seconds": float(active_delay * _FRAME_S),
+        "steady_gain": status.get("steady_gain"),
+        "knots_c": status.get("knots_c"),
+        "regions": status.get("regions"),
+        "plausibility_bounds": {
+            "max_dc_gain_c_per_q": status.get("max_dc_gain_c_per_q"),
+            "max_ar_pole": status.get("max_ar_pole"),
+        },
+        "update_timing": {
+            "last_observation_time_s": status.get("last_observation_time_s"),
+            "refreshes": status.get("refreshes"),
+            "max_forecast_deviation_c": status.get("max_forecast_deviation_c"),
+            "last_refresh_sample": status.get("last_refresh_sample"),
+        },
+    }
+
 
 def _horizon_residuals(
     model: Any,
@@ -2000,8 +2033,12 @@ def _simulator_prediction_diagnostics_from_model(model: Any, record: SignalRecor
             "bias_c": float(np.mean(values)),
             "p90_abs_error_c": float(np.percentile(np.abs(values), 90.0)),
             "coast_braking_temperature_error_c": (float(np.mean(np.abs(masked))) if masked.size else None),
-            "steady_gain_error_c_per_q": _steady_gain_error(model.snapshot(), record),
-            "delay_error_s": _delay_error_s(model.snapshot(), record, validation_end),
+            "steady_gain_error_c_per_q": _steady_gain_error(
+                _bakeoff_snapshot(model), record
+            ),
+            "delay_error_s": _delay_error_s(
+                _bakeoff_snapshot(model), record, validation_end
+            ),
         }
     return {
         "boundaries": {
@@ -2528,7 +2565,7 @@ def _real_mak_evidence(arm: str) -> dict[str, Any]:
         }
         result["origins"] = {str(horizon): list(values) for horizon, values in sorted(diagnostics.items())}
         result["validation_candidate_scores"] = [float(score) for score, _ in scored_candidates]
-        result["fitted"] = _json_value(model.snapshot())
+        result["fitted"] = _json_value(_bakeoff_snapshot(model))
     except Exception as error:
         result["failure"] = f"{type(error).__name__}: {error}"
     return result
