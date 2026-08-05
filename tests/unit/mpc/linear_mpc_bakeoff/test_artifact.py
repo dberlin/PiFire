@@ -106,5 +106,33 @@ def test_bootstrap_and_unavailable_horizons_are_preserved() -> None:
     assert evidence["real"] is None
 
 
+def test_arm_evidence_preserves_raw_distributions_and_horizon_residuals() -> None:
+    artifact = artifact_with_scores().with_horizon_evidence(
+        {
+            "scheduled-arx": {
+                "600": {"residuals_c": [1.0, 2.0], "bootstrap_ci": [1.0, 2.0]},
+                "800": {"residuals_c": [2.0], "bootstrap_ci": [2.0, 2.0]},
+                "1000": {"residuals_c": [3.0], "bootstrap_ci": [3.0, 3.0]},
+                "real": None,
+            }
+        }
+    )
+    evidence = ArmEvidence(
+        "scheduled-arx",
+        {"GrillSim": 10.0},
+        1.0,
+        1.0,
+        2.0,
+        raw_learner_ms=(1.0, 2.0),
+        raw_refresh_ms=(3.0, 4.0),
+        raw_solve_ms=(5.0, 6.0),
+    )
+
+    document = artifact.to_document()
+    assert document["horizon_evidence"]["scheduled-arx"]["600"]["residuals_c"] == [1.0, 2.0]
+    assert evidence.to_document()["raw_timing_ms"]["learner"] == [1.0, 2.0]
+    assert evidence.to_document()["raw_timing_ms"]["solve_p99"] == 5.99
+
+
 def document_has_failure(artifact: ExperimentArtifact, category: str) -> bool:
     return any(failure["category"] == category for failure in artifact.to_document()["failures"])

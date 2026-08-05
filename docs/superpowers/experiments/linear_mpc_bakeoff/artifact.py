@@ -66,6 +66,9 @@ class ArmEvidence:
     projected_solve_p99_ms: float = -1.0
     raw_learner_p99_ms: float = 0.0
     raw_refresh_p99_ms: float = 0.0
+    raw_learner_ms: Sequence[float] = ()
+    raw_refresh_ms: Sequence[float] = ()
+    raw_solve_ms: Sequence[float] = ()
 
     def __post_init__(self) -> None:
         if self.name not in _COMPLEXITY:
@@ -73,16 +76,30 @@ class ArmEvidence:
         scores = {str(domain): float(score) for domain, score in self.domain_median_scores.items()}
         if not scores or not all(isfinite(score) and score >= 0.0 for score in scores.values()):
             raise ValueError("domain scores must be finite and non-negative")
-        values = (self.prediction_error, self.wrong_model_recovery, self.raw_solve_p99_ms)
+        distributions = {
+            "raw_learner_ms": tuple(float(value) for value in self.raw_learner_ms),
+            "raw_refresh_ms": tuple(float(value) for value in self.raw_refresh_ms),
+            "raw_solve_ms": tuple(float(value) for value in self.raw_solve_ms),
+        }
+        if any(not isfinite(value) or value < 0.0 for values in distributions.values() for value in values):
+            raise ValueError("raw timing distributions must be finite and non-negative")
+        for name, values in distributions.items():
+            object.__setattr__(self, name, values)
+        learner_p99 = _p99(distributions["raw_learner_ms"]) if distributions["raw_learner_ms"] else float(self.raw_learner_p99_ms)
+        refresh_p99 = _p99(distributions["raw_refresh_ms"]) if distributions["raw_refresh_ms"] else float(self.raw_refresh_p99_ms)
+        solve_p99 = _p99(distributions["raw_solve_ms"]) if distributions["raw_solve_ms"] else float(self.raw_solve_p99_ms)
+        values = (self.prediction_error, self.wrong_model_recovery, learner_p99, refresh_p99, solve_p99)
         if not all(isfinite(float(value)) and float(value) >= 0.0 for value in values):
             raise ValueError("arm evidence values must be finite and non-negative")
-        projected = self.raw_solve_p99_ms * 5.0 if self.projected_solve_p99_ms < 0.0 else self.projected_solve_p99_ms
+        projected = solve_p99 * 5.0 if self.projected_solve_p99_ms < 0.0 else self.projected_solve_p99_ms
         if not isfinite(float(projected)) or float(projected) < 0.0:
             raise ValueError("projected solve timing must be finite and non-negative")
         object.__setattr__(self, "domain_median_scores", MappingProxyType(dict(sorted(scores.items()))))
         object.__setattr__(self, "prediction_error", float(self.prediction_error))
         object.__setattr__(self, "wrong_model_recovery", float(self.wrong_model_recovery))
-        object.__setattr__(self, "raw_solve_p99_ms", float(self.raw_solve_p99_ms))
+        object.__setattr__(self, "raw_learner_p99_ms", learner_p99)
+        object.__setattr__(self, "raw_refresh_p99_ms", refresh_p99)
+        object.__setattr__(self, "raw_solve_p99_ms", solve_p99)
         object.__setattr__(self, "projected_solve_p99_ms", float(projected))
 
     @property
@@ -90,14 +107,29 @@ class ArmEvidence:
         return max(self.domain_median_scores.values())
 
     def to_document(self) -> dict[str, Any]:
+        raw_timing = {
+            "learner": list(self.raw_learner_ms),
+            "learner_p99": self.raw_learner_p99_ms,
+            "refresh": list(self.raw_refresh_ms),
+            "refresh_p99": self.raw_refresh_p99_ms,
+            "solve": list(self.raw_solve_ms),
+            "solve_p99": self.raw_solve_p99_ms,
+        }
         return {
             "domain_median_control_scores": _document(self.domain_median_scores),
             "prediction_error": self.prediction_error,
             "projected_solve_p99_ms": self.projected_solve_p99_ms,
+            "projected_timing_ms": {
+                "learner": [value * 5.0 for value in self.raw_learner_ms],
+                "learner_p99": self.raw_learner_p99_ms * 5.0,
+                "refresh": [value * 5.0 for value in self.raw_refresh_ms],
+                "refresh_p99": self.raw_refresh_p99_ms * 5.0,
+                "solve": [value * 5.0 for value in self.raw_solve_ms],
+                "solve_p99": self.projected_solve_p99_ms,
+            },
             "raw_solve_p99_ms": self.raw_solve_p99_ms,
+            "raw_timing_ms": raw_timing,
             "wrong_model_recovery": self.wrong_model_recovery,
-            "raw_learner_p99_ms": self.raw_learner_p99_ms,
-            "raw_refresh_p99_ms": self.raw_refresh_p99_ms,
         }
 
 
@@ -187,7 +219,11 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
     valid_evidence: list[ArmEvidence] = []
     for evidence in artifact.arms:
         reasons = sorted(set(failures_by_arm.get(evidence.name, ())))
-        if evidence.projected_solve_p99_ms > budget * 5.0:
+        if (
+            evidence.raw_learner_p99_ms > 25.0
+            or evidence.raw_refresh_p99_ms > 1_250.0
+            or evidence.projected_solve_p99_ms > min(budget * 5.0, 250.0)
+        ):
             reasons.append("runtime beyond hard limits")
         reasons = sorted(set(reasons))
         valid = not reasons
@@ -234,6 +270,16 @@ def _material_pareto_conflict(frontier: Sequence[ArmEvidence]) -> bool:
         return False
     scores = [item.worst_domain_score for item in frontier]
     return max(scores) > min(scores) * 1.05
+
+
+def _p99(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * 0.99
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
 
 
 def _scenario_sort_key(value: Any) -> tuple[str, str, str, int]:

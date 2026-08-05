@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from functools import lru_cache
 import importlib.metadata
 import json
 import os
 import sys
 from collections import defaultdict
 from time import perf_counter
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from statistics import median
@@ -73,15 +75,19 @@ class ScenarioResult:
 
     arm: str
     plant: str
+    mode: str
     scenario: str
     seed: int
-    mode: str
+    initialization: str
     fan_fraction: tuple[float, ...]
     requested_q: tuple[float, ...]
     realized_q: tuple[float, ...]
     temperature_c: tuple[float, ...]
     target_c: tuple[float, ...]
     metrics: dict[str, float | int | None]
+    raw_learner_ms: tuple[float, ...] = ()
+    raw_refresh_ms: tuple[float, ...] = ()
+    raw_solve_ms: tuple[float, ...] = ()
     provenance: str = "simulated-fixed-fan"
     solver_period_s: int = _FRAME_S
 
@@ -93,7 +99,13 @@ class ScenarioResult:
             "arm": self.arm,
             "fan_fraction": list(self.fan_fraction),
             "metrics": dict(self.metrics),
+            "initialization": self.initialization,
             "mode": self.mode,
+            "raw_timing_ms": {
+                "learner": list(self.raw_learner_ms),
+                "refresh": list(self.raw_refresh_ms),
+                "solve": list(self.raw_solve_ms),
+            },
             "plant": self.plant,
             "provenance": self.provenance,
             "realized_q": list(self.realized_q),
@@ -109,30 +121,21 @@ class ScenarioResult:
 def run_tiny_scenario(*, plant: str, seed: int) -> ScenarioResult:
     """Run one tiny fixed-fan cold-start control trace used by smoke tests."""
     definition = next(item for item in quick_scenarios() if item.name == "low-step")
-    return _run_scenario(definition, plant=plant, seed=seed, mode="frozen", duration_s=140, arm="scheduled-arx")
+    return _run_scenario(
+        definition,
+        plant=plant,
+        seed=seed,
+        mode="frozen",
+        duration_s=140,
+        arm="scheduled-arx",
+        initialization="wrong-gain",
+    )
 
 
-def run_experiment(config: ExperimentConfig | None = None) -> ExperimentArtifact:
-    """Run the fixed plant/scenario/mode matrix and optionally atomically save it."""
+def run_experiment(config: ExperimentConfig | None = None, *, resume: bool = False) -> ExperimentArtifact:
+    """Run the fixed three-arm matrix, atomically checkpointing every completed cell."""
     config = ExperimentConfig() if config is None else config
-    definitions = quick_scenarios() if config.quick_mode else SCENARIOS
-    duration = config.duration_s
-    rows: list[ScenarioResult] = []
-    failures = []
-    for arm in ("scheduled-arx", "dmc", "state-space"):
-        for plant in ("GrillSim", "MAKGrillSim"):
-            for mode in ("frozen", "online"):
-                for definition in definitions:
-                    for seed in sorted(config.seeds):
-                        try:
-                            rows.append(_run_scenario(definition, plant=plant, seed=seed, mode=mode, duration_s=duration, arm=arm))
-                        except Exception as exc:
-                            from .artifact import ArmFailure
-                            failures.append(ArmFailure(arm, definition.name, "non-finite/unstable", f"{type(exc).__name__}: {exc}"))
-    artifact = _artifact_from_rows(config, rows, failures)
-    if config.output is not None:
-        write_artifact_atomically(config.output, artifact)
-    return artifact
+    return _run_matrix(config, checkpoint=config.output, resume=resume)
 
 
 def run_tiny_matrix(
@@ -142,56 +145,100 @@ def run_tiny_matrix(
     interrupt_after: int | None = None,
     output: Path | None = None,
 ) -> ExperimentArtifact:
-    """Exercise deterministic checkpoint/restart mechanics without wall-clock timing."""
+    """Run the quick three-arm matrix through the same checkpoint executor as full mode."""
     directory.mkdir(parents=True, exist_ok=True)
-    checkpoint = output if output is not None else directory / "checkpoint.json"
-    config = ExperimentConfig.quick()
-    definitions = quick_scenarios()
+    return _run_matrix(
+        ExperimentConfig.quick(),
+        checkpoint=output if output is not None else directory / "checkpoint.json",
+        resume=resume,
+        interrupt_after=interrupt_after,
+    )
+
+
+def _run_matrix(
+    config: ExperimentConfig,
+    *,
+    checkpoint: Path | None,
+    resume: bool,
+    interrupt_after: int | None = None,
+) -> ExperimentArtifact:
+    definitions = quick_scenarios() if config.quick_mode else SCENARIOS
     jobs = [
-        (definition, plant, mode, seed)
+        (arm, initialization, definition, plant, mode, seed)
+        for arm in ("scheduled-arx", "dmc", "state-space")
+        for initialization in config.initializations
         for plant in ("GrillSim", "MAKGrillSim")
         for mode in ("frozen", "online")
         for definition in definitions
-        for seed in config.seeds
+        for seed in sorted(config.seeds)
     ]
-    completed: list[ScenarioResult] = []
-    if resume and checkpoint.exists():
+    rows: list[ScenarioResult] = []
+    failures = []
+    if resume and checkpoint is not None and checkpoint.exists():
         checkpoint_document = json.loads(checkpoint.read_text(encoding="utf-8"))
-        completed = [_scenario_from_document(row) for row in checkpoint_document.get("rows", ())]
-    completed_keys = {(row.scenario, row.plant, row.mode, row.seed) for row in completed}
-    for index, (definition, plant, mode, seed) in enumerate(jobs):
-        if (definition.name, plant, mode, seed) in completed_keys:
+        rows = [_scenario_from_document(row) for row in checkpoint_document.get("rows", ())]
+        rows = [_canonical_quick_row(row) if config.quick_mode else row for row in rows]
+        from .artifact import ArmFailure
+
+        failures = [
+            ArmFailure(item["arm"], item["scenario"], item["category"], item["detail"])
+            for item in checkpoint_document.get("failures", ())
+        ]
+    completed = {
+        (row.arm, row.initialization, row.scenario, row.plant, row.mode, row.seed)
+        for row in rows
+    }
+    for arm, initialization, definition, plant, mode, seed in jobs:
+        key = (arm, initialization, definition.name, plant, mode, seed)
+        if key in completed:
             continue
-        completed.append(_run_scenario(definition, plant=plant, seed=seed, mode=mode, duration_s=config.duration_s, arm="scheduled-arx"))
-        if interrupt_after is not None and len(completed) == interrupt_after:
-            _write_checkpoint(checkpoint, config, completed, complete=False)
-            if not resume:
-                break
-    if interrupt_after is not None and not resume and len(completed) < len(jobs):
-        return _artifact_from_rows(config, [_stable_timing_row(row) for row in completed])
-    final_rows = completed if len(completed) == len(jobs) else [
-        _run_scenario(definition, plant=plant, seed=seed, mode=mode, duration_s=config.duration_s, arm="scheduled-arx")
-        for definition, plant, mode, seed in jobs
-    ]
-    artifact = _artifact_from_rows(config, [_stable_timing_row(row) for row in final_rows])
-    # A resumed invocation replaces the partial checkpoint with the sorted complete artifact.
-    write_artifact_atomically(checkpoint, artifact)
+        try:
+            row = _run_scenario(
+                definition,
+                plant=plant,
+                seed=seed,
+                mode=mode,
+                duration_s=config.duration_s,
+                arm=arm,
+                initialization=initialization,
+            )
+            rows.append(_canonical_quick_row(row) if config.quick_mode else row)
+        except Exception as exc:
+            from .artifact import ArmFailure
+
+            failures.append(ArmFailure(arm, definition.name, "non-finite/unstable", f"{type(exc).__name__}: {exc}"))
+        if checkpoint is not None:
+            _write_checkpoint(checkpoint, config, rows, failures, complete=False)
+        if interrupt_after is not None and len(rows) + len(failures) >= interrupt_after and not resume:
+            return _artifact_from_rows(config, rows, failures)
+    artifact = _artifact_from_rows(config, rows, failures)
+    if checkpoint is not None:
+        write_artifact_atomically(checkpoint, artifact)
     return artifact
 
 
-def _stable_timing_row(row: ScenarioResult) -> ScenarioResult:
-    metrics = dict(row.metrics)
-    for name in ("raw_learner_p99_ms", "raw_refresh_p99_ms", "raw_solve_p99_ms"):
-        metrics[name] = 0.0
-    return replace(row, metrics=metrics)
 
 
 def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
+    raw_timing = document.get("raw_timing_ms", {})
     return ScenarioResult(
-        document["arm"], document["plant"], document["scenario"], document["seed"], document["mode"],
-        tuple(document["fan_fraction"]), tuple(document["requested_q"]), tuple(document["realized_q"]),
-        tuple(document["temperature_c"]), tuple(document["target_c"]), document["metrics"],
-        document["provenance"], document["solver_period_s"],
+        arm=document["arm"],
+        plant=document["plant"],
+        scenario=document["scenario"],
+        seed=document["seed"],
+        mode=document["mode"],
+        initialization=document["initialization"],
+        fan_fraction=tuple(document["fan_fraction"]),
+        requested_q=tuple(document["requested_q"]),
+        realized_q=tuple(document["realized_q"]),
+        temperature_c=tuple(document["temperature_c"]),
+        target_c=tuple(document["target_c"]),
+        metrics=document["metrics"],
+        raw_learner_ms=tuple(raw_timing.get("learner", ())),
+        raw_refresh_ms=tuple(raw_timing.get("refresh", ())),
+        raw_solve_ms=tuple(raw_timing.get("solve", ())),
+        provenance=document["provenance"],
+        solver_period_s=document["solver_period_s"],
     )
 
 
@@ -207,12 +254,21 @@ def write_artifact_atomically(path: Path, artifact: ExperimentArtifact) -> None:
             temporary.unlink()
 
 
-def _write_checkpoint(path: Path, config: ExperimentConfig, rows: list[ScenarioResult], *, complete: bool) -> None:
+def _write_checkpoint(
+    path: Path,
+    config: ExperimentConfig,
+    rows: list[ScenarioResult],
+    failures: list[Any],
+    *,
+    complete: bool,
+) -> None:
     document = {
         "checkpoint": True,
         "complete": complete,
         "config": config.to_document(),
-        "rows": [row.to_document() for row in rows],
+        "failures": [failure.to_document() for failure in failures],
+        "rows": [row.to_document() for row in sorted(rows, key=_row_key)],
+        "schema_version": 1,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
@@ -224,6 +280,13 @@ def _write_checkpoint(path: Path, config: ExperimentConfig, rows: list[ScenarioR
             temporary.unlink()
 
 
+def _canonical_quick_row(row: ScenarioResult) -> ScenarioResult:
+    metrics = dict(row.metrics)
+    for name in ("raw_learner_p99_ms", "raw_refresh_p99_ms", "raw_solve_p99_ms"):
+        metrics[name] = 0.0
+    return replace(row, metrics=metrics, raw_learner_ms=(), raw_refresh_ms=(), raw_solve_ms=())
+
+
 def _run_scenario(
     definition: ScenarioDefinition,
     *,
@@ -232,6 +295,7 @@ def _run_scenario(
     mode: str,
     duration_s: int,
     arm: str,
+    initialization: str,
 ) -> ScenarioResult:
     plant_type = {"GrillSim": GrillSim, "MAKGrillSim": MAKGrillSim}.get(plant)
     if plant_type is None:
@@ -242,7 +306,7 @@ def _run_scenario(
     realizer = PulseRealizer(frame_s=_FRAME_S, quantum_s=5.0)
     mpc_config = MPCConfig(horizon_s=600, frame_s=_FRAME_S)
     controller = LinearMPC(mpc_config)
-    model, fit_ms = _fitted_model(arm, seed)
+    model, fit_ms, residuals, recovery_mae = _fitted_model(arm, seed, initialization)
     temperatures: list[float] = []
     requested: list[float] = []
     realized: list[float] = []
@@ -280,11 +344,65 @@ def _run_scenario(
             refresh_started = perf_counter()
             model.observe(Observation(12_000.0 + float(second), temperatures[-1], frame.realized_duty, simulator.T_amb))
             refresh_ms.append((perf_counter() - refresh_started) * 1_000.0)
-    metrics = _metrics(temperatures, targets, requested, realized, transitions, duration_s, fit_ms, refresh_ms, solve_ms)
-    return ScenarioResult(arm, plant, definition.name, seed, mode, tuple(fan), tuple(requested), tuple(realized), tuple(temperatures), tuple(targets), metrics)
+    metrics = _metrics(
+        temperatures,
+        targets,
+        requested,
+        realized,
+        transitions,
+        duration_s,
+        fit_ms,
+        refresh_ms,
+        solve_ms,
+        residuals,
+        recovery_mae,
+    )
+    return ScenarioResult(
+        arm=arm,
+        plant=plant,
+        scenario=definition.name,
+        seed=seed,
+        mode=mode,
+        initialization=initialization,
+        fan_fraction=tuple(fan),
+        requested_q=tuple(requested),
+        realized_q=tuple(realized),
+        temperature_c=tuple(temperatures),
+        target_c=tuple(targets),
+        metrics=metrics,
+        raw_learner_ms=(fit_ms,),
+        raw_refresh_ms=tuple(refresh_ms),
+        raw_solve_ms=tuple(solve_ms),
+    )
+def _fitted_model(arm: str, seed: int, initialization: str):
+    model, fit_ms, residuals, recovery_mae = _prepared_model(arm, seed, initialization)
+    return deepcopy(model), fit_ms, {horizon: list(values) for horizon, values in residuals.items()}, recovery_mae
 
 
-def _fitted_model(arm: str, seed: int):
+@lru_cache(maxsize=None)
+def _prepared_model(arm: str, seed: int, initialization: str):
+    """Fit and recover once per arm/initialization/seed before cloning each scenario model."""
+    record, wrong_record = _identification_records(seed, initialization)
+    model = _model_for_initialization(arm, initialization)
+    started = perf_counter()
+    model.fit(record if arm == "state-space" and initialization == "wrong-delay" else wrong_record)
+    fit_ms = (perf_counter() - started) * 1_000.0
+    before = _horizon_residuals(model, record)
+    for index in range(480, 540):
+        model.observe(
+            Observation(
+                float(record.time_s[index]),
+                float(record.temp_c[index]),
+                float(record.q[index]),
+                float(record.ambient_c[index]),
+            )
+        )
+    after = _horizon_residuals(model, record)
+    recovery_mae = float(np.mean(after[600])) if after[600] else float(np.mean(before[600]))
+    return model, fit_ms, after, recovery_mae
+
+
+def _identification_records(seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:
     generator = np.random.default_rng(seed)
     samples = 600
     time_s = np.arange(samples, dtype=np.float64) * _FRAME_S
@@ -298,17 +416,78 @@ def _fitted_model(arm: str, seed: int):
         temperatures[index] = ambient[index] + state[0] + generator.normal(0.0, 0.015)
         state = transition @ state + np.array([0.9 * delayed[index], 0.0])
     record = SignalRecord(time_s, temperatures, q, ambient, "synthetic-identification")
-    if arm == "scheduled-arx":
-        model = ScheduledARX(ARXConfig(na=2, nb=2, delays=(1, 2, 3)))
-    elif arm == "dmc":
-        model = LaguerreDMC(DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(0, 20, 40)))
-    elif arm == "state-space":
-        model = InnovationStateSpace(StateSpaceConfig(orders=(1, 2, 3), delays=(1, 2, 3)))
+    if initialization == "wrong-gain":
+        wrong = SignalRecord(time_s, temperatures, q * 0.45, ambient, "wrong-gain-initialization")
+    elif initialization == "wrong-pole":
+        wrong = SignalRecord(time_s, ambient + (temperatures - ambient) * 1.6, q, ambient, "wrong-pole-initialization")
+    elif initialization == "wrong-delay":
+        wrong = SignalRecord(time_s, temperatures, np.roll(q, 3), ambient, "wrong-delay-initialization")
     else:
-        raise ValueError(f"unknown arm {arm}")
-    started = perf_counter()
-    model.fit(record)
-    return model, (perf_counter() - started) * 1_000.0
+        raise ValueError(f"unknown initialization {initialization!r}")
+    return record, wrong
+
+
+def _model_for_initialization(arm: str, initialization: str):
+    if arm == "scheduled-arx":
+        configs = {
+            "wrong-gain": ARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0),
+            "wrong-pole": ARXConfig(na=2, nb=2, delays=(1, 2, 3), forgetting_factor=0.90),
+            "wrong-delay": ARXConfig(na=2, nb=2, delays=(4, 5, 6)),
+        }
+        return ScheduledARX(configs[initialization])
+    if arm == "dmc":
+        configs = {
+            "wrong-gain": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(0, 20, 40), final_gain_bounds=(1e-6, 0.2)),
+            "wrong-pole": DMCConfig(terms=(2, 3), poles=(0.05, 0.15), delay_seconds=(0, 20, 40)),
+            "wrong-delay": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(60, 80, 100)),
+        }
+        return LaguerreDMC(configs[initialization])
+    if arm == "state-space":
+        configs = {
+            "wrong-gain": StateSpaceConfig(orders=(1,), delays=(2,), parameter_penalty=0.1),
+            "wrong-pole": StateSpaceConfig(orders=(1,), delays=(2,), block_rows=12),
+            "wrong-delay": StateSpaceConfig(orders=(1, 2, 3), delays=(1, 3)),
+        }
+        return InnovationStateSpace(configs[initialization])
+
+
+def _initialization_snapshot(arm: str, initialization: str) -> dict[str, Any]:
+    model = _model_for_initialization(arm, initialization)
+    transform = {
+        "wrong-gain": "requested-duty × 0.45",
+        "wrong-pole": "temperature-deviation × 1.6",
+        "wrong-delay": "requested-duty shifted 3 frames",
+    }[initialization]
+    if arm == "state-space" and initialization == "wrong-delay":
+        transform = "state-space candidates omit delay 2"
+    return {
+        "initialization": initialization,
+        "model_config": asdict(model._config),
+        "record_transform": transform,
+    }
+
+
+def _horizon_residuals(model: Any, record: SignalRecord) -> dict[int, list[float]]:
+    residuals: dict[int, list[float]] = {}
+    for horizon_s in (600, 800, 1_000):
+        steps = horizon_s // _FRAME_S
+        values = []
+        for start in range(360, 600 - steps + 1, 20):
+            prefix = SignalRecord(
+                record.time_s[:start],
+                record.temp_c[:start],
+                record.q[:start],
+                record.ambient_c[:start],
+                record.provenance,
+            )
+            predicted = model.forecast(prefix, record.q[start : start + steps], record.ambient_c[start : start + steps])
+            values.append(float(np.mean(np.abs(predicted - record.temp_c[start : start + steps]))))
+        residuals[horizon_s] = values
+    return residuals
+
+
+def _row_key(row: ScenarioResult) -> tuple[str, str, str, str, str, int]:
+    return (row.arm, row.initialization, row.plant, row.scenario, row.mode, row.seed)
 
 
 def _p99(values: list[float]) -> float:
@@ -325,6 +504,8 @@ def _metrics(
     fit_ms: float,
     refresh_ms: list[float],
     solve_ms: list[float],
+    residuals: dict[int, list[float]],
+    recovery_mae: float,
 ) -> dict[str, float | int | None]:
     error = np.asarray(temperatures) - np.asarray(targets)
     absolute = np.abs(error)
@@ -341,14 +522,19 @@ def _metrics(
         "overshoot_c": overshoot,
         "peak_to_peak_hold_c": float(np.ptp(hold)),
         "prediction_mae_c": float(np.mean(absolute)),
+        "prediction_residual_1000_c": float(np.mean(residuals[1_000])),
+        "prediction_residual_600_c": float(np.mean(residuals[600])),
+        "prediction_residual_800_c": float(np.mean(residuals[800])),
         "promotion_events": 0,
         "raw_learner_p99_ms": fit_ms,
         "raw_refresh_p99_ms": _p99(refresh_ms),
         "raw_solve_p99_ms": _p99(solve_ms),
+        "requested_realized_duty_mae": float(np.mean(np.abs(np.asarray(requested) - np.asarray(realized)))),
         "rmse_c": float(np.sqrt(np.mean(error**2))),
         "settling_s": settled,
         "transitions_per_hour": float(transitions * 3600.0 / duration_s),
         "undershoot_c": undershoot,
+        "wrong_model_recovery_mae_c": recovery_mae,
     }
 
 
@@ -362,31 +548,61 @@ def _metric_float(metrics: dict[str, float | int | None], name: str) -> float:
 def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], failures=()) -> ExperimentArtifact:
     by_arm: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     predictions: dict[str, list[float]] = defaultdict(list)
-    timings: dict[str, list[float]] = defaultdict(list)
-    learner_timings: dict[str, list[float]] = defaultdict(list)
-    refresh_timings: dict[str, list[float]] = defaultdict(list)
+    recoveries: dict[str, list[float]] = defaultdict(list)
+    horizons: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    learner_samples: dict[str, list[float]] = defaultdict(list)
+    refresh_samples: dict[str, list[float]] = defaultdict(list)
+    solve_samples: dict[str, list[float]] = defaultdict(list)
     for row in rows:
         by_arm[row.arm][row.plant].append(_metric_float(row.metrics, "control_score"))
-        predictions[row.arm].append(_metric_float(row.metrics, "prediction_mae_c"))
-        timings[row.arm].append(_metric_float(row.metrics, "raw_solve_p99_ms"))
-        learner_timings[row.arm].append(_metric_float(row.metrics, "raw_learner_p99_ms"))
-        refresh_timings[row.arm].append(_metric_float(row.metrics, "raw_refresh_p99_ms"))
+        predictions[row.arm].append(_metric_float(row.metrics, "prediction_residual_600_c"))
+        recoveries[row.arm].append(_metric_float(row.metrics, "wrong_model_recovery_mae_c"))
+        for horizon in ("600", "800", "1000"):
+            horizons[row.arm][horizon].append(_metric_float(row.metrics, f"prediction_residual_{horizon}_c"))
+        learner_samples[row.arm].extend(row.raw_learner_ms)
+        refresh_samples[row.arm].extend(row.raw_refresh_ms)
+        solve_samples[row.arm].extend(row.raw_solve_ms)
     arms = tuple(
         ArmEvidence(
-            arm,
-            {plant: float(median(scores)) for plant, scores in sorted(domains.items())},
-            float(np.mean(predictions[arm])),
-            float(np.mean(predictions[arm])),
-            _p99(timings[arm]), -1.0, _p99(learner_timings[arm]), _p99(refresh_timings[arm]),
+            name=arm,
+            domain_median_scores={plant: float(median(scores)) for plant, scores in sorted(domains.items())},
+            prediction_error=float(np.mean(predictions[arm])),
+            wrong_model_recovery=float(np.mean(recoveries[arm])),
+            raw_solve_p99_ms=_p99(solve_samples[arm]),
+            raw_learner_ms=tuple(learner_samples[arm]),
+            raw_refresh_ms=tuple(refresh_samples[arm]),
+            raw_solve_ms=tuple(solve_samples[arm]),
         )
         for arm, domains in sorted(by_arm.items())
     )
-    horizon_evidence = {arm.name: {"600": _bootstrap_ci(predictions[arm.name]), "800": _bootstrap_ci(predictions[arm.name]), "1000": _bootstrap_ci(predictions[arm.name]), "real": None} for arm in arms}
+    horizon_evidence = {
+        arm.name: {
+            **{
+                horizon: {
+                    "bootstrap_ci": _bootstrap_ci(horizons[arm.name][horizon]),
+                    "residuals_c": horizons[arm.name][horizon],
+                }
+                for horizon in ("600", "800", "1000")
+            },
+            "real": None,
+        }
+        for arm in arms
+    }
     return ExperimentArtifact(
         config=config.to_document(),
         seeds=config.seeds,
         splits={"synthetic": {"fit": [0, 360], "validation": [360, 480], "test": [480, 600]}},
-        model_snapshots={"configured_arms": [arm.name for arm in arms], "modes": ["frozen", "online"]},
+        model_snapshots={
+            "configured_arms": [arm.name for arm in arms],
+            "modes": ["frozen", "online"],
+            "wrong_model_initializations": {
+                arm: {
+                    initialization: _initialization_snapshot(arm, initialization)
+                    for initialization in config.initializations
+                }
+                for arm in ("scheduled-arx", "dmc", "state-space")
+            },
+        },
         scenarios=tuple(rows),
         arms=arms,
         failures=tuple(failures),

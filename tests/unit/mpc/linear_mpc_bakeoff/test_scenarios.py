@@ -46,3 +46,16 @@ def test_checkpoint_is_atomic_and_does_not_leave_temporary_file(tmp_path: Path) 
 
     assert output.exists()
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_checkpoint_matrix_covers_every_arm_and_wrong_initialization(tmp_path: Path) -> None:
+    artifact = run_tiny_matrix(tmp_path, resume=False)
+
+    assert {row.arm for row in artifact.scenarios} == {"scheduled-arx", "dmc", "state-space"}
+    assert {row.initialization for row in artifact.scenarios} == {
+        "wrong-gain",
+        "wrong-pole",
+        "wrong-delay",
+    }
+    assert all("requested_realized_duty_mae" in row.metrics for row in artifact.scenarios)
+    assert all("wrong_model_recovery_mae_c" in row.metrics for row in artifact.scenarios)

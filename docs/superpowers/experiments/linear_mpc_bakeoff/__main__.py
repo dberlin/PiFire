@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .artifact import render_table
-from .runner import ExperimentConfig, default_output_path, run_experiment, run_tiny_matrix
+from .runner import ExperimentConfig, default_output_path, run_experiment
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,11 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.resume and not output.exists():
         parser.error(f"checkpoint does not exist: {output}")
     config = ExperimentConfig.quick() if args.quick else ExperimentConfig()
-    artifact = (
-        run_tiny_matrix(output.parent, resume=True, output=output)
-        if args.resume and args.quick
-        else run_experiment(replace(config, output=output))
-    )
+    artifact = run_experiment(replace(config, output=output), resume=args.resume)
     print(render_table(artifact))
     return 0
 
