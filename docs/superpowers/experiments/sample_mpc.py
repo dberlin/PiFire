@@ -303,7 +303,10 @@ def _episode_span(arg):
             # detection tick: auger forced fully off (ratio 0.0, below u_min);
             # remaining ticks: ratio pinned at u_min while the auger keeps
             # cycling. Fan is off for the whole pause either way.
-            ratio = 0.0 if k in lid_starts else c.u_min
+            # The controller no longer carries the floor as an attribute; it is
+            # the sampler's own configured value, which is what the controller
+            # was constructed with.
+            ratio = 0.0 if k in lid_starts else CYCLE["u_min"]
             fan = 0.0
             q_app = 0.0
         else:

@@ -39,8 +39,10 @@ def test_pid_trace_diagnostics_reproduce_completed_update(monkeypatch):
 def test_pid_sp_trace_diagnostics_reproduce_completed_update(monkeypatch):
     clock = iter((0.0, 0.0, 0.0, 0.0, 100.0))
     monkeypatch.setattr(pid_sp.time, "time", lambda: next(clock))
+    # tau/theta are no longer configuration: the identifier learns them, so a
+    # controller built here carries no model at all.
     core = pid_sp.Controller(
-        {"PB": 20.0, "Ti": 10.0, "Td": 5.0, "tau": 10.0, "theta": 5.0, "stable_window": 12.0},
+        {"PB": 20.0, "Ti": 10.0, "Td": 5.0, "stable_window": 12.0},
         "F",
         dict(CYCLE_DATA),
     )
@@ -56,10 +58,15 @@ def test_pid_sp_trace_diagnostics_reproduce_completed_update(monkeypatch):
     assert isinstance(diagnostic, PidSpTraceDiagnostics)
     assert diagnostic.error == pytest.approx(-2.0)
     assert diagnostic.measured_rate == pytest.approx(4.0)
-    assert diagnostic.predicted_temperature == pytest.approx(201.625385)
-    assert diagnostic.predicted_error == pytest.approx(1.625385)
-    assert diagnostic.tau_seconds == pytest.approx(10.0)
-    assert diagnostic.theta_seconds == pytest.approx(5.0)
+    # This controller no longer extrapolates a future temperature from a
+    # configured tau/theta. The Smith predictor removes identified dead time
+    # from the reading instead, and nothing is identified on a fresh core, so
+    # the temperature it selects is the measured one and the error taken from it
+    # is the plain error. tau/theta read zero for the same reason.
+    assert diagnostic.predicted_temperature == pytest.approx(198.0)
+    assert diagnostic.predicted_error == pytest.approx(-2.0)
+    assert diagnostic.tau_seconds == pytest.approx(0.0)
+    assert diagnostic.theta_seconds == pytest.approx(0.0)
     assert diagnostic.stable_window_seconds == pytest.approx(12.0)
     assert diagnostic.branch is ControllerBranch.NONE
     assert diagnostic.previous_temperature == pytest.approx(190.0)

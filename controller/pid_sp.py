@@ -106,7 +106,6 @@ class Controller(PIDControllerBase):
         self.predictor = SmithPredictor()
         self._selected = None
 
-
         self.set_target(0.0)
 
     # ------------------------------------------------------------ capabilities

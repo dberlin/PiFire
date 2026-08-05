@@ -33,36 +33,13 @@ def _controller(name, clock, units="F"):
     return mod.Controller(dict(CONFIG), units, dict(CYCLE_DATA))
 
 
-def test_untrusted_pid_sp_is_term_for_term_pid_ac(clock):
-    """Identification is passive, so a fresh install is plain PID for about an
-    hour -- accepted by design. This series holds pid_sp and pid_ac to exact
-    equality only because it stays outside the two points where they
-    legitimately diverge pre-trust: the startup reduction (a dead store in
-    pid_ac, live here) and start_change_temp (pid_ac's fixed 150 vs pid_sp's
-    real first reading). Ticks 1-2 short-circuit at u == 1.0 before either
-    matters, and tick 3 lands at exactly current_time - last_set_time == 60,
-    one float outside the reduction window.
-
-    Uses pid_ac as an oracle: delete this test in the same change that
-    deletes controller/pid_ac.py, since a rotted import would otherwise
-    fail silently rather than flag the removal."""
-    sp = _controller("pid_sp", clock)
-    ac = _controller("pid_ac", clock)
-    sp.set_target(225.0)
-    ac.set_target(225.0)
-    for temp in [150, 160, 180, 200, 205, 210, 215, 218, 220, 221]:
-        clock.t += 20.0
-        assert sp.update(float(temp)) == pytest.approx(ac.update(float(temp)))
-
-
 def test_the_startup_reduction_is_applied_to_the_new_output(clock):
     """Within the first three cycles after a setpoint change, u is the newly
     computed p+i+d scaled by STARTUP_REDUCTION -- not a stale prior output.
 
-    Pinned against PID-SP's own p+i+d rather than pid_ac's output: pid_ac
-    keeps the self.last=150 phantom that PID-SP no longer carries, so their D
-    terms (and therefore u) differ from the very first sample, independent of
-    the startup reduction. Comparing PID-SP to itself isolates the reduction."""
+    Pinned against PID-SP's own p+i+d rather than another controller's output,
+    so the assertion isolates the reduction rather than any difference in how
+    the two seed their first derivative."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     clock.t += 20.0  # inside cycle_time * 3 of the setpoint change
@@ -221,34 +198,40 @@ def test_derivative_is_not_suppressed_on_a_downward_set_point_change(clock):
 
 def test_a_last_selected_temperature_of_exactly_zero_is_repaired_on_a_new_target(clock):
     """In the untrusted regime, self.last is None only at startup; a selected
-    temperature of exactly 0.0 in native units is a distinct case the
-    None-seed does not cover. The repair pid_ac already carries for it must
-    survive here too, or a setpoint change following that reading computes a
-    derivative against a temperature that was never real."""
+    temperature of exactly 0.0 in native units is a distinct case the None-seed
+    does not cover. Without the repair, a setpoint change following that reading
+    computes the derivative against a temperature that was never real.
+
+    Asserted on the derivative directly rather than against another controller:
+    the repair re-seeds self.last from the current selected temperature, so the
+    derivative on that tick is exactly zero. Un-repaired it would be
+    kd * 220.0 / dt, which is nowhere near it -- the pinned value cannot be
+    reached by both paths.
+    """
     sp = _controller("pid_sp", clock)
-    ac = _controller("pid_ac", clock)
     sp.set_target(225.0)
-    ac.set_target(225.0)
     clock.t += 20.0
     sp.update(200.0)
-    ac.update(200.0)
     clock.t += 20.0
     sp.update(0.0)  # a reading of exactly 0.0 in native units: self.last becomes exactly 0.0
-    ac.update(0.0)
+    assert sp.last == 0.0
     sp.set_target(225.0)  # any setpoint change: new_target True
-    ac.set_target(225.0)
-    # Past the startup-reduction window (>= cycle_time * 3), which applies to
-    # pid_sp but is a dead store in pid_ac -- that is a separate, already
-    # pinned difference and must not be conflated with this repair.
-    clock.t += 20.0 * 3 + 1
-    assert sp.update(220.0) == pytest.approx(ac.update(220.0))
+    # Past the startup-reduction window (>= cycle_time * 3), so the reduction
+    # cannot be confused with this repair.
+    dt = 20.0 * 3 + 1
+    clock.t += dt
+    sp.update(220.0)
+
+    assert sp.get_status()["d"] == pytest.approx(0.0)
+    # The value the same tick would have produced had the repair not fired.
+    assert sp.kd * 220.0 / dt != pytest.approx(0.0)
 
 
 def test_set_output_feeds_the_identifier_as_well_as_the_predictor(clock):
     """Dropping predictor.record_output is caught by the divergence tests
     above; dropping identifier.record_output is not caught anywhere else.
     Without duty history the excitation gate can never clear, so a fresh
-    install would silently stay plain pid_ac forever -- no error, no
+    install would silently stay a plain PID forever -- no error, no
     diagnostic, exactly the failure mode this plan exists to prevent."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)

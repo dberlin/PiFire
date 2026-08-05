@@ -20,8 +20,6 @@ PID_CONFIGS = {
         "Td": 45.0,
         "stable_window": 12,
         "center_factor": 0.0010,
-        "tau": 115,
-        "theta": 65,
     },
 }
 
@@ -58,7 +56,11 @@ def _run_variant(module_name, monkeypatch):
 # these values are machine-specific). Do NOT hand-edit after capture.
 GOLDEN = {
     "pid": [1.796296, 1.365741, 0.731481, 0.435185, 0.94213, 0.877315, 0.803241, 0.831944, 0.836111, 0.855093],
-    "pid_sp": [1.0, 0.665488, -0.370505, -0.740875, 0.164966, 0.072374, -0.020219, 0.061806, 0.092153, 0.138275],
+    # Recaptured after PID-SP moved onto the Smith predictor: it regulates on
+    # a dead-time-corrected temperature instead of extrapolating from a
+    # configured tau/theta, so the series it produces is a different one by
+    # design, not a drift in the refactor this file guards.
+    "pid_sp": [1.0, 0.621472, 0.210741, -0.15963, 0.310278, 0.217685, 0.125093, 0.153796, 0.157963, 0.176944],
 }
 
 

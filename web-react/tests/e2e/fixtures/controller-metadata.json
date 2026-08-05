@@ -127,7 +127,7 @@
         },
         {
           "hidden": false,
-          "option_default": 1.4e-9,
+          "option_default": 1.4e-09,
           "option_description": "Radiative (T^4) chamber-loss coefficient. Captures the temperature-dependent gain so one calibration spans the whole range. 0 = purely linear model. [Default=1.4e-9]",
           "option_friendly_name": "Radiative Loss Coefficient",
           "option_max": null,
@@ -138,8 +138,16 @@
         },
         {
           "hidden": false,
-          "list_labels": ["EKF (nonlinear, fast)", "MHE (nonlinear)", "Kalman (linear)"],
-          "list_values": ["ekf", "mhe", "kf"],
+          "list_labels": [
+            "EKF (nonlinear, fast)",
+            "MHE (nonlinear)",
+            "Kalman (linear)"
+          ],
+          "list_values": [
+            "ekf",
+            "mhe",
+            "kf"
+          ],
           "option_default": "ekf",
           "option_description": "Disturbance/state estimator. EKF linearizes the nonlinear radiative term each step -- nonlinear-capable and fast (~us), recommended. MHE solves an NLP each step (nonlinear, slower). KF is a linear-only Kalman filter (requires sigma=0). [Default=ekf]",
           "option_friendly_name": "State Estimator",
@@ -148,8 +156,14 @@
         },
         {
           "hidden": false,
-          "list_labels": ["NLP solve (do_mpc)", "Neural net (fast, IPOPT-free)"],
-          "list_values": ["nlp", "net"],
+          "list_labels": [
+            "NLP solve (do_mpc)",
+            "Neural net (fast, IPOPT-free)"
+          ],
+          "list_values": [
+            "nlp",
+            "net"
+          ],
           "option_default": "nlp",
           "option_description": "How the firing rate is computed. NLP solves the MPC optimization each step (do_mpc/IPOPT). Neural net uses a pre-trained pure-numpy approximation of the policy (no IPOPT/CasADi) -- much faster, and falls back to NLP automatically if the trained net (below) is missing or was trained for a different calibration. Retrain the net (export_span_net.py) after recalibrating. [Default=nlp]",
           "option_friendly_name": "Firing-Rate Policy",
@@ -239,7 +253,9 @@
       "contributors": [],
       "dependencies": {
         "extra": "mpc",
-        "modules": ["do_mpc"]
+        "modules": [
+          "do_mpc"
+        ]
       },
       "description": "Model Predictive Controller. An outer optimizer commands a firing-rate demand against a grey-box thermal model with offset-free disturbance estimation; an inner combustion allocator maps it to auger and (on PWM/DC-fan builds) fan. Targets a tight temperature band. Built on do-mpc.",
       "friendly_name": "Model Predictive Control (MPC)",
@@ -303,7 +319,10 @@
           "option_type": "float"
         }
       ],
-      "contributors": ["Ben Parmeter", "James Weber"],
+      "contributors": [
+        "Ben Parmeter",
+        "James Weber"
+      ],
       "description": "The standard PID controller for PiFire, used by default. This software was originally developed by GitHub user DBorello as part of his excellent PiSmoker project.  Slightly modified by @weberbox and adapted for PiFire. ",
       "friendly_name": "PID Standard",
       "image": "pid.png",
@@ -375,31 +394,18 @@
           "option_name": "center_factor",
           "option_step": 0.0001,
           "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 115,
-          "option_description": "Time constant for the Smith Predictor. This is the time it takes the system to reach 2/3 of it's final value after a Set Point change. Higher Tau decreases system sensitivity to model mismatch. [Default=115]",
-          "option_friendly_name": "Tau (s)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "tau",
-          "option_step": 1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 65,
-          "option_description": "Time delay in the system. Theta is measured after commanding a Set Point change as the time it takes from the initial commmand to seeing initial temperature rise. Higher Theta makes the system more sensitive to delays in the system. [Default=65]",
-          "option_friendly_name": "Theta (s)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "theta",
-          "option_step": 1,
-          "option_type": "float"
         }
       ],
-      "contributors": ["Ben Parmeter", "James Weber", "Ryan Steel"],
+      "contributors": [
+        "Ben Parmeter",
+        "James Weber",
+        "Ryan Steel"
+      ],
+      "dependencies": {
+        "modules": [
+          "numpy"
+        ]
+      },
       "description": "The Auto Center PID controller for PiFire, modified to include a Smith Predictor. This software was originally developed by GitHub user DBorello as part of his excellent PiSmoker project.  Slightly modified by @weberbox and @dogtreatfairy and adapted for PiFire. ",
       "friendly_name": "PID Smith Predictor",
       "image": "pid_sp.png",
