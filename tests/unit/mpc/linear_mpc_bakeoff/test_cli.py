@@ -82,9 +82,8 @@ def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(t
     )
 
     assert completed.returncode == 0, completed.stderr
-    resumed = json.loads(output.read_text(encoding="utf-8"))
-    assert len(resumed["scenarios"]) + len(resumed["failures"]) == 144
-    restored = ExperimentArtifact.from_json(output.read_text(encoding="utf-8"))
+    restored = load_artifact(output)
+    assert len(restored.scenarios) + len(restored.failures) == 144
     key = lambda row: (row["arm"], row["initialization"], row["plant"], row["scenario"], row["mode"], row["seed"])
     restored_rows = {key(row.to_document()): row.to_document() for row in restored.scenarios}
     assert all(restored_rows[key(row)] == row for row in partial["rows"])

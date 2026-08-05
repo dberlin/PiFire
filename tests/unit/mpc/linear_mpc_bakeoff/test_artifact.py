@@ -488,7 +488,30 @@ def test_manifest_shards_are_bounded_deterministic_and_verified(tmp_path) -> Non
     assert all(item["bytes"] <= 10 for item in manifest["parts"])
     assert load_artifact(left).to_document() == artifact.to_document()
     assert left.read_text() == right.read_text()
+    stale = left.parent / f"{left.stem}.part9999.gz"
+    stale.write_bytes(b"stale")
+    write_artifact_atomically(left, artifact, max_part_bytes=10)
+    assert not stale.exists()
+    unsafe = json.loads(left.read_text())
+    unsafe["parts"][0]["name"] = "../escape.gz"
+    left.write_text(json.dumps(unsafe))
+    with pytest.raises(ValueError, match="unsafe"):
+        load_artifact(left)
+    write_artifact_atomically(left, artifact, max_part_bytes=10)
     first = left.parent / manifest["parts"][0]["name"]
     first.write_bytes(first.read_bytes() + b"x")
     with pytest.raises(ValueError, match="checksum"):
         load_artifact(left)
+def test_loader_accepts_legacy_json_and_gzip_transport(tmp_path) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
+        load_artifact,
+        write_artifact_atomically,
+    )
+
+    artifact = artifact_with_scores()
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(artifact.to_json())
+    compressed = tmp_path / "legacy.json.gz"
+    write_artifact_atomically(compressed, artifact)
+    assert load_artifact(legacy).to_document() == artifact.to_document()
+    assert load_artifact(compressed).to_document() == artifact.to_document()

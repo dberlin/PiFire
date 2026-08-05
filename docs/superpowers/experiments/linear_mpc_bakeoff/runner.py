@@ -461,7 +461,10 @@ def _verified_part(manifest: Path, item: Mapping[str, Any], index: int) -> bytes
     name = item["name"]
     if name != f"{manifest.stem}.part{index:04d}.gz" or Path(name).name != name:
         raise ValueError("unsafe or unordered artifact part")
-    data = (manifest.parent / name).read_bytes()
+    part = (manifest.parent / name).resolve()
+    if part.parent != manifest.parent.resolve():
+        raise ValueError("unsafe artifact part path")
+    data = part.read_bytes()
     if len(data) != item["bytes"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
         raise ValueError("artifact part checksum mismatch")
     return data

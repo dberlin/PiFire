@@ -69,7 +69,7 @@ tests/unit/mpc/linear_mpc_bakeoff/
 The generated evidence lives at:
 
 ```text
-docs/superpowers/experiments/_linear_mpc_bakeoff.json.gz
+docs/superpowers/experiments/_linear_mpc_bakeoff.manifest.json
 ```
 
 ---
@@ -789,7 +789,7 @@ python -m docs.superpowers.experiments.linear_mpc_bakeoff --output PATH --resume
 python -m docs.superpowers.experiments.linear_mpc_bakeoff --output PATH
 ```
 
-`--quick` runs tiny deterministic smoke scenarios and never overwrites the committed full artifact. Full mode defaults to the losslessly compressed `docs/superpowers/experiments/_linear_mpc_bakeoff.json.gz` canonical artifact.
+`--quick` runs tiny deterministic smoke scenarios and never overwrites the committed full artifact. Full mode defaults to the bounded-shard manifest `docs/superpowers/experiments/_linear_mpc_bakeoff.manifest.json`.
 
 - [ ] **Step 8: Run focused runner tests**
 
@@ -809,7 +809,7 @@ jj --no-pager diff --summary
 ### Task 9: Execute the bake-off and publish the evidence
 
 **Files:**
-- Create: `docs/superpowers/experiments/_linear_mpc_bakeoff.json.gz`
+- Create: `docs/superpowers/experiments/_linear_mpc_bakeoff.manifest.json` plus bounded gzip shards
 - Modify only if evidence exposes a real experiment bug: files under `docs/superpowers/experiments/linear_mpc_bakeoff/` and their focused tests
 
 **Interfaces:**
@@ -851,7 +851,7 @@ Expected: no errors.
 - [ ] **Step 5: Run the full experiment**
 
 ```bash
-uv run python -m docs.superpowers.experiments.linear_mpc_bakeoff --output docs/superpowers/experiments/_linear_mpc_bakeoff.json.gz --resume
+uv run python -m docs.superpowers.experiments.linear_mpc_bakeoff --output docs/superpowers/experiments/_linear_mpc_bakeoff.manifest.json --resume
 ```
 
 Expected: JSON contains GrillSim, MAKGrillSim, and real-MAK requested-input-reconstruction evidence; frozen and online arms; 600/800/1000-second validation selection; all available 1–60 minute diagnostic horizons; raw workstation and `5x` projected timing; and structured failures rather than missing rows.
