@@ -305,6 +305,8 @@ def _run_matrix(
     ]
     rows: list[ScenarioResult] = []
     checkpoint_path = _checkpoint_path(checkpoint) if checkpoint is not None else None
+    if not resume:
+        _discard_checkpoint(checkpoint_path)
     failures = []
     if resume and checkpoint_path is not None and checkpoint_path.exists():
         checkpoint_document = _read_artifact_document(checkpoint_path)
@@ -438,6 +440,42 @@ def _checkpoint_path(output: Path) -> Path:
     if not output.name.endswith(suffix):
         raise ValueError("checkpoint output requires a .manifest.json path")
     return output.with_name(f"{output.name.removesuffix(suffix)}.checkpoint{suffix}")
+
+
+def _discard_checkpoint(path: Path | None) -> None:
+    """Discard a fresh-run checkpoint without trusting malformed part references."""
+    if path is None or not path.exists():
+        return
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        path.unlink(missing_ok=True)
+        return
+    parts = document.get("parts") if document.get("transport") == "gzip-shards/v1" else None
+    if not isinstance(parts, list):
+        path.unlink()
+        return
+    referenced = []
+    parent = path.parent.resolve()
+    for item in parts:
+        name = item.get("name") if isinstance(item, Mapping) else None
+        if not isinstance(name, str):
+            path.unlink()
+            return
+        candidate = Path(name)
+        part = (path.parent / candidate).resolve()
+        if (
+            candidate.name != name
+            or not name.startswith(f"{path.stem}.")
+            or not name.endswith(".gz")
+            or part.parent != parent
+        ):
+            path.unlink()
+            return
+        referenced.append(part)
+    path.unlink()
+    for part in referenced:
+        part.unlink(missing_ok=True)
 
 
 def _transport_part_paths(path: Path) -> tuple[Path, ...]:

@@ -89,6 +89,56 @@ def test_interrupted_matrix_keeps_only_a_sharded_checkpoint(tmp_path: Path) -> N
     ]
 
 
+def test_fresh_matrix_discards_broken_checkpoint_but_resume_rejects_it(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "artifact.manifest.json"
+    checkpoint = tmp_path / "artifact.checkpoint.manifest.json"
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "transport": "gzip-shards/v1",
+                "parts": [
+                    {
+                        "name": f"{checkpoint.stem}.missing.part0000.deadbeefdeadbeef.gz",
+                        "bytes": 1,
+                        "sha256": "0" * 64,
+                    }
+                ],
+                "compressed_sha256": "0" * 64,
+                "canonical_json_sha256": "0" * 64,
+                "canonical_json_bytes": 1,
+            }
+        )
+    )
+
+    with pytest.raises(FileNotFoundError):
+        run_tiny_matrix(tmp_path, resume=True, output=output)
+
+    run_tiny_matrix(tmp_path, resume=False, interrupt_after=1, output=output)
+
+    assert json.loads(checkpoint.read_text())["transport"] == "gzip-shards/v1"
+
+    outside = tmp_path.parent / "outside.gz"
+    outside.write_bytes(b"outside")
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "transport": "gzip-shards/v1",
+                "parts": [
+                    {
+                        "name": "../outside.gz",
+                        "bytes": len(b"outside"),
+                        "sha256": "0" * 64,
+                    }
+                ],
+            }
+        )
+    )
+    run_tiny_matrix(tmp_path, resume=False, interrupt_after=1, output=output)
+    assert outside.read_bytes() == b"outside"
+
+
 def test_checkpoint_matrix_covers_every_arm_and_wrong_initialization(tmp_path: Path) -> None:
     artifact = run_tiny_matrix(tmp_path, resume=False)
 
