@@ -483,17 +483,21 @@ def _write_text_atomically(path: Path, payload: str) -> None:
             temporary.unlink()
 
 
-def write_artifact_atomically(path: Path, artifact: ExperimentArtifact) -> None:
+def write_artifact_atomically(
+    path: Path, artifact: ExperimentArtifact, *, max_part_bytes: int = _MAX_ARTIFACT_PART_BYTES
+) -> None:
     """Publish a deterministic manifest after bounded gzip shards are durable."""
     payload = (artifact.to_json() + "\n").encode("utf-8")
     if path.suffix == ".gz":
         _write_text_atomically(path, payload.decode("utf-8"))
         return
     compressed = gzip.compress(payload, mtime=0)
+    if max_part_bytes < 1:
+        raise ValueError("max_part_bytes must be positive")
     path.parent.mkdir(parents=True, exist_ok=True)
     parts = []
-    for index, offset in enumerate(range(0, len(compressed), _MAX_ARTIFACT_PART_BYTES)):
-        data = compressed[offset : offset + _MAX_ARTIFACT_PART_BYTES]
+    for index, offset in enumerate(range(0, len(compressed), max_part_bytes)):
+        data = compressed[offset : offset + max_part_bytes]
         name = f"{path.stem}.part{index:04d}.gz"
         part = path.parent / name
         _write_bytes_atomically(part, data)
@@ -506,6 +510,10 @@ def write_artifact_atomically(path: Path, artifact: ExperimentArtifact) -> None:
         "canonical_json_bytes": len(payload),
     }
     _write_text_atomically(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    active = {item["name"] for item in parts}
+    for stale in path.parent.glob(f"{path.stem}.part*.gz"):
+        if stale.name not in active:
+            stale.unlink()
 
 
 def _write_bytes_atomically(path: Path, data: bytes) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import (
     ArmEvidence,
@@ -469,3 +470,25 @@ def test_gzip_transport_is_byte_identical_across_output_paths(tmp_path) -> None:
     write_artifact_atomically(right, artifact)
 
     assert left.read_bytes() == right.read_bytes()
+
+
+def test_manifest_shards_are_bounded_deterministic_and_verified(tmp_path) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
+        load_artifact,
+        write_artifact_atomically,
+    )
+
+    artifact = artifact_with_scores()
+    left = tmp_path / "left" / "evidence.manifest.json"
+    right = tmp_path / "right" / "evidence.manifest.json"
+    write_artifact_atomically(left, artifact, max_part_bytes=10)
+    write_artifact_atomically(right, artifact, max_part_bytes=10)
+    manifest = json.loads(left.read_text())
+    assert len(manifest["parts"]) >= 3
+    assert all(item["bytes"] <= 10 for item in manifest["parts"])
+    assert load_artifact(left).to_document() == artifact.to_document()
+    assert left.read_text() == right.read_text()
+    first = left.parent / manifest["parts"][0]["name"]
+    first.write_bytes(first.read_bytes() + b"x")
+    with pytest.raises(ValueError, match="checksum"):
+        load_artifact(left)
