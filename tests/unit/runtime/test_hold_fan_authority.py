@@ -2,6 +2,8 @@
 
 import logging
 
+from common.control_trace import ActuationMode
+
 from tests.fakes.runner import FakeControllerRunner
 
 
@@ -11,7 +13,7 @@ def _grant(hold, *, dc_fan, pwm_control):
 
 
 def test_ownership_is_granted_when_the_command_can_reach_the_fan(hold_cycle):
-    runner = FakeControllerRunner(period=0.01, commands_fan=True)
+    runner = FakeControllerRunner(period=0.01, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
     hold = hold_cycle(runner, controller="mpc")
     _grant(hold, dc_fan=True, pwm_control=True)
     hold.setup()
@@ -19,7 +21,7 @@ def test_ownership_is_granted_when_the_command_can_reach_the_fan(hold_cycle):
 
 
 def test_ownership_is_refused_when_pwm_control_is_off(hold_cycle):
-    runner = FakeControllerRunner(period=0.01, commands_fan=True)
+    runner = FakeControllerRunner(period=0.01, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
     hold = hold_cycle(runner, controller="mpc")
     _grant(hold, dc_fan=True, pwm_control=False)
     hold.setup()
@@ -29,7 +31,7 @@ def test_ownership_is_refused_when_pwm_control_is_off(hold_cycle):
 
 
 def test_refusing_ownership_logs_an_error_naming_the_controller(hold_cycle, caplog):
-    runner = FakeControllerRunner(period=0.01, commands_fan=True)
+    runner = FakeControllerRunner(period=0.01, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
     hold = hold_cycle(runner, controller="mpc")
     _grant(hold, dc_fan=True, pwm_control=False)
     with caplog.at_level(logging.ERROR):

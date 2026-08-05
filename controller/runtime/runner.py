@@ -28,7 +28,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TypeAlias
 
-from common.control_trace import ActuationMode, ResultStaleState
+from common.control_trace import ActuationMode, ControllerType, ResultStaleState
 
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
@@ -164,6 +164,13 @@ def _actuation_mode_for(core) -> ActuationMode:
     return value
 
 
+def _controller_type_for(value: object) -> ControllerType | None:
+    try:
+        return ControllerType(value)
+    except TypeError, ValueError:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class ControllerUpdateResult:
     """One atomically captured controller completion."""
@@ -249,9 +256,9 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
     raw = core.update(temp)
     solve_end = monotonic_clock()
     cycle_ratio, fan = normalize_controller_output(raw)
-    status = core.get_status()
-    diagnostics = core.trace_diagnostics()
-    allocation = core.trace_allocation()
+    status = getattr(core, "get_status", lambda: None)()
+    diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
+    allocation = getattr(core, "trace_allocation", lambda: None)()
     return ControllerUpdateResult(
         cycle_ratio=cycle_ratio,
         fan=fan,
@@ -285,6 +292,10 @@ class ControllerRunner(ABC):
     @abstractmethod
     def actuation_mode(self) -> ActuationMode: ...
     @abstractmethod
+    def controller_type(self) -> ControllerType | None: ...
+    @abstractmethod
+    def configuration_revision(self) -> int: ...
+    @abstractmethod
     def runs_async(self) -> bool: ...
     @abstractmethod
     def set_output(self, applied): ...
@@ -305,6 +316,7 @@ class SyncControllerRunner(ControllerRunner):
         self,
         core,
         *,
+        controller_type: ControllerType | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
@@ -316,6 +328,8 @@ class SyncControllerRunner(ControllerRunner):
         self._monotonic_clock = monotonic_clock
         self._wall_clock = wall_clock
         self._warning_callback = warning_callback
+        self._controller_type = controller_type
+        self._configuration_revision = 0
         period = getattr(core, "get_control_period", lambda: None)()
         self._quality = _ResultQualityTracker(_control_period_seconds(period))
 
@@ -347,6 +361,8 @@ class SyncControllerRunner(ControllerRunner):
         core, status = _build_core(settings, control, logger=logger)
         if status == "Active":
             self._core = core
+            self._controller_type = _controller_type_for(_selected_controller(settings))
+            self._configuration_revision += 1
             self._quality.control_period = _control_period_seconds(core.get_control_period())
         else:
             report_reconfigure_failure(settings, logger=logger)
@@ -363,6 +379,12 @@ class SyncControllerRunner(ControllerRunner):
 
     def actuation_mode(self) -> ActuationMode:
         return _actuation_mode_for(self._core)
+
+    def controller_type(self) -> ControllerType | None:
+        return self._controller_type
+
+    def configuration_revision(self) -> int:
+        return self._configuration_revision
 
     def runs_async(self) -> bool:
         return False
@@ -440,6 +462,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self,
         core,
         *,
+        controller_type: ControllerType | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
@@ -463,6 +486,8 @@ class ThreadedControllerRunner(ControllerRunner):
         self._revision = 0
         self._pending_target = _UNSET
         self._pending_core = None
+        self._pending_controller_type = None
+        self._configuration_revision = 0
         self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
         self._pending_dropped = 0
         self._pending_restore = None
@@ -471,6 +496,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._control_period = core.get_control_period()
         self._commands_fan = core.commands_fan()
         self._actuation_mode = _actuation_mode_for(core)
+        self._controller_type = controller_type
         self._quality = _ResultQualityTracker(_control_period_seconds(self._control_period))
         self._monotonic_clock = monotonic_clock
         self._wall_clock = wall_clock
@@ -488,6 +514,8 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_target = _UNSET
                 new_core = self._pending_core
                 self._pending_core = None
+                new_controller_type = self._pending_controller_type
+                self._pending_controller_type = None
                 pending_outputs = list(self._pending_outputs)
                 self._pending_outputs.clear()
                 restore = self._pending_restore
@@ -501,7 +529,9 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._control_period = new_period
                     self._commands_fan = new_commands_fan
                     self._actuation_mode = new_actuation_mode
+                    self._controller_type = new_controller_type
                     self._quality.control_period = _control_period_seconds(new_period)
+                    self._configuration_revision += 1
             if restore is not None:
                 self._core.restore_model(restore)
             if target is not _UNSET:
@@ -550,6 +580,7 @@ class ThreadedControllerRunner(ControllerRunner):
         if status == "Active":
             with self._lock:
                 self._pending_core = core
+                self._pending_controller_type = _controller_type_for(_selected_controller(settings))
         else:
             report_reconfigure_failure(settings, logger=logger)
         return status
@@ -566,6 +597,14 @@ class ThreadedControllerRunner(ControllerRunner):
     def actuation_mode(self) -> ActuationMode:
         with self._lock:
             return self._actuation_mode
+
+    def controller_type(self) -> ControllerType | None:
+        with self._lock:
+            return self._controller_type
+
+    def configuration_revision(self) -> int:
+        with self._lock:
+            return self._configuration_revision
 
     def runs_async(self) -> bool:
         return True
@@ -734,12 +773,13 @@ def _build_core(settings, control, logger=None, controller_type=None):
     return core, "Active"
 
 
-def _wrap(core, status):
+def _wrap(core, status, controller_type):
     if core is None:
         return None, status
+    actual_type = _controller_type_for(controller_type)
     if core.wants_async():
-        return ThreadedControllerRunner(core), status
-    return SyncControllerRunner(core), status
+        return ThreadedControllerRunner(core, controller_type=actual_type), status
+    return SyncControllerRunner(core, controller_type=actual_type), status
 
 
 def build_runner(settings, control, logger=None):
@@ -760,7 +800,7 @@ def build_runner(settings, control, logger=None):
     """
     core, status = _build_core(settings, control, logger=logger)
     if core is not None:
-        return _wrap(core, status)
+        return _wrap(core, status, _selected_controller(settings))
 
     selected = _selected_controller(settings)
     if selected == FALLBACK_CONTROLLER:
@@ -788,7 +828,7 @@ def build_runner(settings, control, logger=None):
         f"Your controller selection has not been changed.",
         logger=logger,
     )
-    return _wrap(core, status)
+    return _wrap(core, status, FALLBACK_CONTROLLER)
 
 
 def report_reconfigure_failure(settings, logger=None):

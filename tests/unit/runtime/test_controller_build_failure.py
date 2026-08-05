@@ -27,6 +27,7 @@ import pytest
 import tests.characterization.harness as harness  # noqa: F401  binds control.eventLogger
 from common.common import ErrorKind
 from common.datastore_accessors import read_errors
+from common.control_trace import ControllerType
 from controller.runtime.runner import (
     SyncControllerRunner,
     _build_core,
@@ -104,6 +105,7 @@ def test_build_runner_falls_back_to_pid_and_keeps_controlling(no_do_mpc, ds):
     assert runner is not None
     assert status == "Active"
     assert isinstance(runner, SyncControllerRunner)  # pid is synchronous
+    assert runner.controller_type() is ControllerType.PID
     # And it genuinely works: a temperature in gives a cycle ratio out. (The raw
     # value is unclamped -- HoldMode applies cycle_data's u_min/u_max -- so this
     # pins that a real number comes back, not the band.)
@@ -142,6 +144,7 @@ def test_a_healthy_mpc_selection_is_not_substituted(ds):
     try:
         assert status == "Active"
         assert runner.wants_async() is True
+        assert runner.controller_type() is ControllerType.MPC
     finally:
         if runner is not None:
             runner.stop()
@@ -178,13 +181,14 @@ def test_reconfigure_to_a_broken_controller_keeps_the_previous_core(no_do_mpc, d
             return False
 
     previous = _Core()
-    runner = SyncControllerRunner(previous)
+    runner = SyncControllerRunner(previous, controller_type=ControllerType.PID)
     logger = _Logger()
 
     status = runner.reconfigure(_mpc_settings(), _control(), logger=logger)
 
     assert status == "Inactive"
     assert runner._core is previous  # still the controller that was running
+    assert runner.controller_type() is ControllerType.PID
     assert runner.latest_from(200.0).cycle_ratio == 0.42  # and still controlling
     banner = "\n".join(read_errors(ErrorKind.CONTROL))
     assert "Could not switch to the [mpc] controller" in banner

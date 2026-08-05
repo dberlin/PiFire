@@ -313,6 +313,8 @@ def _mpc_framed_records():
                 "result_revision": 1,
                 "pulse_slot_seconds": 2.0,
                 "frame_seconds": 20.0,
+                "frame_start_ms": 2_000,
+                "frame_end_ms": 22_000,
                 "requested_combustion_load": 0.5,
                 "requested_auger_duty": allocation.requested_auger_duty,
                 "credit_before_seconds": 0.0,
@@ -336,6 +338,12 @@ def _mpc_framed_records():
         _record(2_000, ControllerType.MPC, TraceEventKind.CONTROL_UPDATE, _mpc_update(mode=ActuationMode.FRAMED_PULSE)),
         _record(2_000, ControllerType.MPC, TraceEventKind.ALLOCATION, allocation),
         _record(22_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, frame),
+        _record(
+            22_000,
+            ControllerType.MPC,
+            TraceEventKind.APPLIED_OUTPUT,
+            replace(_applied(), interval_end_ms=22_000),
+        ),
     ]
 
 
@@ -348,6 +356,51 @@ def test_validate_records_accepts_pristine_typed_sessions(records):
     assert report.session_id == _SESSION_ID
     assert report.controller is records[0].controller
     assert report.issues == ()
+
+
+def test_replay_accepts_exactly_one_same_revision_mpc_stale_observation():
+    records = _mpc_fixed_records()
+    fresh = records[1].payload
+    stale = replace(
+        fresh,
+        result_age_ms=10_000,
+        stale=True,
+        stale_state=ResultStaleState.STALE,
+    )
+    stale_record = _record(3_000, ControllerType.MPC, TraceEventKind.CONTROL_UPDATE, stale)
+    observed = records[:3] + [stale_record] + records[3:]
+
+    assert validate_records(observed).valid
+
+    duplicate_fresh = _record(3_000, ControllerType.MPC, TraceEventKind.CONTROL_UPDATE, fresh)
+    repeated_stale = _record(3_001, ControllerType.MPC, TraceEventKind.CONTROL_UPDATE, stale)
+    changed_stale = _record(
+        3_001,
+        ControllerType.MPC,
+        TraceEventKind.CONTROL_UPDATE,
+        replace(stale, bounded_firing_load=0.6),
+    )
+    for invalid in (duplicate_fresh, repeated_stale, changed_stale):
+        report = validate_records(observed + [invalid])
+        assert ReplayIssueCode.NON_MONOTONE_REVISION in [issue.code for issue in report.issues]
+
+
+def test_validate_records_reconciles_framed_delivery_across_feedback_intervals_and_defers_open_tail():
+    records = _mpc_framed_records()
+    first = replace(_applied(), interval_start_ms=2_000, interval_end_ms=12_000)
+    second = replace(_applied(), interval_start_ms=12_000, interval_end_ms=22_000)
+    open_tail = replace(_applied(), interval_start_ms=22_000, interval_end_ms=24_000, realized_auger_duty=0.0)
+    records = (
+        records[:3]
+        + [_record(12_000, ControllerType.MPC, TraceEventKind.APPLIED_OUTPUT, first)]
+        + [records[3]]
+        + [
+            _record(22_000, ControllerType.MPC, TraceEventKind.APPLIED_OUTPUT, second),
+            _record(24_000, ControllerType.MPC, TraceEventKind.APPLIED_OUTPUT, open_tail),
+        ]
+    )
+
+    assert validate_records(records).valid
 
 
 def test_validate_records_accepts_queued_earlier_model_event_after_session():
@@ -526,8 +579,25 @@ def test_validate_records_accepts_recorded_terminal_safety_inhibition(event):
 
 def test_validate_records_requires_scheduler_reset_event_for_framed_reset():
     records = _mpc_framed_records()
-    reset_frame = replace(records[-1].payload, reset_reason="scheduler reset")
-    without_event = records[:-1] + [_record(22_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, reset_frame)]
+    reset_frame = replace(
+        records[3].payload,
+        frame_end_ms=3_000,
+        delivered_on_seconds=0.0,
+        transition_count=0,
+        actual_start_active=False,
+        actual_end_active=False,
+        reset_reason="scheduler reset",
+    )
+    coverage = _record(
+        3_000,
+        ControllerType.MPC,
+        TraceEventKind.APPLIED_OUTPUT,
+        replace(_applied(), interval_end_ms=3_000, realized_auger_duty=0.0),
+    )
+    without_event = records[:3] + [
+        _record(3_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, reset_frame),
+        coverage,
+    ]
     assert ReplayIssueCode.UNEXPLAINED_INHIBIT in [issue.code for issue in validate_records(without_event).issues]
     reset = _record(
         3_000,
@@ -536,7 +606,7 @@ def test_validate_records_requires_scheduler_reset_event_for_framed_reset():
         SafetyEventPayload(SafetyEventType.SCHEDULER_RESET, InhibitReason.SAFETY, 1, "scheduler reset"),
     )
     assert validate_records(
-        records[:-1] + [reset, _record(22_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, reset_frame)]
+        records[:3] + [reset, _record(3_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, reset_frame), coverage]
     ).valid
 
 
@@ -702,15 +772,23 @@ def test_validate_records_reconciles_only_same_revision_fixed_and_framed_deliver
     assert ReplayIssueCode.APPLIED_OUTPUT_MISMATCH in [issue.code for issue in validate_records(cross_revision).issues]
 
     framed = _mpc_framed_records()
-    applied = _record(
+    wrong_coverage = _record(
         22_000,
         ControllerType.MPC,
         TraceEventKind.APPLIED_OUTPUT,
-        replace(_applied(), interval_start_ms=2_000, interval_end_ms=22_000, realized_auger_duty=0.1),
+        replace(_applied(), interval_end_ms=22_000, realized_auger_duty=0.1),
     )
     assert ReplayIssueCode.APPLIED_OUTPUT_MISMATCH in [
-        issue.code for issue in validate_records(framed + [applied]).issues
+        issue.code for issue in validate_records(framed[:4] + [wrong_coverage]).issues
     ]
+
+    open_tail = _record(
+        24_000,
+        ControllerType.MPC,
+        TraceEventKind.APPLIED_OUTPUT,
+        replace(_applied(), interval_start_ms=22_000, interval_end_ms=24_000, realized_auger_duty=0.0),
+    )
+    assert validate_records(framed + [open_tail]).valid
 
 
 def test_validate_records_requires_safety_evidence_for_update_fields_and_matching_scheduler_reset():
@@ -725,7 +803,22 @@ def test_validate_records_requires_safety_evidence_for_update_fields_and_matchin
         issue.code for issue in validate_records([records[0], manual_update] + records[2:]).issues
     ]
 
-    reset = replace(_mpc_framed_records()[-1].payload, reset_reason="scheduler reset")
+    frame = _mpc_framed_records()[3].payload
+    reset = replace(
+        frame,
+        frame_end_ms=3_000,
+        delivered_on_seconds=0.0,
+        transition_count=0,
+        actual_start_active=False,
+        actual_end_active=False,
+        reset_reason="scheduler reset",
+    )
+    coverage = _record(
+        3_000,
+        ControllerType.MPC,
+        TraceEventKind.APPLIED_OUTPUT,
+        replace(_applied(), interval_end_ms=3_000, realized_auger_duty=0.0),
+    )
     framed = _mpc_framed_records()
     wrong_reset = _record(
         3_000,
@@ -736,7 +829,8 @@ def test_validate_records_requires_safety_evidence_for_update_fields_and_matchin
     assert ReplayIssueCode.UNEXPLAINED_INHIBIT in [
         issue.code
         for issue in validate_records(
-            framed[:-1] + [wrong_reset, _record(22_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, reset)]
+            framed[:3]
+            + [wrong_reset, _record(3_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, reset), coverage]
         ).issues
     ]
 
@@ -819,24 +913,28 @@ def test_validate_records_allows_only_seed_applied_output_without_an_update():
     ]
 
 
-@pytest.mark.parametrize(
-    "records",
-    [
-        _mpc_fixed_records()[:3] + _mpc_fixed_records()[4:],
-        _mpc_framed_records()[:3]
-        + [
-            _record(
-                22_000,
-                ControllerType.MPC,
-                TraceEventKind.APPLIED_OUTPUT,
-                replace(_applied(), interval_end_ms=22_000),
-            )
-        ],
-    ],
-)
-def test_validate_records_requires_a_same_revision_frame_for_eligible_complete_output(records):
+def test_validate_records_requires_a_same_revision_frame_for_fixed_cycle_complete_output():
+    records = _mpc_fixed_records()[:3] + _mpc_fixed_records()[4:]
+
     report = validate_records(records)
+
     assert ReplayIssueCode.APPLIED_OUTPUT_MISMATCH in [issue.code for issue in report.issues]
+
+
+def test_validate_records_allows_framed_feedback_tail_before_frame_completion():
+    records = _mpc_framed_records()[:3] + [
+        _record(
+            22_000,
+            ControllerType.MPC,
+            TraceEventKind.APPLIED_OUTPUT,
+            replace(_applied(), interval_end_ms=22_000),
+        )
+    ]
+
+    report = validate_records(records)
+
+    assert report.valid
+    assert ReplayIssueCode.APPLIED_OUTPUT_MISMATCH not in [issue.code for issue in report.issues]
 
 
 @pytest.mark.parametrize(

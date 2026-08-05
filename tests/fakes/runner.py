@@ -1,8 +1,17 @@
+from common.control_trace import ActuationMode, ControllerType
+
 from typing import Any
 
 
 class FakeControllerRunner:
-    def __init__(self, period=None, commands_fan=False, wants_async=False):
+    def __init__(
+        self,
+        period=None,
+        commands_fan=False,
+        wants_async=False,
+        actuation_mode=ActuationMode.FIXED_CYCLE,
+        controller_type: ControllerType | None = None,
+    ):
         self._script = []
         self._i = 0
         self.target = None
@@ -10,6 +19,9 @@ class FakeControllerRunner:
         self.submitted_temps = []
         self._commands_fan = commands_fan
         self._wants_async = wants_async
+        self._actuation_mode = actuation_mode
+        self._controller_type = controller_type
+        self._configuration_revision = 0
         self.applied = []
         self.restored = []
         self.snapshot: dict[str, Any] | None = None
@@ -38,6 +50,7 @@ class FakeControllerRunner:
         self.submitted_temps.append(temp)
 
     def reconfigure(self, settings, control, logger=None):
+        self._configuration_revision += 1
         return "Active"
 
     def control_period(self):
@@ -48,6 +61,15 @@ class FakeControllerRunner:
 
     def wants_async(self):
         return self._wants_async
+
+    def actuation_mode(self):
+        return self._actuation_mode
+
+    def controller_type(self):
+        return self._controller_type
+
+    def configuration_revision(self):
+        return self._configuration_revision
 
     def runs_async(self):
         return self._wants_async

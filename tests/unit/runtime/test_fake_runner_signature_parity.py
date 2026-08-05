@@ -28,3 +28,10 @@ def test_fake_runner_implements_every_method_the_interface_requires():
         fake_method = getattr(FakeControllerRunner, name, None)
         assert fake_method is not None, name
         assert _params(fake_method) == _params(getattr(ControllerRunner, name)), name
+
+
+def test_fake_runner_configuration_revision_advances_only_on_successful_reconfigure():
+    runner = FakeControllerRunner()
+    assert runner.configuration_revision() == 0
+    assert runner.reconfigure({}, {}) == "Active"
+    assert runner.configuration_revision() == 1

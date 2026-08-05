@@ -41,6 +41,20 @@ class ControllerState:
     trace_mpc_stale: bool = False
     trace_prior_output_source: object | None = None
     trace_prior_combustion_load: float | None = None
+    pulse_result_revision: int = -1
+    pulse_frame_result_revision: int = 0
+    pulse_requested_duty: float = 0.0
+    pulse_combustion_load: float | None = None
+    pulse_requested_fan_duty: float | None = None
+    pulse_maximum_duty: float = 1.0
+    pulse_stale_command: bool = False
+    pulse_frame_combustion_load: float | None = None
+    pulse_frame_requested_fan_duty: float | None = None
+    pulse_frame_applied_fan_duty: float | None = None
+    pulse_frame_stale_command: bool = False
+    pulse_feedback_start_s: float | None = None
+    pulse_feedback_delivered_on_s: float = 0.0
+    pulse_metrics_delivered_on_s: float = 0.0
 
 
 @dataclass

@@ -361,6 +361,8 @@ class FramedPulseFramePayload:
     result_revision: NonNegativeInt
     pulse_slot_seconds: PositiveFloat
     frame_seconds: PositiveFloat
+    frame_start_ms: NonNegativeInt
+    frame_end_ms: NonNegativeInt
     requested_combustion_load: FiniteFloat
     requested_auger_duty: FiniteFloat
     credit_before_seconds: FiniteFloat
@@ -383,15 +385,20 @@ class FramedPulseFramePayload:
         slots = self.frame_seconds / self.pulse_slot_seconds
         if not math.isclose(slots, round(slots), rel_tol=0, abs_tol=1e-9):
             raise ValueError("frame_seconds must be divisible by pulse_slot_seconds")
+        if self.frame_start_ms >= self.frame_end_ms:
+            raise ValueError("framed-pulse actual duration must be positive")
+        actual_duration_seconds = (self.frame_end_ms - self.frame_start_ms) / 1000
+        if actual_duration_seconds > self.frame_seconds:
+            raise ValueError("framed-pulse actual duration must not exceed frame_seconds")
         if self.scheduled_on_seconds > self.frame_seconds:
             raise ValueError("scheduled_on_seconds must not exceed frame_seconds")
-        if self.delivered_on_seconds > self.frame_seconds:
-            raise ValueError("delivered_on_seconds must not exceed frame_seconds")
+        if self.delivered_on_seconds > actual_duration_seconds:
+            raise ValueError("delivered_on_seconds must not exceed actual frame duration")
         if self.actual_end_active is not (self.actual_start_active ^ bool(self.transition_count % 2)):
             raise ValueError("framed-pulse transition parity must match start and end state")
         if self.transition_count == 0 and not math.isclose(
             self.delivered_on_seconds,
-            self.frame_seconds if self.actual_start_active else 0.0,
+            actual_duration_seconds if self.actual_start_active else 0.0,
             rel_tol=0,
             abs_tol=1e-9,
         ):

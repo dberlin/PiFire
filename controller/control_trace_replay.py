@@ -7,7 +7,7 @@ mutates runtime state, or substitutes today's configuration for a recording.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from os import PathLike
 import sqlite3
@@ -24,6 +24,7 @@ from common.control_trace import (
     FramedPulseFramePayload,
     InhibitReason,
     MpcUpdatePayload,
+    ResultStaleState,
     PidSpUpdatePayload,
     PidUpdatePayload,
     RecorderGapPayload,
@@ -175,7 +176,7 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
     updates: dict[int, tuple[int, UpdatePayload]] = {}
     allocations: dict[int, tuple[int, AllocationPayload]] = {}
     fixed_frames: list[tuple[int, FixedCycleFramePayload]] = []
-    framed_frames: list[tuple[int, int, FramedPulseFramePayload]] = []
+    framed_frames: list[tuple[int, FramedPulseFramePayload]] = []
     applied_outputs: list[tuple[int, AppliedOutputPayload]] = []
     safety_events: list[tuple[int, SafetyEventPayload]] = []
     scheduler_resets: dict[int, int] = {}
@@ -203,10 +204,14 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
         elif isinstance(payload, (PidUpdatePayload, PidSpUpdatePayload, MpcUpdatePayload)):
             if payload.result_revision > 0:
                 seed_eligible = False
-            if payload.result_revision <= last_revision:
+            prior_update = updates.get(payload.result_revision)
+            if payload.result_revision < last_revision or (
+                payload.result_revision == last_revision
+                and not _is_stale_observation(prior_update[1] if prior_update is not None else None, payload)
+            ):
                 add(ReplayIssueCode.NON_MONOTONE_REVISION, "accepted result revisions must strictly increase", index)
             else:
-                last_revision = payload.result_revision
+                last_revision = max(last_revision, payload.result_revision)
                 updates[payload.result_revision] = (index, payload)
                 _validate_inhibit(payload.inhibit_reason, lid_active, manual_active, safety_active, add, index)
                 _validate_output_source(payload.output_source, lid_active, manual_active, add, index)
@@ -232,7 +237,7 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
         elif isinstance(payload, FramedPulseFramePayload):
             if payload.result_revision > 0:
                 seed_eligible = False
-            framed_frames.append((index, record.ts_ms, payload))
+            framed_frames.append((index, payload))
             _validate_framed_frame(
                 payload,
                 session,
@@ -264,6 +269,32 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
             add(ReplayIssueCode.MISSING_ALLOCATION, "accepted MPC update has no joined allocation", index)
     _validate_applied_outputs(applied_outputs, fixed_frames, framed_frames, updates, ordered, safety_events, add)
     return ReplayReport(session_record.session_id, session.controller, tuple(issues))
+
+
+def _is_stale_observation(previous: object, current: object) -> bool:
+    """The sole legal equal-revision update observes a result becoming stale."""
+    if not isinstance(previous, MpcUpdatePayload) or not isinstance(current, MpcUpdatePayload):
+        return False
+    if (
+        previous.result_revision != current.result_revision
+        or previous.result_age_ms >= current.result_age_ms
+        or previous.stale
+        or previous.stale_state is not ResultStaleState.FRESH
+        or current.recovered
+        or not current.stale
+        or current.stale_state is not ResultStaleState.STALE
+        or current.result_age_ms < 2_000 * current.control_period_seconds
+    ):
+        return False
+    return (
+        replace(
+            current,
+            result_age_ms=previous.result_age_ms,
+            stale=False,
+            stale_state=ResultStaleState.FRESH,
+        )
+        == previous
+    )
 
 
 def _advance_safety(
@@ -386,7 +417,7 @@ def _validate_framed_frame(
         frame_start.actual_start_active,
         payload.transition_count,
         payload.actual_end_active,
-        payload.frame_seconds,
+        (payload.frame_end_ms - payload.frame_start_ms) / 1000,
         add,
         index,
     )
@@ -509,7 +540,7 @@ def _validate_allocations(
 def _validate_applied_outputs(
     applied: list[tuple[int, AppliedOutputPayload]],
     fixed_frames: list[tuple[int, FixedCycleFramePayload]],
-    framed_frames: list[tuple[int, int, FramedPulseFramePayload]],
+    framed_frames: list[tuple[int, FramedPulseFramePayload]],
     updates: dict[int, tuple[int, UpdatePayload]],
     ordered: tuple[ControlTraceRecord, ...],
     safety_events: list[tuple[int, SafetyEventPayload]],
@@ -533,7 +564,10 @@ def _validate_applied_outputs(
                 add(ReplayIssueCode.INVALID_PARTIAL_OUTPUT, "partial output must omit realized combustion load", index)
             if not _replacement_partial(index, payload, ordered):
                 terminal_partials.append(index)
-        _reconcile_applied_output(payload, index, fixed_frames, framed_frames, add)
+        update = updates.get(payload.result_revision)
+        if update is not None and update[1].actuation_mode is ActuationMode.FIXED_CYCLE:
+            _reconcile_fixed_applied_output(payload, index, fixed_frames, add)
+    _reconcile_framed_applied_outputs(applied, framed_frames, add)
     if len(terminal_partials) > 1:
         for index in terminal_partials[1:]:
             add(ReplayIssueCode.INVALID_PARTIAL_OUTPUT, "only one terminal remainder is allowed", index)
@@ -560,6 +594,14 @@ def _replacement_partial(index: int, payload: AppliedOutputPayload, ordered: tup
             and isinstance(event.payload, SafetyEventPayload)
             and event.payload.event is SafetyEventType.MANUAL_TAKEOVER
         )
+    manual_release = False
+    if payload.output_source is OutputSource.MANUAL_OVERRIDE and index:
+        event = ordered[index - 1]
+        manual_release = (
+            event.ts_ms == payload.interval_end_ms
+            and isinstance(event.payload, SafetyEventPayload)
+            and event.payload.event is SafetyEventType.MANUAL_RELEASE
+        )
     lid_replacement = False
     if payload.output_source in (OutputSource.CONTROLLER, OutputSource.LID_OPEN) and index:
         event = ordered[index - 1]
@@ -568,7 +610,7 @@ def _replacement_partial(index: int, payload: AppliedOutputPayload, ordered: tup
             and isinstance(event.payload, SafetyEventPayload)
             and event.payload.event is SafetyEventType.LID_DETECTED
         )
-    return manual_replacement or lid_replacement
+    return manual_replacement or manual_release or lid_replacement
 
 
 def _validate_applied_source(
@@ -599,11 +641,10 @@ def _validate_applied_source(
         )
 
 
-def _reconcile_applied_output(
+def _reconcile_fixed_applied_output(
     payload: AppliedOutputPayload,
     index: int,
     fixed_frames: list[tuple[int, FixedCycleFramePayload]],
-    framed_frames: list[tuple[int, int, FramedPulseFramePayload]],
     add: IssueAdder,
 ) -> None:
     if (
@@ -612,31 +653,69 @@ def _reconcile_applied_output(
         or payload.output_source not in (OutputSource.CONTROLLER, OutputSource.FAN_ASSIST)
     ):
         return
-    fixed_overlap = [
+    matching_fixed = [
         frame
         for _, frame in fixed_frames
-        if payload.interval_start_ms <= frame.cycle_start_ms and frame.cycle_end_ms <= payload.interval_end_ms
+        if (
+            payload.interval_start_ms <= frame.cycle_start_ms
+            and frame.cycle_end_ms <= payload.interval_end_ms
+            and frame.result_revision == payload.result_revision
+        )
     ]
-    framed_overlap = [
-        frame
-        for _, end_ms, frame in framed_frames
-        if payload.interval_start_ms <= end_ms - round(frame.frame_seconds * 1000) and end_ms <= payload.interval_end_ms
-    ]
-    matching_fixed = [frame for frame in fixed_overlap if frame.result_revision == payload.result_revision]
-    matching_framed = [frame for frame in framed_overlap if frame.result_revision == payload.result_revision]
-    if not (matching_fixed or matching_framed):
+    if not matching_fixed:
         add(ReplayIssueCode.APPLIED_OUTPUT_MISMATCH, "applied output lacks a contained same-revision frame", index)
         return
     duration = sum((frame.cycle_end_ms - frame.cycle_start_ms) / 1000 for frame in matching_fixed)
     on_time = sum(frame.actual_on_seconds for frame in matching_fixed)
-    duration += sum(frame.frame_seconds for frame in matching_framed)
-    on_time += sum(frame.delivered_on_seconds for frame in matching_framed)
     if duration and not _duty_close(payload.realized_auger_duty, on_time / duration, duration):
         add(
             ReplayIssueCode.APPLIED_OUTPUT_MISMATCH,
             "applied auger duty disagrees with same-revision delivered on-time",
             index,
         )
+
+
+def _reconcile_framed_applied_outputs(
+    applied: list[tuple[int, AppliedOutputPayload]],
+    framed_frames: list[tuple[int, FramedPulseFramePayload]],
+    add: IssueAdder,
+) -> None:
+    for frame_index, frame in framed_frames:
+        cursor_ms = frame.frame_start_ms
+        delivered_on_seconds = 0.0
+        incomplete = False
+        for _, payload in applied:
+            if (
+                payload.result_revision != frame.result_revision
+                or payload.output_source not in (OutputSource.CONTROLLER, OutputSource.FAN_ASSIST)
+                or payload.interval_end_ms <= cursor_ms
+                or payload.interval_start_ms >= frame.frame_end_ms
+            ):
+                continue
+            if payload.interval_start_ms > cursor_ms:
+                break
+            overlap_end_ms = min(payload.interval_end_ms, frame.frame_end_ms)
+            overlap_seconds = (overlap_end_ms - cursor_ms) / 1000
+            delivered_on_seconds += payload.realized_auger_duty * overlap_seconds
+            incomplete = incomplete or not payload.sample_complete
+            cursor_ms = overlap_end_ms
+            if cursor_ms == frame.frame_end_ms:
+                break
+        if incomplete:
+            continue
+        if cursor_ms != frame.frame_end_ms:
+            add(
+                ReplayIssueCode.APPLIED_OUTPUT_MISMATCH,
+                "framed pulse lacks contiguous same-revision applied-output coverage",
+                frame_index,
+            )
+            continue
+        if not _close(delivered_on_seconds, frame.delivered_on_seconds):
+            add(
+                ReplayIssueCode.APPLIED_OUTPUT_MISMATCH,
+                "framed pulse applied duty disagrees with delivered on-time",
+                frame_index,
+            )
 
 
 def _close(left: float, right: float) -> bool:

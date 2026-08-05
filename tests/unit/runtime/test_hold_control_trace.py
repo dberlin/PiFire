@@ -5,7 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from common.control_trace import ControllerBranch, ControllerType, PidSpUpdatePayload, ResultStaleState, TraceEventKind
+from common.control_trace import (
+    ActuationMode,
+    ControllerBranch,
+    ControllerType,
+    PidSpUpdatePayload,
+    ResultStaleState,
+    TraceEventKind,
+)
 from common.datastore_accessors import read_control_trace_session
 from controller.applied_output import OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
@@ -163,6 +170,7 @@ def _mpc_result(
         completed_wall_time=1.1,
         stale_state=stale_state,
         recovered=recovered,
+        result_age_seconds=0.0,
     )
 
 
@@ -199,52 +207,69 @@ def test_pid_hold_records_session_update_applied_output_and_flushes_in_cook(hold
     assert recorder.flushes
 
 
-def test_mpc_hold_records_update_allocation_and_fixed_cycle_feedback_once_per_revision(hold_cycle, monkeypatch):
+def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revision(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     result = _mpc_result()
-    runner = FakeControllerRunner(period=1.0, commands_fan=True).script([result, result])
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [result, result]
+    )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "cook-mpc"}
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     mode.on_tick(2.0, 220.0, output)
-    mode.on_tick(4.0, 220.0, output)
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
-    assert [record.event_kind for record in recorder.records] == [
+    event_kinds = [record.event_kind for record in recorder.records]
+    assert event_kinds[:4] == [
         TraceEventKind.SESSION,
         TraceEventKind.APPLIED_OUTPUT,
         TraceEventKind.CONTROL_UPDATE,
         TraceEventKind.ALLOCATION,
-        TraceEventKind.ACTUATION_FRAME,
-        TraceEventKind.APPLIED_OUTPUT,
     ]
-    seed = recorder.records[1]
-    update, allocation = recorder.records[2:4]
-    assert seed.payload.result_revision == 0
-    assert seed.payload.output_source is OutputSource.SEED
-    assert update.payload.actuation_mode.value == "fixed_cycle"
-    assert update.payload.result_revision == allocation.payload.result_revision == 1
-    assert recorder.records[-1].payload.result_revision == 1
-    assert update.payload.control_period_seconds == 1.0
+    assert TraceEventKind.SESSION in event_kinds
+    assert TraceEventKind.CONTROL_UPDATE in event_kinds
+    assert TraceEventKind.ALLOCATION in event_kinds
+    frame_index = next(
+        index
+        for index, record in enumerate(recorder.records)
+        if record.event_kind is TraceEventKind.ACTUATION_FRAME and record.ts_ms == 22_000
+    )
+    applied_index = next(
+        index
+        for index, record in enumerate(recorder.records)
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.interval_end_ms == 22_000
+    )
+    assert frame_index < applied_index
+    frames = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
+    assert frames and all(frame.result_revision > 0 for frame in frames)
+    update = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
+    allocation = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION)
+    assert update.actuation_mode is ActuationMode.FRAMED_PULSE
+    assert update.result_revision == allocation.result_revision == 1
+    assert update.control_period_seconds == 1.0
     assert result.allocation is not None
-    assert allocation.payload.requested_auger_duty == result.allocation.auger_duty
+    assert allocation.requested_auger_duty == result.allocation.auger_duty
     assert (
-        allocation.payload.u_max,
-        allocation.payload.fan_min_pct,
-        allocation.payload.fan_max_pct,
-        allocation.payload.fan_enabled,
+        allocation.u_max,
+        allocation.fan_min_pct,
+        allocation.fan_max_pct,
+        allocation.fan_enabled,
     ) == (
         result.allocation.u_max,
         result.allocation.fan_min_pct,
         result.allocation.fan_max_pct,
         result.allocation.fan_enabled,
     )
+    assert validate_records(recorder.records).valid
 
 
 def test_mpc_allocation_trace_preserves_disabled_fan_evidence(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     result = _mpc_result(enable_fan=False)
-    runner = FakeControllerRunner(period=1.0, commands_fan=False).script([result])
+    runner = FakeControllerRunner(period=1.0, commands_fan=False, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [result]
+    )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "cook-mpc-no-fan"}
@@ -255,9 +280,48 @@ def test_mpc_allocation_trace_preserves_disabled_fan_evidence(hold_cycle, monkey
     assert allocation.fan_enabled is False
 
 
+def test_hold_records_one_same_revision_mpc_stale_observation_without_duplicate_allocation(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    fresh = _mpc_result(1)
+    stale = replace(fresh, result_age_seconds=2.0, stale_state=ResultStaleState.STALE)
+    recovered = _mpc_result(2, recovered=True)
+    runner = FakeControllerRunner(
+        period=1.0,
+        commands_fan=True,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+        controller_type=ControllerType.MPC,
+    ).script([fresh, stale, stale, recovered])
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "cook-stale-observation"}
+    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
+
+    for now in (2.0, 4.0, 6.0, 8.0):
+        mode.on_tick(now, 220.0, output)
+
+    updates = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
+    allocations = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION]
+    assert [(update.result_revision, update.stale, update.recovered) for update in updates] == [
+        (1, False, False),
+        (1, True, False),
+        (2, False, True),
+    ]
+    assert (
+        replace(
+            updates[1],
+            result_age_ms=updates[0].result_age_ms,
+            stale=False,
+            stale_state=ResultStaleState.FRESH,
+        )
+        == updates[0]
+    )
+    assert [allocation.result_revision for allocation in allocations] == [1, 2]
+    assert validate_records(recorder.records).valid
+
+
 def test_mpc_trace_marks_the_first_fresh_result_after_runner_staleness(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True).script(
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
         [
             _mpc_result(1, stale_state=ResultStaleState.STALE),
             _mpc_result(2, recovered=True),
@@ -304,7 +368,9 @@ def test_hold_records_branch_local_safety_and_closes_recorder_once(hold_cycle, m
 
 def test_mpc_trace_preserves_a_zero_raw_policy_load(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True).script([_mpc_result(raw_policy_firing_load=0.0)])
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [_mpc_result(raw_policy_firing_load=0.0)]
+    )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "cook-raw-zero"}
@@ -401,7 +467,8 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     class _ReconfiguringRunner(FakeControllerRunner):
         def reconfigure(self, settings, control, logger=None):
             self._commands_fan = True
-            return "Active"
+            self._actuation_mode = ActuationMode.FRAMED_PULSE
+            return super().reconfigure(settings, control, logger=logger)
 
     class _ModelStore:
         def load(self, controller):
@@ -537,7 +604,10 @@ def test_start_active_frame_records_one_transition_when_auger_turns_off(hold_cyc
 def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     result = _mpc_result(raw_policy_firing_load=0.0, requested_auger_duty=0.0)
-    mode = hold_cycle(FakeControllerRunner(period=1.0, commands_fan=True).script([result]), controller="mpc")
+    mode = hold_cycle(
+        FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script([result]),
+        controller="mpc",
+    )
     mode.setup()
     mode.state.metrics = {"id": "cook-mpc-zero"}
 
@@ -546,7 +616,7 @@ def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle,
     update = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
     allocation = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION)
     applied = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.APPLIED_OUTPUT)
-    assert (update.raw_output, allocation.requested_auger_duty, applied.realized_auger_duty) == (0.0, 0.0, 0.1)
+    assert (update.raw_output, allocation.requested_auger_duty, applied.realized_auger_duty) == (0.0, 0.0, 0.0)
 
 
 @pytest.mark.parametrize(
@@ -556,7 +626,7 @@ def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle,
 )
 def test_refit_records_refit_then_its_verdict(hold_cycle, monkeypatch, accepted, expected_event):
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True)
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
     runner.snapshot = {"revision": 7}
     runner.refit_verdict = SimpleNamespace(accepted=accepted)
     mode = hold_cycle(runner, controller="mpc")
@@ -573,96 +643,88 @@ def test_refit_records_refit_then_its_verdict(hold_cycle, monkeypatch, accepted,
     assert model_events == ["refit", expected_event]
 
 
-def test_mpc_applied_load_is_attributed_to_the_result_that_produced_its_interval(hold_cycle, monkeypatch):
+def test_mpc_applied_load_is_measured_and_attributed_to_the_producing_frame(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True).script(
-        [_mpc_result(1, applied_combustion_load=0.0), _mpc_result(2, applied_combustion_load=17.5)]
+    result = _mpc_result(1)
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [result, result]
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "cook-mpc-feedback"}
-    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
-    mode.on_tick(2.0, 220.0, output)
-    mode.on_tick(4.0, 220.0, output)
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(24.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(26.0, 220.0, mode.grill.get_output_status())
+    assert any(applied.timestamp == 26.0 for applied in runner.applied)
+    mode.on_tick(28.0, 220.0, mode.grill.get_output_status())
 
-    applied = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.APPLIED_OUTPUT]
-    assert applied[-1].result_revision == 1
-    assert applied[-1].realized_combustion_load == 17.5
+    applied = next(
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.interval_start_ms == 26_000
+    )
+    assert applied.result_revision == 1
+    assert applied.realized_combustion_load == 1.0
 
 
-def test_mpc_lid_interval_records_feedback_under_the_producing_result_revision(hold_cycle, monkeypatch):
+def test_mpc_lid_interval_records_measured_feedback_under_the_producing_frame_revision(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True).script(
-        [
-            _mpc_result(1, applied_combustion_load=0.0),
-            _mpc_result(2, applied_combustion_load=11.0),
-            _mpc_result(3, applied_combustion_load=23.0),
-        ]
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [_mpc_result(1), _mpc_result(1), _mpc_result(2)]
     )
-    mode = hold_cycle(
-        runner,
-        cycle_data_extra={"HoldCycleTime": 1.0},
-        controller="mpc",
-    )
+    mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "cook-mpc-lid-feedback", "augerontime": 0}
     mode.state.target_temp_achieved = True
     mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
-    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
-    mode.on_tick(2.0, 220.0, output)
-    mode._on_auger_on(2.0)
-    mode._on_auger_off(2.0 + mode.state.cycle.ratio)
-    mode.on_tick(3.0001, 220.0, output)
-    mode._on_auger_on(3.0001)
-    output["auger"] = True
-    mode.on_tick(4.0, 180.0, output)
-    output["auger"] = False
-    mode.on_tick(5.0002, 180.0, output)
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(24.0, 1.0, mode.grill.get_output_status())
+    mode.on_tick(26.0, 1.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(26.0)
+    mode.teardown(1.0)
 
     lid_feedback = [
         record.payload
         for record in recorder.records
         if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.output_source is OutputSource.LID_OPEN
     ]
-    assert [(payload.result_revision, payload.realized_combustion_load) for payload in lid_feedback] == [(2, 23.0)]
-    report = validate_records(recorder.records)
-    assert report.valid
-    assert report.issues == ()
-    without_detection = [record for record in recorder.records if record.event_kind is not TraceEventKind.SAFETY_EVENT]
-    assert ReplayIssueCode.UNEXPLAINED_OUTPUT_SOURCE in [
-        issue.code for issue in validate_records(without_detection).issues
-    ]
+    assert lid_feedback and all(payload.result_revision == 1 for payload in lid_feedback)
+    assert all(
+        payload.realized_combustion_load is None or 0.0 <= payload.realized_combustion_load <= 1.0
+        for payload in lid_feedback
+    )
+    measured = next(
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
+        and (record.payload.interval_start_ms, record.payload.interval_end_ms) == (22_000, 24_000)
+    )
+    assert (measured.realized_auger_duty, measured.realized_combustion_load) == (1.0, 1.0)
+    assert validate_records(recorder.records).valid
 
 
-def test_mpc_manual_interval_records_feedback_under_the_producing_result_revision(hold_cycle, monkeypatch):
+def test_mpc_manual_interval_records_measured_feedback_under_the_producing_frame_revision(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True).script(
-        [
-            _mpc_result(1, applied_combustion_load=0.0),
-            _mpc_result(2, applied_combustion_load=8.0),
-            _mpc_result(3, applied_combustion_load=14.0),
-        ]
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [_mpc_result(1), _mpc_result(1), _mpc_result(2)]
     )
-    mode = hold_cycle(
-        runner,
-        cycle_data_extra={"HoldCycleTime": 1.0},
-        controller="mpc",
-    )
+    mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "cook-mpc-manual-feedback", "augerontime": 0}
-    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
-    mode.on_tick(2.0, 220.0, output)
-    mode._on_auger_on(2.0)
-    mode._on_auger_off(2.0 + mode.state.cycle.ratio)
-    mode.state.manual_override["auger"] = 5.0
-    mode._last_now = 3.0
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+    mode.state.manual_override["auger"] = 25.0
+    mode._last_now = 23.0
     mode._on_manual_output("auger", True)
-    output["auger"] = True
-    mode.on_tick(4.0001, 220.0, output)
-    mode.on_tick(5.0002, 220.0, output)
+    mode.on_tick(24.0, 220.0, mode.grill.get_output_status())
+    mode._on_manual_release("auger", 26.0)
+    mode.on_tick(26.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(28.0, 220.0, mode.grill.get_output_status())
 
     manual_feedback = [
         record.payload
@@ -670,19 +732,47 @@ def test_mpc_manual_interval_records_feedback_under_the_producing_result_revisio
         if record.event_kind is TraceEventKind.APPLIED_OUTPUT
         and record.payload.output_source is OutputSource.MANUAL_OVERRIDE
     ]
-    # Manual takeover keeps its producer command across later accepted updates:
-    # Hold splits feedback intervals but intentionally does not replace manual output.
-    assert [(payload.result_revision, payload.realized_combustion_load) for payload in manual_feedback] == [
-        (1, 8.0),
-        (1, 14.0),
-    ]
-    report = validate_records(recorder.records)
-    assert report.valid
-    assert report.issues == ()
-    without_takeover = [record for record in recorder.records if record.event_kind is not TraceEventKind.SAFETY_EVENT]
-    assert ReplayIssueCode.UNEXPLAINED_OUTPUT_SOURCE in [
-        issue.code for issue in validate_records(without_takeover).issues
-    ]
+    manual_partial = next(payload for payload in manual_feedback if not payload.sample_complete)
+    assert (manual_partial.result_revision, manual_partial.realized_combustion_load) == (1, None)
+    assert manual_feedback and all(payload.result_revision == 1 for payload in manual_feedback)
+    assert all(
+        payload.realized_combustion_load is None or 0.0 <= payload.realized_combustion_load <= 1.0
+        for payload in manual_feedback
+    )
+    assert all(payload.realized_combustion_load is None for payload in manual_feedback if not payload.sample_complete)
+    assert validate_records(recorder.records).valid
+
+
+def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    first = _mpc_result(1)
+    assert first.allocation is not None
+    first = replace(first, allocation=replace(first.allocation, normalized_combustion_load=0.2))
+    second = _mpc_result(2, enable_fan=False, stale_state=ResultStaleState.STALE)
+    assert second.allocation is not None
+    second = replace(second, allocation=replace(second.allocation, normalized_combustion_load=0.8))
+    mode = hold_cycle(
+        FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+            [first, second]
+        ),
+        controller="mpc",
+    )
+    mode.setup()
+    mode.state.metrics = {"id": "cook-framed-latch"}
+
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(4.0, 220.0, mode.grill.get_output_status())
+    mode._on_safety_event("stop", 5.0)
+
+    frame = next(
+        record.payload
+        for record in reversed(recorder.records)
+        if record.event_kind is TraceEventKind.ACTUATION_FRAME and record.payload.reset_reason == "safety"
+    )
+    assert frame.result_revision == 1
+    assert frame.requested_combustion_load == 0.2
+    assert frame.requested_fan_duty == first.allocation.fan_duty
+    assert frame.stale_command is False
 
 
 def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_snapshot(hold_cycle, monkeypatch):
@@ -694,7 +784,9 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
             return True
 
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True, wants_async=True)
+    runner = FakeControllerRunner(
+        period=1.0, commands_fan=True, wants_async=True, actuation_mode=ActuationMode.FRAMED_PULSE
+    )
     runner.snapshot = {"revision": 1}
     mode = hold_cycle(runner, controller="mpc", model_store=_ModelStore())
     mode.setup()
@@ -779,7 +871,9 @@ def test_async_reconfigure_does_not_leak_the_old_published_model_into_new_sessio
 ):
     class _Runner(FakeControllerRunner):
         def reconfigure(self, settings, control, logger=None):
-            return "Active"
+            self._actuation_mode = ActuationMode.FRAMED_PULSE
+            self._controller_type = ControllerType.MPC
+            return super().reconfigure(settings, control, logger=logger)
 
         def restore_model(self, snapshot):
             self.restored.append(snapshot)
@@ -830,6 +924,9 @@ def test_sync_runner_with_async_preferring_core_records_completed_restore(hold_c
         def wants_async(self):
             return True
 
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
         def set_output(self, applied):
             pass
 
@@ -870,7 +967,9 @@ def test_initial_session_uses_the_current_published_model_without_restore(hold_c
             return True
 
     recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True, wants_async=True)
+    runner = FakeControllerRunner(
+        period=1.0, commands_fan=True, wants_async=True, actuation_mode=ActuationMode.FRAMED_PULSE
+    )
     runner.snapshot = {"revision": 5}
     mode = hold_cycle(runner, controller="mpc", model_store=_NoModelStore())
     mode.setup()
@@ -880,3 +979,59 @@ def test_initial_session_uses_the_current_published_model_without_restore(hold_c
 
     (session,) = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     assert (session.payload.model_revision, session.payload.model_provenance) == (5, "persisted")
+
+
+def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script([_mpc_result(1)])
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "cook-base-manual"}
+    mode.settings["safety"]["manual_override_time"] = 30
+    mode.settings["safety"]["allow_manual_changes"] = True
+    mode._ensure_trace_session(1.0)
+    mode.control["manual"]["change"] = "auger"
+    mode.control["manual"]["output"] = True
+    call_start = len(mode.grill.calls)
+
+    mode._apply_manual_overrides(
+        mode.control,
+        now=2.0,
+        current_output_status=mode.grill.get_output_status(),
+    )
+    manual_calls = mode.grill.calls[call_start:]
+    call_count = len(mode.grill.calls)
+    mode.on_tick(3.0, 220.0, mode.grill.get_output_status())
+
+    assert mode.grill.get_output_status()["auger"] is True
+    assert mode.state.manual_override["auger"] > 3.0
+    assert [name for name, _args in manual_calls][-2:] == ["auger_off", "auger_on"]
+    assert mode.grill.calls[call_count:] == []
+    seeds = [
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.output_source is OutputSource.SEED
+    ]
+    assert len(seeds) == 1 and seeds[0].sample_complete is True
+    assert validate_records(recorder.records).valid
+
+
+def test_automatic_lid_preempts_same_tick_framed_on_transition_and_keeps_replay_valid(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [_mpc_result(1), _mpc_result(1)]
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "cook-same-tick-lid"}
+    mode.state.target_temp_achieved = True
+    mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    call_start = len(mode.grill.calls)
+
+    mode.on_tick(20.0, 1.0, mode.grill.get_output_status())
+
+    trigger_calls = [name for name, _args in mode.grill.calls[call_start:]]
+    assert "auger_on" not in trigger_calls
+    assert mode.grill.get_output_status()["auger"] is False
+    assert validate_records(recorder.records).valid

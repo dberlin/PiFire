@@ -280,6 +280,8 @@ def _payload_cases():
                 result_revision=4,
                 pulse_slot_seconds=2.0,
                 frame_seconds=20.0,
+                frame_start_ms=0,
+                frame_end_ms=20_000,
                 requested_combustion_load=0.6,
                 requested_auger_duty=0.55,
                 credit_before_seconds=0.5,
@@ -578,6 +580,8 @@ def test_envelope_rejects_mismatched_event_or_controller(record, message):
                 result_revision=0,
                 pulse_slot_seconds=3.0,
                 frame_seconds=20.0,
+                frame_start_ms=0,
+                frame_end_ms=20_000,
                 requested_combustion_load=0.4,
                 requested_auger_duty=0.4,
                 credit_before_seconds=0.0,
@@ -601,6 +605,63 @@ def test_envelope_rejects_mismatched_event_or_controller(record, message):
 def test_semantic_interval_and_pulse_invariants_are_rejected(factory, message):
     with pytest.raises(ValidationError, match=message):
         factory()
+
+
+@pytest.mark.parametrize(
+    ("actual_start_active", "delivered_on_seconds"),
+    [(False, 0.0), (True, 3.0)],
+)
+def test_framed_reset_allows_partial_zero_transition_delivery(actual_start_active, delivered_on_seconds):
+    payload = FramedPulseFramePayload(
+        result_revision=1,
+        pulse_slot_seconds=2.0,
+        frame_seconds=20.0,
+        frame_start_ms=0,
+        frame_end_ms=3_000,
+        requested_combustion_load=0.4,
+        requested_auger_duty=0.4,
+        credit_before_seconds=0.0,
+        credit_after_seconds=0.0,
+        scheduled_on_seconds=2.0,
+        delivered_on_seconds=delivered_on_seconds,
+        actual_start_active=actual_start_active,
+        transition_count=0,
+        actual_end_active=actual_start_active,
+        requested_fan_duty=None,
+        applied_fan_duty=None,
+        skipped=False,
+        stale_command=False,
+        inhibit_reason=InhibitReason.SAFETY,
+        reset_reason="safety",
+    )
+
+    assert payload.delivered_on_seconds == delivered_on_seconds
+
+
+def test_framed_zero_transition_rejects_delivery_that_disagrees_with_actual_duration():
+    with pytest.raises(ValidationError, match="zero-transition framed-pulse delivery"):
+        FramedPulseFramePayload(
+            result_revision=1,
+            pulse_slot_seconds=2.0,
+            frame_seconds=20.0,
+            frame_start_ms=0,
+            frame_end_ms=3_000,
+            requested_combustion_load=0.4,
+            requested_auger_duty=0.4,
+            credit_before_seconds=0.0,
+            credit_after_seconds=0.0,
+            scheduled_on_seconds=2.0,
+            delivered_on_seconds=2.0,
+            actual_start_active=True,
+            transition_count=0,
+            actual_end_active=True,
+            requested_fan_duty=None,
+            applied_fan_duty=None,
+            skipped=False,
+            stale_command=False,
+            inhibit_reason=InhibitReason.NONE,
+            reset_reason=None,
+        )
 
 
 def test_envelope_rejects_empty_sessions_unknown_enums_and_unsupported_versions():
@@ -699,6 +760,8 @@ def test_duration_and_pulse_timing_must_be_nonnegative_and_positive():
             result_revision=0,
             pulse_slot_seconds=0.0,
             frame_seconds=20.0,
+            frame_start_ms=0,
+            frame_end_ms=20_000,
             requested_combustion_load=0.4,
             requested_auger_duty=0.4,
             credit_before_seconds=0.0,

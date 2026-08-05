@@ -146,6 +146,8 @@ class ControllerBase:
 
     def get_status(self):
         """JSON-safe diagnostics for the MQTT payload, if this core exposes it."""
+        if hasattr(self, "set_point"):
+            return {"set_point": self.set_point}
         return None
 
     def trace_diagnostics(self) -> ControllerTraceDiagnostics | None:
