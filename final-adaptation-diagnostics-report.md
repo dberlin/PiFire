@@ -8,6 +8,7 @@
 - Simulator model evidence now records 60/300/900/1800/3600-second supported-horizon origin residual vectors and RMSE, maximum absolute error, bias, p90 absolute error, coast/braking error, steady-gain error, and delay error for each arm/domain/mode/initialization row. MPC 600/800/1000-second validation evidence remains separate.
 - Follow-up: evaluation buffers are interval-local and are cleared before every five-minute decision. Braking evidence is absent (`null`) when no frame in that interval carries braking/coast status; it is never synthesized from general prediction error.
 - Follow-up: every score sample carries the manager role generation. Evaluations reject fewer than two fresh samples and discard data from prior promotions, preventing either overlapping frames or stale arm labels from contributing to a second win.
+- 650-second online wrong-gain smoke produced distinct fresh windows at 300 and 600 seconds (4 and 15 eligible samples); both candidates were evidence-backed rejections, not score-placeholder outcomes.
 
 Verification:
 
