@@ -286,3 +286,251 @@ def promote(resid_ew, mask):
     if best > runner_up * (1.0 - PROMOTION_MARGIN):
         return None, 0.0
     return int(np.argmin(resid)), float(margin)
+
+
+#: Trust gates. Profile-independent, so no cook shape is privileged.
+MIN_ACCEPTED_SECONDS = 3600.0
+MIN_ACCEPTED = 240
+MIN_DUTY_STD = 0.05
+MIN_TRANSITION = 0.05
+MIN_TRANSITION_HOLD = 60.0
+MIN_TEMP_SPAN_F = 15.0
+CONFIRM_WINDOW = 20
+CONFIRM_K_TOL = 0.05
+CONFIRM_TAU_TOL = 0.075
+#: After initial trust, a candidate is a revision only when it moves this far.
+MATERIAL_K = 0.05
+MATERIAL_TAU = 0.05
+MATERIAL_THETA = 5.0
+#: How much of a passing revision blends into the trusted values.
+BLEND = 0.1
+#: A dt outside this band is a clock jump or a stalled loop, not an observation.
+DT_MIN, DT_MAX = 1.0, 600.0
+
+
+class FOPDTIdentifier:
+    """Passive online identification of the grill's FOPDT parameters.
+
+    Nothing here perturbs the auger: the identifier learns from whatever
+    excitation the controller's own regulation happens to produce, and stays
+    untrusted until the gates say the data earned it.
+    """
+
+    def __init__(self):
+        self._bank = RLSBank(N_CANDIDATES)
+        self._history = DutyHistory(float(DELAYS.max()))
+        self._prev = None  # (timestamp, temperature) anchor
+        self._gap = True  # the next observation would span an undriven interval
+        self._commanded = True  # whether the most recent report was controller-driven
+        self._accepted = 0
+        self._accepted_seconds = 0.0
+        self._temp_lo = None
+        self._temp_hi = None
+        self._duty_n = 0
+        self._duty_sum = 0.0
+        self._duty_sq = 0.0
+        self._transition_seen = False
+        self._transition_from = None
+        self._transition_at = None
+        self._trusted = None
+        self._revision = 0
+        self._confirm = None
+
+    # -------------------------------------------------------------- properties
+    @property
+    def Theta(self):
+        return self._bank.Theta
+
+    # ------------------------------------------------------------------ intake
+    def record_output(self, applied):
+        """Take an AppliedOutput. Every command enters the duty history -- the
+        grill really did run at that duty -- but one the controller did not
+        command opens a gap that suppresses identification across it."""
+        now = float(applied.timestamp)
+        self._history.record(now, applied.ratio)
+        self._history.prune(now)
+        self._commanded = applied.controller_commanded
+        if not applied.controller_commanded:
+            self._gap = True
+            return
+        self._note_transition(now, applied.ratio)
+
+    def _note_transition(self, now, ratio):
+        """A sustained duty change is the excitation this design waits for."""
+        if self._transition_from is None:
+            self._transition_from, self._transition_at = ratio, now
+            return
+        if abs(ratio - self._transition_from) >= MIN_TRANSITION:
+            if now - self._transition_at >= MIN_TRANSITION_HOLD:
+                self._transition_seen = True
+            self._transition_from, self._transition_at = ratio, now
+
+    def observe(self, temperature_f, timestamp):
+        """One temperature sample. True when it became a regression row."""
+        now = float(timestamp)
+        temp = float(temperature_f)
+        if not np.isfinite(temp):
+            self._prev = None
+            self._gap = True
+            return False
+        prev, self._prev = self._prev, (now, temp)
+        if prev is None or self._gap:
+            # A gap only closes on a commanded report: an uncommanded step's own
+            # rejection must not clear it, or the very next window would still
+            # reach back across the gap while reading as clean.
+            if self._commanded:
+                self._gap = False
+            return False
+        t0, y0 = prev
+        dt = now - t0
+        if not (DT_MIN <= dt <= DT_MAX):
+            return False
+        duty, valid = self._history.average(t0, now, DELAYS)
+        if not valid.any():
+            return False
+        # A candidate whose window predates retained history contributes its
+        # last known duty rather than dropping the whole observation.
+        duty = np.where(valid, duty, duty[valid][0])
+
+        shared = np.array([1.0, (y0 - T_REF) / T_SCALE])
+        phi = np.empty((N_CANDIDATES, 3))
+        phi[:, 0] = shared[0]
+        phi[:, 1] = shared[1]
+        phi[:, 2] = duty
+        self._bank.update(phi, (temp - y0) / dt)
+
+        self._accepted += 1
+        self._accepted_seconds += dt
+        self._temp_lo = temp if self._temp_lo is None else min(self._temp_lo, temp)
+        self._temp_hi = temp if self._temp_hi is None else max(self._temp_hi, temp)
+        mean_duty = float(duty[valid].mean())
+        self._duty_n += 1
+        self._duty_sum += mean_duty
+        self._duty_sq += mean_duty * mean_duty
+        self._evaluate()
+        return True
+
+    # ------------------------------------------------------------------- trust
+    def _duty_std(self):
+        if self._duty_n < 2:
+            return 0.0
+        mean = self._duty_sum / self._duty_n
+        var = max(self._duty_sq / self._duty_n - mean * mean, 0.0)
+        return float(np.sqrt(var))
+
+    def _excited(self):
+        return (
+            self._accepted >= MIN_ACCEPTED
+            and self._accepted_seconds >= MIN_ACCEPTED_SECONDS
+            and self._duty_std() >= MIN_DUTY_STD
+            and self._transition_seen
+            and self._temp_lo is not None
+            and (self._temp_hi - self._temp_lo) >= MIN_TEMP_SPAN_F
+        )
+
+    def _evaluate(self):
+        if not self._excited():
+            return
+        params = recover_parameters(self._bank.Theta)
+        rse_K, rse_tau = relative_standard_errors(self._bank.Theta, self._bank.P, self._bank.resid_ew)
+        mask = gate_mask(params, rse_K, rse_tau)
+        winner, _ = promote(self._bank.resid_ew, mask)
+        if winner is None:
+            self._confirm = None
+            return
+        candidate = {
+            "K": float(params["K"][winner]),
+            "tau": float(params["tau"][winner]),
+            "theta": float(DELAYS[winner]),
+        }
+        if self._trusted is not None and not self._material(candidate):
+            self._confirm = None
+            return
+        if not self._confirmed(candidate):
+            return
+        self._adopt(candidate)
+
+    def _material(self, candidate):
+        return (
+            abs(candidate["K"] - self._trusted["K"]) / self._trusted["K"] >= MATERIAL_K
+            or abs(candidate["tau"] - self._trusted["tau"]) / self._trusted["tau"] >= MATERIAL_TAU
+            or abs(candidate["theta"] - self._trusted["theta"]) >= MATERIAL_THETA
+        )
+
+    def _confirmed(self, candidate):
+        """A candidate must hold still for a full window before it is believed."""
+        window = self._confirm
+        if window is None or window["theta"] != candidate["theta"]:
+            self._confirm = {"n": 1, **candidate}
+            return False
+        if (
+            abs(candidate["K"] - window["K"]) / window["K"] > CONFIRM_K_TOL
+            or abs(candidate["tau"] - window["tau"]) / window["tau"] > CONFIRM_TAU_TOL
+        ):
+            self._confirm = {"n": 1, **candidate}
+            return False
+        window["n"] += 1
+        window["K"], window["tau"] = candidate["K"], candidate["tau"]
+        return window["n"] >= CONFIRM_WINDOW
+
+    def _adopt(self, candidate):
+        self._confirm = None
+        if self._trusted is None:
+            self._trusted = dict(candidate)
+        else:
+            # Delay moves outright once confirmed; the continuous parameters
+            # blend, so one noisy window cannot swing the model.
+            self._trusted = {
+                "K": (1.0 - BLEND) * self._trusted["K"] + BLEND * candidate["K"],
+                "tau": (1.0 - BLEND) * self._trusted["tau"] + BLEND * candidate["tau"],
+                "theta": candidate["theta"],
+            }
+        self._revision += 1
+
+    def trusted_model(self):
+        if self._trusted is None:
+            return None
+        return {**self._trusted, "revision": self._revision}
+
+    def restore(self, model):
+        """Adopt a persisted model, re-checking the physics the store does not
+        judge. A restored model is trusted immediately: a process restart is not
+        a reason to doubt parameters that were earned."""
+        if not isinstance(model, dict):
+            return False
+        try:
+            K, tau, theta = float(model["K"]), float(model["tau"]), float(model["theta"])
+            revision = int(model["revision"])
+        except KeyError, TypeError, ValueError:
+            return False
+        if not all(np.isfinite([K, tau, theta])) or revision < 0:
+            return False
+        if not (GAIN_MIN <= K <= GAIN_MAX) or not (TAU_MIN <= tau <= TAU_MAX):
+            return False
+        if theta < float(DELAYS.min()) or theta > float(DELAYS.max()):
+            return False
+        self._trusted = {"K": K, "tau": tau, "theta": theta}
+        self._revision = revision
+        # A confirmation window built against the pre-restore trusted state must
+        # not count toward confirming a candidate against this one.
+        self._confirm = None
+        return True
+
+    def status(self):
+        resid = self._bank.resid_ew
+        ordered = np.partition(resid, 1)[:2] if resid.size > 1 else np.array([0.0, 0.0])
+        params = recover_parameters(self._bank.Theta)
+        rse_K, rse_tau = relative_standard_errors(self._bank.Theta, self._bank.P, self._bank.resid_ew)
+        return {
+            "accepted": self._accepted,
+            "accepted_seconds": round(self._accepted_seconds, 1),
+            "duty_std": round(self._duty_std(), 4),
+            "temp_span": round((self._temp_hi - self._temp_lo) if self._temp_lo is not None else 0.0, 2),
+            "transition_seen": self._transition_seen,
+            "duty_segments": len(self._history),
+            "best_residual": float(ordered[0]),
+            "runner_up_residual": float(ordered[1]),
+            "candidates_passing": int(gate_mask(params, rse_K, rse_tau).sum()),
+            "confirming": None if self._confirm is None else self._confirm["n"],
+            "trusted": self.trusted_model(),
+        }

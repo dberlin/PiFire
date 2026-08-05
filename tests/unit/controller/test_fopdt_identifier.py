@@ -9,18 +9,26 @@ implementation proves only that it agrees with itself.
 import numpy as np
 import pytest
 
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.fopdt_identifier import (
+    BLEND,
+    CONFIRM_WINDOW,
     DELAYS,
     EW_ALPHA,
     GAIN_MAX,
     GAIN_MIN,
     LAM,
+    MIN_ACCEPTED,
+    MIN_ACCEPTED_SECONDS,
+    MIN_DUTY_STD,
+    MIN_TEMP_SPAN_F,
     P0,
     T_REF,
     T_SCALE,
     TAU_MAX,
     TAU_MIN,
     DutyHistory,
+    FOPDTIdentifier,
     RLSBank,
     gate_mask,
     promote,
@@ -297,3 +305,343 @@ def test_relative_standard_errors_negative_variance_is_not_finite():
     assert not np.isfinite(rse_K).any()
     params = recover_parameters(theta)
     assert not gate_mask(params, rse_K, rse_tau)[0]
+
+
+# ------------------------------------------------------------------ identifier
+
+
+class _FOPDTPlant:
+    """The exact process the identifier assumes. A true answer exists here."""
+
+    def __init__(self, K=800.0, tau=600.0, theta=35.0, T_offset=70.0, dt=20.0):
+        self.K, self.tau, self.theta, self.T_offset, self.dt = K, tau, theta, T_offset, dt
+        self.x = 0.0
+        self.t = 0.0
+        self._history = [(0.0, 0.0)]
+
+    def step(self, u):
+        self._history.append((self.t, u))
+        # delayed input
+        target = self.t - self.theta
+        u_d = self._history[0][1]
+        for ts, uu in self._history:
+            if ts <= target:
+                u_d = uu
+        self.x += (self.K * u_d - self.x) / self.tau * self.dt
+        self.t += self.dt
+        return self.T_offset + self.x
+
+
+def _drive(identifier, plant, duties, commanded=True):
+    """Run the plant on a duty schedule, reporting and observing each step."""
+    for u in duties:
+        identifier.record_output(
+            AppliedOutput(
+                ratio=u,
+                source=OutputSource.CONTROLLER if commanded else OutputSource.LID_OPEN,
+                timestamp=plant.t,
+            )
+        )
+        temp = plant.step(u)
+        identifier.observe(temp, plant.t)
+
+
+def _excitation_schedule(n, dt=20.0):
+    """Alternating duty levels with sustained transitions, long enough to clear
+    the 3600 s and 240-observation gates."""
+    out = []
+    for k in range(n):
+        out.append(0.25 if (k // 30) % 2 == 0 else 0.55)
+    return out
+
+
+def test_identifies_a_synthetic_fopdt_plant():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=35.0)
+    _drive(identifier, plant, _excitation_schedule(600))
+    model = identifier.trusted_model()
+    assert model is not None, identifier.status()
+    assert model["K"] == pytest.approx(800.0, rel=0.10)
+    assert model["tau"] == pytest.approx(600.0, rel=0.15)
+    assert abs(model["theta"] - 35.0) <= 5.0
+
+
+def test_no_promotion_under_constant_duty():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    _drive(identifier, plant, [0.4] * 600)
+    assert identifier.trusted_model() is None
+    assert identifier.status()["duty_std"] < 0.05
+
+
+def test_no_promotion_without_enough_temperature_span():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant(K=5.0)  # barely moves the temperature
+    _drive(identifier, plant, _excitation_schedule(600))
+    assert identifier.trusted_model() is None
+
+
+def test_no_promotion_before_the_time_gate():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    _drive(identifier, plant, _excitation_schedule(100))  # 2000 s < 3600 s
+    assert identifier.trusted_model() is None
+    assert identifier.status()["accepted_seconds"] < 3600.0
+
+
+def test_no_promotion_when_duty_std_is_the_sole_blocker():
+    """Duty constant at 0.40 except a single 4-step excursion to 0.46: enough to
+    register a held transition, not enough to move duty_std past its gate."""
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    duties = [0.46 if 300 <= k < 304 else 0.40 for k in range(600)]
+    _drive(identifier, plant, duties)
+    status = identifier.status()
+    assert status["accepted"] >= MIN_ACCEPTED
+    assert status["accepted_seconds"] >= MIN_ACCEPTED_SECONDS
+    assert status["transition_seen"] is True
+    assert (status["temp_span"]) >= 15.0
+    assert status["duty_std"] < MIN_DUTY_STD
+    # positive control: candidates are actually recoverable here, so the block
+    # is the duty_std gate, not a dead identifier.
+    assert status["candidates_passing"] > 0
+    assert identifier.trusted_model() is None
+
+
+def test_no_promotion_when_temp_span_is_the_sole_blocker():
+    """A low-gain plant (K=100, safely inside [GAIN_MIN, GAIN_MAX]) pre-warmed to
+    steady state, then driven with a sustained duty swing large enough to clear
+    duty_std and hold long enough to register a transition -- but too gentle,
+    against this gain, to move the temperature 15 F."""
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant(K=100.0)
+    for _ in range(400):
+        plant.step(0.40)  # settle near steady state before any observation counts
+    duties = [0.55 if (k // 10) % 2 == 0 else 0.25 for k in range(900)]
+    _drive(identifier, plant, duties)
+    status = identifier.status()
+    assert status["accepted"] >= MIN_ACCEPTED
+    assert status["accepted_seconds"] >= MIN_ACCEPTED_SECONDS
+    assert status["duty_std"] >= MIN_DUTY_STD
+    assert status["transition_seen"] is True
+    assert status["temp_span"] < MIN_TEMP_SPAN_F
+    assert status["candidates_passing"] > 0
+    assert identifier.trusted_model() is None
+
+
+def test_no_promotion_when_the_count_gate_is_satisfied_but_the_time_gate_is_not():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant(dt=5.0)
+    _drive(identifier, plant, _excitation_schedule(300))  # 300 * 5s = 1500s < 3600s
+    status = identifier.status()
+    assert status["accepted"] >= MIN_ACCEPTED
+    assert status["accepted_seconds"] < MIN_ACCEPTED_SECONDS
+    assert status["candidates_passing"] > 0
+    assert identifier.trusted_model() is None
+
+
+def test_no_promotion_when_the_time_gate_is_satisfied_but_the_count_gate_is_not():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant(dt=60.0)
+    _drive(identifier, plant, _excitation_schedule(200))  # 199 * 60s = 11940s >= 3600s
+    status = identifier.status()
+    assert status["accepted"] < MIN_ACCEPTED
+    assert status["accepted_seconds"] >= MIN_ACCEPTED_SECONDS
+    assert status["candidates_passing"] > 0
+    assert identifier.trusted_model() is None
+
+
+def test_a_paused_interval_creates_no_cross_gap_observation():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    _drive(identifier, plant, _excitation_schedule(300))
+    before = identifier.status()["accepted"]
+    _drive(identifier, plant, [0.0] * 10, commanded=False)
+    assert identifier.status()["accepted"] == before
+    # the first observation AFTER the gap is also rejected: it would span it
+    _drive(identifier, plant, _excitation_schedule(1))
+    assert identifier.status()["accepted"] == before
+    _drive(identifier, plant, _excitation_schedule(2))
+    assert identifier.status()["accepted"] > before
+
+
+def test_a_non_finite_temperature_is_rejected():
+    identifier = FOPDTIdentifier()
+    identifier.record_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 0.0))
+    identifier.observe(200.0, 0.0)
+    identifier.record_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 20.0))
+    identifier.observe(210.0, 20.0)
+    before = identifier.status()["accepted"]
+    assert before > 0
+    assert identifier.observe(float("nan"), 40.0) is False
+    assert identifier.status()["accepted"] == before
+    # the NaN opened a gap: the very next observation would span it and is
+    # rejected too, even though it is itself finite and evenly spaced.
+    identifier.record_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 60.0))
+    assert identifier.observe(220.0, 60.0) is False
+    assert identifier.status()["accepted"] == before
+
+
+@pytest.mark.parametrize("dt", [0.0, -20.0, 0.5, 100000.0])
+def test_an_implausible_dt_is_rejected(dt):
+    identifier = FOPDTIdentifier()
+    identifier.record_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 0.0))
+    identifier.observe(200.0, 100.0)
+    before = identifier.status()["accepted"]
+    identifier.observe(210.0, 100.0 + dt)
+    assert identifier.status()["accepted"] == before
+
+
+def test_memory_is_bounded():
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    _drive(identifier, plant, _excitation_schedule(3000))
+    assert identifier.status()["duty_segments"] < 40
+    assert identifier.Theta.shape == (DELAYS.size, 3)
+
+
+def test_restore_adopts_a_valid_model_and_rejects_an_impossible_one():
+    identifier = FOPDTIdentifier()
+    assert identifier.restore({"K": 800.0, "tau": 600.0, "theta": 35.0, "revision": 4}) is True
+    assert identifier.trusted_model()["K"] == 800.0
+    assert identifier.trusted_model()["revision"] == 4
+    assert identifier.restore({"K": -1.0, "tau": 600.0, "theta": 35.0, "revision": 5}) is False
+    assert identifier.restore({"K": 800.0, "tau": 1.0, "theta": 35.0, "revision": 5}) is False
+    assert identifier.restore({"K": 800.0, "tau": 600.0, "theta": 999.0, "revision": 5}) is False
+    assert identifier.restore({"K": 800.0, "tau": 600.0}) is False
+
+
+def test_the_revision_advances_only_on_a_material_change():
+    identifier = FOPDTIdentifier()
+    # 40.0 is the delay this plant and schedule identify to: the 5 s DELAYS
+    # grid puts the true 35 s one step below.
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
+    rev = identifier.trusted_model()["revision"]
+    plant = _FOPDTPlant(K=802.0, tau=602.0, theta=35.0)  # within the material band
+    _drive(identifier, plant, _excitation_schedule(600))
+    assert identifier.trusted_model()["revision"] == rev
+    # positive control: the identifier must have actually reached a decision,
+    # not merely have never promoted anything -- otherwise this test cannot
+    # distinguish the material gate working from a dead identifier.
+    assert identifier.status()["candidates_passing"] > 0
+
+
+def test_confirmation_requires_a_full_window_before_trust():
+    """A candidate must hold still for CONFIRM_WINDOW evaluations before it is
+    believed: confirming climbs 1..CONFIRM_WINDOW-1 with no trusted model, then
+    the window closes and a model appears in the same step confirming clears."""
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    seen_confirming = []
+    for u in _excitation_schedule(260):
+        _drive(identifier, plant, [u])
+        confirming = identifier.status()["confirming"]
+        if confirming is not None:
+            assert identifier.trusted_model() is None
+            seen_confirming.append(confirming)
+    assert seen_confirming == list(range(1, CONFIRM_WINDOW))
+    assert identifier.trusted_model() is not None
+
+
+def test_confirmation_resets_when_the_candidate_k_jumps():
+    """A candidate that otherwise repeats exactly still restarts the window when
+    its K moves past CONFIRM_K_TOL: the window is confirming a stable estimate,
+    not merely a stable delay.
+
+    The jump is a fixed doubling, not a multiple of CONFIRM_K_TOL itself: a jump
+    derived from the same constant it's meant to test is tautological --
+    `abs(base * (1 + 2*tol) - base) / base > tol` reduces to `2*tol > tol`,
+    which holds for ANY positive tol, so it could never distinguish a sane
+    tolerance from one inflated past recognition. A fixed jump, comfortably
+    above the real tolerance and comfortably below a broken one, can.
+    """
+    identifier = FOPDTIdentifier()
+    base = {"K": 800.0, "tau": 600.0, "theta": 35.0}
+    for n in range(1, 6):
+        assert identifier._confirmed(dict(base)) is False
+        assert identifier.status()["confirming"] == n
+    jumped = {"K": base["K"] * 2.0, "tau": base["tau"], "theta": base["theta"]}
+    assert identifier._confirmed(jumped) is False
+    assert identifier.status()["confirming"] == 1
+
+
+def test_confirmation_resets_when_the_candidate_tau_jumps():
+    """The tau half of the same OR: a candidate that repeats K exactly still
+    restarts the window when its tau moves past CONFIRM_TAU_TOL.
+
+    The jump is a fixed doubling, not a multiple of CONFIRM_TAU_TOL itself: a
+    jump derived from the same constant it's meant to test is tautological --
+    `abs(base * (1 + 2*tol) - base) / base > tol` reduces to `2*tol > tol`,
+    which holds for ANY positive tol, so it could never distinguish a sane
+    tolerance from one inflated past recognition. A fixed jump, comfortably
+    above the real tolerance and comfortably below a broken one, can.
+    """
+    identifier = FOPDTIdentifier()
+    base = {"K": 800.0, "tau": 600.0, "theta": 35.0}
+    for n in range(1, 6):
+        assert identifier._confirmed(dict(base)) is False
+        assert identifier.status()["confirming"] == n
+    jumped = {"K": base["K"], "tau": base["tau"] * 2.0, "theta": base["theta"]}
+    assert identifier._confirmed(jumped) is False
+    assert identifier.status()["confirming"] == 1
+
+
+def test_a_material_change_advances_the_revision_and_blends_the_continuous_parameters():
+    """The positive counterpart to test_the_revision_advances_only_on_a_material_change:
+    a candidate outside the material band DOES advance the revision, and K/tau move
+    by the BLEND fraction toward it while theta moves to the candidate's grid value
+    outright -- the blend formula in _adopt is otherwise never exercised."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 10.0, "revision": 1})
+    plant = _FOPDTPlant(K=900.0, tau=600.0, theta=35.0)  # K moved 12.5%: outside MATERIAL_K
+    model = None
+    for u in _excitation_schedule(600):
+        _drive(identifier, plant, [u])
+        model = identifier.trusted_model()
+        if model["revision"] == 2:
+            break
+    assert model is not None and model["revision"] == 2
+
+    # Recover the exact candidate that was just adopted, from the bank state at
+    # this same instant, and check the blend arithmetic against it directly --
+    # not against a value hand-derived ahead of time.
+    params = recover_parameters(identifier.Theta)
+    winner = int(np.where(DELAYS == model["theta"])[0][0])
+    candidate_K = float(params["K"][winner])
+    candidate_tau = float(params["tau"][winner])
+    assert model["K"] == pytest.approx((1.0 - BLEND) * 800.0 + BLEND * candidate_K)
+    assert model["tau"] == pytest.approx((1.0 - BLEND) * 600.0 + BLEND * candidate_tau)
+    assert model["theta"] == float(DELAYS[winner])
+    assert model["theta"] != 10.0  # moved outright, not blended toward the restored value
+
+
+def test_restore_clears_a_stale_confirmation_window():
+    """A confirmation window accumulated against the pre-restore trusted state
+    must not count toward confirming a candidate against the restored one."""
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    schedule = _excitation_schedule(260)
+    _drive(identifier, plant, schedule[:259])
+    assert identifier.status()["confirming"] == CONFIRM_WINDOW - 1
+    assert identifier.trusted_model() is None
+    assert identifier.restore({"K": 700.0, "tau": 900.0, "theta": 10.0, "revision": 9}) is True
+    assert identifier.status()["confirming"] is None
+    _drive(identifier, plant, schedule[259:260])
+    assert identifier.trusted_model() == {"K": 700.0, "tau": 900.0, "theta": 10.0, "revision": 9}
+
+
+def test_status_reports_what_the_gates_are_waiting_for():
+    identifier = FOPDTIdentifier()
+    status = identifier.status()
+    for key in (
+        "accepted",
+        "accepted_seconds",
+        "duty_std",
+        "temp_span",
+        "duty_segments",
+        "best_residual",
+        "runner_up_residual",
+        "trusted",
+        "candidates_passing",
+    ):
+        assert key in status
