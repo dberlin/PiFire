@@ -64,11 +64,11 @@ class CalibrationProgram:
 
 DEFAULT_CALIBRATION_PROGRAM: Final = CalibrationProgram(
     segments=(
-        ProgramSegment(720, 0.15, 0.08, 120),
-        ProgramSegment(720, 0.35, 0.08, 120),
-        ProgramSegment(720, 0.65, 0.08, 120),
+        ProgramSegment(4_800, 0.15, 0.08, 120),
+        ProgramSegment(4_800, 0.35, 0.08, 120),
+        ProgramSegment(4_800, 0.65, 0.08, 120),
     ),
-    coast_duration_s=600,
+    coast_duration_s=1_200,
 )
 """The standard three-plateau program for the generic simulated grill."""
 
