@@ -25,7 +25,7 @@ from scipy.optimize import minimize
 
 from controller.grill_sim import GrillSim, MAKGrillSim
 
-from .actuation import PulseRealizer
+from .actuation import PulseSimulationDriver
 from .adaptation import (
     AdaptationManager,
     AdaptationPolicy,
@@ -52,6 +52,7 @@ from .linear_mpc import (
     projected_gradient_qp,
     select_validation_horizon,
 )
+
 _FRAME_S = 20
 _FIXED_FAN = 1.0
 _DEFAULT_OUTPUT = Path("docs/superpowers/experiments/_linear_mpc_bakeoff.manifest.json")
@@ -79,9 +80,7 @@ class ExperimentConfig:
         if self.control_budget_ms <= 0.0:
             raise ValueError("control_budget_ms must be positive")
         for name, value in (("workers", self.workers), ("blas_threads", self.blas_threads)):
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 1
-            ):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
                 raise ValueError(f"{name} must be a positive integer when specified")
 
     @classmethod
@@ -102,6 +101,7 @@ class ExperimentConfig:
             "seeds": list(self.seeds),
             "solver_period_s": _FRAME_S,
         }
+
 
 _NATIVE_THREAD_ENVIRONMENT = (
     "OMP_NUM_THREADS",
@@ -149,10 +149,13 @@ def _resolve_workers(requested: int | None, *, pending_bundles: int) -> int:
 
 
 def _resolve_blas_threads(requested: int | None, *, workers: int) -> int:
-    selected = _parse_requested_workers(
-        requested if requested is not None else os.environ.get("PIFIRE_LINEAR_MPC_BLAS_THREADS"),
-        name="blas_threads",
-    ) or 1
+    selected = (
+        _parse_requested_workers(
+            requested if requested is not None else os.environ.get("PIFIRE_LINEAR_MPC_BLAS_THREADS"),
+            name="blas_threads",
+        )
+        or 1
+    )
     available = max(1, (os.cpu_count() or 1) - 2)
     if workers * selected > available:
         raise ValueError("workers * blas_threads exceeds available CPU budget")
@@ -168,13 +171,9 @@ def _initialize_worker(blas_threads: int) -> None:
     os.environ.update(_worker_environment(blas_threads))
 
 
-
 def _select_validation_horizon(residuals_by_horizon: Mapping[int, tuple[float, ...]]) -> dict[str, Any]:
     """Summarize one already-isolated validation score set."""
-    scores = {
-        horizon_s: float(np.mean(np.abs(values)))
-        for horizon_s, values in residuals_by_horizon.items()
-    }
+    scores = {horizon_s: float(np.mean(np.abs(values))) for horizon_s, values in residuals_by_horizon.items()}
     selected = select_validation_horizon(scores)
     best = min(scores.values())
     return {
@@ -219,9 +218,7 @@ def _common_validation_horizon(
     selected = select_validation_horizon(scores)
     return {
         "selected_horizon_s": selected,
-        "pooled_validation_scores": {
-            str(horizon_s): scores[horizon_s] for horizon_s in sorted(scores)
-        },
+        "pooled_validation_scores": {str(horizon_s): scores[horizon_s] for horizon_s in sorted(scores)},
         "tie_rationale": "shortest horizon within 1% of pooled validation best",
     }
 
@@ -285,6 +282,7 @@ class ScenarioResult:
             "solver_evidence",
             tuple(MappingProxyType(dict(item)) for item in self.solver_evidence),
         )
+
     def to_document(self) -> dict[str, Any]:
         return {
             "arm": self.arm,
@@ -426,9 +424,7 @@ class ScientificRejection(FloatingPointError):
 
 def _prepare_origin(origin: tuple[str, str, str, int]) -> PreparedOrigin:
     arm, initialization, plant, seed = origin
-    model, fit_ms, before, after, calibration = _prepared_model(
-        arm, plant, seed, initialization
-    )
+    model, fit_ms, before, after, calibration = _prepared_model(arm, plant, seed, initialization)
     return PreparedOrigin(
         arm=arm,
         initialization=initialization,
@@ -494,6 +490,7 @@ def _cell_weight(job: MatrixJob) -> tuple[int, int, int]:
 
 def _lpt_jobs(jobs: Sequence[MatrixJob]) -> list[MatrixJob]:
     return sorted(jobs, key=lambda job: (*(-value for value in _cell_weight(job)), job.ordinal))
+
 
 def _temporary_worker_environment(blas_threads: int) -> tuple[dict[str, str | None], dict[str, str]]:
     environment = _worker_environment(blas_threads)
@@ -639,14 +636,14 @@ def _run_matrix(
     if not resume:
         _discard_checkpoint(checkpoint_path)
     fingerprint = _run_fingerprint(config, selection, jobs, source_revision)
-    rows, failures, completed = _load_checkpoint_v2(
-        checkpoint_path, config, selection, fingerprint, jobs, source_revision
-    ) if resume else ([], [], set())
+    rows, failures, completed = (
+        _load_checkpoint_v2(checkpoint_path, config, selection, fingerprint, jobs, source_revision)
+        if resume
+        else ([], [], set())
+    )
     pending = [job for job in jobs if job.ordinal not in completed]
     execution_metadata: list[dict[str, Any]] = []
-    for execution in _execute_cells(
-        _lpt_jobs(pending), prepared, workers=workers, blas_threads=blas_threads
-    ):
+    for execution in _execute_cells(_lpt_jobs(pending), prepared, workers=workers, blas_threads=blas_threads):
         row, failure = _execution_parts(execution)
         if row is not None:
             rows.append(_scenario_from_document(row))
@@ -662,24 +659,28 @@ def _run_matrix(
             }
         )
         if checkpoint_path is not None:
-            _write_checkpoint_v2(
-                checkpoint_path, config, selection, fingerprint, jobs, source_revision, [execution]
-            )
+            _write_checkpoint_v2(checkpoint_path, config, selection, fingerprint, jobs, source_revision, [execution])
         if interrupt_after is not None and len(rows) + len(failures) >= interrupt_after and not resume:
             return _artifact_from_rows(
-                config, rows, failures, selection=selection,
-                execution_metadata=execution_metadata, source_revision=source_revision
+                config,
+                rows,
+                failures,
+                selection=selection,
+                execution_metadata=execution_metadata,
+                source_revision=source_revision,
             )
     artifact = _artifact_from_rows(
-        config, rows, failures, selection=selection,
-        execution_metadata=execution_metadata, source_revision=source_revision
+        config,
+        rows,
+        failures,
+        selection=selection,
+        execution_metadata=execution_metadata,
+        source_revision=source_revision,
     )
     if checkpoint is not None:
         write_artifact_atomically(checkpoint, artifact)
         _remove_checkpoint_v2(checkpoint_path)
     return artifact
-
-
 
 
 def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
@@ -712,12 +713,10 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
         raw_refresh_ms=tuple(raw_timing.get("refresh", ())),
         raw_solve_ms=tuple(raw_timing.get("solve", ())),
         horizon_residuals_c={
-            str(horizon): tuple(values)
-            for horizon, values in document.get("prediction_residuals_c", {}).items()
+            str(horizon): tuple(values) for horizon, values in document.get("prediction_residuals_c", {}).items()
         },
         pre_recovery_residuals_c={
-            str(horizon): tuple(values)
-            for horizon, values in document.get("pre_recovery_residuals_c", {}).items()
+            str(horizon): tuple(values) for horizon, values in document.get("pre_recovery_residuals_c", {}).items()
         },
         provenance=document["provenance"],
         solver_period_s=document["solver_period_s"],
@@ -732,6 +731,7 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
 
 _MAX_ARTIFACT_PART_BYTES = 90 * 1024 * 1024
 
+
 def _checkpoint_path(output: Path) -> Path:
     """Keep in-progress evidence separate from the canonical final manifest."""
     suffix = ".manifest.json"
@@ -740,9 +740,7 @@ def _checkpoint_path(output: Path) -> Path:
     return output.with_name(f"{output.name.removesuffix(suffix)}.checkpoint{suffix}")
 
 
-def _validate_resume_source_revision(
-    path: Path | None, config: ExperimentConfig, source_revision: str
-) -> None:
+def _validate_resume_source_revision(path: Path | None, config: ExperimentConfig, source_revision: str) -> None:
     """Reject incompatible or malformed resume heads before expensive preparation."""
     if path is None or not path.exists():
         return
@@ -757,13 +755,14 @@ def _validate_resume_source_revision(
     if document.get("config") != config.to_document():
         raise ValueError("checkpoint config mismatch")
 
+
 def _discard_checkpoint(path: Path | None) -> None:
     """Discard a fresh-run checkpoint without trusting malformed part references."""
     if path is None or not path.exists():
         return
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         path.unlink(missing_ok=True)
         return
     if not isinstance(document, dict):
@@ -891,13 +890,14 @@ def _read_artifact_text(path: Path) -> str:
     if document.get("transport") != "gzip-shards/v1":
         return json.dumps(document, indent=2, sort_keys=True)
     parts = document["parts"]
-    compressed = b"".join(
-        _verified_part(path, item, index) for index, item in enumerate(parts)
-    )
+    compressed = b"".join(_verified_part(path, item, index) for index, item in enumerate(parts))
     if hashlib.sha256(compressed).hexdigest() != document["compressed_sha256"]:
         raise ValueError("compressed artifact checksum mismatch")
     payload = gzip.decompress(compressed)
-    if len(payload) != document["canonical_json_bytes"] or hashlib.sha256(payload).hexdigest() != document["canonical_json_sha256"]:
+    if (
+        len(payload) != document["canonical_json_bytes"]
+        or hashlib.sha256(payload).hexdigest() != document["canonical_json_sha256"]
+    ):
         raise ValueError("canonical artifact checksum mismatch")
     return payload.decode("utf-8")
 
@@ -987,10 +987,9 @@ def _write_checkpoint(
     }
     _write_transport_atomically(
         path,
-        (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(
-            "utf-8"
-        ),
+        (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"),
     )
+
 
 _CHECKPOINT_SCHEMA = "incremental-cas/v2"
 
@@ -1000,13 +999,23 @@ def _canonical_bytes(document: Mapping[str, Any]) -> bytes:
 
 
 def _job_fingerprint(jobs: Sequence[MatrixJob]) -> str:
+    return hashlib.sha256(_canonical_bytes({"jobs": [job.key.to_document() for job in jobs]})).hexdigest()
+
+
+def _run_fingerprint(
+    config: ExperimentConfig, selection: Mapping[str, Any], jobs: Sequence[MatrixJob], source_revision: str
+) -> str:
     return hashlib.sha256(
-        _canonical_bytes({"jobs": [job.key.to_document() for job in jobs]})
+        _canonical_bytes(
+            {
+                "checkpoint_schema": _CHECKPOINT_SCHEMA,
+                "config": config.to_document(),
+                "horizon_selection": selection,
+                "jobs": _job_fingerprint(jobs),
+                "source_revision": source_revision,
+            }
+        )
     ).hexdigest()
-
-
-def _run_fingerprint(config: ExperimentConfig, selection: Mapping[str, Any], jobs: Sequence[MatrixJob], source_revision: str) -> str:
-    return hashlib.sha256(_canonical_bytes({"checkpoint_schema": _CHECKPOINT_SCHEMA, "config": config.to_document(), "horizon_selection": selection, "jobs": _job_fingerprint(jobs), "source_revision": source_revision})).hexdigest()
 
 
 def _checkpoint_object_path(path: Path, digest: str) -> Path:
@@ -1035,16 +1044,24 @@ def _checkpoint_entry_path(path: Path, entry: Mapping[str, Any]) -> Path:
 def _selection_identity(selection: Mapping[str, Any]) -> dict[str, Any]:
     """Persist a compact exact identity, not all validation residual payloads."""
     return {
-        "origins_sha256": hashlib.sha256(
-            _canonical_bytes({"origins": selection.get("origins", {})})
-        ).hexdigest(),
+        "origins_sha256": hashlib.sha256(_canonical_bytes({"origins": selection.get("origins", {})})).hexdigest(),
         "pooled_validation_scores": selection.get("pooled_validation_scores", {}),
         "selected_horizon_s": selection.get("selected_horizon_s"),
         "tie_rationale": selection.get("tie_rationale"),
     }
 
 
-def _checkpoint_manifest(path: Path, config: ExperimentConfig, selection: Mapping[str, Any], fingerprint: str, jobs: Sequence[MatrixJob], source_revision: str, *, head: Mapping[str, Any] | None = None, count: int = 0) -> dict[str, Any]:
+def _checkpoint_manifest(
+    path: Path,
+    config: ExperimentConfig,
+    selection: Mapping[str, Any],
+    fingerprint: str,
+    jobs: Sequence[MatrixJob],
+    source_revision: str,
+    *,
+    head: Mapping[str, Any] | None = None,
+    count: int = 0,
+) -> dict[str, Any]:
     return {
         "accepted_count": count,
         "checkpoint_schema": _CHECKPOINT_SCHEMA,
@@ -1065,7 +1082,9 @@ def _checkpoint_delta_path(path: Path, digest: str) -> Path:
     return path.with_name(f"{path.stem}.delta.{digest}.json")
 
 
-def _checkpoint_delta_entries(path: Path, head: Mapping[str, Any] | None, fingerprint: str, count: int) -> tuple[list[Mapping[str, Any]], list[Path]]:
+def _checkpoint_delta_entries(
+    path: Path, head: Mapping[str, Any] | None, fingerprint: str, count: int
+) -> tuple[list[Mapping[str, Any]], list[Path]]:
     entries: list[Mapping[str, Any]] = []
     nodes: list[Path] = []
     seen: set[str] = set()
@@ -1109,12 +1128,27 @@ def _execution_parts(execution: CellExecution) -> tuple[dict[str, Any] | None, A
         return dict(envelope["row"]), None
     if envelope.get("kind") == "failure" and isinstance(envelope.get("failure"), Mapping):
         from .artifact import ArmFailure
+
         document = envelope["failure"]
-        return None, ArmFailure(document["arm"], document["scenario"], document["category"], document["detail"], MatrixKey(**document["matrix_key"]))
+        return None, ArmFailure(
+            document["arm"],
+            document["scenario"],
+            document["category"],
+            document["detail"],
+            MatrixKey(**document["matrix_key"]),
+        )
     raise ValueError("worker returned no terminal cell result")
 
 
-def _write_checkpoint_v2(path: Path, config: ExperimentConfig, selection: Mapping[str, Any], fingerprint: str, jobs: Sequence[MatrixJob], source_revision: str, executions: Sequence[CellExecution]) -> None:
+def _write_checkpoint_v2(
+    path: Path,
+    config: ExperimentConfig,
+    selection: Mapping[str, Any],
+    fingerprint: str,
+    jobs: Sequence[MatrixJob],
+    source_revision: str,
+    executions: Sequence[CellExecution],
+) -> None:
     """Publish one immutable cell object and one constant-size delta per acceptance."""
     head: Mapping[str, Any] | None = None
     count = 0
@@ -1123,7 +1157,14 @@ def _write_checkpoint_v2(path: Path, config: ExperimentConfig, selection: Mappin
         required = _checkpoint_manifest(path, config, selection, fingerprint, jobs, source_revision)
         if not isinstance(document, Mapping) or document.get("schema_version") != 2:
             raise ValueError("checkpoint schema mismatch")
-        for manifest_field in ("checkpoint_schema", "config", "horizon_selection", "job_fingerprint", "run_fingerprint", "source_revision"):
+        for manifest_field in (
+            "checkpoint_schema",
+            "config",
+            "horizon_selection",
+            "job_fingerprint",
+            "run_fingerprint",
+            "source_revision",
+        ):
             if document.get(manifest_field) != required[manifest_field]:
                 raise ValueError(f"checkpoint {manifest_field} mismatch")
         head = document.get("head")
@@ -1170,7 +1211,9 @@ def _write_checkpoint_v2(path: Path, config: ExperimentConfig, selection: Mappin
         else:
             _write_bytes_atomically(delta_path, delta_bytes)
         head = {"name": delta_path.name, "sha256": delta_digest}
-        manifest = _checkpoint_manifest(path, config, selection, fingerprint, jobs, source_revision, head=head, count=count)
+        manifest = _checkpoint_manifest(
+            path, config, selection, fingerprint, jobs, source_revision, head=head, count=count
+        )
         _write_text_atomically(path, json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
 
 
@@ -1179,17 +1222,39 @@ def _row_matrix_key(row: ScenarioResult) -> MatrixKey:
 
 
 def _document_matrix_key(document: Mapping[str, Any]) -> MatrixKey:
-    return MatrixKey(str(document["arm"]), str(document["initialization"]), str(document["plant"]), str(document["mode"]), str(document["scenario"]), int(document["seed"]), int(document["mpc_horizon_s"]))
+    return MatrixKey(
+        str(document["arm"]),
+        str(document["initialization"]),
+        str(document["plant"]),
+        str(document["mode"]),
+        str(document["scenario"]),
+        int(document["seed"]),
+        int(document["mpc_horizon_s"]),
+    )
 
 
-def _load_checkpoint_v2(path: Path | None, config: ExperimentConfig, selection: Mapping[str, Any], fingerprint: str, jobs: Sequence[MatrixJob], source_revision: str) -> tuple[list[ScenarioResult], list[Any], set[int]]:
+def _load_checkpoint_v2(
+    path: Path | None,
+    config: ExperimentConfig,
+    selection: Mapping[str, Any],
+    fingerprint: str,
+    jobs: Sequence[MatrixJob],
+    source_revision: str,
+) -> tuple[list[ScenarioResult], list[Any], set[int]]:
     if path is None or not path.exists():
         return [], [], set()
     document = json.loads(path.read_text(encoding="utf-8"))
     required = _checkpoint_manifest(path, config, selection, fingerprint, jobs, source_revision)
     if not isinstance(document, Mapping) or document.get("schema_version") != 2:
         raise ValueError("checkpoint schema mismatch")
-    for manifest_field in ("checkpoint_schema", "config", "horizon_selection", "job_fingerprint", "run_fingerprint", "source_revision"):
+    for manifest_field in (
+        "checkpoint_schema",
+        "config",
+        "horizon_selection",
+        "job_fingerprint",
+        "run_fingerprint",
+        "source_revision",
+    ):
         if document.get(manifest_field) != required[manifest_field]:
             raise ValueError(f"checkpoint {manifest_field} mismatch")
     count = document.get("accepted_count")
@@ -1207,7 +1272,9 @@ def _load_checkpoint_v2(path: Path | None, config: ExperimentConfig, selection: 
             raise ValueError("duplicate checkpoint object reference")
         referenced_names.add(object_path.name)
         compressed = object_path.read_bytes()
-        if len(compressed) != entry.get("compressed_bytes") or hashlib.sha256(compressed).hexdigest() != entry.get("compressed_sha256"):
+        if len(compressed) != entry.get("compressed_bytes") or hashlib.sha256(compressed).hexdigest() != entry.get(
+            "compressed_sha256"
+        ):
             raise ValueError("checkpoint object checksum mismatch")
         canonical = gzip.decompress(compressed)
         if hashlib.sha256(canonical).hexdigest() != entry.get("sha256"):
@@ -1216,13 +1283,23 @@ def _load_checkpoint_v2(path: Path | None, config: ExperimentConfig, selection: 
         if not isinstance(payload, Mapping) or payload.get("run_fingerprint") != fingerprint:
             raise ValueError("checkpoint object fingerprint mismatch")
         ordinals, keys = payload.get("cell_ordinals"), payload.get("matrix_keys")
-        if not isinstance(ordinals, list) or not isinstance(keys, list) or len(ordinals) != 1 or len(keys) != 1 or entry.get("cell_ordinals") != ordinals:
+        if (
+            not isinstance(ordinals, list)
+            or not isinstance(keys, list)
+            or len(ordinals) != 1
+            or len(keys) != 1
+            or entry.get("cell_ordinals") != ordinals
+        ):
             raise ValueError("invalid checkpoint bundle membership")
         ordinal = ordinals[0]
         if not isinstance(ordinal, int) or ordinal in completed or expected.get(ordinal) != keys[0]:
             raise ValueError("duplicate or out-of-matrix checkpoint cell")
         stored_rows, stored_failures = payload.get("rows"), payload.get("failures")
-        if not isinstance(stored_rows, list) or not isinstance(stored_failures, list) or len(stored_rows) + len(stored_failures) != 1:
+        if (
+            not isinstance(stored_rows, list)
+            or not isinstance(stored_failures, list)
+            or len(stored_rows) + len(stored_failures) != 1
+        ):
             raise ValueError("invalid checkpoint terminal result")
         if stored_rows:
             row = _scenario_from_document(dict(stored_rows[0]))
@@ -1231,8 +1308,15 @@ def _load_checkpoint_v2(path: Path | None, config: ExperimentConfig, selection: 
             rows.append(row)
         else:
             from .artifact import ArmFailure
+
             failure_document = stored_failures[0]
-            failure = ArmFailure(failure_document["arm"], failure_document["scenario"], failure_document["category"], failure_document["detail"], MatrixKey(**failure_document["matrix_key"]))
+            failure = ArmFailure(
+                failure_document["arm"],
+                failure_document["scenario"],
+                failure_document["category"],
+                failure_document["detail"],
+                MatrixKey(**failure_document["matrix_key"]),
+            )
             if failure.matrix_key is None or failure.matrix_key.to_document() != expected[ordinal]:
                 raise ValueError("checkpoint failure key mismatch")
             failures.append(failure)
@@ -1246,7 +1330,11 @@ def _remove_checkpoint_v2(path: Path | None) -> None:
         return
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(document, Mapping) or document.get("checkpoint_schema") != _CHECKPOINT_SCHEMA or document.get("schema_version") != 2:
+        if (
+            not isinstance(document, Mapping)
+            or document.get("checkpoint_schema") != _CHECKPOINT_SCHEMA
+            or document.get("schema_version") != 2
+        ):
             return
         count = document.get("accepted_count")
         fingerprint = document.get("run_fingerprint")
@@ -1254,7 +1342,7 @@ def _remove_checkpoint_v2(path: Path | None) -> None:
             return
         entries, nodes = _checkpoint_delta_entries(path, document.get("head"), fingerprint, count)
         objects = [_checkpoint_entry_path(path, entry) for entry in entries]
-    except (OSError, ValueError, json.JSONDecodeError):
+    except OSError, ValueError, json.JSONDecodeError:
         return
     path.unlink()
     for object_path in objects:
@@ -1263,9 +1351,7 @@ def _remove_checkpoint_v2(path: Path | None) -> None:
         node_path.unlink(missing_ok=True)
 
 
-def _adaptation_settings(
-    arm: str, snapshot: Mapping[str, Any]
-) -> tuple[AdaptationPolicy, AlignmentEvidence]:
+def _adaptation_settings(arm: str, snapshot: Mapping[str, Any]) -> tuple[AdaptationPolicy, AlignmentEvidence]:
     """Derive arm-local promotion limits from the retained training snapshot."""
     bounds = snapshot.get("plausibility_bounds")
     if not isinstance(bounds, Mapping):
@@ -1273,11 +1359,7 @@ def _adaptation_settings(
     maximum = bounds.get("max_steady_gain_c_per_q", bounds.get("max_dc_gain_c_per_q"))
     if not isinstance(maximum, (int, float)) or not np.isfinite(maximum) or maximum <= 0.0:
         raise ValueError(f"{arm} snapshot has no finite training gain bound")
-    alignment = (
-        AlignmentEvidence.MEASURED
-        if arm == "state-space"
-        else AlignmentEvidence.NOT_APPLICABLE
-    )
+    alignment = AlignmentEvidence.MEASURED if arm == "state-space" else AlignmentEvidence.NOT_APPLICABLE
     return AdaptationPolicy(max_gain=float(maximum)), alignment
 
 
@@ -1301,12 +1383,8 @@ def _window_free_run_scores(
             q = np.asarray([float(item["q"]) for item in future], dtype=np.float64)
             ambient = np.asarray([float(item["ambient_c"]) for item in future], dtype=np.float64)
             actual = np.asarray([float(item["temp_c"]) for item in future], dtype=np.float64)
-            candidate = origin["challenger"].affine_prediction(
-                steps, float(origin["q_previous"]), ambient
-            )
-            incumbent = origin["incumbent"].affine_prediction(
-                steps, float(origin["q_previous"]), ambient
-            )
+            candidate = origin["challenger"].affine_prediction(steps, float(origin["q_previous"]), ambient)
+            incumbent = origin["incumbent"].affine_prediction(steps, float(origin["q_previous"]), ambient)
             candidate_prediction = candidate.free_output_c + candidate.input_response_c @ q
             incumbent_prediction = incumbent.free_output_c + incumbent.input_response_c @ q
             candidate_error = float(np.sqrt(np.mean((candidate_prediction - actual) ** 2)))
@@ -1342,10 +1420,6 @@ def _window_free_run_scores(
     )
 
 
-
-
-
-
 def _run_scenario(
     definition: ScenarioDefinition,
     *,
@@ -1364,13 +1438,11 @@ def _run_scenario(
     if mode not in {"frozen", "online"}:
         raise ValueError(f"unknown mode {mode!r}")
     simulator = plant_type(seed=seed, fixed_fan=_FIXED_FAN)
-    realizer = PulseRealizer(frame_s=_FRAME_S, quantum_s=5.0)
+    realizer = PulseSimulationDriver()
     mpc_config = MPCConfig(horizon_s=horizon_s, frame_s=_FRAME_S, tolerance=1e-3)
     controller = LinearMPC(mpc_config)
     if prepared is None:
-        model, fit_ms, before_residuals, after_residuals, calibration = _fitted_model(
-            arm, plant, seed, initialization
-        )
+        model, fit_ms, before_residuals, after_residuals, calibration = _fitted_model(arm, plant, seed, initialization)
         diagnostics = _simulator_prediction_diagnostics(arm, plant, seed, initialization)
     else:
         if prepared.origin != (arm, initialization, plant, seed):
@@ -1429,7 +1501,11 @@ def _run_scenario(
             solve = controller.solve(prediction, setpoint_c=target, q_previous=frame.requested_duty)
             elapsed_solve_ms = (perf_counter() - solve_started) * 1_000.0
             solve_ms.append(elapsed_solve_ms)
-            if not np.isfinite(solve.objective) or not np.isfinite(solve.kkt_residual) or solve.kkt_residual > mpc_config.tolerance:
+            if (
+                not np.isfinite(solve.objective)
+                or not np.isfinite(solve.kkt_residual)
+                or solve.kkt_residual > mpc_config.tolerance
+            ):
                 raise ScientificRejection(
                     f"solver certificate failed: kkt={solve.kkt_residual!r}, iterations={solve.iterations}"
                 )
@@ -1442,12 +1518,8 @@ def _run_scenario(
                 "converged": True,
             }
             if second % 100 == 0:
-                hessian, linear = condense_cost(
-                    prediction, target, frame.requested_duty, mpc_config.weights
-                )
-                reference = _independent_box_qp_reference(
-                    hessian, linear, solve.sequence_q
-                )
+                hessian, linear = condense_cost(prediction, target, frame.requested_duty, mpc_config.weights)
+                reference = _independent_box_qp_reference(hessian, linear, solve.sequence_q)
                 evidence.update(reference)
                 if reference["reference_converged"]:
                     evidence["objective_gap"] = solve.objective - float(reference["reference_objective"])
@@ -1475,11 +1547,7 @@ def _run_scenario(
             state = (
                 OperatingState.COAST
                 if frame.realized_duty <= 0.05
-                else (
-                    OperatingState.HOLD
-                    if target == definition.target_low_c
-                    else OperatingState.TRANSIENT
-                )
+                else (OperatingState.HOLD if target == definition.target_low_c else OperatingState.TRANSIENT)
             )
             role_generation = manager.role_generation
             braking = state is OperatingState.COAST or target < previous_observation_target
@@ -1535,9 +1603,7 @@ def _run_scenario(
                 )
             if mode == "online" and (second + 1) % 300 == 0:
                 score_window = [
-                    sample
-                    for sample in free_run_window
-                    if sample["role_generation"] == manager.role_generation
+                    sample for sample in free_run_window if sample["role_generation"] == manager.role_generation
                 ]
                 free_run_window.clear()
                 if len(score_window) < 2:
@@ -1562,9 +1628,7 @@ def _run_scenario(
                         "score_role_generation": role_generation,
                         "score_role_generations": [role_generation],
                         "horizon_metrics": score_evidence["horizon_metrics"],
-                        "braking_or_coast_sample_count": score_evidence[
-                            "braking_or_coast_sample_count"
-                        ],
+                        "braking_or_coast_sample_count": score_evidence["braking_or_coast_sample_count"],
                         "candidate_snapshot": _json_value(decision.candidate_snapshot),
                         "incumbent_snapshot": _json_value(decision.incumbent_snapshot),
                     }
@@ -1636,6 +1700,8 @@ def _run_scenario(
         promotion_history=tuple(promotion_history),
         solver_evidence=tuple(solver_evidence),
     )
+
+
 def _fitted_model(arm: str, plant: str, seed: int, initialization: str):
     model, fit_ms, before, after, record = _prepared_model(arm, plant, seed, initialization)
     return (
@@ -1690,7 +1756,6 @@ def _calibration_record(plant: str, seed: int) -> SignalRecord:
     return generate_calibration_record(plant, seed, program)
 
 
-
 def _simulator_boundaries(plant: str, samples: int) -> tuple[int, int]:
     """Return fixed chronological endpoints independent of scenario duration."""
     if plant == "MAKGrillSim":
@@ -1700,6 +1765,7 @@ def _simulator_boundaries(plant: str, samples: int) -> tuple[int, int]:
     if not 2 <= fit_end < validation_end < samples:
         raise ValueError(f"{plant} calibration record cannot support fixed splits")
     return fit_end, validation_end
+
 
 def _identification_records(plant: str, seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:
     """Return deterministic per-domain calibration evidence and an initial mismatch."""
@@ -1715,9 +1781,7 @@ def _identification_records(plant: str, seed: int, initialization: str) -> tuple
     else:
         raise ValueError(f"unknown initialization {initialization!r}")
     temperatures = (
-        record.ambient_c + (record.temp_c - record.ambient_c) * 1.6
-        if initialization == "wrong-pole"
-        else record.temp_c
+        record.ambient_c + (record.temp_c - record.ambient_c) * 1.6 if initialization == "wrong-pole" else record.temp_c
     )
     return record, SignalRecord(
         record.time_s,
@@ -1741,7 +1805,9 @@ def _model_for_initialization(arm: str, initialization: str):
     if arm == "dmc":
         configs = {
             "correct": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(0, 20, 40)),
-            "wrong-gain": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(0, 20, 40), final_gain_bounds=(1e-6, 0.2)),
+            "wrong-gain": DMCConfig(
+                terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(0, 20, 40), final_gain_bounds=(1e-6, 0.2)
+            ),
             "wrong-pole": DMCConfig(terms=(2, 3), poles=(0.05, 0.15), delay_seconds=(0, 20, 40)),
             "wrong-delay": DMCConfig(terms=(2, 3), poles=(0.3, 0.6), delay_seconds=(60, 80, 100)),
         }
@@ -1781,6 +1847,8 @@ def _record_slice(record: SignalRecord, begin: int, end: int) -> SignalRecord:
         record.provenance,
         metadata=dict(record.metadata),
     )
+
+
 def _horizon_residuals(
     model: Any,
     record: SignalRecord,
@@ -1807,17 +1875,13 @@ def _horizon_residuals(
     return residuals
 
 
-def _simulator_prediction_diagnostics(
-    arm: str, plant: str, seed: int, initialization: str
-) -> dict[str, Any]:
+def _simulator_prediction_diagnostics(arm: str, plant: str, seed: int, initialization: str) -> dict[str, Any]:
     """Publish diagnostics for legacy callers from their cached prepared origin."""
     model, _, _, _, record = _prepared_model(arm, plant, seed, initialization)
     return _simulator_prediction_diagnostics_from_model(model, record, plant)
 
 
-def _simulator_prediction_diagnostics_from_model(
-    model: Any, record: SignalRecord, plant: str
-) -> dict[str, Any]:
+def _simulator_prediction_diagnostics_from_model(model: Any, record: SignalRecord, plant: str) -> dict[str, Any]:
     """Publish raw untouched suffix forecasts from an already fitted origin."""
     fit_end, validation_end = _simulator_boundaries(plant, record.temp_c.size)
     diagnostics: dict[str, Any] = {}
@@ -1826,24 +1890,17 @@ def _simulator_prediction_diagnostics_from_model(
         origins: list[dict[str, Any]] = []
         residuals: list[float] = []
         coast_braking_residuals: list[float] = []
-        for start in range(
-            validation_end, record.temp_c.size - steps + 1, max(1, steps // 6)
-        ):
+        for start in range(validation_end, record.temp_c.size - steps + 1, max(1, steps // 6)):
             predicted = model.forecast(
                 _record_slice(record, 0, start),
                 record.q[start : start + steps],
                 record.ambient_c[start : start + steps],
             )
-            values = [
-                float(value)
-                for value in predicted - record.temp_c[start : start + steps]
-            ]
+            values = [float(value) for value in predicted - record.temp_c[start : start + steps]]
             coast_mask, braking_mask = _coast_braking_masks(record, start, steps)
             selected = [
                 value
-                for value, coast, braking in zip(
-                    values, coast_mask, braking_mask, strict=True
-                )
+                for value, coast, braking in zip(values, coast_mask, braking_mask, strict=True)
                 if coast or braking
             ]
             residuals.extend(values)
@@ -1855,8 +1912,7 @@ def _simulator_prediction_diagnostics_from_model(
                     "coast_mask": coast_mask,
                     "braking_mask": braking_mask,
                     "coast_or_braking_mask": [
-                        coast or braking
-                        for coast, braking in zip(coast_mask, braking_mask, strict=True)
+                        coast or braking for coast, braking in zip(coast_mask, braking_mask, strict=True)
                     ],
                     "residuals_c": values,
                     "coast_braking_residuals_c": selected,
@@ -1875,13 +1931,9 @@ def _simulator_prediction_diagnostics_from_model(
             "max_abs_error_c": float(np.max(np.abs(values))),
             "bias_c": float(np.mean(values)),
             "p90_abs_error_c": float(np.percentile(np.abs(values), 90.0)),
-            "coast_braking_temperature_error_c": (
-                float(np.mean(np.abs(masked))) if masked.size else None
-            ),
+            "coast_braking_temperature_error_c": (float(np.mean(np.abs(masked))) if masked.size else None),
             "steady_gain_error_c_per_q": _steady_gain_error(model.snapshot(), record),
-            "delay_error_s": _delay_error_s(
-                model.snapshot(), record, validation_end
-            ),
+            "delay_error_s": _delay_error_s(model.snapshot(), record, validation_end),
         }
     return {
         "boundaries": {
@@ -1893,18 +1945,13 @@ def _simulator_prediction_diagnostics_from_model(
     }
 
 
-def _coast_braking_masks(
-    record: SignalRecord, start: int, steps: int
-) -> tuple[list[bool], list[bool]]:
+def _coast_braking_masks(record: SignalRecord, start: int, steps: int) -> tuple[list[bool], list[bool]]:
     """Classify each future point; never apply a horizon-wide surrogate label."""
     future_q = record.q[start : start + steps]
     preceding_q = np.concatenate(([record.q[start - 1]], future_q[:-1]))
     return (
         [bool(value <= 0.05) for value in future_q],
-        [
-            bool(value < previous - 1e-9)
-            for value, previous in zip(future_q, preceding_q, strict=True)
-        ],
+        [bool(value < previous - 1e-9) for value, previous in zip(future_q, preceding_q, strict=True)],
     )
 
 
@@ -1917,16 +1964,11 @@ def _steady_gain_error(snapshot: Mapping[str, object], record: SignalRecord) -> 
     fitted = snapshot.get("steady_gain")
     if not isinstance(fitted, (int, float)) or not np.isfinite(fitted):
         raise ValueError("fitted model lacks a finite steady_gain diagnostic")
-    observed = float(
-        (np.mean(record.temp_c[half:]) - np.mean(record.temp_c[:half]))
-        / observed_delta_q
-    )
+    observed = float((np.mean(record.temp_c[half:]) - np.mean(record.temp_c[:half])) / observed_delta_q)
     return float(abs(float(fitted) - observed))
 
 
-def _delay_error_s(
-    snapshot: Mapping[str, object], record: SignalRecord, test_start: int
-) -> float:
+def _delay_error_s(snapshot: Mapping[str, object], record: SignalRecord, test_start: int) -> float:
     """Estimate delay against the untouched simulator suffix."""
     delay_steps = snapshot.get("delay_steps")
     if not isinstance(delay_steps, (int, float)):
@@ -1939,9 +1981,7 @@ def _delay_error_s(
     limit = min(15, inputs.size - 1)
     observed = max(
         range(limit + 1),
-        key=lambda lag: abs(
-            float(np.dot(inputs[: inputs.size - lag], outputs[lag:]))
-        ),
+        key=lambda lag: abs(float(np.dot(inputs[: inputs.size - lag], outputs[lag:]))),
     )
     return float(abs(fitted - observed) * _FRAME_S)
 
@@ -1964,12 +2004,20 @@ def _refresh_marker(snapshot: Mapping[str, object]) -> tuple[int, float | None]:
 def _row_key(row: ScenarioResult) -> tuple[str, str, str, str, str, int, int]:
     return (row.arm, row.initialization, row.plant, row.scenario, row.mode, row.seed, row.mpc_horizon_s)
 
+
 def _failure_sort_key(failure: Any) -> tuple[Any, ...]:
     key = getattr(failure, "matrix_key", None)
     if key is not None:
         return (
-            key.arm, key.initialization, key.plant, key.mode, key.scenario,
-            key.seed, key.mpc_horizon_s, failure.category, failure.detail,
+            key.arm,
+            key.initialization,
+            key.plant,
+            key.mode,
+            key.scenario,
+            key.seed,
+            key.mpc_horizon_s,
+            failure.category,
+            failure.detail,
         )
     return (failure.arm, "", "", "", failure.scenario, -1, -1, failure.category, failure.detail)
 
@@ -2007,6 +2055,7 @@ def _horizon_selection_document(
     }
     return document
 
+
 def _metrics(
     temperatures: list[float],
     targets: list[float],
@@ -2027,14 +2076,12 @@ def _metrics(
     absolute = np.abs(error)
     overshoot = float(np.max(error))
     undershoot = float(max(0.0, -np.min(error)))
-    hold = np.asarray(temperatures[-min(60, len(temperatures)):])
+    hold = np.asarray(temperatures[-min(60, len(temperatures)) :])
     settled = next((index for index in range(len(error)) if np.all(absolute[index:] <= 3.0)), None)
     score = float(np.sqrt(np.mean(error**2)) + np.mean(absolute) + 0.5 * max(overshoot, 0.0))
     before_mae, after_mae = managed_recovery if managed_recovery is not None else (None, None)
     recovery_ratio = (
-        after_mae / before_mae
-        if before_mae is not None and after_mae is not None and before_mae > 0.0
-        else None
+        after_mae / before_mae if before_mae is not None and after_mae is not None and before_mae > 0.0 else None
     )
     return {
         "control_score": score,
@@ -2077,8 +2124,6 @@ def _metric_float(metrics: dict[str, float | int | None], name: str) -> float:
     return float(value)
 
 
-
-
 def _json_value(value: Any) -> Any:
     """Convert model snapshots to immutable-artifact JSON scalars and sequences."""
     if isinstance(value, Mapping):
@@ -2090,14 +2135,15 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, tuple | list):
         return [_json_value(item) for item in value]
     return value
+
+
 def _p99(values: list[float] | tuple[float, ...]) -> float:
     return float(np.percentile(values, 99.0)) if values else 0.0
 
 
-def _independent_box_qp_reference(
-    hessian: np.ndarray, linear: np.ndarray, start: np.ndarray
-) -> dict[str, Any]:
+def _independent_box_qp_reference(hessian: np.ndarray, linear: np.ndarray, start: np.ndarray) -> dict[str, Any]:
     """Use SciPy L-BFGS-B, independent of the controller's projected gradient."""
+
     def objective(x: np.ndarray) -> float:
         return float(0.5 * x @ hessian @ x + linear @ x)
 
@@ -2142,9 +2188,7 @@ def _independent_box_qp_reference(
         }
 
 
-def _aggregate_simulator_diagnostics(
-    by_domain: Mapping[str, Mapping[str, Any]]
-) -> tuple[dict[str, Any], bool]:
+def _aggregate_simulator_diagnostics(by_domain: Mapping[str, Mapping[str, Any]]) -> tuple[dict[str, Any], bool]:
     """Aggregate every simulator arm/domain/mode/initialization diagnostic."""
     metric_names = (
         "rmse_c",
@@ -2167,27 +2211,20 @@ def _aggregate_simulator_diagnostics(
             if not isinstance(evidence, Mapping):
                 valid = False
                 continue
-            values = {
-                metric: evidence.get(metric)
-                for metric in metric_names
-            }
+            values = {metric: evidence.get(metric) for metric in metric_names}
             values["origin_count"] = evidence.get("origin_count")
-            values["coast_braking_sample_count"] = evidence.get(
-                "coast_braking_sample_count"
-            )
+            values["coast_braking_sample_count"] = evidence.get("coast_braking_sample_count")
             domain_values[str(horizon)] = values
-            valid = valid and all(
-                isinstance(value, (int, float)) and np.isfinite(value)
-                for value in values.values()
-            ) and values["origin_count"] > 0 and values["coast_braking_sample_count"] > 0
+            valid = (
+                valid
+                and all(isinstance(value, (int, float)) and np.isfinite(value) for value in values.values())
+                and values["origin_count"] > 0
+                and values["coast_braking_sample_count"] > 0
+            )
         domains[domain] = domain_values
     aggregate: dict[str, Any] = {}
     for horizon in ("60", "300", "900", "1800", "3600"):
-        values = [
-            diagnostics[horizon]
-            for diagnostics in domains.values()
-            if horizon in diagnostics
-        ]
+        values = [diagnostics[horizon] for diagnostics in domains.values() if horizon in diagnostics]
         if len(values) != len(domains):
             valid = False
             continue
@@ -2199,22 +2236,26 @@ def _aggregate_simulator_diagnostics(
             )
             for metric in metric_names
         }
-        aggregate[horizon]["origin_count"] = int(
-            sum(value["origin_count"] for value in values)
-        )
+        aggregate[horizon]["origin_count"] = int(sum(value["origin_count"] for value in values))
         aggregate[horizon]["coast_braking_sample_count"] = int(
             sum(value["coast_braking_sample_count"] for value in values)
         )
     return {"by_domain": domains, "aggregate": aggregate}, valid
 
 
-def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], failures=(), *, selection: Mapping[str, Any] | None = None, execution_metadata: Sequence[Mapping[str, Any]] = (), source_revision: str | None = None) -> ExperimentArtifact:
+def _artifact_from_rows(
+    config: ExperimentConfig,
+    rows: list[ScenarioResult],
+    failures=(),
+    *,
+    selection: Mapping[str, Any] | None = None,
+    execution_metadata: Sequence[Mapping[str, Any]] = (),
+    source_revision: str | None = None,
+) -> ExperimentArtifact:
     """Reduce rows strictly in full matrix identity, never executor arrival order."""
     ordered_rows = sorted(rows, key=_row_key)
     by_arm: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    prediction_origins: dict[str, dict[str, dict[str, tuple[float, ...]]]] = defaultdict(
-        lambda: defaultdict(dict)
-    )
+    prediction_origins: dict[str, dict[str, dict[str, tuple[float, ...]]]] = defaultdict(lambda: defaultdict(dict))
     recovery: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     timings: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     seen_evidence: set[tuple[str, str]] = set()
@@ -2227,9 +2268,7 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
         if isinstance(diagnostic, Mapping) and domain not in simulator_documents[row.arm]:
             simulator_documents[row.arm][domain] = diagnostic
         if row.initialization == "correct":
-            correct_scores[(row.arm, row.plant, row.mode)].append(
-                _metric_float(row.metrics, "control_score")
-            )
+            correct_scores[(row.arm, row.plant, row.mode)].append(_metric_float(row.metrics, "control_score"))
         evidence_key = (row.arm, row.evidence_id)
         if evidence_key not in seen_evidence:
             seen_evidence.add(evidence_key)
@@ -2248,10 +2287,7 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
         timings[row.arm]["learner"].extend(row.raw_learner_ms)
         timings[row.arm]["refresh"].extend(row.raw_refresh_ms)
         timings[row.arm]["solve"].extend(row.raw_solve_ms)
-    simulator_aggregates = {
-        arm: _aggregate_simulator_diagnostics(simulator_documents[arm])
-        for arm in by_arm
-    }
+    simulator_aggregates = {arm: _aggregate_simulator_diagnostics(simulator_documents[arm]) for arm in by_arm}
     arm_values: list[ArmEvidence] = []
     for arm, domains in sorted(by_arm.items()):
         diagnostics, diagnostics_valid = simulator_aggregates[arm]
@@ -2259,39 +2295,28 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
         prediction_error = (
             float(sixty_minute["rmse_c"])
             if isinstance(sixty_minute, Mapping)
-            else _mean_or_none(_flatten_origins(prediction_origins[arm].get("600", {})))
-            or 0.0
+            else _mean_or_none(_flatten_origins(prediction_origins[arm].get("600", {}))) or 0.0
         )
         diagnostic_values = sixty_minute if isinstance(sixty_minute, Mapping) else {}
         arm_values.append(
             ArmEvidence(
                 name=arm,
-                domain_median_scores={
-                    domain: float(median(scores))
-                    for domain, scores in sorted(domains.items())
-                },
+                domain_median_scores={domain: float(median(scores)) for domain, scores in sorted(domains.items())},
                 ranking_domain_scores={
                     plant: float(median(scores))
                     for (candidate_arm, plant, mode), scores in sorted(correct_scores.items())
                     if candidate_arm == arm and mode == "online"
                 },
                 correct_baseline_no_degradation=all(
-                    float(median(scores))
-                    <= float(median(correct_scores[(arm, plant, "frozen")])) * 1.01
+                    float(median(scores)) <= float(median(correct_scores[(arm, plant, "frozen")])) * 1.01
                     for (candidate_arm, plant, mode), scores in correct_scores.items()
-                    if candidate_arm == arm
-                    and mode == "online"
-                    and (arm, plant, "frozen") in correct_scores
+                    if candidate_arm == arm and mode == "online" and (arm, plant, "frozen") in correct_scores
                 ),
                 prediction_error=prediction_error,
                 before_mae=_mean_or_none(recovery[arm]["recovery_before_mae_c"]) or 0.0,
                 after_mae=_mean_or_none(recovery[arm]["recovery_after_mae_c"]) or 0.0,
-                recovery_improvement_ratio=(
-                    _mean_or_none(recovery[arm]["recovery_improvement_ratio"]) or 0.0
-                ),
-                recovery_improvement_delta=(
-                    _mean_or_none(recovery[arm]["recovery_improvement_delta_c"]) or 0.0
-                ),
+                recovery_improvement_ratio=(_mean_or_none(recovery[arm]["recovery_improvement_ratio"]) or 0.0),
+                recovery_improvement_delta=(_mean_or_none(recovery[arm]["recovery_improvement_delta_c"]) or 0.0),
                 recovery_available=bool(recovery[arm]["recovery_improvement_ratio"]),
                 raw_solve_p99_ms=_p99(timings[arm]["solve"]),
                 raw_learner_ms=tuple(timings[arm]["learner"]),
@@ -2301,13 +2326,9 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
                 simulator_diagnostics=diagnostics,
                 simulator_diagnostics_available=bool(diagnostics["aggregate"]),
                 simulator_diagnostics_valid=diagnostics_valid,
-                simulator_gain_error_c_per_q=float(
-                    diagnostic_values.get("steady_gain_error_c_per_q", 0.0)
-                ),
+                simulator_gain_error_c_per_q=float(diagnostic_values.get("steady_gain_error_c_per_q", 0.0)),
                 simulator_delay_error_s=float(diagnostic_values.get("delay_error_s", 0.0)),
-                simulator_coast_braking_error_c=float(
-                    diagnostic_values.get("coast_braking_temperature_error_c", 0.0)
-                ),
+                simulator_coast_braking_error_c=float(diagnostic_values.get("coast_braking_temperature_error_c", 0.0)),
                 target_missed=prediction_error > 5.0,
                 operational_consequence=(
                     "not deployment-ready for 60-minute prediction; retain experiment-only use"
@@ -2337,10 +2358,7 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
             **config.to_document(),
             "execution_metadata": {
                 "blas_threads": config.blas_threads or 1,
-                "cells": [
-                    dict(item)
-                    for item in sorted(execution_metadata, key=lambda item: int(item["ordinal"]))
-                ],
+                "cells": [dict(item) for item in sorted(execution_metadata, key=lambda item: int(item["ordinal"]))],
                 "workers": config.workers,
             },
             "horizon_selection": selection,
@@ -2364,10 +2382,7 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
                 }
                 for arm in ("scheduled-arx", "dmc", "state-space")
             },
-            "fitted_by_domain": {
-                row.evidence_id: dict(row.model_evidence or {})
-                for row in ordered_rows
-            },
+            "fitted_by_domain": {row.evidence_id: dict(row.model_evidence or {}) for row in ordered_rows},
         },
         scenarios=tuple(ordered_rows),
         arms=arms,
@@ -2427,9 +2442,7 @@ def _real_mak_evidence(arm: str) -> dict[str, Any]:
         scored_candidates: list[tuple[float, Any]] = []
         for candidate in candidates:
             candidate.fit(fit_record)
-            validation = _horizon_residuals(
-                candidate, record, starts=validation_starts, horizons_s=(60, 300)
-            )
+            validation = _horizon_residuals(candidate, record, starts=validation_starts, horizons_s=(60, 300))
             score = _mean_or_none(validation[300]) or _mean_or_none(validation[60])
             if score is not None:
                 scored_candidates.append((score, candidate))
@@ -2443,15 +2456,10 @@ def _real_mak_evidence(arm: str) -> dict[str, Any]:
             horizons_s=(60, 300, 900, 1800, 3600),
         )
         result["diagnostics_c"] = {
-            str(horizon): _mean_or_none(values)
-            for horizon, values in sorted(diagnostics.items())
+            str(horizon): _mean_or_none(values) for horizon, values in sorted(diagnostics.items())
         }
-        result["origins"] = {
-            str(horizon): list(values) for horizon, values in sorted(diagnostics.items())
-        }
-        result["validation_candidate_scores"] = [
-            float(score) for score, _ in scored_candidates
-        ]
+        result["origins"] = {str(horizon): list(values) for horizon, values in sorted(diagnostics.items())}
+        result["validation_candidate_scores"] = [float(score) for score, _ in scored_candidates]
         result["fitted"] = _json_value(model.snapshot())
     except Exception as error:
         result["failure"] = f"{type(error).__name__}: {error}"
@@ -2467,6 +2475,7 @@ def _real_mak_boundaries(samples: int) -> tuple[int, int]:
     if not 2 <= fit_end < validation_end < samples:
         raise ValueError("fixture cannot support chronological fit, validation, and test")
     return fit_end, validation_end
+
 
 def _split_evidence(config: ExperimentConfig) -> dict[str, Any]:
     """Persist actual index/time boundaries for every immutable domain record."""
@@ -2503,7 +2512,15 @@ def _bootstrap_ci(origins: Mapping[str, tuple[float, ...]]) -> list[float]:
         return [0.0, 0.0]
     generator = np.random.default_rng(0)
     samples = [
-        float(np.mean([value for index in generator.integers(len(populated), size=len(populated)) for value in populated[index]]))
+        float(
+            np.mean(
+                [
+                    value
+                    for index in generator.integers(len(populated), size=len(populated))
+                    for value in populated[index]
+                ]
+            )
+        )
         for _ in range(1_000)
     ]
     return [float(np.percentile(samples, 2.5)), float(np.percentile(samples, 97.5))]
@@ -2512,6 +2529,7 @@ def _bootstrap_ci(origins: Mapping[str, tuple[float, ...]]) -> list[float]:
 def _source_revision() -> str:
     """Capture this workspace's immutable revision without reading mutable files."""
     import subprocess
+
     try:
         revision = subprocess.check_output(
             ["jj", "--ignore-working-copy", "--no-pager", "log", "-r", "@", "--no-graph", "-T", "commit_id"],

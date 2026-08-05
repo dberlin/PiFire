@@ -7,8 +7,9 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 from scipy.optimize import minimize
+from docs.superpowers.experiments.linear_mpc_bakeoff import actuation
 
-from docs.superpowers.experiments.linear_mpc_bakeoff.actuation import PulseRealizer
+from docs.superpowers.experiments.linear_mpc_bakeoff.actuation import PulseSimulationDriver
 from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import AffinePrediction
 from docs.superpowers.experiments.linear_mpc_bakeoff import linear_mpc
 from docs.superpowers.experiments.linear_mpc_bakeoff.linear_mpc import (
@@ -57,6 +58,7 @@ def test_projected_gradient_matches_scipy_reference() -> None:
     npt.assert_allclose(actual.x, expected, atol=1e-5)
     assert actual.kkt_residual < 1e-6
 
+
 @pytest.mark.parametrize("invalid", (np.nan, np.inf, -np.inf))
 def test_solver_result_rejects_nonfinite_sequence(invalid: float) -> None:
     with pytest.raises(ValueError, match="finite"):
@@ -67,11 +69,10 @@ def test_solver_result_rejects_nonfinite_sequence(invalid: float) -> None:
     ("objective", "kkt_residual"),
     ((np.nan, 0.0), (0.0, np.inf)),
 )
-def test_solver_result_rejects_nonfinite_certificate(
-    objective: float, kkt_residual: float
-) -> None:
+def test_solver_result_rejects_nonfinite_certificate(objective: float, kkt_residual: float) -> None:
     with pytest.raises(ValueError, match="finite"):
         SolveResult(np.array([0.5]), objective, 0, kkt_residual)
+
 
 def test_diagonally_scaled_active_set_certifies_ill_conditioned_box_qp() -> None:
     """The primary solver must certify original-coordinate KKT at condition 1e9."""
@@ -103,18 +104,14 @@ def test_solver_tolerates_roundoff_negative_eigenvalue_in_constructed_psd_hessia
     hessian = 0.5 * (hessian + hessian.T)
     assert np.linalg.eigvalsh(hessian)[0] < 0.0
 
-    result = projected_gradient_qp(
-        hessian, np.zeros(20), np.zeros(20), np.ones(20), np.zeros(20)
-    )
+    result = projected_gradient_qp(hessian, np.zeros(20), np.zeros(20), np.ones(20), np.zeros(20))
 
     npt.assert_array_equal(result.x, np.zeros(20))
     assert result.kkt_residual == 0.0
 
 
 def test_projected_gradient_respects_exact_box_bounds() -> None:
-    result = projected_gradient_qp(
-        np.eye(3), np.array([2.0, -2.0, -0.5]), np.zeros(3), np.ones(3), np.full(3, 0.5)
-    )
+    result = projected_gradient_qp(np.eye(3), np.array([2.0, -2.0, -0.5]), np.zeros(3), np.ones(3), np.full(3, 0.5))
 
     npt.assert_array_equal(result.x, np.array([0.0, 1.0, 0.5]))
 
@@ -145,6 +142,7 @@ def test_all_fixed_box_qp_has_zero_iterations() -> None:
     npt.assert_array_equal(result.x, np.array([0.2, 0.8]))
     assert result.iterations == 0
     assert result.kkt_residual == 0.0
+
 
 @pytest.mark.parametrize("max_iterations", (1, 2, 3, 4))
 def test_bvls_never_exceeds_the_public_iteration_cap(
@@ -201,7 +199,6 @@ def test_bvls_reserves_setup_and_initialization_from_the_public_cap(
     assert result.kkt_residual == 0.0
 
 
-
 @pytest.mark.parametrize(
     "bvls_x",
     (
@@ -234,6 +231,7 @@ def test_budget_exhausted_bvls_invalid_candidate_uses_bounded_fallback(
     assert np.isfinite(result.kkt_residual)
     assert result.kkt_residual <= 1e-12
 
+
 def test_zero_curvature_qp_selects_the_deterministic_bounded_linear_optimum() -> None:
     result = projected_gradient_qp(
         np.zeros((3, 3)),
@@ -248,9 +246,7 @@ def test_zero_curvature_qp_selects_the_deterministic_bounded_linear_optimum() ->
 
 
 def test_solve_result_arrays_are_defensive_read_only_copies() -> None:
-    result = LinearMPC(MPCConfig(horizon_s=800, frame_s=20)).solve(
-        affine_integrator_model(steps=40), setpoint_c=120.0
-    )
+    result = LinearMPC(MPCConfig(horizon_s=800, frame_s=20)).solve(affine_integrator_model(steps=40), setpoint_c=120.0)
 
     with pytest.raises(ValueError):
         result.x[0] = 0.0
@@ -273,11 +269,11 @@ def test_mpc_accepts_only_candidate_horizons(horizon_s: int) -> None:
     assert MPCConfig(horizon_s=horizon_s, frame_s=20).horizon_steps == horizon_s // 20
 
 
-
 def test_validation_horizon_tie_breaks_to_shorter_candidate() -> None:
     selected = select_validation_horizon({600: 10.05, 800: 10.0, 1000: 9.96})
 
     assert selected == 600
+
 
 def test_mpc_rejects_non_candidate_horizon() -> None:
     with pytest.raises(ValueError, match="600, 800, or 1000"):
@@ -295,7 +291,7 @@ def test_mpc_warm_start_is_deterministic() -> None:
 
 
 def test_fractional_pulse_carries_between_frames() -> None:
-    pulse = PulseRealizer(frame_s=20, quantum_s=2)
+    pulse = PulseSimulationDriver()
 
     realized = [pulse.frame(0.15) for _ in range(10)]
 
@@ -304,35 +300,51 @@ def test_fractional_pulse_carries_between_frames() -> None:
     assert all(frame.requested_duty == pytest.approx(0.15) for frame in realized)
 
 
-def test_skipped_frames_discard_unrealized_pulses_without_replay() -> None:
-    pulse = PulseRealizer(frame_s=20, quantum_s=2)
-    pulse.frame(0.95)
+def test_pulse_driver_uses_production_scheduler_authority() -> None:
+    frame = PulseSimulationDriver().frame(1.0)
 
-    realized = pulse.frame(0.15, skipped_frames=1_000_000_000)
-
-    assert realized.on_seconds == 2.0
-    assert realized.realized_duty == 0.1
-    assert realized.transitions <= 2
+    assert frame.on_seconds == 20.0
+    assert frame.realized_duty == 1.0
+    assert frame.transitions == 1
 
 
 def test_pulse_results_are_immutable() -> None:
-    frame = PulseRealizer(frame_s=20, quantum_s=2).frame(0.5)
+    frame = PulseSimulationDriver().frame(0.5)
 
     with pytest.raises((AttributeError, TypeError)):
         setattr(frame, "on_seconds", 0.0)
 
 
-
-def test_pulse_transition_counts_preserve_prior_state_and_reset_after_skip() -> None:
-    pulse = PulseRealizer(frame_s=20, quantum_s=2)
+def test_pulse_transition_counts_preserve_prior_relay_state() -> None:
+    pulse = PulseSimulationDriver()
 
     first = pulse.frame(1.0)
     continued = pulse.frame(1.0)
     stopped = pulse.frame(0.0)
-    pulse.frame(1.0)
-    after_skip = pulse.frame(0.0, skipped_frames=1)
 
     assert first.transitions == 1
     assert continued.transitions == 0
     assert stopped.transitions == 1
-    assert after_skip.transitions == 0
+
+
+def test_pulse_simulation_driver_uses_production_two_second_scheduler() -> None:
+    driver_type = getattr(actuation, "PulseSimulationDriver", None)
+
+    assert driver_type is not None
+    driver = driver_type()
+    frames = [driver.frame(0.15) for _ in range(2)]
+
+    assert [frame.on_seconds for frame in frames] == [2.0, 4.0]
+    assert [frame.realized_duty for frame in frames] == [0.1, 0.2]
+
+
+def test_pulse_driver_reports_production_delivered_accounting() -> None:
+    driver = PulseSimulationDriver()
+
+    driver.frame(0.1)
+    driver.frame(0.0)
+
+    completed = getattr(driver, "last_completed_frame", None)
+    assert completed is not None
+    assert completed.delivered_on_s == 2.0
+    assert completed.observed_transition_count == 2
