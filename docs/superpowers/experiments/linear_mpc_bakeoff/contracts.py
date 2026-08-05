@@ -9,6 +9,7 @@ from typing import Protocol, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
+from controller.linear_mpc.contracts import AffinePrediction
 
 JSONPrimitive: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = (
@@ -131,22 +132,6 @@ class UpdateOutcome:
     updated: bool
 
 
-@dataclass(frozen=True, slots=True)
-class AffinePrediction:
-    """An exact horizon prediction expressed as an affine input response."""
-
-    free_output_c: FloatArray
-    input_response_c: FloatArray
-
-    def __post_init__(self) -> None:
-        free_output_c = _normalized_float_array(self.free_output_c)
-        input_response_c = _normalized_float_array(self.input_response_c)
-        if free_output_c.ndim != 1:
-            raise ValueError("free_output_c must have shape (N,)")
-        if input_response_c.shape != (free_output_c.size, free_output_c.size):
-            raise ValueError("input_response_c must have shape (N, N)")
-        object.__setattr__(self, "free_output_c", free_output_c)
-        object.__setattr__(self, "input_response_c", input_response_c)
 
 
 class AdaptiveLinearModel(Protocol):

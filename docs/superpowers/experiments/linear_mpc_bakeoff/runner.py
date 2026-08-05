@@ -33,7 +33,7 @@ from .adaptation import (
     OperatingState,
     WindowScores,
 )
-from .arx import ARXConfig, ScheduledARX
+from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
 from .data import reconstruct_mak_fixture, resample_record
 from .datasets import (
     DEFAULT_CALIBRATION_PROGRAM,
@@ -43,7 +43,7 @@ from .datasets import (
 from .dmc import DMCConfig, LaguerreDMC
 from .state_space import InnovationStateSpace, StateSpaceConfig
 from .artifact import ArmEvidence, ExperimentArtifact, MatrixKey
-from .contracts import Observation, SignalRecord
+from controller.linear_mpc.contracts import AffinePrediction, FrameObservation
 from .scenarios import SCENARIOS, ScenarioDefinition, quick_scenarios
 from .linear_mpc import (
     LinearMPC,
@@ -1536,14 +1536,32 @@ def _run_scenario(
         targets.append(target)
         fan.append(_FIXED_FAN)
         if (second + 1) % _FRAME_S == 0:
-            observation = Observation(
-                float(calibration.time_s[-1] + second + 1),
-                temperatures[-1],
-                frame.realized_duty,
-                simulator.T_amb,
-            )
             safety_override = definition.safety_override_at(second)
             manual_override = definition.manual_override_at(second)
+            frame_end_s = float(calibration.time_s[-1] + second + 1)
+            observation = FrameObservation(
+                frame_start_s=frame_end_s - _FRAME_S,
+                frame_end_s=frame_end_s,
+                temp_c=temperatures[-1],
+                setpoint_c=target,
+                ambient_c=simulator.T_amb,
+                requested_q=frame.requested_duty,
+                realized_q=frame.realized_duty,
+                requested_auger_duty=frame.requested_duty,
+                delivered_on_s=frame.on_seconds,
+                requested_fan_duty=_FIXED_FAN,
+                actual_fan_duty=_FIXED_FAN,
+                result_revision=0,
+                output_source="bakeoff-simulator",
+                lid_open=lid_open,
+                safety_inhibited=safety_override,
+                manual_override=manual_override,
+                stale=False,
+                skipped=False,
+                reset=False,
+                continuous=True,
+                role_generation=manager.role_generation,
+            )
             state = (
                 OperatingState.COAST
                 if frame.realized_duty <= 0.05
@@ -1724,7 +1742,7 @@ def _prepared_model(arm: str, plant: str, seed: int, initialization: str):
     model = _model_for_initialization(arm, initialization)
     fit_record = _record_slice(initialized_record, 0, fit_end)
     started = perf_counter()
-    model.fit(fit_record)
+    _fit_model(model, fit_record)
     fit_ms = (perf_counter() - started) * 1_000.0
     before = {
         horizon_s: _horizon_residuals(
@@ -1796,10 +1814,10 @@ def _identification_records(plant: str, seed: int, initialization: str) -> tuple
 def _model_for_initialization(arm: str, initialization: str):
     if arm == "scheduled-arx":
         configs = {
-            "correct": ARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0),
-            "wrong-gain": ARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0),
-            "wrong-pole": ARXConfig(na=2, nb=2, delays=(1, 2, 3), forgetting_factor=0.90),
-            "wrong-delay": ARXConfig(na=2, nb=2, delays=(4, 5, 6)),
+            "correct": ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0),
+            "wrong-gain": ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0),
+            "wrong-pole": ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), forgetting_factor=0.90),
+            "wrong-delay": ScheduledARXConfig(na=2, nb=2, delays=(4, 5, 6)),
         }
         return ScheduledARX(configs[initialization])
     if arm == "dmc":
@@ -1848,6 +1866,54 @@ def _record_slice(record: SignalRecord, begin: int, end: int) -> SignalRecord:
         metadata=dict(record.metadata),
     )
 
+def _record_frames(record: SignalRecord) -> tuple[FrameObservation, ...]:
+    return tuple(
+        FrameObservation(
+            frame_start_s=float(time_s) - _FRAME_S,
+            frame_end_s=float(time_s),
+            temp_c=float(temp_c),
+            setpoint_c=float(temp_c),
+            ambient_c=float(ambient_c),
+            requested_q=float(q),
+            realized_q=float(q),
+            requested_auger_duty=float(q),
+            delivered_on_s=float(q) * _FRAME_S,
+            requested_fan_duty=None,
+            actual_fan_duty=None,
+            result_revision=0,
+            output_source="bakeoff-record",
+            lid_open=False,
+            safety_inhibited=False,
+            manual_override=False,
+            stale=False,
+            skipped=False,
+            reset=False,
+            continuous=True,
+            role_generation=0,
+        )
+        for time_s, temp_c, q, ambient_c in zip(
+            record.time_s, record.temp_c, record.q, record.ambient_c, strict=True
+        )
+    )
+
+
+def _fit_model(model: Any, record: SignalRecord) -> None:
+    if isinstance(model, ScheduledARX):
+        model.fit(_record_frames(record))
+    else:
+        model.fit(record)
+
+
+def _forecast_model(
+    model: Any,
+    prefix: SignalRecord,
+    q_future: np.ndarray,
+    ambient_future: np.ndarray,
+) -> np.ndarray:
+    if isinstance(model, ScheduledARX):
+        return model.forecast(_record_frames(prefix), q_future, ambient_future)
+    return model.forecast(prefix, q_future, ambient_future)
+
 
 def _horizon_residuals(
     model: Any,
@@ -1865,7 +1931,8 @@ def _horizon_residuals(
             if start + steps > record.temp_c.size:
                 continue
             prefix = _record_slice(record, 0, start)
-            predicted = model.forecast(
+            predicted = _forecast_model(
+                model,
                 prefix,
                 record.q[start : start + steps],
                 record.ambient_c[start : start + steps],
@@ -1891,7 +1958,8 @@ def _simulator_prediction_diagnostics_from_model(model: Any, record: SignalRecor
         residuals: list[float] = []
         coast_braking_residuals: list[float] = []
         for start in range(validation_end, record.temp_c.size - steps + 1, max(1, steps // 6)):
-            predicted = model.forecast(
+            predicted = _forecast_model(
+                model,
                 _record_slice(record, 0, start),
                 record.q[start : start + steps],
                 record.ambient_c[start : start + steps],
@@ -2441,7 +2509,7 @@ def _real_mak_evidence(arm: str) -> dict[str, Any]:
             candidates = (_model_for_initialization(arm, "correct"),)
         scored_candidates: list[tuple[float, Any]] = []
         for candidate in candidates:
-            candidate.fit(fit_record)
+            _fit_model(candidate, fit_record)
             validation = _horizon_residuals(candidate, record, starts=validation_starts, horizons_s=(60, 300))
             score = _mean_or_none(validation[300]) or _mean_or_none(validation[60])
             if score is not None:
