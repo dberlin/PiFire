@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json
 
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from docs.superpowers.experiments.linear_mpc_bakeoff import runner as runner_module
 
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     ExperimentConfig,
@@ -55,7 +58,7 @@ def test_checkpoint_is_atomic_and_does_not_leave_temporary_file(tmp_path: Path) 
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_interrupted_matrix_keeps_only_a_sharded_checkpoint(tmp_path: Path) -> None:
+def test_interrupted_matrix_publishes_exact_content_addressed_checkpoint_objects(tmp_path: Path) -> None:
     output = tmp_path / "artifact.manifest.json"
 
     partial = run_tiny_matrix(
@@ -66,16 +69,35 @@ def test_interrupted_matrix_keeps_only_a_sharded_checkpoint(tmp_path: Path) -> N
     checkpoint_manifest = json.loads(checkpoint.read_text())
     assert len(partial.scenarios) == 3
     assert not output.exists()
-    assert checkpoint_manifest["transport"] == "gzip-shards/v1"
-    assert checkpoint_manifest["parts"]
-    assert all(
-        part["bytes"] <= 90 * 1024 * 1024
-        and (checkpoint.parent / part["name"]).is_file()
-        for part in checkpoint_manifest["parts"]
+    assert checkpoint_manifest["checkpoint_schema"] == "incremental-cas/v2"
+    assert checkpoint_manifest["complete"] is False
+    entries, _ = runner_module._checkpoint_delta_entries(
+        checkpoint,
+        checkpoint_manifest["head"],
+        checkpoint_manifest["run_fingerprint"],
+        checkpoint_manifest["accepted_count"],
     )
+    assert len(entries) == 3
+
+    referenced = set()
+    for entry in entries:
+        assert entry["cell_ordinals"] and len(entry["cell_ordinals"]) == 1
+        assert entry["compressed_bytes"] <= 90 * 1024 * 1024
+        assert len(entry["sha256"]) == 64
+        object_path = checkpoint.parent / entry["name"]
+        assert object_path.is_file()
+        assert object_path.name == f"{checkpoint.stem}.bundle.{entry['sha256']}.json.gz"
+        compressed = object_path.read_bytes()
+        assert len(compressed) == entry["compressed_bytes"]
+        assert hashlib.sha256(compressed).hexdigest() == entry["compressed_sha256"]
+        payload = json.loads(gzip.decompress(compressed))
+        assert payload["run_fingerprint"] == checkpoint_manifest["run_fingerprint"]
+        assert payload["cell_ordinals"] == entry["cell_ordinals"]
+        assert len(payload["rows"]) + len(payload["failures"]) == 1
+        referenced.add(object_path)
 
     orphan = checkpoint.with_name(
-        f"{checkpoint.stem}.unrelated.part0000.0000000000000000.gz"
+        f"{checkpoint.stem}.bundle.{'0' * 64}.json.gz"
     )
     orphan.write_bytes(b"unrelated")
 
@@ -83,13 +105,11 @@ def test_interrupted_matrix_keeps_only_a_sharded_checkpoint(tmp_path: Path) -> N
 
     assert load_artifact(output).canonical_document() == resumed.canonical_document()
     assert not checkpoint.exists()
+    assert all(not path.exists() for path in referenced)
     assert orphan.is_file()
-    assert [part.name for part in tmp_path.glob("artifact.checkpoint.manifest.*.part*.gz")] == [
-        orphan.name
-    ]
 
 
-def test_fresh_matrix_discards_broken_checkpoint_but_resume_rejects_it(
+def test_fresh_matrix_discards_invalid_checkpoint_head_but_resume_rejects_it(
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "artifact.manifest.json"
@@ -105,31 +125,30 @@ def test_fresh_matrix_discards_broken_checkpoint_but_resume_rejects_it(
                         "sha256": "0" * 64,
                     }
                 ],
-                "compressed_sha256": "0" * 64,
-                "canonical_json_sha256": "0" * 64,
-                "canonical_json_bytes": 1,
             }
         )
     )
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ValueError, match="schema mismatch"):
         run_tiny_matrix(tmp_path, resume=True, output=output)
 
     run_tiny_matrix(tmp_path, resume=False, interrupt_after=1, output=output)
 
-    assert json.loads(checkpoint.read_text())["transport"] == "gzip-shards/v1"
+    assert json.loads(checkpoint.read_text())["checkpoint_schema"] == "incremental-cas/v2"
 
     outside = tmp_path.parent / "outside.gz"
     outside.write_bytes(b"outside")
     checkpoint.write_text(
         json.dumps(
             {
-                "transport": "gzip-shards/v1",
-                "parts": [
+                "checkpoint_schema": "incremental-cas/v2",
+                "bundles": [
                     {
                         "name": "../outside.gz",
-                        "bytes": len(b"outside"),
+                        "compressed_bytes": len(b"outside"),
+                        "compressed_sha256": "0" * 64,
                         "sha256": "0" * 64,
+                        "cell_ordinals": [0],
                     }
                 ],
             }
@@ -151,10 +170,12 @@ def test_fresh_matrix_discards_nonobject_checkpoint_and_resume_rejects_it(
 
     run_tiny_matrix(tmp_path, resume=False, interrupt_after=1, output=output)
 
-    assert json.loads(checkpoint.read_text())["transport"] == "gzip-shards/v1"
+    manifest = json.loads(checkpoint.read_text())
+    assert manifest["checkpoint_schema"] == "incremental-cas/v2"
+    assert manifest["accepted_count"] == 1
 
     checkpoint.write_text(json.dumps(malformed))
-    with pytest.raises(ValueError, match="object"):
+    with pytest.raises(ValueError, match="schema mismatch"):
         run_tiny_matrix(tmp_path, resume=True, output=output)
 
     assert unrelated.read_bytes() == b"unrelated"

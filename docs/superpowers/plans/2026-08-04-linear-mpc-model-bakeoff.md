@@ -26,6 +26,14 @@
 - Runtime-facing result objects are immutable dataclasses. Arrays returned across module boundaries are read-only copies or documented immutable views.
 - Run focused tests per task. Run the complete experiment package tests, Ruff, and the end-to-end experiment once in Task 9.
 
+## Parallel runner completion record — 2026-08-05
+
+- Added spawned, bounded LPT cell scheduling with picklable prepared origins, parent-only checkpoint publication, and deterministic full-identity aggregation.
+- Migrated checkpoint transport to immutable `incremental-cas/v2` gzip objects; resume validates schema, source, config, selection, job identity, object integrity, and paths before executing its complement.
+- Source revision is captured once at the parent boundary with `jj --ignore-working-copy` and threaded through fingerprint, checkpoint, and final artifact. Canonical evidence excludes raw timing/execution metadata.
+- `pytest -q tests/unit/mpc/linear_mpc_bakeoff`: 188 passed in 300.92 s; Ruff: OK. No 1,080-cell run was performed.
+- Cold 36-cell micro matrix produced identical canonical SHA-256 `1c26823cfa0780d6cbae3c8e2522f29d502998ec18897d051b9133cfdc74e9e2` for `(1,1)`, `(8,1)`, `(4,2)`, and `(2,4)`; `(8,1)` was fastest at 7.217 s (contaminated runtime-only observation). See `.superpowers/sdd/2026-08-04-linear-mpc-model-bakeoff/parallel-runner-final.md`.
+
 ## File Structure
 
 Create this focused package:
@@ -895,3 +903,7 @@ jj --no-pager log -r 'trunk()..@' --no-graph
 ```
 
 Expected: atomic described changes, no conflicts, and no unrelated files.
+
+### Parallel runner completion record — 2026-08-05
+
+Implemented and verified `incremental-cas/v2`, immutable parent-only source capture, picklable worker envelopes, cell-level dynamic LPT, and timing-free canonical evidence. Focused runner: 11 passed; scenario/CLI: 19 passed; full bakeoff package: 188 passed; Ruff passed. Three rotating 36-cell micro repetitions had canonical SHA-256 `cb9a5af75bb64428165eaf985d1ae25b3c2f76756792ce2286468faf02cd3cab`; `(8,1)` and `(4,2)` overlap materially, so `(8,1)` is selected for a later full rerun because it uses one BLAS thread per finer-grained worker and had higher observed utilization. The active no-full-run constraint intentionally superseded Task 9's full 1,080-cell command. See `.superpowers/sdd/2026-08-04-linear-mpc-model-bakeoff/parallel-runner-final.md`.

@@ -282,7 +282,7 @@ class ExperimentArtifact:
         object.__setattr__(self, "scenarios", tuple(sorted(self.scenarios, key=_scenario_sort_key)))
         object.__setattr__(self, "arms", arms)
         object.__setattr__(self, "environment", _freeze(self.environment))
-        object.__setattr__(self, "failures", tuple(sorted(self.failures, key=lambda item: (item.arm, item.scenario, item.category, item.detail))))
+        object.__setattr__(self, "failures", tuple(sorted(self.failures, key=_failure_sort_key)))
         object.__setattr__(self, "horizon_evidence", _freeze(self.horizon_evidence))
 
     def with_failures(self, failures: Sequence[ArmFailure]) -> "ExperimentArtifact":
@@ -417,10 +417,28 @@ class ExperimentArtifact:
     def canonical_document(self) -> dict[str, Any]:
         """Return deterministic scientific evidence while retaining timing evidence in ``to_document``."""
         document = self.to_document()
+        document["config"].pop("execution_metadata", None)
+        fitted_by_domain = document["model_snapshots"].get("fitted_by_domain", {})
+        if isinstance(fitted_by_domain, dict):
+            for evidence in fitted_by_domain.values():
+                if isinstance(evidence, dict):
+                    evidence.pop("initial_batch_fit_ms", None)
         for row in document["scenarios"]:
             row.pop("raw_timing_ms", None)
-            for name in ("raw_learner_p99_ms", "raw_refresh_p99_ms", "raw_solve_p99_ms"):
+            for name in (
+                "deadline_misses",
+                "initial_batch_fit_ms",
+                "raw_learner_p99_ms",
+                "raw_refresh_p99_ms",
+                "raw_solve_p99_ms",
+            ):
                 row["metrics"].pop(name, None)
+            model_evidence = row.get("model_evidence")
+            if isinstance(model_evidence, dict):
+                model_evidence.pop("initial_batch_fit_ms", None)
+            runtime_evidence = row.get("runtime_model_evidence")
+            if isinstance(runtime_evidence, dict):
+                runtime_evidence.pop("initial_batch_fit_ms", None)
         for arm in document["arms"].values():
             arm.pop("raw_timing_ms", None)
             arm.pop("projected_timing_ms", None)
@@ -663,8 +681,33 @@ def _p99(values: Sequence[float]) -> float:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
 
 
-def _scenario_sort_key(value: Any) -> tuple[str, str, str, int]:
-    return (str(getattr(value, "plant", "")), str(getattr(value, "scenario", "")), str(getattr(value, "mode", "")), int(getattr(value, "seed", 0)))
+def _scenario_sort_key(value: Any) -> tuple[str, str, str, str, str, int, int]:
+    return (
+        str(getattr(value, "arm", "")),
+        str(getattr(value, "initialization", "")),
+        str(getattr(value, "plant", "")),
+        str(getattr(value, "mode", "")),
+        str(getattr(value, "scenario", "")),
+        int(getattr(value, "seed", 0)),
+        int(getattr(value, "mpc_horizon_s", 0)),
+    )
+
+
+def _failure_sort_key(value: ArmFailure) -> tuple[str, str, str, str, str, int, int, str, str]:
+    key = value.matrix_key
+    if key is None:
+        return (value.arm, "", "", "", value.scenario, -1, -1, value.category, value.detail)
+    return (
+        key.arm,
+        key.initialization,
+        key.plant,
+        key.mode,
+        key.scenario,
+        key.seed,
+        key.mpc_horizon_s,
+        value.category,
+        value.detail,
+    )
 
 
 def _scenario_document(value: Any) -> Any:

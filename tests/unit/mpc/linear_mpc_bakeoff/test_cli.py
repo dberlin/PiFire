@@ -3,17 +3,32 @@
 from __future__ import annotations
 
 import json
+import gzip
 import re
 import os
 import subprocess
 import sys
 from pathlib import Path
+from docs.superpowers.experiments.linear_mpc_bakeoff import runner as runner_module
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _read_artifact_document
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _select_validation_horizon
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _source_revision
 from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import ExperimentArtifact
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import load_artifact
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_tiny_matrix
+
+def _checkpoint_rows(checkpoint: Path) -> list[dict[str, object]]:
+    manifest = json.loads(checkpoint.read_text())
+    assert manifest["checkpoint_schema"] == "incremental-cas/v2"
+    rows: list[dict[str, object]] = []
+    entries, _ = runner_module._checkpoint_delta_entries(
+        checkpoint, manifest["head"], manifest["run_fingerprint"], manifest["accepted_count"]
+    )
+    for entry in entries:
+        payload = json.loads(gzip.decompress((checkpoint.parent / entry["name"]).read_bytes()))
+        assert payload["cell_ordinals"] == entry["cell_ordinals"]
+        rows.extend(payload["rows"])
+    return rows
 
 
 def test_quick_mode_writes_requested_output_and_table(tmp_path: Path) -> None:
@@ -97,9 +112,7 @@ def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(t
     output = tmp_path / "resume.manifest.json"
     run_tiny_matrix(tmp_path / "partial", resume=False, interrupt_after=3, output=output)
     checkpoint = output.with_name("resume.checkpoint.manifest.json")
-    partial = _read_artifact_document(checkpoint)
-    assert not output.exists()
-
+    partial_rows = _checkpoint_rows(checkpoint)
     completed = subprocess.run(
         [sys.executable, "-m", "docs.superpowers.experiments.linear_mpc_bakeoff", "--quick", "--resume", "--output", str(output)],
         check=False, capture_output=True, text=True, env={**os.environ, "UV_NO_SYNC": "1"},
@@ -110,5 +123,5 @@ def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(t
     assert len(restored.scenarios) + len(restored.failures) == 144
     key = lambda row: (row["arm"], row["initialization"], row["plant"], row["scenario"], row["mode"], row["seed"])
     restored_rows = {key(row.to_document()): row.to_document() for row in restored.scenarios}
-    assert all(restored_rows[key(row)] == row for row in partial["rows"])
+    assert all(restored_rows[key(row)] == row for row in partial_rows)
     assert not checkpoint.exists()

@@ -62,9 +62,12 @@ class RefreshOutcome:
     """Result of an atomic rolling-realization replacement attempt."""
 
     accepted: bool
-    alignment_error_c: float
+    alignment_error_c: float | None
     duration_s: float
 
+
+class CandidateExhaustedError(ValueError):
+    """No physically viable realization survived a rolling candidate search."""
 
 @dataclass(frozen=True, slots=True)
 class PlausibilityBounds:
@@ -252,7 +255,13 @@ class InnovationStateSpace:
         _validate_record(record)
         started = perf_counter()
         combined = _join_records(self.history_record, record, self._config.max_buffer_samples)
-        candidate = _select_fit(combined, self._config)
+        try:
+            candidate = _select_fit(combined, self._config)
+        except CandidateExhaustedError:
+            duration = perf_counter() - started
+            self._last_refresh_time_s = float(record.time_s[-1])
+            self._last_refresh_duration_s = duration
+            return RefreshOutcome(False, None, duration)
         old = self._require_fit()
         candidate_state = _state_from_values(
             self._temperatures, self._ambients, self._inputs, candidate
@@ -405,7 +414,7 @@ def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
         detail = "; ".join(sorted(set(rejection_reasons))) or "no candidate was attempted"
         if rejection_reasons and all("too short" in reason for reason in rejection_reasons):
             raise ValueError(f"record is too short for configured state-space candidates: {detail}")
-        raise ValueError(f"no viable state-space candidate: {detail}")
+        raise CandidateExhaustedError(f"no viable state-space candidate: {detail}")
     best_error = min(candidate.validation_error for candidate in candidates)
     statistically_equivalent = [
         candidate

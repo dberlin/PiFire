@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
+from docs.superpowers.experiments.linear_mpc_bakeoff import state_space as state_space_module
 
 from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import (
     Observation,
@@ -157,6 +158,43 @@ def test_rejected_refresh_keeps_incumbent_but_records_attempt_cadence() -> None:
     assert after["state_covariance"] == before["state_covariance"]
     assert after["update_timing"]["last_attempt_time_s"] == extension.time_s[-1]
 
+
+
+def test_refresh_rejects_candidate_exhaustion_atomically_and_preserves_incumbent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model, extension = fitted_then_extended_record()
+    before = model.snapshot()
+    attempts = 0
+
+    def exhausted(*_: object) -> SubspaceFit:
+        nonlocal attempts
+        attempts += 1
+        raise state_space_module.CandidateExhaustedError("identified steady gain must be positive")
+
+    monkeypatch.setattr(state_space_module, "_select_fit", exhausted)
+
+    result = model.refresh(extension)
+    after = model.snapshot()
+
+    assert not result.accepted
+    assert result.alignment_error_c is None
+    assert after["matrices"] == before["matrices"]
+    assert after["state_covariance"] == before["state_covariance"]
+    assert after["update_timing"]["last_attempt_time_s"] == extension.time_s[-1]
+    assert after["refresh_duration_s"] >= 0.0
+
+    observation = Observation(
+        extension.time_s[-1] + 20.0,
+        extension.temp_c[-1],
+        extension.q[-1],
+        extension.ambient_c[-1],
+    )
+    model.observe(observation)
+
+    assert attempts == 1
+    with pytest.raises(state_space_module.CandidateExhaustedError):
+        InnovationStateSpace(StateSpaceConfig(orders=(1,), delays=(1,))).fit(extension)
 
 def test_subspace_fit_is_defensive_and_block_rows_affect_identification() -> None:
     source = known_state_space(seed=4)(samples=800)

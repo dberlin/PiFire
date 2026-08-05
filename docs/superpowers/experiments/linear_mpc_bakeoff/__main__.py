@@ -17,6 +17,8 @@ def main(argv: list[str] | None = None) -> int:
         "--output", type=Path, help="bounded artifact manifest path (*.manifest.json)"
     )
     parser.add_argument("--resume", action="store_true", help="resume from an existing checkpoint")
+    parser.add_argument("--workers", type=int, help="spawned process workers (default: bounded auto)")
+    parser.add_argument("--blas-threads", type=int, help="native numerical threads per worker (default: 1)")
     args = parser.parse_args(argv)
     output = args.output or (default_output_path().with_name("_linear_mpc_bakeoff_quick.manifest.json") if args.quick else default_output_path())
     if not output.name.endswith(".manifest.json"):
@@ -25,7 +27,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.resume and not checkpoint.exists():
         parser.error(f"checkpoint does not exist: {checkpoint}")
     config = ExperimentConfig.quick() if args.quick else ExperimentConfig()
-    artifact = run_experiment(replace(config, output=output), resume=args.resume)
+    config = replace(
+        config,
+        output=output,
+        workers=args.workers,
+        blas_threads=args.blas_threads,
+    )
+    artifact = run_experiment(config, resume=args.resume)
     print(render_table(artifact))
     return 0
 
