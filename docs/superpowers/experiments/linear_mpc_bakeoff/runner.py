@@ -474,12 +474,7 @@ def _write_text_atomically(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
     try:
-        if path.suffix == ".gz":
-            with temporary.open("wb") as raw:
-                with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as sink:
-                    sink.write(payload.encode("utf-8"))
-        else:
-            temporary.write_text(payload, encoding="utf-8")
+        temporary.write_text(payload, encoding="utf-8")
         os.replace(temporary, path)
     finally:
         if temporary.exists():
@@ -496,8 +491,8 @@ def write_artifact_atomically(
     """Publish a deterministic manifest after bounded gzip shards are durable."""
     if max_part_bytes < 1 or max_part_bytes > _MAX_ARTIFACT_PART_BYTES:
         raise ValueError(f"max_part_bytes must be within 1..{_MAX_ARTIFACT_PART_BYTES}")
-    if path.suffix == ".gz":
-        raise ValueError("artifact publication requires a bounded manifest path, not .gz")
+    if not path.name.endswith(".manifest.json"):
+        raise ValueError("artifact publication requires a .manifest.json path")
     payload = (artifact.to_json() + "\n").encode("utf-8")
     compressed = gzip.compress(payload, mtime=0)
     stream_hash = hashlib.sha256(compressed).hexdigest()

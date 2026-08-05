@@ -449,7 +449,7 @@ def test_normalized_artifact_round_trip_deduplicates_evidence_bundles() -> None:
 def test_gzip_output_is_load_only_and_artifact_writer_requires_manifest(tmp_path) -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import write_artifact_atomically
 
-    with pytest.raises(ValueError, match="bounded manifest"):
+    with pytest.raises(ValueError, match=".manifest.json"):
         write_artifact_atomically(tmp_path / "evidence.json.gz", artifact_with_scores())
 
 

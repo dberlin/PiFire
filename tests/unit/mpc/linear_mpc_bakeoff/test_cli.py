@@ -16,7 +16,7 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_tiny_matr
 
 
 def test_quick_mode_writes_requested_output_and_table(tmp_path: Path) -> None:
-    output = tmp_path / "quick.json.gz"
+    output = tmp_path / "quick.manifest.json"
     completed = subprocess.run(
         [
             sys.executable,
@@ -71,8 +71,29 @@ def test_resume_requires_existing_checkpoint(tmp_path: Path) -> None:
     assert "checkpoint" in completed.stderr.lower()
 
 
+def test_cli_rejects_non_manifest_output_before_running(tmp_path: Path) -> None:
+    output = tmp_path / "unsafe.json.gz"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docs.superpowers.experiments.linear_mpc_bakeoff",
+            "--quick",
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "UV_NO_SYNC": "1"},
+    )
+    assert completed.returncode == 2
+    assert ".manifest.json" in completed.stderr
+    assert not output.exists()
+
+
 def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(tmp_path: Path) -> None:
-    output = tmp_path / "resume.json"
+    output = tmp_path / "resume.manifest.json"
     run_tiny_matrix(tmp_path / "partial", resume=False, interrupt_after=3, output=output)
     partial = json.loads(output.read_text(encoding="utf-8"))
 
