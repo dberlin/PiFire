@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from controller.pid import Controller as PIDController
 from controller.pid_base import PIDControllerBase
 from controller.pid_sp import Controller as PIDSPController
 
@@ -34,17 +35,31 @@ def test_zero_pb_disables_the_proportional_term():
     assert gains.kp == 0
 
 
-def test_update_twice_at_the_same_clock_value_stays_finite(monkeypatch):
+@pytest.mark.parametrize(
+    "controller_cls, expected_low, expected_high",
+    [
+        # PID-SP clamps to the literal 1.0 full-output branch here regardless
+        # of dt's magnitude, so this pins that exact branch stays taken.
+        (PIDSPController, 0.99, 1.01),
+        # PID-classic divides by dt unconditionally on every update with no
+        # cancellation, so its output is 1/dt-sensitive: an un-floored dt (or
+        # one floored to the wrong order of magnitude) lands far outside this
+        # band instead of matching the ~-3748 the current 1ms floor produces.
+        (PIDController, -4000.0, -3000.0),
+    ],
+    ids=["pid_sp", "pid"],
+)
+def test_update_twice_at_the_same_clock_value_stays_finite(monkeypatch, controller_cls, expected_low, expected_high):
     fixed_time = 1_700_000_000.0
     monkeypatch.setattr(time, "time", lambda: fixed_time)
 
     config = {"PB": 60.0, "Ti": 180.0, "Td": 45.0}
     cycle_data = {"HoldCycleTime": 1}
-    controller = PIDSPController(config, "F", cycle_data)
+    controller = controller_cls(config, "F", cycle_data)
     controller.set_target(225.0)
 
     controller.update(150.0)
     result = controller.update(155.0)
 
     assert math.isfinite(result)
-    assert -1e6 < result < 1e6
+    assert expected_low < result < expected_high

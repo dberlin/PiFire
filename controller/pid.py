@@ -77,7 +77,9 @@ class Controller(PIDControllerBase):
         error = current - self.set_point
         self.p = self.kp * error + self.center
 
-        dt = time.time() - previous_update_time
+        # I
+        dt = self._elapsed_since_last_update(time.time())
+        # if self.p > 0 and self.p < 1: # Ensure we are in the pb, otherwise do not calculate i to avoid windup
         unclamped_integral = self.inter + error * dt
         self.inter = unclamped_integral
         if self.center != 0:
