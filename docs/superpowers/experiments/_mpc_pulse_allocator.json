@@ -1,48 +1,48 @@
 {
   "calibration_fits": {
     "inferred_old_auger_duty": {
-      "C_c": 3229.2715098544218,
-      "K_Q": 1002.2847244786228,
+      "C_c": 3229.2913554067545,
+      "K_Q": 1002.2898700865776,
       "converged": true,
       "h_amb": 0.5,
-      "max_abs_error": 8.442311641035559,
-      "nfev": 18.0,
-      "rmse": 2.432414019626479,
+      "max_abs_error": 8.442298584020051,
+      "nfev": 9.0,
+      "rmse": 2.4324140197274757,
       "sigma": 1.4e-09,
-      "theta": 112.41447816424889
+      "theta": 112.41422873260952
     },
     "normalized_q": {
-      "C_c": 3591.88982622464,
-      "K_Q": 992.0689340597002,
+      "C_c": 3591.917620728107,
+      "K_Q": 992.075457163396,
       "converged": true,
       "h_amb": 0.5,
-      "max_abs_error": 8.32243250508759,
-      "nfev": 20.0,
-      "rmse": 2.335804134238943,
+      "max_abs_error": 8.322418999733003,
+      "nfev": 10.0,
+      "rmse": 2.3358041341532725,
       "sigma": 1.4e-09,
-      "theta": 111.31696279518823
+      "theta": 111.31666795900595
     },
     "proposed_linear_auger_duty": {
-      "C_c": 3591.8955228093014,
-      "K_Q": 1102.3003038641436,
+      "C_c": 3591.9198543590314,
+      "K_Q": 1102.3066538582098,
       "converged": true,
       "h_amb": 0.5,
-      "max_abs_error": 8.32242956210385,
-      "nfev": 19.0,
-      "rmse": 2.3358041342039235,
+      "max_abs_error": 8.322417364788464,
+      "nfev": 11.0,
+      "rmse": 2.335804134155397,
       "sigma": 1.4e-09,
-      "theta": 111.31690467590937
+      "theta": 111.31665106791726
     },
     "recorded_Q_percent": {
-      "C_c": 3591.9451567165243,
-      "K_Q": 9.920819271367138,
+      "C_c": 3591.8989399232264,
+      "K_Q": 9.920710600831082,
       "converged": true,
       "h_amb": 0.5,
-      "max_abs_error": 8.322404895665386,
-      "nfev": 10.0,
-      "rmse": 2.33580413428669,
+      "max_abs_error": 8.322429102936525,
+      "nfev": 24.0,
+      "rmse": 2.3358041341814753,
       "sigma": 1.4e-09,
-      "theta": 111.31638368025381
+      "theta": 111.31685365829561
     }
   },
   "conditions": {
@@ -71,11 +71,43 @@
       0.75,
       1.0
     ],
+    "plant_calibration": {
+      "GrillSim": {
+        "C_c": 300.0,
+        "H": 420.0,
+        "T_amb": 17.0,
+        "deadtime_s": 20,
+        "fan_is_lever": true,
+        "fixed_fan": null,
+        "h_lid": 1.5,
+        "probe_tau_s": 4.5,
+        "sigma": 1.4e-09
+      },
+      "MAKGrillSim": {
+        "C_c": 3115.9,
+        "H": 958.8,
+        "T_amb": 20.0,
+        "deadtime_s": 100,
+        "fan_is_lever": true,
+        "fixed_fan": null,
+        "h_lid": 1.5,
+        "probe_tau_s": 4.5,
+        "sigma": 1.4e-09
+      }
+    },
     "pulse_slot_s": 1.0,
     "seeds": [
       0
     ],
+    "selected_scheduler": {
+      "frame_s": 20.0,
+      "pulse_quantum_s": 2.0
+    },
     "tail_s": 1800
+  },
+  "header": {
+    "format_version": 1,
+    "regeneration_command": "uv run --no-sync python docs/superpowers/experiments/mpc_pulse_allocator.py --out docs/superpowers/experiments/_mpc_pulse_allocator.json"
   },
   "open_loop": [
     {

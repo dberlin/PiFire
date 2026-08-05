@@ -23,9 +23,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 from controller.mpc import Controller, _DEFAULTS
-from controller.mpc_model import _rad_loss
-from controller.mpc_allocator import allocate
+from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
+from controller.mpc_model import MODEL_SCHEMA, _rad_loss
+from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
 from controller.grill_sim import GrillSim
+from sample_mpc import SPAN_DATASET_SCHEMA, SPAN_GENERATION_VERSION, span_generation_command
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 # prefer the larger external dataset if present, else the local span samples
@@ -43,7 +45,130 @@ SPAN_NPZ = next(
 DCFG = _DEFAULTS
 ND = int(_DEFAULTS["n_delay"])
 DIDX = ND + 1  # index of d in the state vector [q0..q_{ND-1}, T_c, d]
-QMIN, QMAX = DCFG["Q_min"], DCFG["Q_max"]
+QMIN, QMAX = 0.0, 1.0
+
+_SPAN_REQUIRED_FIELDS = (
+    "X0",
+    "u_prev",
+    "t_set",
+    "u0",
+    "sp_lo",
+    "sp_hi",
+    "dataset_schema",
+    "sample_mode",
+    "model_schema",
+    "allocator_revision",
+    "episode_count",
+    "sampled_state_count",
+    "seed",
+    "generation_version",
+    "sample_minutes",
+    "sample_dither",
+    "generation_command",
+    *_CALIB_FLOATS,
+    *_CALIB_INTS,
+)
+_SPAN_PROVENANCE_FIELDS = _SPAN_REQUIRED_FIELDS[4:]
+
+
+def _scalar(dataset, key):
+    value = np.asarray(dataset[key])
+    if value.size != 1:
+        raise ValueError(f"dataset {key} must be a scalar")
+    return value.item()
+
+
+def _require_equal(dataset, key, expected):
+    actual = _scalar(dataset, key)
+    if actual != expected:
+        raise ValueError(f"dataset {key}={actual!r} does not match expected {expected!r}")
+    return actual
+
+
+def validate_span_dataset(dataset, *, expected_enable_fan, expected_episodes=None, expected_seed=None):
+    """Reject a span archive unless its provenance and arrays match this model."""
+    available = set(dataset.files) if hasattr(dataset, "files") else set(dataset)
+    missing = sorted(set(_SPAN_REQUIRED_FIELDS) - available)
+    if missing:
+        raise ValueError(f"dataset missing required provenance: {', '.join(missing)}")
+
+    _require_equal(dataset, "dataset_schema", SPAN_DATASET_SCHEMA)
+    _require_equal(dataset, "sample_mode", "span")
+    _require_equal(dataset, "model_schema", MODEL_SCHEMA)
+    _require_equal(dataset, "allocator_revision", ALLOCATOR_REVISION)
+    _require_equal(dataset, "generation_version", SPAN_GENERATION_VERSION)
+    _require_equal(dataset, "enable_fan_input", int(bool(expected_enable_fan)))
+    if int(_scalar(dataset, "episode_count")) <= 0:
+        raise ValueError("dataset episode_count must be positive")
+    if int(_scalar(dataset, "seed")) < 0:
+        raise ValueError("dataset seed must be non-negative")
+    if expected_episodes is not None:
+        _require_equal(dataset, "episode_count", int(expected_episodes))
+    if expected_seed is not None:
+        _require_equal(dataset, "seed", int(expected_seed))
+
+    for key in _CALIB_FLOATS:
+        actual = float(_scalar(dataset, key))
+        expected = float(_DEFAULTS[key])
+        if not np.isfinite(actual) or actual != expected:
+            raise ValueError(f"dataset {key}={actual!r} does not match active calibration {expected!r}")
+    for key in _CALIB_INTS:
+        if key != "enable_fan_input":
+            _require_equal(dataset, key, int(_DEFAULTS[key]))
+
+    X0 = np.asarray(dataset["X0"])
+    u_prev = np.asarray(dataset["u_prev"]).reshape(-1)
+    t_set = np.asarray(dataset["t_set"]).reshape(-1)
+    u0 = np.asarray(dataset["u0"]).reshape(-1)
+    sample_count = len(u0)
+    if X0.ndim != 2 or X0.shape != (sample_count, ND + 2):
+        raise ValueError(f"dataset X0 shape {X0.shape!r} does not match {(sample_count, ND + 2)!r}")
+    if len(u_prev) != sample_count or len(t_set) != sample_count:
+        raise ValueError("dataset sampled-state arrays have inconsistent lengths")
+    if sample_count == 0 or not all(np.all(np.isfinite(values)) for values in (X0, u_prev, t_set, u0)):
+        raise ValueError("dataset sampled-state arrays must be non-empty and finite")
+    _require_equal(dataset, "sampled_state_count", sample_count)
+
+    sp_lo = float(_scalar(dataset, "sp_lo"))
+    sp_hi = float(_scalar(dataset, "sp_hi"))
+    minutes = float(_scalar(dataset, "sample_minutes"))
+    dither = float(_scalar(dataset, "sample_dither"))
+    if (
+        not np.isfinite((sp_lo, sp_hi, minutes, dither)).all()
+        or not sp_lo < sp_hi
+        or minutes <= 0.0
+        or dither < 0.0
+    ):
+        raise ValueError("dataset span sampling metadata is invalid")
+    expected_command = span_generation_command(
+        episodes=int(_scalar(dataset, "episode_count")),
+        minutes=minutes,
+        dither=dither,
+        sp_lo=sp_lo,
+        sp_hi=sp_hi,
+        seed=int(_scalar(dataset, "seed")),
+        enable_fan=bool(_scalar(dataset, "enable_fan_input")),
+    )
+    _require_equal(dataset, "generation_command", expected_command)
+    return {key: np.asarray(dataset[key]).copy() for key in _SPAN_PROVENANCE_FIELDS}
+
+
+def load_span_dataset(data_path, *, expected_enable_fan, expected_episodes=None, expected_seed=None):
+    """Load arrays and only validated immutable provenance from a span archive."""
+    with np.load(data_path, allow_pickle=False) as dataset:
+        provenance = validate_span_dataset(
+            dataset,
+            expected_enable_fan=expected_enable_fan,
+            expected_episodes=expected_episodes,
+            expected_seed=expected_seed,
+        )
+        return {
+            "X0": np.asarray(dataset["X0"]).copy(),
+            "u_prev": np.asarray(dataset["u_prev"]).reshape(-1).copy(),
+            "t_set": np.asarray(dataset["t_set"]).reshape(-1).copy(),
+            "u0": np.asarray(dataset["u0"]).reshape(-1).copy(),
+            "provenance": provenance,
+        }
 
 
 def Q_ss(d, set_c):
@@ -62,10 +187,23 @@ class SpanNet(nn.Module):
         return self.net(x)
 
 
-def build_span_net(epochs=400, batch=4096, data_path=SPAN_NPZ):
-    z = np.load(data_path)
-    X0, UP, TS, U0 = z["X0"], z["u_prev"].flatten(), z["t_set"].flatten(), z["u0"].flatten()
-    Xin = np.column_stack([X0, UP, TS])  # [N, ND+4] -- X0 is ND+2 wide
+def build_span_net(
+    epochs=400,
+    batch=4096,
+    data_path=SPAN_NPZ,
+    *,
+    expected_enable_fan=False,
+    expected_episodes=None,
+    expected_seed=None,
+    dataset=None,
+):
+    dataset = dataset or load_span_dataset(
+        data_path,
+        expected_enable_fan=expected_enable_fan,
+        expected_episodes=expected_episodes,
+        expected_seed=expected_seed,
+    )
+    X0, UP, TS, U0 = dataset["X0"], dataset["u_prev"], dataset["t_set"], dataset["u0"]
     resid = U0 - Q_ss(X0[:, DIDX], TS)  # target
 
     xm, xs = Xin.mean(0), Xin.std(0) + 1e-8
@@ -103,7 +241,7 @@ def build_span_net(epochs=400, batch=4096, data_path=SPAN_NPZ):
         flush=True,
     )
     stats = (torch.tensor(xm, dtype=torch.float32), torch.tensor(xs, dtype=torch.float32), float(rm), float(rs))
-    return net, stats
+    return net, stats, dataset["provenance"]
 
 
 def _drive(plant, Q, c):
@@ -174,7 +312,7 @@ def band(T, set_c, win=0.4):
 
 if __name__ == "__main__":
     print("Building setpoint-spanning residual net ...", flush=True)
-    net, stats = build_span_net()
+    net, stats, _ = build_span_net()
     SETPOINTS = [110.0, 150.0, 190.0, 220.0, 260.0]  # 230..500F
     SEEDS = [0, 1, 2]
     print("\n setpoint    FULL MPC (rms/max/bias)     SPAN net (rms/max/bias)", flush=True)

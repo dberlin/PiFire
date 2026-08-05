@@ -30,7 +30,9 @@ import multiprocessing as mp
 from scipy.stats import qmc
 
 from controller.mpc import Controller, _DEFAULTS
-from controller.mpc_allocator import allocate
+from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
+from controller.mpc_model import MODEL_SCHEMA
+from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
 from controller.grill_sim import GrillSim
 
 SP = 110.0
@@ -38,6 +40,50 @@ CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 ND = int(_DEFAULTS["n_delay"])
 OUT = "./docs/superpowers/experiments/_ampc_data/pifire_samples.npz"
 OUT_SPAN = "./docs/superpowers/experiments/_ampc_data/pifire_span.npz"
+
+SPAN_DATASET_SCHEMA = 1
+SPAN_GENERATION_VERSION = 1
+
+
+def span_generation_command(*, episodes, minutes, dither, sp_lo, sp_hi, seed, enable_fan):
+    """Return the canonical, reproducible invocation represented by a span archive."""
+    command = (
+        f"sample_mpc.py --mode span -e {int(episodes)} --minutes {float(minutes)} "
+        f"--dither {float(dither)} --sp-lo {float(sp_lo)} --sp-hi {float(sp_hi)} --seed {int(seed)}"
+    )
+    return f"{command} --enable-fan" if enable_fan else command
+
+
+def span_dataset_metadata(*, episodes, sampled_state_count, minutes, dither, sp_lo, sp_hi, seed, enable_fan):
+    """Build complete model and sampling provenance for one span dataset."""
+    metadata = {
+        "dataset_schema": np.int64(SPAN_DATASET_SCHEMA),
+        "sample_mode": np.array("span"),
+        "model_schema": np.int64(MODEL_SCHEMA),
+        "allocator_revision": np.int64(ALLOCATOR_REVISION),
+        "episode_count": np.int64(episodes),
+        "sampled_state_count": np.int64(sampled_state_count),
+        "seed": np.int64(seed),
+        "generation_version": np.int64(SPAN_GENERATION_VERSION),
+        "sample_minutes": np.float64(minutes),
+        "sample_dither": np.float64(dither),
+        "generation_command": np.array(
+            span_generation_command(
+                episodes=episodes,
+                minutes=minutes,
+                dither=dither,
+                sp_lo=sp_lo,
+                sp_hi=sp_hi,
+                seed=seed,
+                enable_fan=enable_fan,
+            )
+        ),
+    }
+    for key in _CALIB_FLOATS:
+        metadata[key] = np.float64(_DEFAULTS[key])
+    for key in _CALIB_INTS:
+        metadata[key] = np.int64(bool(enable_fan) if key == "enable_fan_input" else _DEFAULTS[key])
+    return metadata
 
 
 def generate_states(n, *, seed=0, op_frac=0.55):
@@ -195,10 +241,11 @@ def _episode_span(arg):
         y = plant.measured()
         x_hat = c.estimator.update(lastQ, y)
         try:
-            q_exp = float(np.asarray(c.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+            residual = float(np.asarray(c.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
         except Exception:
-            q_exp = lastQ
-        q_exp = float(np.clip(q_exp, 0.0, 1.0))
+            residual = 0.0
+        equilibrium = c._equilibrium_load(c._set_point_c, float(x_hat[int(cfg["n_delay"]) + 1]))
+        q_exp = float(np.clip(equilibrium + residual, 0.0, 1.0))
         if k >= 4:
             Xh.append(np.asarray(x_hat).flatten().copy())
             Up.append(lastQ)
@@ -233,7 +280,7 @@ def sample_span(
     workers=None,
     seed=0,
     minutes=120,
-    dither=8.0,
+    dither=0.08,
     sp_lo=100.0,
     sp_hi=290.0,
     out=OUT_SPAN,
@@ -252,7 +299,23 @@ def sample_span(
     U0 = np.concatenate([r[3] for r in results])
     os.makedirs(os.path.dirname(out), exist_ok=True)
     np.savez_compressed(
-        out, X0=X0, u_prev=Up, t_set=Ts, u0=U0, sp_lo=sp_lo, sp_hi=sp_hi, enable_fan=np.int64(bool(enable_fan))
+        out,
+        X0=X0,
+        u_prev=Up,
+        t_set=Ts,
+        u0=U0,
+        sp_lo=sp_lo,
+        sp_hi=sp_hi,
+        **span_dataset_metadata(
+            episodes=episodes,
+            sampled_state_count=len(U0),
+            minutes=minutes,
+            dither=dither,
+            sp_lo=sp_lo,
+            sp_hi=sp_hi,
+            seed=seed,
+            enable_fan=enable_fan,
+        ),
     )
     print(
         f"span: {episodes} episodes [{sp_lo:.0f},{sp_hi:.0f}]C on {workers} workers in "
@@ -327,7 +390,7 @@ if __name__ == "__main__":
     ap.add_argument("-e", "--episodes", type=int, default=120, help="closed/span: episodes")
     ap.add_argument("-w", "--workers", type=int, default=None)
     ap.add_argument("--minutes", type=float, default=None, help="episode length (min)")
-    ap.add_argument("--dither", type=float, default=8.0)
+    ap.add_argument("--dither", type=float, default=0.08)
     ap.add_argument("--sp-lo", type=float, default=100.0)
     ap.add_argument("--sp-hi", type=float, default=290.0)
     ap.add_argument("--enable-fan", action="store_true", help="span: sample with the MPC driving the fan")

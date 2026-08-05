@@ -11,6 +11,7 @@ import pytest
 import notify.mqtt_handler as mh
 from common.modes import Mode
 from controller.mpc import Controller, _DEFAULTS, _warn_about_model
+from controller.mpc_model import steady_combustion_load
 from controller.runtime.runner import ThreadedControllerRunner
 from controller.applied_output import AppliedOutput, OutputSource
 from common.control_trace import ActuationMode
@@ -795,7 +796,7 @@ def test_set_target_still_updates_the_target():
     assert c._set_point_c == 300  # units are "C" here, so no conversion
 
 
-def _residual_controller(*, feed_forward=False):
+def _residual_controller(*, feed_forward=True):
     controller = Controller(
         dict(
             CONFIG,
@@ -812,6 +813,12 @@ def _residual_controller(*, feed_forward=False):
     )
     controller.set_target(120.0)
     controller.estimator.update = lambda applied, measured: np.asarray((measured, 10.0))
+    if feed_forward:
+        controller._equilibrium_load = lambda target, disturbance: steady_combustion_load(
+            controller.cfg,
+            target,
+            disturbance,
+        )
     return controller
 
 
@@ -866,14 +873,15 @@ def test_residual_policy_clamps_only_the_combined_load_once(residual, raw_total,
     assert diagnostics.bounded_firing_load == pytest.approx(bounded_total)
 
 
-def test_feed_forward_remains_active_when_unrecognized_production_config_requests_it_disabled():
+def test_unrecognized_feed_forward_config_cannot_override_the_measured_production_default():
     controller = _residual_controller(feed_forward=False)
     controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
 
     controller.update(100.0)
 
-    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.4)
-    assert controller.trace_diagnostics().bounded_firing_load == pytest.approx(0.4)
+    assert "feed_forward" not in controller.cfg
+    assert controller.trace_diagnostics().equilibrium_feed_forward == 0.0
+    assert controller.trace_diagnostics().bounded_firing_load == 0.0
 
 
 def test_nondefault_configured_model_is_reachability_known_while_exact_defaults_remain_unknown():
@@ -909,6 +917,29 @@ def test_private_equilibrium_provider_seam_can_run_a_no_feed_forward_experiment(
     assert diagnostics.bounded_firing_load == 0.25
 
 
+def test_loaded_net_keeps_its_full_raw_command_with_zero_and_analytic_equilibrium_seams(net_mpc_controller):
+    """The outer composition must not drop or double-add the net's analytic baseline."""
+    controller = net_mpc_controller
+    state = np.asarray([0.0] * int(controller.cfg["n_delay"]) + [100.0, 10.0])
+    controller.estimator.update = lambda applied, measured: state
+    expected_raw = controller._net.firing_rate_raw(state, 0.0, controller._set_point_c)
+    analytic_equilibrium = steady_combustion_load(controller.cfg, controller._set_point_c, state[-1])
+
+    controller.update(100.0)
+    production = controller.trace_diagnostics()
+
+    controller._applied_combustion_load = 0.0
+    controller._equilibrium_load = lambda target, disturbance: analytic_equilibrium
+    controller.update(100.0)
+    experiment = controller.trace_diagnostics()
+
+    for diagnostics, equilibrium in ((production, 0.0), (experiment, analytic_equilibrium)):
+        assert diagnostics.equilibrium_feed_forward == pytest.approx(equilibrium)
+        assert diagnostics.residual_move == pytest.approx(expected_raw - equilibrium)
+        assert diagnostics.raw_policy_firing_load == pytest.approx(expected_raw)
+        assert diagnostics.bounded_firing_load == pytest.approx(np.clip(expected_raw, 0.0, 1.0))
+
+
 def test_radiation_only_model_keeps_controller_equilibrium_finite():
     controller = Controller(
         dict(CONFIG, n_delay=0, theta=0.0, h_amb=0.0, K_Q=100.0, sigma=1.4e-9, estimator="ekf"),
@@ -917,6 +948,11 @@ def test_radiation_only_model_keeps_controller_equilibrium_finite():
     )
     controller.set_target(240.0)
     controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
+    controller._equilibrium_load = lambda target, disturbance: steady_combustion_load(
+        controller.cfg,
+        target,
+        disturbance,
+    )
 
     controller.update(100.0)
 
@@ -942,6 +978,11 @@ def test_nlp_reaches_upper_authority_when_raw_equilibrium_exceeds_two_without_fa
         dict(CYCLE),
     )
     controller.set_target(100.0)
+    controller._equilibrium_load = lambda target, disturbance: steady_combustion_load(
+        controller.cfg,
+        target,
+        disturbance,
+    )
 
     controller.update(20.0)
 

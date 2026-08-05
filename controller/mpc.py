@@ -331,6 +331,9 @@ def requires_modules(config):
     return ("do_mpc",)
 
 
+_SHIP_EQUILIBRIUM_FEED_FORWARD = False
+
+
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
@@ -831,18 +834,16 @@ class Controller(ControllerBase):
         self._applied_combustion_load = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
 
     def _equilibrium_load(self, target, disturbance):
-        """Private experiment seam for replacing the analytic feed-forward arm."""
+        """Private experiment seam; the measured shipment gate owns the production default."""
+        if not _SHIP_EQUILIBRIUM_FEED_FORWARD:
+            return 0.0
         return steady_combustion_load(self.cfg, target, disturbance)
 
     def _policy_residual(self, x_hat, previous_load, equilibrium_load):
-        """Return only the policy's transient move around the analytic baseline."""
+        """Return the policy move that outer composition adds to its injected equilibrium."""
         self._policy_equilibrium_load = equilibrium_load
         if self._net is not None:
-            residual = getattr(self._net, "residual", None)
-            if residual is not None:
-                return float(residual(x_hat, previous_load, self._set_point_c))
-            raw_policy = getattr(self._net, "firing_rate_raw", self._net.firing_rate)
-            return float(raw_policy(x_hat, previous_load, self._set_point_c)) - equilibrium_load
+            return float(self._net.firing_rate_raw(x_hat, previous_load, self._set_point_c)) - equilibrium_load
         return float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
 
     def update(self, current):

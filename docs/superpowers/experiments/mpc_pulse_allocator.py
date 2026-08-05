@@ -34,6 +34,8 @@ FAN_MAX = 1.00
 Q_FLOOR = 0.05
 PULSE_SLOT_S = 1.0
 FIXED_CYCLE_S = 25
+PULSE_QUANTUM_S = 2.0
+PULSE_FRAME_S = 20.0
 LEVELS = (0.01, 0.025, 0.05, 0.10, 0.25, 0.50, 0.75, 1.00)
 PLANTS = {"GrillSim": GrillSim, "MAKGrillSim": MAKGrillSim}
 DURATIONS = {"GrillSim": 4 * 3600, "MAKGrillSim": 8 * 3600}
@@ -41,6 +43,24 @@ TAIL_S = 30 * 60
 ROOT = Path(__file__).resolve().parents[3]
 CALIBRATION = ROOT / "tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv"
 OUT = Path(__file__).with_name("_mpc_pulse_allocator.json")
+
+
+def _plant_calibration(plant):
+    return {
+        "C_c": float(plant.C_c),
+        "H": float(plant.H),
+        "T_amb": float(plant.T_amb),
+        "deadtime_s": len(plant.transit),
+        "fan_is_lever": bool(plant.fan_is_lever),
+        "fixed_fan": plant.fixed_fan,
+        "h_lid": float(plant.h_lid),
+        "probe_tau_s": float(plant.probe_tau),
+        "sigma": float(plant.sigma),
+    }
+
+
+def _plant_calibrations():
+    return {name: _plant_calibration(factory(seed=0)) for name, factory in PLANTS.items()}
 
 
 @dataclass(frozen=True)
@@ -262,9 +282,18 @@ def main(argv=None) -> None:
     rows = run_open_loop()
     fits = run_calibration_fits()
     payload = {
+        "header": {
+            "format_version": 1,
+            "regeneration_command": (
+                "uv run --no-sync python docs/superpowers/experiments/mpc_pulse_allocator.py "
+                "--out docs/superpowers/experiments/_mpc_pulse_allocator.json"
+            ),
+        },
         "conditions": {
             "levels": LEVELS,
             "pulse_slot_s": PULSE_SLOT_S,
+            "selected_scheduler": {"pulse_quantum_s": PULSE_QUANTUM_S, "frame_s": PULSE_FRAME_S},
+            "plant_calibration": _plant_calibrations(),
             "fixed_cycle_s": FIXED_CYCLE_S,
             "fan_range": (FAN_MIN, FAN_MAX),
             "auger_range": (0.0, U_MAX),

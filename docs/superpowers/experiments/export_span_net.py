@@ -17,12 +17,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for approxmpc_
 sys.path.insert(0, os.getcwd())  # repo root for controller
 import numpy as np
 import torch
-from controller.mpc import _DEFAULTS
-from approxmpc_span import build_span_net, Q_ss, DIDX  # noqa: E402
+from approxmpc_span import DIDX, Q_ss, build_span_net, load_span_dataset  # noqa: E402
+from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
 
 
-def main(data_path, out, enable_fan):
-    net, stats = build_span_net(data_path=data_path)
+def main(data_path, out, enable_fan, *, expected_episodes=500, expected_seed=0):
+    dataset = load_span_dataset(
+        data_path,
+        expected_enable_fan=enable_fan,
+        expected_episodes=expected_episodes,
+        expected_seed=expected_seed,
+    )
+    net, stats, provenance = build_span_net(dataset=dataset)
     xm, xs, rm, rs = stats
     # extract Linear layers from the torch Sequential, transpose W to [in,out]
     layers = [m for m in net.net if isinstance(m, torch.nn.Linear)]
@@ -34,32 +40,23 @@ def main(data_path, out, enable_fan):
     blob["x_std"] = xs.numpy().astype(np.float32)
     blob["r_mean"] = np.float32(rm)
     blob["r_std"] = np.float32(rs)
-    # Embed the full normalized-command calibration the policy depends on.
-    from controller.mpc_model import MODEL_SCHEMA
-    from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
-
-    # Which model STRUCTURE this was trained against, not which calibration.
-    # The calibration scalars cannot express it -- every one of them was
-    # identical across the two-lump/one-lump change -- so the controller has
-    # nothing else to refuse a structurally stale artifact by.
-    blob["model_schema"] = np.int64(MODEL_SCHEMA)
-    for k in _CALIB_FLOATS:
-        blob[k] = np.float32(_DEFAULTS[k])
-    for k in _CALIB_INTS:
-        # enable_fan_input reflects the mode this artifact was trained for,
-        # not the _DEFAULTS value (always False)
-        val = bool(enable_fan) if k == "enable_fan_input" else _DEFAULTS[k]
-        blob[k] = np.int64(val)
-    z = np.load(data_path)
-    blob["sp_lo"] = np.float32(z["sp_lo"])
-    blob["sp_hi"] = np.float32(z["sp_hi"])
+    # The runtime fields are copied only from provenance which has already
+    # matched the active model; never restamp them from current constants.
+    for key, value in provenance.items():
+        blob[f"source_{key}"] = value
+    for key in ("model_schema", "allocator_revision", *_CALIB_FLOATS, *_CALIB_INTS):
+        blob[key] = provenance[key]
+    blob["sp_lo"] = provenance["sp_lo"]
+    blob["sp_hi"] = provenance["sp_hi"]
 
     # Reference pairs: full torch normalized command on real sampled states.
+    if len(dataset["u0"]) < 64:
+        raise ValueError("dataset sampled_state_count must be at least 64 for reference-pair fidelity")
     rng = np.random.default_rng(0)
-    idx = rng.choice(len(z["u0"]), size=64, replace=False)
-    X0 = z["X0"][idx]
-    UP = z["u_prev"].flatten()[idx]
-    TS = z["t_set"].flatten()[idx]
+    idx = rng.choice(len(dataset["u0"]), size=64, replace=False)
+    X0 = dataset["X0"][idx]
+    UP = dataset["u_prev"][idx]
+    TS = dataset["t_set"][idx]
     Xin = np.column_stack([X0, UP, TS])
     with torch.no_grad():
         inp = (torch.tensor(Xin, dtype=torch.float32) - xm) / xs
@@ -74,7 +71,8 @@ def main(data_path, out, enable_fan):
     sz = os.path.getsize(out) / 1024
     print(
         f"exported {out} ({sz:.0f} KB): {len(layers)} layers, fan={bool(enable_fan)}, "
-        f"span [{blob['sp_lo']:.0f},{blob['sp_hi']:.0f}]C"
+        f"span [{float(blob['sp_lo']):.0f},{float(blob['sp_hi']):.0f}]C, "
+        f"episodes={int(provenance['episode_count'])}, samples={int(provenance['sampled_state_count'])}"
     )
 
 
@@ -83,5 +81,13 @@ if __name__ == "__main__":
     ap.add_argument("--data", default="./docs/superpowers/experiments/_ampc_data/pifire_span.npz")
     ap.add_argument("--out", default="./controller/mpc_policy_net.npz")
     ap.add_argument("--enable-fan", action="store_true")
+    ap.add_argument("--expected-episodes", type=int, default=500)
+    ap.add_argument("--expected-seed", type=int, default=0)
     a = ap.parse_args()
-    main(a.data, a.out, a.enable_fan)
+    main(
+        a.data,
+        a.out,
+        a.enable_fan,
+        expected_episodes=a.expected_episodes,
+        expected_seed=a.expected_seed,
+    )

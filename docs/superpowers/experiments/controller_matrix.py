@@ -34,8 +34,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 from common.control_trace import ActuationMode  # noqa: E402
 from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
 from controller.runtime.logic.pulse import PulseResetReason, PulseScheduler  # noqa: E402
+from controller.runtime.runner import ControllerType, SyncControllerRunner  # noqa: E402
 
 OUT = "./docs/superpowers/experiments/_matrix_baseline.json"
+STEADY_TAIL_S = 30 * 60
 
 # Plants a run may be driven against, by name. Resolved out of this module's
 # globals at call time rather than captured in a mapping here, so a test that
@@ -95,13 +97,23 @@ class Scenario:
     manual_inhibit: list[tuple[int, int]] = field(default_factory=list)
 
 
+
+# This fixed target is above the full-duty authority calculated for both
+# unchanged plants.  It is a feasibility probe, never a ranked quality row.
+CAPABILITY_UNREACHABLE_HIGH_TARGET_F = 2_000.0
+CAPABILITY_UNREACHABLE_HIGH_SCENARIO = "capability_unreachable_high_2000"
+
 SCENARIOS = {
     "steady_225": Scenario("steady_225", 3 * 3600 + 1800, [(0, 225.0)]),
     "steady_325": Scenario("steady_325", 3 * 3600, [(0, 325.0)]),
     "steady_350": Scenario("steady_350", 3 * 3600 + 1800, [(0, 350.0)]),
     "steady_450": Scenario("steady_450", 3 * 3600 + 1800, [(0, 450.0)]),
     "step_225_275": Scenario("step_225_275", 4 * 3600, [(0, 225.0), (2 * 3600, 275.0)]),
-    "capability_600": Scenario("capability_600", 3 * 3600, [(0, 600.0)]),
+    CAPABILITY_UNREACHABLE_HIGH_SCENARIO: Scenario(
+        CAPABILITY_UNREACHABLE_HIGH_SCENARIO,
+        3 * 3600,
+        [(0, CAPABILITY_UNREACHABLE_HIGH_TARGET_F)],
+    ),
     "lid_open_225": Scenario("lid_open_225", 3 * 3600, [(0, 225.0)], [(2 * 3600, 120)]),
 }
 
@@ -285,7 +297,19 @@ def rank_reachable_rows(rows, *, key):
     )
 
 
-def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, cycle_config=None, refit=False):
+def run_scenario(
+    controller,
+    scenario,
+    seed,
+    *,
+    plant="GrillSim",
+    config=None,
+    cycle_config=None,
+    refit=False,
+    core_setup=None,
+    output_transform=None,
+    trace_sink=None,
+):
     """Drive one controller/plant scenario with the configuration shipping now.
 
     The only override seams are ``config`` (controller options) and
@@ -303,6 +327,11 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
     try:
         mod = importlib.import_module(f"controller.{controller}")
         core = mod.Controller(dict(core_config), "F", dict(cycle_data))
+        if core_setup is not None:
+            core_setup(core)
+        runner = (
+            SyncControllerRunner(core, controller_type=ControllerType(controller)) if trace_sink is not None else None
+        )
         plant_name = plant
         plant_instance = globals()[plant_name](seed=seed)
         mode = _actuation_mode(core)
@@ -329,22 +358,38 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
 
         u_min, u_max = float(cycle_data["u_min"]), float(cycle_data["u_max"])
         setpoint = _setpoint_at(scenario, 0)
-        core.set_target(setpoint)
-        period = float(core.get_control_period() or cycle_data["HoldCycleTime"])
+        if runner is None:
+            core.set_target(setpoint)
+        else:
+            runner.set_target(setpoint)
+        period = float(
+            (core.get_control_period() if runner is None else runner.control_period()) or cycle_data["HoldCycleTime"]
+        )
+        if trace_sink is not None:
+            trace_sink.start(
+                core=core,
+                effective_run=effective_run,
+                control_period_s=period,
+                setpoint=setpoint,
+            )
         requested, ratio, fan_frac = 0.0, (0.0 if scheduler else u_min), 1.0
         next_solve = 0.0
         auger_on, auger_toggle, actual_auger_on = False, 0.0, False
         feedback_start, feedback_delivered = 0.0, 0.0
+        latest_result = None
         if scheduler is None:
             _report(core, u_min, "seed", 0)
-
-        temps, duties, settle_from = [], [], None
+        temps, duties, requested_duties = [], [], []
+        solve_durations, deadline_misses, stale_episodes, settle_from = [], [], 0, None
         for t in range(scenario.duration_s):
             clock.t = float(t)
             new_sp = _setpoint_at(scenario, t)
             if new_sp != setpoint:
                 setpoint = new_sp
-                core.set_target(setpoint)
+                if runner is None:
+                    core.set_target(setpoint)
+                else:
+                    runner.set_target(setpoint)
                 next_solve = t + period
                 settle_from = None
 
@@ -357,18 +402,40 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
             solved = t >= next_solve
             if solved:
                 next_solve = t + period
-                raw = core.update(temp_f)
-                if isinstance(raw, dict):
-                    requested = float(raw.get("cycle_ratio", 0.0))
-                    fan = raw.get("fan") or {}
+                if runner is None:
+                    raw = core.update(temp_f)
+                    if isinstance(raw, dict):
+                        requested = float(raw.get("cycle_ratio", 0.0))
+                        fan = raw.get("fan") or {}
+                        if fan.get("duty") is not None:
+                            fan_frac = float(fan["duty"]) / 100.0
+                    else:
+                        requested = float(raw)
+                    diagnostics = core.trace_diagnostics()
+                    if diagnostics is not None:
+                        solve_durations.append(float(diagnostics.solve_duration_seconds))
+                        deadline_misses.append(int(diagnostics.deadline_miss_count))
+                        stale_episodes += int(diagnostics.stale_state.value == "stale")
+                else:
+                    latest_result = runner.latest_from(temp_f)
+                    requested = float(latest_result.cycle_ratio)
+                    fan = latest_result.fan or {}
                     if fan.get("duty") is not None:
                         fan_frac = float(fan["duty"]) / 100.0
-                else:
-                    requested = float(raw)
+                    diagnostics = latest_result.diagnostics
+                    if diagnostics is not None:
+                        solve_durations.append(float(latest_result.solve_duration_seconds))
+                        deadline_misses.append(int(latest_result.deadline_miss_count))
+                        stale_episodes += int(latest_result.stale_state.value == "stale")
+                if output_transform is not None:
+                    requested = float(output_transform(requested))
                 if scheduler is not None:
                     # Framed MPC has no fixed-cycle minimum firing floor; its
                     # only duty authority is the effective controller/cycle cap.
                     requested = min(max(requested, 0.0), effective_max)
+                if trace_sink is not None:
+                    assert latest_result is not None
+                    trace_sink.solved(t=float(t), result=latest_result, requested=requested)
 
             if scheduler is None:
                 ratio = min(max(requested, u_min), u_max)
@@ -378,7 +445,6 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
                     ratio = 0.0
                 if solved and not manual_inhibit:
                     source = "lid_open" if lid_paused else "controller"
-                    _report(core, ratio, source, t, requested=requested)
                 if manual_inhibit:
                     # Hold preserves its toggle timer while manual ownership
                     # holds the auger off; release resumes the existing phase.
@@ -392,6 +458,19 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
                     auger_on, auger_toggle, auger_frac = _auger_toggle_tick(
                         auger_on, auger_toggle, t, ratio, cycle_data["HoldCycleTime"]
                     )
+                if solved and not manual_inhibit and t > feedback_start:
+                    delivered = feedback_delivered / (t - feedback_start)
+                    _report(core, delivered, source, t, requested=requested)
+                    if trace_sink is not None and latest_result is not None:
+                        trace_sink.applied(
+                            interval_start_s=feedback_start,
+                            interval_end_s=float(t),
+                            result=latest_result,
+                            requested=requested,
+                            realized=delivered,
+                        )
+                    feedback_start = float(t)
+                    feedback_delivered = 0.0
             else:
                 inhibited = lid_paused or manual_inhibit
                 reset_reason = PulseResetReason.MANUAL if manual_start else PulseResetReason.LID
@@ -399,31 +478,64 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
                     # Account the observed interval first, then discard the
                     # interrupted credit exactly as Hold does before preemption.
                     decision = scheduler.advance(requested, float(t), actual_auger_on)
+                    if trace_sink is not None and latest_result is not None:
+                        trace_sink.frames(
+                            t=float(t),
+                            revision=latest_result.revision,
+                            frames=decision.completed_frames,
+                        )
+                    if trace_sink is not None and latest_result is not None and t > feedback_start:
+                        delivered = decision.delivered_on_s - feedback_delivered
+                        trace_sink.applied(
+                            interval_start_s=feedback_start,
+                            interval_end_s=float(t),
+                            result=latest_result,
+                            requested=requested,
+                            realized=delivered / (t - feedback_start),
+                            sample_complete=False,
+                        )
                     scheduler.reset(reset_reason)
                     actual_auger_on = False
-                    feedback_start = float(t)
                     # PulseScheduler retains its monotone total across reset;
                     # baseline this new feedback interval at that total so an
                     # interrupted frame cannot be charged again after release.
+                    feedback_start = float(t)
                     feedback_delivered = decision.delivered_on_s
                 elif inhibited:
                     actual_auger_on = False
                 else:
                     decision = scheduler.advance(requested, float(t), actual_auger_on)
+                    if trace_sink is not None and latest_result is not None:
+                        trace_sink.frames(
+                            t=float(t),
+                            revision=latest_result.revision,
+                            frames=decision.completed_frames,
+                        )
                     actual_auger_on = decision.command_on
                     if solved and t > feedback_start:
                         delivered = decision.delivered_on_s - feedback_delivered
+                        realized = delivered / (t - feedback_start)
                         _report(
                             core,
-                            delivered / (t - feedback_start),
+                            realized,
                             "controller",
                             t,
                             requested=requested,
                         )
+                        if trace_sink is not None and latest_result is not None:
+                            trace_sink.applied(
+                                interval_start_s=feedback_start,
+                                interval_end_s=float(t),
+                                result=latest_result,
+                                requested=requested,
+                                realized=realized,
+                            )
                         feedback_start = float(t)
                         feedback_delivered = decision.delivered_on_s
                 auger_frac = float(actual_auger_on)
                 ratio = auger_frac
+            if scheduler is None:
+                feedback_delivered += auger_frac
 
             plant_instance.step(
                 auger_on=auger_frac,
@@ -432,6 +544,7 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
             )
             temps.append(temp_f)
             duties.append(auger_frac)
+            requested_duties.append(requested * effective_max if scheduler is not None else requested)
             if abs(temp_f - setpoint) <= 5.0:
                 if settle_from is None:
                     settle_from = t
@@ -440,8 +553,29 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
 
         temps = np.asarray(temps)
         duties = np.asarray(duties)
+        requested_duties = np.asarray(requested_duties)
         sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
         err = temps - sp_series
+        if trace_sink is not None and latest_result is not None and float(scenario.duration_s) > feedback_start:
+            if scheduler is not None:
+                final_decision = scheduler.advance(requested, float(scenario.duration_s), actual_auger_on)
+                trace_sink.frames(
+                    t=float(scenario.duration_s),
+                    revision=latest_result.revision,
+                    frames=final_decision.completed_frames,
+                )
+                delivered = final_decision.delivered_on_s - feedback_delivered
+                realized = delivered / (float(scenario.duration_s) - feedback_start)
+            else:
+                realized = feedback_delivered / (float(scenario.duration_s) - feedback_start)
+            trace_sink.applied(
+                interval_start_s=feedback_start,
+                interval_end_s=float(scenario.duration_s),
+                result=latest_result,
+                requested=requested,
+                realized=realized,
+            )
+
         lid_start = min((start for start, _ in scenario.lid_open), default=None)
         reachability, max_authority = _feasibility(core, cycle_data, plant_instance, scenario)
         result = {
@@ -461,6 +595,15 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
             "std_duty": float(duties.std()),
             "final_temp_f": float(temps[-1]),
             "lid_min_temp_f": None if lid_start is None else float(temps[lid_start:].min()),
+            "rmse_f": float(np.sqrt(np.mean(err**2))),
+            "steady_peak_to_peak_f": float(np.ptp(temps[-min(len(temps), STEADY_TAIL_S) :])),
+            "auger_on_time_s": float(duties.sum()),
+            "pellet_proxy": float(duties.sum()),
+            "requested_realized_load_error": float(np.abs(requested_duties - duties).mean()),
+            "solver_duration_seconds": tuple(solve_durations),
+            "deadline_misses": max(deadline_misses, default=0),
+            "stale_result_episodes": stale_episodes,
+            "transitions_per_hour": float(np.count_nonzero(np.diff(duties)) * 3600.0 / len(duties)),
             "lid_recovery_s": None if lid_start is None else _recovery_s(err[lid_start:]),
         }
         status = getattr(core, "get_status", lambda: None)()
@@ -473,6 +616,8 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, c
             result["built_n_horizon"] = int(cfg["n_horizon"]) if built is None else int(built)
         if refit:
             result["refit"] = _refit_after_cook(core)
+        if trace_sink is not None:
+            result["trace_session"] = trace_sink.close()
         return result
     finally:
         time.time = real_time_time
@@ -516,7 +661,7 @@ def main(argv=None):
     regeneration_command = (
         "uv run --no-sync python docs/superpowers/experiments/controller_matrix.py "
         "--controllers pid_sp mpc --scenarios steady_225 steady_350 steady_450 "
-        "step_225_275 capability_600 lid_open_225 --seeds 0 1 2 3 4 "
+        "step_225_275 capability_unreachable_high_2000 lid_open_225 --seeds 0 1 2 3 4 "
         "--plants GrillSim MAKGrillSim --out docs/superpowers/experiments/_matrix_baseline.json"
     )
     ap = argparse.ArgumentParser(

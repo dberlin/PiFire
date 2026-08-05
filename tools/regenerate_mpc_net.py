@@ -27,8 +27,8 @@ ACCEPTANCE_GATE = (
 )
 
 
-def sample_cmd(py, enable_fan, episodes, workers):
-    cmd = [py, SAMPLER, "--mode", "span", "-e", str(episodes)]
+def sample_cmd(py, enable_fan, episodes, workers, seed=0):
+    cmd = [py, SAMPLER, "--mode", "span", "-e", str(episodes), "--seed", str(seed)]
     if workers is not None:
         cmd += ["-w", str(workers)]
     if enable_fan:
@@ -36,21 +36,32 @@ def sample_cmd(py, enable_fan, episodes, workers):
     return cmd
 
 
-def export_cmd(py, enable_fan):
+def export_cmd(py, enable_fan, episodes=500, seed=0):
     data = net_path_for(SPAN_DATA, enable_fan)
     out = net_path_for(BASE_ARTIFACT, enable_fan)
-    cmd = [py, EXPORTER, "--data", data, "--out", out]
+    cmd = [
+        py,
+        EXPORTER,
+        "--data",
+        data,
+        "--out",
+        out,
+        "--expected-episodes",
+        str(episodes),
+        "--expected-seed",
+        str(seed),
+    ]
     if enable_fan:
         cmd.append("--enable-fan")
     return cmd
 
 
-def plan_commands(modes, episodes, workers, skip_sample, py=sys.executable):
+def plan_commands(modes, episodes, workers, skip_sample, py=sys.executable, seed=0):
     cmds = []
     for enable_fan in modes:
         if not skip_sample:
-            cmds.append(sample_cmd(py, enable_fan, episodes, workers))
-        cmds.append(export_cmd(py, enable_fan))
+            cmds.append(sample_cmd(py, enable_fan, episodes, workers, seed))
+        cmds.append(export_cmd(py, enable_fan, episodes, seed))
     return cmds
 
 
@@ -63,11 +74,12 @@ def main(argv=None):
     ap.add_argument("--episodes", type=int, default=500)
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--skip-sample", action="store_true", help="skip sampling; retrain+export from an existing dataset")
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true", help="print the commands without executing them")
     args = ap.parse_args(argv)
 
     modes = _MODE_MAP[args.mode]
-    cmds = plan_commands(modes, args.episodes, args.workers, args.skip_sample)
+    cmds = plan_commands(modes, args.episodes, args.workers, args.skip_sample, seed=args.seed)
 
     if args.dry_run:
         for cmd in cmds:
