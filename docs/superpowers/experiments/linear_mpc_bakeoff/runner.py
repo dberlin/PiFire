@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from functools import lru_cache
 import gzip
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -51,7 +52,7 @@ from .linear_mpc import (
 )
 _FRAME_S = 20
 _FIXED_FAN = 1.0
-_DEFAULT_OUTPUT = Path("docs/superpowers/experiments/_linear_mpc_bakeoff.json.gz")
+_DEFAULT_OUTPUT = Path("docs/superpowers/experiments/_linear_mpc_bakeoff.manifest.json")
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,6 +428,7 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
     return row
 
 
+_MAX_ARTIFACT_PART_BYTES = 90 * 1024 * 1024
 def load_artifact(path: Path) -> ExperimentArtifact:
     """Load either canonical gzip transport or a legacy JSON manifest exactly."""
     return ExperimentArtifact.from_json(_read_artifact_text(path))
@@ -440,7 +442,29 @@ def _read_artifact_text(path: Path) -> str:
     if path.suffix == ".gz":
         with gzip.open(path, "rt", encoding="utf-8") as source:
             return source.read()
-    return path.read_text(encoding="utf-8")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("transport") != "gzip-shards/v1":
+        return json.dumps(document, indent=2, sort_keys=True)
+    parts = document["parts"]
+    compressed = b"".join(
+        _verified_part(path, item, index) for index, item in enumerate(parts)
+    )
+    if hashlib.sha256(compressed).hexdigest() != document["compressed_sha256"]:
+        raise ValueError("compressed artifact checksum mismatch")
+    payload = gzip.decompress(compressed)
+    if len(payload) != document["canonical_json_bytes"] or hashlib.sha256(payload).hexdigest() != document["canonical_json_sha256"]:
+        raise ValueError("canonical artifact checksum mismatch")
+    return payload.decode("utf-8")
+
+
+def _verified_part(manifest: Path, item: Mapping[str, Any], index: int) -> bytes:
+    name = item["name"]
+    if name != f"{manifest.stem}.part{index:04d}.gz" or Path(name).name != name:
+        raise ValueError("unsafe or unordered artifact part")
+    data = (manifest.parent / name).read_bytes()
+    if len(data) != item["bytes"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
+        raise ValueError("artifact part checksum mismatch")
+    return data
 
 
 def _write_text_atomically(path: Path, payload: str) -> None:
@@ -460,8 +484,41 @@ def _write_text_atomically(path: Path, payload: str) -> None:
 
 
 def write_artifact_atomically(path: Path, artifact: ExperimentArtifact) -> None:
-    """Write canonical evidence atomically, compressing explicit ``.gz`` transport."""
-    _write_text_atomically(path, artifact.to_json() + "\n")
+    """Publish a deterministic manifest after bounded gzip shards are durable."""
+    payload = (artifact.to_json() + "\n").encode("utf-8")
+    if path.suffix == ".gz":
+        _write_text_atomically(path, payload.decode("utf-8"))
+        return
+    compressed = gzip.compress(payload, mtime=0)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    parts = []
+    for index, offset in enumerate(range(0, len(compressed), _MAX_ARTIFACT_PART_BYTES)):
+        data = compressed[offset : offset + _MAX_ARTIFACT_PART_BYTES]
+        name = f"{path.stem}.part{index:04d}.gz"
+        part = path.parent / name
+        _write_bytes_atomically(part, data)
+        parts.append({"name": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+    manifest = {
+        "transport": "gzip-shards/v1",
+        "parts": parts,
+        "compressed_sha256": hashlib.sha256(compressed).hexdigest(),
+        "canonical_json_sha256": hashlib.sha256(payload).hexdigest(),
+        "canonical_json_bytes": len(payload),
+    }
+    _write_text_atomically(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def _write_bytes_atomically(path: Path, data: bytes) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        with temporary.open("wb") as sink:
+            sink.write(data)
+            sink.flush()
+            os.fsync(sink.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _write_checkpoint(
