@@ -12,6 +12,7 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.data import chronological_s
 from docs.superpowers.experiments.linear_mpc_bakeoff.state_space import (
     InnovationStateSpace,
     StateSpaceConfig,
+    _select_fit,
     subspace_fit,
 )
 
@@ -245,3 +246,16 @@ def test_projected_realization_initializes_forecast_and_affine_with_direct_feedt
     assert abs(model.snapshot()["matrices"]["D"][0]) > 0.1
     assert float(np.sqrt(np.mean((forecast - record.temp_c[1_200:]) ** 2))) < 0.08
     np.testing.assert_allclose(affine.free_output_c + affine.input_response_c @ future_q, forecast)
+
+def test_no_viable_candidate_preserves_detailed_rejection_reason() -> None:
+    samples = 100
+    record = SignalRecord(
+        np.arange(samples, dtype=np.float64) * 20.0,
+        np.full(samples, 20.0),
+        np.full(samples, 0.5),
+        np.full(samples, 20.0),
+        "physically-uninformative",
+    )
+
+    with pytest.raises(ValueError, match="no viable state-space candidate.*subspace Markov projection"):
+        _select_fit(record, StateSpaceConfig(orders=(1,), delays=(1,)))

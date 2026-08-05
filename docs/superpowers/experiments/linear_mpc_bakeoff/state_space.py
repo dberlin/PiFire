@@ -299,6 +299,7 @@ def subspace_fit(record: SignalRecord, order: int, block_rows: int) -> SubspaceF
 
 def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
     n = record.temp_c.size
+    rejection_reasons: list[str] = []
     candidates: list[SubspaceFit] = []
     split = max(
         max(config.orders) + max(config.delays) + 4,
@@ -319,10 +320,14 @@ def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
                     error + config.parameter_penalty * (order * order + 2 * order + 2),
                     candidate.state_offset,
                 ))
-            except ValueError:
+            except ValueError as error:
+                rejection_reasons.append(str(error))
                 continue
     if not candidates:
-        raise ValueError("record is too short for configured state-space candidates")
+        detail = "; ".join(sorted(set(rejection_reasons))) or "no candidate was attempted"
+        if rejection_reasons and all("too short" in reason for reason in rejection_reasons):
+            raise ValueError(f"record is too short for configured state-space candidates: {detail}")
+        raise ValueError(f"no viable state-space candidate: {detail}")
     best_error = min(candidate.validation_error for candidate in candidates)
     statistically_equivalent = [
         candidate

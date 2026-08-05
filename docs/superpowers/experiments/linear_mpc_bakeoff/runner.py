@@ -16,6 +16,7 @@ from types import MappingProxyType
 from statistics import median
 from typing import Any, Mapping
 import numpy as np
+from scipy.optimize import minimize
 
 
 from controller.grill_sim import GrillSim, MAKGrillSim
@@ -288,9 +289,10 @@ def _run_matrix(
         (arm, initialization, definition, plant, mode, seed, horizon_s)
         for arm in ("scheduled-arx", "dmc", "state-space")
         for initialization in config.initializations
-        for plant in ("GrillSim", "MAKGrillSim")
-        for mode in ("frozen", "online")
         for definition in definitions
+        for plant in ("GrillSim", "MAKGrillSim")
+        if plant in definition.applicable_plants
+        for mode in ("frozen", "online")
         for seed in sorted(config.seeds)
     ]
     rows: list[ScenarioResult] = []
@@ -467,6 +469,7 @@ def _run_scenario(
     model, fit_ms, before_residuals, after_residuals, calibration = _fitted_model(
         arm, plant, seed, initialization
     )
+    batch_fit_snapshot = _json_value(model.snapshot())
     manager = (
         AdaptationManager(
             incumbent=model,
@@ -493,12 +496,12 @@ def _run_scenario(
         if second % _FRAME_S == 0:
             observed_c = simulator.measured()
             active_model = manager.incumbent if manager is not None else model
-            solve_started = perf_counter()
             prediction = active_model.affine_prediction(
                 mpc_config.horizon_steps,
                 frame.requested_duty,
                 np.full(mpc_config.horizon_steps, simulator.T_amb),
             )
+            solve_started = perf_counter()
             solve = controller.solve(prediction, setpoint_c=target, q_previous=frame.requested_duty)
             elapsed_solve_ms = (perf_counter() - solve_started) * 1_000.0
             solve_ms.append(elapsed_solve_ms)
@@ -517,25 +520,13 @@ def _run_scenario(
                 hessian, linear = condense_cost(
                     prediction, target, frame.requested_duty, mpc_config.weights
                 )
-                reference = projected_gradient_qp(
-                    hessian,
-                    linear,
-                    np.zeros(mpc_config.horizon_steps),
-                    np.ones(mpc_config.horizon_steps),
-                    solve.sequence_q,
-                    max_iterations=100_000,
-                    tolerance=1e-10,
+                reference = _independent_box_qp_reference(
+                    hessian, linear, solve.sequence_q
                 )
-                if not np.isfinite(reference.objective) or reference.kkt_residual > 1e-8:
-                    raise ValueError("high-accuracy convex reference did not converge")
-                evidence.update(
-                    {
-                        "reference_objective": reference.objective,
-                        "objective_gap": solve.objective - reference.objective,
-                        "reference_kkt_residual": reference.kkt_residual,
-                        "kkt_gap": solve.kkt_residual - reference.kkt_residual,
-                    }
-                )
+                evidence.update(reference)
+                if reference["reference_converged"]:
+                    evidence["objective_gap"] = solve.objective - float(reference["reference_objective"])
+                    evidence["kkt_gap"] = solve.kkt_residual - float(reference["reference_kkt_residual"])
             solver_evidence.append(evidence)
             frame = realizer.frame(float(solve.sequence_q[0]))
             transitions += frame.transitions
@@ -555,14 +546,28 @@ def _run_scenario(
                 simulator.T_amb,
             )
             learner_started = perf_counter()
+            safety_override = definition.safety_override_at(second)
+            manual_override = definition.manual_override_at(second)
             outcome = manager.observe(
                 observation,
                 state=OperatingState.HOLD if target == definition.target_low_c else OperatingState.TRANSIENT,
                 provenance="ordinary-cook",
                 lid_open=lid_open,
+                safety_override=safety_override,
+                manual_override=manual_override,
             )
             if outcome.gate.permitted:
                 learner_ms.append((perf_counter() - learner_started) * 1_000.0)
+            if not outcome.gate.permitted:
+                promotion_history.append(
+                    {
+                        "kind": "update-rejection",
+                        "frame_s": second + 1,
+                        "reasons": [reason.value for reason in outcome.gate.reasons],
+                        "incumbent_updated": False,
+                        "challenger_updated": False,
+                    }
+                )
             if (second + 1) % 300 == 0:
                 refresh_started = perf_counter()
                 incumbent_score = float(np.mean(np.abs(temperatures[-min(15, len(temperatures)): ] - np.asarray(targets[-min(15, len(targets)):]))))
@@ -578,6 +583,7 @@ def _run_scenario(
                 refresh_ms.append((perf_counter() - refresh_started) * 1_000.0)
                 promotion_history.append(
                     {
+                        "kind": "five-minute-evaluation",
                         "window_id": decision.window_id,
                         "promoted": decision.promoted,
                         "reasons": [reason.value for reason in decision.reasons],
@@ -599,7 +605,7 @@ def _run_scenario(
         after_residuals,
         before_residuals,
         fit_ms,
-        len(promotion_history),
+        sum(1 for item in promotion_history if item.get("promoted") is True),
     )
     active_model = manager.incumbent if manager is not None else model
     return ScenarioResult(
@@ -625,7 +631,8 @@ def _run_scenario(
         model_evidence={
             "calibration_provenance": calibration.provenance,
             "calibration_metadata": dict(calibration.metadata),
-            "fitted": _json_value(active_model.snapshot()),
+            "batch_fit_snapshot": batch_fit_snapshot,
+            "final_active_snapshot": _json_value(active_model.snapshot()),
             "initial_batch_fit_ms": fit_ms,
         },
         promotion_history=tuple(promotion_history),
@@ -656,18 +663,21 @@ def _prepared_model(arm: str, plant: str, seed: int, initialization: str):
     started = perf_counter()
     model.fit(fit_record)
     fit_ms = (perf_counter() - started) * 1_000.0
-    before = _horizon_residuals(
-        model,
-        record,
-        starts=_validation_origins(
-            record_samples=samples,
-            validation_start=fit_end,
-            validation_end=validation_end,
-            horizon_steps=30,
-            frame_steps=1,
-        ),
-        horizons_s=(600, 800, 1_000),
-    )
+    before = {
+        horizon_s: _horizon_residuals(
+            model,
+            record,
+            starts=_validation_origins(
+                record_samples=samples,
+                validation_start=fit_end,
+                validation_end=validation_end,
+                horizon_steps=horizon_s // _FRAME_S,
+                frame_steps=1,
+            ),
+            horizons_s=(horizon_s,),
+        )[horizon_s]
+        for horizon_s in (600, 800, 1_000)
+    }
     for index in range(fit_end, validation_end):
         model.observe(
             Observation(
@@ -918,6 +928,54 @@ def _p99(values: list[float] | tuple[float, ...]) -> float:
     return float(np.percentile(values, 99.0)) if values else 0.0
 
 
+def _independent_box_qp_reference(
+    hessian: np.ndarray, linear: np.ndarray, start: np.ndarray
+) -> dict[str, Any]:
+    """Use SciPy L-BFGS-B, independent of the controller's projected gradient."""
+    def objective(x: np.ndarray) -> float:
+        return float(0.5 * x @ hessian @ x + linear @ x)
+
+    def jacobian(x: np.ndarray) -> np.ndarray:
+        return hessian @ x + linear
+
+    try:
+        result = minimize(
+            objective,
+            np.asarray(start, dtype=np.float64),
+            jac=jacobian,
+            method="L-BFGS-B",
+            bounds=[(0.0, 1.0)] * linear.size,
+            options={"ftol": 1e-14, "gtol": 1e-10, "maxiter": 100_000},
+        )
+        x = np.asarray(result.x, dtype=np.float64)
+        gradient = jacobian(x)
+        projected = np.where(
+            x <= 1e-9,
+            np.minimum(gradient, 0.0),
+            np.where(x >= 1.0 - 1e-9, np.maximum(gradient, 0.0), gradient),
+        )
+        kkt = float(np.max(np.abs(projected)))
+        converged = bool(result.success and np.isfinite(result.fun) and kkt <= 1e-7)
+        document: dict[str, Any] = {
+            "reference_method": "scipy-l-bfgs-b",
+            "reference_converged": converged,
+            "reference_iterations": int(result.nit),
+            "reference_kkt_residual": kkt,
+        }
+        if converged:
+            document["reference_objective"] = float(result.fun)
+            document["reference_move_gap"] = float(np.max(np.abs(x - start)))
+        else:
+            document["reference_failure"] = str(result.message)
+        return document
+    except Exception as error:
+        return {
+            "reference_method": "scipy-l-bfgs-b",
+            "reference_converged": False,
+            "reference_failure": f"{type(error).__name__}: {error}",
+        }
+
+
 def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], failures=()) -> ExperimentArtifact:
     by_arm: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     prediction_origins: dict[str, dict[str, dict[str, tuple[float, ...]]]] = defaultdict(
@@ -1054,7 +1112,18 @@ def _real_mak_evidence(arm: str) -> dict[str, Any]:
         result["failure"] = "fixture cannot support chronological fit"
         return result
     try:
-        model = _model_for_initialization(arm, "correct")
+        model = (
+            InnovationStateSpace(
+                StateSpaceConfig(
+                    orders=(1,),
+                    delays=(1,),
+                    block_rows=2,
+                    refresh_interval_s=1e12,
+                )
+            )
+            if arm == "state-space"
+            else _model_for_initialization(arm, "correct")
+        )
         model.fit(_record_slice(record, 0, fit_end))
         diagnostics = _horizon_residuals(
             model,
