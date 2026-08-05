@@ -471,7 +471,7 @@ def test_manifest_shards_are_bounded_deterministic_and_verified(tmp_path) -> Non
     stale = left.parent / f"{left.stem}.old.part9999.old.gz"
     stale.write_bytes(b"stale")
     write_artifact_atomically(left, artifact, max_part_bytes=10)
-    assert not stale.exists()
+    assert stale.exists()
     unsafe = json.loads(left.read_text())
     unsafe["parts"][0]["name"] = "../escape.gz"
     left.write_text(json.dumps(unsafe))

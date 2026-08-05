@@ -440,13 +440,33 @@ def _checkpoint_path(output: Path) -> Path:
     return output.with_name(f"{output.name.removesuffix(suffix)}.checkpoint{suffix}")
 
 
+def _transport_part_paths(path: Path) -> tuple[Path, ...]:
+    """Return the exactly verified part paths named by an existing transport."""
+    if not path.exists():
+        return ()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("transport") != "gzip-shards/v1":
+        return ()
+    parts = document.get("parts")
+    if not isinstance(parts, list):
+        raise ValueError("transport manifest requires a parts list")
+    referenced = []
+    for index, item in enumerate(parts):
+        if not isinstance(item, Mapping):
+            raise ValueError("transport manifest contains an invalid part")
+        _verified_part(path, item, index)
+        referenced.append(path.parent / str(item["name"]))
+    return tuple(referenced)
+
+
 def _remove_transport(path: Path | None) -> None:
-    """Delete only one published transport manifest and its content-addressed shards."""
-    if path is None:
+    """Delete exactly the verified shards named by one transport manifest."""
+    if path is None or not path.exists():
         return
-    path.unlink(missing_ok=True)
-    for part in path.parent.glob(f"{path.stem}.*.part*.gz"):
-        part.unlink()
+    referenced = _transport_part_paths(path)
+    path.unlink()
+    for part in referenced:
+        part.unlink(missing_ok=True)
 
 
 def _write_transport_atomically(
@@ -461,6 +481,11 @@ def _write_transport_atomically(
         raise ValueError(f"max_part_bytes must be within 1..{_MAX_ARTIFACT_PART_BYTES}")
     if not path.name.endswith(".manifest.json"):
         raise ValueError("artifact publication requires a .manifest.json path")
+    try:
+        previous = _transport_part_paths(path)
+    except ValueError:
+        # A replacement must not trust or delete shards from a corrupt predecessor.
+        previous = ()
     compressed = gzip.compress(payload, mtime=0)
     stream_hash = hashlib.sha256(compressed).hexdigest()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -482,9 +507,9 @@ def _write_transport_atomically(
         before_publish()
     _write_text_atomically(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     active = {item["name"] for item in parts}
-    for stale in path.parent.glob(f"{path.stem}.*.part*.gz"):
-        if stale.name not in active:
-            stale.unlink()
+    for part in previous:
+        if part.name not in active:
+            part.unlink(missing_ok=True)
 
 
 def load_artifact(path: Path) -> ExperimentArtifact:

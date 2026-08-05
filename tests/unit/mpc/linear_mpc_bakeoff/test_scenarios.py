@@ -74,11 +74,19 @@ def test_interrupted_matrix_keeps_only_a_sharded_checkpoint(tmp_path: Path) -> N
         for part in checkpoint_manifest["parts"]
     )
 
+    orphan = checkpoint.with_name(
+        f"{checkpoint.stem}.unrelated.part0000.0000000000000000.gz"
+    )
+    orphan.write_bytes(b"unrelated")
+
     resumed = run_tiny_matrix(tmp_path, resume=True, output=output)
 
     assert load_artifact(output).canonical_document() == resumed.canonical_document()
     assert not checkpoint.exists()
-    assert not list(tmp_path.glob("artifact.checkpoint.manifest.*.part*.gz"))
+    assert orphan.is_file()
+    assert [part.name for part in tmp_path.glob("artifact.checkpoint.manifest.*.part*.gz")] == [
+        orphan.name
+    ]
 
 
 def test_checkpoint_matrix_covers_every_arm_and_wrong_initialization(tmp_path: Path) -> None:
