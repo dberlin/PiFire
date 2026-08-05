@@ -277,6 +277,27 @@ def test_runner_scores_untouched_multi_horizon_free_runs_and_clears_windows() ->
     assert set(evaluations[0]["score_frame_ids"]).isdisjoint(evaluations[1]["score_frame_ids"])
 
 
+
+def test_downstep_transition_is_braking_without_coast_and_heating_is_excluded() -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    definition = next(item for item in SCENARIOS if item.name == "down-step")
+    row = _run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=120,
+        arm="scheduled-arx",
+        initialization="correct",
+        horizon_s=600,
+    )
+    samples = row.model_evidence["free_run_classifications"]
+    downstep = next(item for item in samples if item["frame_s"] == 80)
+    heating = next(item for item in samples if item["frame_s"] == 40)
+    assert downstep["braking"] and downstep["realized_duty"] > 0.05
+    assert not heating["braking"]
+
 def test_online_and_frozen_paths_track_identical_realized_history() -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
 

@@ -685,6 +685,7 @@ def _run_scenario(
     solver_evidence: list[Mapping[str, Any]] = []
     promotion_history: list[Mapping[str, Any]] = []
     free_run_window: list[dict[str, Any]] = []
+    free_run_classifications: list[dict[str, Any]] = []
     previous_realized_duty = 0.0
     previous_observation_target = definition.target_at(0)
     for second in range(duration_s):
@@ -754,6 +755,7 @@ def _run_scenario(
                 )
             )
             role_generation = manager.role_generation
+            braking = state is OperatingState.COAST or target < previous_observation_target
             free_run_window.append(
                 {
                     "window_id": f"{plant}:{arm}:{initialization}:{second + 1}",
@@ -765,8 +767,15 @@ def _run_scenario(
                     "q": frame.realized_duty,
                     "ambient_c": simulator.T_amb,
                     "temp_c": temperatures[-1],
-                    "braking": state is OperatingState.COAST
-                    or target < previous_observation_target,
+                    "braking": braking,
+                }
+            )
+            free_run_classifications.append(
+                {
+                    "frame_s": second + 1,
+                    "braking": bool(braking),
+                    "realized_duty": frame.realized_duty,
+                    "target_c": target,
                 }
             )
             previous_observation_target = target
@@ -896,6 +905,7 @@ def _run_scenario(
                 "alignment": alignment.value,
                 "policy": {"max_gain": policy.max_gain},
             },
+            "free_run_classifications": free_run_classifications,
             "runtime_tracking": _json_value(manager.tracking_evidence),
         },
         promotion_history=tuple(promotion_history),
