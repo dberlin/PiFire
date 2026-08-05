@@ -30,6 +30,10 @@ from controller.fopdt_identifier import (
     TAU_MAX,
     TAU_MIN,
     DutyHistory,
+    FORM_FOPDT,
+    FORM_IPDT,
+    FORM_PARAMS,
+    RESTORE_BOUNDS,
     FOPDTIdentifier,
     RLSBank,
     gate_mask,
@@ -513,6 +517,43 @@ def test_restore_adopts_a_valid_model_and_rejects_an_impossible_one():
     assert identifier.restore({"K": 800.0, "tau": 600.0}) is False
 
 
+def test_every_promotable_form_can_be_restored():
+    """A form the identifier can promote but not restore is learning that cannot
+    outlive the cook that earned it: it drives the predictor until the cook ends
+    and is then refused at the next Hold entry, silently, as `starting fresh`.
+    """
+    assert set(FORM_PARAMS) == set(RESTORE_BOUNDS)
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        {"form": FORM_FOPDT, "K": 800.0, "tau": 600.0, "theta": 35.0, "revision": 4},
+        {"form": FORM_IPDT, "K_i": 0.46, "c0": -0.033, "theta": 90.0, "revision": 4},
+    ],
+    ids=[FORM_FOPDT, FORM_IPDT],
+)
+def test_a_persisted_model_round_trips_through_restore(model):
+    """Both ends of the store's seam, for every form: what a cook hands out is
+    what the next cook gets back."""
+    identifier = FOPDTIdentifier()
+    assert identifier.restore(dict(model)) is True
+    assert identifier.trusted_model() == model
+
+
+def test_restore_rejects_an_impossible_integrating_model():
+    identifier = FOPDTIdentifier()
+    good = {"form": FORM_IPDT, "K_i": 0.46, "c0": -0.033, "theta": 90.0, "revision": 4}
+    assert identifier.restore(dict(good)) is True
+    # A chamber that climbs with the auger off is not a chamber.
+    assert identifier.restore({**good, "c0": 0.5}) is False
+    assert identifier.restore({**good, "K_i": 500.0}) is False
+    assert identifier.restore({**good, "theta": 999.0}) is False
+    # The first-order parameters are not this form's parameters.
+    assert identifier.restore({"form": FORM_IPDT, "K": 800.0, "tau": 600.0, "theta": 90.0, "revision": 4}) is False
+    assert identifier.restore({**good, "form": "no-such-form"}) is False
+
+
 def test_the_revision_advances_only_on_a_material_change():
     """The materiality gate protects a model this cook has actually EARNED
     (promoted and confirmed against this plant), as opposed to one merely
@@ -673,7 +714,14 @@ def test_restore_clears_a_stale_confirmation_window():
     assert identifier.restore({"K": 700.0, "tau": 900.0, "theta": 10.0, "revision": 9}) is True
     assert identifier.status()["confirming"] is None
     _drive(identifier, plant, schedule[259:260])
-    assert identifier.trusted_model() == {"K": 700.0, "tau": 900.0, "theta": 10.0, "revision": 9}
+    # A record predating the integrating form names none, and restore settles it.
+    assert identifier.trusted_model() == {
+        "form": FORM_FOPDT,
+        "K": 700.0,
+        "tau": 900.0,
+        "theta": 10.0,
+        "revision": 9,
+    }
 
 
 # ---------------------------------------------------------------------- distrust

@@ -371,6 +371,14 @@ FORM_PARAMS = {
     FORM_IPDT: (("K_i", MATERIAL_K), ("c0", MATERIAL_TAU)),
 }
 CONFIRM_TOL = {"K": CONFIRM_K_TOL, "tau": CONFIRM_TAU_TOL, "K_i": CONFIRM_K_TOL, "c0": CONFIRM_TAU_TOL}
+#: The parameters a persisted record of each form must carry, and the range each
+#: must land in to be worth restoring. The model store keeps bytes and judges
+#: nothing, so every bound the live gates apply is re-applied here. A rising
+#: chamber that coasts upward with the auger off is not a chamber, hence c0 <= 0.
+RESTORE_BOUNDS = {
+    FORM_FOPDT: (("K", GAIN_MIN, GAIN_MAX), ("tau", TAU_MIN, TAU_MAX)),
+    FORM_IPDT: (("K_i", GAIN_RATE_MIN, GAIN_RATE_MAX), ("c0", -np.inf, 0.0)),
+}
 #: How much of a passing revision blends into the trusted values.
 BLEND = 0.1
 #: A dt outside this band is a clock jump or a stalled loop, not an observation.
@@ -719,18 +727,25 @@ class FOPDTIdentifier:
         a reason to doubt parameters that were earned."""
         if not isinstance(model, dict):
             return False
+        # A record written before the identifier could promote an integrating
+        # chamber names no form, and every such record is a first-order fit.
+        form = model.get("form", FORM_FOPDT)
+        bounds = RESTORE_BOUNDS.get(form)
+        if bounds is None:
+            return False
         try:
-            K, tau, theta = float(model["K"]), float(model["tau"]), float(model["theta"])
+            values = {name: float(model[name]) for name, _lo, _hi in bounds}
+            theta = float(model["theta"])
             revision = int(model["revision"])
         except KeyError, TypeError, ValueError:
             return False
-        if not all(np.isfinite([K, tau, theta])) or revision < 0:
+        if not all(np.isfinite([*values.values(), theta])) or revision < 0:
             return False
-        if not (GAIN_MIN <= K <= GAIN_MAX) or not (TAU_MIN <= tau <= TAU_MAX):
+        if any(not lo <= values[name] <= hi for name, lo, hi in bounds):
             return False
         if theta < float(DELAYS.min()) or theta > float(DELAYS.max()):
             return False
-        self._trusted = {"K": K, "tau": tau, "theta": theta}
+        self._trusted = {"form": form, "theta": theta, **values}
         self._revision = revision
         # A confirmation window built against the pre-restore trusted state must
         # not count toward confirming a candidate against this one.

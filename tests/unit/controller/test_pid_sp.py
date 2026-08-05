@@ -404,7 +404,14 @@ def test_a_snapshot_survives_the_store_round_trip(clock):
     fresh = _controller("pid_sp", clock)
     assert fresh.get_model_snapshot() is None
     assert fresh.restore_model(store.load("pid_sp")) is True
-    assert fresh.get_model_snapshot() == {"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3, "setpoint_f": 0.0}
+    assert fresh.get_model_snapshot() == {
+        "form": "fopdt",
+        "K": 800.0,
+        "tau": 600.0,
+        "theta": 40.0,
+        "revision": 3,
+        "setpoint_f": 0.0,
+    }
 
 
 def test_the_snapshot_round_trips_setpoint_f(clock):
@@ -447,6 +454,25 @@ def test_a_restored_model_is_active_on_the_first_tick(clock):
     clock.t += 20.0
     sp.update(200.0)
     assert sp.get_status()["predictor"]["active"] is True
+
+
+def test_an_integrating_model_survives_the_store(clock):
+    """An integrating chamber is the form a real grill actually identifies, so
+    the cook boundary has to carry it. It reached the predictor within a cook
+    long before it could be persisted, which is why the FOPDT-shaped tests above
+    could all pass while a real grill relearned its chamber every cook."""
+    blobs = _FakeBlobs()
+    store = ControllerModelStore(reader=blobs.read, writer=blobs.write)
+    identified = {"form": "ipdt", "K_i": 0.46, "c0": -0.033, "theta": 90.0, "revision": 3}
+    store.save("pid_sp", identified)
+
+    sp = _controller("pid_sp", clock)
+    assert sp.restore_model(store.load("pid_sp")) is True
+    sp.set_target(225.0)
+    clock.t += 20.0
+    sp.update(200.0)
+    assert sp.get_status()["predictor"]["active"] is True
+    assert sp.get_model_snapshot()["K_i"] == 0.46
 
 
 def test_the_snapshot_satisfies_the_store_s_envelope_rules(clock):
