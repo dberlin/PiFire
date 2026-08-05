@@ -638,3 +638,39 @@ def test_a_prediction_just_outside_the_low_temperature_band_disables():
     out = p.temperature(-100.5, 1.0)  # just outside TEMP_MIN_F
     assert p.status()["disabled"] is True
     assert out == -100.5
+
+
+def test_a_non_finite_model_state_disables_prediction():
+    """A corrupted accumulated state disables prediction, distinct from a
+    corrupted incoming MEASUREMENT. NaN propagates through the correction into
+    the prediction, so the band check is what rejects it; the isfinite clauses on
+    x0/xd only decide when the prediction is computed some other way."""
+    p = _predictor()
+    p.trust(MODEL)
+    p.record_output(AppliedOutput(0.5, OutputSource.CONTROLLER, 0.0))
+    p.temperature(212.0, 0.0)
+    p._x0 = float("nan")
+    assert p.temperature(212.0, 20.0) == 212.0
+    assert p.active is False
+    assert p.status()["disabled"] is True
+
+
+def test_the_last_valid_parameters_stay_observable_after_a_disable():
+    p = _predictor()
+    p.trust(MODEL)
+    p.record_output(AppliedOutput(0.5, OutputSource.CONTROLLER, 0.0))
+    p.temperature(212.0, 0.0)
+    p._x0 = float("inf")
+    p.temperature(212.0, 20.0)
+    assert p.status()["model"]["K"] == MODEL["K"]
+
+
+def test_re_trusting_the_same_model_does_not_restart_the_states():
+    p = _predictor()
+    p.trust(MODEL)
+    p.record_output(AppliedOutput(0.5, OutputSource.CONTROLLER, 0.0))
+    p.temperature(212.0, 0.0)
+    p.temperature(212.0, 600.0)
+    x0 = p.status()["x0"]
+    p.trust(dict(MODEL))
+    assert p.status()["x0"] == x0

@@ -108,6 +108,17 @@ class SmithPredictor:
             return
         self._model = incoming
 
+    def _disable(self):
+        """Fall back to measured temperature and reinitialize both branches
+        equally, so a later re-trust starts from a zero correction. The streak
+        counter stands: it is what status() reports to explain the disable."""
+        self._x0 = 0.0
+        self._xd = 0.0
+        self._last_t = None
+        self._last_measured = None
+        self._prev_xd = None
+        self._disabled = True
+
     def reset(self):
         self._x0 = 0.0
         self._xd = 0.0
@@ -141,10 +152,7 @@ class SmithPredictor:
         expected_measured = self._last_measured + (self._xd - self._prev_xd)
         residual = abs(measured - expected_measured)
         if not self._safe(predicted, residual):
-            streak = self._residual_streak
-            self.reset()
-            self._residual_streak = streak
-            self._disabled = True
+            self._disable()
             return measured
         self._last_measured = measured
         self._prev_xd = self._xd
