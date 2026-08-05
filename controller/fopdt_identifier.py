@@ -671,6 +671,43 @@ class FOPDTIdentifier:
         # model has now earned the churn protection a restored one lacks.
         self._restored = False
 
+    #: Accepted observations before an integrating gain is worth acting on. Far
+    #: below what promotion needs, because promotion is about telling one dead
+    #: time from another and this is not: the gain and the loss rate come from
+    #: the duty/rate relationship alone, which is well conditioned long before
+    #: any delay is distinguishable.
+    MIN_HOLD_DUTY_SAMPLES = 60
+
+    def hold_duty(self, u_max=1.0):
+        """The duty that holds the current operating point, or None.
+
+        The integrating fit says the chamber's rate is `K_i*u + c0`, so it holds
+        still at `u = -c0/K_i`. That is the operating point a controller would
+        otherwise have to discover with its integral, and it needs no dead time
+        to compute -- every delay candidate estimates the same gain, differing
+        only in which duty history it attributes it to.
+
+        Taken as the median across candidates that pass the physics gate rather
+        than from the lowest-residual one, because with the delay undetermined
+        no single candidate is the right one to trust.
+        """
+        if self._accepted < self.MIN_HOLD_DUTY_SAMPLES or not self._duty_std() >= MIN_DUTY_STD:
+            return None
+        params = recover_integrating_parameters(self._ibank.Theta)
+        rse = integrating_relative_standard_errors(self._ibank.Theta, self._ibank.P, self._ibank.resid_ew)
+        mask = integrating_gate_mask(params, rse)
+        if not mask.any():
+            return None
+        with np.errstate(divide="ignore", invalid="ignore"):
+            held = -np.asarray(params["c0"])[mask] / np.asarray(params["K_i"])[mask]
+        held = held[np.isfinite(held)]
+        if held.size == 0:
+            return None
+        value = float(np.median(held))
+        # A hold duty outside the actuator's own range is not a statement about
+        # this grill, whatever the fit says.
+        return value if 0.0 < value <= u_max else None
+
     def trusted_model(self):
         if self._trusted is None:
             return None

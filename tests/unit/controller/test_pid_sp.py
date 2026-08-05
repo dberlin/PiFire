@@ -277,6 +277,51 @@ def test_the_integral_accumulates_once_the_set_point_has_been_crossed(clock):
     assert sp.inter - after_one == pytest.approx(2 * 8.0 * 20.0)
 
 
+def test_the_integral_is_seeded_from_the_identified_hold_duty_once(clock):
+    """The identified operating point moves the loop's output to it directly.
+
+    `center` is where the loop sits at zero error and is a heuristic -- 0.225 at
+    a 225 F set point, where the grill holds near 0.07. Without this the whole
+    gap is carried by the integral, which has to wind there before the loop can
+    sit still. Seeded rather than substituted into the proportional term,
+    because that term is also what drives the last stretch up to set point:
+    measured, substituting it slowed the approach enough to cost more than the
+    offset it removed.
+    """
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    held = 0.07
+    sp.identifier.hold_duty = lambda u_max=1.0: held
+
+    # Inside the stable window: outside it the integral reset fires every tick
+    # and would wipe the seed on the same update that placed it.
+    clock.t += 20.0
+    sp.update(220.0)
+
+    # i = ki * inter, so the seeded accumulator puts the zero-error output at
+    # the identified duty rather than at the heuristic.
+    assert sp.center + sp.ki * sp.inter == pytest.approx(held)
+    assert sp._integral_seeded
+
+    # And it is a seed, not a control law: the loop's own integral owns it after.
+    sp.inter = 0.0
+    clock.t += 20.0
+    sp.update(222.0)
+    assert sp.inter != pytest.approx((held - sp.center) / sp.ki)
+
+
+def test_no_identified_hold_duty_leaves_the_integral_alone(clock):
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    sp.identifier.hold_duty = lambda u_max=1.0: None
+
+    clock.t += 20.0
+    sp.update(220.0)
+
+    assert not sp._integral_seeded
+    assert sp.feed_forward == sp.center
+
+
 def test_set_output_feeds_the_identifier_as_well_as_the_predictor(clock):
     """Dropping predictor.record_output is caught by the divergence tests
     above; dropping identifier.record_output is not caught anywhere else.

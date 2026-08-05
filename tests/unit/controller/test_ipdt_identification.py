@@ -94,3 +94,57 @@ def test_an_integrating_model_reaches_the_predictor_intact():
     p = SmithPredictor()
     p.trust({"form": FORM_IPDT, "K_i": 0.5, "c0": -0.08, "theta": 100.0, "revision": 1})
     assert p._model == {"form": FORM_IPDT, "K_i": 0.5, "c0": -0.08, "theta": 100.0}
+
+
+class TestHoldDuty:
+    """The duty that holds the operating point, which needs no dead time.
+
+    Promotion is about telling one dead time from another and takes an hour of
+    cook to earn. The gain and the loss rate come from the duty/rate relation
+    alone, so the duty they imply is available long before that.
+    """
+
+    def _identifier(self, *, rate, duty, n=200, dt=20.0):
+        from controller.applied_output import AppliedOutput, OutputSource
+        from controller.fopdt_identifier import FOPDTIdentifier
+
+        ident = FOPDTIdentifier()
+        temp, t = 200.0, 0.0
+        rng = np.random.default_rng(0)
+        for i in range(n):
+            # Vary the duty so the excitation gate can clear, and move the
+            # chamber at the rate that duty implies.
+            u = float(duty(i, rng))
+            ident.record_output(AppliedOutput(u, OutputSource.CONTROLLER, t))
+            t += dt
+            temp += rate(u) * dt
+            ident.observe(temp, t)
+        return ident
+
+    def test_nothing_is_reported_before_enough_observations(self):
+        from controller.fopdt_identifier import FOPDTIdentifier
+
+        ident = self._identifier(
+            rate=lambda u: 0.5 * u - 0.05,
+            duty=lambda i, rng: 0.1 + 0.1 * (i % 2),
+            n=FOPDTIdentifier.MIN_HOLD_DUTY_SAMPLES // 4,
+        )
+        assert ident.hold_duty() is None
+
+    def test_it_recovers_the_duty_that_holds_a_synthetic_chamber(self):
+        # dT/dt = 0.5*u - 0.05 is still at u = 0.1.
+        ident = self._identifier(
+            rate=lambda u: 0.5 * u - 0.05,
+            duty=lambda i, rng: 0.05 if (i // 6) % 2 else 0.35,
+        )
+        held = ident.hold_duty()
+        assert held is not None
+        assert held == pytest.approx(0.1, abs=0.02)
+
+    def test_a_duty_beyond_the_actuator_is_not_reported(self):
+        # dT/dt = 0.5*u - 0.4 would need u = 0.8 to hold, which is past the cap.
+        ident = self._identifier(
+            rate=lambda u: 0.5 * u - 0.4,
+            duty=lambda i, rng: 0.05 if (i // 6) % 2 else 0.35,
+        )
+        assert ident.hold_duty(u_max=0.5) is None

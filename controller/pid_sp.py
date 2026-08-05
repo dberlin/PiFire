@@ -86,6 +86,14 @@ class Controller(PIDControllerBase):
 
         self.center = 0.5
         self.center_factor = config.get("center_factor", 0.0010)
+        # `center` serves two roles that are not the same thing: the output the
+        # loop sits at when the error is zero, and the authority the integral is
+        # allowed. Only the first is the operating point, and only the first is
+        # something the identifier can supply, so they are tracked apart.
+        # Until a model can name the operating point this stays the heuristic,
+        # which is what the controller has always used for both.
+        self.feed_forward = self.center
+        self._integral_seeded = False
 
         self.stable_window = config.get("stable_window", 12)
         self.cycle_time = cycle_data["HoldCycleTime"]
@@ -122,6 +130,7 @@ class Controller(PIDControllerBase):
             "error": self.error,
             "set_point": self.set_point,
             "center": self.center,
+            "feed_forward": self.feed_forward,
             "selected_temp": self._selected,
             "last_selected": self.last,
             "identifier": self.identifier.status(),
@@ -143,6 +152,25 @@ class Controller(PIDControllerBase):
         self.predictor.trust(self.identifier.trusted_model())
         return True
 
+    def _seed_integral_from_identified_hold(self, error):
+        """Put the integral where the identified operating point says it belongs.
+
+        Only inside the stable window, and only once. Outside it the reset above
+        clears the accumulator on every tick, so a seed placed there would be
+        wiped by the same update that set it; and an operating point is a
+        statement about holding, which is not what the loop is doing on the way
+        up. After the first seed the integral is the loop's own, and overwriting
+        it would discard the correction it exists to make.
+        """
+        if self._integral_seeded or self.ki == 0 or abs(error) > self.stable_window:
+            return
+        held = self.identifier.hold_duty()
+        if held is None:
+            return
+        self.feed_forward = held
+        self.inter = (held - self.center) / self.ki
+        self._integral_seeded = True
+
     # ------------------------------------------------------------------ control
     def update(self, current):
         current_time = time.time()
@@ -154,6 +182,15 @@ class Controller(PIDControllerBase):
 
         measured_f = _to_f(current, self.units)
         self.identifier.observe(measured_f, current_time)
+        # The identified duty that holds the operating point, once there is one.
+        # `center` is where the loop sits at zero error, and it is a heuristic
+        # that reads 0.225 at a 225 F set point where the grill actually holds
+        # near 0.07 -- the whole gap has to be carried by the integral before the
+        # loop can sit still. Seeding the integral with it once, rather than
+        # substituting it into the proportional term, moves the loop to the right
+        # output without softening the approach: the term the heuristic inflates
+        # is also what drives the last stretch up to set point, and measuring the
+        # substitution showed that cost more than the offset it removed.
         trusted = self.identifier.trusted_model()
         self.predictor.trust(trusted)
         selected = _from_f(self.predictor.temperature(measured_f, current_time), self.units)
@@ -257,6 +294,8 @@ class Controller(PIDControllerBase):
             # was reached on this tick whatever the previous one left behind.
             integral_clamped = False
 
+        self._seed_integral_from_identified_hold(error)
+
         self.error = error
         self.last = selected
         self.last_update = current_time
@@ -326,3 +365,7 @@ class Controller(PIDControllerBase):
                 self.center = (set_point * 9 / 5 + 32) * self.center_factor
             else:
                 self.center = (set_point * 9 / 5 + 32) * self.center_factor * 1.2
+        if not self._integral_seeded:
+            # Until the identifier names the operating point, the heuristic
+            # centre is the best estimate of it available.
+            self.feed_forward = self.center
