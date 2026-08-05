@@ -127,3 +127,68 @@ class DutyHistory:
             del self._u[:keep]
             del self._i[:keep]
             self._sync()
+
+
+#: Forgetting factor. Slow enough that an hour of observations still counts,
+#: fast enough that a re-seasoned grill is eventually re-learned.
+LAM = 0.9995
+#: Initial covariance: no prior belief about the coefficients.
+P0 = 1e6
+#: Weight of the newest squared residual in the exponentially weighted mean.
+EW_ALPHA = 0.02
+
+#: Temperature regressors are centered and scaled before each update and
+#: transformed back afterwards -- absolute grill temperatures condition the
+#: matrix badly. The reference is FIXED rather than a running mean: a moving
+#: reference would silently change the meaning of the covariance already
+#: accumulated under the old one.
+T_REF = 250.0
+T_SCALE = 100.0
+
+
+class RLSBank:
+    """One recursive-least-squares estimator per dead-time candidate, batched.
+
+    Theta is (N, 3), P is (N, 3, 3), resid_ew is (N,). Only the third regressor
+    column differs per candidate; [1, T_scaled] is shared and broadcast by the
+    caller.
+    """
+
+    def __init__(self, n_candidates):
+        self._n = int(n_candidates)
+        self.Theta = np.zeros((self._n, 3))
+        self.P = np.tile(P0 * np.eye(3), (self._n, 1, 1))
+        self.resid_ew = np.zeros(self._n)
+
+    def update(self, phi, y):
+        """One accepted observation into the whole bank. `phi` is (N, 3)."""
+        phi = np.asarray(phi, dtype=float)
+        Pphi = np.einsum("nij,nj->ni", self.P, phi)
+        denom = LAM + np.einsum("ni,ni->n", phi, Pphi)
+        gain = Pphi / denom[:, None]
+        err = y - np.einsum("ni,ni->n", phi, self.Theta)
+        self.Theta += gain * err[:, None]
+        self.P = (self.P - np.einsum("ni,nj->nij", gain, Pphi)) / LAM
+        # Hold P symmetric against accumulated float drift.
+        self.P = 0.5 * (self.P + self.P.transpose(0, 2, 1))
+        self.resid_ew = EW_ALPHA * err**2 + (1.0 - EW_ALPHA) * self.resid_ew
+        self._reset_degenerate()
+
+    def reset(self, mask):
+        """Return the masked candidates to their initial state."""
+        mask = np.asarray(mask, dtype=bool)
+        if not mask.any():
+            return
+        self.Theta[mask] = 0.0
+        self.P[mask] = P0 * np.eye(3)
+        self.resid_ew[mask] = 0.0
+
+    def _reset_degenerate(self):
+        """A candidate that has lost positive-definiteness or gone non-finite
+        starts over rather than poisoning the bank."""
+        bad = ~np.isfinite(self.Theta).all(axis=1)
+        bad |= ~np.isfinite(self.P).all(axis=(1, 2))
+        bad |= ~np.isfinite(self.resid_ew)
+        diag = np.einsum("nii->ni", self.P)
+        bad |= (diag <= 0.0).any(axis=1)
+        self.reset(bad)
