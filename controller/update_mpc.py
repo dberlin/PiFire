@@ -5,27 +5,44 @@
  PiFire MPC Offline Calibration Utility
 *****************************************
 
- Fits the grey-box thermal parameters to a logged history CSV so the MPC model
- describes a specific grill. Fitting runs through controller.mpc_model's shared
- forward simulator, so the parameters produced describe the same dynamics the
- controller plans against -- radiative loss and transport deadtime included.
+Fits the grey-box thermal parameters to one typed SQLite MPC control-trace
+session. Fitting runs through controller.mpc_model's shared forward simulator,
+so the parameters produced describe the same dynamics the controller plans
+against -- radiative loss and transport deadtime included.
 
- CSV columns: time_s, temp_c, Q  (Q is the firing-rate demand; if you logged
- auger duty instead, map it back through the allocator first). Capture the log
- with the fan under the controller's command: a log taken with the fan pinned
- at one duty only describes the grill at that duty.
+The selected session must contain uninterrupted, completed MPC control updates
+and same-revision applied combustion loads. Capture the cook with the fan under
+the controller's command: a trace taken with the fan pinned at one duty only
+describes the grill at that duty.
 
- Usage: python -m controller.update_mpc history.csv [--t-amb 20] [--json]
+Usage: python -m controller.update_mpc (--cook COOK_ID | --session SESSION_ID)
+       [--database PATH] [--t-amb 20] [--json]
 *****************************************
 """
 
 import argparse
 import json
+import os
 import math
+import sqlite3
 import sys
 
 import numpy as np
 from scipy.optimize import least_squares
+
+from common.control_trace import (
+    AppliedOutputPayload,
+    ControlTraceRecord,
+    ControllerType,
+    InhibitReason,
+    MpcFailureState,
+    MpcUpdatePayload,
+    RecorderGapPayload,
+    SessionPayload,
+    TRACE_SCHEMA_VERSION,
+)
+from common.datastore_accessors import read_control_trace_cook, read_control_trace_session
+from controller.applied_output import OutputSource
 
 from controller.model_promotion import (
     _MAX_CONFIGURABLE_HORIZON_S,
@@ -100,6 +117,150 @@ _MAX_NFEV = 2000
 # that it is a NUMBER, because a NaN residual is not comparable to anything and
 # a trust region cannot step away from what it cannot compare.
 _DIVERGED = 1e4
+
+
+class TraceSelectionError(ValueError):
+    """The selected control trace cannot provide an unambiguous fit input."""
+
+
+def load_trace_samples(
+    *,
+    cook_id: str | None = None,
+    session_id: str | None = None,
+    database_path: str | os.PathLike[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load one complete, uninterrupted MPC session as fitting arrays.
+
+    Hold closes the prior command interval under the next accepted update. The
+    returned temperature/load pairs therefore use each update except the final
+    one and the complete applied output keyed by the following update revision.
+    """
+    if (cook_id is None) == (session_id is None):
+        raise TraceSelectionError("select exactly one of cook_id or session_id")
+
+    try:
+        records = (
+            read_control_trace_cook(cook_id, database_path=database_path)
+            if cook_id is not None
+            else read_control_trace_session(session_id, database_path=database_path)
+        )
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        raise TraceSelectionError(f"could not read selected control trace: {exc}") from exc
+
+    if not records:
+        raise TraceSelectionError("selected control trace contains no records")
+    sessions = {record.session_id for record in records}
+    if len(sessions) != 1:
+        raise TraceSelectionError("selected cook contains more than one control session; select one session_id")
+    if any(record.schema_version != TRACE_SCHEMA_VERSION for record in records):
+        raise TraceSelectionError("selected control trace has an incompatible schema version")
+    if any(record.controller is not ControllerType.MPC for record in records):
+        raise TraceSelectionError("selected control trace mixes controller types")
+    if any(isinstance(record.payload, RecorderGapPayload) for record in records):
+        raise TraceSelectionError("selected control trace contains a recorder gap")
+
+    session_records = [record for record in records if isinstance(record.payload, SessionPayload)]
+    if len(session_records) != 1 or session_records[0].payload.controller is not ControllerType.MPC:
+        raise TraceSelectionError("selected records do not describe exactly one MPC trace session")
+
+    previous_ts = -1
+    for record in records:
+        if record.ts_ms < previous_ts:
+            raise TraceSelectionError("selected control trace timestamps are not ordered")
+        previous_ts = record.ts_ms
+
+    updates: list[tuple[int, MpcUpdatePayload]] = []
+    complete_outputs: dict[int, tuple[int, AppliedOutputPayload]] = {}
+    partial_outputs: list[tuple[int, AppliedOutputPayload]] = []
+    previous_revision = -1
+    previous_wall_ms = -1
+    for index, record in enumerate(records):
+        payload = record.payload
+        if isinstance(payload, MpcUpdatePayload):
+            revision = payload.result_revision
+            if revision <= previous_revision:
+                raise TraceSelectionError("MPC control-update revisions are not strictly ordered")
+            if payload.wall_ms < previous_wall_ms:
+                raise TraceSelectionError("MPC control-update timestamps are not ordered")
+            if payload.failure_state is not MpcFailureState.SUCCESS or payload.stale:
+                raise TraceSelectionError(f"MPC revision {revision} is incomplete")
+            if payload.inhibit_reason is not InhibitReason.NONE:
+                raise TraceSelectionError(f"MPC revision {revision} is inhibited")
+            updates.append((index, payload))
+            previous_revision = revision
+            previous_wall_ms = payload.wall_ms
+        elif isinstance(payload, AppliedOutputPayload):
+            revision = payload.result_revision
+            if payload.output_source is not OutputSource.CONTROLLER:
+                raise TraceSelectionError(f"MPC revision {revision} is inhibited by {payload.output_source.value}")
+            if payload.sample_complete:
+                if payload.realized_combustion_load is None:
+                    raise TraceSelectionError(f"MPC revision {revision} has no realized combustion load")
+                if revision in complete_outputs:
+                    raise TraceSelectionError(f"MPC revision {revision} has multiple complete applied-output records")
+                complete_outputs[revision] = (index, payload)
+            else:
+                if payload.realized_combustion_load is not None:
+                    raise TraceSelectionError(
+                        f"MPC revision {revision} has a malformed incomplete applied-output interval"
+                    )
+                partial_outputs.append((index, payload))
+
+    if len(updates) < 2:
+        raise TraceSelectionError("selected control trace requires at least two completed MPC control updates")
+
+    latest_revision = updates[-1][1].result_revision
+    if partial_outputs:
+        if len(partial_outputs) != 1:
+            raise TraceSelectionError("selected control trace has multiple incomplete applied-output intervals")
+        partial_index, partial = partial_outputs[0]
+        if partial.result_revision != latest_revision:
+            raise TraceSelectionError("terminal incomplete applied-output interval does not match its latest update")
+        latest_complete = complete_outputs.get(latest_revision)
+        if partial_index <= updates[-1][0] or latest_complete is None or latest_complete[0] >= partial_index:
+            raise TraceSelectionError("terminal incomplete applied-output interval does not follow its latest update")
+        if any(
+            isinstance(record.payload, (MpcUpdatePayload, AppliedOutputPayload))
+            for record in records[partial_index + 1 :]
+        ):
+            raise TraceSelectionError("terminal incomplete applied-output interval has a later update or output")
+        if partial.interval_start_ms < latest_complete[1].interval_end_ms:
+            raise TraceSelectionError(
+                "terminal incomplete applied-output interval does not follow its complete interval"
+            )
+
+    update_indices = {payload.result_revision: index for index, payload in updates}
+    for revision, (output_index, _) in complete_outputs.items():
+        if revision not in update_indices:
+            raise TraceSelectionError("complete applied output does not match an accepted MPC update")
+        if output_index <= update_indices[revision]:
+            raise TraceSelectionError("complete applied output must follow its accepted update")
+    for update_position, (update_index, update) in enumerate(updates):
+        complete_output = complete_outputs.get(update.result_revision)
+        if complete_output is None or update_position + 1 == len(updates):
+            continue
+        next_update_index = updates[update_position + 1][0]
+        if complete_output[0] >= next_update_index:
+            raise TraceSelectionError("complete applied output must precede the next accepted update")
+    expected_revisions = {payload.result_revision for _, payload in updates[1:]}
+    missing_revisions = expected_revisions - set(complete_outputs)
+    if missing_revisions:
+        raise TraceSelectionError("every next accepted MPC update requires one complete applied output")
+
+    paired_updates = updates[:-1]
+    start_ms = paired_updates[0][1].wall_ms
+    return (
+        np.asarray([(update.wall_ms - start_ms) / 1000.0 for _, update in paired_updates], dtype=float),
+        np.asarray([update.measured_temperature for _, update in paired_updates], dtype=float),
+        np.asarray(
+            [
+                complete_outputs[updates[index + 1][1].result_revision][1].realized_combustion_load
+                for index, (_, update) in enumerate(paired_updates)
+            ],
+            dtype=float,
+        ),
+    )
+
 
 # Said in both output modes, so neither can be the one that stays quiet.
 _NOT_CONVERGED = (
@@ -315,30 +476,32 @@ def _dump_json(document):
 
     RFC 8259 has no `Infinity`, `-Infinity` or `NaN` literal, and Python's own
     decoder accepts all three, so an unconverted non-finite value would leave
-    here as text only Python can read back. `allow_nan=False` -- the same
-    setting the model store's snapshot validator encodes with -- makes that a
-    ValueError at the emit, beside the value that caused it, instead of a parse
-    error in whatever consumes this. Finite substitutes belong at the point the
-    quantity is assembled; see `_optional_float`.
+    here as text only Python can read back. `allow_nan=False` makes that a
+    ValueError at the emit, beside the value that caused it.
     """
     return json.dumps(document, indent=2, allow_nan=False)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Fit MPC grey-box parameters to a calibration log.")
-    ap.add_argument("csv")
+    ap = argparse.ArgumentParser(description="Fit MPC grey-box parameters to a typed SQLite control trace.")
+    selection = ap.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--cook", dest="cook_id", help="Cook ID containing exactly one MPC trace session")
+    selection.add_argument("--session", dest="session_id", help="MPC control trace session ID")
+    ap.add_argument("--database", default=None, help="Optional path to the SQLite trace database")
     ap.add_argument("--t-amb", type=float, default=None, help="Ambient temperature in C")
     ap.add_argument("--json", action="store_true", help="Print only the fitted config JSON")
     args = ap.parse_args()
 
-    import pandas as pd
+    try:
+        t, temp, Q = load_trace_samples(
+            cook_id=args.cook_id,
+            session_id=args.session_id,
+            database_path=args.database,
+        )
+    except TraceSelectionError as exc:
+        ap.error(str(exc))
 
     from controller.mpc import _DEFAULTS, _optional_float
-
-    df = pd.read_csv(args.csv)
-    t = df["time_s"].values
-    temp = df["temp_c"].values
-    Q = df["Q"].values
 
     T_amb = args.t_amb if args.t_amb is not None else float(_DEFAULTS["T_amb"])
     init = {k: float(_DEFAULTS[k]) for k in ("C_c", "h_amb", "K_Q", "theta")}

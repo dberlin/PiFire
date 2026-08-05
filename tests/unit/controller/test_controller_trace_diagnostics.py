@@ -110,7 +110,6 @@ def _bare_mpc_controller():
     core.estimator = _Estimator()
     core.u_min = 0.1
     core.u_max = 0.9
-    core._log_path = None
     return core
 
 

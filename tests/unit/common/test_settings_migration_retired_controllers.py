@@ -7,6 +7,7 @@ from common import datastore
 from common.datastore_accessors import read_settings_store, write_settings_store
 from common.defaults import default_settings
 from common.settings_migration import _migrate_retired_controllers, read_settings_file
+from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
 RETIRED = (
     "pid_clamping",
@@ -73,7 +74,7 @@ def test_store_upgrade_migrates_a_schema_v2_retired_controller_selection(ds):
     datastore._upgrade_settings_in_store()
 
     stored = read_settings_store()
-    assert stored["schema_version"] == 3
+    assert stored["schema_version"] == SETTINGS_SCHEMA_VERSION
     assert stored["controller"]["selected"] == "pid"
     assert stored["controller"]["config"]["pid"] == expected_pid
     assert not (set(stored["controller"]["config"]) & set(RETIRED))
@@ -89,7 +90,7 @@ def test_unstamped_file_import_migrates_retired_controller_before_default_overla
 
     imported = read_settings_file(filename=str(source), init=True)
 
-    assert imported["schema_version"] == 3
+    assert imported["schema_version"] == SETTINGS_SCHEMA_VERSION
     assert imported["controller"]["selected"] == "pid"
     assert imported["controller"]["config"]["pid"] == expected_pid
     assert not (set(imported["controller"]["config"]) & set(RETIRED))

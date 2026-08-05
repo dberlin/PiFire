@@ -19,6 +19,7 @@ for why both of those matter.
 
 import collections
 import importlib
+import math
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -85,6 +86,7 @@ class ControllerUpdateResult:
 
     cycle_ratio: float
     fan: Mapping[str, float] | None
+    input_temperature: float
     diagnostics: ControllerTraceDiagnostics | None = None
     allocation: AllocationResult | None = None
     status: Mapping[str, StatusValue] | None = None
@@ -99,6 +101,8 @@ class ControllerUpdateResult:
             object.__setattr__(self, "fan", MappingProxyType(dict(self.fan)))
         if self.status is not None:
             object.__setattr__(self, "status", _freeze_status(self.status))
+        if not math.isfinite(self.input_temperature):
+            raise ValueError("input_temperature must be finite")
         if self.revision < 0:
             raise ValueError("revision must be non-negative")
         solve_start = self.solve_start_monotonic
@@ -133,6 +137,7 @@ def _capture_completed_result(core, temp, revision):
     return ControllerUpdateResult(
         cycle_ratio=cycle_ratio,
         fan=fan,
+        input_temperature=float(temp),
         diagnostics=diagnostics,
         allocation=allocation,
         status=status,
@@ -287,6 +292,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._output = ControllerUpdateResult(
             cycle_ratio=0.0,
             fan=None,
+            input_temperature=0.0,
             diagnostics=None,
             status=None,
             revision=0,

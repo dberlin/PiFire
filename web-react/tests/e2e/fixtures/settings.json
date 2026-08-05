@@ -19,8 +19,6 @@
           "fan_max_pct": 100.0,
           "fan_min_pct": 40.0,
           "h_amb": 0.5,
-          "log_data": false,
-          "log_path": "./controller/mpc_calibration_log.csv",
           "n_delay": 8,
           "n_horizon": 24,
           "policy": "nlp",
@@ -613,7 +611,7 @@
         "primary": "Grill"
       }
     },
-    "schema_version": 1,
+    "schema_version": 4,
     "safety": {
       "allow_manual_changes": false,
       "manual_override_time": 30,

@@ -238,22 +238,24 @@ def _migrate_i2c_buses(settings):
     return changed
 
 
-#: Where the MPC calibration log was written before it moved under ./logs.
-_LEGACY_MPC_LOG_PATH = "./controller/mpc_calibration_log.csv"
-_MPC_LOG_PATH = "./logs/mpc_calibration_log.csv"
-
-
-def _migrate_mpc_log_path(settings):
-    """Move the MPC calibration log out of the source tree and into ./logs.
-
-    Only the superseded default is rewritten. A path the operator chose is
-    theirs, and silently relocating their file would lose track of it.
-    """
-    config = settings.get("controller", {}).get("config", {}).get("mpc")
-    if not isinstance(config, dict) or config.get("log_path") != _LEGACY_MPC_LOG_PATH:
+def _remove_retired_mpc_logging_settings(settings):
+    """Remove retired MPC logging settings from an otherwise valid tree."""
+    controller = settings.get("controller")
+    if not isinstance(controller, MutableMapping):
         return False
-    config["log_path"] = _MPC_LOG_PATH
-    return True
+    config = controller.get("config")
+    if not isinstance(config, MutableMapping):
+        return False
+    mpc = config.get("mpc")
+    if not isinstance(mpc, MutableMapping):
+        return False
+
+    changed = False
+    for key in ("log_data", "log_path"):
+        if key in mpc:
+            mpc.pop(key)
+            changed = True
+    return changed
 
 
 _RETIRED_CONTROLLER_IDS = (
@@ -294,8 +296,8 @@ def _migrate_retired_controllers(settings):
 #: cascade in upgrade_settings() below is closed to new entries.
 _SHAPE_MIGRATIONS = [
     (1, _migrate_i2c_buses),
-    (2, _migrate_mpc_log_path),
     (3, _migrate_retired_controllers),
+    (4, _remove_retired_mpc_logging_settings),
 ]
 
 

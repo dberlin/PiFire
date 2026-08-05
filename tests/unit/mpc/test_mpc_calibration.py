@@ -7,10 +7,24 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from common.control_trace import (
+    ActuationMode,
+    AppliedOutputPayload,
+    ControlTraceRecord,
+    ControllerType,
+    InhibitReason,
+    MpcFailureState,
+    MpcUpdatePayload,
+    SessionPayload,
+    TraceEventKind,
+    TraceSetting,
+)
+from common.datastore_accessors import append_control_trace
+from controller.applied_output import OutputSource
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, longest_braking_distance
 from controller.mpc import _DEFAULTS
 from controller.mpc_model import simulate_grey_box
-from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality
+from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality, load_trace_samples
 
 #: The grill these tests fit: an order of magnitude slower than the shipped
 #: default, nearly ten times its gain, and twice its dead time.
@@ -41,6 +55,114 @@ def _dataset():
 def _init():
     """The shipped starting point, exactly as controller/mpc.py's _REFIT_INIT."""
     return dict(C_c=320.0, h_amb=0.5, K_Q=3.5, theta=50.0)
+
+
+def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibration-session"):
+    records = [
+        ControlTraceRecord(
+            ts_ms=0,
+            session_id=session_id,
+            cook_id=cook_id,
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.SESSION,
+            payload=SessionPayload(
+                controller=ControllerType.MPC,
+                controller_config=(TraceSetting(key="policy", value="nlp"),),
+                temperature_unit="C",
+                control_period_seconds=5.0,
+                model_revision=1,
+                model_provenance="configured",
+                u_min=0.1,
+                u_max=0.9,
+                hold_cycle_seconds=None,
+                pulse_slot_seconds=2.0,
+                pulse_frame_seconds=20.0,
+                fan_authority=True,
+                fan_pwm_capable=True,
+                fan_min_duty=40.0,
+                fan_max_duty=100.0,
+                setpoint=250.0,
+                ambient_temperature=T_AMB,
+                software_version="test",
+                build_version="test",
+            ),
+        )
+    ]
+    previous_timestamp_ms: int | None = None
+    previous_load: float | None = None
+    for revision, (time_s, temperature, load) in enumerate(zip(t, temp, Q)):
+        timestamp_ms = int(float(time_s) * 1000)
+        load = float(load)
+        records.append(
+            ControlTraceRecord(
+                ts_ms=timestamp_ms,
+                session_id=session_id,
+                cook_id=cook_id,
+                controller=ControllerType.MPC,
+                event_kind=TraceEventKind.CONTROL_UPDATE,
+                payload=MpcUpdatePayload(
+                    monotonic_ms=timestamp_ms,
+                    wall_ms=timestamp_ms,
+                    result_revision=revision,
+                    result_age_ms=0,
+                    control_period_seconds=5.0,
+                    observed_dt_seconds=5.0,
+                    setpoint=250.0,
+                    measured_temperature=float(temperature),
+                    raw_output=load,
+                    requested_output=load,
+                    actuation_mode=ActuationMode.FIXED_CYCLE,
+                    prior_requested_auger_duty=0.2,
+                    prior_realized_auger_duty=0.2,
+                    requested_fan_duty=100.0,
+                    applied_fan_duty=100.0,
+                    output_source=OutputSource.CONTROLLER,
+                    inhibit_reason=InhibitReason.NONE,
+                    state_names=("temperature", "disturbance"),
+                    state_values=(float(temperature), 0.0),
+                    disturbance_estimate=0.0,
+                    model_revision=1,
+                    model_provenance="configured",
+                    raw_policy_firing_load=load,
+                    equilibrium_feed_forward=load,
+                    residual_move=0.0,
+                    bounded_firing_load=load,
+                    policy_kind="nlp",
+                    failure_state=MpcFailureState.SUCCESS,
+                    solve_start_ms=timestamp_ms,
+                    solve_end_ms=timestamp_ms,
+                    deadline_miss_count=0,
+                    stale=False,
+                    recovered=False,
+                    predicted_feasible=True,
+                    predicted_steady_load=load,
+                ),
+            )
+        )
+        interval_start_ms = timestamp_ms if previous_timestamp_ms is None else previous_timestamp_ms
+        realized_load = load if previous_load is None else previous_load
+        records.append(
+            ControlTraceRecord(
+                ts_ms=timestamp_ms + 1,
+                session_id=session_id,
+                cook_id=cook_id,
+                controller=ControllerType.MPC,
+                event_kind=TraceEventKind.APPLIED_OUTPUT,
+                payload=AppliedOutputPayload(
+                    result_revision=revision,
+                    interval_start_ms=interval_start_ms,
+                    interval_end_ms=timestamp_ms,
+                    realized_auger_duty=0.2,
+                    realized_combustion_load=realized_load,
+                    actual_fan_duty=100.0,
+                    sample_complete=True,
+                    output_source=OutputSource.CONTROLLER,
+                ),
+            )
+        )
+        previous_timestamp_ms = timestamp_ms
+        previous_load = load
+    append_control_trace(records)
 
 
 def test_fit_recovers_the_generating_parameters():
@@ -144,7 +266,7 @@ def test_the_reported_time_constant_accounts_for_radiative_conductance():
     assert effective_tau(payload, T_HAZARD_C) < effective_tau(payload, T_FLOOR_C) < payload["C_c"] / payload["h_amb"]
 
 
-def test_the_cli_reports_the_radiation_aware_time_constant(tmp_path, capsys, monkeypatch):
+def test_the_cli_reports_the_radiation_aware_time_constant(ds, capsys, monkeypatch):
     """The kept CLI fix, exercised through `main()` rather than around it.
 
     The utility reports two different things and must not confuse them: the
@@ -155,9 +277,11 @@ def test_the_cli_reports_the_radiation_aware_time_constant(tmp_path, capsys, mon
     import controller.update_mpc as U
 
     t, Q, temp = _dataset()
-    csv = tmp_path / "cook.csv"
-    csv.write_text("time_s,temp_c,Q\n" + "".join(f"{a},{b},{c}\n" for a, b, c in zip(t, temp, Q)))
-    monkeypatch.setattr("sys.argv", ["update_mpc", str(csv), "--t-amb", str(T_AMB)])
+    _seed_trace(t, temp, Q)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["update_mpc", "--cook", "calibration-cook", "--database", str(ds.DB_PATH), "--t-amb", str(T_AMB)],
+    )
     U.main()
     out = capsys.readouterr().out
 
@@ -174,14 +298,16 @@ def test_the_cli_reports_the_radiation_aware_time_constant(tmp_path, capsys, mon
     assert f"Braking distance after a fuel cut: up to {longest_braking_distance(payload):.0f} s" in out
 
 
-def test_the_cli_says_so_when_the_solver_ran_out_of_evaluations(tmp_path, capsys, monkeypatch):
+def test_the_cli_says_so_when_the_solver_ran_out_of_evaluations(ds, capsys, monkeypatch):
     """An exhausted solve must not be presented as a finished fit."""
     import controller.update_mpc as U
 
     t, Q, temp = _dataset()
-    csv = tmp_path / "cook.csv"
-    csv.write_text("time_s,temp_c,Q\n" + "".join(f"{a},{b},{c}\n" for a, b, c in zip(t, temp, Q)))
-    monkeypatch.setattr("sys.argv", ["update_mpc", str(csv), "--t-amb", str(T_AMB)])
+    _seed_trace(t, temp, Q)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["update_mpc", "--cook", "calibration-cook", "--database", str(ds.DB_PATH), "--t-amb", str(T_AMB)],
+    )
 
     monkeypatch.setattr(U, "_MAX_NFEV", 3)  # far too few to converge
     U.main()
@@ -233,16 +359,18 @@ def test_the_reported_sigma_is_the_one_the_fit_actually_simulated():
     assert np.max(np.abs(without - reported)) > 1.0
 
 
-def test_the_json_mode_carries_the_convergence_verdict(tmp_path, capsys, monkeypatch):
+def test_the_json_mode_carries_the_convergence_verdict(ds, capsys, monkeypatch):
     """--json is the mode something else consumes; it must not be the quiet one."""
     import json
 
     import controller.update_mpc as U
 
     t, Q, temp = _dataset()
-    csv = tmp_path / "cook.csv"
-    csv.write_text("time_s,temp_c,Q\n" + "".join(f"{a},{b},{c}\n" for a, b, c in zip(t, temp, Q)))
-    monkeypatch.setattr("sys.argv", ["update_mpc", str(csv), "--t-amb", str(T_AMB), "--json"])
+    _seed_trace(t, temp, Q)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["update_mpc", "--cook", "calibration-cook", "--database", str(ds.DB_PATH), "--t-amb", str(T_AMB), "--json"],
+    )
 
     monkeypatch.setattr(U, "_MAX_NFEV", 3)
     U.main()
@@ -264,7 +392,7 @@ def _reject_constant(literal):
     raise ValueError(f"not RFC 8259: {literal}")
 
 
-def test_the_json_mode_reports_an_unscorable_fit_as_null_not_as_infinity(tmp_path, capsys, monkeypatch):
+def test_the_json_mode_reports_an_unscorable_fit_as_null_not_as_infinity(ds, capsys, monkeypatch):
     """`Infinity` is not JSON, and Python's own decoder is the reason that hides.
 
     `fit_quality` answers infinity where the grey box cannot be simulated at
@@ -284,9 +412,11 @@ def test_the_json_mode_reports_an_unscorable_fit_as_null_not_as_infinity(tmp_pat
     import controller.update_mpc as U
 
     t, Q, temp = _dataset()
-    csv = tmp_path / "cook.csv"
-    csv.write_text("time_s,temp_c,Q\n" + "".join(f"{a},{b},{c}\n" for a, b, c in zip(t, temp, Q)))
-    monkeypatch.setattr("sys.argv", ["update_mpc", str(csv), "--t-amb", str(T_AMB), "--json"])
+    _seed_trace(t, temp, Q)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["update_mpc", "--cook", "calibration-cook", "--database", str(ds.DB_PATH), "--t-amb", str(T_AMB), "--json"],
+    )
 
     # The premise as a negative control: the solve starts where the chamber's
     # own float arithmetic overflows, so `fit_quality` really is reporting the
@@ -436,6 +566,18 @@ def test_a_fit_whose_simulation_goes_non_finite_without_raising_is_also_refused(
     # And the same record with a sigma the model survives converges, so what
     # the assertion above catches is the non-finite simulation, not the data.
     assert fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)["converged"] is True
+
+
+def test_database_trace_of_committed_mak_evidence_reproduces_established_fit(ds):
+    """Historical CSV is test evidence only; calibration reads typed SQLite rows."""
+    mak = pd.read_csv(os.path.join(os.path.dirname(__file__), "fixtures", "mak_cook_2026-08-02.csv"))
+    _seed_trace(mak["time_s"].values, mak["temp_c"].values, mak["Q"].values, cook_id="mak-evidence")
+
+    t, temp, Q = load_trace_samples(cook_id="mak-evidence", database_path=ds.DB_PATH)
+    fitted = fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)
+    rmse, _ = fit_quality(t, temp, Q, fitted, T_amb=T_AMB)
+
+    assert rmse == pytest.approx(2.3358, abs=0.02)
 
 
 def test_a_quality_score_where_the_simulation_raises_is_infinite_not_an_exception():

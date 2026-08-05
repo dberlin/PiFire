@@ -13,10 +13,14 @@ Description: Read/write accessors for the SQLite-backed datastore -- the
 ==============================================================================
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 import json
 import logging
 import math
+import os
+from pathlib import Path
+import sqlite3
 import time
 from common import datastore
 from common.common import (
@@ -448,6 +452,36 @@ def _control_trace_records(rows: Sequence[ControlTraceSqliteRow]) -> list[Contro
     ]
 
 
+@contextmanager
+def _control_trace_connection(database_path: str | os.PathLike[str] | None) -> Iterator[sqlite3.Connection]:
+    """Yield the normal datastore connection or one explicit read-only database."""
+    if database_path is None:
+        yield datastore.connection()
+        return
+
+    path = Path(database_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"control trace database does not exist: {path}")
+    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _read_control_trace_records(
+    where_column: str,
+    identifier: str,
+    database_path: str | os.PathLike[str] | None,
+) -> list[ControlTraceRecord]:
+    with _control_trace_connection(database_path) as connection:
+        rows = connection.execute(
+            f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace WHERE {where_column}=? ORDER BY id",
+            (identifier,),
+        ).fetchall()
+    return _control_trace_records(rows)
+
+
 def append_control_trace(records: Sequence[ControlTraceRecord]) -> None:
     """Persist a validated trace batch in one ordered SQLite transaction."""
     rows = _validated_control_trace_rows(records)
@@ -471,28 +505,26 @@ def append_control_trace(records: Sequence[ControlTraceRecord]) -> None:
         conn.executemany(f"INSERT INTO control_trace ({_CONTROL_TRACE_COLUMNS_SQL}) VALUES ({placeholders})", values)
 
 
-def read_control_trace_session(session_id: str) -> list[ControlTraceRecord]:
+def read_control_trace_session(
+    session_id: str, *, database_path: str | os.PathLike[str] | None = None
+) -> list[ControlTraceRecord]:
     """Return one session's typed trace records in insertion order."""
-    session_id = _require_control_trace_identifier(session_id, "session_id")
-    rows = (
-        datastore.connection()
-        .execute(
-            f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace WHERE session_id=? ORDER BY id", (session_id,)
-        )
-        .fetchall()
+    return _read_control_trace_records(
+        "session_id",
+        _require_control_trace_identifier(session_id, "session_id"),
+        database_path,
     )
-    return _control_trace_records(rows)
 
 
-def read_control_trace_cook(cook_id: str) -> list[ControlTraceRecord]:
+def read_control_trace_cook(
+    cook_id: str, *, database_path: str | os.PathLike[str] | None = None
+) -> list[ControlTraceRecord]:
     """Return one cook's typed trace records in insertion order."""
-    cook_id = _require_control_trace_identifier(cook_id, "cook_id")
-    rows = (
-        datastore.connection()
-        .execute(f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace WHERE cook_id=? ORDER BY id", (cook_id,))
-        .fetchall()
+    return _read_control_trace_records(
+        "cook_id",
+        _require_control_trace_identifier(cook_id, "cook_id"),
+        database_path,
     )
-    return _control_trace_records(rows)
 
 
 def read_control_trace_range(start_ms: int, end_ms: int, *, limit: int) -> list[ControlTraceRecord]:

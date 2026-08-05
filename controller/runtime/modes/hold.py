@@ -244,7 +244,7 @@ class HoldMode(ControlMode):
             return
         self._trace_record(TraceEventKind.MODEL_EVENT, payload, now_ms)
 
-    def _trace_update(self, result, now: float, ptemp: float, controller_interval: float) -> bool:
+    def _trace_update(self, result, now: float, controller_interval: float) -> bool:
         if result is None or result.revision <= self.state.controller.trace_result_revision or result.revision == 0:
             return False
         diagnostics = result.diagnostics
@@ -265,7 +265,7 @@ class HoldMode(ControlMode):
             ),
             control_period_seconds=float(controller_interval),
             setpoint=float(self.control["primary_setpoint"]),
-            measured_temperature=float(ptemp),
+            measured_temperature=result.input_temperature,
             raw_output=(
                 diagnostics.raw_output
                 if isinstance(diagnostics, PidTraceDiagnostics)
@@ -683,7 +683,7 @@ class HoldMode(ControlMode):
                 self.state.fan.assist = False
             # Don't set ratio over maximum.
             self.state.cycle.ratio = min(self.state.cycle.ratio, settings["cycle_data"]["u_max"])
-            self._trace_update(result, now, ptemp, controller_interval)
+            self._trace_update(result, now, controller_interval)
             self._trace_finish_frame(now)
             self._trace_start_frame(
                 now,

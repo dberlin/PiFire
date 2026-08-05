@@ -42,9 +42,7 @@ export interface MpcConfig {
   est_q_temp: number;
   est_q_dist: number;
   est_r_meas: number;
-  log_data: boolean;
   enable_identification: boolean;
-  log_path: string;
 }
 
 export interface ControllerConfigs {

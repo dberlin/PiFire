@@ -92,6 +92,38 @@ def test_threaded_runner_solves_submitted_temp():
         r.stop()
 
 
+def test_threaded_result_retains_consumed_temperature_after_newer_submit():
+    class FirstBlockedCore(FakeCore):
+        def __init__(self):
+            super().__init__(period=0.01)
+            self.first_entered = threading.Event()
+            self.first_release = threading.Event()
+            self.second_release = threading.Event()
+
+        def update(self, temp):
+            self.updates.append(temp)
+            if len(self.updates) == 1:
+                self.first_entered.set()
+                self.first_release.wait(2.0)
+            else:
+                self.second_release.wait(2.0)
+            return {"cycle_ratio": self._ratio, "fan": None}
+
+    core = FirstBlockedCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(70.0)
+        assert core.first_entered.wait(2.0)
+        runner.submit(80.0)
+        core.first_release.set()
+        assert _wait_for(lambda: runner.latest().revision == 1)
+        assert runner.latest().input_temperature == 70.0
+    finally:
+        core.first_release.set()
+        core.second_release.set()
+        runner.stop()
+
+
 def test_threaded_runner_repoll_returns_same_completed_result_revision():
     core = FakeCore()
     runner = ThreadedControllerRunner(core)

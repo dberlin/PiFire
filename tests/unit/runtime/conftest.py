@@ -10,7 +10,7 @@ from tests.fakes.probes import FakeProbes
 
 
 def _output(ratio):
-    return ControllerUpdateResult(cycle_ratio=ratio, fan=None)
+    return ControllerUpdateResult(cycle_ratio=ratio, fan=None, input_temperature=0.0)
 
 
 def _off():

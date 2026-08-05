@@ -35,6 +35,7 @@ def test_sync_runner_normalizes_dict_output():
     assert isinstance(out, ControllerUpdateResult)
     assert out.cycle_ratio == 0.4
     assert out.fan == {"duty": 60}
+    assert out.input_temperature == 200.0
 
 
 def test_sync_runner_float_output_has_no_fan():
@@ -67,6 +68,7 @@ def test_sync_runner_result_revision_and_status_match_one_completed_update():
     assert (second.revision, second.status) == (2, {"completed": 2})
     assert first.solve_end_monotonic >= first.solve_start_monotonic
     assert first.solve_duration_seconds == first.solve_end_monotonic - first.solve_start_monotonic
+    assert (first.input_temperature, second.input_temperature) == (190.0, 191.0)
 
 
 def test_sync_controller_state_thaws_nested_completed_status_without_mutating_result():

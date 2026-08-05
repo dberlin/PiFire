@@ -555,7 +555,7 @@ def test_hold_fan_assist_cycles_fan_via_pid_path():
     control_data["primary_setpoint"] = 225
     probes = FakeProbes().script([230] * 60)  # >= setpoint: arms target_temp_achieved
     grill = FakeGrillPlatform(dc_fan=True)
-    runner = FakeControllerRunner(period=0.01).script([ControllerUpdateResult(cycle_ratio=0.02, fan=None)] * 60)
+    runner = FakeControllerRunner(period=0.01).script([ControllerUpdateResult(cycle_ratio=0.02, fan=None, input_temperature=0.0)] * 60)
     result = run_mode(
         "Hold",
         settings=settings,
@@ -596,10 +596,10 @@ def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
     grill = FakeGrillPlatform(dc_fan=True)
     runner = FakeControllerRunner(period=0.01, commands_fan=True).script(
         [
-            ControllerUpdateResult(cycle_ratio=0.5, fan={"duty": 42}),
-            ControllerUpdateResult(cycle_ratio=0.5, fan=None),
-            ControllerUpdateResult(cycle_ratio=0.5, fan=None),
-            ControllerUpdateResult(cycle_ratio=0.5, fan=None),
+            ControllerUpdateResult(cycle_ratio=0.5, fan={"duty": 42}, input_temperature=0.0),
+            ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0),
+            ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0),
+            ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0),
         ]
     )
     result = run_mode(
@@ -629,7 +629,7 @@ def test_hold_mpc_commands_fan_suppresses_temp_profile_from_first_tick():
     probes = FakeProbes().script([210] * 8)
     grill = FakeGrillPlatform(dc_fan=True)
     runner = FakeControllerRunner(period=999, commands_fan=True).script(
-        [ControllerUpdateResult(cycle_ratio=0.5, fan=None)] * 8  # never reaches a fan command in-window
+        [ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 8  # never reaches a fan command in-window
     )
     result = run_mode(
         "Hold",
@@ -808,7 +808,7 @@ def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
     probes = FakeProbes().script([200, 200, 210, 220, 550])  # [pre-loop, tick1..3 (under), tick4 (over)]
-    runner = FakeControllerRunner(period=1000.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None)] * 6)
+    runner = FakeControllerRunner(period=1000.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 6)
     result = run_mode(
         "Hold",
         settings=settings,
@@ -835,7 +835,7 @@ def test_hold_controller_receives_current_tick_ptemp():
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
     probes = FakeProbes().script([200, 205, 210, 215, 220])
-    runner = FakeControllerRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None)] * 8)
+    runner = FakeControllerRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 8)
     run_mode(
         "Hold",
         settings=settings,

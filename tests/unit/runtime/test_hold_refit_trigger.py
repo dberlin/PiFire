@@ -50,7 +50,7 @@ def test_no_refit_when_identification_is_off(hold_cycle):
 
 
 def test_no_refit_during_the_cook(hold_cycle):
-    runner = FakeControllerRunner(period=0.01).script([ControllerUpdateResult(cycle_ratio=0.3, fan=None)] * 10)
+    runner = FakeControllerRunner(period=0.01).script([ControllerUpdateResult(cycle_ratio=0.3, fan=None, input_temperature=0.0)] * 10)
     hold = _hold(hold_cycle, runner, identification=True)
     for tick in range(5):
         hold.on_tick(

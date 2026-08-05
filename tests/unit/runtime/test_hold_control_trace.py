@@ -55,6 +55,7 @@ def _pid_result(revision=1):
     return ControllerUpdateResult(
         cycle_ratio=0.3,
         fan=None,
+        input_temperature=100.0,
         diagnostics=diagnostics,
         revision=revision,
         solve_start_monotonic=1.0,
@@ -100,6 +101,7 @@ def _pid_sp_result(revision=1):
     return ControllerUpdateResult(
         cycle_ratio=0.3,
         fan=None,
+        input_temperature=100.0,
         diagnostics=diagnostics,
         revision=revision,
         solve_start_monotonic=1.0,
@@ -150,6 +152,7 @@ def _mpc_result(
     return ControllerUpdateResult(
         cycle_ratio=allocation.auger_duty,
         fan={"duty": allocation.fan_duty or 0.0},
+        input_temperature=100.0,
         diagnostics=diagnostics,
         allocation=allocation,
         revision=revision,
