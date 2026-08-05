@@ -24,7 +24,7 @@ from .actuation import PulseRealizer
 from .arx import ARXConfig, ScheduledARX
 from .dmc import DMCConfig, LaguerreDMC
 from .state_space import InnovationStateSpace, StateSpaceConfig
-from .artifact import ArmEvidence, ExperimentArtifact
+from .artifact import ArmEvidence, ExperimentArtifact, MatrixKey
 from .contracts import AffinePrediction
 from .contracts import Observation, SignalRecord
 from .linear_mpc import LinearMPC, MPCConfig
@@ -193,13 +193,24 @@ def _run_matrix(
         from .artifact import ArmFailure
 
         failures = [
-            ArmFailure(item["arm"], item["scenario"], item["category"], item["detail"])
+            ArmFailure(
+                item["arm"],
+                item["scenario"],
+                item["category"],
+                item["detail"],
+                MatrixKey(**item["matrix_key"]) if "matrix_key" in item else None,
+            )
             for item in checkpoint_document.get("failures", ())
         ]
     completed = {
         (row.arm, row.initialization, row.scenario, row.plant, row.mode, row.seed)
         for row in rows
     }
+    completed.update(
+        (failure.matrix_key.arm, failure.matrix_key.initialization, failure.matrix_key.scenario,
+         failure.matrix_key.plant, failure.matrix_key.mode, failure.matrix_key.seed)
+        for failure in failures if failure.matrix_key is not None
+    )
     for arm, initialization, definition, plant, mode, seed in jobs:
         key = (arm, initialization, definition.name, plant, mode, seed)
         if key in completed:
@@ -218,7 +229,15 @@ def _run_matrix(
         except Exception as exc:
             from .artifact import ArmFailure
 
-            failures.append(ArmFailure(arm, definition.name, "non-finite/unstable", f"{type(exc).__name__}: {exc}"))
+            failures.append(
+                ArmFailure(
+                    arm,
+                    definition.name,
+                    "non-finite/unstable",
+                    f"{type(exc).__name__}: {exc}",
+                    MatrixKey(arm, initialization, plant, mode, definition.name, seed),
+                )
+            )
         if checkpoint is not None:
             _write_checkpoint(checkpoint, config, rows, failures, complete=False)
         if interrupt_after is not None and len(rows) + len(failures) >= interrupt_after and not resume:

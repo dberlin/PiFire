@@ -8,6 +8,7 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import (
     ArmEvidence,
     ArmFailure,
     ExperimentArtifact,
+    MatrixKey,
     recommend,
 )
 
@@ -76,14 +77,21 @@ def test_artifact_is_schema_valid_sorted_and_has_provenance() -> None:
     assert json.loads(artifact.to_json()) == document
 
 
-def test_structured_failure_invalidates_only_allowed_reason() -> None:
-    artifact = artifact_with_scores()
-    artifact = artifact.with_failures((ArmFailure("dmc", "lid-excursion", "wrong-input-semantics", "q was realized"),))
+    artifact = artifact.with_failures((
+        ArmFailure(
+            "dmc",
+            "lid-excursion",
+            "wrong-input-semantics",
+            "q was realized",
+            MatrixKey("dmc", "wrong-delay", "GrillSim", "online", "lid-excursion", 2),
+        ),
+    ))
 
     recommendation = recommend(artifact)
 
     assert not recommendation.arms["dmc"].valid
     assert recommendation.arms["dmc"].reasons == ("wrong input semantics",)
+    assert artifact.to_document()["failures"][0]["matrix_key"]["initialization"] == "wrong-delay"
     assert document_has_failure(artifact, "wrong-input-semantics")
 
 

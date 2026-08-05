@@ -38,6 +38,28 @@ def _document(value: Any) -> Any:
 
 
 @dataclass(frozen=True, slots=True)
+class MatrixKey:
+    """The immutable identity of one matrix cell, including failed cells."""
+
+    arm: str
+    initialization: str
+    plant: str
+    mode: str
+    scenario: str
+    seed: int
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "arm": self.arm,
+            "initialization": self.initialization,
+            "mode": self.mode,
+            "plant": self.plant,
+            "scenario": self.scenario,
+            "seed": self.seed,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ArmFailure:
     """A structured failure retained as evidence instead of being silently dropped."""
 
@@ -45,13 +67,24 @@ class ArmFailure:
     scenario: str
     category: str
     detail: str
+    matrix_key: MatrixKey | None = None
 
     def __post_init__(self) -> None:
         if not all(isinstance(value, str) and value for value in (self.arm, self.scenario, self.category, self.detail)):
             raise ValueError("failure fields must be non-empty strings")
+        if self.matrix_key is not None and (self.matrix_key.arm != self.arm or self.matrix_key.scenario != self.scenario):
+            raise ValueError("failure matrix key must match arm and scenario")
 
-    def to_document(self) -> dict[str, str]:
-        return {"arm": self.arm, "category": self.category, "detail": self.detail, "scenario": self.scenario}
+    def to_document(self) -> dict[str, Any]:
+        document: dict[str, Any] = {
+            "arm": self.arm,
+            "category": self.category,
+            "detail": self.detail,
+            "scenario": self.scenario,
+        }
+        if self.matrix_key is not None:
+            document["matrix_key"] = self.matrix_key.to_document()
+        return document
 
 
 @dataclass(frozen=True, slots=True)
