@@ -9,6 +9,7 @@ from math import isfinite
 
 import numpy as np
 import numpy.typing as npt
+from scipy.optimize import lsq_linear
 
 from .contracts import AffinePrediction
 
@@ -95,18 +96,29 @@ class SolveResult:
     iterations: int
     kkt_residual: float
     predicted_c: FloatVector | None = None
+    hessian_condition: float | None = None
     def __post_init__(self) -> None:
         x = np.array(self.x, dtype=np.float64, copy=True)
         if x.ndim != 1:
             raise ValueError("x must have shape (N,)")
+        if not np.isfinite(x).all():
+            raise ValueError("x must be finite")
         x.flags.writeable = False
         object.__setattr__(self, "x", x)
+        if not isfinite(self.objective) or not isfinite(self.kkt_residual):
+            raise ValueError("objective and kkt_residual must be finite")
         if self.predicted_c is not None:
             predicted = np.array(self.predicted_c, dtype=np.float64, copy=True)
             if predicted.shape != x.shape:
                 raise ValueError("predicted_c must have shape (N,)")
+            if not np.isfinite(predicted).all():
+                raise ValueError("predicted_c must be finite")
             predicted.flags.writeable = False
             object.__setattr__(self, "predicted_c", predicted)
+        if self.hessian_condition is not None and (
+            not isfinite(self.hessian_condition) or self.hessian_condition < 1.0
+        ):
+            raise ValueError("hessian_condition must be finite and at least one")
 
     @property
     def sequence_q(self) -> FloatVector:
@@ -184,6 +196,89 @@ def _validate_qp(
     return H, f, lo, hi, start
 
 
+def _original_coordinate_kkt_residual(
+    hessian: FloatVector,
+    linear: FloatVector,
+    x: FloatVector,
+    lower: FloatVector,
+    upper: FloatVector,
+) -> float:
+    """Return the infinity-norm box KKT residual in the caller's coordinates."""
+    gradient = hessian @ x + linear
+    bound_epsilon = 64.0 * _EPSILON * np.maximum(
+        1.0, np.maximum(np.abs(lower), np.abs(upper))
+    )
+    projected = gradient.copy()
+    at_lower = x <= lower + bound_epsilon
+    at_upper = x >= upper - bound_epsilon
+    projected[at_lower] = np.minimum(projected[at_lower], 0.0)
+    projected[at_upper] = np.maximum(projected[at_upper], 0.0)
+    return float(np.max(np.abs(projected))) if projected.size else 0.0
+
+
+def _clip_roundoff_box_point(
+    x: FloatVector, lower: FloatVector, upper: FloatVector
+) -> FloatVector | None:
+    """Clip only machine-roundoff bound drift, rejecting every substantive violation."""
+    if not np.isfinite(x).all():
+        return None
+    clipped = np.clip(x, lower, upper)
+    bound_epsilon = 64.0 * _EPSILON * np.maximum(
+        1.0, np.maximum(np.abs(lower), np.abs(upper))
+    )
+    if np.any(np.abs(x - clipped) > bound_epsilon):
+        return None
+    return clipped
+
+def _scaled_newton_step(
+    scaled_hessian: FloatVector, gradient: FloatVector, free: npt.NDArray[np.bool_]
+) -> FloatVector:
+    """Solve the free Newton system with deterministic SVD refinement."""
+    step = np.zeros(gradient.size, dtype=np.float64)
+    reduced = scaled_hessian[np.ix_(free, free)]
+    reduced_gradient = gradient[free]
+    solution = -np.linalg.lstsq(reduced, reduced_gradient, rcond=None)[0]
+    for _ in range(3):
+        correction = -np.linalg.lstsq(
+            reduced, reduced @ solution + reduced_gradient, rcond=None
+        )[0]
+        solution += correction
+    step[free] = solution
+    return step
+
+
+
+def _bvls_box_qp(
+    hessian: FloatVector,
+    linear: FloatVector,
+    lower: FloatVector,
+    upper: FloatVector,
+    max_iterations: int,
+) -> tuple[FloatVector, int] | None:
+    """Solve free coordinates as bounded least squares after exact-bound elimination."""
+    fixed = lower == upper
+    x = lower.copy()
+    free = ~fixed
+    if not np.any(free):
+        return x, 0
+    reduced_hessian = hessian[np.ix_(free, free)]
+    reduced_linear = linear[free] + hessian[np.ix_(free, fixed)] @ x[fixed]
+    values, vectors = np.linalg.eigh(reduced_hessian)
+    if float(values[0]) <= _EPSILON:
+        return None
+    root = np.sqrt(values)[:, np.newaxis] * vectors.T
+    target = -np.linalg.solve(root.T, reduced_linear)
+    result = lsq_linear(
+        root,
+        target,
+        bounds=(lower[free], upper[free]),
+        method="bvls",
+        tol=1e-14,
+        max_iter=max_iterations,
+    )
+    x[free] = np.asarray(result.x, dtype=np.float64)
+    return x, int(result.nit)
+
 def projected_gradient_qp(
     H: npt.ArrayLike,
     f: npt.ArrayLike,
@@ -194,7 +289,7 @@ def projected_gradient_qp(
     max_iterations: int = 10_000,
     tolerance: float = 1e-7,
 ) -> SolveResult:
-    """Solve a positive-semidefinite box QP with restartable accelerated PGD."""
+    """Solve a PSD box QP by diagonally scaled primal active-set iterations."""
     hessian, linear, lo, hi, start = _validate_qp(H, f, lower, upper, warm_start)
     if max_iterations < 1:
         raise ValueError("max_iterations must be positive")
@@ -204,45 +299,117 @@ def projected_gradient_qp(
     eigenvalues = np.linalg.eigvalsh(hessian)
     if float(eigenvalues[0]) < -_EPSILON:
         raise ValueError("H must be positive semidefinite")
-    lipschitz = float(eigenvalues[-1])
+    condition = (
+        float(eigenvalues[-1] / eigenvalues[0])
+        if float(eigenvalues[0]) > _EPSILON
+        else None
+    )
+    if np.all(lo == hi):
+        return SolveResult(
+            lo,
+            _objective(hessian, linear, lo),
+            0,
+            0.0,
+            hessian_condition=condition,
+        )
     if np.count_nonzero(hessian) == 0:
         x = np.where(linear > 0.0, lo, np.where(linear < 0.0, hi, np.clip(start, lo, hi)))
-        return SolveResult(x, float(linear @ x), 0, 0.0)
-    if lipschitz <= _EPSILON:
-        raise ValueError("H must have a usable positive Lipschitz constant")
-    x = np.clip(start, lo, hi)
-    accelerated = x.copy()
-    momentum = 1.0
-    objective = _objective(hessian, linear, x)
+        return SolveResult(x, float(linear @ x), 0, 0.0, hessian_condition=condition)
+    iterations_used = 0
+    reserved_bvls_iterations = linear.size + 1
+    bvls_budget = max_iterations - reserved_bvls_iterations
+    bvls_result = (
+        _bvls_box_qp(hessian, linear, lo, hi, bvls_budget)
+        if bvls_budget > 0
+        else None
+    )
+    if bvls_result is not None:
+        x, bvls_iterations = bvls_result
+        iterations_used = 1 + max(linear.size, bvls_iterations)
+        exact_box_x = _clip_roundoff_box_point(x, lo, hi)
+        if exact_box_x is not None:
+            residual = _original_coordinate_kkt_residual(
+                hessian, linear, exact_box_x, lo, hi
+            )
+            if np.isfinite(residual) and (
+                residual <= tolerance or iterations_used >= max_iterations
+            ):
+                return SolveResult(
+                    exact_box_x,
+                    _objective(hessian, linear, exact_box_x),
+                    iterations_used,
+                    residual,
+                    hessian_condition=condition,
+                )
 
-    for iteration in range(1, max_iterations + 1):
-        candidate = np.clip(accelerated - (hessian @ accelerated + linear) / lipschitz, lo, hi)
-        candidate_objective = _objective(hessian, linear, candidate)
-        if candidate_objective > objective:
-            accelerated = x
-            momentum = 1.0
-            candidate = np.clip(x - (hessian @ x + linear) / lipschitz, lo, hi)
-            candidate_objective = _objective(hessian, linear, candidate)
+    scale = np.sqrt(np.maximum(np.diag(hessian), _EPSILON))
+    scaled_hessian = hessian / np.outer(scale, scale)
+    scaled_linear = linear / scale
+    scaled_lower = lo * scale
+    scaled_upper = hi * scale
+    y = np.clip(start, lo, hi) * scale
+    bound_epsilon = 64.0 * _EPSILON * np.maximum(
+        1.0, np.maximum(np.abs(scaled_lower), np.abs(scaled_upper))
+    )
 
-        gradient = hessian @ candidate + linear
-        projected = np.clip(candidate - gradient / lipschitz, lo, hi)
-        residual = float(lipschitz * np.max(np.abs(candidate - projected)))
+    for iteration in range(1, max_iterations - iterations_used + 1):
+        x = np.clip(y / scale, lo, hi)
+        residual = _original_coordinate_kkt_residual(hessian, linear, x, lo, hi)
         if residual <= tolerance:
-            return SolveResult(candidate, candidate_objective, iteration, residual)
+            return SolveResult(
+                x,
+                _objective(hessian, linear, x),
+                iterations_used + iteration - 1,
+                residual,
+                hessian_condition=condition,
+            )
 
-        next_momentum = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * momentum * momentum))
-        accelerated = candidate + ((momentum - 1.0) / next_momentum) * (candidate - x)
-        x = candidate
-        momentum = next_momentum
-        objective = candidate_objective
+        gradient = scaled_hessian @ y + scaled_linear
+        at_lower = y <= scaled_lower + bound_epsilon
+        at_upper = y >= scaled_upper - bound_epsilon
+        free = ~(at_lower | at_upper)
+        original_gradient = hessian @ x + linear
+        release = (at_lower & (original_gradient < -tolerance)) | (
+            at_upper & (original_gradient > tolerance)
+        )
+        free |= release
+        if not np.any(free):
+            violation = np.where(
+                at_lower,
+                np.maximum(-original_gradient, 0.0),
+                np.maximum(original_gradient, 0.0),
+            )
+            free[int(np.argmax(violation))] = True
 
-    gradient = hessian @ x + linear
-    projected = np.clip(x - gradient / lipschitz, lo, hi)
+        step = _scaled_newton_step(scaled_hessian, gradient, free)
+        if float(gradient @ step) >= 0.0:
+            step.fill(0.0)
+            step[free] = -gradient[free]
+
+        alpha = 1.0
+        rising = step > 0.0
+        falling = step < 0.0
+        if np.any(rising):
+            alpha = min(alpha, float(np.min((scaled_upper[rising] - y[rising]) / step[rising])))
+        if np.any(falling):
+            alpha = min(alpha, float(np.min((scaled_lower[falling] - y[falling]) / step[falling])))
+        if alpha <= _EPSILON:
+            y = np.clip(y, scaled_lower, scaled_upper)
+        else:
+            y = np.clip(y + alpha * step, scaled_lower, scaled_upper)
+
+    x = np.clip(y / scale, lo, hi)
+    if not np.isfinite(x).all():
+        x = np.clip(start, lo, hi)
+    residual = _original_coordinate_kkt_residual(hessian, linear, x, lo, hi)
+    if not isfinite(residual):
+        raise FloatingPointError("box QP fallback produced a non-finite KKT certificate")
     return SolveResult(
         x,
         _objective(hessian, linear, x),
         max_iterations,
-        float(lipschitz * np.max(np.abs(x - projected))),
+        residual,
+        hessian_condition=condition,
     )
 
 
@@ -288,4 +455,5 @@ class LinearMPC:
             result.iterations,
             result.kkt_residual,
             predicted,
+            result.hessian_condition,
         )

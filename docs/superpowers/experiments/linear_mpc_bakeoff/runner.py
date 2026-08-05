@@ -514,6 +514,7 @@ def _run_scenario(
                 "iterations": solve.iterations,
                 "kkt_residual": solve.kkt_residual,
                 "objective": solve.objective,
+                "hessian_condition": solve.hessian_condition,
                 "converged": True,
             }
             if second % 100 == 0:

@@ -25,6 +25,8 @@ class StateSpaceConfig:
     max_buffer_samples: int = 1_800
     refresh_interval_s: float = 300.0
     alignment_tolerance_c: float = 0.05
+    steady_gain_scale_limit: float = 16.0
+    held_out_forecast_scale_limit: float = 8.0
 
     def __post_init__(self) -> None:
         if not self.orders or any(order < 1 for order in self.orders):
@@ -47,6 +49,12 @@ class StateSpaceConfig:
             raise ValueError("refresh_interval_s must be positive")
         if self.alignment_tolerance_c < 0.0:
             raise ValueError("alignment_tolerance_c must be non-negative")
+        for name, value in (
+            ("steady_gain_scale_limit", self.steady_gain_scale_limit),
+            ("held_out_forecast_scale_limit", self.held_out_forecast_scale_limit),
+        ):
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +64,24 @@ class RefreshOutcome:
     accepted: bool
     alignment_error_c: float
     duration_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class PlausibilityBounds:
+    """Training-only physical limits retained with the selected realization."""
+
+    input_span_q: float
+    max_held_out_deviation_c: float
+    max_steady_gain_c_per_q: float
+    observed_deviation_c: float
+
+    def to_document(self) -> dict[str, float]:
+        return {
+            "input_span_q": self.input_span_q,
+            "max_held_out_deviation_c": self.max_held_out_deviation_c,
+            "max_steady_gain_c_per_q": self.max_steady_gain_c_per_q,
+            "observed_deviation_c": self.observed_deviation_c,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +101,7 @@ class SubspaceFit:
     state_offset: FloatArray = field(
         default_factory=lambda: np.empty(0, dtype=np.float64), repr=False
     )
+    plausibility_bounds: PlausibilityBounds | None = field(default=None, repr=False)
     def __post_init__(self) -> None:
         for name in ("A", "B", "C", "D", "state_offset"):
             array = np.array(getattr(self, name), dtype=np.float64, copy=True)
@@ -102,6 +129,7 @@ class InnovationStateSpace:
         self._last_alignment_error_c: float | None = None
         self._last_refresh_duration_s = 0.0
         self._refreshes = 0
+        self._plausibility_bounds: PlausibilityBounds | None = None
 
     @property
     def current_output_c(self) -> float:
@@ -139,6 +167,7 @@ class InnovationStateSpace:
         self._state = _state_from_record(record, fit)
         self._covariance = np.eye(fit.order, dtype=np.float64) * fit.covariance
         self._trim_history()
+        self._plausibility_bounds = fit.plausibility_bounds
         self._last_refresh_time_s = self._times[-1]
         self._last_alignment_error_c = None
         self._last_refresh_duration_s = 0.0
@@ -227,6 +256,7 @@ class InnovationStateSpace:
         self._last_refresh_duration_s = duration
         self._last_refresh_time_s = self._times[-1]
         self._refreshes += 1
+        self._plausibility_bounds = candidate.plausibility_bounds
         return RefreshOutcome(True, alignment_error, duration)
 
     def affine_prediction(self, horizon_steps: int, q_previous: float, ambient_future: FloatArray) -> AffinePrediction:
@@ -269,6 +299,11 @@ class InnovationStateSpace:
                 "D": fit.D.tolist(), "state_offset": fit.state_offset.tolist(),
             },
             "poles": [float(abs(pole)) for pole in poles], "steady_gain": _steady_gain(fit),
+            "plausibility_bounds": (
+                self._plausibility_bounds.to_document()
+                if self._plausibility_bounds is not None
+                else None
+            ),
             "innovation_covariance": fit.covariance, "state_covariance": self._covariance.tolist(),
             "alignment_error_c": self._last_alignment_error_c, "buffer_samples": len(self._times),
             "refresh_duration_s": self._last_refresh_duration_s, "refreshes": self._refreshes,
@@ -308,17 +343,28 @@ def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
     split = min(split, n - 2)
     training = _slice_record(record, 0, split)
     validation = _slice_record(record, split, n)
+    bounds = _plausibility_bounds(training, config)
     for order in config.orders:
         for delay in config.delays:
             try:
                 candidate = _fit_candidate(training, order, delay, config.block_rows)
+                rejection = _candidate_rejection_reason(
+                    candidate, training, validation, config, bounds
+                )
+                if rejection is not None:
+                    rejection_reasons.append(rejection)
+                    continue
                 error = _one_step_error(candidate, training, validation)
+                if not np.isfinite(error):
+                    rejection_reasons.append("held-out one-step validation is non-finite")
+                    continue
                 candidates.append(SubspaceFit(
                     candidate.order, candidate.delay, candidate.A, candidate.B,
                     candidate.C, candidate.D, candidate.intercept, candidate.input_mean,
                     candidate.covariance,
                     error + config.parameter_penalty * (order * order + 2 * order + 2),
                     candidate.state_offset,
+                    bounds,
                 ))
             except ValueError as error:
                 rejection_reasons.append(str(error))
@@ -354,11 +400,6 @@ def _fit_candidate(record: SignalRecord, order: int, delay: int, block_rows: int
     A, B, C, D, state_offset, intercept, residuals = _recover_projected_realization(
         z, q - input_mean, order, delay, block_rows
     )
-    provisional = SubspaceFit(
-        order, delay, A, B, C, D, intercept, input_mean, 1e-6, 0.0, state_offset
-    )
-    if not 0.0 < _steady_gain(provisional) < 1_000.0:
-        raise ValueError("identified steady gain is not physically plausible")
     covariance = max(float(np.mean(residuals * residuals)), 1e-8)
     return SubspaceFit(
         order, delay, A, B, C, D, intercept, input_mean, covariance, 0.0, state_offset
@@ -422,6 +463,73 @@ def _svd_least_squares(features: FloatArray, targets: FloatArray) -> FloatArray:
     projected_targets = left[:, : singular_values.size].T @ targets
     scale = inverse if projected_targets.ndim == 1 else inverse[:, np.newaxis]
     return right[: singular_values.size].T @ (scale * projected_targets)
+def _plausibility_bounds(
+    record: SignalRecord, config: StateSpaceConfig
+) -> PlausibilityBounds:
+    """Return calibrated finite-response limits recorded with each accepted fit."""
+    temperature_deviation = np.asarray(record.temp_c - record.ambient_c, dtype=np.float64)
+    observed_deviation_c = max(float(np.max(np.abs(temperature_deviation))), 1.0)
+    input_span = max(float(np.ptp(record.q)), 0.05)
+    return PlausibilityBounds(
+        input_span,
+        config.held_out_forecast_scale_limit * observed_deviation_c,
+        config.steady_gain_scale_limit * observed_deviation_c / input_span,
+        observed_deviation_c,
+    )
+
+
+def _candidate_rejection_reason(
+    fit: SubspaceFit,
+    training: SignalRecord,
+    validation: SignalRecord,
+    config: StateSpaceConfig,
+    bounds: PlausibilityBounds | None = None,
+) -> str | None:
+    """Return a physical or held-out safety rejection without a global gain cap."""
+    arrays = (fit.A, fit.B, fit.C, fit.D, fit.state_offset)
+    if not all(np.isfinite(array).all() for array in arrays):
+        return "identified model contains non-finite coefficients"
+    poles = np.linalg.eigvals(fit.A)
+    if not np.isfinite(poles).all() or float(np.max(np.abs(poles))) >= 1.0:
+        return "identified model is unstable"
+    gain = _steady_gain(fit)
+    if not np.isfinite(gain):
+        return "identified steady gain is non-finite"
+    if gain <= 0.0:
+        return "identified steady gain must be positive"
+    bounds = _plausibility_bounds(training, config) if bounds is None else bounds
+    if gain > bounds.max_steady_gain_c_per_q:
+        return "identified steady gain exceeds data-scaled plausibility bound"
+    forecast = _free_run_forecast(fit, training, validation.q, validation.ambient_c)
+    if not np.isfinite(forecast).all():
+        return "held-out forecast is non-finite"
+    if float(np.max(np.abs(forecast - validation.ambient_c))) > (
+        bounds.max_held_out_deviation_c
+    ):
+        return "held-out forecast exceeds data-scaled envelope"
+    return None
+
+
+def _free_run_forecast(
+    fit: SubspaceFit,
+    prefix: SignalRecord,
+    future_q: FloatArray,
+    future_ambient: FloatArray,
+) -> FloatArray:
+    """Forecast without observation updates for candidate plausibility validation."""
+    state = _state_from_record(prefix, fit)
+    inputs = prefix.q.astype(float).tolist()
+    prediction = np.empty(future_q.size, dtype=np.float64)
+    for step, ambient_c in enumerate(future_ambient):
+        target = len(inputs)
+        transition_delayed = _delayed_input(inputs, future_q, target - 1, fit.delay)
+        output_delayed = _delayed_input(inputs, future_q, target, fit.delay)
+        state = _advance(fit, state, transition_delayed)
+        prediction[step] = _output(fit, state, output_delayed, float(ambient_c))
+        inputs.append(float(future_q[step]))
+    return prediction
+
+
 def _one_step_error(fit: SubspaceFit, training: SignalRecord, validation: SignalRecord) -> float:
     temperatures = training.temp_c.astype(float).tolist()
     ambients = training.ambient_c.astype(float).tolist()

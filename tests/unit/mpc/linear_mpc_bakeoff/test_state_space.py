@@ -9,9 +9,16 @@ import pytest
 
 from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import SignalRecord
 from docs.superpowers.experiments.linear_mpc_bakeoff.data import chronological_split
+from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
+    _identification_records,
+    _record_slice,
+)
 from docs.superpowers.experiments.linear_mpc_bakeoff.state_space import (
     InnovationStateSpace,
     StateSpaceConfig,
+    SubspaceFit,
+    _plausibility_bounds,
+    _candidate_rejection_reason,
     _select_fit,
     subspace_fit,
 )
@@ -259,3 +266,127 @@ def test_no_viable_candidate_preserves_detailed_rejection_reason() -> None:
 
     with pytest.raises(ValueError, match="no viable state-space candidate.*subspace Markov projection"):
         _select_fit(record, StateSpaceConfig(orders=(1,), delays=(1,)))
+
+
+def test_mak_correct_calibration_accepts_data_scaled_high_gain_candidate() -> None:
+    """A correct MAK prefix has a valid gain above the retired global 1,000 cap."""
+    record, initialized = _identification_records("MAKGrillSim", 2, "correct")
+    fit_record = _record_slice(initialized, 0, int(record.temp_c.size * 0.35))
+    model = InnovationStateSpace(
+        StateSpaceConfig(orders=(1,), delays=(2,), refresh_interval_s=1e12)
+    )
+
+    model.fit(fit_record)
+
+    snapshot = model.snapshot()
+    assert snapshot["steady_gain"] > 1_000.0
+    forecast = model.forecast(
+        fit_record,
+        record.q[fit_record.temp_c.size :],
+        record.ambient_c[fit_record.temp_c.size :],
+    )
+    assert snapshot["plausibility_bounds"]["max_steady_gain_c_per_q"] > snapshot["steady_gain"]
+    assert np.isfinite(forecast).all()
+
+
+@pytest.mark.parametrize(
+    ("fit", "reason"),
+    (
+        (
+            SubspaceFit(
+                1,
+                1,
+                np.array([[0.5]]),
+                np.array([-1.0]),
+                np.array([1.0]),
+                np.array([0.0]),
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+            ),
+            "positive",
+        ),
+        (
+            SubspaceFit(
+                1,
+                1,
+                np.array([[1.01]]),
+                np.array([1.0]),
+                np.array([1.0]),
+                np.array([0.0]),
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+            ),
+            "unstable",
+        ),
+        (
+            SubspaceFit(
+                1,
+                1,
+                np.array([[0.5]]),
+                np.array([1.0]),
+                np.array([0.0]),
+                np.array([1.0]),
+                1_000_000.0,
+                0.0,
+                1.0,
+                0.0,
+            ),
+            "held-out forecast",
+        ),
+    ),
+)
+def test_data_scaled_plausibility_rejects_true_negative_candidates(
+    fit: SubspaceFit, reason: str
+) -> None:
+    record = known_state_space(seed=13)(samples=120)
+    training = SignalRecord(
+        record.time_s[:80],
+        record.temp_c[:80],
+        record.q[:80],
+        record.ambient_c[:80],
+        record.provenance,
+    )
+    validation = SignalRecord(
+        record.time_s[80:],
+        record.temp_c[80:],
+        record.q[80:],
+        record.ambient_c[80:],
+        record.provenance,
+    )
+
+    rejection = _candidate_rejection_reason(
+        fit, training, validation, StateSpaceConfig(orders=(1,), delays=(1,))
+    )
+
+    assert rejection is not None
+    assert reason in rejection
+
+
+def test_snapshot_uses_selected_training_bounds_not_held_out_scale() -> None:
+    record = known_state_space(seed=31)(samples=300)
+    temperatures = record.temp_c.copy()
+    temperatures[-30:] = record.ambient_c[-30:] + 10_000.0
+    widened = SignalRecord(
+        record.time_s, temperatures, record.q, record.ambient_c, record.provenance
+    )
+    config = StateSpaceConfig(orders=(1,), delays=(2,))
+    model = InnovationStateSpace(config)
+
+    model.fit(widened)
+
+    split = int(widened.temp_c.size * (1.0 - config.validation_fraction))
+    expected = _plausibility_bounds(
+        SignalRecord(
+            widened.time_s[:split],
+            widened.temp_c[:split],
+            widened.q[:split],
+            widened.ambient_c[:split],
+            widened.provenance,
+        ),
+        config,
+    )
+    assert model.snapshot()["plausibility_bounds"] == expected.to_document()
