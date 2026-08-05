@@ -94,7 +94,10 @@ class ArmEvidence:
     name: str
     domain_median_scores: Mapping[str, float]
     prediction_error: float
-    wrong_model_recovery: float
+    before_mae: float
+    after_mae: float
+    recovery_improvement_ratio: float
+    recovery_improvement_delta: float
     raw_solve_p99_ms: float
     projected_solve_p99_ms: float = -1.0
     raw_learner_p99_ms: float = 0.0
@@ -121,15 +124,28 @@ class ArmEvidence:
         learner_p99 = _p99(distributions["raw_learner_ms"]) if distributions["raw_learner_ms"] else float(self.raw_learner_p99_ms)
         refresh_p99 = _p99(distributions["raw_refresh_ms"]) if distributions["raw_refresh_ms"] else float(self.raw_refresh_p99_ms)
         solve_p99 = _p99(distributions["raw_solve_ms"]) if distributions["raw_solve_ms"] else float(self.raw_solve_p99_ms)
-        values = (self.prediction_error, self.wrong_model_recovery, learner_p99, refresh_p99, solve_p99)
+        values = (
+            self.prediction_error,
+            self.before_mae,
+            self.after_mae,
+            self.recovery_improvement_ratio,
+            learner_p99,
+            refresh_p99,
+            solve_p99,
+        )
         if not all(isfinite(float(value)) and float(value) >= 0.0 for value in values):
             raise ValueError("arm evidence values must be finite and non-negative")
+        if not isfinite(float(self.recovery_improvement_delta)):
+            raise ValueError("recovery improvement delta must be finite")
         projected = solve_p99 * 5.0 if self.projected_solve_p99_ms < 0.0 else self.projected_solve_p99_ms
         if not isfinite(float(projected)) or float(projected) < 0.0:
             raise ValueError("projected solve timing must be finite and non-negative")
         object.__setattr__(self, "domain_median_scores", MappingProxyType(dict(sorted(scores.items()))))
         object.__setattr__(self, "prediction_error", float(self.prediction_error))
-        object.__setattr__(self, "wrong_model_recovery", float(self.wrong_model_recovery))
+        object.__setattr__(self, "before_mae", float(self.before_mae))
+        object.__setattr__(self, "after_mae", float(self.after_mae))
+        object.__setattr__(self, "recovery_improvement_ratio", float(self.recovery_improvement_ratio))
+        object.__setattr__(self, "recovery_improvement_delta", float(self.recovery_improvement_delta))
         object.__setattr__(self, "raw_learner_p99_ms", learner_p99)
         object.__setattr__(self, "raw_refresh_p99_ms", refresh_p99)
         object.__setattr__(self, "raw_solve_p99_ms", solve_p99)
@@ -162,7 +178,10 @@ class ArmEvidence:
             },
             "raw_solve_p99_ms": self.raw_solve_p99_ms,
             "raw_timing_ms": raw_timing,
-            "wrong_model_recovery": self.wrong_model_recovery,
+            "before_mae": self.before_mae,
+            "after_mae": self.after_mae,
+            "recovery_improvement_ratio": self.recovery_improvement_ratio,
+            "recovery_improvement_delta": self.recovery_improvement_delta,
         }
 
 
@@ -284,7 +303,13 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
         contenders = [item for item in valid_evidence if item.worst_domain_score <= best_score * 1.05]
         selected = min(
             contenders,
-            key=lambda item: (_COMPLEXITY[item.name], item.prediction_error, item.wrong_model_recovery, item.projected_solve_p99_ms, item.name),
+            key=lambda item: (
+                _COMPLEXITY[item.name],
+                item.prediction_error,
+                item.recovery_improvement_ratio,
+                item.projected_solve_p99_ms,
+                item.name,
+            ),
         ).name
     return Recommendation(MappingProxyType(dict(sorted(recommendations.items()))), selected, tuple(item.name for item in frontier))
 
@@ -323,7 +348,7 @@ def _pareto_values(evidence: ArmEvidence) -> tuple[float, float, float, float]:
     return (
         evidence.worst_domain_score,
         evidence.prediction_error,
-        evidence.wrong_model_recovery,
+        evidence.recovery_improvement_ratio,
         evidence.projected_solve_p99_ms,
     )
 

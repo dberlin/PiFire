@@ -24,9 +24,12 @@ def artifact_with_scores(
         model_snapshots={},
         scenarios=(),
         arms=(
-            ArmEvidence("scheduled-arx", {"GrillSim": arx}, 3.0, 3.0, 2.0, 10.0),
-            ArmEvidence("dmc", {"GrillSim": dmc}, 4.0, 4.0, 2.0, 10.0),
-            ArmEvidence("state-space", {"GrillSim": state_space}, state_prediction, state_prediction, 2.0, 10.0),
+            ArmEvidence("scheduled-arx", {"GrillSim": arx}, 3.0, 3.0, 3.0, 1.0, 0.0, 2.0, 10.0),
+            ArmEvidence("dmc", {"GrillSim": dmc}, 4.0, 4.0, 4.0, 1.0, 0.0, 2.0, 10.0),
+            ArmEvidence(
+                "state-space", {"GrillSim": state_space}, state_prediction, state_prediction,
+                state_prediction, 1.0, 0.0, 2.0, 10.0,
+            ),
         ),
         source_revision="abc123",
         environment={"python": "test", "numpy": "test"},
@@ -42,7 +45,7 @@ def artifact_with_timings(*, projected_solve_p99_ms: float) -> ExperimentArtifac
         scenarios=(),
         arms=(
             ArmEvidence(
-                "scheduled-arx", {"GrillSim": 10.0}, 1.0, 1.0,
+                "scheduled-arx", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0,
                 raw_solve_p99_ms=projected_solve_p99_ms / 5.0,
                 projected_solve_p99_ms=projected_solve_p99_ms,
             ),
@@ -131,6 +134,9 @@ def test_arm_evidence_preserves_raw_distributions_and_horizon_residuals() -> Non
         {"GrillSim": 10.0},
         1.0,
         1.0,
+        1.0,
+        1.0,
+        0.0,
         2.0,
         raw_learner_ms=(1.0, 2.0),
         raw_refresh_ms=(3.0, 4.0),
@@ -157,6 +163,9 @@ def test_runtime_gates_apply_to_five_times_learner_and_refresh_p99() -> None:
                 {"GrillSim": 10.0},
                 1.0,
                 1.0,
+                1.0,
+                1.0,
+                0.0,
                 raw_solve_p99_ms=1.0,
                 raw_learner_ms=(6.0,),
                 raw_refresh_ms=(1.0,),
@@ -170,3 +179,45 @@ def test_runtime_gates_apply_to_five_times_learner_and_refresh_p99() -> None:
 
 def document_has_failure(artifact: ExperimentArtifact, category: str) -> bool:
     return any(failure["category"] == category for failure in artifact.to_document()["failures"])
+
+
+def test_recommendation_uses_recovery_improvement_ratio_not_absolute_after_error() -> None:
+    artifact = ExperimentArtifact(
+        config={"control_budget_ms": 50.0},
+        seeds=(2,),
+        splits={},
+        model_snapshots={},
+        scenarios=(),
+        arms=(
+            ArmEvidence(
+                "scheduled-arx",
+                {"GrillSim": 10.0},
+                prediction_error=1.0,
+                before_mae=1.0,
+                after_mae=1.0,
+                recovery_improvement_ratio=1.0,
+                recovery_improvement_delta=0.0,
+                raw_solve_p99_ms=1.0,
+            ),
+            ArmEvidence(
+                "dmc",
+                {"GrillSim": 10.0},
+                prediction_error=1.0,
+                before_mae=100.0,
+                after_mae=10.0,
+                recovery_improvement_ratio=0.1,
+                recovery_improvement_delta=90.0,
+                raw_solve_p99_ms=1.0,
+            ),
+        ),
+        source_revision="abc123",
+        environment={"python": "test"},
+    )
+
+    evidence = artifact.to_document()["arms"]["dmc"]
+
+    assert evidence["before_mae"] == 100.0
+    assert evidence["after_mae"] == 10.0
+    assert evidence["recovery_improvement_ratio"] == 0.1
+    assert evidence["recovery_improvement_delta"] == 90.0
+    assert recommend(artifact).pareto_frontier == ("dmc",)

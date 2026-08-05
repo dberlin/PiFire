@@ -10,7 +10,7 @@ import os
 import sys
 from collections import defaultdict
 from time import perf_counter
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from statistics import median
@@ -91,29 +91,38 @@ class ScenarioResult:
     provenance: str = "simulated-fixed-fan"
     solver_period_s: int = _FRAME_S
     horizon_residuals_c: Mapping[str, tuple[float, ...]] | None = None
+    pre_recovery_residuals_c: Mapping[str, tuple[float, ...]] | None = None
+    evidence_id: str = field(init=False)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_id", _evidence_id(self.arm, self.seed, self.initialization))
         object.__setattr__(self, "metrics", MappingProxyType(dict(sorted(self.metrics.items()))))
-        object.__setattr__(
-            self,
-            "horizon_residuals_c",
-            MappingProxyType(
-                {
-                    str(horizon): tuple(float(value) for value in values)
-                    for horizon, values in sorted((self.horizon_residuals_c or {}).items())
-                }
-            ),
-        )
+        for name in ("horizon_residuals_c", "pre_recovery_residuals_c"):
+            values_by_horizon = getattr(self, name) or {}
+            object.__setattr__(
+                self,
+                name,
+                MappingProxyType(
+                    {
+                        str(horizon): tuple(float(value) for value in values)
+                        for horizon, values in sorted(values_by_horizon.items())
+                    }
+                ),
+            )
     def to_document(self) -> dict[str, Any]:
         return {
             "arm": self.arm,
+            "evidence_id": self.evidence_id,
             "fan_fraction": list(self.fan_fraction),
             "initialization": self.initialization,
             "metrics": dict(self.metrics),
             "mode": self.mode,
             "plant": self.plant,
             "prediction_residuals_c": {
-                horizon: list(values) for horizon, values in self.horizon_residuals_c.items()
+                horizon: list(values) for horizon, values in (self.horizon_residuals_c or {}).items()
+            },
+            "pre_recovery_residuals_c": {
+                horizon: list(values) for horizon, values in (self.pre_recovery_residuals_c or {}).items()
             },
             "provenance": self.provenance,
             "raw_timing_ms": {
@@ -252,7 +261,7 @@ def _run_matrix(
 
 def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
     raw_timing = document.get("raw_timing_ms", {})
-    return ScenarioResult(
+    row = ScenarioResult(
         arm=document["arm"],
         plant=document["plant"],
         scenario=document["scenario"],
@@ -272,9 +281,16 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
             str(horizon): tuple(values)
             for horizon, values in document.get("prediction_residuals_c", {}).items()
         },
+        pre_recovery_residuals_c={
+            str(horizon): tuple(values)
+            for horizon, values in document.get("pre_recovery_residuals_c", {}).items()
+        },
         provenance=document["provenance"],
         solver_period_s=document["solver_period_s"],
     )
+    if "evidence_id" in document and document["evidence_id"] != row.evidence_id:
+        raise ValueError("scenario evidence_id does not match its prepared-model origin")
+    return row
 
 
 def write_artifact_atomically(path: Path, artifact: ExperimentArtifact) -> None:
@@ -336,7 +352,7 @@ def _run_scenario(
     realizer = PulseRealizer(frame_s=_FRAME_S, quantum_s=5.0)
     mpc_config = MPCConfig(horizon_s=600, frame_s=_FRAME_S)
     controller = LinearMPC(mpc_config)
-    model, fit_ms, residuals, recovery_mae = _fitted_model(arm, seed, initialization)
+    model, fit_ms, before_residuals, after_residuals = _fitted_model(arm, seed, initialization)
     temperatures: list[float] = []
     requested: list[float] = []
     realized: list[float] = []
@@ -384,8 +400,8 @@ def _run_scenario(
         fit_ms,
         refresh_ms,
         solve_ms,
-        residuals,
-        recovery_mae,
+        after_residuals,
+        before_residuals,
     )
     return ScenarioResult(
         arm=arm,
@@ -403,11 +419,17 @@ def _run_scenario(
         raw_learner_ms=(fit_ms,),
         raw_refresh_ms=tuple(refresh_ms),
         raw_solve_ms=tuple(solve_ms),
-        horizon_residuals_c={str(horizon): tuple(values) for horizon, values in residuals.items()},
+        horizon_residuals_c={str(horizon): tuple(values) for horizon, values in after_residuals.items()},
+        pre_recovery_residuals_c={str(horizon): tuple(values) for horizon, values in before_residuals.items()},
     )
 def _fitted_model(arm: str, seed: int, initialization: str):
-    model, fit_ms, residuals, recovery_mae = _prepared_model(arm, seed, initialization)
-    return deepcopy(model), fit_ms, {horizon: list(values) for horizon, values in residuals.items()}, recovery_mae
+    model, fit_ms, before, after = _prepared_model(arm, seed, initialization)
+    return (
+        deepcopy(model),
+        fit_ms,
+        {horizon: list(values) for horizon, values in before.items()},
+        {horizon: list(values) for horizon, values in after.items()},
+    )
 
 
 @lru_cache(maxsize=None)
@@ -435,8 +457,7 @@ def _prepared_model(arm: str, seed: int, initialization: str):
             )
         )
     after = _horizon_residuals(model, record, starts=range(480, 600, 20))
-    recovery_mae = float(np.mean(after[600]))
-    return model, fit_ms, after, recovery_mae
+    return model, fit_ms, before, after
 
 
 def _identification_records(seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:
@@ -534,6 +555,11 @@ def _row_key(row: ScenarioResult) -> tuple[str, str, str, str, str, int]:
     return (row.arm, row.initialization, row.plant, row.scenario, row.mode, row.seed)
 
 
+def _evidence_id(arm: str, seed: int, initialization: str) -> str:
+    """Return the immutable identity of one prepared-model origin."""
+    return f"{arm}:{seed}:{initialization}"
+
+
 def _p99(values: list[float]) -> float:
     return float(np.percentile(values, 99.0)) if values else 0.0
 
@@ -549,7 +575,7 @@ def _metrics(
     refresh_ms: list[float],
     solve_ms: list[float],
     residuals: dict[int, list[float]],
-    recovery_mae: float,
+    before_residuals: dict[int, list[float]],
 ) -> dict[str, float | int | None]:
     error = np.asarray(temperatures) - np.asarray(targets)
     absolute = np.abs(error)
@@ -558,6 +584,13 @@ def _metrics(
     hold = np.asarray(temperatures[-min(60, len(temperatures)):])
     settled = next((index for index in range(len(error)) if np.all(absolute[index:] <= 3.0)), None)
     score = float(np.sqrt(np.mean(error**2)) + np.mean(absolute) + 0.5 * max(overshoot, 0.0))
+    before_mae = float(np.mean(before_residuals[600]))
+    after_mae = float(np.mean(residuals[600]))
+    recovery_ratio = (
+        after_mae / before_mae
+        if before_mae > 0.0
+        else (0.0 if after_mae == 0.0 else float(np.finfo(np.float64).max))
+    )
     return {
         "control_score": score,
         "deadline_misses": int(any(value > 250.0 for value in solve_ms)),
@@ -573,12 +606,15 @@ def _metrics(
         "raw_learner_p99_ms": fit_ms,
         "raw_refresh_p99_ms": _p99(refresh_ms),
         "raw_solve_p99_ms": _p99(solve_ms),
+        "recovery_after_mae_c": after_mae,
+        "recovery_before_mae_c": before_mae,
+        "recovery_improvement_delta_c": before_mae - after_mae,
+        "recovery_improvement_ratio": recovery_ratio,
         "requested_realized_duty_mae": float(np.mean(np.abs(np.asarray(requested) - np.asarray(realized)))),
         "rmse_c": float(np.sqrt(np.mean(error**2))),
         "settling_s": settled,
         "transitions_per_hour": float(transitions * 3600.0 / duration_s),
         "undershoot_c": undershoot,
-        "wrong_model_recovery_mae_c": recovery_mae,
     }
 
 
@@ -592,17 +628,29 @@ def _metric_float(metrics: dict[str, float | int | None], name: str) -> float:
 def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], failures=()) -> ExperimentArtifact:
     by_arm: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     predictions: dict[str, list[float]] = defaultdict(list)
-    recoveries: dict[str, list[float]] = defaultdict(list)
-    horizons: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    before_maes: dict[str, list[float]] = defaultdict(list)
+    after_maes: dict[str, list[float]] = defaultdict(list)
+    recovery_ratios: dict[str, list[float]] = defaultdict(list)
+    recovery_deltas: dict[str, list[float]] = defaultdict(list)
+    horizon_origins: dict[str, dict[str, dict[str, tuple[float, ...]]]] = defaultdict(
+        lambda: defaultdict(dict)
+    )
+    seen_evidence: set[tuple[str, str]] = set()
     learner_samples: dict[str, list[float]] = defaultdict(list)
     refresh_samples: dict[str, list[float]] = defaultdict(list)
     solve_samples: dict[str, list[float]] = defaultdict(list)
     for row in rows:
         by_arm[row.arm][row.plant].append(_metric_float(row.metrics, "control_score"))
-        predictions[row.arm].extend(row.horizon_residuals_c["600"])
-        recoveries[row.arm].append(_metric_float(row.metrics, "wrong_model_recovery_mae_c"))
-        for horizon in ("600", "800", "1000"):
-            horizons[row.arm][horizon].extend(row.horizon_residuals_c[horizon])
+        evidence_key = (row.arm, row.evidence_id)
+        if evidence_key not in seen_evidence:
+            seen_evidence.add(evidence_key)
+            predictions[row.arm].extend((row.horizon_residuals_c or {})["600"])
+            before_maes[row.arm].append(_metric_float(row.metrics, "recovery_before_mae_c"))
+            after_maes[row.arm].append(_metric_float(row.metrics, "recovery_after_mae_c"))
+            recovery_ratios[row.arm].append(_metric_float(row.metrics, "recovery_improvement_ratio"))
+            recovery_deltas[row.arm].append(_metric_float(row.metrics, "recovery_improvement_delta_c"))
+            for horizon in ("600", "800", "1000"):
+                horizon_origins[row.arm][horizon][row.evidence_id] = (row.horizon_residuals_c or {})[horizon]
         learner_samples[row.arm].extend(row.raw_learner_ms)
         refresh_samples[row.arm].extend(row.raw_refresh_ms)
         solve_samples[row.arm].extend(row.raw_solve_ms)
@@ -611,7 +659,10 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
             name=arm,
             domain_median_scores={plant: float(median(scores)) for plant, scores in sorted(domains.items())},
             prediction_error=float(np.mean(predictions[arm])),
-            wrong_model_recovery=float(np.mean(recoveries[arm])),
+            before_mae=float(np.mean(before_maes[arm])),
+            after_mae=float(np.mean(after_maes[arm])),
+            recovery_improvement_ratio=float(np.mean(recovery_ratios[arm])),
+            recovery_improvement_delta=float(np.mean(recovery_deltas[arm])),
             raw_solve_p99_ms=_p99(solve_samples[arm]),
             raw_learner_ms=tuple(learner_samples[arm]),
             raw_refresh_ms=tuple(refresh_samples[arm]),
@@ -623,8 +674,8 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
         arm.name: {
             **{
                 horizon: {
-                    "bootstrap_ci": _bootstrap_ci(horizons[arm.name][horizon]),
-                    "residuals_c": horizons[arm.name][horizon],
+                    "bootstrap_ci": _bootstrap_ci(horizon_origins[arm.name][horizon]),
+                    "residuals_c": _flatten_origins(horizon_origins[arm.name][horizon]),
                 }
                 for horizon in ("600", "800", "1000")
             },
@@ -656,13 +707,20 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
     )
 
 
-def _bootstrap_ci(values: list[float]) -> list[float]:
-    if not values:
+def _flatten_origins(origins: Mapping[str, tuple[float, ...]]) -> list[float]:
+    return [value for evidence_id in sorted(origins) for value in origins[evidence_id]]
+
+
+def _bootstrap_ci(origins: Mapping[str, tuple[float, ...]]) -> list[float]:
+    populated = tuple(values for _, values in sorted(origins.items()) if values)
+    if not populated:
         return [0.0, 0.0]
     generator = np.random.default_rng(0)
-    samples = np.asarray(values)
-    means = [float(np.mean(generator.choice(samples, size=samples.size, replace=True))) for _ in range(1_000)]
-    return [float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))]
+    samples = [
+        float(np.mean([value for index in generator.integers(len(populated), size=len(populated)) for value in populated[index]]))
+        for _ in range(1_000)
+    ]
+    return [float(np.percentile(samples, 2.5)), float(np.percentile(samples, 97.5))]
 
 
 def _source_revision() -> str:
