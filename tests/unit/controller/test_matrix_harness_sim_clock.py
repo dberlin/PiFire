@@ -22,7 +22,7 @@ import importlib
 
 import pytest
 
-from docs.superpowers.experiments.controller_matrix import CYCLE_DATA, SCENARIOS, run_scenario
+from docs.superpowers.experiments.controller_matrix import SCENARIOS, run_scenario
 
 
 @pytest.mark.parametrize("scenario_name", ["steady_225", "step_225_275"])
@@ -42,10 +42,10 @@ def test_controller_observes_the_intended_control_period(controller, scenario_na
 
     monkeypatch.setattr(mod.Controller, "update", _spy_update)
 
-    run_scenario(controller, SCENARIOS[scenario_name], seed=0)
+    row = run_scenario(controller, SCENARIOS[scenario_name], seed=0)
 
     assert observed_dts, "the controller was never solved"
-    period = CYCLE_DATA["HoldCycleTime"]
+    period = row["effective_run"]["cycle_config"]["HoldCycleTime"]
     assert observed_dts == pytest.approx([period] * len(observed_dts))
 
     # Not [u_min, u_max] -- the controller's raw output is clamped to that

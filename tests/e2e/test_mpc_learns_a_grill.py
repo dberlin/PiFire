@@ -80,20 +80,15 @@ PLANT = "MAKGrillSim"
 SEED = 1
 COOKS = 3
 
-#: The cycle data the product ships, not the experiment harness's.
-#: `controller_matrix.CYCLE_DATA` carries `u_min=0.15` and `HoldCycleTime=20`;
-#: `common/defaults.py` ships `u_min=0.1` and `HoldCycleTime=25`. Neither is
-#: cosmetic. `u_min` is the auger's floor, and a floor sets a temperature the
-#: chamber cannot be driven below however the controller behaves -- on this
-#: plant, 435 F at `u_min=0.15` against 342 F at the shipped 0.1. A setpoint
-#: near or under that floor would make "overshoot" a reading of the actuator
-#: rather than of the controller. `HoldCycleTime` is the loop period the MPC's
-#: own `t_step` (25 s) is written against. An acceptance test exercises what
-#: ships.
-_SHIPPED = default_settings()["cycle_data"]
-CYCLE_DATA = dict(controller_matrix.CYCLE_DATA) | {
-    key: _SHIPPED[key] for key in ("HoldCycleTime", "u_min", "u_max", "PMode")
-}
+
+#: The cycle data the product ships. `u_min` is the auger's floor, and a floor
+#: sets a temperature the chamber cannot be driven below however the controller
+#: behaves -- on this plant, a setpoint near that floor would make "overshoot"
+#: a reading of the actuator rather than of the controller.
+def _shipped_cycle_data():
+    settings = default_settings()["cycle_data"]
+    return {key: settings[key] for key in ("HoldCycleTime", "u_min", "u_max", "PMode")}
+
 
 #: Long enough past this plant's ~2 h time constant that the chamber has
 #: stopped moving; the floor below is an equilibrium, not a transient.
@@ -123,12 +118,9 @@ def _cook(config, *, refit):
     test_a_restored_model_reaches_the_estimator_the_horizon_and_the_solve, and
     a cook here would not notice if the restore stopped carrying it.
     """
-    saved = controller_matrix.CYCLE_DATA
-    controller_matrix.CYCLE_DATA = dict(CYCLE_DATA)
-    try:
-        row = controller_matrix.run_scenario("mpc", SCENARIO, SEED, plant=PLANT, config=dict(config), refit=refit)
-    finally:
-        controller_matrix.CYCLE_DATA = saved
+    row = controller_matrix.run_scenario(
+        "mpc", SCENARIO, SEED, plant=PLANT, config=dict(config), cycle_config=_shipped_cycle_data(), refit=refit
+    )
     row["peak_temp_f"] = SETPOINT_F + row["overshoot_f"]
     return row
 
@@ -142,7 +134,7 @@ def _min_firing_equilibrium_f(fan):
     """
     plant = controller_matrix.MAKGrillSim(seed=SEED)
     for _ in range(_EQUILIBRIUM_S):
-        plant.step(CYCLE_DATA["u_min"], fan)
+        plant.step(_shipped_cycle_data()["u_min"], fan)
     return plant.T_c * 9 / 5 + 32
 
 
@@ -162,7 +154,7 @@ def test_overshoot_falls_across_successive_cooks():
     authority_f = SETPOINT_F - floor_f
     assert authority_f > MIN_PEAK_DROP_F, (
         f"the {SETPOINT_F:.0f} F setpoint is only {authority_f:.1f} F above this plant's "
-        f"minimum-firing equilibrium ({floor_f:.1f} F at u_min={CYCLE_DATA['u_min']}), so overshoot "
+        f"minimum-firing equilibrium ({floor_f:.1f} F at u_min={_shipped_cycle_data()['u_min']}), so overshoot "
         "here reads the actuator floor rather than the controller"
     )
 
@@ -236,8 +228,8 @@ def test_identification_off_is_invisible():
     # The flag is not a controller option: a core built with it set is the same
     # core. If this ever stops holding, the negative control below is testing
     # the wrong switch and must be rewritten around the new one.
-    flagged = Controller({"enable_identification": True}, "F", dict(CYCLE_DATA))
-    plain = Controller({}, "F", dict(CYCLE_DATA))
+    flagged = Controller({"enable_identification": True}, "F", _shipped_cycle_data())
+    plain = Controller({}, "F", _shipped_cycle_data())
     assert {k: flagged.cfg[k] for k in MODEL_KEYS} == {k: plain.cfg[k] for k in MODEL_KEYS}
     assert flagged._built_n_horizon == plain._built_n_horizon
 

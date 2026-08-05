@@ -25,13 +25,15 @@ import types
 
 import pytest
 
+from common.defaults import default_settings
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 import docs.superpowers.experiments.controller_matrix as controller_matrix
 
-CYCLE_TIME = controller_matrix.CYCLE_DATA["HoldCycleTime"]
+CYCLE_TIME = default_settings()["cycle_data"]["HoldCycleTime"]
 RATIO = 0.35
-U_MIN = controller_matrix.CYCLE_DATA["u_min"]
+U_MIN = default_settings()["cycle_data"]["u_min"]
 # cycle_time * NON_INTEGER_RATIO is not a whole number, so the toggle's
 # transition instants fall strictly inside a tick and the fraction returned
 # is neither 0.0 nor 1.0 -- exercises the remainder arithmetic itself, which
@@ -100,12 +102,11 @@ def _run_stub(control_period, ratio, monkeypatch):
     fake_mod = types.ModuleType(f"controller.{name}")
     fake_mod.Controller = _StubController
     monkeypatch.setitem(sys.modules, f"controller.{name}", fake_mod)
-    monkeypatch.setitem(controller_matrix.CONTROLLER_CONFIGS, name, {"_period": control_period, "_ratio": ratio})
     monkeypatch.setattr(controller_matrix, "GrillSim", _FakePlant)
     _FakePlant.instances.clear()
 
     scenario = controller_matrix.Scenario(name, DURATION, [(0, 999.0)])
-    controller_matrix.run_scenario(name, scenario, seed=0)
+    controller_matrix.run_scenario(name, scenario, seed=0, config={"_period": control_period, "_ratio": ratio})
     return _FakePlant.instances[-1]
 
 

@@ -1,29 +1,20 @@
 #!/usr/bin/env python3
 """Scenario matrix for a controller against GrillSim.
 
-Drives a controller core directly -- no Hold mode, no datastore -- so a run is
-reproducible from (controller, scenario, seed) alone. The lid-open scenario
-opens the lid on the plant as well as reproducing what Hold does to the auger
-during a pause, and reports the applied duty through `set_output` when the
-controller has that capability, so the same harness measures code from before
-and after applied-output feedback exists.
+Drives a controller core directly -- no Hold mode or datastore -- while
+resolving the same defaults and controller manifest a fresh Hold run would use.
+Each JSON row contains the immutable effective configuration used to construct
+the core, its typed actuation mode, and feasibility derived from plant/actuator
+authority rather than from the row's score.
 
-A `lid_open` window drives two independent things, as production does:
-
-* the physical lid, open for the whole window, leaking chamber heat to ambient
-  (`GrillSim.step(lid_open=True)`); and
-* Hold's actuator pause, which starts when the lid opens and runs
-  `LidOpenPauseTime` seconds (`hold.py:265`, `hold.py:296`) -- the fan stops and
-  the auger is pinned to `u_min` (`hold.py:171-173`). Hold releases the pause on
-  the timer (`hold.py:269-271`) whether or not the lid is still open, so a window
-  longer than the pause ends with the controller back at full authority while the
-  chamber is still losing heat.
-
-The pause begins at the instant the lid opens, which is the shape of Hold's
-manual `lid_open_toggle` path and can happen at setpoint; the automatic detector
-instead arms only once the chamber has already fallen `LidOpenThreshold` percent
-below it, and the excursion this scenario produces is deep enough to cross that
-trigger.
+A `lid_open` window opens the physical lid for the whole window. Fixed-cycle
+controllers retain Hold's historical pause: fan off, one forced-off detection
+tick, then cycling at `u_min` until the run's `LidOpenPauseTime` expires.
+Framed MPC instead uses the production `PulseScheduler`: a lid or manual
+inhibit accounts observed delivery to that instant, resets/discards pulse
+credit, and keeps the auger off until the inhibit clears. Its feedback is the
+actually delivered interval duty, reported only at completed producing control
+boundaries.
 """
 
 import argparse
@@ -33,14 +24,16 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
+from enum import StrEnum
 from multiprocessing import Pool
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from common.defaults import default_settings  # noqa: E402
+from common.control_trace import ActuationMode  # noqa: E402
 from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
+from controller.runtime.logic.pulse import PulseResetReason, PulseScheduler  # noqa: E402
 
 OUT = "./docs/superpowers/experiments/_matrix_baseline.json"
 
@@ -50,17 +43,37 @@ OUT = "./docs/superpowers/experiments/_matrix_baseline.json"
 # loop builds.
 PLANTS = ("GrillSim", "MAKGrillSim")
 
-CYCLE_DATA = {"HoldCycleTime": 20, "u_min": 0.15, "u_max": 0.9, "PMode": 2}
 
-# How long Hold holds the actuators after a lid event, from the same setting
-# production reads, so the harness tracks a user's configured pause.
-LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
+class ReachabilityState(StrEnum):
+    """Whether this run's highest target is within its plant/actuator authority."""
 
-CONTROLLER_CONFIGS = {
-    "pid_sp": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
-    "pid_ac": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
-    "mpc": {},
-}
+    REACHABLE = "reachable"
+    UNREACHABLE_HIGH = "unreachable_high"
+    UNKNOWN_AUTHORITY = "unknown_authority"
+
+
+def _snapshot(value):
+    """Make a JSON-safe value that cannot alias live settings or controller state."""
+    return json.loads(json.dumps(value, allow_nan=False, default=str, sort_keys=True))
+
+
+def _effective_configuration(controller, config, cycle_config):
+    """Resolve the shipped defaults and controller manifest for this one run.
+
+    `default_settings()` rebuilds controller configuration from
+    ``controller/controllers.json`` each call. Importing its module rather than
+    its function lets a test (or a newly installed manifest) change that source
+    after this experiment module was imported. `config` and `cycle_config` are
+    the only explicit override seams; each wins over the fresh shipped value.
+    """
+    settings = importlib.import_module("common.defaults").default_settings()
+    controller_config = dict(settings["controller"]["config"].get(controller, {}))
+    effective_cycle = dict(settings["cycle_data"])
+    controller_override = dict(config or {})
+    cycle_override = dict(cycle_config or {})
+    controller_config.update(controller_override)
+    effective_cycle.update(cycle_override)
+    return controller_config, effective_cycle, controller_override, cycle_override
 
 
 def _c_to_f(c):
@@ -71,12 +84,15 @@ def _c_to_f(c):
 class Scenario:
     name: str
     duration_s: int
-    # (start_second, setpoint_F); the first entry must start at 0
-    setpoints: list = field(default_factory=list)
-    # (start_second, duration_s) windows where the lid is physically open. The
-    # actuator pause each one triggers is derived, and is LID_PAUSE_S long
-    # regardless of how long the lid stays open.
-    lid_open: list = field(default_factory=list)
+    # (start_second, setpoint_F); the first entry must start at 0.
+    setpoints: list[tuple[int, float]] = field(default_factory=list)
+    # (start_second, duration_s) physical-lid windows. Fixed-cycle Hold pauses
+    # are derived from the run's current LidOpenPauseTime.
+    lid_open: list[tuple[int, int]] = field(default_factory=list)
+    # (start_second, duration_s) deterministic manual-inhibit windows. They
+    # model the auger being unavailable to the controller and exist only for
+    # this experiment's framed-pulse accounting contracts.
+    manual_inhibit: list[tuple[int, int]] = field(default_factory=list)
 
 
 SCENARIOS = {
@@ -99,16 +115,22 @@ def _setpoint_at(scenario, t):
 
 
 def _lid_open_at(scenario, t):
-    """The lid is physically open, so the chamber is leaking heat to ambient.
-    Hold has no notion of this; it only ever sees the temperature."""
-    return any(start <= t < start + dur for start, dur in scenario.lid_open)
+    """The lid is physically open, so the chamber leaks heat to ambient."""
+    return any(start <= t < start + duration for start, duration in scenario.lid_open)
 
 
-def _lid_paused_at(scenario, t):
-    """Hold is holding the actuators. The pause is a timer armed when the lid
-    opens (`hold.py:296`) and cleared LID_PAUSE_S later (`hold.py:269-271`),
-    independent of whether the lid is still open."""
-    return any(start <= t < start + LID_PAUSE_S for start, _ in scenario.lid_open)
+def _lid_paused_at(scenario, t, cycle_data):
+    """Fixed-cycle Hold's pause uses this run's current settings."""
+    pause_s = cycle_data["LidOpenPauseTime"]
+    return any(start <= t < start + pause_s for start, _ in scenario.lid_open)
+
+
+def _manual_inhibited_at(scenario, t):
+    return any(start <= t < start + duration for start, duration in scenario.manual_inhibit)
+
+
+def _manual_inhibit_start_at(scenario, t):
+    return any(start == t for start, _ in scenario.manual_inhibit)
 
 
 def _lid_pause_start_at(scenario, t):
@@ -119,15 +141,17 @@ def _lid_pause_start_at(scenario, t):
 
 
 def _recovery_s(err_from_lid):
-    """Seconds from the lid opening until the chamber, having left the 5 F
-    band around setpoint, is back inside it. 0 if it never left, None if the
-    run ends before it returns."""
-    outside = np.flatnonzero(np.abs(err_from_lid) > 5.0)
-    if outside.size == 0:
+    """Seconds from lid opening to the first in-band sample after the cold trough.
+
+    Probe/transport lag can briefly re-enter the 5 F band before the lid
+    excursion reaches its minimum. That transient is not recovery: the
+    relevant return begins only after the coldest error sample.
+    """
+    if not np.any(np.abs(err_from_lid) > 5.0):
         return 0
-    left = int(outside[0])
-    back = np.flatnonzero(np.abs(err_from_lid[left:]) <= 5.0)
-    return None if back.size == 0 else left + int(back[0])
+    trough = int(np.argmin(err_from_lid))
+    back = np.flatnonzero(np.abs(err_from_lid[trough:]) <= 5.0)
+    return None if back.size == 0 else trough + int(back[0])
 
 
 def _report(core, ratio, source_name, t, requested=None):
@@ -195,48 +219,124 @@ class _SimClock:
         return self.t
 
 
-def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, refit=False):
-    """Drive `controller` through `scenario` on `plant` and score the result.
+def _actuation_mode(core):
+    """Match runtime.runner's typed controller capability check."""
+    mode = getattr(core, "actuation_mode", lambda: ActuationMode.FIXED_CYCLE)()
+    if not isinstance(mode, ActuationMode):
+        raise TypeError("controller actuation_mode() must return ActuationMode")
+    return mode
 
-    `config` is merged over CONTROLLER_CONFIGS[controller] before the core is
-    built. That is how a model an earlier cook learned reaches this one: mpc.py
-    adopts a fit into `cfg` and rebuilds nothing, because production carries it
-    across through the next cook's build from settings -- so a run that starts
-    from learned parameters starts from them at CONSTRUCTION, exactly as the
-    next Hold would, and not by mutating a core that has already sized its
-    horizon and assembled its NLP.
 
-    `refit` runs the end-of-cook refit the same way HoldMode's teardown does,
-    after the metrics above are taken, and reports the gate's verdict and the
-    parameters it left behind. It changes nothing about the run just scored.
+def _authority(core, cycle_data):
+    cycle_max = float(cycle_data["u_max"])
+    controller_max = float(getattr(core, "u_max", cycle_max))
+    effective_max = min(cycle_max, controller_max)
+    binding = "controller_max_duty" if controller_max < cycle_max else "cycle_max_duty"
+    return cycle_max, controller_max, effective_max, binding
+
+
+def _maximum_plant_temperature_f(plant, maximum_duty):
+    """Derive a no-lid maximum from plant and actuator authority, not metrics."""
+    maximum = getattr(plant, "maximum_reachable_temperature_f", None)
+    if callable(maximum):
+        return float(maximum(maximum_duty))
+    required = ("feed_rate", "H", "h_amb0", "sigma", "T_amb")
+    if not all(hasattr(plant, name) for name in required):
+        return None
+    ambient = float(plant.T_amb)
+    heat = maximum_duty * float(plant.feed_rate) * float(plant.H)
+    loss, sigma = float(plant.h_amb0) * 1.3, float(plant.sigma)
+    low, high = ambient, ambient + 5_000.0
+    for _ in range(80):
+        chamber = (low + high) / 2.0
+        rejected = loss * (chamber - ambient) + sigma * ((chamber + 273.15) ** 4 - (ambient + 273.15) ** 4)
+        if rejected < heat:
+            low = chamber
+        else:
+            high = chamber
+    return _c_to_f((low + high) / 2.0)
+
+
+def _feasibility(core, cycle_data, plant, scenario):
+    cycle_max, controller_max, effective_max, binding = _authority(core, cycle_data)
+    plant_max = _maximum_plant_temperature_f(plant, effective_max)
+    target = max(value for _, value in scenario.setpoints)
+    if plant_max is None:
+        state = ReachabilityState.UNKNOWN_AUTHORITY
+    elif target > plant_max:
+        state, binding = ReachabilityState.UNREACHABLE_HIGH, "plant_max_temperature"
+    else:
+        state = ReachabilityState.REACHABLE
+    return state, {
+        "target_f": float(target),
+        "cycle_max_duty": cycle_max,
+        "controller_max_duty": controller_max,
+        "effective_max_duty": effective_max,
+        "plant_max_temp_f": plant_max,
+        "binding": binding,
+    }
+
+
+def rank_reachable_rows(rows, *, key):
+    """Return rows eligible for target-achievement comparisons, best first."""
+    return sorted(
+        (row for row in rows if row["reachability"] == ReachabilityState.REACHABLE.value),
+        key=lambda row: row[key],
+    )
+
+
+def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, cycle_config=None, refit=False):
+    """Drive one controller/plant scenario with the configuration shipping now.
+
+    The only override seams are ``config`` (controller options) and
+    ``cycle_config`` (Hold cycle settings); both override fresh
+    ``default_settings()`` values for this call only. Rows retain independent
+    JSON-safe snapshots so subsequent settings/manifest changes cannot alter
+    recorded evidence.
     """
-    # Some controllers (pid_sp, pid_ac) read time.time() for their own dt;
-    # replacing it with a clock this loop drives makes their dt match the
-    # simulated second the loop models, instead of the wall-clock nanoseconds
-    # between calls in a tight loop. Controllers that don't read the wall
-    # clock (mpc) are unaffected. Started one HoldCycleTime before t=0 so the
-    # very first solve -- which happens immediately, since next_solve starts
-    # at 0.0 -- sees a full period of elapsed time rather than dt=0.
-    clock = _SimClock(-float(CYCLE_DATA["HoldCycleTime"]))
+    core_config, cycle_data, controller_override, cycle_override = _effective_configuration(
+        controller, config, cycle_config
+    )
+    clock = _SimClock(-float(cycle_data["HoldCycleTime"]))
     real_time_time = time.time
     time.time = clock
     try:
         mod = importlib.import_module(f"controller.{controller}")
-        core_config = dict(CONTROLLER_CONFIGS[controller])
-        core_config.update(config or {})
-        core = mod.Controller(core_config, "F", dict(CYCLE_DATA))
+        core = mod.Controller(dict(core_config), "F", dict(cycle_data))
         plant_name = plant
-        plant = globals()[plant_name](seed=seed)
-        u_min, u_max = CYCLE_DATA["u_min"], CYCLE_DATA["u_max"]
+        plant_instance = globals()[plant_name](seed=seed)
+        mode = _actuation_mode(core)
+        cycle_max, controller_max, effective_max, _ = _authority(core, cycle_data)
+        del cycle_max, controller_max
+        scheduler = PulseScheduler() if mode is ActuationMode.FRAMED_PULSE else None
+        pulse_timing = (
+            {"frame_seconds": float(scheduler.timing.frame_s), "pulse_seconds": float(scheduler.timing.pulse_s)}
+            if scheduler is not None
+            else None
+        )
+        effective_run = _snapshot(
+            {
+                "controller_config": core_config,
+                "cycle_config": cycle_data,
+                "actuation_mode": mode.value,
+                "pulse_timing": pulse_timing,
+                "plant": plant_name,
+                "seed": seed,
+                "scenario": scenario.name,
+                "overrides": {"controller": controller_override, "cycle": cycle_override},
+            }
+        )
 
+        u_min, u_max = float(cycle_data["u_min"]), float(cycle_data["u_max"])
         setpoint = _setpoint_at(scenario, 0)
         core.set_target(setpoint)
-        _report(core, u_min, "seed", 0)
-
-        period = core.get_control_period() or CYCLE_DATA["HoldCycleTime"]
-        ratio, fan_frac = u_min, 1.0
+        period = float(core.get_control_period() or cycle_data["HoldCycleTime"])
+        requested, ratio, fan_frac = 0.0, (0.0 if scheduler else u_min), 1.0
         next_solve = 0.0
-        auger_on, auger_toggle = False, 0.0
+        auger_on, auger_toggle, actual_auger_on = False, 0.0, False
+        feedback_start, feedback_delivered = 0.0, 0.0
+        if scheduler is None:
+            _report(core, u_min, "seed", 0)
 
         temps, duties, settle_from = [], [], None
         for t in range(scenario.duration_s):
@@ -245,20 +345,17 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, r
             if new_sp != setpoint:
                 setpoint = new_sp
                 core.set_target(setpoint)
-                # set_target() just reset the controller's own last-update
-                # clock to t; if a scheduled solve also lands on t (e.g.
-                # step_225_275's setpoint change falls on a solve boundary),
-                # calling update() again this same tick would hand it dt=0.
-                # Push the next solve a full period out from here instead.
                 next_solve = t + period
                 settle_from = None
 
             lid_open = _lid_open_at(scenario, t)
-            lid_paused = _lid_paused_at(scenario, t)
+            lid_paused = _lid_paused_at(scenario, t, cycle_data)
             lid_pause_start = _lid_pause_start_at(scenario, t)
-            temp_f = _c_to_f(plant.measured())
-
-            if t >= next_solve:
+            manual_inhibit = _manual_inhibited_at(scenario, t)
+            manual_start = _manual_inhibit_start_at(scenario, t)
+            temp_f = _c_to_f(plant_instance.measured())
+            solved = t >= next_solve
+            if solved:
                 next_solve = t + period
                 raw = core.update(temp_f)
                 if isinstance(raw, dict):
@@ -268,42 +365,73 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, r
                         fan_frac = float(fan["duty"]) / 100.0
                 else:
                     requested = float(raw)
+                if scheduler is not None:
+                    # Framed MPC has no fixed-cycle minimum firing floor; its
+                    # only duty authority is the effective controller/cycle cap.
+                    requested = min(max(requested, 0.0), effective_max)
+
+            if scheduler is None:
                 ratio = min(max(requested, u_min), u_max)
-                # hold.py:171-173 replaces the controller's answer with u_min
-                # while the pause is live, ahead of the floor/ceiling just
-                # above. Once the timer clears the controller is back at full
-                # authority even if the lid is still open.
                 if lid_paused:
                     ratio = u_min
-                _report(core, ratio, "lid_open" if lid_paused else "controller", t, requested=requested)
-
-            if lid_pause_start:
-                # hold.py's detection instant: auger off, cycle timer reset,
-                # one AppliedOutput(0.0) report (hold.py:247-264). That block
-                # clears target_temp_achieved (hold.py:266), and the pause's
-                # own heat loss keeps it clear -- hold.py:234 only re-arms it
-                # once the plant is back at setpoint -- so this fires exactly
-                # once per pause, not every tick.
-                auger_on, auger_toggle, auger_frac = False, t, 0.0
-                _report(core, 0.0, "lid_open", t)
+                if manual_inhibit:
+                    ratio = 0.0
+                if solved and not manual_inhibit:
+                    source = "lid_open" if lid_paused else "controller"
+                    _report(core, ratio, source, t, requested=requested)
+                if manual_inhibit:
+                    # Hold preserves its toggle timer while manual ownership
+                    # holds the auger off; release resumes the existing phase.
+                    auger_on, auger_frac = False, 0.0
+                    if manual_start:
+                        _report(core, 0.0, "manual_override", t, requested=requested)
+                elif lid_pause_start:
+                    auger_on, auger_toggle, auger_frac = False, t, 0.0
+                    _report(core, 0.0, "lid_open", t, requested=requested)
+                else:
+                    auger_on, auger_toggle, auger_frac = _auger_toggle_tick(
+                        auger_on, auger_toggle, t, ratio, cycle_data["HoldCycleTime"]
+                    )
             else:
-                # hold.py:228 calls _auger_cycle_tick unconditionally and
-                # base.py:118-147 has no lid gate, so for the rest of the
-                # pause the auger keeps cycling at the ratio pinned above.
-                auger_on, auger_toggle, auger_frac = _auger_toggle_tick(
-                    auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"]
-                )
+                inhibited = lid_paused or manual_inhibit
+                reset_reason = PulseResetReason.MANUAL if manual_start else PulseResetReason.LID
+                if lid_pause_start or manual_start:
+                    # Account the observed interval first, then discard the
+                    # interrupted credit exactly as Hold does before preemption.
+                    decision = scheduler.advance(requested, float(t), actual_auger_on)
+                    scheduler.reset(reset_reason)
+                    actual_auger_on = False
+                    feedback_start = float(t)
+                    # PulseScheduler retains its monotone total across reset;
+                    # baseline this new feedback interval at that total so an
+                    # interrupted frame cannot be charged again after release.
+                    feedback_delivered = decision.delivered_on_s
+                elif inhibited:
+                    actual_auger_on = False
+                else:
+                    decision = scheduler.advance(requested, float(t), actual_auger_on)
+                    actual_auger_on = decision.command_on
+                    if solved and t > feedback_start:
+                        delivered = decision.delivered_on_s - feedback_delivered
+                        _report(
+                            core,
+                            delivered / (t - feedback_start),
+                            "controller",
+                            t,
+                            requested=requested,
+                        )
+                        feedback_start = float(t)
+                        feedback_delivered = decision.delivered_on_s
+                auger_frac = float(actual_auger_on)
+                ratio = auger_frac
 
-            # The fan is cut for the pause only; hold.py:271 restarts it on
-            # expiry, so it is running again for any part of the lid window
-            # that outlasts the timer.
-            plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_paused else fan_frac, lid_open=lid_open)
-
+            plant_instance.step(
+                auger_on=auger_frac,
+                fan_frac=0.0 if lid_paused else fan_frac,
+                lid_open=lid_open,
+            )
             temps.append(temp_f)
-            # The reported ratio: 0.0 at the detection instant, u_min (pinned
-            # above) for the rest of the pause, the controller's own answer
-            # otherwise.
-            duties.append(0.0 if lid_pause_start else ratio)
+            duties.append(auger_frac)
             if abs(temp_f - setpoint) <= 5.0:
                 if settle_from is None:
                     settle_from = t
@@ -315,38 +443,32 @@ def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, r
         sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
         err = temps - sp_series
         lid_start = min((start for start, _ in scenario.lid_open), default=None)
+        reachability, max_authority = _feasibility(core, cycle_data, plant_instance, scenario)
         result = {
             "controller": controller,
             "scenario": scenario.name,
             "plant": plant_name,
             "seed": seed,
+            "effective_run": effective_run,
+            "reachability": reachability.value,
+            "max_authority": _snapshot(max_authority),
             "iae": float(np.abs(err).sum()),
             "pct_within_5f": float((np.abs(err) <= 5.0).mean() * 100.0),
             "overshoot_f": float(err.max()),
             "undershoot_f": float(err.min()),
-            "settle_s": (None if settle_from is None else int(settle_from)),
+            "settle_s": None if settle_from is None else int(settle_from),
             "mean_duty": float(duties.mean()),
             "std_duty": float(duties.std()),
             "final_temp_f": float(temps[-1]),
-            # Depth of the lid excursion: the coldest reading from the first
-            # lid opening to the end of the run, so the trough is captured
-            # wherever transport lag puts it relative to the lid closing.
-            "lid_min_temp_f": (None if lid_start is None else float(temps[lid_start:].min())),
-            # Width of the same excursion: seconds from the lid opening until
-            # the chamber is first back within 5 F of setpoint. Depth alone
-            # cannot distinguish the modelled pause length, since a longer
-            # pause only digs the trough deeper.
-            "lid_recovery_s": (None if lid_start is None else _recovery_s(err[lid_start:])),
+            "lid_min_temp_f": None if lid_start is None else float(temps[lid_start:].min()),
+            "lid_recovery_s": None if lid_start is None else _recovery_s(err[lid_start:]),
         }
         status = getattr(core, "get_status", lambda: None)()
         if status is not None:
-            result["status"] = json.loads(json.dumps(status, allow_nan=False, default=str))
+            result["status"] = _snapshot(status)
         cfg = getattr(core, "cfg", None)
         if cfg is not None and "n_horizon" in cfg:
             result["configured_n_horizon"] = int(cfg["n_horizon"])
-            # What the NLP was actually assembled with. Before the horizon was
-            # derived from the model's own coast there is no such attribute and
-            # the configured length is the built one.
             built = getattr(core, "_built_n_horizon", None)
             result["built_n_horizon"] = int(cfg["n_horizon"]) if built is None else int(built)
         if refit:
@@ -391,30 +513,54 @@ def _job(arg):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Run the GrillSim controller scenario matrix.")
+    regeneration_command = (
+        "uv run --no-sync python docs/superpowers/experiments/controller_matrix.py "
+        "--controllers pid_sp mpc --scenarios steady_225 steady_350 steady_450 "
+        "step_225_275 capability_600 lid_open_225 --seeds 0 1 2 3 4 "
+        "--plants GrillSim MAKGrillSim --out docs/superpowers/experiments/_matrix_baseline.json"
+    )
+    ap = argparse.ArgumentParser(
+        description="Run deterministic shipped-controller scenarios against GrillSim.",
+        epilog=f"Regenerate the committed evidence only after validation:\n  {regeneration_command}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--controllers", nargs="+", default=["pid_sp", "mpc"])
-    # Defaults to every scenario, which since `steady_325` was added is a
-    # SUPERSET of what `_matrix_baseline.json` currently holds: a bare
-    # regeneration now writes seven scenarios where that file has six. Pass
-    # `--scenarios` explicitly to reproduce the committed baseline.
     ap.add_argument("--scenarios", nargs="+", default=sorted(SCENARIOS))
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     ap.add_argument("--plants", nargs="+", default=["GrillSim"], choices=PLANTS)
     ap.add_argument("--out", default=OUT)
     ap.add_argument("-w", "--workers", type=int, default=None)
     args = ap.parse_args(argv)
-
     jobs = [
-        (c, s, seed, plant)
-        for c in args.controllers
-        for s in args.scenarios
+        (controller, scenario, seed, plant)
+        for controller in args.controllers
+        for scenario in args.scenarios
         for seed in args.seeds
         for plant in args.plants
     ]
     with Pool(args.workers) as pool:
         rows = pool.map(_job, jobs)
+
+    payload = {
+        "header": {
+            "format_version": 2,
+            "regeneration_command": regeneration_command,
+            "effective_runs": [row["effective_run"] for row in rows],
+        },
+        "rows": rows,
+        "summary": {
+            "run_count": len(rows),
+            "reachable_count": sum(row["reachability"] == ReachabilityState.REACHABLE.value for row in rows),
+            "unreachable_high_count": sum(
+                row["reachability"] == ReachabilityState.UNREACHABLE_HIGH.value for row in rows
+            ),
+            "unknown_authority_count": sum(
+                row["reachability"] == ReachabilityState.UNKNOWN_AUTHORITY.value for row in rows
+            ),
+        },
+    }
     with open(args.out, "w") as f:
-        json.dump(rows, f, indent=1, sort_keys=True)
+        json.dump(payload, f, indent=1, sort_keys=True)
     print(f"{len(rows)} runs -> {args.out}")
 
 

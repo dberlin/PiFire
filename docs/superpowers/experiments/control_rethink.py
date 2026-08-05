@@ -323,39 +323,29 @@ def run_simple(plant_cls, *, arm, Kp, lead_s, Ti, u_min, fan, seed, setpoint_f=S
 
 
 # ---------------------------------------------------------------------------
-# R7 -- the shipped MPC, through A9a's own harness.
-#
-# `run_scenario` reads its clamp from the harness module's CYCLE_DATA global, so
-# the config under test is installed there before the workers fork. Nothing in
-# controller/ is touched: only the harness's copy of the grill's cycle settings
-# moves, and it moves TOWARD what common/defaults.py ships.
+# R7 -- the shipped MPC, through the matrix harness's explicit cycle seam.
 # ---------------------------------------------------------------------------
 
 
-def _mpc_init(cycle_data):
-    from docs.superpowers.experiments import controller_matrix as cm
-
-    cm.CYCLE_DATA.update(cycle_data)
-
-
-def _mpc_run(seed):
+def _mpc_run(arg):
     import contextlib
     import io
 
+    seed, cycle_data = arg
     from docs.superpowers.experiments import controller_matrix as cm
 
     # mpc.py prints an uncalibrated-model banner on construction; it belongs in
     # the record but not in the middle of a table.
     with contextlib.redirect_stdout(io.StringIO()):
-        return cm.run_scenario("mpc", cm.SCENARIOS["steady_325"], seed, plant="MAKGrillSim")
+        return cm.run_scenario("mpc", cm.SCENARIOS["steady_325"], seed, plant="MAKGrillSim", cycle_config=cycle_data)
 
 
 def run_mpc_batch(u_min, cycle_s, seeds=SEEDS):
     from multiprocessing import Pool
 
     cycle = {"HoldCycleTime": cycle_s, "u_min": u_min, "u_max": HARNESS_CYCLE["u_max"]}
-    with Pool(min(R7_WORKERS, len(seeds)), initializer=_mpc_init, initargs=(cycle,)) as pool:
-        return pool.map(_mpc_run, list(seeds))
+    with Pool(min(R7_WORKERS, len(seeds))) as pool:
+        return pool.map(_mpc_run, [(seed, cycle) for seed in seeds])
 
 
 # ---------------------------------------------------------------------------

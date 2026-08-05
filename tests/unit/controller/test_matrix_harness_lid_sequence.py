@@ -31,17 +31,19 @@ import types
 
 import pytest
 
+from common.defaults import default_settings
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 import docs.superpowers.experiments.controller_matrix as controller_matrix
 from controller.applied_output import OutputSource
 
-CYCLE_TIME = controller_matrix.CYCLE_DATA["HoldCycleTime"]
-U_MIN = controller_matrix.CYCLE_DATA["u_min"]
+CYCLE_TIME = default_settings()["cycle_data"]["HoldCycleTime"]
+U_MIN = default_settings()["cycle_data"]["u_min"]
 # Distinct from U_MIN so a report that should show u_min but leaks the
 # controller's own output (or vice versa) is caught.
 RATIO = 0.5
-PAUSE = controller_matrix.LID_PAUSE_S
+PAUSE = default_settings()["cycle_data"]["LidOpenPauseTime"]
 LID_START = 2 * CYCLE_TIME
 # Deliberately longer than the pause, so the third phase -- lid still open,
 # actuators released -- is inside the window under test.
@@ -104,13 +106,12 @@ def _run_stub(monkeypatch, lid_open):
     fake_mod = types.ModuleType(f"controller.{name}")
     fake_mod.Controller = _StubController
     monkeypatch.setitem(sys.modules, f"controller.{name}", fake_mod)
-    monkeypatch.setitem(controller_matrix.CONTROLLER_CONFIGS, name, {"_ratio": RATIO})
     monkeypatch.setattr(controller_matrix, "GrillSim", _FakePlant)
     _StubController.instances.clear()
     _FakePlant.instances.clear()
 
     scenario = controller_matrix.Scenario(name, DURATION, [(0, 999.0)], lid_open)
-    controller_matrix.run_scenario(name, scenario, seed=0)
+    controller_matrix.run_scenario(name, scenario, seed=0, config={"_ratio": RATIO})
     return _StubController.instances[-1], _FakePlant.instances[-1]
 
 
@@ -189,7 +190,11 @@ def test_whole_pause_off_model_fails_the_pinned_sequence(monkeypatch):
     at some point during the pause" would still pass this buggy model; the
     sequence pinned above does not, which is why it is the one that matters.
     """
-    monkeypatch.setattr(controller_matrix, "_lid_pause_start_at", controller_matrix._lid_paused_at)
+    monkeypatch.setattr(
+        controller_matrix,
+        "_lid_pause_start_at",
+        lambda scenario, t: controller_matrix._lid_paused_at(scenario, t, default_settings()["cycle_data"]),
+    )
     core, plant = _run_stub(monkeypatch, [(LID_START, LID_DURATION)])
 
     window = plant.on_fracs[LID_START : LID_START + PAUSE]
@@ -208,7 +213,9 @@ def test_pause_lasting_the_whole_lid_window_fails_the_pinned_sequence(monkeypatc
     honoured. hold.py never does this -- its timer is armed once and expires on
     its own -- and the released-while-open solves the test above requires are
     exactly what this model cannot produce."""
-    monkeypatch.setattr(controller_matrix, "_lid_paused_at", controller_matrix._lid_open_at)
+    monkeypatch.setattr(
+        controller_matrix, "_lid_paused_at", lambda scenario, t, cycle_data: controller_matrix._lid_open_at(scenario, t)
+    )
     core, plant = _run_stub(monkeypatch, [(LID_START, LID_DURATION)])
 
     lid_window = range(LID_START, LID_START + LID_DURATION)

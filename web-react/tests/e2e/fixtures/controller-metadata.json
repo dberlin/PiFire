@@ -61,28 +61,6 @@
         },
         {
           "hidden": false,
-          "option_default": 5.0,
-          "option_description": "Minimum sustainable firing-rate demand. [Default=5.0]",
-          "option_friendly_name": "Min Firing Rate",
-          "option_max": null,
-          "option_min": 0.0,
-          "option_name": "Q_min",
-          "option_step": 1.0,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 100.0,
-          "option_description": "Maximum firing-rate demand. [Default=100.0]",
-          "option_friendly_name": "Max Firing Rate",
-          "option_max": null,
-          "option_min": 1.0,
-          "option_name": "Q_max",
-          "option_step": 1.0,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
           "option_default": 320.0,
           "option_description": "Chamber lumped thermal mass (nominal; calibrate per grill). [Default=320.0]",
           "option_friendly_name": "Chamber Heat Capacity",
@@ -138,13 +116,13 @@
         },
         {
           "hidden": false,
-          "option_default": 3.5,
-          "option_description": "Maps the abstract firing-rate demand to actual heat input - calibrate to your grill's power (run the calibration utility). [Default=3.5]",
-          "option_friendly_name": "Firing-Rate Heat Gain",
+          "option_default": 350.0,
+          "option_description": "Maps normalized full combustion load (1.0) to heat input; calibrate to your grill's power (run the calibration utility). [Default=350.0]",
+          "option_friendly_name": "Full-Load Heat Gain",
           "option_max": null,
-          "option_min": 0.1,
+          "option_min": 10.0,
           "option_name": "K_Q",
-          "option_step": 0.1,
+          "option_step": 1.0,
           "option_type": "float"
         },
         {

@@ -20,6 +20,8 @@ negative control below.
 import os
 import sys
 
+import numpy as np
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 import docs.superpowers.experiments.controller_matrix as controller_matrix
@@ -46,9 +48,8 @@ def _lid_results(monkeypatch, h_lid=None, pause_s=None):
             real_init(self, **{**kwargs, "h_lid": h_lid})
 
         monkeypatch.setattr(GrillSim, "__init__", _fixed_h_lid)
-    if pause_s is not None:
-        monkeypatch.setattr(controller_matrix, "LID_PAUSE_S", pause_s)
-    return [controller_matrix.run_scenario("pid_sp", SCENARIO, seed) for seed in SEEDS]
+    cycle_config = {} if pause_s is None else {"LidOpenPauseTime": pause_s}
+    return [controller_matrix.run_scenario("pid_sp", SCENARIO, seed, cycle_config=cycle_config) for seed in SEEDS]
 
 
 def test_lid_open_scenario_crosses_the_lid_open_threshold(monkeypatch):
@@ -61,14 +62,18 @@ def test_lid_open_scenario_crosses_the_lid_open_threshold(monkeypatch):
 
 
 def test_the_chamber_recovers_on_the_pause_timer_not_the_lid_window(monkeypatch):
-    """Width of the same excursion. The chamber cannot re-enter the 5 F band
-    while the auger is pinned, so recovery outlasts the pause; it comes back
-    well inside `MAX_RECOVERY_S` because Hold hands control back on the timer
-    rather than when the lid shuts."""
+    """Width of the cold excursion after its trough.
+
+    Probe/transport lag can briefly cross the band before the trough, so the
+    metric starts recovery only after that coldest point. It returns well
+    inside `MAX_RECOVERY_S` because Hold hands control back on the timer rather
+    than when the lid shuts.
+    """
     recoveries = [r["lid_recovery_s"] for r in _lid_results(monkeypatch)]
 
-    assert all(r is not None and controller_matrix.LID_PAUSE_S < r < MAX_RECOVERY_S for r in recoveries), (
-        f"recovery must fall between the {controller_matrix.LID_PAUSE_S} s pause and {MAX_RECOVERY_S} s; got {recoveries}"
+    pause_s = default_settings()["cycle_data"]["LidOpenPauseTime"]
+    assert all(r is not None and pause_s < r < MAX_RECOVERY_S for r in recoveries), (
+        f"recovery must fall between the {pause_s} s pause and {MAX_RECOVERY_S} s; got {recoveries}"
     )
 
 
@@ -98,3 +103,10 @@ def test_a_pause_lasting_the_whole_lid_window_recovers_too_slowly(monkeypatch):
     )
     # The depth-only assertion cannot tell this model from the correct one.
     assert all(r["lid_min_temp_f"] < TRIGGER_F for r in results)
+
+
+def test_recovery_starts_after_the_cold_excursion_trough():
+    """A transient in-band reading before transport lag peaks is not recovery."""
+    err_from_lid = np.asarray([0.0, -6.0, 0.0, -7.0, -12.0, -4.0])
+
+    assert controller_matrix._recovery_s(err_from_lid) == 5
