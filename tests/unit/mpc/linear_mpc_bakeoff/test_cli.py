@@ -50,7 +50,7 @@ def test_validation_horizon_selection_uses_only_validation_scores() -> None:
 
 
 def test_resume_requires_existing_checkpoint(tmp_path: Path) -> None:
-    output = tmp_path / "missing.json"
+    output = tmp_path / "missing.manifest.json"
     completed = subprocess.run(
         [
             sys.executable,

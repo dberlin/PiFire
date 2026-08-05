@@ -277,7 +277,7 @@ def run_tiny_matrix(
     directory.mkdir(parents=True, exist_ok=True)
     return _run_matrix(
         ExperimentConfig.quick(),
-        checkpoint=output if output is not None else directory / "checkpoint.json",
+        checkpoint=output if output is not None else directory / "checkpoint.manifest.json",
         resume=resume,
         interrupt_after=interrupt_after,
     )

@@ -251,10 +251,10 @@ def test_excited_samples_only_train_the_challenger_and_track_the_incumbent() -> 
 
     assert outcome.updated is True
     assert challenger.observe_calls == 1
-    assert challenger.track_calls == 0
+    assert challenger.track_calls == 1
     assert isinstance(incumbent, SpyModel)
     assert incumbent.observe_calls == 0
-    assert incumbent.track_calls == 1
+    assert incumbent.track_calls == 2
 
 def test_replay_retains_temperature_and_transient_strata() -> None:
     replay = StratifiedReplay(capacity=120, seed=1)

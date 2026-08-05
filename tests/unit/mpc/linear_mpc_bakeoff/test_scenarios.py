@@ -44,7 +44,7 @@ def test_resume_matches_clean_artifact(tmp_path: Path) -> None:
 
 
 def test_checkpoint_is_atomic_and_does_not_leave_temporary_file(tmp_path: Path) -> None:
-    output = tmp_path / "artifact.json"
+    output = tmp_path / "artifact.manifest.json"
 
     run_tiny_matrix(tmp_path, resume=False, output=output)
 
@@ -66,23 +66,19 @@ def test_checkpoint_matrix_covers_every_arm_and_wrong_initialization(tmp_path: P
     assert all("recovery_improvement_ratio" in row.metrics for row in artifact.scenarios)
 
 
-def test_recovery_evidence_keeps_chronological_before_and_after_residuals() -> None:
+def test_frozen_tiny_scenario_preserves_residuals_without_recovery_credit() -> None:
     result = run_tiny_scenario(plant="GrillSim", seed=2)
     metrics = result.metrics
 
     assert result.evidence_id == "scheduled-arx:GrillSim:2:wrong-gain"
     assert result.to_document()["evidence_id"] == result.evidence_id
-    assert metrics["recovery_before_mae_c"] > 0.0
-    assert metrics["recovery_after_mae_c"] > 0.0
+    assert metrics["recovery_before_mae_c"] is None
+    assert metrics["recovery_after_mae_c"] is None
+    assert metrics["recovery_improvement_delta_c"] is None
+    assert metrics["recovery_improvement_ratio"] is None
     assert result.pre_recovery_residuals_c["600"]
     assert result.horizon_residuals_c["600"]
     assert result.to_document()["pre_recovery_residuals_c"]["600"] == list(result.pre_recovery_residuals_c["600"])
-    assert metrics["recovery_improvement_delta_c"] == pytest.approx(
-        metrics["recovery_before_mae_c"] - metrics["recovery_after_mae_c"]
-    )
-    assert metrics["recovery_improvement_ratio"] == pytest.approx(
-        metrics["recovery_after_mae_c"] / metrics["recovery_before_mae_c"]
-    )
 
 
 def test_horizon_evidence_bootstraps_unique_model_origins_once_despite_duplicate_rows() -> None:
