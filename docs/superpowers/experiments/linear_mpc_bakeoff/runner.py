@@ -571,6 +571,7 @@ def _run_scenario(
                 pre_assimilation_scores.append(
                     {
                         "frame_s": second + 1,
+                        "role_generation": manager.role_generation,
                         "candidate_abs_error_c": abs(outcome.challenger.innovation_c),
                         "incumbent_abs_error_c": abs(outcome.incumbent.innovation_c),
                         "braking_or_coast": (
@@ -590,9 +591,13 @@ def _run_scenario(
                     }
                 )
             if (second + 1) % 300 == 0:
-                score_window = tuple(pre_assimilation_scores)
+                score_window = tuple(
+                    sample
+                    for sample in pre_assimilation_scores
+                    if sample["role_generation"] == manager.role_generation
+                )
                 pre_assimilation_scores.clear()
-                if not score_window:
+                if len(score_window) < 2:
                     continue
                 braking_window = tuple(
                     sample for sample in score_window if sample["braking_or_coast"]

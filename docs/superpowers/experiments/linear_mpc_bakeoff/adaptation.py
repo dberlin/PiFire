@@ -262,6 +262,7 @@ class AdaptationManager:
         self._replay = StratifiedReplay(replay_capacity, replay_seed)
         self._challenger_effective_updates = 0
         self._consecutive_wins = 0
+        self._role_generation = 0
         self._lock = Lock()
 
     @property
@@ -276,6 +277,12 @@ class AdaptationManager:
         with self._lock:
             return self._challenger
 
+
+    @property
+    def role_generation(self) -> int:
+        """Monotonic role identity; old score windows cannot survive promotion."""
+        with self._lock:
+            return self._role_generation
     @property
     def replay(self) -> StratifiedReplay:
         """Return the manager-owned replay store."""
@@ -392,6 +399,7 @@ class AdaptationManager:
                         self._incumbent_alignment,
                     )
                     self._consecutive_wins = 0
+                    self._role_generation += 1
 
             return PromotionDecision(
                 promoted=promoted,
