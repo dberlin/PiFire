@@ -245,7 +245,7 @@ def test_delayed_branch_matches_the_unpruned_profile_across_a_realistic_control_
         reference_history.record(t, duty)
     x0_reference = 0.0
     for duration, duty in reference_history.segments(0.0, t_last - theta):
-        x0_reference = SmithPredictor._step(x0_reference, duty, duration, K, tau)
+        x0_reference = SmithPredictor._step(x0_reference, duty, duration, {"form": "fopdt", "K": K, "tau": tau})
 
     p = _predictor()
     p.trust(model)
@@ -276,7 +276,7 @@ def test_delayed_branch_matches_the_unpruned_profile_at_a_large_but_realistic_cy
         reference_history.record(t, duty)
     x0_reference = 0.0
     for duration, duty in reference_history.segments(0.0, t_last - theta):
-        x0_reference = SmithPredictor._step(x0_reference, duty, duration, K, tau)
+        x0_reference = SmithPredictor._step(x0_reference, duty, duration, {"form": "fopdt", "K": K, "tau": tau})
 
     p = _predictor()
     p.trust(model)
@@ -554,7 +554,7 @@ def test_a_theta_revision_reinitializes_the_predictor():
     def expected_xd(theta):
         x = 0.0
         for duration, duty in reference_history.segments(max(seed_t - theta, 0.0), max(t_final - theta, 0.0)):
-            x = SmithPredictor._step(x, duty, duration, MODEL["K"], MODEL["tau"])
+            x = SmithPredictor._step(x, duty, duration, {"form": "fopdt", "K": MODEL["K"], "tau": MODEL["tau"]})
         return x
 
     old_theta_value = expected_xd(MODEL["theta"])

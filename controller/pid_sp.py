@@ -288,7 +288,9 @@ class Controller(PIDControllerBase):
             measured_rate=measured_rate,
             predicted_temperature=selected,
             predicted_error=error,
-            tau_seconds=(0.0 if trusted is None else trusted["tau"]),
+            # An integrating model has no time constant to report; the trace
+            # field predates that form and stays zero for it.
+            tau_seconds=(0.0 if trusted is None else float(trusted.get("tau", 0.0))),
             theta_seconds=(0.0 if trusted is None else trusted["theta"]),
             stable_window_seconds=self.stable_window,
             center_factor=self.center_factor,

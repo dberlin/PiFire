@@ -28,7 +28,7 @@
 
 import math
 
-from controller.fopdt_identifier import DELAYS, DutyHistory
+from controller.fopdt_identifier import DELAYS, FORM_FOPDT, FORM_IPDT, DutyHistory
 
 #: Prediction outside this band is not a grill temperature.
 TEMP_MIN_F, TEMP_MAX_F = -100.0, 1200.0
@@ -40,6 +40,19 @@ MAX_RESIDUAL_STREAK = 4
 #: so a constant margin can only make truncation unlikely, never impossible --
 #: _integrate detects and refuses it instead of silently answering wrong.
 HISTORY_MARGIN_S = 1800.0
+
+
+def _incoming_model(model):
+    """The identified model reduced to what propagation needs, by form.
+
+    Kept as a plain dict of floats rather than the identifier's own object so a
+    later change there cannot silently alter what the predictor integrates.
+    """
+    form = model.get("form", FORM_FOPDT)
+    common = {"form": form, "theta": float(model["theta"])}
+    if form == FORM_IPDT:
+        return {**common, "K_i": float(model["K_i"]), "c0": float(model["c0"])}
+    return {**common, "K": float(model["K"]), "tau": float(model["tau"])}
 
 
 class SmithPredictor:
@@ -92,7 +105,7 @@ class SmithPredictor:
         """
         if model is None:
             return
-        incoming = {"K": float(model["K"]), "tau": float(model["tau"]), "theta": float(model["theta"])}
+        incoming = _incoming_model(model)
         if self._model is None:
             self._model = incoming
             self.reset()
@@ -182,9 +195,8 @@ class SmithPredictor:
         before that pruned boundary, it is truncation, and the caller must
         refuse the result rather than silently clamp it.
         """
-        tau = self._model["tau"]
-        gain = self._model["K"]
-        theta = self._model["theta"]
+        model = self._model
+        theta = model["theta"]
         start = self._history.earliest()
         if start is None:
             return False
@@ -193,17 +205,26 @@ class SmithPredictor:
             return True
         lo0, hi0 = max(t0, start), max(t1, start)
         for duration, duty in self._history.segments(lo0, hi0):
-            self._x0 = self._step(self._x0, duty, duration, gain, tau)
+            self._x0 = self._step(self._x0, duty, duration, model)
         lod, hid = max(t0 - theta, start), max(t1 - theta, start)
         for duration, duty in self._history.segments(lod, hid):
-            self._xd = self._step(self._xd, duty, duration, gain, tau)
+            self._xd = self._step(self._xd, duty, duration, model)
         return False
 
     @staticmethod
-    def _step(x, u, dt, gain, tau):
-        """Exact first-order response to a constant input over dt."""
-        decay = math.exp(-dt / tau)
-        return x * decay + gain * u * (1.0 - decay)
+    def _step(x, u, dt, model):
+        """Exact response of the identified form to a constant input over dt.
+
+        Both branches are exact rather than integrated numerically, so the
+        correction does not accumulate step error over a long window.
+        """
+        if model["form"] == FORM_IPDT:
+            # An integrating chamber has no state to decay toward: the rate is
+            # the commanded gain less the loss, and over a constant input the
+            # response is that rate times the interval.
+            return x + (model["K_i"] * u + model["c0"]) * dt
+        decay = math.exp(-dt / model["tau"])
+        return x * decay + model["K"] * u * (1.0 - decay)
 
     def _safe(self, predicted, residual):
         """Whether the prediction and the plant/model agreement are within bounds.

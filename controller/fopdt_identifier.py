@@ -149,19 +149,25 @@ T_SCALE = 100.0
 class RLSBank:
     """One recursive-least-squares estimator per dead-time candidate, batched.
 
-    Theta is (N, 3), P is (N, 3, 3), resid_ew is (N,). Only the third regressor
-    column differs per candidate; [1, T_scaled] is shared and broadcast by the
-    caller.
+    Theta is (N, M), P is (N, M, M), resid_ew is (N,), where M is the number of
+    regressors. Only the delayed-duty column differs per candidate; the rest is
+    shared and broadcast by the caller.
+
+    M is a parameter because the same bank serves two model forms. The
+    first-order fit carries [1, T_scaled, u]; the integrating fit drops the
+    temperature column, which is the one whose coefficient is near zero on a
+    slow chamber and whose inverse the first-order time constant is.
     """
 
-    def __init__(self, n_candidates):
+    def __init__(self, n_candidates, n_params=3):
         self._n = int(n_candidates)
-        self.Theta = np.zeros((self._n, 3))
-        self.P = np.tile(P0 * np.eye(3), (self._n, 1, 1))
+        self._m = int(n_params)
+        self.Theta = np.zeros((self._n, self._m))
+        self.P = np.tile(P0 * np.eye(self._m), (self._n, 1, 1))
         self.resid_ew = np.zeros(self._n)
 
     def update(self, phi, y):
-        """One accepted observation into the whole bank. `phi` is (N, 3)."""
+        """One accepted observation into the whole bank. `phi` is (N, M)."""
         phi = np.asarray(phi, dtype=float)
         Pphi = np.einsum("nij,nj->ni", self.P, phi)
         denom = LAM + np.einsum("ni,ni->n", phi, Pphi)
@@ -180,7 +186,7 @@ class RLSBank:
         if not mask.any():
             return
         self.Theta[mask] = 0.0
-        self.P[mask] = P0 * np.eye(3)
+        self.P[mask] = P0 * np.eye(self._m)
         self.resid_ew[mask] = 0.0
 
     def _reset_degenerate(self):
@@ -221,6 +227,57 @@ def recover_parameters(Theta):
         K = -cu / beta_T
         T_offset = -beta_0 / beta_T
     return {"K": K, "tau": tau, "T_offset": T_offset}
+
+
+#: Physical bounds for the integrating form. `K_i` is the rate the chamber
+#: climbs at full duty, in F per second per unit duty: 0.05 spans a grill that
+#: takes an hour to gain 180 F, 5.0 one that gains 18000 F in the same hour, so
+#: anything outside is not a grill. Fitted values seen on the two plants sit at
+#: 0.44 and 2.19.
+GAIN_RATE_MIN, GAIN_RATE_MAX = 0.05, 5.0  # F per second per unit duty
+RSE_GAIN_RATE_MAX = 0.20
+
+
+def recover_integrating_parameters(Theta):
+    """Physical parameters for the integrating form, dT/dt = K_i*u(t-theta) + c0.
+
+    Nothing has to be undone here: the regressand is already a rate and the duty
+    column is unscaled, so the fitted coefficient IS the gain in F per second per
+    unit duty, and the intercept IS the loss rate at the operating point. That
+    directness is the point of this form -- the first-order fit reports its time
+    constant as the reciprocal of a coefficient whose true value is near zero on
+    a slow chamber, so noise across zero inverts its sign and drags the gain with
+    it.
+    """
+    Theta = np.atleast_2d(np.asarray(Theta, dtype=float))
+    return {"K_i": Theta[:, 1], "c0": Theta[:, 0]}
+
+
+def integrating_relative_standard_errors(Theta, P, resid_ew):
+    """Relative standard error of K_i. It is a single fitted coefficient rather
+    than a ratio of two, so no covariance term arises."""
+    Theta = np.atleast_2d(np.asarray(Theta, dtype=float))
+    P = np.asarray(P, dtype=float)
+    resid_ew = np.asarray(resid_ew, dtype=float)
+    K_i = Theta[:, 1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.sqrt(resid_ew * P[:, 1, 1]) / np.abs(K_i)
+
+
+def integrating_gate_mask(params, rse_K_i):
+    """Candidates whose integrating estimate is finite, physical and certain."""
+    K_i = np.asarray(params["K_i"])
+    c0 = np.asarray(params["c0"])
+    rse = np.asarray(rse_K_i)
+    with np.errstate(invalid="ignore"):
+        mask = np.isfinite(K_i) & np.isfinite(c0) & np.isfinite(rse)
+        mask &= (K_i >= GAIN_RATE_MIN) & (K_i <= GAIN_RATE_MAX)
+        # A chamber loses heat to ambient, so the term that is not explained by
+        # duty cannot be a gain. A positive one means the fit has attributed
+        # heating to something other than the auger.
+        mask &= c0 <= 0.0
+        mask &= rse <= RSE_GAIN_RATE_MAX
+    return mask
 
 
 def relative_standard_errors(Theta, P, resid_ew):
@@ -302,6 +359,18 @@ CONFIRM_TAU_TOL = 0.075
 MATERIAL_K = 0.05
 MATERIAL_TAU = 0.05
 MATERIAL_THETA = 5.0
+
+
+#: The two model forms the identifier can promote, and which of each form's
+#: parameters blend on adoption, with the fraction of change that counts as
+#: material. `theta` is handled separately in every case -- it moves outright.
+FORM_FOPDT = "fopdt"
+FORM_IPDT = "ipdt"
+FORM_PARAMS = {
+    FORM_FOPDT: (("K", MATERIAL_K), ("tau", MATERIAL_TAU)),
+    FORM_IPDT: (("K_i", MATERIAL_K), ("c0", MATERIAL_TAU)),
+}
+CONFIRM_TOL = {"K": CONFIRM_K_TOL, "tau": CONFIRM_TAU_TOL, "K_i": CONFIRM_K_TOL, "c0": CONFIRM_TAU_TOL}
 #: How much of a passing revision blends into the trusted values.
 BLEND = 0.1
 #: A dt outside this band is a clock jump or a stalled loop, not an observation.
@@ -334,6 +403,11 @@ class FOPDTIdentifier:
 
     def __init__(self):
         self._bank = RLSBank(N_CANDIDATES)
+        # The integrating fit runs on the same observations, without the
+        # temperature regressor. It is a second bank rather than a slice of the
+        # first because a coefficient estimated alongside an ill-conditioned one
+        # inherits its noise -- separating them is the whole point.
+        self._ibank = RLSBank(N_CANDIDATES, n_params=2)
         self._history = DutyHistory(float(DELAYS.max()))
         self._prev = None  # (timestamp, temperature) anchor
         self._gap = True  # the next observation would span an undriven interval
@@ -419,7 +493,12 @@ class FOPDTIdentifier:
         phi[:, 0] = shared[0]
         phi[:, 1] = shared[1]
         phi[:, 2] = duty
-        self._bank.update(phi, (temp - y0) / dt)
+        rate = (temp - y0) / dt
+        self._bank.update(phi, rate)
+        iphi = np.empty((N_CANDIDATES, 2))
+        iphi[:, 0] = shared[0]
+        iphi[:, 1] = duty
+        self._ibank.update(iphi, rate)
 
         self._accepted += 1
         self._accepted_seconds += dt
@@ -494,14 +573,33 @@ class FOPDTIdentifier:
         rse_K, rse_tau = relative_standard_errors(self._bank.Theta, self._bank.P, self._bank.resid_ew)
         mask = gate_mask(params, rse_K, rse_tau)
         winner, _ = promote(self._bank.resid_ew, mask)
-        if winner is None:
-            self._confirm = None
-            return
-        candidate = {
-            "K": float(params["K"][winner]),
-            "tau": float(params["tau"][winner]),
-            "theta": float(DELAYS[winner]),
-        }
+        if winner is not None:
+            candidate = {
+                "form": FORM_FOPDT,
+                "K": float(params["K"][winner]),
+                "tau": float(params["tau"][winner]),
+                "theta": float(DELAYS[winner]),
+            }
+        else:
+            # A chamber slow relative to the observation window looks like an
+            # integrator over it, and a first-order fit of one returns a negative
+            # time constant and a negative gain together -- confidently
+            # impossible, so the gate above rejects every candidate and the
+            # controller learns nothing. The integrating form is what that
+            # chamber actually is.
+            iparams = recover_integrating_parameters(self._ibank.Theta)
+            irse = integrating_relative_standard_errors(self._ibank.Theta, self._ibank.P, self._ibank.resid_ew)
+            imask = integrating_gate_mask(iparams, irse)
+            iwinner, _ = promote(self._ibank.resid_ew, imask)
+            if iwinner is None:
+                self._confirm = None
+                return
+            candidate = {
+                "form": FORM_IPDT,
+                "K_i": float(iparams["K_i"][iwinner]),
+                "c0": float(iparams["c0"][iwinner]),
+                "theta": float(DELAYS[iwinner]),
+            }
         # A restored model has not yet been confirmed against this cook's
         # plant, so it has not earned the churn protection the materiality
         # gate gives a model this cook already confirmed -- any candidate
@@ -513,41 +611,61 @@ class FOPDTIdentifier:
             return
         self._adopt(candidate)
 
+    @staticmethod
+    def _continuous_params(candidate):
+        """The candidate's parameters that blend, by model form.
+
+        `theta` is excluded everywhere it appears below: a delay moves outright
+        once confirmed, because a delay half way between two candidates is not a
+        delay any candidate had.
+        """
+        return FORM_PARAMS[candidate.get("form", FORM_FOPDT)]
+
     def _material(self, candidate):
-        return (
-            abs(candidate["K"] - self._trusted["K"]) / self._trusted["K"] >= MATERIAL_K
-            or abs(candidate["tau"] - self._trusted["tau"]) / self._trusted["tau"] >= MATERIAL_TAU
-            or abs(candidate["theta"] - self._trusted["theta"]) >= MATERIAL_THETA
+        if candidate.get("form", FORM_FOPDT) != self._trusted.get("form", FORM_FOPDT):
+            # A different model form is not a revision of the trusted one, so
+            # there is no small-change threshold that could hold it back.
+            return True
+        if abs(candidate["theta"] - self._trusted["theta"]) >= MATERIAL_THETA:
+            return True
+        return any(
+            abs(candidate[name] - self._trusted[name]) / abs(self._trusted[name]) >= tol
+            for name, tol in self._continuous_params(candidate)
         )
 
     def _confirmed(self, candidate):
         """A candidate must hold still for a full window before it is believed."""
         window = self._confirm
-        if window is None or window["theta"] != candidate["theta"]:
-            self._confirm = {"n": 1, **candidate}
-            return False
         if (
-            abs(candidate["K"] - window["K"]) / window["K"] > CONFIRM_K_TOL
-            or abs(candidate["tau"] - window["tau"]) / window["tau"] > CONFIRM_TAU_TOL
+            window is None
+            or window["theta"] != candidate["theta"]
+            or window.get("form", FORM_FOPDT) != candidate.get("form", FORM_FOPDT)
         ):
             self._confirm = {"n": 1, **candidate}
             return False
+        for name, _material_tol in self._continuous_params(candidate):
+            tol = CONFIRM_TOL[name]
+            if abs(candidate[name] - window[name]) / abs(window[name]) > tol:
+                self._confirm = {"n": 1, **candidate}
+                return False
         window["n"] += 1
-        window["K"], window["tau"] = candidate["K"], candidate["tau"]
+        for name, _ in self._continuous_params(candidate):
+            window[name] = candidate[name]
         return window["n"] >= CONFIRM_WINDOW
 
     def _adopt(self, candidate):
         self._confirm = None
-        if self._trusted is None:
+        if self._trusted is None or self._trusted.get("form", FORM_FOPDT) != candidate.get("form", FORM_FOPDT):
+            # Nothing to blend against across a change of form: the parameters
+            # do not even mean the same thing.
             self._trusted = dict(candidate)
         else:
             # Delay moves outright once confirmed; the continuous parameters
             # blend, so one noisy window cannot swing the model.
-            self._trusted = {
-                "K": (1.0 - BLEND) * self._trusted["K"] + BLEND * candidate["K"],
-                "tau": (1.0 - BLEND) * self._trusted["tau"] + BLEND * candidate["tau"],
-                "theta": candidate["theta"],
-            }
+            blended = {"form": candidate.get("form", FORM_FOPDT), "theta": candidate["theta"]}
+            for name, _ in self._continuous_params(candidate):
+                blended[name] = (1.0 - BLEND) * self._trusted[name] + BLEND * candidate[name]
+            self._trusted = blended
         self._revision += 1
         # This adoption is evidence from the current cook's own plant, so the
         # model has now earned the churn protection a restored one lacks.
