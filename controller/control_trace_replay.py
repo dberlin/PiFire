@@ -202,8 +202,6 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
                 payload, lid_active, manual_active, safety_active, add, index
             )
         elif isinstance(payload, (PidUpdatePayload, PidSpUpdatePayload, MpcUpdatePayload)):
-            if payload.result_revision > 0:
-                seed_eligible = False
             prior_update = updates.get(payload.result_revision)
             if payload.result_revision < last_revision or (
                 payload.result_revision == last_revision
@@ -215,6 +213,8 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
                 updates[payload.result_revision] = (index, payload)
                 _validate_inhibit(payload.inhibit_reason, lid_active, manual_active, safety_active, add, index)
                 _validate_output_source(payload.output_source, lid_active, manual_active, add, index)
+            if payload.actuation_mode is ActuationMode.FIXED_CYCLE:
+                seed_eligible = False
         elif isinstance(payload, AllocationPayload):
             if payload.result_revision in allocations:
                 add(ReplayIssueCode.DUPLICATE_ALLOCATION, "duplicate allocation result revision", index)

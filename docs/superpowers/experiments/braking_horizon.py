@@ -32,6 +32,8 @@ from controller.runtime.logic.pulse import PulseScheduler
 from grillplat.actuator_capabilities import AUGER_TIMING
 
 OUTPUT = Path(__file__).with_name("_braking_horizon.json")
+EXPERIMENT_ID = "braking-horizon-coast-v2"
+TEMPERATURE_SOURCE = "GrillSim.true_Tc (noise-free chamber state)"
 REGENERATION_COMMAND = "python -m docs.superpowers.experiments.braking_horizon"
 SEEDS = (0, 1, 2)
 TARGETS_F = (225.0, 350.0, 450.0)
@@ -121,34 +123,57 @@ def _run_coast(plant_type: type[GrillSim], seed: int, target_f: float) -> dict[s
     }
 
 
+def _nominal_model_bound() -> float:
+    """The retained model coast product recorded for comparison only."""
+    return max(
+        braking_distance(dict(_DEFAULTS), t_ref)
+        for t_ref in (T_FLOOR_C, T_HAZARD_C)
+        if t_ref > float(_DEFAULTS["T_amb"])
+    )
+
+
 def _validate(payload: dict[str, Any]) -> None:
     """Reject incomplete, non-production, or non-braking evidence."""
-    conditions = payload.get("conditions")
+    required_payload_keys = {
+        "experiment",
+        "regeneration_command",
+        "conditions",
+        "nominal_model_bound_s",
+        "rows",
+        "maximum_measured_rise_c",
+    }
+    if set(payload) != required_payload_keys:
+        raise ValueError("evidence envelope has missing or unexpected fields")
+    if payload["experiment"] != EXPERIMENT_ID:
+        raise ValueError("evidence must record the braking coast experiment identity")
+    if payload["regeneration_command"] != REGENERATION_COMMAND:
+        raise ValueError("evidence must record the canonical regeneration command")
+
+    conditions = payload["conditions"]
     if not isinstance(conditions, dict):
         raise ValueError("evidence must record measurement conditions")
-    expected_allocator = {
-        "normalized_combustion_load": {"preheat": 1.0, "cut": 0.0},
-        "u_max": SHIPPED_U_MAX,
-        "fan_enabled": False,
-        "fan_behavior": "uncontrolled",
+    expected_conditions = {
+        "plants": [name for name, _ in PLANTS],
+        "seeds": list(SEEDS),
+        "targets_f": list(TARGETS_F),
+        "cut_target_tolerance_f": CUT_TARGET_TOLERANCE_F,
+        "coast_seconds": COAST_SECONDS,
+        "temperature_source": TEMPERATURE_SOURCE,
+        "calibration_mutations": False,
+        "allocator": {
+            "normalized_combustion_load": {"preheat": 1.0, "cut": 0.0},
+            "u_max": SHIPPED_U_MAX,
+            "fan_enabled": MPC_FAN_AUTHORITY_ENABLED,
+            "fan_behavior": "uncontrolled",
+        },
+        "pulse_scheduler": {
+            "pulse_seconds": float(AUGER_TIMING.pulse_s),
+            "frame_seconds": float(AUGER_TIMING.frame_s),
+            "actual_auger_feedback": "commanded",
+        },
     }
-    expected_scheduler = {
-        "pulse_seconds": float(AUGER_TIMING.pulse_s),
-        "frame_seconds": float(AUGER_TIMING.frame_s),
-        "actual_auger_feedback": "commanded",
-    }
-    if conditions.get("plants") != [name for name, _ in PLANTS] or conditions.get("seeds") != list(SEEDS):
-        raise ValueError("evidence must record every plant and fixed seed")
-    if conditions.get("targets_f") != list(TARGETS_F):
-        raise ValueError("evidence must record all fixed cut targets")
-    if conditions.get("cut_target_tolerance_f") != CUT_TARGET_TOLERANCE_F:
-        raise ValueError("evidence must record the cut target tolerance")
-    if conditions.get("allocator") != expected_allocator:
-        raise ValueError("evidence must record shipped allocator configuration")
-    if conditions.get("pulse_scheduler") != expected_scheduler:
-        raise ValueError("evidence must record production PulseScheduler configuration")
-    if conditions.get("calibration_mutations") is not False:
-        raise ValueError("coast evidence must not mutate plant calibration")
+    if conditions != expected_conditions:
+        raise ValueError("evidence conditions do not match the canonical production coast experiment")
 
     required_row_keys = {
         "plant",
@@ -180,15 +205,25 @@ def _validate(payload: dict[str, Any]) -> None:
         seen.add((plant, seed, float(target_f)))
         for key in required_row_keys - {"plant", "seed", "cut_was_rising"}:
             value = row[key]
-            if not isinstance(value, (int, float)) or not math.isfinite(value):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"evidence row {plant}/{seed}/{target_f} has non-finite {key}")
         if row["cut_was_rising"] is not True:
             raise ValueError(f"evidence row {plant}/{seed}/{target_f} was not cut while rising")
         if abs((float(row["cut_temperature_c"]) * 9.0 / 5.0 + 32.0) - float(target_f)) > CUT_TARGET_TOLERANCE_F:
             raise ValueError(f"evidence row {plant}/{seed}/{target_f} cut away from target")
-        if row["peak_temperature_c"] < row["cut_temperature_c"] or row["rise_c"] < 0.0:
-            raise ValueError(f"evidence row {plant}/{seed}/{target_f} has an invalid peak/rise")
-        if row["rise_c"] > 0.0 and row["seconds_to_peak"] > 0:
+        rise = float(row["rise_c"])
+        measured_rise = float(row["peak_temperature_c"]) - float(row["cut_temperature_c"])
+        if rise < 0.0 or not math.isclose(rise, measured_rise, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(f"evidence row {plant}/{seed}/{target_f} has invalid peak/rise arithmetic")
+        seconds_to_peak = row["seconds_to_peak"]
+        if (
+            isinstance(seconds_to_peak, bool)
+            or not isinstance(seconds_to_peak, int)
+            or not 0 <= seconds_to_peak <= COAST_SECONDS
+            or (rise > 0.0) != (seconds_to_peak > 0)
+        ):
+            raise ValueError(f"evidence row {plant}/{seed}/{target_f} has invalid time-to-peak")
+        if rise > 0.0:
             positive_rise_seen = True
     expected_conditions = {(name, seed, target) for name, _ in PLANTS for seed in SEEDS for target in TARGETS_F}
     if seen != expected_conditions:
@@ -196,13 +231,24 @@ def _validate(payload: dict[str, Any]) -> None:
 
     if not positive_rise_seen:
         raise ValueError("evidence must contain a positive post-cut rise with time-to-peak")
-    nominal_bound = payload.get("nominal_model_bound_s")
-    maximum_rise = payload.get("maximum_measured_rise_c")
-    if not isinstance(nominal_bound, (int, float)) or not math.isfinite(nominal_bound) or nominal_bound <= 0.0:
-        raise ValueError("nominal model braking bound must be positive and finite")
-    if not isinstance(maximum_rise, (int, float)) or not math.isfinite(maximum_rise) or maximum_rise < 0.0:
+    nominal_bound = payload["nominal_model_bound_s"]
+    maximum_rise = payload["maximum_measured_rise_c"]
+    expected_nominal_bound = _nominal_model_bound()
+    if (
+        isinstance(nominal_bound, bool)
+        or not isinstance(nominal_bound, (int, float))
+        or not math.isfinite(nominal_bound)
+        or not math.isclose(float(nominal_bound), expected_nominal_bound, rel_tol=0.0, abs_tol=1e-12)
+    ):
+        raise ValueError("nominal model braking bound does not match the shipped model")
+    if (
+        isinstance(maximum_rise, bool)
+        or not isinstance(maximum_rise, (int, float))
+        or not math.isfinite(maximum_rise)
+        or maximum_rise < 0.0
+    ):
         raise ValueError("maximum measured rise must be finite and non-negative")
-    if maximum_rise != max(row["rise_c"] for row in rows):
+    if not math.isclose(float(maximum_rise), max(float(row["rise_c"]) for row in rows), rel_tol=0.0, abs_tol=1e-12):
         raise ValueError("maximum measured rise must equal the maximum row rise")
 
 
@@ -212,7 +258,7 @@ def measure() -> dict[str, Any]:
         _run_coast(plant_type, seed, target_f) for _, plant_type in PLANTS for seed in SEEDS for target_f in TARGETS_F
     ]
     payload: dict[str, Any] = {
-        "experiment": "braking-horizon-coast-v2",
+        "experiment": EXPERIMENT_ID,
         "regeneration_command": REGENERATION_COMMAND,
         "conditions": {
             "plants": [name for name, _ in PLANTS],
@@ -220,7 +266,7 @@ def measure() -> dict[str, Any]:
             "targets_f": list(TARGETS_F),
             "cut_target_tolerance_f": CUT_TARGET_TOLERANCE_F,
             "coast_seconds": COAST_SECONDS,
-            "temperature_source": "GrillSim.true_Tc (noise-free chamber state)",
+            "temperature_source": TEMPERATURE_SOURCE,
             "calibration_mutations": False,
             "allocator": {
                 "normalized_combustion_load": {"preheat": 1.0, "cut": 0.0},
@@ -234,11 +280,7 @@ def measure() -> dict[str, Any]:
                 "actual_auger_feedback": "commanded",
             },
         },
-        "nominal_model_bound_s": max(
-            braking_distance(dict(_DEFAULTS), t_ref)
-            for t_ref in (T_FLOOR_C, T_HAZARD_C)
-            if t_ref > float(_DEFAULTS["T_amb"])
-        ),
+        "nominal_model_bound_s": _nominal_model_bound(),
         "rows": rows,
         "maximum_measured_rise_c": max(row["rise_c"] for row in rows),
     }

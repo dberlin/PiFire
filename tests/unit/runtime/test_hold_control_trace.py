@@ -223,10 +223,15 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
     event_kinds = [record.event_kind for record in recorder.records]
     assert event_kinds[:4] == [
         TraceEventKind.SESSION,
-        TraceEventKind.APPLIED_OUTPUT,
         TraceEventKind.CONTROL_UPDATE,
         TraceEventKind.ALLOCATION,
+        TraceEventKind.APPLIED_OUTPUT,
     ]
+    timestamps = [record.ts_ms for record in recorder.records]
+    assert timestamps == sorted(timestamps)
+    update_record = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
+    assert update_record.ts_ms == 2_000
+    assert update_record.payload.wall_ms == 1_100
     assert TraceEventKind.SESSION in event_kinds
     assert TraceEventKind.CONTROL_UPDATE in event_kinds
     assert TraceEventKind.ALLOCATION in event_kinds
@@ -261,6 +266,72 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
         result.allocation.fan_max_pct,
         result.allocation.fan_enabled,
     )
+    assert validate_records(recorder.records).valid
+
+
+def test_first_framed_results_complete_the_initial_seed_once(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [ControllerUpdateResult(cycle_ratio=0.1, fan=None, input_temperature=220.0), _mpc_result(1), _mpc_result(2)]
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "cook-mpc-seed"}
+    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
+
+    mode.on_tick(2.0, 220.0, output)
+    mode.on_tick(4.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(6.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+
+    seeds = [
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0
+    ]
+    seed_evidence = [
+        (seed.interval_start_ms, seed.interval_end_ms, seed.sample_complete, seed.output_source) for seed in seeds
+    ]
+    assert seed_evidence == [(0, 22_000, True, OutputSource.SEED)]
+
+
+def test_lid_reset_completes_deferred_initial_seed_before_first_frame_boundary(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [ControllerUpdateResult(cycle_ratio=0.1, fan=None, input_temperature=220.0), _mpc_result(1)]
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "cook-mpc-seed-lid-reset"}
+    mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
+
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.on_tick(4.0, 220.0, mode.grill.get_output_status())
+    mode.state.target_temp_achieved = True
+    mode.on_tick(6.0, 1.0, mode.grill.get_output_status())
+
+    seeds = [
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0
+    ]
+    assert len(seeds) == 1
+    assert seeds[0].sample_complete is True
+    assert validate_records(recorder.records).valid
+
+
+def test_misaligned_feedback_gate_keeps_framed_applied_coverage_contiguous(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [_mpc_result(revision) for revision in range(1, 24)]
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "cook-mpc-misaligned"}
+
+    for now in range(1, 43):
+        mode.on_tick(float(now), 220.0, mode.grill.get_output_status())
+
     assert validate_records(recorder.records).valid
 
 

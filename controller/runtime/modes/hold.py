@@ -141,6 +141,7 @@ class HoldMode(ControlMode):
             controller.pulse_maximum_duty = 1.0
             controller.pulse_stale_command = False
             controller.pulse_frame_combustion_load = None
+            controller.pulse_frame_requested_auger_duty = 0.0
             controller.pulse_frame_requested_fan_duty = None
             controller.pulse_frame_applied_fan_duty = None
             controller.pulse_frame_stale_command = False
@@ -161,6 +162,7 @@ class HoldMode(ControlMode):
         controller = self.state.controller
         controller.pulse_frame_result_revision = max(0, controller.pulse_result_revision)
         controller.pulse_frame_combustion_load = controller.pulse_combustion_load
+        controller.pulse_frame_requested_auger_duty = controller.pulse_requested_duty
         controller.pulse_frame_requested_fan_duty = controller.pulse_requested_fan_duty
         controller.pulse_frame_applied_fan_duty = controller.fan_duty if controller.controls_fan else None
         controller.pulse_frame_stale_command = controller.pulse_stale_command
@@ -217,12 +219,26 @@ class HoldMode(ControlMode):
         scheduler = self._pulse_scheduler
         if scheduler is None:
             raise RuntimeError("framed actuation requires a pulse scheduler")
+        previous_frame_revision = self.state.controller.pulse_frame_result_revision
         decision = scheduler.advance(self.state.controller.pulse_requested_duty, now, actual_auger_on)
         self._record_pulse_delivery(decision.delivered_on_s)
         for frame in decision.completed_frames:
             self._trace_pulse_frame(frame, InhibitReason.NONE, self.state.controller.pulse_frame_result_revision)
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._latch_pulse_frame()
+            transition_at_s: float | None = None
+            delivered_at_transition_s = decision.delivered_on_s
+            if decision.completed_frames:
+                transition_at_s = decision.completed_frames[-1].ended_at_s
+                delivered_at_transition_s -= decision.frame_delivered_on_s
+            elif previous_frame_revision == 0 and self.state.controller.pulse_frame_result_revision > 0:
+                transition_at_s = now
+            if transition_at_s is not None:
+                self._report_framed_feedback(
+                    transition_at_s,
+                    delivered_at_transition_s,
+                    completed_revision=previous_frame_revision,
+                )
         if apply_transition and decision.transition is not None:
             if decision.transition.command_on:
                 self.grill.auger_on()
@@ -257,7 +273,9 @@ class HoldMode(ControlMode):
         controller.pulse_feedback_delivered_on_s = decision.delivered_on_s
         self.grill.auger_off()
 
-    def _report_framed_feedback(self, now: float, delivered_on_s: float) -> None:
+    def _report_framed_feedback(
+        self, now: float, delivered_on_s: float, *, completed_revision: int | None = None
+    ) -> None:
         controller = self.state.controller
         start = controller.pulse_feedback_start_s
         if start is None:
@@ -276,12 +294,15 @@ class HoldMode(ControlMode):
                 fan_assist_active=False,
             ),
             timestamp=now,
-            requested=controller.pulse_requested_duty,
+            requested=controller.pulse_frame_requested_auger_duty,
         )
         inverse_combustion_load = max(0.0, min(1.0, realized_duty / controller.pulse_maximum_duty))
         measured_source = controller.trace_prior_output_source in (OutputSource.CONTROLLER, OutputSource.FAN_ASSIST)
+        sample_complete = controller.trace_prior_output_source is OutputSource.SEED or measured_source
         if measured_source:
-            controller.trace_interval_result_revision = controller.pulse_frame_result_revision
+            controller.trace_interval_result_revision = (
+                controller.pulse_frame_result_revision if completed_revision is None else completed_revision
+            )
             controller.trace_prior_requested_auger_duty = (
                 applied.requested if applied.requested is not None else applied.ratio
             )
@@ -293,7 +314,7 @@ class HoldMode(ControlMode):
             applied,
             now,
             producing_revision=controller.pulse_frame_result_revision,
-            sample_complete=measured_source,
+            sample_complete=sample_complete,
         )
         if measured_source:
             controller.trace_prior_combustion_load = inverse_combustion_load
@@ -480,6 +501,7 @@ class HoldMode(ControlMode):
             result.revision == self.state.controller.trace_result_revision and not stale_observation
         ):
             return False
+        observed_ms = int(now * 1_000)
         if stale_observation:
             previous_payload = self._trace_last_update_payload
             if not isinstance(previous_payload, MpcUpdatePayload):
@@ -491,7 +513,7 @@ class HoldMode(ControlMode):
                 stale_state=ResultStaleState.STALE,
                 recovered=False,
             )
-            self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, int(result.completed_wall_time * 1_000))
+            self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, observed_ms)
             self.state.controller.trace_mpc_stale = True
             self._trace_last_update_payload = payload
             return True
@@ -503,7 +525,7 @@ class HoldMode(ControlMode):
             monotonic_ms=monotonic_ms,
             wall_ms=wall_ms,
             result_revision=result.revision,
-            result_age_ms=max(0, int(now * 1_000) - wall_ms),
+            result_age_ms=max(0, observed_ms - wall_ms),
             observed_dt_seconds=(
                 diagnostics.observed_dt_seconds
                 if isinstance(diagnostics, PidTraceDiagnostics)
@@ -649,10 +671,10 @@ class HoldMode(ControlMode):
                 realized_combustion_load=realized_combustion_load,
             )
         self.state.controller.trace_result_revision = result.revision
-        self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, wall_ms)
+        self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, observed_ms)
         self._trace_last_update_payload = payload
         if allocation_payload is not None and not stale_observation:
-            self._trace_record(TraceEventKind.ALLOCATION, allocation_payload, wall_ms)
+            self._trace_record(TraceEventKind.ALLOCATION, allocation_payload, observed_ms)
         if isinstance(diagnostics, MpcTraceDiagnostics):
             self.state.controller.trace_mpc_stale = result.stale_state is ResultStaleState.STALE
         return True
@@ -665,6 +687,9 @@ class HoldMode(ControlMode):
         realized_combustion_load: float | None,
     ) -> None:
         controller = self.state.controller
+        sample_complete = sample_complete or (
+            controller.trace_interval_result_revision == 0 and controller.trace_prior_output_source is OutputSource.SEED
+        )
         end_ms = int(now * 1_000)
         start_ms = controller.trace_interval_start_ms
         if start_ms is None or start_ms >= end_ms or controller.trace_prior_output_source is None:
@@ -983,16 +1008,7 @@ class HoldMode(ControlMode):
             if self._framed_pulse():
                 controller = self.state.controller
                 controller.cycle_start = now
-                if result.revision > controller.pulse_result_revision:
-                    if controller.pulse_frame_result_revision == 0 and controller.trace_interval_result_revision == 0:
-                        if controller.trace_prior_output_source is OutputSource.SEED:
-                            self._trace_complete_applied_interval(
-                                now,
-                                sample_complete=True,
-                                realized_combustion_load=None,
-                            )
-                        else:
-                            controller.trace_interval_result_revision = result.revision
+                if result.revision > 0 and result.revision > controller.pulse_result_revision:
                     controller.output = result.cycle_ratio
                     controller.pulse_result_revision = result.revision
                     controller.pulse_requested_duty = max(0.0, min(1.0, result.cycle_ratio))

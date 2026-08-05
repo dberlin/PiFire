@@ -133,12 +133,7 @@ def validate_span_dataset(dataset, *, expected_enable_fan, expected_episodes=Non
     sp_hi = float(_scalar(dataset, "sp_hi"))
     minutes = float(_scalar(dataset, "sample_minutes"))
     dither = float(_scalar(dataset, "sample_dither"))
-    if (
-        not np.isfinite((sp_lo, sp_hi, minutes, dither)).all()
-        or not sp_lo < sp_hi
-        or minutes <= 0.0
-        or dither < 0.0
-    ):
+    if not np.isfinite((sp_lo, sp_hi, minutes, dither)).all() or not sp_lo < sp_hi or minutes <= 0.0 or dither < 0.0:
         raise ValueError("dataset span sampling metadata is invalid")
     expected_command = span_generation_command(
         episodes=int(_scalar(dataset, "episode_count")),
@@ -204,6 +199,7 @@ def build_span_net(
         expected_seed=expected_seed,
     )
     X0, UP, TS, U0 = dataset["X0"], dataset["u_prev"], dataset["t_set"], dataset["u0"]
+    Xin = np.column_stack([X0, UP, TS])
     resid = U0 - Q_ss(X0[:, DIDX], TS)  # target
 
     xm, xs = Xin.mean(0), Xin.std(0) + 1e-8

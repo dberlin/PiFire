@@ -118,10 +118,10 @@ def _run_stub(monkeypatch, lid_open):
 def test_lid_open_reports_zero_once_then_u_min_while_cycling(monkeypatch):
     core, plant = _run_stub(monkeypatch, [(LID_START, LID_DURATION)])
 
-    # Reports are (timestamp, ratio, source). The seed report at t=0 (before
-    # the loop) and every non-lid solve report RATIO/CONTROLLER; only the
-    # solves that land inside the window pin to u_min, and exactly one report
-    # in the whole run is the ratio=0.0 detection instant.
+    # Reports are (timestamp, ratio, source). The seed report at t=0 precedes
+    # the loop. At the detection instant, zero is applied immediately; the
+    # completed prior interval is then reported with its measured 0.5 duty.
+    # Every later solve inside the pause reports the realized u_min duty.
     seq = [(r.timestamp, r.ratio, r.source) for r in core.reports]
 
     zero_reports = [r for r in seq if r[1] == 0.0]
@@ -130,14 +130,13 @@ def test_lid_open_reports_zero_once_then_u_min_while_cycling(monkeypatch):
     )
 
     lid_open_reports = [r for r in seq if r[2] == OutputSource.LID_OPEN]
-    # The solve landing exactly on LID_START emits the 0.0 detection report
-    # plus its own u_min report; every later solve inside the PAUSE emits
-    # u_min. Solves after the pause expires are the controller's again, even
-    # though the lid is still open.
+    # The detection report precedes feedback for the completed interval. The
+    # latter still carries the pre-inhibit delivery; subsequent completed
+    # intervals inside the pause carry u_min.
     pause_solves = [LID_START + k for k in range(0, PAUSE, CYCLE_TIME)]
     assert lid_open_reports == [
-        (float(LID_START), U_MIN, OutputSource.LID_OPEN),
         (float(LID_START), 0.0, OutputSource.LID_OPEN),
+        (float(LID_START), RATIO, OutputSource.LID_OPEN),
     ] + [(float(t), U_MIN, OutputSource.LID_OPEN) for t in pause_solves[1:]], (
         f"lid-open report sequence drifted from hold.py's: {lid_open_reports}"
     )

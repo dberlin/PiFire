@@ -44,8 +44,8 @@
      healthy and the incumbent's cannot be moved by the fit under test.
    * SPLIT CONSISTENCY. The record is fitted twice more, on the prefix and on
      the suffix separately, and the two models are compared by BEHAVIOUR over a
-     fixed probe input -- degrees C RMS between their predictions, and the ratio
-     of the braking distances they imply. A record that determines the model
+     fixed probe input -- degrees C RMS between their predictions and the ratio
+     of their effective time constants. A record that determines the model
      gives two fits that agree about what the grill will do next; one that does
      not gives two fits that agree about the record and nothing else. This needs
      no plant, so a gate could compute it on a live grill.
@@ -70,10 +70,11 @@
  reported without a truth column at all.
 
  The two validation profiles are not among the eleven fitted ones and are never
- fitted, so no fit has seen a switch at their times. `val_steps` is out of family
- on its levels too (20/80/45/90%); `cq_probe`'s full-fire-then-cut levels do
- appear in the fitting set, at different switch times, which is why the truth
- error is pooled over both rather than read off the probe alone.
+ fitted, so no fit has seen a switch at their times. `val_steps` is out of
+ family on normalized levels too (0.20/0.80/0.45/0.90); `cq_probe`'s
+ full-fire-then-cut levels do appear in the fitting set, at different switch
+ times, which is why the truth error is pooled over both rather than read off
+ the probe alone.
 
  EVERYTHING THE RECOMMENDATION RESTS ON IS SCOPED TO WHAT THE GATE CAN SEE.
  controller/mpc.py refuses a refit below `_REFIT_MIN_SAMPLES` rows before
@@ -212,7 +213,7 @@ CQ_CUT = 900.0
 #: their parameters read, which across this model's scaling directions is not
 #: the same question.
 PROBE_T = np.arange(0.0, 1800.0 + LOG_PERIOD_S, LOG_PERIOD_S)
-PROBE_Q = np.where(PROBE_T < CQ_CUT, 100.0, 0.0)
+PROBE_Q = np.where(PROBE_T < CQ_CUT, 1.0, 0.0)
 
 
 def _plant(name, seed=0):
@@ -242,7 +243,7 @@ def plant_record(plant, profile, seed=0):
     duty, warm_duty, warm_s = profiles()[profile]
     t, true, meas = _drive(plant, duty, warm_duty, warm_s, seed=seed)
     k = slice(None, None, LOG_STRIDE)
-    return dict(plant=plant, profile=profile, t=t[k], y=meas[k], true=true[k], Q=(duty * 100.0)[k])
+    return dict(plant=plant, profile=profile, t=t[k], y=meas[k], true=true[k], Q=duty[k])
 
 
 def flat_synthetic(sigma_c, seed=0):
@@ -260,7 +261,7 @@ def flat_synthetic(sigma_c, seed=0):
     n = 400
     t = np.arange(n, dtype=float) * LOG_PERIOD_S
     y = 100.0 + rng.normal(0.0, sigma_c, size=n)
-    return dict(plant=None, profile=f"flat_synth_{sigma_c:g}", t=t, y=y, true=None, Q=np.full(n, 50.0))
+    return dict(plant=None, profile=f"flat_synth_{sigma_c:g}", t=t, y=y, true=None, Q=np.full(n, 0.5))
 
 
 def real_cook():
@@ -274,7 +275,7 @@ def real_cook():
         t=t - t[0],
         y=df["temp_c"].values.astype(float),
         true=None,
-        Q=df["Q"].values.astype(float),
+        Q=df["Q"].values.astype(float) / 100.0,
     )
 
 
@@ -379,7 +380,7 @@ def validation_runs(plant):
         out = {}
         for name, duty in VALIDATION.items():
             t, true, _ = _drive(plant, duty, 0.0, 0)
-            out[name] = (t, duty * 100.0, true)
+            out[name] = (t, duty, true)
         _VAL_CACHE[plant] = out
     return _VAL_CACHE[plant]
 
@@ -453,14 +454,13 @@ def measure(rec, incumbents):
         out["suf_converged"] = bool(suf["converged"])
         out["suf_fit"] = {key: float(suf[key]) for key in MODEL_KEYS}
         out["split_disagree"] = model_disagreement(out["pre_fit"], out["suf_fit"])
-        out["split_brake_ratio"] = float("nan")
         out["split_tau_ratio"] = _ratio(
             promo.effective_tau(out["pre_fit"], promo.T_HAZARD_C), promo.effective_tau(out["suf_fit"], promo.T_HAZARD_C)
         )
     else:
         out["suf_converged"] = False
         out["suf_fit"] = dict(out["pre_fit"])
-        out["split_disagree"] = out["split_brake_ratio"] = out["split_tau_ratio"] = float("inf")
+        out["split_disagree"] = out["split_tau_ratio"] = float("inf")
 
     for name, params in incumbents.items():
         out["insample"][name] = fit_quality(t, y, Q, params, T_amb=T_AMB)[0]
@@ -480,7 +480,6 @@ def measure(rec, incumbents):
     out["s_max"] = float(sv[0]) if sv is not None else float("nan")
     out["cond"] = float(sv[0] / sv[-1]) if (sv is not None and sv[-1] > 0) else float("inf")
     out["inv_cond"] = float(sv[-1] / sv[0]) if (sv is not None and sv[0] > 0) else 0.0
-    out["brake_s"] = float("nan")
     out["q_std"] = float(np.std(Q))
     out["q_range"] = float(np.max(Q) - np.min(Q))
     out["q_levels"] = float(len(np.unique(np.round(Q, 1))))
@@ -678,12 +677,15 @@ def main():
     #: tests/unit/mpc/test_model_promotion.py REAL_MAK_FIT, transcribed. If this
     #: harness cannot reproduce the repo's own recorded fit of this record, it
     #: is not measuring the shipped fitter and nothing below means anything.
-    recorded = dict(C_c=3591.95, theta=111.32, K_Q=9.9208)
+    recorded = dict(C_c=3591.95, theta=111.32, K_Q=992.08)
     say(
         "real-cook fit vs test_model_promotion.REAL_MAK_FIT: "
         + " ".join(f"{k}={rc_fit[k]:.5g} (recorded {v:g})" for k, v in recorded.items())
     )
-    say(f"  worst relative disagreement {max(abs(rc_fit[k] / v - 1.0) for k, v in recorded.items()):.2e}")
+    worst_disagreement = max(abs(rc_fit[k] / v - 1.0) for k, v in recorded.items())
+    say(f"  worst relative disagreement {worst_disagreement:.2e}")
+    if worst_disagreement > 1e-3:
+        raise ValueError("promotion experiment does not reproduce the recorded normalized real-cook fit")
     for plant in ("mak", "generic"):
         runs = validation_runs(plant)
         t, _, true = runs["cq_probe"]
@@ -819,11 +821,11 @@ def main():
     say("s_min@fit / s_min@ship = the smallest per-sample singular value of d(model)/d(log p) at")
     say("the fitted point and at the shipped incumbent's parameters. split_* compare the prefix fit")
     say("with a separate fit of the suffix: disagree is C RMS between their predictions over the")
-    say("fixed probe, brake and tau are the ratios of the braking distance and the effective tau at")
-    say("the hazard temperature they imply. pre_C_c/suf_C_c are the two fits' capacitances.")
+    say("fixed probe, and tau is the ratio of the effective time constants at the hazard")
+    say("temperature they imply. pre_C_c/suf_C_c are the two fits' capacitances.")
     hdr = (
         f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'sc':>3s} {'s_min@fit':>11s} {'s_min@ship':>11s} {'inv_cond':>9s} "
-        f"{'split_dis':>10s} {'split_brk':>10s} {'split_tau':>10s} {'pre_C_c':>10s} {'suf_C_c':>10s} "
+        f"{'split_dis':>10s} {'split_tau':>10s} {'pre_C_c':>10s} {'suf_C_c':>10s} "
         f"{'L/tau':>6s} {'Tspan':>7s} {'truth_c':>8s}"
     )
     say(hdr)
@@ -832,7 +834,7 @@ def main():
         say(
             f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
             f"{fmt(r['s_min'], 11, 6)} {fmt(r.get('s_min_shipped'), 11, 6)} {fmt(r['inv_cond'], 9, 5)} "
-            f"{fmt(r['split_disagree'], 10, 3)} {fmt(r['split_brake_ratio'], 10, 3)} {fmt(r['split_tau_ratio'], 10, 3)} "
+            f"{fmt(r['split_disagree'], 10, 3)} {fmt(r['split_tau_ratio'], 10, 3)} "
             f"{fmt(r['pre_fit']['C_c'], 10, 1)} {fmt(r['suf_fit']['C_c'], 10, 1)} "
             f"{fmt(r['len_over_tau'], 6, 2)} {fmt(r['temp_span'], 7, 1)} {fmt(r['truth_cand'], 8, 2)}"
         )
@@ -1160,21 +1162,9 @@ def main():
         ("len_over_tau", lambda r, inc: r["len_over_tau"], True),
         ("q_std", lambda r, inc: r["q_std"], True),
         ("split_disagree", lambda r, inc: r["split_disagree"], False),
-        ("split_brake_ratio", lambda r, inc: r["split_brake_ratio"], False),
         ("split_tau_ratio", lambda r, inc: r["split_tau_ratio"], False),
-        ("brake_vs_inc", lambda r, inc: brake_vs_inc(r, inc), True),
         ("(none)", lambda r, inc: 1.0, True),
     )
-
-    # Derived horizon metrics were retired with the runtime horizon floor.
-    inc_brake_of = {name: {} for name in incumbents}
-
-    def brake_vs_inc(r, inc):
-        """Candidate braking distance over the incumbent's. Below 1 is a shortening."""
-        b = inc_brake_of[inc].get(r["plant"])
-        if b is None or not (math.isfinite(b) and b > 0) or not math.isfinite(r["brake_s"]):
-            return float("nan")
-        return r["brake_s"] / b
 
     def population(inc_name):
         return [
@@ -1323,9 +1313,9 @@ def main():
     say("=" * 104)
     say("SECTION 8 -- rules built from more than one test")
     say("=" * 104)
-    say("No single statistic in SECTION 7 both keeps the justified promotions and zeroes DANGER, so")
-    say("the conjunctions are measured here. Every threshold quoted is a quantile of the values this")
-    say("run observed, printed with the quantile it came from, so it is traceable to Appendix B.")
+    say("Derived braking-distance statistics were retired with the runtime horizon floor.")
+    say("The remaining conjunction asks whether held-out fit quality plus an observed")
+    say("informativeness floor improves the shipped gate without inventing a coast-derived ratchet.")
     say()
 
     def quantile(vals, q):
@@ -1333,55 +1323,14 @@ def main():
         return v[min(len(v) - 1, max(0, int(round(q * (len(v) - 1)))))] if v else float("nan")
 
     all_smin = [r["s_min"] for r in sim_rows]
-    all_brk = [r["split_brake_ratio"] for r in sim_rows]
     smin_grid = [(q, quantile(all_smin, q)) for q in (0.0, 0.25, 0.5, 0.6, 0.75, 0.9)]
-    brk_grid = [(q, quantile(all_brk, q)) for q in (1.0, 0.9, 0.75, 0.5, 0.25, 0.1)]
     say(
         "s_min@fit thresholds (quantiles of the 176 simulated records): "
         + ", ".join(f"q{q:.2f}={v:.4g}" for q, v in smin_grid)
     )
-    say(
-        "split_brake_ratio thresholds (same):                          "
-        + ", ".join(f"q{q:.2f}={v:.4g}" for q, v in brk_grid)
-    )
     say()
-    for inc_name in incumbents:
-        for brake_gate in (False, True):
-            say(
-                f"### incumbent={inc_name}  signal=held-out warm  "
-                + (
-                    "plus brake_vs_inc >= 1.0 (candidate may not shorten the braking distance)"
-                    if brake_gate
-                    else "no braking-direction test"
-                )
-            )
-            say(f"  cells are TP/FP/DANGER over n={len(base[(inc_name, 'warm')])}")
-            say(f"  {'s_min >=':>12s} " + " ".join(f"{'brk<=' + f'{v:.3g}':>16s}" for _q, v in brk_grid))
-            for _qs, ts in smin_grid:
-                cells = []
-                for _qb, tb in brk_grid:
 
-                    def passes(r, inc, ts=ts, tb=tb, bg=brake_gate):
-                        if not (math.isfinite(r["s_min"]) and r["s_min"] >= ts):
-                            return False
-                        if not (math.isfinite(r["split_brake_ratio"]) and r["split_brake_ratio"] <= tb):
-                            return False
-                        if bg:
-                            b = brake_vs_inc(r, inc)
-                            if not (math.isfinite(b) and b >= 1.0):
-                                return False
-                        return True
-
-                    _n, _a, tp, fp, _fn, dg, _dgen, _wc, _wt = score_pred(inc_name, "warm", passes)
-                    cells.append(f"{tp}/{fp}/{dg}")
-                say(f"  {ts:>12.4g} " + " ".join(f"{c:>16s}" for c in cells))
-            say()
-
-    say("Named rules, side by side. 'today' is the shipped gate; every other row is the shipped")
-    say("evaluate() with the stated additions. T and B are the q0.60 and q0.25 grid values above.")
-    say()
     T_S = quantile(all_smin, 0.60)
-    B_S = quantile(all_brk, 0.25)
 
     def _always(r, inc):
         return True
@@ -1389,22 +1338,11 @@ def main():
     def _smin(r, inc):
         return math.isfinite(r["s_min"]) and r["s_min"] >= T_S
 
-    def _brk(r, inc):
-        return math.isfinite(r["split_brake_ratio"]) and r["split_brake_ratio"] <= B_S
-
-    def _dir(r, inc):
-        b = brake_vs_inc(r, inc)
-        return math.isfinite(b) and b >= 1.0
-
     RULES = (
         ("today (in-sample)", "insample", _always),
         ("held-out warm", "warm", _always),
-        ("held-out warm + dir", "warm", _dir),
         (f"held-out warm + s_min>={T_S:.3g}", "warm", _smin),
-        (f"held-out warm + split_brk<={B_S:.3g}", "warm", _brk),
-        ("held-out warm + s_min + split_brk", "warm", lambda r, i: _smin(r, i) and _brk(r, i)),
-        ("held-out warm + all three", "warm", lambda r, i: _smin(r, i) and _brk(r, i) and _dir(r, i)),
-        ("in-sample + all three", "insample", lambda r, i: _smin(r, i) and _brk(r, i) and _dir(r, i)),
+        (f"in-sample + s_min>={T_S:.3g}", "insample", _smin),
         ("never promote", "warm", lambda r, i: False),
     )
     say(
@@ -1420,26 +1358,9 @@ def main():
                 f"{dg:>7d} {dgen:>6d} {wc:>+12.2f} {wt:>+15.2f}"
             )
     say()
-    say("What the braking-direction test costs, stated separately because it is the one rule here")
-    say("with a structural objection as well as a price. Enforced as a hard gate it is a RATCHET: an")
-    say("adopted model's braking distance can then only ever grow, the horizon demand grows with it,")
-    say("and a grill that genuinely gets faster can never be learned. The price on this population:")
-    for inc_name in incumbents:
-        just = [r for r in population(inc_name) if r["truth_cand"] < inc_truth_of[inc_name][r["plant"]]]
-        blocked = [
-            r for r in just if not (math.isfinite(brake_vs_inc(r, inc_name)) and brake_vs_inc(r, inc_name) >= 1.0)
-        ]
-        say(
-            f"  incumbent={inc_name:11s} it refuses {len(blocked)} of the {len(just)} justified promotions "
-            f"({len(blocked) / max(1, len(just)):.0%}) -- models that predict the plant BETTER and read a shorter brake"
-        )
-    say()
     say("And what each rule would do with the real MAK cook (full 1240 s, shipped incumbent):")
-    say(
-        f"  s_min={full['s_min']:.4g} (needs >= {T_S:.4g})   split_brake_ratio={full['split_brake_ratio']:.4g} (needs <= {B_S:.4g})"
-    )
+    say(f"  s_min={full['s_min']:.4g} (needs >= {T_S:.4g})")
     say(f"  split_disagree={full['split_disagree']:.4g} C between its own two halves' fits over the fixed probe")
-    say(f"  brake_vs_inc={brake_vs_inc(full, 'shipped'):.4g} (needs >= 1.0)")
     for label, sig_key, pred in RULES:
         cand, inc = full[sig_key].get("cand", float("nan")), full[sig_key].get("shipped", float("nan"))
         ok, _ = gate_verdict(full, SHIPPED, cand, inc)

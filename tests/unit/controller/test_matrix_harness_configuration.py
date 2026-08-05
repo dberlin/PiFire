@@ -205,7 +205,6 @@ def test_fixed_cycle_manual_inhibit_reports_once_and_resumes_from_its_existing_p
     delivery = [step[0] for step in _Plant.instances[-1].steps]
     assert reports == [
         (0.0, 0.1, OutputSource.SEED),
-        (0.0, 0.25, OutputSource.CONTROLLER),
         (20.0, 0.0, OutputSource.MANUAL_OVERRIDE),
     ]
     assert delivery[20:24] == [0.0] * 4

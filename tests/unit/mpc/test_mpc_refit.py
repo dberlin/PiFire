@@ -12,6 +12,7 @@ from common.controller_model_state import ControllerModelStore
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR, PROMOTION_BOUNDS, evaluate
 from controller.mpc import _DEFAULTS, _HISTORY_MAX, _REFIT_INIT, Controller
 from controller.mpc_model import simulate_grey_box
+from docs.superpowers.experiments import promotion_signal
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 #: h_amb matches the shipped default rather than differing from it: `_FREE`
@@ -274,6 +275,27 @@ def test_the_floor_still_admits_the_shortest_real_cook_the_controller_will_fit()
     _, s_min = _shipped_fit(t, temp, Q)
     assert s_min == pytest.approx(1.098188, abs=1e-5)
     assert s_min >= _IDENTIFIABILITY_FLOOR
+
+
+def test_promotion_experiment_normalizes_every_model_input(monkeypatch):
+    """Runnable promotion evidence must use the same normalized load as production."""
+
+    def fake_drive(_plant, duty, _warm_duty, _warm_s, seed=0):
+        count = len(duty)
+        return np.arange(count, dtype=float), np.zeros(count), np.zeros(count)
+
+    monkeypatch.setattr(promotion_signal, "_drive", fake_drive)
+    monkeypatch.setattr(promotion_signal, "_VAL_CACHE", {})
+
+    plant = promotion_signal.plant_record("mak", "ramp_coast")
+    validation = promotion_signal.validation_runs("mak")
+    assert np.min(plant["Q"]) >= 0.0 and np.max(plant["Q"]) <= 1.0
+    assert all(np.min(Q) >= 0.0 and np.max(Q) <= 1.0 for _t, Q, _true in validation.values())
+    assert np.min(promotion_signal.PROBE_Q) >= 0.0 and np.max(promotion_signal.PROBE_Q) <= 1.0
+    assert np.min(promotion_signal.flat_synthetic(0.05)["Q"]) >= 0.0
+    assert np.max(promotion_signal.flat_synthetic(0.05)["Q"]) <= 1.0
+    assert np.min(promotion_signal.real_cook()["Q"]) >= 0.0
+    assert np.max(promotion_signal.real_cook()["Q"]) <= 1.0
 
 
 def test_the_two_statistics_rank_the_same_pair_of_records_in_opposite_orders():

@@ -61,7 +61,13 @@ def _session() -> ControlTraceRecord:
 
 
 def _update(
-    revision: int, timestamp_ms: int, temperature: float, load: float, *, inhibit: InhibitReason = InhibitReason.NONE
+    revision: int,
+    timestamp_ms: int,
+    temperature: float,
+    load: float,
+    *,
+    inhibit: InhibitReason = InhibitReason.NONE,
+    mode: ActuationMode = ActuationMode.FIXED_CYCLE,
 ) -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=timestamp_ms,
@@ -80,7 +86,7 @@ def _update(
             measured_temperature=temperature,
             raw_output=load,
             requested_output=load,
-            actuation_mode=ActuationMode.FIXED_CYCLE,
+            actuation_mode=mode,
             prior_requested_auger_duty=0.2,
             prior_realized_auger_duty=0.2,
             requested_fan_duty=100.0,
@@ -194,6 +200,57 @@ def test_load_trace_samples_pairs_temperature_with_its_own_complete_load(ds):
     np.testing.assert_allclose(combustion_load, (20.0, 25.0))
 
 
+def test_load_trace_samples_duration_weights_repeated_intervals_for_one_revision(ds):
+    records = _lifecycle_records()
+    records[3:4] = [
+        _applied(2, 3_000, 1_000, 3_000, 10.0),
+        _applied(2, 6_000, 3_000, 6_000, 30.0),
+    ]
+    append_control_trace(records)
+
+    _, _, combustion_load = load_trace_samples(session_id=SESSION_ID)
+
+    np.testing.assert_allclose(combustion_load, (22.0, 25.0))
+
+
+def test_load_trace_samples_skips_results_superseded_before_actuation(ds):
+    records = _lifecycle_records()
+    records.insert(3, _update(4, 4_000, 105.0, 23.0))
+    append_control_trace(records)
+
+    _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
+
+    np.testing.assert_allclose(temperature_c, (100.0, 110.0))
+    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+
+
+def test_load_trace_samples_rejects_missing_output_for_an_actuated_revision(ds):
+    records = _lifecycle_records()
+    records.insert(3, _update(4, 4_000, 105.0, 23.0))
+    frame = _teardown_frame()
+    frame_payload = replace(
+        frame.payload,
+        result_revision=4,
+        cycle_start_ms=4_000,
+        cycle_end_ms=5_000,
+        scheduled_off_seconds=1.0,
+    )
+    records.insert(4, frame.model_copy(update={"ts_ms": 5_000, "payload": frame_payload}))
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="actuated.*complete applied output"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_rejects_latest_actuated_revision_without_any_output(ds):
+    records = _lifecycle_records()
+    records.append(_teardown_frame())
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="actuated.*complete applied output"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
 @pytest.mark.parametrize("with_initial_seed", (True, False))
 def test_load_trace_samples_accepts_pristine_traces_with_or_without_initial_seed(ds, with_initial_seed):
     records = _lifecycle_records()
@@ -214,6 +271,32 @@ def test_load_trace_samples_rejects_a_late_revision_zero_seed(ds):
 
     with pytest.raises(TraceSelectionError, match="initial seed"):
         load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_rejects_seed_after_a_fixed_cycle_update(ds):
+    records = _lifecycle_records()
+    seed = records.pop(1)
+    records.insert(2, seed.model_copy(update={"ts_ms": 1_001}))
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="initial seed"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_allows_seed_after_unactuated_framed_update(ds):
+    records = _lifecycle_records()
+    seed = records.pop(1)
+    first_update = records[1]
+    records[1] = first_update.model_copy(
+        update={"payload": replace(first_update.payload, actuation_mode=ActuationMode.FRAMED_PULSE)}
+    )
+    records.insert(2, seed.model_copy(update={"ts_ms": 1_001}))
+    append_control_trace(records)
+
+    _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
+
+    np.testing.assert_allclose(temperature_c, (100.0, 110.0))
+    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
 
 
 def test_load_trace_samples_accepts_an_active_session_without_a_terminal_partial(ds):
@@ -256,15 +339,18 @@ def test_load_trace_samples_rejects_complete_output_before_its_matching_update(d
         load_trace_samples(session_id=SESSION_ID)
 
 
-def test_load_trace_samples_rejects_complete_output_after_the_next_update(ds):
+def test_load_trace_samples_accepts_output_recorded_after_a_newer_result(ds):
     records = _lifecycle_records()
     records[5:7] = [
         _update(12, 11_000, 120.0, 30.0),
         _applied(7, 11_001, 6_000, 11_000, 25.0),
     ]
     append_control_trace(records)
-    with pytest.raises(TraceSelectionError, match="precede the next accepted update"):
-        load_trace_samples(session_id=SESSION_ID)
+
+    _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
+
+    np.testing.assert_allclose(temperature_c, (100.0, 110.0))
+    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
 
 
 def test_load_trace_samples_accepts_skipped_numeric_revisions(ds):
@@ -335,12 +421,12 @@ def test_load_trace_samples_rejects_missing_complete_realized_load(ds):
         load_trace_samples(session_id=SESSION_ID)
 
 
-def test_load_trace_samples_rejects_duplicate_complete_output(ds):
+def test_load_trace_samples_rejects_overlapping_complete_output(ds):
     records = _lifecycle_records()
     records.append(_applied(7, 11_002, 1_000, 6_000, 20.0))
     append_control_trace(records)
 
-    with pytest.raises(TraceSelectionError, match="multiple complete"):
+    with pytest.raises(TraceSelectionError, match="contiguous intervals"):
         load_trace_samples(session_id=SESSION_ID)
 
 

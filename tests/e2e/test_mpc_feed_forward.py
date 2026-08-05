@@ -151,13 +151,26 @@ def test_committed_matrix_is_complete_finite_and_self_describing():
         summary = row["trace_session_summary"]
         assert row["trace_session_ids"] == [summary["session_id"]]
         assert summary["record_count"] == sum(summary["event_counts"].values())
-        for field in ("requested_revisions", "applied_revisions", "diagnostic_revisions"):
+        for field in ("requested_revisions", "diagnostic_revisions"):
             revisions = summary[field]
             assert revisions["record_count"] >= revisions["unique_count"] > 0
             assert 1 <= revisions["first"] <= revisions["last"]
             assert revisions["contiguous"] is True
+        applied_revisions = summary["applied_revisions"]
+        assert applied_revisions["record_count"] >= applied_revisions["unique_count"] > 0
+        assert 1 <= applied_revisions["first"] <= applied_revisions["last"]
         assert summary["requested_revisions"] == summary["diagnostic_revisions"]
-        assert summary["applied_revisions"]["last"] <= summary["requested_revisions"]["last"]
+        assert applied_revisions["last"] <= summary["requested_revisions"]["last"]
+        intervals = summary["applied_interval_summary"]
+        assert intervals["record_count"] > 0
+        assert intervals["complete_record_count"] > 0
+        assert intervals["positive_duration"] is True
+        assert intervals["contiguous"] is True
+        assert intervals["overlap_count"] == intervals["gap_count"] == 0
+        assert intervals["total_duration_s"] > 0.0
+        assert 0.0 <= intervals["mean_auger_duty"] <= 1.0
+        assert 0.0 <= intervals["mean_combustion_load"] <= 1.0
+        assert intervals["normalized_load_inverted"] is True
         assert set(row["metrics"]) >= METRIC_FIELDS
         assert all(math.isfinite(float(row["metrics"][field])) for field in FINITE_METRIC_FIELDS)
         settle_time = row["metrics"]["settle_time_s"]
@@ -250,9 +263,7 @@ def test_shipment_decision_rejects_incomplete_or_foreign_evidence():
         experiment.decision_from_rows(rows, delayed_cases, duplicate_pulse_evidence)
 
     foreign_pulse_evidence = copy.deepcopy(pulse_evidence)
-    foreign_pulse_evidence["open_loop"].append(
-        {**foreign_pulse_evidence["open_loop"][0], "arm": "foreign_pulse_arm"}
-    )
+    foreign_pulse_evidence["open_loop"].append({**foreign_pulse_evidence["open_loop"][0], "arm": "foreign_pulse_arm"})
     with pytest.raises(ValueError, match="pulse|complete"):
         experiment.decision_from_rows(rows, delayed_cases, foreign_pulse_evidence)
 
@@ -268,17 +279,13 @@ def test_shipment_decision_rejects_incomplete_or_foreign_evidence():
         (
             "low_fire_floor_removed",
             lambda rows, _cases, pulse: next(
-                row
-                for row in pulse["open_loop"]
-                if row["arm"] == "linear_coupled_2s_frame_20s" and row["q"] == 0.01
+                row for row in pulse["open_loop"] if row["arm"] == "linear_coupled_2s_frame_20s" and row["q"] == 0.01
             ).update(mean_duty=0.12),
         ),
         (
             "pulse_transition_envelope_respected",
             lambda rows, _cases, pulse: next(
-                row
-                for row in pulse["open_loop"]
-                if row["arm"] == "linear_coupled_2s_frame_20s" and row["q"] == 0.5
+                row for row in pulse["open_loop"] if row["arm"] == "linear_coupled_2s_frame_20s" and row["q"] == 0.5
             ).update(switches_per_hour=361.0),
         ),
         (
@@ -353,16 +360,14 @@ def test_shipment_decision_rejects_incomplete_or_foreign_evidence():
         ),
         (
             "capability_rows_upper_unreachable",
-            lambda rows, _cases, _pulse: next(
-                row for row in rows if row["scenario"] == CAPABILITY_SCENARIO
-            ).update(reachability="reachable"),
+            lambda rows, _cases, _pulse: next(row for row in rows if row["scenario"] == CAPABILITY_SCENARIO).update(
+                reachability="reachable"
+            ),
         ),
         (
             "ranked_reachable_pairs_complete",
             lambda rows, _cases, _pulse: next(
-                row
-                for row in rows
-                if row["arm"] == ARM_IDS[2] and row["scenario"] == "steady_225"
+                row for row in rows if row["arm"] == ARM_IDS[2] and row["scenario"] == "steady_225"
             ).update(reachability="unknown_authority"),
         ),
         (
@@ -379,33 +384,31 @@ def test_shipment_decision_rejects_incomplete_or_foreign_evidence():
         ),
         (
             "delayed_stale_authority_bounded",
-            lambda _rows, cases, _pulse: next(
-                case for case in cases if case["delay_seconds"] == 1
-            ).update(max_stale_authority_periods=99.0),
+            lambda _rows, cases, _pulse: next(case for case in cases if case["delay_seconds"] == 1).update(
+                max_stale_authority_periods=99.0
+            ),
         ),
         (
             "delayed_deadline_stale_sequence",
-            lambda _rows, cases, _pulse: next(
-                case for case in cases if case["delay_seconds"] == 1
-            ).update(deadline_misses=0),
+            lambda _rows, cases, _pulse: next(case for case in cases if case["delay_seconds"] == 1).update(
+                deadline_misses=0
+            ),
         ),
         (
             "delayed_deadline_stale_sequence",
-            lambda _rows, cases, _pulse: next(
-                case for case in cases if case["delay_seconds"] == 1
-            ).update(stale_protection_observed=False),
+            lambda _rows, cases, _pulse: next(case for case in cases if case["delay_seconds"] == 1).update(
+                stale_protection_observed=False
+            ),
         ),
         (
             "delayed_warning_recovery",
-            lambda _rows, cases, _pulse: next(
-                case for case in cases if case["delay_seconds"] == 1
-            )["warning_recovery"].update(recovered=False),
+            lambda _rows, cases, _pulse: next(case for case in cases if case["delay_seconds"] == 1)[
+                "warning_recovery"
+            ].update(recovered=False),
         ),
         (
             "delayed_stop_lid_manual_preemption",
-            lambda _rows, cases, _pulse: cases[0]["preemptions"]["manual"].update(
-                command_on_after_preemption=True
-            ),
+            lambda _rows, cases, _pulse: cases[0]["preemptions"]["manual"].update(command_on_after_preemption=True),
         ),
     ),
 )

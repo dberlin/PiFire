@@ -111,7 +111,7 @@ def test_delayed_solver_evidence_preserves_scheduler_safety_and_single_revision_
         assert all(
             evidence["command_on_after_preemption"] is False
             and evidence["observed_at_s"] > 0.0
-            and evidence["runtime_event"] in {"stop", "lid_detected", "manual_takeover"}
+            and evidence["runtime_event"] in {"mode_change", "lid_detected", "manual_takeover"}
             and evidence["recorder_safety_events"] >= 1
             and evidence["scheduler_reset_observed"] is True
             and evidence["interrupted_frame"]

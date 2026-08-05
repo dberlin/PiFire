@@ -97,7 +97,6 @@ class Scenario:
     manual_inhibit: list[tuple[int, int]] = field(default_factory=list)
 
 
-
 # This fixed target is above the full-duty authority calculated for both
 # unchanged plants.  It is a feasibility probe, never a ranked quality row.
 CAPABILITY_UNREACHABLE_HIGH_TARGET_F = 2_000.0
@@ -411,9 +410,10 @@ def run_scenario(
                             fan_frac = float(fan["duty"]) / 100.0
                     else:
                         requested = float(raw)
-                    diagnostics = core.trace_diagnostics()
-                    if diagnostics is not None:
-                        solve_durations.append(float(diagnostics.solve_duration_seconds))
+                    diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
+                    duration = getattr(diagnostics, "solve_duration_seconds", None)
+                    if duration is not None:
+                        solve_durations.append(float(duration))
                         deadline_misses.append(int(diagnostics.deadline_miss_count))
                         stale_episodes += int(diagnostics.stale_state.value == "stale")
                 else:

@@ -171,10 +171,6 @@ class NetPolicy:
         inp = np.concatenate([x, [float(u_prev), ts_net]])
         return self._net_residual(inp)
 
-    def firing_rate(self, x_hat, u_prev, set_point_c):
-        """Compatibility inspection helper for the composed normalized command."""
-        return float(np.clip(self.firing_rate_raw(x_hat, u_prev, set_point_c), 0.0, 1.0))
-
     def firing_rate_raw(self, x_hat, u_prev, set_point_c):
         """Return the unclipped baseline plus learned transient residual."""
         x = np.asarray(x_hat, dtype=float).reshape(-1)

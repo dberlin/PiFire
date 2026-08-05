@@ -183,14 +183,8 @@ def _sanitized_copy(mapping):
 def _load_net_policy(cfg, n_horizon):
     """Load the numpy net policy, or return None to fall back to the NLP.
 
-    The net approximates the NLP's policy at one horizon, so the horizon it is
-    judged against is the EFFECTIVE one the NLP would be built at, not cfg's
-    floor. An artifact trained at the shorter length is a policy that brakes
-    from a shorter view of the coast, which is the whole thing being fixed.
-
-    Module-level (not a method) because `requires_modules` below has to ask the
-    same question before any Controller exists -- and asking it any other way
-    would mean re-deriving this logic in a second place.
+    The net approximates the NLP policy at one configured planning horizon, so
+    an artifact trained for any other horizon must be rejected.
     """
     from controller.mpc_net import NetPolicy, net_path_for
 
@@ -219,6 +213,7 @@ def _load_net_policy(cfg, n_horizon):
         else:
             print("[mpc] net policy calibration does not match config; using NLP")
         return None
+    return net
 
 
 _PHYSICAL_PARAMS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")

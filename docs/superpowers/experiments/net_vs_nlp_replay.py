@@ -284,7 +284,7 @@ def replay(
             # Sibling pin for `core._policy_u_prev`, recorded in `triples` above
             # as "the u_prev the policy was asked about": Task 13 redefined it
             # from `float(core._last_Q)` to `clip(core._applied_Q, Q_min,
-            # Q_max)`. mpc.py still passes exactly this value to firing_rate(),
+            # Q_max)`. mpc.py still passes exactly this value to firing_rate_raw(),
             # so the harness measures what it claims -- pinned here the same
             # way `_last_Q` is, so a future redefinition fails loudly instead
             # of sliding through unnoticed. Compared against the value
@@ -407,7 +407,7 @@ def replay(
     lid_mask = np.asarray(in_lid)
 
     net_raw_vals = np.asarray([net.firing_rate_raw(x, u, sp) for x, u, sp in triples])
-    diffs_clamped = np.asarray([abs(net.firing_rate(x, u, sp) - q) for (x, u, sp), q in zip(triples, q_nlp_clamped)])
+    diffs_clamped = np.asarray([abs(np.clip(nq, 0.0, 1.0) - q) for nq, q in zip(net_raw_vals, q_nlp_clamped)])
     diffs_raw = np.asarray([abs(nq - q) for nq, q in zip(net_raw_vals, q_nlp_raw)])
 
     def _excursions(mask):

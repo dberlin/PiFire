@@ -72,8 +72,7 @@ def _span_dataset():
         "sample_minutes": np.float64(120.0),
         "sample_dither": np.float64(0.08),
         "generation_command": np.array(
-            "sample_mpc.py --mode span -e 500 --minutes 120.0 --dither 0.08 "
-            "--sp-lo 100.0 --sp-hi 290.0 --seed 0"
+            "sample_mpc.py --mode span -e 500 --minutes 120.0 --dither 0.08 --sp-lo 100.0 --sp-hi 290.0 --seed 0"
         ),
     }
     for key, value in _DEFAULTS.items():
@@ -105,6 +104,23 @@ def test_span_dataset_validator_accepts_complete_current_provenance():
     assert str(provenance["generation_command"]).endswith("--seed 0")
 
 
+def test_span_trainer_consumes_validated_array_bundle():
+    sample_count = 10
+    state_width = int(_DEFAULTS["n_delay"]) + 2
+    dataset = {
+        "X0": np.zeros((sample_count, state_width), dtype=np.float64),
+        "u_prev": np.linspace(0.0, 1.0, sample_count),
+        "t_set": np.linspace(100.0, 120.0, sample_count),
+        "u0": np.linspace(0.1, 0.9, sample_count),
+        "provenance": {"marker": np.array("validated")},
+    }
+
+    net, _stats, provenance = approxmpc_span.build_span_net(epochs=0, dataset=dataset)
+
+    assert net.net[0].in_features == state_width + 2
+    assert str(provenance["marker"]) == "validated"
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [
@@ -123,9 +139,7 @@ def test_span_dataset_validator_rejects_stale_or_fabricated_provenance(key, valu
     dataset[key] = value
 
     with pytest.raises(ValueError, match=key):
-        approxmpc_span.validate_span_dataset(
-            dataset, expected_enable_fan=False, expected_episodes=500, expected_seed=0
-        )
+        approxmpc_span.validate_span_dataset(dataset, expected_enable_fan=False, expected_episodes=500, expected_seed=0)
 
 
 def test_span_dataset_validator_rejects_metadata_free_input():
@@ -133,9 +147,7 @@ def test_span_dataset_validator_rejects_metadata_free_input():
     del dataset["generation_version"]
 
     with pytest.raises(ValueError, match="generation_version"):
-        approxmpc_span.validate_span_dataset(
-            dataset, expected_enable_fan=False, expected_episodes=500, expected_seed=0
-        )
+        approxmpc_span.validate_span_dataset(dataset, expected_enable_fan=False, expected_episodes=500, expected_seed=0)
 
 
 def test_export_rejects_mismatched_provenance_before_stamping_an_artifact(tmp_path):

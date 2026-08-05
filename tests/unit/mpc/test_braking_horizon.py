@@ -1,6 +1,7 @@
 """Contract tests for the committed production-path coast experiment."""
 
 from __future__ import annotations
+import json
 
 from typing import Any
 
@@ -16,6 +17,14 @@ PLANTS = ("GrillSim", "MAKGrillSim")
 
 def _celsius(fahrenheit: float) -> float:
     return (fahrenheit - 32.0) * 5.0 / 9.0
+
+
+def _nominal_model_bound() -> float:
+    return max(
+        braking_horizon.braking_distance(dict(braking_horizon._DEFAULTS), reference)
+        for reference in (braking_horizon.T_FLOOR_C, braking_horizon.T_HAZARD_C)
+        if reference > float(braking_horizon._DEFAULTS["T_amb"])
+    )
 
 
 def _payload() -> dict[str, Any]:
@@ -60,7 +69,7 @@ def _payload() -> dict[str, Any]:
                 "actual_auger_feedback": "commanded",
             },
         },
-        "nominal_model_bound_s": 1.0,
+        "nominal_model_bound_s": _nominal_model_bound(),
         "maximum_measured_rise_c": 1.0,
         "rows": rows,
     }
@@ -128,3 +137,50 @@ def test_coast_measurement_rejects_a_cut_that_is_not_rising_or_near_its_target()
 
     with pytest.raises(ValueError, match="target"):
         braking_horizon._validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("container", "key", "invalid"),
+    [
+        ("payload", "experiment", "foreign-experiment"),
+        ("payload", "regeneration_command", "python foreign.py"),
+        ("conditions", "coast_seconds", 60),
+        ("conditions", "temperature_source", "measured noisy probe"),
+    ],
+)
+def test_coast_measurement_rejects_foreign_provenance(container, key, invalid):
+    payload = _payload()
+    target = payload if container == "payload" else payload["conditions"]
+    target[key] = invalid
+
+    with pytest.raises(ValueError, match="evidence"):
+        braking_horizon._validate(payload)
+
+
+def test_coast_measurement_rejects_a_foreign_nominal_bound():
+    payload = _payload()
+    payload["nominal_model_bound_s"] += 1.0
+
+    with pytest.raises(ValueError, match="nominal model braking bound"):
+        braking_horizon._validate(payload)
+
+
+def test_coast_measurement_rejects_inconsistent_rise_or_peak_time():
+    payload = _payload()
+    row = payload["rows"][0]
+    row["rise_c"] += 0.25
+
+    with pytest.raises(ValueError, match="peak/rise arithmetic"):
+        braking_horizon._validate(payload)
+
+    payload = _payload()
+    payload["rows"][0]["seconds_to_peak"] = braking_horizon.COAST_SECONDS + 1
+
+    with pytest.raises(ValueError, match="time-to-peak"):
+        braking_horizon._validate(payload)
+
+
+def test_committed_coast_evidence_satisfies_the_full_validator():
+    payload = json.loads(braking_horizon.OUTPUT.read_text(encoding="utf-8"))
+
+    braking_horizon._validate(payload)

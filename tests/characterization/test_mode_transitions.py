@@ -239,7 +239,9 @@ def test_maxtemp_trip_breaks_before_actuation():
     control_data["safety"]["startuptemp"] = 150
     control_data["safety"]["afterstarttemp"] = 200  # setup_safety OK
     probes = FakeProbes().script([200, 550, 550])
-    runner = FakeControllerRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 4)
+    runner = FakeControllerRunner(period=0.0).script(
+        [ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 4
+    )
     result = run_mode(
         "Hold",
         settings=settings,
@@ -267,7 +269,9 @@ def test_check_safety_flameout_breaks_before_actuation():
     control_data["safety"]["afterstarttemp"] = 200
     control_data["safety"]["reigniteretries"] = 0  # -> ERROR verdict
     probes = FakeProbes().script([200, 100, 100])
-    runner = FakeControllerRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 4)
+    runner = FakeControllerRunner(period=0.0).script(
+        [ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 4
+    )
     result = run_mode(
         "Hold",
         settings=settings,
@@ -294,7 +298,9 @@ def test_setup_safety_inactive_skips_loop_but_runs_teardown():
     control_data["safety"]["afterstarttemp"] = 100  # < startuptemp -> flameout at setup
     control_data["safety"]["reigniteretries"] = 0  # -> ERROR verdict, Inactive
     probes = FakeProbes().script([100, 100, 100])
-    runner = _StopRecordingRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 2)
+    runner = _StopRecordingRunner(period=0.0).script(
+        [ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 2
+    )
     result = run_mode(
         "Hold",
         settings=settings,

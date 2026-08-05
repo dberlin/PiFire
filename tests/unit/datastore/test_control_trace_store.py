@@ -136,7 +136,7 @@ def test_identifiers_are_normalized_for_session_cook_reads_and_session_deletion(
 
 def test_invalid_record_is_rejected_before_transaction(ds, monkeypatch):
     valid = _record(1_000, "session-a")
-    invalid = valid.model_copy(update={"schema_version": 2})
+    invalid = valid.model_copy(update={"schema_version": 1})
 
     def transaction_must_not_open():
         raise AssertionError("invalid records must be rejected before opening a transaction")

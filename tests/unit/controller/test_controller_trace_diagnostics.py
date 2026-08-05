@@ -74,7 +74,7 @@ class _Estimator:
 
 
 class _Policy:
-    def firing_rate(self, x_hat, previous_load, setpoint_c):
+    def firing_rate_raw(self, x_hat, previous_load, setpoint_c):
         assert previous_load == 0.7
         assert setpoint_c == 120.0
         return 1.1
@@ -151,7 +151,7 @@ def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monk
 
 def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch):
     class _FailingPolicy:
-        def firing_rate(self, *_):
+        def firing_rate_raw(self, *_):
             raise RuntimeError("solve failed")
 
     core = _bare_mpc_controller()
@@ -174,7 +174,7 @@ def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch)
 
 def test_mpc_policy_timing_excludes_failure_logging(monkeypatch):
     class _FailingPolicy:
-        def firing_rate(self, *_):
+        def firing_rate_raw(self, *_):
             raise RuntimeError("solve failed")
 
     core = _bare_mpc_controller()

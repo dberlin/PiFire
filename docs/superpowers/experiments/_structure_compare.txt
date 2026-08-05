@@ -127,38 +127,6 @@ short-circuits on the PROMOTION_BOUNDS check for h_amb first. Those bounds are
 byte-identical at both revisions -- h_amb (1e-4, 1e3) -- so what separates the
 arms here is the fitted value, not a change to the gate.
 
-HORIZON -- configured floor vs what was built, and what the gate demanded
-------------------------------------------------------------------------------
-`brake s` is longest_braking_distance of the model the run was BUILT with,
-which is what effective_n_horizon raises the horizon to cover. It is blank
-for the two-lump arms: their coast is not this estimator's to compute.
-
-ONLY THE U3/F3 ROWS TEST ANYTHING HERE. `built` is read from the controller's
-`_built_n_horizon`, which does not exist at 282ee65c9309, so on every U5/F5 row
-it falls back to the configured value and the two columns agree by
-construction. The claim that the derived horizon never bound is therefore over
-the 24 U3/F3 runs, not all 48. On those, the configured floor was the binding
-term every time: the longest coast any model implied is the largest `brake s`
-below, against the 600 s that 24 steps of 25 s t_step already cover, and
-neither the 2400 s nor the 96-step cap was approached.
-plant        arm   cook  configured   built   brake s  gate needed
-GrillSim     U5       1          24      24                      -
-GrillSim     F5       1          24      24                      -
-GrillSim     F5       2          24      24                      -
-GrillSim     F5       3          24      24                      -
-GrillSim     U3       1          24      24       150            -
-GrillSim     F3       1          24      24       150            -
-GrillSim     F3       2          24      24        94            -
-GrillSim     F3       3          24      24        94            -
-MAKGrillSim  U5       1          24      24                      -
-MAKGrillSim  F5       1          24      24                      -
-MAKGrillSim  F5       2          24      24                      -
-MAKGrillSim  F5       3          24      24                      -
-MAKGrillSim  U3       1          24      24       150            -
-MAKGrillSim  F3       1          24      24       150            -
-MAKGrillSim  F3       2          24      24       323            -
-MAKGrillSim  F3       3          24      24       420            -
-
 WALL CLOCK
 ------------------------------------------------------------------------------
   F5 shard: 208 s over 8 workers, 24 runs

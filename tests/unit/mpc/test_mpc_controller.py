@@ -490,7 +490,7 @@ def test_a_policy_that_always_raises_does_not_freeze_the_output_in_silence(capsy
     c = _make()
 
     class _AlwaysRaises:
-        def firing_rate(self, *a, **k):
+        def firing_rate_raw(self, *a, **k):
             raise RuntimeError("simulated policy failure")
 
     c._net = _AlwaysRaises()
@@ -528,7 +528,7 @@ def test_a_recovering_policy_clears_the_frozen_output_report(capsys):
         def __init__(self):
             self.calls = 0
 
-        def firing_rate(self, *a, **k):
+        def firing_rate_raw(self, *a, **k):
             self.calls += 1
             if self.calls <= 2:
                 raise RuntimeError("transient")

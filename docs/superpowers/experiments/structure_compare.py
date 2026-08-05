@@ -36,11 +36,9 @@ uncalibrated floor is a property of the code that has to beat it:
   F3  three free    the same, at HEAD.
 
 An adopted model reaches the next cook the way production carries it: mpc.py's
-`_adopt_model` writes into `cfg` and rebuilds nothing, because the next Hold
-builds fresh from settings. So cook N+1 is a NEW controller constructed with
-cook N's adopted parameters, which is also the only way the horizon a model
-implies can be re-derived -- mutating a core that has already assembled its NLP
-would silently keep the old one.
+`_adopt_model` writes into `cfg`, and the next Hold builds a new controller
+from those settings. Mutating a core that has already assembled its estimator
+and policy would silently keep stale internal state and confound the next cook.
 
 HOW IDENTIFICATION IS SWITCHED ON. Not by `enable_identification`. That key is
 a settings-surface flag read in the Hold mode's teardown path; `controller/mpc.py`

@@ -49,6 +49,7 @@ class ControllerState:
     pulse_maximum_duty: float = 1.0
     pulse_stale_command: bool = False
     pulse_frame_combustion_load: float | None = None
+    pulse_frame_requested_auger_duty: float = 0.0
     pulse_frame_requested_fan_duty: float | None = None
     pulse_frame_applied_fan_duty: float | None = None
     pulse_frame_stale_command: bool = False

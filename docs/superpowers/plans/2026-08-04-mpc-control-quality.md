@@ -537,14 +537,14 @@ Search live code for deleted horizon symbols/promises. Expected revisions remain
 
 ### Steps
 
-- [ ] **Step 1: Run focused retained-controller/runtime suites**
+- [x] **Step 1: Run focused retained-controller/runtime suites**
 
 ```bash
 uv run pytest tests/unit/mpc tests/unit/runtime tests/unit/controller \
   tests/unit/common/test_settings_migration_mpc_combustion_load.py -v
 ```
 
-- [ ] **Step 2: Run slow/e2e experiments**
+- [x] **Step 2: Run slow/e2e experiments**
 
 ```bash
 uv run pytest tests/e2e/test_mpc_feed_forward.py \
@@ -553,7 +553,7 @@ uv run pytest tests/e2e/test_mpc_feed_forward.py \
 
 Verify both plants, fixed seeds, delayed-solver injection, upper infeasibility, and trace replay.
 
-- [ ] **Step 3: Run full project verification**
+- [x] **Step 3: Run full project verification**
 
 Use context-mode for large outputs:
 
@@ -564,13 +564,13 @@ cd web-react && bun run gen:types && bun run typecheck && bun run lint && bun ru
 
 Run Python formatting/static checks configured by the project. Record exact observed totals.
 
-- [ ] **Step 4: Smoke the complete path**
+- [x] **Step 4: Smoke the complete path**
 
 Run a fake/simulated Hold with MPC, observe asynchronous results, 2-second/20-second pulse transitions, coupled fan commands, applied-load feedback, upper advisory behavior, five-second SQLite trace rows before teardown, and immediate Stop.
 
 Replay the session and run database-backed calibration extraction. This observed scenario—not a narrowed unit test—is final behavior proof.
 
-- [ ] **Step 5: Audit clean-cutover invariants**
+- [x] **Step 5: Audit clean-cutover invariants**
 
 Confirm:
 
@@ -586,7 +586,7 @@ Confirm:
 - `COAST_BOUND` unchanged;
 - experiments include both plants and recorded MAK calibration evidence.
 
-- [ ] **Step 6: Review Jujutsu revisions**
+- [x] **Step 6: Review Jujutsu revisions**
 
 ```bash
 jj --no-pager log -r 'trunk()..@' --no-graph -T 'change_id.short() ++ " " ++ description.first_line() ++ "\n"'

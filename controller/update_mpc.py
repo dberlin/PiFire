@@ -31,9 +31,12 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from common.control_trace import (
+    ActuationMode,
     AppliedOutputPayload,
     ControlTraceRecord,
     ControllerType,
+    FixedCycleFramePayload,
+    FramedPulseFramePayload,
     InhibitReason,
     MpcFailureState,
     MpcUpdatePayload,
@@ -162,9 +165,10 @@ def load_trace_samples(
         previous_ts = record.ts_ms
 
     updates: list[tuple[int, MpcUpdatePayload]] = []
-    complete_outputs: dict[int, tuple[int, AppliedOutputPayload]] = {}
+    complete_outputs: dict[int, list[tuple[int, AppliedOutputPayload]]] = {}
     seed_outputs = 0
     partial_outputs: list[tuple[int, AppliedOutputPayload]] = []
+    actuated_revisions: set[int] = set()
     previous_revision = -1
     previous_wall_ms = -1
     seed_allowed = False
@@ -184,7 +188,6 @@ def load_trace_samples(
                 raise TraceSelectionError("revision zero applied output must be the one complete initial seed")
             seed_allowed = False
             continue
-        seed_allowed = False
         if isinstance(payload, MpcUpdatePayload):
             revision = payload.result_revision
             if revision <= previous_revision:
@@ -198,22 +201,33 @@ def load_trace_samples(
             updates.append((index, payload))
             previous_revision = revision
             previous_wall_ms = payload.wall_ms
+            if payload.actuation_mode is ActuationMode.FIXED_CYCLE:
+                seed_allowed = False
         elif isinstance(payload, AppliedOutputPayload):
+            seed_allowed = False
             revision = payload.result_revision
             if payload.output_source is not OutputSource.CONTROLLER:
                 raise TraceSelectionError(f"MPC revision {revision} is inhibited by {payload.output_source.value}")
             if payload.sample_complete:
                 if payload.realized_combustion_load is None:
                     raise TraceSelectionError(f"MPC revision {revision} has no realized combustion load")
-                if revision in complete_outputs:
-                    raise TraceSelectionError(f"MPC revision {revision} has multiple complete applied-output records")
-                complete_outputs[revision] = (index, payload)
+                complete_outputs.setdefault(revision, []).append((index, payload))
             else:
                 if payload.realized_combustion_load is not None:
                     raise TraceSelectionError(
                         f"MPC revision {revision} has a malformed incomplete applied-output interval"
                     )
                 partial_outputs.append((index, payload))
+        elif isinstance(payload, FixedCycleFramePayload):
+            if payload.result_revision > 0:
+                seed_allowed = False
+                if payload.inhibit_reason is InhibitReason.NONE:
+                    actuated_revisions.add(payload.result_revision)
+        elif isinstance(payload, FramedPulseFramePayload):
+            if payload.result_revision > 0:
+                seed_allowed = False
+                if payload.inhibit_reason is InhibitReason.NONE and not payload.skipped:
+                    actuated_revisions.add(payload.result_revision)
 
     if len(updates) < 2:
         raise TraceSelectionError("selected control trace requires at least two completed MPC control updates")
@@ -233,35 +247,64 @@ def load_trace_samples(
         ):
             raise TraceSelectionError("terminal incomplete applied-output interval has a later update or output")
         if complete_outputs:
-            latest_complete = max(complete_outputs.values(), key=lambda item: item[0])[1]
+            latest_complete = max(
+                (item for revision_outputs in complete_outputs.values() for item in revision_outputs),
+                key=lambda item: item[0],
+            )[1]
             if partial.interval_start_ms < latest_complete.interval_end_ms:
                 raise TraceSelectionError(
                     "terminal incomplete applied-output interval does not follow its complete interval"
                 )
 
     update_indices = {payload.result_revision: index for index, payload in updates}
-    for revision, (output_index, _) in complete_outputs.items():
+    for revision, revision_outputs in complete_outputs.items():
         if revision not in update_indices:
             raise TraceSelectionError("complete applied output does not match an accepted MPC update")
-        if output_index <= update_indices[revision]:
-            raise TraceSelectionError("complete applied output must follow its accepted update")
-    for update_position, (_, update) in enumerate(updates[:-1]):
-        complete_output = complete_outputs.get(update.result_revision)
-        if complete_output is None:
-            raise TraceSelectionError(
-                "every accepted MPC update except the latest requires one complete applied output"
-            )
-        next_update_index = updates[update_position + 1][0]
-        if complete_output[0] >= next_update_index:
-            raise TraceSelectionError("complete applied output must precede the next accepted update")
+        previous_end_ms: int | None = None
+        for output_index, output in revision_outputs:
+            if output_index <= update_indices[revision]:
+                raise TraceSelectionError("complete applied output must follow its accepted update")
+            duration_ms = output.interval_end_ms - output.interval_start_ms
+            if duration_ms < 0:
+                raise TraceSelectionError("complete applied output interval must not run backwards")
+            if len(revision_outputs) > 1 and duration_ms == 0:
+                raise TraceSelectionError("repeated complete applied outputs must span positive intervals")
+            if previous_end_ms is not None and output.interval_start_ms != previous_end_ms:
+                raise TraceSelectionError("repeated complete applied outputs must cover contiguous intervals")
+            previous_end_ms = output.interval_end_ms
 
-    paired_updates = updates[:-1]
+    terminal_partial_revision = partial_outputs[0][1].result_revision if partial_outputs else None
+    missing_actuated_revisions = sorted(
+        revision
+        for revision in actuated_revisions
+        if revision in update_indices and revision not in complete_outputs and revision != terminal_partial_revision
+    )
+    if missing_actuated_revisions:
+        raise TraceSelectionError(
+            f"MPC revision {missing_actuated_revisions[0]} was actuated without a complete applied output"
+        )
+
+    def realized_load(revision_outputs: list[tuple[int, AppliedOutputPayload]]) -> float:
+        if len(revision_outputs) == 1:
+            return float(revision_outputs[0][1].realized_combustion_load)
+        duration_ms = sum(output.interval_end_ms - output.interval_start_ms for _, output in revision_outputs)
+        return (
+            sum(
+                float(output.realized_combustion_load) * (output.interval_end_ms - output.interval_start_ms)
+                for _, output in revision_outputs
+            )
+            / duration_ms
+        )
+
+    paired_updates = [(index, update) for index, update in updates if update.result_revision in complete_outputs]
+    if len(paired_updates) < 2:
+        raise TraceSelectionError("selected control trace requires at least two applied MPC control updates")
     start_ms = paired_updates[0][1].wall_ms
     return (
         np.asarray([(update.wall_ms - start_ms) / 1000.0 for _, update in paired_updates], dtype=float),
         np.asarray([update.measured_temperature for _, update in paired_updates], dtype=float),
         np.asarray(
-            [complete_outputs[update.result_revision][1].realized_combustion_load for _, update in paired_updates],
+            [realized_load(complete_outputs[update.result_revision]) for _, update in paired_updates],
             dtype=float,
         ),
     )

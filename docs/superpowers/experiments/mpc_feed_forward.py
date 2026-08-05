@@ -400,9 +400,7 @@ class _RunTrace:
                 interval_end_ms=end_ms,
                 realized_auger_duty=realized_duty,
                 realized_combustion_load=(
-                    normalized_load_from_auger_duty(realized_duty, u_max=allocation.u_max)
-                    if sample_complete
-                    else None
+                    normalized_load_from_auger_duty(realized_duty, u_max=allocation.u_max) if sample_complete else None
                 ),
                 actual_fan_duty=None,
                 sample_complete=sample_complete,
@@ -449,9 +447,7 @@ class _RunTrace:
         provenance = [
             record.payload.model_provenance for record in records if record.event_kind is TraceEventKind.CONTROL_UPDATE
         ]
-        applied_payloads = [
-            record.payload for record in records if record.event_kind is TraceEventKind.APPLIED_OUTPUT
-        ]
+        applied_payloads = [record.payload for record in records if record.event_kind is TraceEventKind.APPLIED_OUTPUT]
         ordered_intervals = sorted(applied_payloads, key=lambda payload: payload.interval_start_ms)
         overlap_count = sum(
             current.interval_start_ms < previous.interval_end_ms
@@ -461,9 +457,7 @@ class _RunTrace:
             current.interval_start_ms > previous.interval_end_ms
             for previous, current in zip(ordered_intervals, ordered_intervals[1:])
         )
-        positive_duration = all(
-            payload.interval_end_ms > payload.interval_start_ms for payload in ordered_intervals
-        )
+        positive_duration = all(payload.interval_end_ms > payload.interval_start_ms for payload in ordered_intervals)
         normalized_load_inverted = all(
             not payload.sample_complete
             or payload.realized_combustion_load
@@ -639,7 +633,6 @@ def _required(mapping, keys, context):
     return tuple(mapping[key] for key in keys)
 
 
-
 def _require_complete_pulse_evidence(pulse_evidence):
     (open_loop,) = _required(pulse_evidence, ("open_loop",), "pulse evidence")
     if not isinstance(open_loop, list):
@@ -653,6 +646,7 @@ def _require_complete_pulse_evidence(pulse_evidence):
     if len(keys) != len(expected) or set(keys) != expected or len(set(keys)) != len(keys):
         raise ValueError("incomplete pulse evidence rows")
     return open_loop
+
 
 def _pulse_rows(pulse_evidence, arm, q):
     open_loop = _require_complete_pulse_evidence(pulse_evidence)
@@ -760,9 +754,7 @@ def _delayed_components(cases):
                 for frame in actualizations
             )
         )
-        authority.append(
-            0.0 <= float(case["max_stale_authority_periods"]) <= delay_periods
-        )
+        authority.append(0.0 <= float(case["max_stale_authority_periods"]) <= delay_periods)
         warning = case["warning_recovery"]
         _required(warning, ("stale_advisories", "recovered"), "delayed warning recovery")
         if delay == 0.0:
@@ -792,7 +784,7 @@ def _delayed_components(cases):
                 f"delayed {name} preemption",
             )
             expected_runtime_event = {
-                "stop": "stop",
+                "stop": PulseResetReason.MODE_CHANGE.value,
                 "lid": "lid_detected",
                 "manual": "manual_takeover",
             }[name]
@@ -851,9 +843,7 @@ def decision_from_rows(rows, delayed_solver_cases, pulse_evidence):
     if not legacy_lid_rows:
         raise ValueError("matrix has no legacy lid-recovery evidence")
     lid_recovery_preserved = all(
-        by_key[(row["plant"], row["scenario"], row["seed"], NO_FEED_FORWARD_ARM)]["safety"]["outcome"][
-            "lid_recovery_s"
-        ]
+        by_key[(row["plant"], row["scenario"], row["seed"], NO_FEED_FORWARD_ARM)]["safety"]["outcome"]["lid_recovery_s"]
         is not None
         for row in legacy_lid_rows
     )
@@ -866,8 +856,7 @@ def decision_from_rows(rows, delayed_solver_cases, pulse_evidence):
         "quality_comparable_or_improved": quality <= QUALITY_TOLERANCE_F,
         "applied_load_fidelity_improved": load >= MIN_LOAD_ERROR_IMPROVEMENT,
         "capability_rows_upper_unreachable": capability_rows_upper_unreachable,
-        "ranked_reachable_pairs_complete": len(pairs)
-        == len(PLANTS) * (len(SCENARIO_NAMES) - 1) * len(SEEDS),
+        "ranked_reachable_pairs_complete": len(pairs) == len(PLANTS) * (len(SCENARIO_NAMES) - 1) * len(SEEDS),
         **_delayed_components(delayed_solver_cases),
     }
     scheduler_ok = all(components.values())
@@ -938,6 +927,7 @@ def _delayed_solver_case(plant_name, delay_s):
         trace.solved(t=0.0, result=first, requested=first.cycle_ratio)
 
         mode, runtime_recorder = _hold_runtime(core, runner, label=f"task7:delay:{plant_name}:{delay_s}")
+
         def advance_runtime(at_s):
             delta_s = at_s - mode.ctx.clock.now()
             if delta_s < 0.0:
@@ -954,9 +944,7 @@ def _delayed_solver_case(plant_name, delay_s):
         advance_runtime(40.0)
         mode.on_tick(40.0, 225.0, mode.grill.get_output_status())
         runtime_frames = [
-            record.payload
-            for record in runtime_recorder.records
-            if record.event_kind is TraceEventKind.ACTUATION_FRAME
+            record.payload for record in runtime_recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME
         ]
         if not runtime_frames:
             raise AssertionError("Hold did not record a framed actualization")
@@ -996,25 +984,16 @@ def _delayed_solver_case(plant_name, delay_s):
 
         preemptions = {}
 
-        def observe_preemption(name, runtime_event, at_s, invoke):
+        def observe_preemption(name, at_s, invoke):
             before = len(runtime_recorder.records)
             invoke()
             observed = runtime_recorder.records[before:]
-            safety = [
-                record
-                for record in observed
-                if record.event_kind is TraceEventKind.SAFETY_EVENT
-            ]
-            reset = [
-                record
-                for record in safety
-                if record.payload.event is SafetyEventType.SCHEDULER_RESET
-            ]
+            safety = [record for record in observed if record.event_kind is TraceEventKind.SAFETY_EVENT]
+            reset = [record for record in safety if record.payload.event is SafetyEventType.SCHEDULER_RESET]
             interrupted = [
                 record
                 for record in observed
-                if record.event_kind is TraceEventKind.ACTUATION_FRAME
-                and record.payload.reset_reason is not None
+                if record.event_kind is TraceEventKind.ACTUATION_FRAME and record.payload.reset_reason is not None
             ]
             command_on = mode.grill.get_output_status()["auger"]
             if command_on or not safety or not reset or not interrupted:
@@ -1022,6 +1001,15 @@ def _delayed_solver_case(plant_name, delay_s):
                     f"Hold {name} preemption incomplete: command_on={command_on}, "
                     f"safety={len(safety)}, reset={len(reset)}, interrupted={len(interrupted)}"
                 )
+            primary = next(
+                (record for record in safety if record.payload.event is not SafetyEventType.SCHEDULER_RESET),
+                reset[0],
+            )
+            runtime_event = (
+                primary.payload.event.value
+                if primary.payload.event is not SafetyEventType.SCHEDULER_RESET
+                else primary.payload.detail.rsplit(": ", 1)[-1]
+            )
             trace.safety(
                 t=at_s,
                 event=safety[0].payload.event,
@@ -1040,7 +1028,6 @@ def _delayed_solver_case(plant_name, delay_s):
 
         observe_preemption(
             "manual",
-            "manual_takeover",
             40.25,
             lambda: mode._on_manual_output("auger", False),
         )
@@ -1050,7 +1037,6 @@ def _delayed_solver_case(plant_name, delay_s):
         advance_runtime(40.5)
         observe_preemption(
             "lid",
-            "lid_detected",
             40.5,
             lambda: mode.on_tick(40.5, 225.0, mode.grill.get_output_status()),
         )
@@ -1067,7 +1053,6 @@ def _delayed_solver_case(plant_name, delay_s):
         stop_at_s = 60.25
         advance_runtime(stop_at_s)
         observe_preemption(
-            "stop",
             "stop",
             stop_at_s,
             lambda: mode.teardown(225.0),

@@ -993,3 +993,27 @@ def test_validate_records_enforces_optional_seed_lifecycle():
     ):
         report = validate_records(corrupted)
         assert ReplayIssueCode.INVALID_SEED_OUTPUT in [issue.code for issue in report.issues]
+
+
+def test_validate_records_rejects_a_seed_after_any_fixed_cycle_update():
+    cases = [
+        _pid_records(),
+        _pid_records(ControllerType.PID_SP),
+        _mpc_fixed_records(),
+    ]
+    for records in cases:
+        seed = replace(
+            records[-1].payload,
+            result_revision=0,
+            interval_start_ms=0,
+            interval_end_ms=2_000,
+            realized_combustion_load=None,
+            output_source=OutputSource.SEED,
+        )
+        seed_record = _record(2_001, records[0].controller, TraceEventKind.APPLIED_OUTPUT, seed)
+        first_frame = next(
+            index for index, record in enumerate(records) if record.event_kind is TraceEventKind.ACTUATION_FRAME
+        )
+        report = validate_records(records[:first_frame] + [seed_record] + records[first_frame:])
+
+        assert ReplayIssueCode.INVALID_SEED_OUTPUT in [issue.code for issue in report.issues]

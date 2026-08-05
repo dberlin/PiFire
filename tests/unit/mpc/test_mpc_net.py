@@ -88,7 +88,7 @@ def test_regenerated_policy_artifacts_embed_schema3_normalized_calibration_and_r
 
         observed = np.asarray(
             [
-                policy.firing_rate(state, previous, setpoint)
+                np.clip(policy.firing_rate_raw(state, previous, setpoint), 0.0, 1.0)
                 for state, previous, setpoint in zip(artifact["ref_state"], artifact["ref_uprev"], artifact["ref_set"])
             ]
         )
@@ -124,12 +124,12 @@ def test_artifact_with_a_stale_model_schema_is_rejected():
     assert not policy.matches_config(_DEFAULTS)
 
 
-def test_firing_rate_is_bounded_to_the_normalized_command_domain():
+def test_firing_rate_raw_is_finite_across_the_normalized_command_span():
     policy = _normalized_policy()
     state = np.array([0.0] * policy.n_delay + [150.0, 0.0])
 
     for setpoint in (110.0, 170.0, 230.0, 285.0):
-        assert 0.0 <= policy.firing_rate(state, 0.5, setpoint) <= 1.0
+        assert np.isfinite(policy.firing_rate_raw(state, 0.5, setpoint))
 
 
 def test_normalized_artifact_rejects_a_changed_model_calibration():
