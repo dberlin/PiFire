@@ -591,32 +591,41 @@ def _run_scenario(
                 )
             if (second + 1) % 300 == 0:
                 score_window = tuple(pre_assimilation_scores)
+                pre_assimilation_scores.clear()
                 if not score_window:
                     continue
                 braking_window = tuple(
                     sample for sample in score_window if sample["braking_or_coast"]
-                ) or score_window
+                )
                 candidate_score = float(
                     np.mean([float(sample["candidate_abs_error_c"]) for sample in score_window])
                 )
                 incumbent_score = float(
                     np.mean([float(sample["incumbent_abs_error_c"]) for sample in score_window])
                 )
-                candidate_braking_score = float(
-                    np.mean(
-                        [
-                            float(sample["candidate_abs_error_c"])
-                            for sample in braking_window
-                        ]
+                candidate_braking_score = (
+                    float(
+                        np.mean(
+                            [
+                                float(sample["candidate_abs_error_c"])
+                                for sample in braking_window
+                            ]
+                        )
                     )
+                    if braking_window
+                    else None
                 )
-                incumbent_braking_score = float(
-                    np.mean(
-                        [
-                            float(sample["incumbent_abs_error_c"])
-                            for sample in braking_window
-                        ]
+                incumbent_braking_score = (
+                    float(
+                        np.mean(
+                            [
+                                float(sample["incumbent_abs_error_c"])
+                                for sample in braking_window
+                            ]
+                        )
                     )
+                    if braking_window
+                    else None
                 )
                 decision = manager.evaluate(
                     WindowScores(
