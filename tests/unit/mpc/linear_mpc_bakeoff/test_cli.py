@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import subprocess
 import sys
 from pathlib import Path
+from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _select_validation_horizon
+from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _source_revision
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_tiny_matrix
 
 
@@ -30,6 +33,16 @@ def test_quick_mode_writes_requested_output_and_table(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr
     assert "arm" in completed.stdout
     assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == 1
+
+def test_source_revision_is_a_plain_commit_id() -> None:
+    assert re.fullmatch(r"[0-9a-f]{40}", _source_revision())
+
+def test_validation_horizon_selection_uses_only_validation_scores() -> None:
+    selection = _select_validation_horizon({600: (1.0,), 800: (0.995,), 1000: (0.991,)})
+
+    assert selection["selected_horizon_s"] == 600
+    assert selection["validation_scores"] == {"600": 1.0, "800": 0.995, "1000": 0.991}
+    assert selection["tie_rationale"] == "600 seconds is within 1% of the validation best"
 
 
 def test_resume_requires_existing_checkpoint(tmp_path: Path) -> None:

@@ -27,7 +27,7 @@ from .state_space import InnovationStateSpace, StateSpaceConfig
 from .artifact import ArmEvidence, ExperimentArtifact, MatrixKey
 from .contracts import AffinePrediction
 from .contracts import Observation, SignalRecord
-from .linear_mpc import LinearMPC, MPCConfig
+from .linear_mpc import LinearMPC, MPCConfig, select_validation_horizon
 from .scenarios import SCENARIOS, ScenarioDefinition, quick_scenarios
 
 _FRAME_S = 20
@@ -69,6 +69,26 @@ class ExperimentConfig:
         }
 
 
+def _select_validation_horizon(residuals_by_horizon: Mapping[int, tuple[float, ...]]) -> dict[str, Any]:
+    """Freeze a horizon from the pre-test validation-window residual scores only."""
+    scores = {
+        horizon_s: float(np.mean(np.abs(values)))
+        for horizon_s, values in residuals_by_horizon.items()
+    }
+    selected = select_validation_horizon(scores)
+    best = min(scores.values())
+    within_one_percent = scores[selected] <= best * 1.01
+    return {
+        "selected_horizon_s": selected,
+        "tie_rationale": (
+            f"{selected} seconds is within 1% of the validation best"
+            if within_one_percent and selected != min(scores, key=scores.get)
+            else f"{selected} seconds is the validation best"
+        ),
+        "validation_scores": {str(horizon_s): scores[horizon_s] for horizon_s in sorted(scores)},
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ScenarioResult:
     """One immutable one-second trace, including requested and realized duty."""
@@ -85,6 +105,7 @@ class ScenarioResult:
     temperature_c: tuple[float, ...]
     target_c: tuple[float, ...]
     metrics: dict[str, float | int | None]
+    mpc_horizon_s: int = 600
     raw_learner_ms: tuple[float, ...] = ()
     raw_refresh_ms: tuple[float, ...] = ()
     raw_solve_ms: tuple[float, ...] = ()
@@ -115,6 +136,7 @@ class ScenarioResult:
             "evidence_id": self.evidence_id,
             "fan_fraction": list(self.fan_fraction),
             "initialization": self.initialization,
+            "mpc_horizon_s": self.mpc_horizon_s,
             "metrics": dict(self.metrics),
             "mode": self.mode,
             "plant": self.plant,
@@ -185,8 +207,9 @@ def _run_matrix(
     interrupt_after: int | None = None,
 ) -> ExperimentArtifact:
     definitions = quick_scenarios() if config.quick_mode else SCENARIOS
+    selections = _horizon_selection_document(config)
     jobs = [
-        (arm, initialization, definition, plant, mode, seed)
+        (arm, initialization, definition, plant, mode, seed, selections[_evidence_id(arm, seed, initialization)]["selected_horizon_s"])
         for arm in ("scheduled-arx", "dmc", "state-space")
         for initialization in config.initializations
         for plant in ("GrillSim", "MAKGrillSim")
@@ -212,16 +235,23 @@ def _run_matrix(
             for item in checkpoint_document.get("failures", ())
         ]
     completed = {
-        (row.arm, row.initialization, row.scenario, row.plant, row.mode, row.seed)
+        (row.arm, row.initialization, row.scenario, row.plant, row.mode, row.seed, row.mpc_horizon_s)
         for row in rows
     }
     completed.update(
-        (failure.matrix_key.arm, failure.matrix_key.initialization, failure.matrix_key.scenario,
-         failure.matrix_key.plant, failure.matrix_key.mode, failure.matrix_key.seed)
+        (
+            failure.matrix_key.arm,
+            failure.matrix_key.initialization,
+            failure.matrix_key.scenario,
+            failure.matrix_key.plant,
+            failure.matrix_key.mode,
+            failure.matrix_key.seed,
+            failure.matrix_key.mpc_horizon_s,
+        )
         for failure in failures if failure.matrix_key is not None
     )
-    for arm, initialization, definition, plant, mode, seed in jobs:
-        key = (arm, initialization, definition.name, plant, mode, seed)
+    for arm, initialization, definition, plant, mode, seed, horizon_s in jobs:
+        key = (arm, initialization, definition.name, plant, mode, seed, horizon_s)
         if key in completed:
             continue
         try:
@@ -233,6 +263,7 @@ def _run_matrix(
                 duration_s=config.duration_s,
                 arm=arm,
                 initialization=initialization,
+                horizon_s=horizon_s,
             )
             rows.append(row)
         except Exception as exc:
@@ -244,7 +275,7 @@ def _run_matrix(
                     definition.name,
                     "non-finite/unstable",
                     f"{type(exc).__name__}: {exc}",
-                    MatrixKey(arm, initialization, plant, mode, definition.name, seed),
+                    MatrixKey(arm, initialization, plant, mode, definition.name, seed, horizon_s),
                 )
             )
         if checkpoint is not None:
@@ -267,6 +298,7 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
         scenario=document["scenario"],
         seed=document["seed"],
         mode=document["mode"],
+        mpc_horizon_s=int(document.get("mpc_horizon_s", 600)),
         initialization=document["initialization"],
         fan_fraction=tuple(document["fan_fraction"]),
         requested_q=tuple(document["requested_q"]),
@@ -342,6 +374,7 @@ def _run_scenario(
     duration_s: int,
     arm: str,
     initialization: str,
+    horizon_s: int = 600,
 ) -> ScenarioResult:
     plant_type = {"GrillSim": GrillSim, "MAKGrillSim": MAKGrillSim}.get(plant)
     if plant_type is None:
@@ -350,7 +383,7 @@ def _run_scenario(
         raise ValueError(f"unknown mode {mode!r}")
     simulator = plant_type(seed=seed, fixed_fan=_FIXED_FAN)
     realizer = PulseRealizer(frame_s=_FRAME_S, quantum_s=5.0)
-    mpc_config = MPCConfig(horizon_s=600, frame_s=_FRAME_S)
+    mpc_config = MPCConfig(horizon_s=horizon_s, frame_s=_FRAME_S)
     controller = LinearMPC(mpc_config)
     model, fit_ms, before_residuals, after_residuals = _fitted_model(arm, seed, initialization)
     temperatures: list[float] = []
@@ -408,6 +441,7 @@ def _run_scenario(
         plant=plant,
         scenario=definition.name,
         seed=seed,
+        mpc_horizon_s=horizon_s,
         mode=mode,
         initialization=initialization,
         fan_fraction=tuple(fan),
@@ -551,13 +585,24 @@ def _horizon_residuals(model: Any, record: SignalRecord, *, starts: range) -> di
     return residuals
 
 
-def _row_key(row: ScenarioResult) -> tuple[str, str, str, str, str, int]:
-    return (row.arm, row.initialization, row.plant, row.scenario, row.mode, row.seed)
+def _row_key(row: ScenarioResult) -> tuple[str, str, str, str, str, int, int]:
+    return (row.arm, row.initialization, row.plant, row.scenario, row.mode, row.seed, row.mpc_horizon_s)
 
 
 def _evidence_id(arm: str, seed: int, initialization: str) -> str:
     """Return the immutable identity of one prepared-model origin."""
     return f"{arm}:{seed}:{initialization}"
+
+
+def _horizon_selection_document(config: ExperimentConfig) -> dict[str, dict[str, Any]]:
+    """Record each arm/seed/wrong-model validation-only selection before testing."""
+    selections = {}
+    for arm in ("scheduled-arx", "dmc", "state-space"):
+        for initialization in config.initializations:
+            for seed in sorted(config.seeds):
+                _, _, validation_residuals, _ = _prepared_model(arm, seed, initialization)
+                selections[_evidence_id(arm, seed, initialization)] = _select_validation_horizon(validation_residuals)
+    return dict(sorted(selections.items()))
 
 
 def _p99(values: list[float]) -> float:
@@ -683,8 +728,14 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
         }
         for arm in arms
     }
+    artifact_config = {
+        **config.to_document(),
+        "horizon_selection": _horizon_selection_document(config),
+        "horizon_selection_window": [360, 480],
+        "horizon_tie_rule": "shortest horizon within 1% of validation best",
+    }
     return ExperimentArtifact(
-        config=config.to_document(),
+        config=artifact_config,
         seeds=config.seeds,
         splits={"synthetic": {"fit": [0, 360], "validation": [360, 480], "test": [480, 600]}},
         model_snapshots={
@@ -726,7 +777,7 @@ def _bootstrap_ci(origins: Mapping[str, tuple[float, ...]]) -> list[float]:
 def _source_revision() -> str:
     import subprocess
     try:
-        return subprocess.check_output(["jj", "log", "-r", "@", "-T", "commit_id"], text=True).strip()
+        return subprocess.check_output(["jj", "--no-pager", "log", "-r", "@", "--no-graph", "-T", "commit_id"], text=True).strip()
     except (OSError, subprocess.CalledProcessError):
         return os.environ.get("PIFIRE_REVISION", "unavailable")
 

@@ -513,9 +513,11 @@ def _steady_gain(fit: SubspaceFit) -> float:
 
 
 def _observability(A: FloatArray, C: FloatArray, rows: int) -> FloatArray:
-    result = np.empty((rows, A.shape[0]), dtype=np.float64); power = np.eye(A.shape[0], dtype=np.float64)
+    result = np.empty((rows, A.shape[0]), dtype=np.float64)
+    power = np.eye(A.shape[0], dtype=np.float64)
     for row in range(rows):
-        result[row] = C @ power; power = power @ A
+        result[row] = C @ power
+        power = power @ A
     return result
 
 

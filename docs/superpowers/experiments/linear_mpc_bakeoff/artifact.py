@@ -47,6 +47,7 @@ class MatrixKey:
     mode: str
     scenario: str
     seed: int
+    mpc_horizon_s: int = 600
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -56,6 +57,7 @@ class MatrixKey:
             "plant": self.plant,
             "scenario": self.scenario,
             "seed": self.seed,
+            "mpc_horizon_s": self.mpc_horizon_s,
         }
 
 
