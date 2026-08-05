@@ -1,6 +1,7 @@
 """Final runner evidence contracts that prevent scientific-evidence regressions."""
 
 from __future__ import annotations
+from dataclasses import replace
 
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     ExperimentConfig,
@@ -196,4 +197,79 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
     assert state_space_row.raw_refresh_ms
     assert all("iterations" in item and "kkt_residual" in item for item in row.solver_evidence)
     assert any(item.get("reference_method") == "scipy-l-bfgs-b" for item in row.solver_evidence)
+
+
+def test_runner_clears_promoted_window_samples_and_role_generations(
+    monkeypatch,
+) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff import runner
+    from docs.superpowers.experiments.linear_mpc_bakeoff.adaptation import (
+        AdaptationManager as RealAdaptationManager,
+        AdaptationOutcome,
+        AlignmentEvidence,
+        UpdateGate,
+    )
+    from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import UpdateOutcome
+
+
+    class ControlledAdaptationManager(RealAdaptationManager):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._policy = replace(self._policy, max_gain=1e12)
+            self._challenger_alignment = AlignmentEvidence.NOT_APPLICABLE
+
+        def observe(self, observation, *args, **kwargs):
+            self._challenger_effective_updates += 1
+            gate = UpdateGate(True, (), 0.1, 2)
+            return AdaptationOutcome(
+                True,
+                gate,
+                UpdateOutcome(
+                    observation.temp_c - 1.0, observation.temp_c, 1.0, False
+                ),
+                UpdateOutcome(
+                    observation.temp_c - 0.1, observation.temp_c, 0.1, True
+                ),
+            )
+
+
+        def evaluate(self, scores):
+            self._challenger_effective_updates = 100
+            return super().evaluate(
+                replace(
+                    scores,
+                    candidate_prediction_score=0.1,
+                    incumbent_prediction_score=1.0,
+                    candidate_braking_score=0.1,
+                    incumbent_braking_score=1.0,
+                )
+            )
+
+    monkeypatch.setattr(runner, "AdaptationManager", ControlledAdaptationManager)
+    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
+    row = runner._run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=920,
+        arm="scheduled-arx",
+        initialization="wrong-gain",
+        horizon_s=600,
+    )
+    evaluations = [
+        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
+    ]
+
+    assert len(evaluations) == 3
+    assert not evaluations[0]["reasons"], evaluations[0]["reasons"]
+    assert evaluations[0]["consecutive_wins"] == 1
+    assert evaluations[1]["promoted"], evaluations
+    assert [item["score_role_generation"] for item in evaluations] == [0, 0, 1]
+    assert len({item["window_id"] for item in evaluations}) == 3
+    assert all(item["sample_count"] >= 2 for item in evaluations)
+    frame_sets = [set(item["score_frame_ids"]) for item in evaluations]
+    assert frame_sets[0].isdisjoint(frame_sets[1])
+    assert frame_sets[1].isdisjoint(frame_sets[2])
+    assert all(frame > 600 for frame in frame_sets[2])
 
