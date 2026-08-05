@@ -440,3 +440,18 @@ def test_normalized_artifact_round_trip_deduplicates_evidence_bundles() -> None:
     assert all("model_evidence" not in row for row in document["scenarios"])
     restored = ExperimentArtifact.from_json(artifact.to_json())
     assert restored.to_document() == document
+
+
+def test_gzip_artifact_transport_is_lossless_and_compact(tmp_path) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
+        load_artifact,
+        write_artifact_atomically,
+    )
+
+    artifact = artifact_with_scores()
+    output = tmp_path / "evidence.json.gz"
+    write_artifact_atomically(output, artifact)
+
+    assert output.read_bytes()[:2] == b"\x1f\x8b"
+    assert output.stat().st_size < len(artifact.to_json().encode())
+    assert load_artifact(output).to_document() == artifact.to_document()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from functools import lru_cache
+import gzip
 import importlib.metadata
 import json
 import os
@@ -50,7 +51,7 @@ from .linear_mpc import (
 )
 _FRAME_S = 20
 _FIXED_FAN = 1.0
-_DEFAULT_OUTPUT = Path("docs/superpowers/experiments/_linear_mpc_bakeoff.json")
+_DEFAULT_OUTPUT = Path("docs/superpowers/experiments/_linear_mpc_bakeoff.json.gz")
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,7 +305,7 @@ def _run_matrix(
     rows: list[ScenarioResult] = []
     failures = []
     if resume and checkpoint is not None and checkpoint.exists():
-        checkpoint_document = json.loads(checkpoint.read_text(encoding="utf-8"))
+        checkpoint_document = _read_artifact_document(checkpoint)
         evidence_bundles = checkpoint_document.get("evidence_bundles", {})
         stored_rows = checkpoint_document.get("rows", checkpoint_document.get("scenarios", ()))
         rows = []
@@ -420,16 +421,41 @@ def _scenario_from_document(document: dict[str, Any]) -> ScenarioResult:
     return row
 
 
-def write_artifact_atomically(path: Path, artifact: ExperimentArtifact) -> None:
-    """Write final JSON through a same-directory temporary followed by ``os.replace``."""
+def load_artifact(path: Path) -> ExperimentArtifact:
+    """Load either canonical gzip transport or a legacy JSON manifest exactly."""
+    return ExperimentArtifact.from_json(_read_artifact_text(path))
+
+
+def _read_artifact_document(path: Path) -> dict[str, Any]:
+    return json.loads(_read_artifact_text(path))
+
+
+def _read_artifact_text(path: Path) -> str:
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as source:
+            return source.read()
+    return path.read_text(encoding="utf-8")
+
+
+def _write_text_atomically(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
     try:
-        temporary.write_text(artifact.to_json() + "\n", encoding="utf-8")
+        if path.suffix == ".gz":
+            with temporary.open("wb") as raw:
+                with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as sink:
+                    sink.write(payload.encode("utf-8"))
+        else:
+            temporary.write_text(payload, encoding="utf-8")
         os.replace(temporary, path)
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def write_artifact_atomically(path: Path, artifact: ExperimentArtifact) -> None:
+    """Write canonical evidence atomically, compressing explicit ``.gz`` transport."""
+    _write_text_atomically(path, artifact.to_json() + "\n")
 
 
 def _write_checkpoint(
@@ -448,14 +474,7 @@ def _write_checkpoint(
         "rows": [row.to_document() for row in sorted(rows, key=_row_key)],
         "schema_version": 1,
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    try:
-        temporary.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    _write_text_atomically(path, json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
 def _adaptation_settings(
     arm: str, snapshot: Mapping[str, Any]
 ) -> tuple[AdaptationPolicy, AlignmentEvidence]:
