@@ -13,7 +13,9 @@ from .runner import ExperimentConfig, default_output_path, run_experiment
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the linear-MPC model bake-off.")
     parser.add_argument("--quick", action="store_true", help="run deterministic tiny smoke scenarios")
-    parser.add_argument("--output", type=Path, help="artifact or checkpoint JSON/JSON.gz path")
+    parser.add_argument(
+        "--output", type=Path, help="bounded artifact manifest or checkpoint JSON path"
+    )
     parser.add_argument("--resume", action="store_true", help="resume from an existing checkpoint")
     args = parser.parse_args(argv)
     output = args.output or (default_output_path().with_name("_linear_mpc_bakeoff_quick.manifest.json") if args.quick else default_output_path())

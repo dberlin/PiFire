@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from statistics import median
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 import numpy as np
 from scipy.optimize import minimize
 
@@ -487,7 +487,11 @@ def _write_text_atomically(path: Path, payload: str) -> None:
 
 
 def write_artifact_atomically(
-    path: Path, artifact: ExperimentArtifact, *, max_part_bytes: int = _MAX_ARTIFACT_PART_BYTES
+    path: Path,
+    artifact: ExperimentArtifact,
+    *,
+    max_part_bytes: int = _MAX_ARTIFACT_PART_BYTES,
+    before_publish: Callable[[], None] | None = None,
 ) -> None:
     """Publish a deterministic manifest after bounded gzip shards are durable."""
     if max_part_bytes < 1 or max_part_bytes > _MAX_ARTIFACT_PART_BYTES:
@@ -512,6 +516,8 @@ def write_artifact_atomically(
         "canonical_json_sha256": hashlib.sha256(payload).hexdigest(),
         "canonical_json_bytes": len(payload),
     }
+    if before_publish is not None:
+        before_publish()
     _write_text_atomically(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     active = {item["name"] for item in parts}
     for stale in path.parent.glob(f"{path.stem}.*.part*.gz"):

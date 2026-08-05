@@ -482,6 +482,27 @@ def test_manifest_shards_are_bounded_deterministic_and_verified(tmp_path) -> Non
     first.write_bytes(first.read_bytes() + b"x")
     with pytest.raises(ValueError, match="checksum"):
         load_artifact(left)
+
+
+def test_crash_before_manifest_publish_preserves_previous_artifact(tmp_path) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
+        load_artifact,
+        write_artifact_atomically,
+    )
+
+    artifact = artifact_with_scores()
+    path = tmp_path / "evidence.manifest.json"
+    write_artifact_atomically(path, artifact, max_part_bytes=10)
+    previous_manifest = path.read_bytes()
+    with pytest.raises(RuntimeError, match="crash"):
+        write_artifact_atomically(
+            path,
+            artifact,
+            max_part_bytes=10,
+            before_publish=lambda: (_ for _ in ()).throw(RuntimeError("crash")),
+        )
+    assert path.read_bytes() == previous_manifest
+    assert load_artifact(path).to_document() == artifact.to_document()
 def test_loader_accepts_legacy_json_and_gzip_transport(tmp_path) -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import load_artifact
 
