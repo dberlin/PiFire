@@ -26,6 +26,7 @@ from common.i2c_bus_config import FT232HBus
 from grillplat.emc2301 import EMC2301
 from grillplat.ft232h import open_gpio as open_ft232h_gpio
 from grillplat.system_commands import SystemCommandsMixin
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 
 # Default FT232H pin name per PiFire output.  The C-bank keeps the I2C pins
@@ -155,6 +156,9 @@ class GrillPlatform(SystemCommandsMixin):
     def auger_off(self):
         self.logger.debug("auger_off: Turning off auger")
         self._set_output("auger", False)
+
+    def auger_timing(self):
+        return AUGER_TIMING
 
     def igniter_on(self):
         self.logger.debug("igniter_on: Turning on igniter")

@@ -21,6 +21,7 @@ import logging
 from gpiozero.threads import GPIOThread
 from common.common import is_float
 from grillplat.system_commands import SystemCommandsMixin
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 """
 	==============================
@@ -62,6 +63,9 @@ class GrillPlatform(SystemCommandsMixin):
 
     def auger_off(self):
         self.out_pins["auger"] = False
+
+    def auger_timing(self):
+        return AUGER_TIMING
 
     def fan_on(self, duty_cycle=100):
         self.out_pins["fan"] = True

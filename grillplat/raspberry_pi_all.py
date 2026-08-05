@@ -40,6 +40,7 @@ from gpiozero import OutputDevice
 from gpiozero import Button
 from gpiozero.threads import GPIOThread
 from rpi_hardware_pwm import HardwarePWM
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 """
 	==============================
@@ -99,6 +100,9 @@ class GrillPlatform(SystemCommandsMixin):
     def auger_off(self):
         self.logger.debug("auger_off: Turning off auger")
         self.auger.off()
+
+    def auger_timing(self):
+        return AUGER_TIMING
 
     def fan_on(self, fan_speed_percent=100):
         self.fan.on()  # Turn on fan output pin to enable fan power

@@ -1,4 +1,5 @@
 from tests.ft232h_helpers import make_ft232h_platform
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 
 def _relay_config(**overrides):
@@ -34,6 +35,11 @@ def test_output_methods_toggle_mapped_active_low_pins():
         plat.auger_off()
         assert harness.gpio.values["C2"] is True
         assert plat._output_state["auger"] is False
+
+
+def test_auger_timing_is_shared_capability():
+    with make_ft232h_platform(_relay_config()) as (plat, _):
+        assert plat.auger_timing() is AUGER_TIMING
 
 
 def test_power_and_igniter_use_mapped_pins():

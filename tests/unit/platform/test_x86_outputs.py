@@ -1,5 +1,6 @@
 import pytest
 from unittest import mock
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 
 @pytest.fixture
@@ -41,6 +42,10 @@ def test_auger_on_off_uses_mapped_relay(x86_platform):
     x86_platform.relay.relay_on.assert_called_with(2)
     x86_platform.auger_off()
     x86_platform.relay.relay_off.assert_called_with(2)
+
+
+def test_auger_timing_is_shared_capability(x86_platform):
+    assert x86_platform.auger_timing() is AUGER_TIMING
 
 
 def test_power_and_igniter_use_mapped_relays(x86_platform):

@@ -13,6 +13,7 @@ from unittest import mock
 
 import grillplat.prototype as proto
 from grillplat.prototype import GrillPlatform
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 
 def _config(dc_fan=False, frequency=100, standalone=True):
@@ -92,6 +93,10 @@ def test_auger_on_off():
     assert p.out_pins["auger"] is True
     p.auger_off()
     assert p.out_pins["auger"] is False
+
+
+def test_auger_timing_is_shared_capability():
+    assert GrillPlatform(_config()).auger_timing() is AUGER_TIMING
 
 
 def test_igniter_on_off():

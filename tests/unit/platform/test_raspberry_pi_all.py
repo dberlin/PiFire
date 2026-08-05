@@ -17,6 +17,7 @@ import types
 from unittest import mock
 
 import pytest
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 # raspberry_pi_all imports `from rpi_hardware_pwm import HardwarePWM` at module
 # load; that package is Pi-only and absent in the test venv. Stub it so the
@@ -137,6 +138,10 @@ def test_auger_on_off(hw):
     p.auger.on.assert_called_once()
     p.auger_off()
     p.auger.off.assert_called_once()
+
+
+def test_auger_timing_is_shared_capability(hw):
+    assert rpi.GrillPlatform(_config()).auger_timing() is AUGER_TIMING
 
 
 def test_igniter_on_off(hw):

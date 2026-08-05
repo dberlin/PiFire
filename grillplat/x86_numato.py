@@ -31,6 +31,7 @@ from common.i2c_bus_config import parse_i2c_bus
 from grillplat.numato_usbrelay import NumatoUSBRelay
 from grillplat.emc2301 import EMC2301
 from grillplat.system_commands import SystemCommandsMixin
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 
 """
@@ -118,6 +119,9 @@ class GrillPlatform(SystemCommandsMixin):
     def auger_off(self):
         self.logger.debug("auger_off: Turning off auger")
         self._set_output("auger", False)
+
+    def auger_timing(self):
+        return AUGER_TIMING
 
     def igniter_on(self):
         self.logger.debug("igniter_on: Turning on igniter")

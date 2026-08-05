@@ -1,3 +1,6 @@
+from grillplat.actuator_capabilities import AUGER_TIMING
+
+
 class FakeGrillPlatform:
     def __init__(self, dc_fan=False, standalone=True, input_on=True, outputs=("power", "auger", "fan", "igniter")):
         self.calls = []
@@ -41,6 +44,9 @@ class FakeGrillPlatform:
     def auger_off(self):
         self._rec("auger_off")
         self._status["auger"] = False
+
+    def auger_timing(self):
+        return AUGER_TIMING
 
     def fan_on(self, dc=None):
         self._rec("fan_on", dc)
