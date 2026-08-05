@@ -19,6 +19,13 @@ dependencies = [
     # line; it lives here now so there is one place that decides it.
     "influxdb-client[ciso]>=1.50.0",
     "netifaces>=0.11.0",
+    # Imported eagerly by controller/fopdt_identifier.py, which controller/pid_sp.py
+    # loads at module scope -- the shipped PID Smith Predictor controller depends on
+    # it unconditionally, so unlike the MPC stack's lazy imports this cannot live in
+    # an optional extra. Already present transitively via scikit-learn, so declaring
+    # it changes no resolution -- it stops a future drop of that package from
+    # silently taking numpy with it.
+    "numpy>=1.26",
     "paho-mqtt>=2.1.0",
     "pyftdi>=0.55.0",
     "pyserial>=3.5",

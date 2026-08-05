@@ -34,6 +34,31 @@ def test_mpc_entry_present():
     assert policy["option_default"] == "nlp"
 
 
+def test_pid_sp_declares_numpy_without_an_extra():
+    """numpy missing means a broken install, not a missing opt-in, so there is
+    nothing for PiFire to offer to install."""
+    meta = _meta()["pid_sp"]
+    assert meta["dependencies"] == {"modules": ["numpy"]}
+    assert "extra" not in meta["dependencies"]
+
+
+def test_pid_sp_no_longer_offers_tau_or_theta():
+    """Identification is online; a user-supplied tau=115 is not merely unused,
+    it is outside the design's own trusted band of 300-20000 s."""
+    options = {o["option_name"] for o in _meta()["pid_sp"]["config"]}
+    assert "tau" not in options
+    assert "theta" not in options
+    assert options == {"PB", "Td", "Ti", "stable_window", "center_factor"}
+
+
+def test_numpy_is_an_explicit_project_dependency():
+    import tomllib
+
+    with open(os.path.join(BASE, "pyproject.toml"), "rb") as f:
+        project = tomllib.load(f)["project"]
+    assert any(d.split(">")[0].split("=")[0].strip() == "numpy" for d in project["dependencies"])
+
+
 def test_default_controller_config_includes_mpc():
     cwd = os.getcwd()
     os.chdir(BASE)
