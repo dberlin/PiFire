@@ -562,6 +562,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._outcome_drops_since_drain = 0
         self._outcome_dropped_sequences = collections.deque(maxlen=60)
         self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
+        self._latest_delivered_output = None
         self._pending_dropped = 0
         self._pending_restore = None
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
@@ -593,6 +594,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 target = self._pending_target
                 self._pending_target = _UNSET
                 new_core = None
+                handoff_output = None
                 new_controller_type = None
                 pending_outputs = list(self._pending_outputs)
                 self._pending_outputs.clear()
@@ -607,8 +609,12 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._core.set_target(target)
             # A command must reach the core before the temperature that command
             # caused, and in the order the auger saw it.
-            for applied in sorted(pending_outputs, key=lambda a: a.timestamp):
+            ordered_outputs = sorted(pending_outputs, key=lambda applied: applied.timestamp)
+            for applied in ordered_outputs:
                 self._core.set_output(applied)
+            if ordered_outputs:
+                with self._lock:
+                    self._latest_delivered_output = ordered_outputs[-1]
             # Learner calls must never hold _lock. Drain until a lock-protected
             # empty observation queue commits this iteration's temperature
             # update; an observation that wins the lock before that commit is
@@ -688,10 +694,12 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._controller_type = new_controller_type
                     self._quality.control_period = _control_period_seconds(self._control_period)
                     self._configuration_revision += 1
+                    handoff_output = self._latest_delivered_output
             if new_core is not None:
-                # A frame accepted after reconfigure is already reserved for
-                # this generation. Redrain under the installed core before its
-                # first solve so observations always precede their update.
+                # Seed the replacement from the latest physical output before
+                # its reserved observations and first solve.
+                if handoff_output is not None:
+                    new_core.set_output(handoff_output)
                 continue
             if update_temp is not _UNSET and update_temp is not None:
                 result = _capture_completed_result(

@@ -1067,7 +1067,7 @@ def test_threaded_runner_swap_delivers_pre_swap_observation_to_old_core():
         runner.stop()
 
 
-def test_threaded_runner_drains_reserved_new_generation_before_first_swapped_solve():
+def test_threaded_runner_seeds_swapped_core_before_reserved_observation_and_solve():
     barrier = _ObservationBarrier()
     old = _ObservationRecordingCore()
     new = _ObservationRecordingCore()
@@ -1076,6 +1076,7 @@ def test_threaded_runner_drains_reserved_new_generation_before_first_swapped_sol
     new.runner = runner
     try:
         assert barrier.first_waiting.wait(2.0)
+        runner.set_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 20.0))
         with runner._lock:
             runner._pending_core = new
             runner._pending_controller_type = None
@@ -1084,8 +1085,11 @@ def test_threaded_runner_drains_reserved_new_generation_before_first_swapped_sol
         barrier.release.set()
 
         assert _wait_for(lambda: len(new.observations) == 1 and ("update", 212.0) in new.calls)
+        with old.lock:
+            assert ("set_output", 20.0) in old.calls
         with new.lock:
             calls = list(new.calls)
+        assert calls.index(("set_output", 20.0)) < calls.index(("observe_frame", 20.0))
         assert calls.index(("observe_frame", 20.0)) < calls.index(("update", 212.0))
     finally:
         barrier.release.set()
