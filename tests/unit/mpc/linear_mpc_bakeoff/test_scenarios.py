@@ -38,6 +38,13 @@ def test_tiny_matrix_runs_both_plants_and_modes() -> None:
     assert {row.mode for row in artifact.scenarios} == {"frozen", "online"}
     assert {row.scenario for row in artifact.scenarios} >= {"low-step", "lid-excursion"}
     assert all(row.solver_period_s == 20 for row in artifact.scenarios)
+    state_space_rows = [row for row in artifact.scenarios if row.arm == "state-space"]
+    assert state_space_rows
+    assert all(
+        isinstance(row.model_evidence["batch_fit_snapshot"]["steady_gain"], (int, float))
+        and row.model_evidence["batch_fit_snapshot"]["steady_gain"] > 0.0
+        for row in state_space_rows
+    )
 
 
 def test_resume_matches_clean_artifact(tmp_path: Path) -> None:

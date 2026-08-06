@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import perf_counter
 from types import MappingProxyType
 
 import numpy as np
 import numpy.typing as npt
 
+from controller.linear_mpc.state_space import (
+    CandidateAttempt,
+    RefreshDiagnostics,
+    RefreshRejectionReason,
+)
 from .contracts import AffinePrediction, FloatArray, Observation, SignalRecord, UpdateOutcome
 
 
@@ -64,10 +69,50 @@ class RefreshOutcome:
     accepted: bool
     alignment_error_c: float | None
     duration_s: float
+    diagnostics: RefreshDiagnostics
+
+
+@dataclass(slots=True)
+class _CandidateEvidence:
+    """Mutable in-loop measurements, copied once into an immutable attempt."""
+
+    order: int
+    delay: int
+    sample_count: int
+    hankel_shape: tuple[int, int]
+    singular_values: tuple[float, ...] = ()
+    effective_rank: int = 0
+    condition_number: float | None = None
+    projection_applied: bool = False
+    steady_gain: float | None = None
+    alignment_error_c: float | None = None
+    prediction_score: float | None = None
+    braking_score: float | None = None
+    rejection_reasons: list[RefreshRejectionReason] = field(default_factory=list)
+
+    def attempt(self, started: float) -> CandidateAttempt:
+        """Freeze evidence without recomputing any scientific value."""
+        return CandidateAttempt(
+            order=self.order,
+            delay=self.delay,
+            sample_count=self.sample_count,
+            hankel_shape=self.hankel_shape,
+            singular_values=self.singular_values,
+            effective_rank=self.effective_rank,
+            condition_number=self.condition_number,
+            projection_applied=self.projection_applied,
+            steady_gain=self.steady_gain,
+            alignment_error_c=self.alignment_error_c,
+            prediction_score=self.prediction_score,
+            braking_score=self.braking_score,
+            rejection_reasons=tuple(self.rejection_reasons),
+            elapsed_ms=(perf_counter() - started) * 1_000.0,
+        )
 
 
 class CandidateExhaustedError(ValueError):
     """No physically viable realization survived a rolling candidate search."""
+
 
 @dataclass(frozen=True, slots=True)
 class PlausibilityBounds:
@@ -101,10 +146,9 @@ class SubspaceFit:
     input_mean: float
     covariance: float
     validation_error: float
-    state_offset: FloatArray = field(
-        default_factory=lambda: np.empty(0, dtype=np.float64), repr=False
-    )
+    state_offset: FloatArray = field(default_factory=lambda: np.empty(0, dtype=np.float64), repr=False)
     plausibility_bounds: PlausibilityBounds | None = field(default=None, repr=False)
+
     def __post_init__(self) -> None:
         for name in ("A", "B", "C", "D", "state_offset"):
             array = np.array(getattr(self, name), dtype=np.float64, copy=True)
@@ -138,10 +182,9 @@ class InnovationStateSpace:
     def current_output_c(self) -> float:
         """The filtered current temperature estimate in degrees Celsius."""
         fit = self._require_fit()
-        delayed = _delayed_input(
-            self._inputs, np.empty(0), len(self._inputs) - 1, fit.delay
-        )
+        delayed = _delayed_input(self._inputs, np.empty(0), len(self._inputs) - 1, fit.delay)
         return _output(fit, self._state, delayed, self._ambients[-1])
+
     @property
     def input_history(self) -> tuple[float, ...]:
         """Immutable q history; semantics follow each record's provenance."""
@@ -205,31 +248,19 @@ class InnovationStateSpace:
         """Apply a Kalman state correction without changing fitted matrices."""
         return self._assimilate_runtime(observation, allow_refresh=False)
 
-    def _assimilate_runtime(
-        self, observation: Observation, *, allow_refresh: bool
-    ) -> UpdateOutcome:
+    def _assimilate_runtime(self, observation: Observation, *, allow_refresh: bool) -> UpdateOutcome:
         fit = self._require_fit()
         target = len(self._inputs)
-        transition_delayed = _delayed_input(
-            self._inputs, np.empty(0), target - 1, fit.delay
-        )
+        transition_delayed = _delayed_input(self._inputs, np.empty(0), target - 1, fit.delay)
         output_delayed = _delayed_input(self._inputs, np.empty(0), target, fit.delay)
         predicted_state = _advance(fit, self._state, transition_delayed)
-        predicted_covariance = (
-            fit.A @ self._covariance @ fit.A.T + np.eye(fit.order) * fit.covariance
-        )
-        predicted_temp = _output(
-            fit, predicted_state, output_delayed, observation.ambient_c
-        )
+        predicted_covariance = fit.A @ self._covariance @ fit.A.T + np.eye(fit.order) * fit.covariance
+        predicted_temp = _output(fit, predicted_state, output_delayed, observation.ambient_c)
         innovation = float(observation.temp_c - predicted_temp)
-        innovation_variance = float(
-            fit.C @ predicted_covariance @ fit.C.T + fit.covariance
-        )
+        innovation_variance = float(fit.C @ predicted_covariance @ fit.C.T + fit.covariance)
         gain = (predicted_covariance @ fit.C) / max(innovation_variance, 1e-12)
         self._state = predicted_state + gain * innovation
-        self._covariance = (
-            np.eye(fit.order) - np.outer(gain, fit.C)
-        ) @ predicted_covariance
+        self._covariance = (np.eye(fit.order) - np.outer(gain, fit.C)) @ predicted_covariance
         self._covariance = 0.5 * (self._covariance + self._covariance.T)
         self._times.append(observation.time_s)
         self._temperatures.append(observation.temp_c)
@@ -240,14 +271,11 @@ class InnovationStateSpace:
         if (
             allow_refresh
             and self._last_refresh_time_s is not None
-            and observation.time_s - self._last_refresh_time_s
-            >= self._config.refresh_interval_s
+            and observation.time_s - self._last_refresh_time_s >= self._config.refresh_interval_s
         ):
             self.refresh(self.history_record)
             refreshed = True
-        return UpdateOutcome(
-            predicted_temp, observation.temp_c, innovation, allow_refresh or refreshed
-        )
+        return UpdateOutcome(predicted_temp, observation.temp_c, innovation, allow_refresh or refreshed)
 
     def refresh(self, record: SignalRecord) -> RefreshOutcome:
         """Atomically replace the realization only when aligned prediction is continuous."""
@@ -255,26 +283,19 @@ class InnovationStateSpace:
         _validate_record(record)
         started = perf_counter()
         combined = _join_records(self.history_record, record, self._config.max_buffer_samples)
-        try:
-            candidate = _select_fit(combined, self._config)
-        except CandidateExhaustedError:
-            duration = perf_counter() - started
+        candidate, diagnostics = _select_fit_with_diagnostics(combined, self._config)
+        duration = perf_counter() - started
+        if candidate is None:
             self._last_refresh_time_s = float(record.time_s[-1])
             self._last_refresh_duration_s = duration
-            return RefreshOutcome(False, None, duration)
+            return RefreshOutcome(False, None, duration, diagnostics)
         old = self._require_fit()
-        candidate_state = _state_from_values(
-            self._temperatures, self._ambients, self._inputs, candidate
-        )
+        candidate_state = _state_from_values(self._temperatures, self._ambients, self._inputs, candidate)
         old_transition = _delayed_input(self._inputs, np.empty(0), len(self._inputs) - 1, old.delay)
         old_output = _delayed_input(self._inputs, np.empty(0), len(self._inputs), old.delay)
-        new_transition = _delayed_input(
-            self._inputs, np.empty(0), len(self._inputs) - 1, candidate.delay
-        )
+        new_transition = _delayed_input(self._inputs, np.empty(0), len(self._inputs) - 1, candidate.delay)
         new_output = _delayed_input(self._inputs, np.empty(0), len(self._inputs), candidate.delay)
-        old_next = _output(
-            old, _advance(old, self._state, old_transition), old_output, self._ambients[-1]
-        )
+        old_next = _output(old, _advance(old, self._state, old_transition), old_output, self._ambients[-1])
         new_next = _output(
             candidate,
             _advance(candidate, candidate_state, new_transition),
@@ -283,9 +304,21 @@ class InnovationStateSpace:
         )
         alignment_error = abs(new_next - old_next)
         duration = perf_counter() - started
-        if alignment_error > self._config.alignment_tolerance_c:
+        if not np.isfinite(alignment_error):
+            diagnostics = _diagnostics_with_alignment(
+                diagnostics, candidate, alignment_error, RefreshRejectionReason.NONFINITE
+            )
             self._last_refresh_time_s = float(record.time_s[-1])
-            return RefreshOutcome(False, alignment_error, duration)
+            self._last_refresh_duration_s = duration
+            return RefreshOutcome(False, alignment_error, duration, diagnostics)
+        if alignment_error > self._config.alignment_tolerance_c:
+            diagnostics = _diagnostics_with_alignment(
+                diagnostics, candidate, alignment_error, RefreshRejectionReason.ALIGNMENT_FAILED
+            )
+            self._last_refresh_time_s = float(record.time_s[-1])
+            self._last_refresh_duration_s = duration
+            return RefreshOutcome(False, alignment_error, duration, diagnostics)
+        diagnostics = _diagnostics_with_alignment(diagnostics, candidate, alignment_error, None)
         self._fit = candidate
         self._state = candidate_state
         self._covariance = np.eye(candidate.order, dtype=np.float64) * candidate.covariance
@@ -294,7 +327,7 @@ class InnovationStateSpace:
         self._last_refresh_time_s = self._times[-1]
         self._refreshes += 1
         self._plausibility_bounds = candidate.plausibility_bounds
-        return RefreshOutcome(True, alignment_error, duration)
+        return RefreshOutcome(True, alignment_error, duration, diagnostics)
 
     def affine_prediction(self, horizon_steps: int, q_previous: float, ambient_future: FloatArray) -> AffinePrediction:
         """Return the lower-triangular affine open-loop map using powers of ``A``."""
@@ -329,27 +362,33 @@ class InnovationStateSpace:
         """Serialize only immutable plain values suitable for deterministic comparison."""
         fit = self._require_fit()
         poles = np.linalg.eigvals(fit.A)
-        return _freeze({
-            "schema": "innovation-state-space/v1",
-            "order": fit.order,
-            "delay_steps": fit.delay,
-            "delay_seconds": fit.delay * 20.0,
-            "matrices": {
-                "A": fit.A.tolist(), "B": fit.B.tolist(), "C": fit.C.tolist(),
-                "D": fit.D.tolist(), "state_offset": fit.state_offset.tolist(),
-            },
-            "poles": [float(abs(pole)) for pole in poles],
-            "steady_gain": _steady_gain(fit),
-            "plausibility_bounds": (
-                self._plausibility_bounds.to_document()
-                if self._plausibility_bounds is not None
-                else None
-            ),
-            "innovation_covariance": fit.covariance, "state_covariance": self._covariance.tolist(),
-            "alignment_error_c": self._last_alignment_error_c, "buffer_samples": len(self._times),
-            "refresh_duration_s": self._last_refresh_duration_s, "refreshes": self._refreshes,
-            "update_timing": {"last_attempt_time_s": self._last_refresh_time_s},
-        })
+        return _freeze(
+            {
+                "schema": "innovation-state-space/v1",
+                "order": fit.order,
+                "delay_steps": fit.delay,
+                "delay_seconds": fit.delay * 20.0,
+                "matrices": {
+                    "A": fit.A.tolist(),
+                    "B": fit.B.tolist(),
+                    "C": fit.C.tolist(),
+                    "D": fit.D.tolist(),
+                    "state_offset": fit.state_offset.tolist(),
+                },
+                "poles": [float(abs(pole)) for pole in poles],
+                "steady_gain": _steady_gain(fit),
+                "plausibility_bounds": (
+                    self._plausibility_bounds.to_document() if self._plausibility_bounds is not None else None
+                ),
+                "innovation_covariance": fit.covariance,
+                "state_covariance": self._covariance.tolist(),
+                "alignment_error_c": self._last_alignment_error_c,
+                "buffer_samples": len(self._times),
+                "refresh_duration_s": self._last_refresh_duration_s,
+                "refreshes": self._refreshes,
+                "update_timing": {"last_attempt_time_s": self._last_refresh_time_s},
+            }
+        )
 
     def _trim_history(self) -> None:
         excess = len(self._times) - self._config.max_buffer_samples
@@ -374,9 +413,27 @@ def subspace_fit(record: SignalRecord, order: int, block_rows: int) -> SubspaceF
 
 
 def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
+    """Keep the historical fitting API while refresh consumes its diagnostics."""
+    details: list[str] = []
+    candidate, diagnostics = _select_fit_with_diagnostics(record, config, details)
+    if candidate is not None:
+        return candidate
+    reasons = tuple(reason for attempt in diagnostics.attempts for reason in attempt.rejection_reasons)
+    detail = "; ".join(sorted(set(details))) or "no candidate was attempted"
+    if reasons and all(reason is RefreshRejectionReason.INSUFFICIENT_SAMPLES for reason in reasons):
+        raise ValueError(f"record is too short for configured state-space candidates: {detail}")
+    raise CandidateExhaustedError(f"no viable state-space candidate: {detail}")
+
+
+def _select_fit_with_diagnostics(
+    record: SignalRecord,
+    config: StateSpaceConfig,
+    details: list[str] | None = None,
+) -> tuple[SubspaceFit | None, RefreshDiagnostics]:
+    """Evaluate each configured candidate once, retaining the measurements it used."""
     n = record.temp_c.size
-    rejection_reasons: list[str] = []
     candidates: list[SubspaceFit] = []
+    attempts: list[CandidateAttempt] = []
     split = max(
         max(config.orders) + max(config.delays) + 4,
         int(n * (1.0 - config.validation_fraction)),
@@ -387,41 +444,68 @@ def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
     bounds = _plausibility_bounds(training, config)
     for order in config.orders:
         for delay in config.delays:
+            started = perf_counter()
+            evidence = _CandidateEvidence(
+                order=order,
+                delay=delay,
+                sample_count=int(training.temp_c.size),
+                hankel_shape=(config.block_rows, config.block_rows),
+                effective_rank=0,
+            )
             try:
-                candidate = _fit_candidate(training, order, delay, config.block_rows)
-                rejection = _candidate_rejection_reason(
-                    candidate, training, validation, config, bounds
-                )
+                candidate = _fit_candidate(training, order, delay, config.block_rows, evidence)
+                gain = _steady_gain(candidate)
+                evidence.steady_gain = gain if np.isfinite(gain) else None
+                rejection = _candidate_rejection_reason(candidate, training, validation, config, bounds, gain)
                 if rejection is not None:
-                    rejection_reasons.append(rejection)
+                    evidence.rejection_reasons.append(_rejection_reason(rejection))
+                    if details is not None:
+                        details.append(rejection)
+                    attempts.append(evidence.attempt(started))
                     continue
                 error = _one_step_error(candidate, training, validation)
                 if not np.isfinite(error):
-                    rejection_reasons.append("held-out one-step validation is non-finite")
+                    evidence.rejection_reasons.append(RefreshRejectionReason.NONFINITE)
+                    attempts.append(evidence.attempt(started))
                     continue
-                candidates.append(SubspaceFit(
-                    candidate.order, candidate.delay, candidate.A, candidate.B,
-                    candidate.C, candidate.D, candidate.intercept, candidate.input_mean,
-                    candidate.covariance,
-                    error + config.parameter_penalty * (order * order + 2 * order + 2),
-                    candidate.state_offset,
-                    bounds,
-                ))
-            except ValueError as error:
-                rejection_reasons.append(str(error))
-                continue
+                score = error + config.parameter_penalty * (order * order + 2 * order + 2)
+                evidence.prediction_score = score
+                candidates.append(
+                    SubspaceFit(
+                        candidate.order,
+                        candidate.delay,
+                        candidate.A,
+                        candidate.B,
+                        candidate.C,
+                        candidate.D,
+                        candidate.intercept,
+                        candidate.input_mean,
+                        candidate.covariance,
+                        score,
+                        candidate.state_offset,
+                        bounds,
+                    )
+                )
+                attempts.append(evidence.attempt(started))
+            except (ValueError, np.linalg.LinAlgError) as error:
+                detail = str(error)
+                evidence.rejection_reasons.append(_rejection_reason(detail))
+                if details is not None:
+                    details.append(detail)
+                attempts.append(evidence.attempt(started))
     if not candidates:
-        detail = "; ".join(sorted(set(rejection_reasons))) or "no candidate was attempted"
-        if rejection_reasons and all("too short" in reason for reason in rejection_reasons):
-            raise ValueError(f"record is too short for configured state-space candidates: {detail}")
-        raise CandidateExhaustedError(f"no viable state-space candidate: {detail}")
+        return None, RefreshDiagnostics(
+            accepted=False,
+            terminal_reason=RefreshRejectionReason.NO_VALID_CANDIDATE,
+            attempts=tuple(attempts),
+            selected_order=None,
+            selected_delay=None,
+        )
     best_error = min(candidate.validation_error for candidate in candidates)
     statistically_equivalent = [
-        candidate
-        for candidate in candidates
-        if candidate.validation_error <= best_error * 1.12
+        candidate for candidate in candidates if candidate.validation_error <= best_error * 1.12
     ]
-    return min(
+    selected = min(
         statistically_equivalent,
         key=lambda candidate: (
             abs(float(candidate.D[0])),
@@ -430,21 +514,80 @@ def _select_fit(record: SignalRecord, config: StateSpaceConfig) -> SubspaceFit:
             candidate.delay,
         ),
     )
+    return selected, RefreshDiagnostics(
+        accepted=True,
+        terminal_reason=None,
+        attempts=tuple(attempts),
+        selected_order=selected.order,
+        selected_delay=selected.delay,
+    )
 
 
-def _fit_candidate(record: SignalRecord, order: int, delay: int, block_rows: int) -> SubspaceFit:
+def _rejection_reason(detail: str) -> RefreshRejectionReason:
+    """Normalize existing candidate guard text to the stable diagnostic vocabulary."""
+    text = detail.lower()
+    if "too short" in text or "enough observations" in text:
+        return RefreshRejectionReason.INSUFFICIENT_SAMPLES
+    if "rank" in text or "projection does not support" in text:
+        return RefreshRejectionReason.RANK_DEFICIENT
+    if "condition" in text:
+        return RefreshRejectionReason.ILL_CONDITIONED
+    if "unstable" in text:
+        return RefreshRejectionReason.UNSTABLE_AFTER_PROJECTION
+    if "gain" in text or "envelope" in text:
+        return RefreshRejectionReason.IMPLAUSIBLE_GAIN
+    if "alignment" in text:
+        return RefreshRejectionReason.ALIGNMENT_FAILED
+    return RefreshRejectionReason.NONFINITE
+
+
+def _diagnostics_with_alignment(
+    diagnostics: RefreshDiagnostics,
+    candidate: SubspaceFit,
+    alignment_error_c: float,
+    rejection: RefreshRejectionReason | None,
+) -> RefreshDiagnostics:
+    """Attach the refresh-time continuity check to its selected immutable attempt."""
+    recorded_error = alignment_error_c if np.isfinite(alignment_error_c) else None
+    attempts = tuple(
+        replace(
+            attempt,
+            alignment_error_c=recorded_error,
+            rejection_reasons=(
+                attempt.rejection_reasons if rejection is None else (*attempt.rejection_reasons, rejection)
+            ),
+        )
+        if (attempt.order, attempt.delay) == (candidate.order, candidate.delay)
+        else attempt
+        for attempt in diagnostics.attempts
+    )
+    return replace(
+        diagnostics,
+        accepted=rejection is None,
+        terminal_reason=rejection,
+        attempts=attempts,
+        selected_order=None if rejection is not None else diagnostics.selected_order,
+        selected_delay=None if rejection is not None else diagnostics.selected_delay,
+    )
+
+
+def _fit_candidate(
+    record: SignalRecord,
+    order: int,
+    delay: int,
+    block_rows: int,
+    evidence: _CandidateEvidence | None = None,
+) -> SubspaceFit:
     z = np.asarray(record.temp_c - record.ambient_c, dtype=np.float64)
     q = np.asarray(record.q, dtype=np.float64)
     if z.size <= max(order + delay, 2 * block_rows):
         raise ValueError("record is too short for selected order, delay, and block rows")
     input_mean = float(np.mean(q))
     A, B, C, D, state_offset, intercept, residuals = _recover_projected_realization(
-        z, q - input_mean, order, delay, block_rows
+        z, q - input_mean, order, delay, block_rows, evidence
     )
     covariance = max(float(np.mean(residuals * residuals)), 1e-8)
-    return SubspaceFit(
-        order, delay, A, B, C, D, intercept, input_mean, covariance, 0.0, state_offset
-    )
+    return SubspaceFit(order, delay, A, B, C, D, intercept, input_mean, covariance, 0.0, state_offset)
 
 
 def _recover_projected_realization(
@@ -453,16 +596,19 @@ def _recover_projected_realization(
     order: int,
     delay: int,
     block_rows: int,
+    evidence: _CandidateEvidence | None = None,
 ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, float, FloatArray]:
     """Recover a projected realization from deterministic ARX Markov parameters."""
     start = order + delay
     targets = output[start:]
-    design = np.column_stack((
-        *(output[start - lag : output.size - lag] for lag in range(1, order + 1)),
-        centered_input[start - delay : output.size - delay],
-        *(centered_input[start - delay - lag : output.size - delay - lag] for lag in range(1, order + 1)),
-        np.ones(targets.size, dtype=np.float64),
-    ))
+    design = np.column_stack(
+        (
+            *(output[start - lag : output.size - lag] for lag in range(1, order + 1)),
+            centered_input[start - delay : output.size - delay],
+            *(centered_input[start - delay - lag : output.size - delay - lag] for lag in range(1, order + 1)),
+            np.ones(targets.size, dtype=np.float64),
+        )
+    )
     coefficients = _svd_least_squares(design, targets)
     ar = coefficients[:order]
     direct = coefficients[order]
@@ -471,29 +617,43 @@ def _recover_projected_realization(
     response = np.empty(2 * block_rows, dtype=np.float64)
     response[0] = direct
     for step in range(1, response.size):
-        response[step] = (
-            ar[: min(order, step)] @ response[step - min(order, step) : step][::-1]
-            + (numerator[step - 1] if step <= order else 0.0)
+        response[step] = ar[: min(order, step)] @ response[step - min(order, step) : step][::-1] + (
+            numerator[step - 1] if step <= order else 0.0
         )
     hankel = _block_hankel(response[1:], block_rows)
     left, singular_values, right = np.linalg.svd(hankel, full_matrices=False)
+    if evidence is not None:
+        evidence.hankel_shape = tuple(int(size) for size in hankel.shape)
+        if np.isfinite(singular_values).all():
+            evidence.singular_values = tuple(float(value) for value in singular_values)
+            cutoff = np.finfo(np.float64).eps * max(hankel.shape) * singular_values[0]
+            evidence.effective_rank = int(np.count_nonzero(singular_values > cutoff))
+            evidence.condition_number = (
+                float(singular_values[0] / singular_values[-1]) if singular_values[-1] > 0.0 else None
+            )
     if singular_values[order - 1] <= np.finfo(np.float64).eps:
         raise ValueError("subspace Markov projection does not support requested order")
     roots = np.sqrt(singular_values[:order])
     observability = left[:, :order] * roots
     reachability = roots[:, np.newaxis] * right[:order]
-    A = _project_matrix(_svd_least_squares(observability[:-1], observability[1:]))
+    unprojected_A = _svd_least_squares(observability[:-1], observability[1:])
+    A = _project_matrix(unprojected_A)
+    if evidence is not None:
+        evidence.projection_applied = not np.allclose(unprojected_A, A)
     B = reachability[:, 0]
     C = observability[0]
     D = np.array([response[0]], dtype=np.float64)
-    constant_output = float(coefficients[-1] / (1.0 - np.sum(ar)))
+    denominator = 1.0 - float(np.sum(ar))
+    if not np.isfinite(denominator) or abs(denominator) <= np.finfo(np.float64).eps:
+        raise ValueError("identified constant term is non-finite")
+    constant_output = float(coefficients[-1] / denominator)
+    if not np.isfinite(constant_output):
+        raise ValueError("identified constant term is non-finite")
     constant_direction = np.linalg.solve((np.eye(order) - A).T, C)
     state_offset = constant_output * constant_direction / (constant_direction @ constant_direction)
+    if not np.isfinite(state_offset).all():
+        raise ValueError("identified state offset is non-finite")
     return A, B, C, D, state_offset, 0.0, residuals
-
-
-
-
 
 
 def _svd_least_squares(features: FloatArray, targets: FloatArray) -> FloatArray:
@@ -504,9 +664,9 @@ def _svd_least_squares(features: FloatArray, targets: FloatArray) -> FloatArray:
     projected_targets = left[:, : singular_values.size].T @ targets
     scale = inverse if projected_targets.ndim == 1 else inverse[:, np.newaxis]
     return right[: singular_values.size].T @ (scale * projected_targets)
-def _plausibility_bounds(
-    record: SignalRecord, config: StateSpaceConfig
-) -> PlausibilityBounds:
+
+
+def _plausibility_bounds(record: SignalRecord, config: StateSpaceConfig) -> PlausibilityBounds:
     """Return calibrated finite-response limits recorded with each accepted fit."""
     temperature_deviation = np.asarray(record.temp_c - record.ambient_c, dtype=np.float64)
     observed_deviation_c = max(float(np.max(np.abs(temperature_deviation))), 1.0)
@@ -525,6 +685,7 @@ def _candidate_rejection_reason(
     validation: SignalRecord,
     config: StateSpaceConfig,
     bounds: PlausibilityBounds | None = None,
+    steady_gain: float | None = None,
 ) -> str | None:
     """Return a physical or held-out safety rejection without a global gain cap."""
     arrays = (fit.A, fit.B, fit.C, fit.D, fit.state_offset)
@@ -533,7 +694,7 @@ def _candidate_rejection_reason(
     poles = np.linalg.eigvals(fit.A)
     if not np.isfinite(poles).all() or float(np.max(np.abs(poles))) >= 1.0:
         return "identified model is unstable"
-    gain = _steady_gain(fit)
+    gain = _steady_gain(fit) if steady_gain is None else steady_gain
     if not np.isfinite(gain):
         return "identified steady gain is non-finite"
     if gain <= 0.0:
@@ -544,9 +705,7 @@ def _candidate_rejection_reason(
     forecast = _free_run_forecast(fit, training, validation.q, validation.ambient_c)
     if not np.isfinite(forecast).all():
         return "held-out forecast is non-finite"
-    if float(np.max(np.abs(forecast - validation.ambient_c))) > (
-        bounds.max_held_out_deviation_c
-    ):
+    if float(np.max(np.abs(forecast - validation.ambient_c))) > (bounds.max_held_out_deviation_c):
         return "held-out forecast exceeds data-scaled envelope"
     return None
 
@@ -580,9 +739,7 @@ def _one_step_error(fit: SubspaceFit, training: SignalRecord, validation: Signal
         state = _state_from_values(temperatures, ambients, inputs, fit)
         transition_delayed = _delayed_input(inputs, np.empty(0), len(inputs) - 1, fit.delay)
         output_delayed = _delayed_input(inputs, np.empty(0), len(inputs), fit.delay)
-        prediction = _output(
-            fit, _advance(fit, state, transition_delayed), output_delayed, float(ambient_c)
-        )
+        prediction = _output(fit, _advance(fit, state, transition_delayed), output_delayed, float(ambient_c))
         errors.append((prediction - float(temp_c)) ** 2)
         temperatures.append(float(temp_c))
         ambients.append(float(ambient_c))
@@ -614,7 +771,8 @@ def _state_from_values(
     for row, target in enumerate(range(start, len(temperatures))):
         delayed = _delayed_input(inputs, np.empty(0), target, fit.delay)
         residuals[row] = (
-            temperatures[target] - ambients[target]
+            temperatures[target]
+            - ambients[target]
             - (fit.C @ forced_state)
             - fit.D[0] * (delayed - fit.input_mean)
             - fit.intercept
@@ -631,9 +789,7 @@ def _advance(fit: SubspaceFit, state: FloatArray, delayed_q: float) -> FloatArra
 
 
 def _output(fit: SubspaceFit, state: FloatArray, delayed_q: float, ambient_c: float) -> float:
-    return float(
-        ambient_c + fit.C @ state + fit.D[0] * (delayed_q - fit.input_mean) + fit.intercept
-    )
+    return float(ambient_c + fit.C @ state + fit.D[0] * (delayed_q - fit.input_mean) + fit.intercept)
 
 
 def _delayed_input(history: list[float], future: FloatArray, target: int, delay: int) -> float:
@@ -661,25 +817,17 @@ def _block_hankel(values: FloatArray, rows: int) -> FloatArray:
     columns = frames.shape[0] - rows + 1
     if columns < 1:
         raise ValueError("not enough samples for block Hankel matrix")
-    return np.concatenate(
-        [frames[offset : offset + columns].T for offset in range(rows)], axis=0
-    )
-
+    return np.concatenate([frames[offset : offset + columns].T for offset in range(rows)], axis=0)
 
 
 def _project_matrix(A: FloatArray) -> FloatArray:
     values, vectors = np.linalg.eig(A)
-    values = np.array(
-        [value * min(1.0, 0.999 / abs(value)) if abs(value) else value for value in values]
-    )
+    values = np.array([value * min(1.0, 0.999 / abs(value)) if abs(value) else value for value in values])
     return np.real_if_close(vectors @ np.diag(values) @ np.linalg.inv(vectors)).astype(np.float64)
 
 
 def _steady_gain(fit: SubspaceFit) -> float:
-    try:
-        return float(fit.C @ np.linalg.solve(np.eye(fit.order) - fit.A, fit.B) + fit.D[0])
-    except np.linalg.LinAlgError:
-        return 0.0
+    return float(fit.C @ np.linalg.solve(np.eye(fit.order) - fit.A, fit.B) + fit.D[0])
 
 
 def _observability(A: FloatArray, C: FloatArray, rows: int) -> FloatArray:
@@ -692,15 +840,29 @@ def _observability(A: FloatArray, C: FloatArray, rows: int) -> FloatArray:
 
 
 def _slice_record(record: SignalRecord, start: int, stop: int) -> SignalRecord:
-    return SignalRecord(record.time_s[start:stop], record.temp_c[start:stop], record.q[start:stop], record.ambient_c[start:stop], record.provenance)
+    return SignalRecord(
+        record.time_s[start:stop],
+        record.temp_c[start:stop],
+        record.q[start:stop],
+        record.ambient_c[start:stop],
+        record.provenance,
+    )
 
 
 def _join_records(left: SignalRecord, right: SignalRecord, max_samples: int) -> SignalRecord:
     if right.time_s[0] <= left.time_s[-1]:
-        right = _slice_record(right, int(np.searchsorted(right.time_s, left.time_s[-1], side="right")), right.time_s.size)
+        right = _slice_record(
+            right, int(np.searchsorted(right.time_s, left.time_s[-1], side="right")), right.time_s.size
+        )
     if right.time_s.size == 0:
         return _slice_record(left, max(0, left.time_s.size - max_samples), left.time_s.size)
-    return SignalRecord(np.concatenate((left.time_s, right.time_s))[-max_samples:], np.concatenate((left.temp_c, right.temp_c))[-max_samples:], np.concatenate((left.q, right.q))[-max_samples:], np.concatenate((left.ambient_c, right.ambient_c))[-max_samples:], left.provenance)
+    return SignalRecord(
+        np.concatenate((left.time_s, right.time_s))[-max_samples:],
+        np.concatenate((left.temp_c, right.temp_c))[-max_samples:],
+        np.concatenate((left.q, right.q))[-max_samples:],
+        np.concatenate((left.ambient_c, right.ambient_c))[-max_samples:],
+        left.provenance,
+    )
 
 
 def _validate_record(record: SignalRecord) -> None:
@@ -724,6 +886,7 @@ def _freeze(value: object) -> Mapping[str, object]:
         if isinstance(nested, list):
             return tuple(freeze(item) for item in nested)
         return nested
+
     frozen = freeze(value)
     assert isinstance(frozen, Mapping)
     return frozen

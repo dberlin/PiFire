@@ -13,6 +13,7 @@ from typing import Protocol, cast
 import numpy as np
 from .arx import ScheduledARX
 from .contracts import AffinePrediction, FrameObservation, ModelUpdate
+from .state_space import InnovationStateSpace
 
 _SCHEMA = "online-adaptation/v2"
 _LEGACY_SCHEMA = "online-adaptation/v1"
@@ -76,6 +77,14 @@ class EvaluationRejectionReason(StrEnum):
     CONTINUITY = "continuity"
     STALE_GENERATION = "stale-generation"
     PROSPECTIVE = "prospective"
+    STATE_ALIGNMENT = "state-alignment"
+
+
+class AlignmentEvidence(StrEnum):
+    """Whether an arm provides an applicable measured state-alignment residual."""
+
+    MEASURED = "measured"
+    NOT_APPLICABLE = "not-applicable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +97,7 @@ class AdaptationPolicy:
     required_consecutive_wins: int = 2
     max_delay_steps: int = 15
     max_pole_magnitude: float = 0.999
+    max_alignment_error_c: float = 2.0
     braking_tolerance_c: float = 0.0
 
     def __post_init__(self) -> None:
@@ -99,6 +109,8 @@ class AdaptationPolicy:
             raise ValueError("evaluation policy must have positive interval and win count")
         if self.max_delay_steps < 1 or not 0.0 < self.max_pole_magnitude < 1.0:
             raise ValueError("delay and stability policy is invalid")
+        if not isfinite(self.max_alignment_error_c) or self.max_alignment_error_c < 0.0:
+            raise ValueError("max_alignment_error_c must be finite and non-negative")
         if self.braking_tolerance_c < 0.0:
             raise ValueError("braking_tolerance_c must be non-negative")
 
@@ -155,6 +167,10 @@ class EvaluationDecision:
     completed_origins: tuple[CompletedOrigin, ...]
     horizon_scores: tuple[HorizonScore, ...]
     evaluation_duration_ms: float = 0.0
+    state_aligned: bool = True
+    challenger_alignment: AlignmentEvidence = AlignmentEvidence.NOT_APPLICABLE
+    incumbent_alignment: AlignmentEvidence = AlignmentEvidence.NOT_APPLICABLE
+    alignment_error_c: float | None = None
 
     @property
     def role_generation(self) -> int:
@@ -217,6 +233,16 @@ class _PendingDecision:
     decision: EvaluationDecision
 
 
+@dataclass(frozen=True, slots=True)
+class _CrossArmPrediction:
+    """Predictions produced by both arms for one common observed frame."""
+
+    frame_end_s: float
+    generation: int
+    incumbent_output_c: float
+    challenger_output_c: float
+
+
 class OnlineAdaptation:
     """Own challenger learning, prequential scoring, and two-phase role changes."""
 
@@ -254,6 +280,7 @@ class OnlineAdaptation:
         self._pending: dict[str, _PendingDecision] = {}
         self._decision_sequence = 0
         self._last_duty: float | None = None
+        self._latest_cross_arm_prediction: _CrossArmPrediction | None = None
 
     @property
     def role_generation(self) -> int:
@@ -355,11 +382,17 @@ class OnlineAdaptation:
                 braking,
             )
         incumbent_outcome = self.incumbent.track(observation)
+        challenger_refresh_generation = _state_space_refresh_generation(self.challenger)
         challenger_outcome = (
             self.challenger.observe(observation) if self._parameter_learning else self.challenger.track(observation)
         )
+        refreshed_challenger = challenger_refresh_generation != _state_space_refresh_generation(self.challenger)
         if challenger_outcome.updated:
             self._effective_updates += 1
+        if refreshed_challenger:
+            self._begin_role_generation()
+        else:
+            self._retain_cross_arm_prediction(observation, incumbent_outcome, challenger_outcome)
         self._capture_origins(observation, ambient_future, braking)
         self._last_duty = observation.realized_q
         return ObservationOutcome(
@@ -384,12 +417,30 @@ class OnlineAdaptation:
         )
         completed = tuple(self._completed)
         horizon_scores = _horizon_scores(completed)
+        incumbent_snapshot = self.incumbent.snapshot()
+        challenger_snapshot = self.challenger.snapshot()
+        incumbent_alignment, _ = _alignment_evidence(incumbent_snapshot)
+        challenger_alignment, alignment_error = _alignment_evidence(challenger_snapshot)
+        if _is_state_space_snapshot(challenger_snapshot):
+            cross_arm = self._latest_cross_arm_prediction
+            alignment_error = (
+                None
+                if cross_arm is None or cross_arm.generation != self._role_generation
+                else abs(cross_arm.incumbent_output_c - cross_arm.challenger_output_c)
+            )
+            state_aligned = alignment_error is not None and alignment_error <= self.policy.max_alignment_error_c
+        else:
+            state_aligned = challenger_alignment is AlignmentEvidence.NOT_APPLICABLE or (
+                alignment_error is not None and alignment_error <= self.policy.max_alignment_error_c
+            )
         reasons = self._evaluation_reasons(
             incumbent_prediction,
             candidate_prediction,
             incumbent_braking,
             candidate_braking,
             horizon_scores,
+            state_aligned,
+            challenger_snapshot,
         )
         win = not reasons
         has_complete_horizon_evidence = all(score.sample_count > 0 for score in horizon_scores)
@@ -427,6 +478,10 @@ class OnlineAdaptation:
             challenger_digest,
             completed,
             horizon_scores,
+            state_aligned=state_aligned,
+            challenger_alignment=challenger_alignment,
+            incumbent_alignment=incumbent_alignment,
+            alignment_error_c=alignment_error,
         )
         if eligible:
             self._pending.clear()
@@ -542,7 +597,7 @@ class OnlineAdaptation:
         if not legacy and not _SNAPSHOT_FIELDS.issubset(snapshot):
             raise ValueError("snapshot fields are invalid")
         policy_data = _mapping(snapshot.get("policy"), "policy")
-        policy = AdaptationPolicy(**dict(policy_data))
+        policy = _policy_from_snapshot(policy_data)
         parameter_learning = snapshot.get("parameter_learning")
         if not isinstance(parameter_learning, bool):
             raise ValueError("parameter_learning must be a bool")
@@ -663,10 +718,25 @@ class OnlineAdaptation:
         braking: bool,
     ) -> ObservationOutcome:
         incumbent, challenger = (self.incumbent.track(observation), self.challenger.track(observation))
+        self._retain_cross_arm_prediction(observation, incumbent, challenger)
         self._capture_origins(observation, ambient_future, braking)
         self._last_duty = observation.realized_q
         return ObservationOutcome(
             UpdateGate(False, (reason,), variance, levels), incumbent, challenger, self._effective_updates
+        )
+
+    def _retain_cross_arm_prediction(
+        self,
+        observation: FrameObservation,
+        incumbent: ModelUpdate,
+        challenger: ModelUpdate,
+    ) -> None:
+        """Retain the two pre-update outputs generated for this same frame."""
+        self._latest_cross_arm_prediction = _CrossArmPrediction(
+            observation.frame_end_s,
+            self._role_generation,
+            incumbent.predicted_temp_c,
+            challenger.predicted_temp_c,
         )
 
     def _reset_role_lag_history(self) -> None:
@@ -674,6 +744,7 @@ class OnlineAdaptation:
         self._excitation.clear()
         self._last_duty = None
         self._lag_warmup_remaining = self.policy.max_delay_steps
+        self._latest_cross_arm_prediction = None
         for model in (self.incumbent, self.challenger):
             reset = getattr(model, "reset_lag_history", None)
             if callable(reset):
@@ -693,6 +764,7 @@ class OnlineAdaptation:
         self._origins.clear()
         self._scores.continuous = False
         self._pending.clear()
+        self._latest_cross_arm_prediction = None
 
     def _begin_role_generation(self) -> None:
         """Discard old-role evidence while preserving continuous new-role scoring."""
@@ -701,6 +773,9 @@ class OnlineAdaptation:
         self._completed.clear()
         self._completed_window = ()
         self._scores.clear()
+        self._consecutive_wins = 0
+
+        self._latest_cross_arm_prediction = None
 
     def _capture_origins(
         self,
@@ -819,6 +894,8 @@ class OnlineAdaptation:
         incumbent_braking: float | None,
         candidate_braking: float | None,
         horizon_scores: Sequence[HorizonScore],
+        state_aligned: bool,
+        challenger_snapshot: Mapping[str, object],
     ) -> list[EvaluationRejectionReason]:
         reasons: list[EvaluationRejectionReason] = []
         if (
@@ -839,24 +916,30 @@ class OnlineAdaptation:
             and candidate_braking > incumbent_braking + self.policy.braking_tolerance_c
         ):
             reasons.append(EvaluationRejectionReason.BRAKING)
-        snapshot = self.challenger.snapshot()
-        if not _stable(snapshot, self.policy.max_pole_magnitude):
+        if not _stable(challenger_snapshot, self.policy.max_pole_magnitude):
             reasons.append(EvaluationRejectionReason.STABILITY)
-        if not _positive_gain(snapshot):
+        if not _positive_gain(challenger_snapshot):
             reasons.append(EvaluationRejectionReason.GAIN)
-        if not _valid_delay(snapshot, self.policy.max_delay_steps):
+        if not _valid_delay(challenger_snapshot, self.policy.max_delay_steps):
             reasons.append(EvaluationRejectionReason.DELAY)
         if self._effective_updates < self.policy.min_effective_updates:
             reasons.append(EvaluationRejectionReason.SAMPLES)
         if not self._scores.continuous:
             reasons.append(EvaluationRejectionReason.CONTINUITY)
+        if not state_aligned:
+            reasons.append(EvaluationRejectionReason.STATE_ALIGNMENT)
         return reasons
 
 
 def _scheduled_arx_loader(snapshot: Mapping[str, object]) -> AdaptiveModel:
-    if snapshot.get("schema") != "scheduled-arx/v2":
-        raise ValueError("model_loader is required for a non-ScheduledARX snapshot")
-    return ScheduledARX.from_snapshot(snapshot)
+    schema = snapshot.get("schema")
+    if schema == "scheduled-arx/v2":
+        return ScheduledARX.from_snapshot(snapshot)
+    if schema == "innovation-state-space/v2":
+        from .state_space import InnovationStateSpace
+
+        return InnovationStateSpace.from_snapshot(snapshot)
+    raise ValueError("model_loader is required for an unsupported online-model snapshot")
 
 
 def _valid_prospective_solve(value: object) -> bool:
@@ -963,18 +1046,59 @@ def _nonnegative_finite(value: object, name: str) -> float:
     return result
 
 
+def _is_state_space_snapshot(snapshot: Mapping[str, object]) -> bool:
+    return snapshot.get("schema") == "innovation-state-space/v2"
+
+
+def _state_space_refresh_generation(model: AdaptiveModel) -> int | None:
+    """Return the installed realization generation, never diagnostic attempt counts."""
+    if not isinstance(model, InnovationStateSpace) and getattr(model, "model_kind", None) != "innovation-state-space":
+        return None
+    snapshot = model.snapshot()
+    if not _is_state_space_snapshot(snapshot):
+        return None
+    status = snapshot.get("status")
+    if not isinstance(status, Mapping):
+        return None
+    refreshes = cast(Mapping[str, object], status).get("refreshes")
+    return refreshes if isinstance(refreshes, int) and not isinstance(refreshes, bool) and refreshes >= 0 else None
+
+
+def _canonical_state_space_model(snapshot: Mapping[str, object]) -> Mapping[str, object] | None:
+    if not _is_state_space_snapshot(snapshot):
+        return None
+    model = snapshot.get("model")
+    return model if isinstance(model, Mapping) else None
+
+
 def _stable(snapshot: Mapping[str, object], maximum: float) -> bool:
-    poles = _values(snapshot, "poles")
+    model = _canonical_state_space_model(snapshot)
+    poles = (
+        _numeric(model.get("poles"))
+        if model is not None
+        else ([] if _is_state_space_snapshot(snapshot) else _values(snapshot, "poles"))
+    )
     return bool(poles) and all((abs(value) <= maximum for value in poles))
 
 
 def _positive_gain(snapshot: Mapping[str, object]) -> bool:
-    gains = _values(snapshot, "steady_gain")
+    model = _canonical_state_space_model(snapshot)
+    gains = (
+        _numeric(model.get("steady_gain"))
+        if model is not None
+        else ([] if _is_state_space_snapshot(snapshot) else _values(snapshot, "steady_gain"))
+    )
     return bool(gains) and all((value > 0.0 for value in gains))
 
 
 def _valid_delay(snapshot: Mapping[str, object], maximum: int) -> bool:
-    delays = _values(snapshot, "active_delay") + _values(snapshot, "delay_steps")
+    model = _canonical_state_space_model(snapshot)
+    if model is not None:
+        delays = _numeric(model.get("delay"))
+    elif _is_state_space_snapshot(snapshot):
+        delays = []
+    else:
+        delays = _values(snapshot, "active_delay") + _values(snapshot, "delay_steps") + _values(snapshot, "delay")
     return bool(delays) and all((0.0 <= delay <= maximum and delay.is_integer() for delay in delays))
 
 
@@ -992,6 +1116,59 @@ def _values(value: object, key: str) -> list[float]:
     if isinstance(value, (list, tuple)):
         return [item for nested in value for item in _values(nested, key)]
     return []
+
+
+def _alignment_evidence(snapshot: Mapping[str, object]) -> tuple[AlignmentEvidence, float | None]:
+    """Extract canonical state-space status without accepting diagnostic duplicates."""
+    if _is_state_space_snapshot(snapshot):
+        return _status_alignment_evidence(snapshot.get("status"))
+    values: list[object] = []
+    kinds: list[object] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                if key == "alignment_error_c":
+                    values.append(nested)
+                elif key == "alignment_evidence":
+                    kinds.append(nested)
+                else:
+                    visit(nested)
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            for nested in value:
+                visit(nested)
+
+    visit(snapshot)
+    if kinds:
+        if len(kinds) != 1:
+            return AlignmentEvidence.MEASURED, None
+        if kinds[0] == AlignmentEvidence.NOT_APPLICABLE:
+            return AlignmentEvidence.NOT_APPLICABLE, None
+        if kinds[0] != AlignmentEvidence.MEASURED:
+            return AlignmentEvidence.MEASURED, None
+    elif not values or all(value is None for value in values):
+        return AlignmentEvidence.NOT_APPLICABLE, None
+    if len(values) != 1:
+        return AlignmentEvidence.MEASURED, None
+    return _measured_alignment_error(values[0])
+
+
+def _status_alignment_evidence(status: object) -> tuple[AlignmentEvidence, float | None]:
+    if not isinstance(status, Mapping):
+        return AlignmentEvidence.MEASURED, None
+    evidence = status.get("alignment_evidence")
+    if evidence == AlignmentEvidence.NOT_APPLICABLE:
+        return AlignmentEvidence.NOT_APPLICABLE, None
+    if evidence != AlignmentEvidence.MEASURED:
+        return AlignmentEvidence.MEASURED, None
+    return _measured_alignment_error(status.get("alignment_error_c"))
+
+
+def _measured_alignment_error(value: object) -> tuple[AlignmentEvidence, float | None]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(float(value)):
+        return AlignmentEvidence.MEASURED, None
+    error = float(value)
+    return AlignmentEvidence.MEASURED, error if error >= 0.0 else None
 
 
 def _numeric(value: object) -> list[float]:
@@ -1032,7 +1209,25 @@ def _strings(value: object, name: str) -> list[str]:
     values = list(_sequence(value, name))
     if any(not isinstance(item, str) or not item for item in values):
         raise ValueError(f"{name} must contain only non-empty strings")
-    return values
+    return [item for item in values if isinstance(item, str)]
+
+
+def _policy_from_snapshot(data: Mapping[str, object]) -> AdaptationPolicy:
+    fields = AdaptationPolicy.__dataclass_fields__
+    if set(data) != set(fields):
+        raise ValueError("policy must contain exactly the configured fields")
+    return AdaptationPolicy(
+        excitation_window=_nonnegative(data["excitation_window"], "excitation_window"),
+        min_input_variance=_finite(data["min_input_variance"], "min_input_variance"),
+        min_input_levels=_nonnegative(data["min_input_levels"], "min_input_levels"),
+        min_effective_updates=_nonnegative(data["min_effective_updates"], "min_effective_updates"),
+        evaluation_interval_s=_finite(data["evaluation_interval_s"], "evaluation_interval_s"),
+        required_consecutive_wins=_nonnegative(data["required_consecutive_wins"], "required_consecutive_wins"),
+        max_delay_steps=_nonnegative(data["max_delay_steps"], "max_delay_steps"),
+        max_pole_magnitude=_finite(data["max_pole_magnitude"], "max_pole_magnitude"),
+        max_alignment_error_c=_finite(data["max_alignment_error_c"], "max_alignment_error_c"),
+        braking_tolerance_c=_finite(data["braking_tolerance_c"], "braking_tolerance_c"),
+    )
 
 
 def _finite(value: object, name: str) -> float:

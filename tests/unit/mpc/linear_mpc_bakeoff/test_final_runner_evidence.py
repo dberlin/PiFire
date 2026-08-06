@@ -1,6 +1,7 @@
 """Final runner evidence contracts that prevent scientific-evidence regressions."""
 
-from __future__ import annotations
+from math import isfinite
+
 from dataclasses import replace
 
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
@@ -66,11 +67,15 @@ def test_quick_artifact_persists_one_horizon_and_real_mak_provenance() -> None:
         real = artifact.horizon_evidence[arm.name]["real"]
         assert real["provenance"] == "requested-input-reconstruction"
         assert set(real["diagnostics_c"]) == {"60", "300", "900", "1800", "3600"}
-        assert real["diagnostics_c"]["60"] is not None
-        assert real["diagnostics_c"]["300"] is not None
-        assert real["diagnostics_c"]["900"] is None
-        assert real["diagnostics_c"]["1800"] is None
-        assert real["diagnostics_c"]["3600"] is None
+        if arm.name == "state-space":
+            assert all(value is None for value in real["diagnostics_c"].values())
+            assert isinstance(real.get("failure"), str) and real["failure"]
+        else:
+            assert real["diagnostics_c"]["60"] is not None
+            assert real["diagnostics_c"]["300"] is not None
+            assert real["diagnostics_c"]["900"] is None
+            assert real["diagnostics_c"]["1800"] is None
+            assert real["diagnostics_c"]["3600"] is None
     real_split = artifact.splits["real-MAK"]
     assert real_split["fit"][1] <= real_split["validation"][0] <= real_split["validation"][1]
     assert real_split["validation"][1] <= real_split["test"][0]
@@ -105,7 +110,9 @@ def test_quick_simulator_diagnostics_cover_all_horizons_without_unmasked_coast_l
                     residual for residual, selected in zip(origin["residuals_c"], mask, strict=True) if selected
                 ]
         snapshot = row.model_evidence["batch_fit_snapshot"]
-        assert snapshot["steady_gain"] != 0.0
+        assert isinstance(snapshot["steady_gain"], (int, float))
+        assert isfinite(snapshot["steady_gain"])
+        assert snapshot["steady_gain"] > 0.0
 
     for arm in artifact.arms:
         assert arm.simulator_diagnostics_available
@@ -144,7 +151,6 @@ def test_override_frames_are_recorded_as_non_updates_for_both_models() -> None:
 
 
 def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_work() -> None:
-    from math import isfinite
 
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
 
@@ -194,6 +200,9 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
         initialization="wrong-gain",
         horizon_s=600,
     )
+    state_space_snapshot = state_space_row.model_evidence["batch_fit_snapshot"]
+    assert state_space_snapshot["diagnostics"]["accepted"]
+    assert state_space_snapshot["refreshes"] == 0
     assert state_space_row.raw_refresh_ms
     assert all("iterations" in item and "kkt_residual" in item for item in row.solver_evidence)
     assert any(item.get("reference_method") == "scipy-l-bfgs-b" for item in row.solver_evidence)

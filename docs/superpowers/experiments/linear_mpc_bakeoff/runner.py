@@ -45,7 +45,7 @@ from .datasets import (
     generate_calibration_record,
 )
 from .dmc import DMCConfig, LaguerreDMC
-from .state_space import InnovationStateSpace, StateSpaceConfig
+from controller.linear_mpc.state_space import InnovationStateSpace, StateSpaceConfig
 from .artifact import ArmEvidence, ExperimentArtifact, MatrixKey
 from .contracts import SignalRecord
 from controller.linear_mpc.contracts import AffinePrediction, FrameObservation
@@ -1623,9 +1623,7 @@ def _run_scenario(
                 }
             )
             previous_observation_target = target
-            challenger_refresh_before = _refresh_marker(
-                _bakeoff_snapshot(manager.challenger)
-            )
+            challenger_refresh_before = _refresh_marker(_bakeoff_snapshot(manager.challenger))
             learner_started = perf_counter()
             if isinstance(manager, OnlineAdaptation):
                 outcome = manager.observe(observation, braking=braking)
@@ -1639,9 +1637,7 @@ def _run_scenario(
                     manual_override=manual_override,
                 )
             observe_ms = (perf_counter() - learner_started) * 1_000.0
-            challenger_refresh_after = _refresh_marker(
-                _bakeoff_snapshot(manager.challenger)
-            )
+            challenger_refresh_after = _refresh_marker(_bakeoff_snapshot(manager.challenger))
             if mode == "online" and outcome.gate.permitted:
                 if challenger_refresh_after != challenger_refresh_before:
                     refresh_ms.append(observe_ms)
@@ -1694,37 +1690,16 @@ def _run_scenario(
                     completed = manager.completed_origins
                     horizon_metrics: dict[str, dict[str, Any]] = {}
                     for horizon_steps in (3, 15):
-                        horizon_origins = [
-                            origin
-                            for origin in completed
-                            if origin.horizon_steps == horizon_steps
-                        ]
+                        horizon_origins = [origin for origin in completed if origin.horizon_steps == horizon_steps]
                         if horizon_origins:
                             horizon_metrics[str(horizon_steps * _FRAME_S)] = {
                                 "candidate_rmse_c": float(
-                                    np.sqrt(
-                                        np.mean(
-                                            [
-                                                origin.challenger_error_c**2
-                                                for origin in horizon_origins
-                                            ]
-                                        )
-                                    )
+                                    np.sqrt(np.mean([origin.challenger_error_c**2 for origin in horizon_origins]))
                                 ),
                                 "incumbent_rmse_c": float(
-                                    np.sqrt(
-                                        np.mean(
-                                            [
-                                                origin.incumbent_error_c**2
-                                                for origin in horizon_origins
-                                            ]
-                                        )
-                                    )
+                                    np.sqrt(np.mean([origin.incumbent_error_c**2 for origin in horizon_origins]))
                                 ),
-                                "origin_frame_ids": [
-                                    int(origin.completion_time_s)
-                                    for origin in horizon_origins
-                                ],
+                                "origin_frame_ids": [int(origin.completion_time_s) for origin in horizon_origins],
                             }
                     promotion_history.append(
                         {
@@ -1741,16 +1716,14 @@ def _run_scenario(
                             "plausible_gain": "gain" not in [reason.value for reason in decision.reasons],
                             "state_aligned": True,
                             "sample_count": decision.sample_count,
-                            "score_frame_ids": sorted(
-                                int(origin.completion_time_s) for origin in completed
-                            ),
+                            "score_frame_ids": sorted(int(origin.completion_time_s) for origin in completed),
                             "score_role_generation": decision.generation,
                             "score_role_generations": [decision.generation],
                             "horizon_metrics": horizon_metrics,
-                            "braking_or_coast_sample_count": sum(
-                                origin.braking for origin in completed
+                            "braking_or_coast_sample_count": sum(origin.braking for origin in completed),
+                            "candidate_snapshot": _json_value(
+                                candidate_snapshot or _bakeoff_snapshot(manager.challenger)
                             ),
-                            "candidate_snapshot": _json_value(candidate_snapshot or _bakeoff_snapshot(manager.challenger)),
                             "incumbent_snapshot": _json_value(_bakeoff_snapshot(manager.incumbent)),
                         }
                     )
@@ -1846,9 +1819,7 @@ def _run_scenario(
                 {
                     "alignment": "not-applicable",
                     "policy": {
-                        "max_gain": float(
-                            abs(batch_fit_snapshot.get("steady_gain", 0.0))
-                        ),
+                        "max_gain": float(abs(batch_fit_snapshot.get("steady_gain", 0.0))),
                         **_json_value(manager.snapshot()["policy"]),
                     },
                 }
@@ -1914,6 +1885,12 @@ def _prepared_model(arm: str, plant: str, seed: int, initialization: str):
         starts=tuple(range(validation_end, samples, 1)),
         horizons_s=(600, 800, 1_000),
     )
+    if isinstance(model, InnovationStateSpace):
+        # Advance only the fitted filter state across withheld calibration frames.
+        # Forecast scores above were produced before this assimilation, so the
+        # scenario starts contiguous without parameter fitting or score leakage.
+        for frame in _record_frames(_record_slice(record, fit_end, samples)):
+            model.track(frame)
     return model, fit_ms, before, after, record
 
 
@@ -2015,6 +1992,7 @@ def _record_slice(record: SignalRecord, begin: int, end: int) -> SignalRecord:
         metadata=dict(record.metadata),
     )
 
+
 def record_frames(record: SignalRecord) -> tuple[FrameObservation, ...]:
     """Convert a deterministic evidence record into complete production frames."""
     return _record_frames(record)
@@ -2028,6 +2006,7 @@ def frame_seconds() -> int:
 def real_mak_record() -> SignalRecord:
     """Return the cached chronological real-MAK record used by bake-off evidence."""
     return _real_mak_record()
+
 
 def _record_frames(record: SignalRecord) -> tuple[FrameObservation, ...]:
     return tuple(
@@ -2054,14 +2033,12 @@ def _record_frames(record: SignalRecord) -> tuple[FrameObservation, ...]:
             continuous=True,
             role_generation=0,
         )
-        for time_s, temp_c, q, ambient_c in zip(
-            record.time_s, record.temp_c, record.q, record.ambient_c, strict=True
-        )
+        for time_s, temp_c, q, ambient_c in zip(record.time_s, record.temp_c, record.q, record.ambient_c, strict=True)
     )
 
 
 def _fit_model(model: Any, record: SignalRecord) -> None:
-    if isinstance(model, ScheduledARX):
+    if isinstance(model, (ScheduledARX, InnovationStateSpace)):
         model.fit(_record_frames(record))
     else:
         model.fit(record)
@@ -2073,13 +2050,16 @@ def _forecast_model(
     q_future: np.ndarray,
     ambient_future: np.ndarray,
 ) -> np.ndarray:
-    if isinstance(model, ScheduledARX):
+    if isinstance(model, (ScheduledARX, InnovationStateSpace)):
         return model.forecast(_record_frames(prefix), q_future, ambient_future)
     return model.forecast(prefix, q_future, ambient_future)
+
 
 def _bakeoff_snapshot(model: Any) -> Mapping[str, object]:
     """Adapt a production v2 model snapshot to legacy evidence diagnostics."""
     snapshot = model.snapshot()
+    if snapshot.get("schema") == "innovation-state-space/v2":
+        return _without_fit_timing(snapshot)
     if snapshot.get("schema") != "scheduled-arx/v2":
         return snapshot
     status = snapshot.get("status")
@@ -2104,6 +2084,15 @@ def _bakeoff_snapshot(model: Any) -> Mapping[str, object]:
             "last_refresh_sample": status.get("last_refresh_sample"),
         },
     }
+
+
+def _without_fit_timing(value: object) -> Any:
+    """Exclude nondeterministic wall-clock fit timing from canonical evidence."""
+    if isinstance(value, Mapping):
+        return {key: _without_fit_timing(item) for key, item in value.items() if key != "elapsed_ms"}
+    if isinstance(value, (list, tuple)):
+        return [_without_fit_timing(item) for item in value]
+    return value
 
 
 def _horizon_residuals(
@@ -2191,12 +2180,8 @@ def _simulator_prediction_diagnostics_from_model(model: Any, record: SignalRecor
             "bias_c": float(np.mean(values)),
             "p90_abs_error_c": float(np.percentile(np.abs(values), 90.0)),
             "coast_braking_temperature_error_c": (float(np.mean(np.abs(masked))) if masked.size else None),
-            "steady_gain_error_c_per_q": _steady_gain_error(
-                _bakeoff_snapshot(model), record
-            ),
-            "delay_error_s": _delay_error_s(
-                _bakeoff_snapshot(model), record, validation_end
-            ),
+            "steady_gain_error_c_per_q": _steady_gain_error(_bakeoff_snapshot(model), record),
+            "delay_error_s": _delay_error_s(_bakeoff_snapshot(model), record, validation_end),
         }
     return {
         "boundaries": {

@@ -110,6 +110,8 @@ def _bare_mpc_controller():
     core._history = collections.deque(maxlen=2)
     core._model_revision = 3
     core._model_meta = {"source": "cook-fit"}
+    core._online = None
+    core._online_pending_lifecycle = None
     core._net = _Policy()
     core.mpc = None
     core.estimator = _Estimator()

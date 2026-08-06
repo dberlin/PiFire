@@ -457,6 +457,25 @@ def test_framed_completed_observations_are_exactly_aligned_and_deduplicated(hold
     assert second.temp_c == pytest.approx(200.0)
 
 
+def test_framed_observation_latches_role_generation_at_frame_start(hold_cycle):
+    runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    runner.observation_status = {"adaptation": {"role_generation": 7}}
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "latched-role-generation"}
+    _configure_frame_observation(mode)
+
+    mode._advance_framed_pulse(0.0, True, ptemp=212.0)
+    mode._advance_framed_pulse(6.0, False, ptemp=212.0)
+    runner.observation_status = {"adaptation": {"role_generation": 8}}
+    mode._advance_framed_pulse(20.0, False, ptemp=212.0)
+    mode._advance_framed_pulse(20.0, True, ptemp=392.0)
+    mode._advance_framed_pulse(26.0, False, ptemp=392.0)
+    mode._advance_framed_pulse(40.0, False, ptemp=392.0)
+
+    assert [(item.result_revision, item.role_generation) for item in runner.observations] == [(1, 7), (1, 8)]
+
+
 @pytest.mark.parametrize(
     ("case", "inhibit", "skipped", "reset_reason", "expected_source"),
     [

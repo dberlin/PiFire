@@ -1,5 +1,6 @@
 """End-to-end Hold control-trace contracts using the normal fake runtime seam."""
 
+from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -26,6 +27,7 @@ from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.runner import ControllerUpdateResult, ObservationOutcomeEnvelope, SyncControllerRunner
 from controller.linear_mpc.contracts import FrameObservation
+from controller.runtime.modes.hold import HoldMode
 from tests.fakes.runner import FakeControllerRunner
 from controller.update_mpc import load_trace_samples
 
@@ -1147,6 +1149,58 @@ def _promotion_outcome(*, frame_end_ms):
     }
 
 
+def _state_space_evaluation():
+    evaluation = deepcopy(_promotion_outcome(frame_end_ms=20_000)["evaluation"])
+    evaluation.update(
+        challenger_model_kind="innovation-state-space",
+        state_space_refresh={
+            "accepted": True,
+            "terminal_reason": None,
+            "attempts": (
+                {
+                    "order": 2,
+                    "delay": 3,
+                    "sample_count": 48,
+                    "hankel_shape": (8, 33),
+                    "singular_values": (8.0, 2.0),
+                    "effective_rank": 2,
+                    "alignment_error_c": 0.25,
+                    "rejection_reasons": (),
+                    "elapsed_ms": 4.0,
+                },
+            ),
+            "refresh_duration_ms": 4.0,
+            "state_space_digest": "d" * 64,
+            "order": 2,
+            "delay": 3,
+            "singular_values": (8.0, 2.0),
+            "effective_rank": 2,
+            "alignment_error_c": 0.25,
+            "max_pole_magnitude": 0.8,
+            "process_covariance_trace": 0.2,
+            "measurement_covariance": 0.1,
+        },
+    )
+    return evaluation
+
+
+def test_hold_evaluation_trace_preserves_typed_state_space_evidence():
+    payload = HoldMode._model_evaluation_payload(_state_space_evaluation())
+
+    assert payload is not None
+    assert payload.challenger_model_kind == "innovation-state-space"
+    assert payload.state_space_refresh is not None
+    assert payload.state_space_refresh.state_space_digest == "d" * 64
+    assert payload.state_space_refresh.attempts[0].alignment_error_c == 0.25
+
+
+def test_hold_evaluation_trace_rejects_malformed_state_space_refresh_evidence():
+    evaluation = _state_space_evaluation()
+    evaluation["state_space_refresh"]["max_pole_magnitude"] = 1.0
+
+    assert HoldMode._model_evaluation_payload(evaluation) is None
+
+
 def _learning_observation(frame_start_s):
     return FrameObservation(
         frame_start_s,
@@ -1250,6 +1304,44 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
         TraceEventKind.MODEL_EVALUATION,
         TraceEventKind.MODEL_EVENT,
     ]
+
+
+def test_framed_learning_trace_uses_generation_latched_with_pulse_frame(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+
+    class _Runner(FakeControllerRunner):
+        def __init__(self):
+            super().__init__(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+            self.status = {"adaptation": {"role_generation": 7}}
+
+        def controller_state(self):
+            return self.status
+
+    runner = _Runner()
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "latched-generation-learning-trace"}
+    mode._ensure_trace_session(0.0)
+    controller = mode.state.controller
+    controller.pulse_result_revision = 1
+    controller.pulse_requested_duty = 0.3
+    controller.pulse_combustion_load = 0.3
+    controller.pulse_maximum_duty = 0.5
+
+    mode._advance_framed_pulse(0.0, True, ptemp=212.0)
+    mode._advance_framed_pulse(6.0, False, ptemp=212.0)
+    runner.status = {"adaptation": {"role_generation": 8}}
+    mode._advance_framed_pulse(20.0, False, ptemp=212.0)
+
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(
+            1, 0, runner.observations[0], _model_observation_outcome(frame_end_ms=20_000, role_generation=7)
+        )
+    )
+    mode._reconcile_model_observation_outcomes(now=22.0)
+
+    payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
+    assert [payload.role_generation for payload in payloads] == [7]
 
 
 def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, monkeypatch):

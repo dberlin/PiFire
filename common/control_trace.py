@@ -35,6 +35,7 @@ NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
 PositiveFloat: TypeAlias = Annotated[FiniteFloat, Field(gt=0)]
 BoundedLoad: TypeAlias = Annotated[FiniteFloat, Field(ge=0, le=1)]
 NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
+PositiveInt: TypeAlias = Annotated[int, Field(gt=0, strict=True)]
 NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 Digest: TypeAlias = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 
@@ -516,7 +517,179 @@ def _matches_completed_rmse(errors: Sequence[float], reported: float | None) -> 
 
 
 CompletedOriginEvidence: TypeAlias = Annotated[CompletedOriginPayload, BeforeValidator(_completed_origin_payload)]
+
+
+def _trace_tuple(value: object) -> tuple[object, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError("trace evidence must be an array")
+    return tuple(value)
+
+
 HorizonScoreEvidence: TypeAlias = Annotated[HorizonScorePayload, BeforeValidator(_horizon_score_payload)]
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class StateSpaceRefreshAttemptPayload:
+    """One finite candidate realization attempt captured during a refresh."""
+
+    order: PositiveInt
+    delay: PositiveInt
+    sample_count: NonNegativeInt
+    hankel_shape: Annotated[tuple[NonNegativeInt, NonNegativeInt], BeforeValidator(_trace_tuple)]
+    singular_values: Annotated[tuple[FiniteFloat, ...], BeforeValidator(_trace_tuple)]
+    effective_rank: NonNegativeInt
+    alignment_error_c: NonNegativeFloat | None
+    rejection_reasons: Annotated[tuple[NonBlankString, ...], BeforeValidator(_trace_tuple), Field(max_length=16)]
+    elapsed_ms: NonNegativeFloat
+
+    @model_validator(mode="after")
+    def validate_attempt(self) -> StateSpaceRefreshAttemptPayload:
+        if any(value < 0.0 for value in self.singular_values):
+            raise ValueError("state-space singular values must be non-negative")
+        if self.effective_rank > min(len(self.singular_values), *self.hankel_shape):
+            raise ValueError("state-space effective rank exceeds the Hankel dimensions")
+        return self
+
+
+def _state_space_attempt_payload(value: object) -> StateSpaceRefreshAttemptPayload:
+    if isinstance(value, StateSpaceRefreshAttemptPayload):
+        return value
+    if isinstance(value, Mapping):
+        return StateSpaceRefreshAttemptPayload(**dict(value))
+    raise ValueError("state-space refresh attempt must be an object")
+
+
+def _state_space_tuple(value: object) -> tuple[object, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError("state-space evidence must be an array")
+    return tuple(value)
+
+
+StateSpaceFiniteValues: TypeAlias = Annotated[tuple[FiniteFloat, ...], BeforeValidator(_state_space_tuple)]
+
+
+StateSpaceRefreshAttemptEvidence: TypeAlias = Annotated[
+    StateSpaceRefreshAttemptPayload, BeforeValidator(_state_space_attempt_payload)
+]
+StateSpaceRefreshAttempts: TypeAlias = Annotated[
+    tuple[StateSpaceRefreshAttemptEvidence, ...], BeforeValidator(_state_space_tuple)
+]
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class StateSpaceRefreshPayload:
+    """Validated state-space-only refresh, alignment, and numerical evidence."""
+
+    accepted: bool
+    terminal_reason: NonBlankString | None
+    attempts: Annotated[StateSpaceRefreshAttempts, Field(max_length=32)]
+    refresh_duration_ms: NonNegativeFloat
+    state_space_digest: Digest
+    order: PositiveInt | None = None
+    delay: PositiveInt | None = None
+    singular_values: StateSpaceFiniteValues | None = None
+    effective_rank: NonNegativeInt | None = None
+    alignment_error_c: NonNegativeFloat | None = None
+    max_pole_magnitude: NonNegativeFloat | None = None
+    process_covariance_trace: NonNegativeFloat | None = None
+    measurement_covariance: NonNegativeFloat | None = None
+
+    @model_validator(mode="after")
+    def validate_refresh(self) -> StateSpaceRefreshPayload:
+        known_reasons = (
+            "insufficient-samples",
+            "rank-deficient",
+            "ill-conditioned",
+            "unstable-after-projection",
+            "implausible-gain",
+            "alignment-failed",
+            "nonfinite",
+            "no-valid-candidate",
+        )
+        required_selected = (
+            self.order,
+            self.delay,
+            self.singular_values,
+            self.effective_rank,
+            self.max_pole_magnitude,
+            self.process_covariance_trace,
+            self.measurement_covariance,
+        )
+        selected_summary = (*required_selected, self.alignment_error_c)
+        if self.terminal_reason is not None and self.terminal_reason not in known_reasons:
+            raise ValueError("state-space refresh terminal rejection is unknown")
+        if any(reason not in known_reasons for attempt in self.attempts for reason in attempt.rejection_reasons):
+            raise ValueError("state-space refresh attempt rejection is unknown")
+        elif self.refresh_duration_ms < sum(attempt.elapsed_ms for attempt in self.attempts):
+            raise ValueError("state-space refresh duration is shorter than its attempted candidate evidence")
+        if self.accepted:
+            if self.terminal_reason is not None:
+                raise ValueError("accepted state-space refresh cannot have a terminal rejection")
+            if any(value is None for value in required_selected):
+                raise ValueError("accepted state-space refresh requires complete selected diagnostics")
+            assert self.order is not None
+            assert self.delay is not None
+            assert self.singular_values is not None
+            assert self.effective_rank is not None
+            assert self.max_pole_magnitude is not None
+            if self.order < 1 or self.delay < 1:
+                raise ValueError("accepted state-space order and delay must be positive")
+            if (
+                not self.singular_values
+                or self.effective_rank < self.order
+                or self.effective_rank > len(self.singular_values)
+            ):
+                raise ValueError("accepted state-space effective rank is invalid")
+            selected_attempt = None
+            for attempt in self.attempts:
+                if (attempt.order, attempt.delay) == (self.order, self.delay):
+                    if selected_attempt is not None:
+                        raise ValueError("accepted state-space refresh selects duplicate candidate evidence")
+                    selected_attempt = attempt
+            if selected_attempt is None or selected_attempt.rejection_reasons:
+                raise ValueError("accepted state-space refresh requires one matching clean selected attempt")
+            if (
+                selected_attempt.singular_values != self.singular_values
+                or selected_attempt.effective_rank != self.effective_rank
+                or selected_attempt.alignment_error_c != self.alignment_error_c
+            ):
+                raise ValueError("accepted state-space selected diagnostics disagree with the selected attempt")
+            if self.alignment_error_c is not None and self.alignment_error_c > 2.0:
+                raise ValueError("accepted state-space alignment exceeds the state-alignment gate")
+            if self.max_pole_magnitude >= 1.0:
+                raise ValueError("accepted state-space poles must be stable")
+        else:
+            if self.terminal_reason is None:
+                raise ValueError("rejected state-space refresh requires a terminal rejection")
+            if any(value is not None for value in selected_summary):
+                raise ValueError("rejected state-space refresh cannot claim selected diagnostics")
+            if self.terminal_reason == "no-valid-candidate":
+                if not self.attempts:
+                    raise ValueError("no-valid-candidate requires attempted state-space candidates")
+                if any(not attempt.rejection_reasons for attempt in self.attempts):
+                    raise ValueError("no-valid-candidate requires every attempted candidate to be rejected")
+            elif self.terminal_reason != "insufficient-samples" and not any(
+                self.terminal_reason in attempt.rejection_reasons for attempt in self.attempts
+            ):
+                raise ValueError("state-space terminal rejection must match an attempted candidate rejection")
+            elif self.attempts and not any(
+                self.terminal_reason in attempt.rejection_reasons for attempt in self.attempts
+            ):
+                raise ValueError("state-space terminal rejection must match an attempted candidate rejection")
+        return self
+
+
+def _state_space_refresh_payload(value: object) -> StateSpaceRefreshPayload:
+    if isinstance(value, StateSpaceRefreshPayload):
+        return value
+    if isinstance(value, Mapping):
+        return StateSpaceRefreshPayload(**dict(value))
+    raise ValueError("state-space refresh must be an object")
+
+
+StateSpaceRefreshEvidence: TypeAlias = Annotated[
+    StateSpaceRefreshPayload, BeforeValidator(_state_space_refresh_payload)
+]
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -544,6 +717,9 @@ class ModelEvaluationPayload:
     horizon_scores: Annotated[tuple[HorizonScoreEvidence, ...], Field(min_length=2, max_length=2)]
     evaluation_duration_ms: NonNegativeFloat
     payload_type: Literal["model_evaluation"] = "model_evaluation"
+
+    challenger_model_kind: Literal["scheduled-arx", "innovation-state-space"] = "scheduled-arx"
+    state_space_refresh: StateSpaceRefreshEvidence | None = None
 
     @model_validator(mode="after")
     def validate_evaluation(self) -> ModelEvaluationPayload:
@@ -590,6 +766,8 @@ class ModelEvaluationPayload:
                 raise ValueError("incumbent horizon RMSE must match completed origins")
             if not _matches_completed_rmse(challenger_errors, score.challenger_rmse_c):
                 raise ValueError("challenger horizon RMSE must match completed origins")
+        if (self.challenger_model_kind == "innovation-state-space") != (self.state_space_refresh is not None):
+            raise ValueError("state-space refresh evidence must match the challenger model kind")
         return self
 
 

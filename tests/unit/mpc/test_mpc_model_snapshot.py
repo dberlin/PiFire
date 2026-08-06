@@ -7,7 +7,8 @@ import pytest
 
 from controller.linear_mpc.adaptation import OnlineAdaptation
 from controller.linear_mpc.arx import ScheduledARX
-from controller.mpc import _DEFAULTS, Controller
+from controller.linear_mpc.contracts import FrameObservation
+from controller.mpc import _DEFAULTS, Controller, _online_evaluation
 
 #: The schema this controller writes and is the only one it will read back.
 #: A literal, not `Controller._MODEL_SCHEMA`: importing it would move every
@@ -35,6 +36,34 @@ def _c(**over):
     # below). Every other test here is about some OTHER field of the snapshot,
     # so they must not trip that guard on the way to the thing they check.
     return Controller(dict(_DEFAULTS, policy="nlp", n_delay=PARAMS["n_delay"], **over), "C", dict(CYCLE))
+
+
+def _state_space_frame(index: int) -> FrameObservation:
+    loads = (0.1, 0.35, 0.7, 0.2, 0.85, 0.5, 0.25, 0.65)
+    q = loads[index % len(loads)]
+    return FrameObservation(
+        index * 20.0,
+        (index + 1) * 20.0,
+        80.0 + 12.0 * loads[(index - 1) % len(loads)] + 4.0 * loads[(index - 2) % len(loads)],
+        110.0,
+        20.0,
+        q,
+        q,
+        q,
+        5.0,
+        1.0,
+        1.0,
+        index,
+        "controller",
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        0,
+    )
 
 
 def test_an_unidentified_controller_snapshots_nothing():
@@ -500,10 +529,72 @@ def _completed_evaluation():
     }
 
 
+def _state_space_refresh_evidence():
+    return {
+        "accepted": True,
+        "terminal_reason": None,
+        "attempts": (
+            {
+                "order": 2,
+                "delay": 3,
+                "sample_count": 48,
+                "hankel_shape": (8, 33),
+                "singular_values": (8.0, 2.0),
+                "effective_rank": 2,
+                "alignment_error_c": 0.25,
+                "rejection_reasons": (),
+                "elapsed_ms": 4.0,
+            },
+        ),
+        "refresh_duration_ms": 4.0,
+        "state_space_digest": "c" * 64,
+        "order": 2,
+        "delay": 3,
+        "singular_values": (8.0, 2.0),
+        "effective_rank": 2,
+        "alignment_error_c": 0.25,
+        "max_pole_magnitude": 0.8,
+        "process_covariance_trace": 0.2,
+        "measurement_covariance": 0.1,
+    }
+
+
 def _snapshot_with_completed_evaluation():
     snapshot = _active_online_snapshot()
     snapshot["online_adaptation"]["last_evaluation"] = _completed_evaluation()
     return snapshot
+
+
+def test_snapshot_restore_round_trips_state_space_evaluation_evidence_exactly():
+    snapshot = _snapshot_with_completed_evaluation()
+    evaluation = snapshot["online_adaptation"]["last_evaluation"]
+    evaluation.update(
+        challenger_model_kind="innovation-state-space",
+        state_space_refresh=_state_space_refresh_evidence(),
+    )
+    restored = _c(enable_online_adaptation=True)
+
+    assert restored.restore_model(snapshot) is True
+    assert restored.get_model_snapshot()["online_adaptation"]["last_evaluation"] == evaluation
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    (
+        ("challenger_model_kind", "grey-box"),
+        ("state_space_refresh", {"accepted": True}),
+    ),
+)
+def test_completed_evaluation_rejects_malformed_state_space_extension(field, invalid):
+    evaluation = _completed_evaluation()
+    evaluation.update(
+        challenger_model_kind="innovation-state-space",
+        state_space_refresh=_state_space_refresh_evidence(),
+    )
+    evaluation[field] = invalid
+
+    with pytest.raises(ValueError, match="evaluation"):
+        _online_evaluation(evaluation)
 
 
 def test_snapshot_restore_round_trips_an_exact_completed_evaluation_audit_trail():
@@ -562,6 +653,7 @@ def test_v2_active_arx_snapshot_accepts_a_digest_valid_arx_rollback_owner():
     assert restored._online.rollback() is True
     assert isinstance(restored._online.incumbent, ScheduledARX)
     assert restored._online.lag_warmup_remaining == restored._online.policy.max_delay_steps
+
 
 @pytest.mark.parametrize(
     ("origin_index", "field", "invalid"),
@@ -753,6 +845,55 @@ def test_absent_or_malformed_online_member_does_not_discard_valid_grey_box_model
     assert restored_malformed.restore_model(malformed) is True
     assert restored_malformed.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
     assert restored_malformed.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+
+
+def test_malformed_nested_state_space_member_preserves_outer_grey_box_restore():
+    """A corrupt optional challenger must not discard the independently valid model."""
+    snapshot = deepcopy(_active_online_snapshot())
+    snapshot["online_adaptation"]["challenger"] = {
+        "schema": "innovation-state-space/v2",
+        "model": {"A": [[float("nan")]]},
+    }
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+
+    assert restored.restore_model(snapshot) is True
+    assert restored.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+
+
+def test_fitted_state_space_challenger_restores_as_a_session_resettable_shadow():
+    source = _adopted_online_controller()
+    shadow = source._new_state_space_challenger()
+    for index in range(20):
+        shadow.observe(_state_space_frame(index))
+    assert shadow.snapshot()["schema"] == "innovation-state-space/v2"
+    source._online.challenger = shadow
+    snapshot = source.get_model_snapshot()
+
+    restored = _c(enable_online_adaptation=True)
+
+    assert restored.restore_model(snapshot) is True
+    restored_shadow = restored._online.challenger
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+    assert restored_shadow.snapshot()["schema"] == "innovation-state-space-shadow/v1"
+    assert restored_shadow.snapshot()["effective_samples"] == 0
+
+
+def test_state_space_snapshot_cannot_restore_as_an_incumbent():
+    source = _adopted_online_controller()
+    shadow = source._new_state_space_challenger()
+    for index in range(20):
+        shadow.observe(_state_space_frame(index))
+    snapshot = source.get_model_snapshot()
+    snapshot["online_adaptation"]["incumbent"] = shadow.snapshot()
+
+    restored = _c(enable_online_adaptation=True)
+
+    assert restored.restore_model(snapshot) is True
+    assert restored._online.incumbent.snapshot()["schema"] == "grey-box-adapter/v1"
+    assert restored._online.challenger.snapshot()["schema"] == "scheduled-arx/v2"
 
 
 @pytest.mark.parametrize(

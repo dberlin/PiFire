@@ -33,6 +33,7 @@ import numpy as np
 # do_mpc (CasADi/IPOPT) is imported lazily only when the NLP policy is built; the
 # net policy + EKF path is pure numpy/scipy and never imports it.
 
+from common.control_trace import StateSpaceRefreshPayload
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import feasibility_report
@@ -50,6 +51,7 @@ from controller.linear_mpc.adaptation import AdaptationPolicy, EvaluationDecisio
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
 from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
 from controller.linear_mpc.grey_box import GreyBoxPredictionAdapter
+from controller.linear_mpc.state_space import InnovationStateSpace, StateSpaceConfig
 from controller.linear_mpc.policy import LinearMPC, LinearMPCConfig
 
 _DEFAULTS = dict(
@@ -246,8 +248,11 @@ _EVALUATION_KEYS = frozenset(
         "completed_origins",
         "horizon_scores",
         "evaluation_duration_ms",
+        "challenger_model_kind",
+        "state_space_refresh",
     )
 )
+_LEGACY_EVALUATION_KEYS = _EVALUATION_KEYS - {"challenger_model_kind", "state_space_refresh"}
 _LIFECYCLE_KEYS = frozenset(
     (
         "event",
@@ -302,8 +307,12 @@ def _online_horizon(value, name):
 def _online_evaluation(value):
     if value is None:
         return None
-    if not isinstance(value, Mapping) or set(value) != _EVALUATION_KEYS:
+    if not isinstance(value, Mapping):
         raise ValueError("last_evaluation has an invalid schema")
+    evaluation_keys = set(value)
+    if evaluation_keys not in (_EVALUATION_KEYS, _LEGACY_EVALUATION_KEYS):
+        raise ValueError("last_evaluation has an invalid schema")
+    has_model_extension = evaluation_keys == _EVALUATION_KEYS
     if not isinstance(value["decision_id"], str) or not value["decision_id"].strip():
         raise ValueError("evaluation decision_id is invalid")
     evaluated = _online_nonnegative_score(value["evaluated_at_s"], "evaluated_at_s")
@@ -413,7 +422,24 @@ def _online_evaluation(value):
     if reasons and complete_horizon_evidence and consecutive_wins != 0:
         raise ValueError("rejected complete evaluation must reset the win count")
     _online_nonnegative_score(value["evaluation_duration_ms"], "evaluation_duration_ms")
-    return copy.deepcopy(dict(value))
+    restored = copy.deepcopy(dict(value))
+    if not has_model_extension:
+        return restored
+    challenger_model_kind = value["challenger_model_kind"]
+    if challenger_model_kind not in {"scheduled-arx", "innovation-state-space"}:
+        raise ValueError("evaluation challenger_model_kind is invalid")
+    refresh = value["state_space_refresh"]
+    if challenger_model_kind == "scheduled-arx":
+        if refresh is not None:
+            raise ValueError("scheduled-arx evaluation cannot include state-space refresh evidence")
+        return restored
+    if not isinstance(refresh, Mapping):
+        raise ValueError("state-space evaluation requires refresh evidence")
+    try:
+        restored["state_space_refresh"] = asdict(StateSpaceRefreshPayload(**dict(refresh)))
+    except TypeError, ValueError:
+        raise ValueError("evaluation state_space_refresh is invalid") from None
+    return restored
 
 
 def _online_lifecycle_metadata(value):
@@ -478,6 +504,105 @@ def _load_net_policy(cfg, n_horizon):
             print("[mpc] net policy calibration does not match config; using NLP")
         return None
     return net
+
+
+class _StateSpaceShadow:
+    """Buffer complete worker frames until the production realization can fit."""
+
+    _SCHEMA = "innovation-state-space-shadow/v1"
+
+    def __init__(self) -> None:
+        self._config = StateSpaceConfig(orders=(1, 2), delays=(1, 2, 3))
+        self._model = InnovationStateSpace(self._config)
+        self._frames: collections.deque[FrameObservation] = collections.deque(maxlen=self._config.max_buffer_samples)
+        self._fitted = False
+        self._refresh_attempts = 0
+        self._last_refresh_attempt_s: float | None = None
+
+    @classmethod
+    def from_fitted_snapshot(cls, snapshot):
+        """Restore a fitted realization behind the session-resettable wrapper."""
+        shadow = cls.__new__(cls)
+        shadow._model = InnovationStateSpace.from_snapshot(snapshot)
+        shadow._config = shadow._model._config
+        shadow._frames = collections.deque(maxlen=shadow._config.max_buffer_samples)
+        shadow._fitted = True
+        shadow._refresh_attempts = 0
+        shadow._last_refresh_attempt_s = None
+        return shadow
+
+    @property
+    def refresh_attempts(self) -> int:
+        return self._refresh_attempts
+
+    @property
+    def model_kind(self) -> str:
+        return "innovation-state-space"
+
+    def reset_lag_history(self) -> None:
+        """Discard every pre-gap state and frame before renewed shadow learning."""
+        self._model = InnovationStateSpace(self._config)
+        self._frames.clear()
+        self._fitted = False
+        self._last_refresh_attempt_s = None
+
+    def _minimum_samples(self) -> int:
+        return max(
+            self._config.max_buffer_samples // 100,
+            max(self._config.orders) + max(self._config.delays) + 6,
+            2 * self._config.block_rows + 3,
+        )
+
+    def _bootstrap(self, observation: FrameObservation) -> bool:
+        self._frames.append(observation)
+        if len(self._frames) < self._minimum_samples():
+            return False
+        diagnostics = self._model.fit(tuple(self._frames))
+        self._fitted = diagnostics.accepted
+        if self._fitted:
+            self._last_refresh_attempt_s = observation.frame_end_s
+        return self._fitted
+
+    def track(self, observation: FrameObservation) -> ModelUpdate:
+        if not self._fitted:
+            self._bootstrap(observation)
+            return ModelUpdate(observation.temp_c, observation.temp_c, 0.0, False)
+        return self._model.track(observation)
+
+    def observe(self, observation: FrameObservation) -> ModelUpdate:
+        if not self._fitted:
+            self._bootstrap(observation)
+            return ModelUpdate(observation.temp_c, observation.temp_c, 0.0, False)
+        if (
+            self._last_refresh_attempt_s is not None
+            and observation.frame_end_s - self._last_refresh_attempt_s >= self._config.refresh_interval_s
+        ):
+            self._refresh_attempts += 1
+            self._last_refresh_attempt_s = observation.frame_end_s
+        return self._model.observe(observation)
+
+    def affine_prediction(self, horizon_steps, q_previous, ambient_future):
+        if not self._fitted:
+            raise RuntimeError("state-space shadow has not accumulated a complete fit window")
+        return self._model.affine_prediction(horizon_steps, q_previous, ambient_future)
+
+    def snapshot(self):
+        if self._fitted:
+            return self._model.snapshot()
+        return {
+            "schema": self._SCHEMA,
+            "config": asdict(self._config),
+            "effective_samples": len(self._frames),
+            "poles": (0.0,),
+            "steady_gain": 1.0,
+            "delay_steps": (1,),
+            "diagnostics": {
+                "accepted": False,
+                "terminal_reason": "insufficient-samples",
+                "attempts": (),
+            },
+            "status": {"alignment_evidence": "measured", "alignment_error_c": None},
+        }
 
 
 class _GreyBoxAdaptiveModel:
@@ -601,7 +726,9 @@ def requires_modules(config):
 
 
 class Controller(ControllerBase):
-    def __init__(self, config, units, cycle_data):
+    def __init__(self, config, units, cycle_data, *, _online_challenger_kind=None):
+        if _online_challenger_kind not in (None, "state-space"):
+            raise ValueError("_online_challenger_kind must be None or 'state-space'")
         super().__init__(config, units, cycle_data)
 
         cfg = dict(_DEFAULTS)
@@ -615,6 +742,11 @@ class Controller(ControllerBase):
         self._online_enabled = cfg.get("enable_online_adaptation") is True
         self._online = None
         self._linear_config = None
+        self._online_challenger_kind = _online_challenger_kind
+        # This private experiment arm observes and scores on the normal worker,
+        # but may never become an output-owning model until evidence authorizes
+        # a code change that opens this gate.
+        self._online_experiment_active = False
         self._linear_policy = None
         self._online_next_evaluation_s = None
         self._online_last_evaluation = None
@@ -657,6 +789,9 @@ class Controller(ControllerBase):
     def _new_scheduled_arx(self):
         return ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0))
 
+    def _new_state_space_challenger(self):
+        return _StateSpaceShadow()
+
     def _new_linear_policy(self):
         return _SCHEDULED_ARX_LINEAR_CONFIG, LinearMPC(_SCHEDULED_ARX_LINEAR_CONFIG)
 
@@ -668,16 +803,19 @@ class Controller(ControllerBase):
         # ScheduledARX only predicts after its complete lag window exists.  Keep
         # adaptation in tracking mode until then, rather than letting the
         # coordinator invoke observe() against an incomplete learner.
-        coordinator._lag_warmup_remaining = max(
-            challenger.config.na + 1,
-            max(challenger.config.delays) + challenger.config.nb + 1,
-        )
+        if isinstance(challenger, ScheduledARX):
+            coordinator._lag_warmup_remaining = max(
+                challenger.config.na + 1,
+                max(challenger.config.delays) + challenger.config.nb + 1,
+            )
         return coordinator
 
     def _initialize_online_adaptation(self):
-        challenger = self._new_scheduled_arx()
+        state_space_experiment = self._online_challenger_kind == "state-space"
+        challenger = self._new_state_space_challenger() if state_space_experiment else self._new_scheduled_arx()
+        incumbent = self._new_scheduled_arx() if state_space_experiment else self._new_grey_box_model()
         self._linear_config, self._linear_policy = self._new_linear_policy()
-        self._online = self._new_online_adaptation(self._new_grey_box_model(), challenger)
+        self._online = self._new_online_adaptation(incumbent, challenger)
 
     def _build_for(self, cfg, *, model_identified=None):
         """Build thermal components at the configured planning horizon."""
@@ -861,6 +999,67 @@ class Controller(ControllerBase):
     def _active_arx(self):
         return self._online is not None and isinstance(self._online.incumbent, ScheduledARX)
 
+    @staticmethod
+    def _is_state_space_model(model):
+        return isinstance(model, (InnovationStateSpace, _StateSpaceShadow))
+
+    def _state_space_refresh_evidence(self, model):
+        snapshot = model.snapshot()
+        diagnostics = snapshot.get("diagnostics")
+        if not isinstance(diagnostics, Mapping):
+            return None
+        attempts = tuple(
+            {
+                "order": attempt["order"],
+                "delay": attempt["delay"],
+                "sample_count": attempt["sample_count"],
+                "hankel_shape": tuple(attempt["hankel_shape"]),
+                "singular_values": tuple(attempt["singular_values"]),
+                "effective_rank": attempt["effective_rank"],
+                "alignment_error_c": attempt["alignment_error_c"],
+                "rejection_reasons": tuple(attempt["rejection_reasons"]),
+                "elapsed_ms": attempt["elapsed_ms"],
+            }
+            for attempt in diagnostics.get("attempts", ())
+            if isinstance(attempt, Mapping)
+        )
+        evidence = {
+            "accepted": diagnostics.get("accepted"),
+            "terminal_reason": diagnostics.get("terminal_reason"),
+            "attempts": attempts,
+            "refresh_duration_ms": sum(attempt["elapsed_ms"] for attempt in attempts),
+            "state_space_digest": OnlineAdaptation.model_digest(model),
+        }
+        if not diagnostics.get("accepted"):
+            return evidence
+        selected = next(
+            (
+                attempt
+                for attempt in attempts
+                if (attempt["order"], attempt["delay"])
+                == (diagnostics.get("selected_order"), diagnostics.get("selected_delay"))
+            ),
+            None,
+        )
+        model_data = snapshot.get("model")
+        if selected is None or not isinstance(model_data, Mapping):
+            return None
+        process = np.asarray(model_data.get("process_covariance"), dtype=float)
+        poles = np.asarray(model_data.get("poles"), dtype=float)
+        evidence.update(
+            {
+                "order": selected["order"],
+                "delay": selected["delay"],
+                "singular_values": selected["singular_values"],
+                "effective_rank": selected["effective_rank"],
+                "alignment_error_c": selected["alignment_error_c"],
+                "max_pole_magnitude": float(np.max(poles)),
+                "process_covariance_trace": float(np.trace(process)),
+                "measurement_covariance": model_data.get("measurement_covariance"),
+            }
+        )
+        return evidence
+
     def _online_status(self):
         coordinator = self._online
         if coordinator is None:
@@ -926,6 +1125,14 @@ class Controller(ControllerBase):
             "sample_count": decision.sample_count,
             "prospective_digest": decision.prospective_digest,
         }
+        challenger = self._online.challenger
+        if self._is_state_space_model(challenger):
+            evidence = self._state_space_refresh_evidence(challenger)
+            if evidence is not None:
+                self._online_last_evaluation.update(
+                    challenger_model_kind="innovation-state-space",
+                    state_space_refresh=evidence,
+                )
         if isinstance(decision, EvaluationDecision):
             self._online_last_evaluation.update(
                 {
@@ -942,17 +1149,27 @@ class Controller(ControllerBase):
     def _online_lifecycle(self, event, detail):
         model = self._online.incumbent
         snapshot = model.snapshot()
-        return {
+        state_space = self._is_state_space_model(model)
+        lifecycle = {
             "event": event,
             "model_revision": self._model_revision,
             "provenance": "online-adaptation",
             "detail": detail,
-            "model_kind": "scheduled-arx" if isinstance(model, ScheduledARX) else "grey-box",
+            "model_kind": (
+                "innovation-state-space"
+                if state_space
+                else "scheduled-arx"
+                if isinstance(model, ScheduledARX)
+                else "grey-box"
+            ),
             "model_schema": snapshot.get("schema"),
             "role_generation": self._online.role_generation,
             "snapshot_digest": OnlineAdaptation.model_digest(model),
             "parameters": (),
         }
+        if state_space:
+            lifecycle["state_space_refresh"] = self._state_space_refresh_evidence(model)
+        return lifecycle
 
     def _evaluate_online(self, observation):
         if self._online_next_evaluation_s is None:
@@ -969,6 +1186,10 @@ class Controller(ControllerBase):
         self._record_evaluation(decision)
         self._model_revision += 1
         if not decision.promoted:
+            return {"evaluation": self._online_last_evaluation}
+        if self._is_state_space_model(self._online.challenger) and not self._online_experiment_active:
+            self._online.reject_prospective(decision.decision_id, "experiment-activation-gate")
+            self._online_last_lifecycle_reason = "experiment-activation-gate"
             return {"evaluation": self._online_last_evaluation}
         try:
             candidate = self._online.prospective_model(decision.decision_id)
@@ -1079,7 +1300,7 @@ class Controller(ControllerBase):
 
     def get_status(self):
         return {
-            "set_point": _finite_float(self.set_point),
+            "set_point": _finite_float(getattr(self, "set_point", self._set_point_c)),
             "set_point_c": _finite_float(self._set_point_c),
             "last_combustion_load": _finite_float(self._last_combustion_load),
             "last_raw_combustion_load": _optional_float(self._last_raw_combustion_load),
@@ -1348,25 +1569,32 @@ class Controller(ControllerBase):
                         schema = model_snapshot.get("schema")
                         if schema == "scheduled-arx/v2":
                             return ScheduledARX.from_snapshot(model_snapshot)
+                        if schema == "innovation-state-space/v2":
+                            return _StateSpaceShadow.from_fitted_snapshot(model_snapshot)
                         if schema == _GreyBoxAdaptiveModel._SCHEMA:
                             return _GreyBoxAdaptiveModel.from_snapshot(model_snapshot)
                         raise ValueError("unsupported online model schema")
 
                     restored = OnlineAdaptation.from_snapshot(payload, model_loader=load_model)
+                    if self._is_state_space_model(restored.incumbent):
+                        raise ValueError("state-space model cannot be an incumbent")
                     active_kind = payload.get("active_model_kind")
                     actual_kind = "scheduled-arx" if isinstance(restored.incumbent, ScheduledARX) else "grey-box"
                     if active_kind != actual_kind:
                         raise ValueError("online active model kind does not match incumbent")
                     previous = restored._previous_incumbent
                     if actual_kind == "scheduled-arx":
-                        if (
+                        if isinstance(restored.challenger, _StateSpaceShadow):
+                            if previous is not None or restored.previous_incumbent_digest is not None:
+                                raise ValueError("state-space shadow cannot own a rollback model")
+                        elif (
                             not isinstance(restored.challenger, ScheduledARX)
                             or previous is None
                             or restored.previous_incumbent_digest is None
                         ):
                             raise ValueError("active ARX lacks a valid rollback owner")
                     elif (
-                        not isinstance(restored.challenger, ScheduledARX)
+                        not isinstance(restored.challenger, (ScheduledARX, _StateSpaceShadow))
                         or previous is not None
                         or restored.previous_incumbent_digest is not None
                     ):

@@ -59,6 +59,7 @@ class FixedAffineModel:
             "status": {
                 "steady_gain": self._gain,
                 "regions": [{"effective_samples": self._effective_updates, "poles": [self._pole]}],
+                "alignment_error_c": getattr(self, "alignment_error_c", None),
             },
             "active_delay": self._delay,
         }
@@ -77,6 +78,73 @@ class HorizonAffineModel(FixedAffineModel):
             np.full(horizon_steps, self._biases[horizon_steps], dtype=np.float64),
             np.zeros((horizon_steps, horizon_steps), dtype=np.float64),
         )
+
+
+class StateSpaceAffineModel(FixedAffineModel):
+    """State-space-shaped fake with independent refresh and cross-arm evidence."""
+
+    def __init__(
+        self,
+        bias: float = 0.0,
+        *,
+        digest: str = "state-space",
+        cross_arm_offset_c: float = 0.0,
+        refresh_on_observe_call: int | None = None,
+    ) -> None:
+        super().__init__(bias, digest=digest)
+        self.cross_arm_offset_c = cross_arm_offset_c
+        self.refresh_on_observe_call = refresh_on_observe_call
+        self.refreshes = 0
+
+    @property
+    def model_kind(self) -> str:
+        return "innovation-state-space"
+
+    def observe(self, observation: FrameObservation) -> ModelUpdate:
+        self.observe_calls += 1
+        update = ModelUpdate(
+            observation.temp_c + self.cross_arm_offset_c,
+            observation.temp_c,
+            -self.cross_arm_offset_c,
+            True,
+        )
+        if self.observe_calls == self.refresh_on_observe_call:
+            self.refreshes += 1
+        return update
+
+    def track(self, observation: FrameObservation) -> ModelUpdate:
+        self.track_calls += 1
+        return ModelUpdate(
+            observation.temp_c + self.cross_arm_offset_c,
+            observation.temp_c,
+            -self.cross_arm_offset_c,
+            False,
+        )
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "schema": "innovation-state-space/v2",
+            "model": {
+                "poles": [self._pole],
+                "steady_gain": self._gain,
+                "delay": self._delay,
+            },
+            "diagnostics": {
+                "attempts": [
+                    {
+                        "poles": [1.5],
+                        "steady_gain": -5.0,
+                        "delay": 99,
+                        "alignment_error_c": 99.0,
+                    }
+                ]
+            },
+            "status": {
+                "alignment_evidence": "measured",
+                "alignment_error_c": 0.0,
+                "refreshes": self.refreshes,
+            },
+        }
 
 
 def frame(index: int, *, temperature: float | None = None) -> FrameObservation:
@@ -338,6 +406,157 @@ def test_model_promotion_gates_are_independent(attribute, value, reason) -> None
     assert not decision.promoted
 
 
+def test_state_space_gates_read_only_the_selected_model_and_canonical_status() -> None:
+    manager = OnlineAdaptation(
+        FixedAffineModel(bias=1.0, digest="incumbent"),
+        StateSpaceAffineModel(bias=0.0, digest="challenger"),
+        AdaptationPolicy(
+            excitation_window=2,
+            min_effective_updates=1,
+            required_consecutive_wins=1,
+            evaluation_interval_s=300.0,
+        ),
+    )
+
+    _populate_one_window(manager)
+    decision = manager.evaluate_due(at_s=320.0)
+
+    assert decision.promoted
+    assert EvaluationRejectionReason.STABILITY not in decision.reasons
+    assert EvaluationRejectionReason.GAIN not in decision.reasons
+    assert EvaluationRejectionReason.DELAY not in decision.reasons
+    assert decision.alignment_error_c == 0.0
+
+
+@pytest.mark.parametrize(
+    ("cross_arm_offset_c", "expected_promotion"),
+    [(2.01, False), (2.0, True)],
+)
+def test_state_space_promotion_requires_latest_cross_arm_output_alignment(
+    cross_arm_offset_c: float,
+    expected_promotion: bool,
+) -> None:
+    manager = OnlineAdaptation(
+        FixedAffineModel(bias=1.0, digest="incumbent"),
+        StateSpaceAffineModel(
+            bias=0.0,
+            digest="challenger",
+            cross_arm_offset_c=cross_arm_offset_c,
+        ),
+        AdaptationPolicy(
+            excitation_window=2,
+            min_effective_updates=1,
+            required_consecutive_wins=1,
+            evaluation_interval_s=300.0,
+        ),
+    )
+
+    _populate_one_window(manager)
+    decision = manager.evaluate_due(at_s=320.0)
+
+    assert decision.alignment_error_c == cross_arm_offset_c
+    assert decision.state_aligned is expected_promotion
+    assert decision.promoted is expected_promotion
+    assert (EvaluationRejectionReason.STATE_ALIGNMENT in decision.reasons) is not expected_promotion
+
+
+def test_state_space_refresh_defers_cross_arm_alignment_until_next_common_frame() -> None:
+    challenger = StateSpaceAffineModel(
+        bias=0.0,
+        digest="challenger",
+        refresh_on_observe_call=16,
+    )
+    manager = OnlineAdaptation(
+        FixedAffineModel(bias=1.0, digest="incumbent"),
+        challenger,
+        AdaptationPolicy(
+            excitation_window=2,
+            min_effective_updates=1,
+            required_consecutive_wins=1,
+            evaluation_interval_s=1.0,
+        ),
+    )
+
+    _populate_one_window(manager)
+    manager.observe(frame(16, temperature=0.0))
+    same_frame = manager.evaluate_due(at_s=340.0)
+
+    assert challenger.refreshes == 1
+    assert same_frame.alignment_error_c is None
+    assert not same_frame.state_aligned
+    assert not same_frame.promoted
+    assert EvaluationRejectionReason.STATE_ALIGNMENT in same_frame.reasons
+
+    manager.observe(frame(17, temperature=0.0))
+    post_refresh = manager.evaluate_due(at_s=360.0)
+
+    assert post_refresh.alignment_error_c == 0.0
+    assert post_refresh.state_aligned
+    assert EvaluationRejectionReason.STATE_ALIGNMENT not in post_refresh.reasons
+
+
+def test_state_space_refresh_discards_old_generation_scoring_before_new_evidence() -> None:
+    challenger = StateSpaceAffineModel(
+        bias=0.0,
+        digest="challenger",
+        refresh_on_observe_call=19,
+    )
+    manager = OnlineAdaptation(
+        FixedAffineModel(bias=1.0, digest="incumbent"),
+        challenger,
+        AdaptationPolicy(
+            excitation_window=2,
+            min_effective_updates=1,
+            required_consecutive_wins=2,
+            evaluation_interval_s=1.0,
+        ),
+    )
+
+    _populate_one_window(manager)
+    eligible = manager.evaluate_due(at_s=320.0)
+    assert eligible.consecutive_wins == 1
+    for index in range(16, 19):
+        manager.observe(frame(index, temperature=0.0))
+
+    assert not eligible.promoted
+    assert manager.consecutive_wins == 1
+    assert manager.completed_origins
+    assert manager._origins
+    assert manager._scores.prediction_count > 0
+    assert manager._latest_cross_arm_prediction is not None
+
+    manager.observe(frame(19, temperature=0.0))
+
+    assert challenger.refreshes == 1
+    assert manager.completed_origins == ()
+    assert manager._origins
+    assert all(origin.origin_time_s >= 400.0 for origin in manager._origins)
+    assert (
+        manager._scores.incumbent_prediction_error,
+        manager._scores.candidate_prediction_error,
+        manager._scores.prediction_count,
+        manager._scores.incumbent_braking_error,
+        manager._scores.candidate_braking_error,
+        manager._scores.braking_count,
+    ) == (0.0, 0.0, 0, 0.0, 0.0, 0)
+    assert manager._latest_cross_arm_prediction is None
+    assert manager.consecutive_wins == 0
+    with pytest.raises(ValueError, match="not a current prospective promotion"):
+        manager.prospective_model(eligible.decision_id)
+    same_frame = manager.evaluate_due(at_s=400.0)
+    assert same_frame.alignment_error_c is None
+    assert not same_frame.state_aligned
+    assert not same_frame.promoted
+
+    for index in range(20, 36):
+        manager.observe(frame(index, temperature=0.0))
+    repopulated = manager.evaluate_due(at_s=720.0)
+
+    assert repopulated.completed_origins
+    assert all(origin.origin_time_s >= 400.0 for origin in repopulated.completed_origins)
+    assert repopulated.state_aligned
+
+
 def test_prediction_braking_continuity_and_prospective_gates_are_independent() -> None:
     manager = _winning_manager()
     _populate_one_window(manager)
@@ -500,3 +719,26 @@ def test_snapshot_rejects_malformed_bounded_state(path, value) -> None:
                 digest=str(payload["digest"]),
             ),
         )
+
+
+def test_measured_alignment_uses_an_exact_inclusive_two_degree_gate() -> None:
+    """A state-space evidence boundary must neither promote early nor change roles."""
+    manager = _winning_manager()
+    manager.challenger.alignment_error_c = 2.0
+    _populate_one_window(manager)
+    accepted = manager.evaluate_due(at_s=300.0)
+
+    assert EvaluationRejectionReason.STATE_ALIGNMENT not in accepted.reasons
+    assert accepted.state_aligned
+    assert accepted.alignment_error_c == 2.0
+    assert manager.consecutive_wins == 1
+    assert manager.role_generation == 0
+
+    manager.challenger.alignment_error_c = 2.0 + 1e-12
+    _populate_one_window(manager, start_index=16)
+    rejected = manager.evaluate_due(at_s=600.0)
+
+    assert EvaluationRejectionReason.STATE_ALIGNMENT in rejected.reasons
+    assert not rejected.state_aligned
+    assert manager.consecutive_wins == 0
+    assert manager.role_generation == 0

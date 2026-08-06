@@ -164,38 +164,44 @@ def test_rejected_refresh_keeps_incumbent_but_records_attempt_cadence() -> None:
 def test_refresh_rejects_candidate_exhaustion_atomically_and_preserves_incumbent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A typed failed refresh records every candidate without mutating its incumbent."""
+    from controller.linear_mpc.state_space import RefreshRejectionReason
+
     model, extension = fitted_then_extended_record()
     before = model.snapshot()
-    attempts = 0
 
     def exhausted(*_: object) -> SubspaceFit:
-        nonlocal attempts
-        attempts += 1
-        raise state_space_module.CandidateExhaustedError("identified steady gain must be positive")
+        raise ValueError("identified steady gain must be positive")
 
-    monkeypatch.setattr(state_space_module, "_select_fit", exhausted)
+    monkeypatch.setattr(state_space_module, "_fit_candidate", exhausted)
 
     result = model.refresh(extension)
     after = model.snapshot()
 
     assert not result.accepted
     assert result.alignment_error_c is None
+    assert result.diagnostics.terminal_reason is RefreshRejectionReason.NO_VALID_CANDIDATE
+    assert len(result.diagnostics.attempts) == 9
+    assert {(attempt.order, attempt.delay) for attempt in result.diagnostics.attempts} == {
+        (order, delay) for order in (1, 2, 3) for delay in (1, 2, 3)
+    }
+    for attempt in result.diagnostics.attempts:
+        assert attempt.sample_count > 0
+        assert attempt.hankel_shape is not None
+        assert attempt.singular_values is not None
+        assert attempt.effective_rank is not None
+        assert attempt.condition_number is None
+        assert attempt.projection_applied is False
+        assert attempt.steady_gain is None
+        assert attempt.alignment_error_c is None
+        assert attempt.prediction_score is None
+        assert attempt.braking_score is None
+        assert attempt.rejection_reasons
+        assert attempt.elapsed_ms >= 0.0
     assert after["matrices"] == before["matrices"]
     assert after["state_covariance"] == before["state_covariance"]
     assert after["update_timing"]["last_attempt_time_s"] == extension.time_s[-1]
     assert after["refresh_duration_s"] >= 0.0
-
-    observation = Observation(
-        extension.time_s[-1] + 20.0,
-        extension.temp_c[-1],
-        extension.q[-1],
-        extension.ambient_c[-1],
-    )
-    model.observe(observation)
-
-    assert attempts == 1
-    with pytest.raises(state_space_module.CandidateExhaustedError):
-        InnovationStateSpace(StateSpaceConfig(orders=(1,), delays=(1,))).fit(extension)
 
 
 def test_subspace_fit_is_defensive_and_block_rows_affect_identification() -> None:

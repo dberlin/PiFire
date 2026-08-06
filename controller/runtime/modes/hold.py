@@ -103,6 +103,7 @@ class HoldMode(ControlMode):
     _runner_configuration_revision: int = 0
     _actuation_mode: ActuationMode = ActuationMode.FRAMED_PULSE
     _pulse_scheduler: PulseScheduler | None = None
+    _pulse_frame_role_generation: int = 0
     _pending_model_observations: (
         dict[int, tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None]] | None
     ) = None
@@ -171,6 +172,7 @@ class HoldMode(ControlMode):
         controller.pulse_frame_maximum_duty = controller.pulse_maximum_duty
         controller.pulse_frame_applied_fan_duty = controller.fan_duty if controller.controls_fan else None
         controller.pulse_frame_stale_command = controller.pulse_stale_command
+        self._pulse_frame_role_generation = self._model_role_generation(self._runner_status())
 
     def _runner_status(self) -> Mapping[str, object]:
         if self._runner is None:
@@ -238,7 +240,7 @@ class HoldMode(ControlMode):
             or source == "unknown"
             or frame.ended_at_s < sample_at_s
         )
-        status = self._runner_status()
+        role_generation = self._pulse_frame_role_generation
         observation = FrameObservation(
             frame_start_s=frame.nominal_start_s,
             frame_end_s=frame.ended_at_s,
@@ -264,7 +266,7 @@ class HoldMode(ControlMode):
             skipped=frame.skipped,
             reset=reset,
             continuous=continuous,
-            role_generation=self._model_role_generation(status),
+            role_generation=role_generation,
         )
         return frame_key, observation
 
@@ -381,6 +383,8 @@ class HoldMode(ControlMode):
                     for score in horizon_scores
                 ),
                 evaluation_duration_ms=finite_float(value["evaluation_duration_ms"]),
+                challenger_model_kind=value.get("challenger_model_kind", "scheduled-arx"),
+                state_space_refresh=value.get("state_space_refresh"),
             )
         except KeyError, OverflowError, TypeError, ValueError:
             return None
@@ -661,10 +665,8 @@ class HoldMode(ControlMode):
         frame = scheduler.reset(reason)
         if frame is not None:
             self._observe_completed_pulse_frame(frame, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
-        if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
-            self._latch_pulse_frame()
-        if frame is not None:
             self._trace_pulse_frame(frame, inhibit, self.state.controller.pulse_frame_result_revision)
+        self._pulse_frame_role_generation = 0
         controller = self.state.controller
         controller.pulse_metrics_delivered_on_s = decision.delivered_on_s
         controller.pulse_feedback_start_s = now

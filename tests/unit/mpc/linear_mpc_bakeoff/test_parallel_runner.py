@@ -159,6 +159,13 @@ def test_serial_and_spawned_parallel_micro_matrix_are_canonically_equivalent(tmp
 
     assert len(parallel.scenarios) == 36
     assert serial.canonical_document() == parallel.canonical_document()
+    state_space_rows = [row for row in parallel.scenarios if row.arm == "state-space"]
+    assert state_space_rows
+    assert all(
+        isinstance(row.model_evidence["batch_fit_snapshot"]["steady_gain"], (int, float))
+        and row.model_evidence["batch_fit_snapshot"]["steady_gain"] > 0.0
+        for row in state_space_rows
+    )
 
 
 def test_incremental_checkpoint_head_uses_bounded_deltas(tmp_path: Path) -> None:
