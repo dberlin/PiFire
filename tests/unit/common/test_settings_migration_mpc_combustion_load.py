@@ -22,7 +22,7 @@ def _v4_settings():
     }
 
 
-def test_schema_version_five_removes_only_mpc_affine_load_bounds():
+def test_later_schema_versions_preserve_the_v5_affine_load_cutover():
     settings = _v4_settings()
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
