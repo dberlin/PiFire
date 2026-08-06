@@ -920,7 +920,7 @@ class HoldMode(ControlMode):
                 lid_open=self.state.lid.open_detected,
                 manual_override_active=self.state.manual_override["auger"] > now,
                 fan_assist_active=False,
-                auger_output=current_output_status["auger"],
+                auger_output=False,
             ),
             now,
         )

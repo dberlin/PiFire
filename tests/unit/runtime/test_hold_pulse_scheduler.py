@@ -168,7 +168,7 @@ def test_lid_inhibit_discards_credit_and_preempts_auger(hold_cycle):
     assert hold._pulse_scheduler.advance(0.9, 3.0, False).reset_reason is not None
 
 
-def test_deferred_mpc_to_pid_swap_keeps_one_framed_scheduler(hold_cycle):
+def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_output(hold_cycle, monkeypatch):
     class DeferredRunner(FakeControllerRunner):
         def reconfigure(self, settings, control, logger=None):
             self.pending = True
@@ -190,6 +190,14 @@ def test_deferred_mpc_to_pid_swap_keeps_one_framed_scheduler(hold_cycle):
     hold._advance_framed_pulse(2.0, True)
 
     assert hold.grill.get_output_status()["auger"] is True
+    configure_scheduler = hold._configure_pulse_scheduler
+
+    def configure_with_live_ratio():
+        configure_scheduler()
+        hold.state.cycle.ratio = 0.5
+
+    monkeypatch.setattr(hold, "_configure_pulse_scheduler", configure_with_live_ratio)
+    runner.applied.clear()
 
     runner.complete_swap()
     hold.on_tick(4.0, 200.0, _status(hold))
@@ -199,6 +207,9 @@ def test_deferred_mpc_to_pid_swap_keeps_one_framed_scheduler(hold_cycle):
     assert hold._controller_name == "pid"
     assert hold.grill.get_output_status()["auger"] is False
     assert hold.state.metrics["augerontime"] == 2.0
+    seed = runner.applied[0]
+    assert seed.ratio == 0.0
+    assert seed.source is OutputSource.SEED
 
 
 def test_missed_frames_are_recorded_as_skipped_without_catchup(hold_cycle, monkeypatch):
