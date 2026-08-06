@@ -27,9 +27,9 @@ def test_schema_version_five_removes_only_mpc_affine_load_bounds():
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 5
+    assert SETTINGS_SCHEMA_VERSION == 6
     assert settings == {
-        "schema_version": 5,
+        "schema_version": 6,
         "controller": {
             "selected": "mpc",
             "config": {

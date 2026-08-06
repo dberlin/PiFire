@@ -217,12 +217,16 @@ def test_identification_off_is_invisible():
 
     That the two arms are genuinely different arms is the other half, and it is
     checked at both ends: `mpc.py` ignores `enable_identification` entirely (so
-    the flag cannot be what these arms differ by), the shipped default is off,
-    and `test_overshoot_falls_across_successive_cooks` above shows that carrying
-    the model -- the thing the flag gates -- changes the cook.
+    the flag cannot be what these arms differ by), and
+    `test_overshoot_falls_across_successive_cooks` above shows that carrying the
+    model -- the thing the flag gates -- changes the cook.
+
+    The shipped default is asserted here too, and it is on. This test is what
+    an operator gets by turning learning off, so it has to keep working after
+    the default stopped being the thing it describes.
     """
-    assert default_settings()["controller"]["config"]["mpc"]["enable_identification"] is False, (
-        "identification is meant to ship off"
+    assert default_settings()["controller"]["config"]["mpc"]["enable_identification"] is True, (
+        "identification is meant to ship on"
     )
 
     # The flag is not a controller option: a core built with it set is the same

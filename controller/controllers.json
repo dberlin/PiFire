@@ -389,9 +389,9 @@
         {
           "option_name": "enable_identification",
           "option_friendly_name": "Learn This Grill",
-          "option_description": "After each cook, refit the thermal model from that cook and keep it if it describes the grill better. On the Neural Net firing-rate policy, a learned calibration no longer matches the trained artifact, so the controller falls back to the full optimisation until it is retrained. [Default=false]",
+          "option_description": "After each cook, refit the thermal model from that cook and keep it if it describes the grill better. On the Neural Net firing-rate policy, a learned calibration no longer matches the trained artifact, so the controller falls back to the full optimisation until it is retrained. [Default=true]",
           "option_type": "bool",
-          "option_default": false,
+          "option_default": true,
           "hidden": false
         }
       ]

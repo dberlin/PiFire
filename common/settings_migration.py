@@ -308,6 +308,28 @@ def _migrate_retired_controllers(settings):
     return changed
 
 
+def _clear_mpc_identification_choice(settings):
+    """Drop a stored MPC identification switch so the shipped default governs.
+
+    The switch shipped off, so every install that predates this carries an
+    explicit `false` that would outlive the default being flipped on -- and a
+    grill that learns its own chamber is worth roughly ten times the overshoot
+    on its second cook. The key is removed rather than rewritten so there is
+    one place that decides, and it is the manifest.
+    """
+    controller = settings.get("controller")
+    if not isinstance(controller, MutableMapping):
+        return False
+    config = controller.get("config")
+    if not isinstance(config, MutableMapping):
+        return False
+    mpc = config.get("mpc")
+    if not isinstance(mpc, MutableMapping):
+        return False
+    sentinel = object()
+    return mpc.pop("enable_identification", sentinel) is not sentinel
+
+
 #: The shape migrations, in ascending order, as (target_version, migration).
 #: A step's number is the version the tree is AT once that step has run, and
 #: each callable mutates the tree in place and returns True if it changed
@@ -318,6 +340,7 @@ _SHAPE_MIGRATIONS = [
     (3, _migrate_retired_controllers),
     (4, _remove_retired_mpc_logging_settings),
     (5, _remove_mpc_affine_load_bounds),
+    (6, _clear_mpc_identification_choice),
 ]
 
 
