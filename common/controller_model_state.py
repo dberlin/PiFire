@@ -47,6 +47,7 @@
 
 import json
 import logging
+import threading
 
 from common.datastore_accessors import read_generic_key, write_generic_key
 
@@ -60,6 +61,7 @@ SCHEMA_VERSION = 1
 MAX_SNAPSHOT_BYTES = 65536
 
 _logger = logging.getLogger("control")
+_SAVE_LOCK = threading.Lock()
 
 
 def _valid(snapshot):
@@ -101,44 +103,52 @@ class ControllerModelStore:
             return False
         revision = snapshot["revision"]
 
-        # Cheap path: this process already knows the last revision it persisted
-        # for this controller, so a same-or-older revision is rejected without
-        # touching storage -- the common case on ticks where nothing was learned.
-        cached = self._revisions.get(name)
-        if cached is not None and revision <= cached:
-            self._log_non_advancing(name, revision, cached)
-            return False
-
-        models, safe = self._read_state()
-        if not safe:
-            _logger.warning(
-                "controller_model_state: refusing to save %r at revision %s -- the existing "
-                "record could not be read, and writing now would silently discard whatever it held",
-                name,
-                revision,
-            )
-            return False
-
-        # Cold path: nothing cached yet for this controller in this process (the
-        # first save since startup), so the only baseline available is whatever
-        # was actually persisted last time. Skipping this would let a producer
-        # whose revision counter reset across a restart silently overwrite a
-        # far-newer stored model on its very first save -- see the module
-        # docstring's contract on `revision`.
-        if cached is None:
-            existing = models.get(name)
-            if existing is not None and revision <= existing["revision"]:
-                self._log_non_advancing(name, revision, existing["revision"])
+        # Workers can outlive a Hold teardown. Serialize the complete
+        # read-check-write transaction across store instances so an older
+        # orphan cannot overwrite a newer mode's checkpoint.
+        with _SAVE_LOCK:
+            # Cheap path: this process already knows the last revision it
+            # persisted for this controller, so a same-or-older revision is
+            # rejected without touching storage -- the common case on ticks
+            # where nothing was learned.
+            cached = self._revisions.get(name)
+            if cached is not None and revision <= cached:
+                self._log_non_advancing(name, revision, cached)
                 return False
 
-        models[name] = snapshot
-        try:
-            self._writer(MODEL_STATE_KEY, {"version": SCHEMA_VERSION, "models": models})
-        except Exception:
-            _logger.warning("controller_model_state: failed to persist a snapshot for %r", name, exc_info=True)
-            return False
-        self._revisions[name] = revision
-        return True
+            models, safe = self._read_state()
+            if not safe:
+                _logger.warning(
+                    "controller_model_state: refusing to save %r at revision %s -- the existing "
+                    "record could not be read, and writing now would silently discard whatever it held",
+                    name,
+                    revision,
+                )
+                return False
+
+            # Cold path: nothing cached yet for this controller in this process
+            # (the first save since startup), so the only baseline available is
+            # whatever was actually persisted last time. Skipping this would
+            # let a producer whose revision counter reset across a restart
+            # silently overwrite a far-newer stored model on its first save.
+            if cached is None:
+                existing = models.get(name)
+                if existing is not None and revision <= existing["revision"]:
+                    self._log_non_advancing(name, revision, existing["revision"])
+                    return False
+
+            models[name] = snapshot
+            try:
+                self._writer(MODEL_STATE_KEY, {"version": SCHEMA_VERSION, "models": models})
+            except Exception:
+                _logger.warning(
+                    "controller_model_state: failed to persist a snapshot for %r",
+                    name,
+                    exc_info=True,
+                )
+                return False
+            self._revisions[name] = revision
+            return True
 
     @staticmethod
     def _log_non_advancing(name, revision, baseline):

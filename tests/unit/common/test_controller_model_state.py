@@ -7,6 +7,7 @@ genuinely model-agnostic.
 
 import json
 import logging
+import threading
 
 import pytest
 
@@ -236,6 +237,38 @@ def test_a_save_without_a_prior_load_still_honors_the_stored_revision():
     assert second.load("pid_sp")["K"] == 700.0
     assert second.save("pid_sp", {"revision": 58, "K": 999.0}) is True
     assert second.load("pid_sp")["K"] == 999.0
+
+
+def test_concurrent_store_instances_serialize_revision_guard_and_write():
+    fake = _FakeStore()
+    older_write_entered = threading.Event()
+    release_older_write = threading.Event()
+    newer_finished = threading.Event()
+
+    def blocking_write(key, value):
+        revision = value["models"]["mpc"]["revision"]
+        if revision == 1:
+            older_write_entered.set()
+            assert release_older_write.wait(1.0)
+        fake.write(key, value)
+
+    older = ControllerModelStore(reader=fake.read, writer=blocking_write)
+    newer = ControllerModelStore(reader=fake.read, writer=blocking_write)
+    older_thread = threading.Thread(target=lambda: older.save("mpc", {"revision": 1}))
+    newer_thread = threading.Thread(target=lambda: (newer.save("mpc", {"revision": 2}), newer_finished.set()))
+
+    older_thread.start()
+    assert older_write_entered.wait(1.0)
+    newer_thread.start()
+    newer_finished_before_release = newer_finished.wait(0.05)
+    release_older_write.set()
+    older_thread.join(timeout=1.0)
+    newer_thread.join(timeout=1.0)
+
+    assert not newer_finished_before_release
+    assert not older_thread.is_alive()
+    assert not newer_thread.is_alive()
+    assert fake.read(MODEL_STATE_KEY)["models"]["mpc"]["revision"] == 2
 
 
 def test_a_reset_revision_is_logged_at_error_under_the_shipped_default_log_level(caplog):
