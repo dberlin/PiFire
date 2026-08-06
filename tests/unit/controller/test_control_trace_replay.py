@@ -327,6 +327,8 @@ def test_validate_records_accepts_pristine_typed_sessions(records):
     assert report.issues == ()
 
 
+
+
 @pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP])
 def test_validate_records_accepts_completed_pid_family_framed_frames(controller):
     assert validate_records(_pid_framed_records(controller)).valid

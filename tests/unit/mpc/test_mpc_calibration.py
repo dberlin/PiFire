@@ -9,9 +9,11 @@ import pytest
 
 from common.control_trace import (
     ActuationMode,
+    AllocationPayload,
     AppliedOutputPayload,
     ControlTraceRecord,
     ControllerType,
+    FramedPulseFramePayload,
     InhibitReason,
     MpcFailureState,
     MpcUpdatePayload,
@@ -26,6 +28,7 @@ from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau
 from controller.mpc import _DEFAULTS
 from controller.mpc_model import simulate_grey_box
 from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality, load_trace_samples
+from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 
 #: The grill these tests fit: an order of magnitude slower than the shipped
 #: default, nearly ten times its gain, and twice its dead time.
@@ -97,11 +100,6 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                 control_period_seconds=5.0,
                 model_revision=1,
                 model_provenance="configured",
-                # Framed pulses carry no cycle floor: a session declares one
-                # actuation authority, and this one's is the pulse timing below.
-                u_min=None,
-                u_max=None,
-                hold_cycle_seconds=None,
                 pulse_slot_seconds=2.0,
                 pulse_frame_seconds=20.0,
                 fan_authority=True,
@@ -115,29 +113,10 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
             ),
         )
     ]
-    records.append(
-        ControlTraceRecord(
-            ts_ms=0,
-            session_id=session_id,
-            cook_id=cook_id,
-            controller=ControllerType.MPC,
-            event_kind=TraceEventKind.APPLIED_OUTPUT,
-            payload=AppliedOutputPayload(
-                result_revision=0,
-                interval_start_ms=0,
-                interval_end_ms=0,
-                realized_auger_duty=0.0,
-                realized_combustion_load=None,
-                actual_fan_duty=None,
-                sample_complete=True,
-                output_source=OutputSource.SEED,
-            ),
-        )
-    )
-    previous_timestamp_ms: int | None = None
     for revision, (time_s, temperature, load) in enumerate(zip(t, temp, Q), start=1):
         timestamp_ms = int(float(time_s) * 1000)
         load = float(load)
+        normalized_load = load if 0.0 <= load <= 1.0 else load / 100.0
         records.append(
             ControlTraceRecord(
                 ts_ms=timestamp_ms,
@@ -156,7 +135,7 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                     measured_temperature=float(temperature),
                     raw_output=load,
                     requested_output=load,
-                    actuation_mode=ActuationMode.FIXED_CYCLE,
+                    actuation_mode=ActuationMode.FRAMED_PULSE,
                     prior_requested_auger_duty=0.2,
                     prior_realized_auger_duty=0.2,
                     requested_fan_duty=100.0,
@@ -171,7 +150,7 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                     raw_policy_firing_load=load,
                     equilibrium_feed_forward=load,
                     residual_move=0.0,
-                    bounded_firing_load=load,
+                    bounded_firing_load=normalized_load,
                     policy_kind="nlp",
                     failure_state=MpcFailureState.SUCCESS,
                     solve_start_ms=timestamp_ms,
@@ -187,28 +166,84 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                 ),
             )
         )
-        interval_start_ms = timestamp_ms if previous_timestamp_ms is None else previous_timestamp_ms
-        realized_load = load
-        records.append(
-            ControlTraceRecord(
-                ts_ms=timestamp_ms + 1,
-                session_id=session_id,
-                cook_id=cook_id,
-                controller=ControllerType.MPC,
-                event_kind=TraceEventKind.APPLIED_OUTPUT,
-                payload=AppliedOutputPayload(
-                    result_revision=revision,
-                    interval_start_ms=interval_start_ms,
-                    interval_end_ms=timestamp_ms,
-                    realized_auger_duty=0.2,
-                    realized_combustion_load=realized_load,
-                    actual_fan_duty=100.0,
-                    sample_complete=True,
-                    output_source=OutputSource.CONTROLLER,
-                ),
-            )
+        if revision == len(t):
+            continue
+        allocation_result = allocate(
+            normalized_load, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True
         )
-        previous_timestamp_ms = timestamp_ms
+        allocation = AllocationPayload(
+            result_revision=revision,
+            normalized_combustion_load=allocation_result.normalized_combustion_load,
+            requested_auger_duty=allocation_result.auger_duty,
+            requested_fan_duty=allocation_result.fan_duty,
+            u_max=allocation_result.u_max,
+            fan_min_pct=allocation_result.fan_min_pct,
+            fan_max_pct=allocation_result.fan_max_pct,
+            fan_enabled=allocation_result.fan_enabled,
+            mpc_has_fan_authority=True,
+            auger_clamp_reason=allocation_result.auger_clamp_reason,
+            fan_clamp_reason=allocation_result.fan_clamp_reason,
+            allocator_revision=ALLOCATOR_REVISION,
+        )
+        interval_end_ms = int(float(t[revision]) * 1000)
+        records.extend(
+            [
+                ControlTraceRecord(
+                    ts_ms=timestamp_ms,
+                    session_id=session_id,
+                    cook_id=cook_id,
+                    controller=ControllerType.MPC,
+                    event_kind=TraceEventKind.ALLOCATION,
+                    payload=allocation,
+                ),
+                ControlTraceRecord(
+                    ts_ms=interval_end_ms,
+                    session_id=session_id,
+                    cook_id=cook_id,
+                    controller=ControllerType.MPC,
+                    event_kind=TraceEventKind.ACTUATION_FRAME,
+                    payload=FramedPulseFramePayload(
+                        result_revision=revision,
+                        pulse_slot_seconds=2.0,
+                        frame_seconds=20.0,
+                        frame_start_ms=timestamp_ms,
+                        frame_end_ms=interval_end_ms,
+                        requested_combustion_load=allocation.normalized_combustion_load,
+                        requested_auger_duty=allocation.requested_auger_duty,
+                        credit_before_seconds=0.0,
+                        credit_after_seconds=0.0,
+                        scheduled_on_seconds=6.0,
+                        delivered_on_seconds=allocation.requested_auger_duty * 5.0,
+                        transition_count=2,
+                        actual_start_active=False,
+                        actual_end_active=False,
+                        requested_fan_duty=allocation.requested_fan_duty,
+                        applied_fan_duty=allocation.requested_fan_duty,
+                        skipped=False,
+                        stale_command=False,
+                        inhibit_reason=InhibitReason.NONE,
+                        reset_reason=None,
+                    ),
+                ),
+                ControlTraceRecord(
+                    ts_ms=interval_end_ms,
+                    session_id=session_id,
+                    cook_id=cook_id,
+                    controller=ControllerType.MPC,
+                    event_kind=TraceEventKind.APPLIED_OUTPUT,
+                    payload=AppliedOutputPayload(
+                        result_revision=revision,
+                        interval_start_ms=timestamp_ms,
+                        interval_end_ms=interval_end_ms,
+                        realized_auger_duty=allocation.requested_auger_duty,
+                        realized_combustion_load=load,
+                        actual_fan_duty=100.0,
+                        sample_complete=True,
+                        output_source=OutputSource.CONTROLLER,
+                    ),
+                ),
+            ]
+        )
     append_control_trace(records)
 
 

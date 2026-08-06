@@ -7,10 +7,11 @@ import pytest
 
 from common.control_trace import (
     ActuationMode,
+    AllocationPayload,
     AppliedOutputPayload,
     ControlTraceRecord,
     ControllerType,
-    FixedCycleFramePayload,
+    FramedPulseFramePayload,
     InhibitReason,
     MpcFailureState,
     MpcUpdatePayload,
@@ -23,6 +24,7 @@ from common.control_trace import (
 from common.datastore_accessors import append_control_trace
 from controller.applied_output import OutputSource
 from controller.update_mpc import TraceSelectionError, load_trace_samples
+from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 
 
 SESSION_ID = "mpc-session"
@@ -43,11 +45,6 @@ def _session() -> ControlTraceRecord:
             control_period_seconds=5.0,
             model_revision=1,
             model_provenance="configured",
-            # Framed pulses carry no cycle floor: a session declares one
-            # actuation authority, and this one's is the pulse timing below.
-            u_min=None,
-            u_max=None,
-            hold_cycle_seconds=None,
             pulse_slot_seconds=2.0,
             pulse_frame_seconds=20.0,
             fan_authority=True,
@@ -69,7 +66,7 @@ def _update(
     load: float,
     *,
     inhibit: InhibitReason = InhibitReason.NONE,
-    mode: ActuationMode = ActuationMode.FIXED_CYCLE,
+    stale: bool = False,
 ) -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=timestamp_ms,
@@ -88,7 +85,7 @@ def _update(
             measured_temperature=temperature,
             raw_output=load,
             requested_output=load,
-            actuation_mode=mode,
+            actuation_mode=ActuationMode.FRAMED_PULSE,
             prior_requested_auger_duty=0.2,
             prior_realized_auger_duty=0.2,
             requested_fan_duty=100.0,
@@ -109,13 +106,64 @@ def _update(
             solve_start_ms=timestamp_ms,
             solve_end_ms=timestamp_ms,
             deadline_miss_count=0,
-            stale=False,
+            stale=stale,
             recovered=False,
             predicted_feasible=True,
             predicted_steady_load=load,
             solve_duration_ms=0,
             consecutive_deadline_miss_count=0,
-            stale_state=ResultStaleState.FRESH,
+            stale_state=ResultStaleState.STALE if stale else ResultStaleState.FRESH,
+        ),
+    )
+
+
+def _allocation(revision: int, load: float) -> AllocationPayload:
+    result = allocate(load, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
+    return AllocationPayload(
+        result_revision=revision,
+        normalized_combustion_load=result.normalized_combustion_load,
+        requested_auger_duty=result.auger_duty,
+        requested_fan_duty=result.fan_duty,
+        u_max=result.u_max,
+        fan_min_pct=result.fan_min_pct,
+        fan_max_pct=result.fan_max_pct,
+        fan_enabled=result.fan_enabled,
+        mpc_has_fan_authority=True,
+        auger_clamp_reason=result.auger_clamp_reason,
+        fan_clamp_reason=result.fan_clamp_reason,
+        allocator_revision=ALLOCATOR_REVISION,
+    )
+
+
+def _frame(revision: int, start_ms: int, end_ms: int, allocation: AllocationPayload) -> ControlTraceRecord:
+    duration_seconds = (end_ms - start_ms) / 1000.0
+    return ControlTraceRecord(
+        ts_ms=end_ms,
+        session_id=SESSION_ID,
+        cook_id=COOK_ID,
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.ACTUATION_FRAME,
+        payload=FramedPulseFramePayload(
+            result_revision=revision,
+            pulse_slot_seconds=2.0,
+            frame_seconds=20.0,
+            frame_start_ms=start_ms,
+            frame_end_ms=end_ms,
+            requested_combustion_load=allocation.normalized_combustion_load,
+            requested_auger_duty=allocation.requested_auger_duty,
+            credit_before_seconds=0.0,
+            credit_after_seconds=0.0,
+            scheduled_on_seconds=2.0,
+            delivered_on_seconds=allocation.requested_auger_duty * duration_seconds,
+            transition_count=2,
+            actual_start_active=False,
+            actual_end_active=False,
+            requested_fan_duty=allocation.requested_fan_duty,
+            applied_fan_duty=allocation.requested_fan_duty,
+            skipped=False,
+            stale_command=False,
+            inhibit_reason=InhibitReason.NONE,
+            reset_reason=None,
         ),
     )
 
@@ -127,6 +175,7 @@ def _applied(
     interval_end_ms: int,
     load: float | None,
     *,
+    auger_duty: float = 0.2,
     complete: bool = True,
     source: OutputSource = OutputSource.CONTROLLER,
 ) -> ControlTraceRecord:
@@ -140,7 +189,7 @@ def _applied(
             result_revision=revision,
             interval_start_ms=interval_start_ms,
             interval_end_ms=interval_end_ms,
-            realized_auger_duty=0.2,
+            realized_auger_duty=auger_duty,
             realized_combustion_load=load,
             actual_fan_duty=100.0,
             sample_complete=complete,
@@ -149,112 +198,159 @@ def _applied(
     )
 
 
-def _teardown_frame() -> ControlTraceRecord:
+def _revision_records(revision: int, start_ms: int, end_ms: int, temperature: float, load: float) -> list[ControlTraceRecord]:
+    allocation = _allocation(revision, load)
+    return [
+        _update(revision, start_ms, temperature, load),
+        ControlTraceRecord(
+            ts_ms=start_ms,
+            session_id=SESSION_ID,
+            cook_id=COOK_ID,
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.ALLOCATION,
+            payload=allocation,
+        ),
+        _frame(revision, start_ms, end_ms, allocation),
+        _applied(
+            revision,
+            end_ms,
+            start_ms,
+            end_ms,
+            load,
+            auger_duty=allocation.requested_auger_duty,
+        ),
+    ]
+
+
+def _allocation_record(timestamp_ms: int, allocation: AllocationPayload) -> ControlTraceRecord:
     return ControlTraceRecord(
-        ts_ms=16_001,
+        ts_ms=timestamp_ms,
         session_id=SESSION_ID,
         cook_id=COOK_ID,
         controller=ControllerType.MPC,
-        event_kind=TraceEventKind.ACTUATION_FRAME,
-        payload=FixedCycleFramePayload(
-            result_revision=12,
-            raw_requested_duty=0.2,
-            bounded_duty=0.2,
-            u_min=0.1,
-            u_max=0.9,
-            cycle_start_ms=11_000,
-            cycle_end_ms=16_000,
-            scheduled_on_seconds=0.0,
-            scheduled_off_seconds=5.0,
-            actual_on_seconds=0.0,
-            actual_start_active=False,
-            transition_count=0,
-            fan_assist_active=False,
-            inhibit_reason=InhibitReason.NONE,
-            output_active=False,
-        ),
+        event_kind=TraceEventKind.ALLOCATION,
+        payload=allocation,
     )
 
 
 def _lifecycle_records(*, terminal_partial: bool = False) -> list[ControlTraceRecord]:
+    allocation = _allocation(12, 0.3)
     records = [
         _session(),
-        _applied(0, 1, 0, 1_000, None, source=OutputSource.SEED),
-        _update(2, 1_000, 100.0, 20.0),
-        _applied(2, 6_000, 1_000, 6_000, 20.0),
-        _update(7, 6_000, 110.0, 25.0),
-        _applied(7, 11_000, 6_000, 11_000, 25.0),
-        _update(12, 11_000, 120.0, 30.0),
+        _applied(0, 1_000, 0, 1_000, None, source=OutputSource.SEED),
+        *_revision_records(2, 1_000, 6_000, 100.0, 0.2),
+        *_revision_records(7, 6_000, 11_000, 110.0, 0.25),
+        _update(12, 11_000, 120.0, 0.3),
+        _allocation_record(11_000, allocation),
     ]
     if terminal_partial:
-        records.append(_applied(12, 16_000, 11_000, 16_000, None, complete=False))
-        records.append(_teardown_frame())
+        records.extend(
+            [
+                _frame(12, 11_000, 16_000, allocation),
+                _applied(
+                    12,
+                    16_000,
+                    11_000,
+                    16_000,
+                    None,
+                    auger_duty=allocation.requested_auger_duty,
+                    complete=False,
+                ),
+            ]
+        )
     return records
 
+def _output_index(records: list[ControlTraceRecord], revision: int) -> int:
+    return next(
+        index
+        for index, record in enumerate(records)
+        if isinstance(record.payload, AppliedOutputPayload) and record.payload.result_revision == revision
+    )
 
-def test_load_trace_samples_pairs_temperature_with_its_own_complete_load(ds):
+
+def test_load_trace_samples_pairs_temperature_with_its_own_complete_framed_load(ds):
     append_control_trace(_lifecycle_records())
 
     time_s, temperature_c, combustion_load = load_trace_samples(cook_id=COOK_ID, database_path=ds.DB_PATH)
 
     np.testing.assert_allclose(time_s, (0.0, 5.0))
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
 
 
-def test_load_trace_samples_duration_weights_repeated_intervals_for_one_revision(ds):
+def test_load_trace_samples_duration_weights_complete_intervals_for_one_framed_revision(ds):
     records = _lifecycle_records()
-    records[3:4] = [
-        _applied(2, 3_000, 1_000, 3_000, 10.0),
-        _applied(2, 6_000, 3_000, 6_000, 30.0),
+    index = _output_index(records, 2)
+    allocation = _allocation(2, 0.2)
+    records[index : index + 1] = [
+        _applied(2, 6_000, 1_000, 3_000, 0.1, auger_duty=allocation.requested_auger_duty),
+        _applied(2, 6_000, 3_000, 6_000, 0.3, auger_duty=allocation.requested_auger_duty),
     ]
     append_control_trace(records)
 
     _, _, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
-    np.testing.assert_allclose(combustion_load, (22.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.22, 0.25))
 
 
-def test_load_trace_samples_skips_results_superseded_before_actuation(ds):
+def test_load_trace_samples_skips_results_superseded_before_a_framed_interval(ds):
     records = _lifecycle_records()
-    records.insert(3, _update(4, 4_000, 105.0, 23.0))
+    records.insert(4, _update(4, 4_000, 105.0, 0.23))
     append_control_trace(records)
 
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
+
+
+def test_load_trace_samples_rejects_a_complete_controller_interval_without_a_frame(ds):
+    records = _lifecycle_records()
+    records.insert(4, _update(4, 4_000, 105.0, 0.23))
+    records.insert(5, _applied(4, 5_000, 4_000, 5_000, 0.23))
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="complete framed interval"):
+        load_trace_samples(session_id=SESSION_ID)
 
 
 def test_load_trace_samples_rejects_missing_output_for_an_actuated_revision(ds):
     records = _lifecycle_records()
-    records.insert(3, _update(4, 4_000, 105.0, 23.0))
-    frame = _teardown_frame()
-    frame_payload = replace(
-        frame.payload,
-        result_revision=4,
-        cycle_start_ms=4_000,
-        cycle_end_ms=5_000,
-        scheduled_off_seconds=1.0,
-    )
-    records.insert(4, frame.model_copy(update={"ts_ms": 5_000, "payload": frame_payload}))
+    allocation = _allocation(4, 0.23)
+    records[4:4] = [
+        _update(4, 4_000, 105.0, 0.23),
+        ControlTraceRecord(
+            ts_ms=4_000,
+            session_id=SESSION_ID,
+            cook_id=COOK_ID,
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.ALLOCATION,
+            payload=allocation,
+        ),
+        _frame(4, 4_000, 5_000, allocation),
+    ]
     append_control_trace(records)
 
-    with pytest.raises(TraceSelectionError, match="actuated.*complete applied output"):
+    with pytest.raises(TraceSelectionError, match="actuated.*complete framed interval"):
         load_trace_samples(session_id=SESSION_ID)
 
 
 def test_load_trace_samples_rejects_latest_actuated_revision_without_any_output(ds):
     records = _lifecycle_records()
-    records.append(_teardown_frame())
+    allocation = next(
+        record.payload
+        for record in records
+        if isinstance(record.payload, AllocationPayload) and record.payload.result_revision == 12
+    )
+    records.append(_frame(12, 11_000, 16_000, allocation))
     append_control_trace(records)
 
-    with pytest.raises(TraceSelectionError, match="actuated.*complete applied output"):
+    with pytest.raises(TraceSelectionError, match="actuated.*complete framed interval"):
         load_trace_samples(session_id=SESSION_ID)
 
 
 @pytest.mark.parametrize("with_initial_seed", (True, False))
-def test_load_trace_samples_accepts_pristine_traces_with_or_without_initial_seed(ds, with_initial_seed):
+def test_load_trace_samples_accepts_pristine_framed_traces_with_or_without_initial_seed(ds, with_initial_seed):
     records = _lifecycle_records()
     if not with_initial_seed:
         records.pop(1)
@@ -263,7 +359,7 @@ def test_load_trace_samples_accepts_pristine_traces_with_or_without_initial_seed
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
 
 
 def test_load_trace_samples_rejects_a_late_revision_zero_seed(ds):
@@ -275,39 +371,23 @@ def test_load_trace_samples_rejects_a_late_revision_zero_seed(ds):
         load_trace_samples(session_id=SESSION_ID)
 
 
-def test_load_trace_samples_rejects_seed_after_a_fixed_cycle_update(ds):
+def test_load_trace_samples_rejects_seed_after_a_framed_update(ds):
     records = _lifecycle_records()
     seed = records.pop(1)
-    records.insert(2, seed.model_copy(update={"ts_ms": 1_001}))
+    records.insert(3, seed.model_copy(update={"ts_ms": 1_001}))
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="initial seed"):
         load_trace_samples(session_id=SESSION_ID)
 
 
-def test_load_trace_samples_allows_seed_after_unactuated_framed_update(ds):
-    records = _lifecycle_records()
-    seed = records.pop(1)
-    first_update = records[1]
-    records[1] = first_update.model_copy(
-        update={"payload": replace(first_update.payload, actuation_mode=ActuationMode.FRAMED_PULSE)}
-    )
-    records.insert(2, seed.model_copy(update={"ts_ms": 1_001}))
-    append_control_trace(records)
-
-    _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
-
-    np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
-
-
-def test_load_trace_samples_accepts_an_active_session_without_a_terminal_partial(ds):
+def test_load_trace_samples_accepts_an_active_framed_session_without_a_terminal_partial(ds):
     append_control_trace(_lifecycle_records())
 
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
 
 
 def test_load_trace_samples_ignores_one_terminal_partial_output(ds):
@@ -316,13 +396,14 @@ def test_load_trace_samples_ignores_one_terminal_partial_output(ds):
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
 
 
 def test_load_trace_samples_rejects_terminal_partial_with_a_nonlatest_revision(ds):
     records = _lifecycle_records(terminal_partial=True)
-    partial = records[7].payload
-    records[7] = records[7].model_copy(update={"payload": replace(partial, result_revision=7)})
+    index = _output_index(records, 12)
+    partial = records[index].payload
+    records[index] = records[index].model_copy(update={"payload": replace(partial, result_revision=7)})
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="latest update"):
@@ -331,10 +412,12 @@ def test_load_trace_samples_rejects_terminal_partial_with_a_nonlatest_revision(d
 
 def test_load_trace_samples_rejects_complete_output_before_its_matching_update(ds):
     records = _lifecycle_records()
-    records[4:6] = [
-        _applied(7, 6_000, 1_000, 6_000, 25.0),
-        _update(7, 6_000, 110.0, 25.0),
-    ]
+    update_index = next(
+        index
+        for index, record in enumerate(records)
+        if isinstance(record.payload, MpcUpdatePayload) and record.payload.result_revision == 7
+    )
+    records.insert(update_index, _applied(7, 6_000, 6_000, 11_000, 0.25, auger_duty=_allocation(7, 0.25).requested_auger_duty))
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="must follow its accepted update"):
@@ -343,16 +426,20 @@ def test_load_trace_samples_rejects_complete_output_before_its_matching_update(d
 
 def test_load_trace_samples_accepts_output_recorded_after_a_newer_result(ds):
     records = _lifecycle_records()
-    records[5:7] = [
-        _update(12, 11_000, 120.0, 30.0),
-        _applied(7, 11_001, 6_000, 11_000, 25.0),
-    ]
+    index = _output_index(records, 7)
+    output = records.pop(index)
+    latest_update = next(
+        index
+        for index, record in enumerate(records)
+        if isinstance(record.payload, MpcUpdatePayload) and record.payload.result_revision == 12
+    )
+    records.insert(latest_update + 1, output.model_copy(update={"ts_ms": 11_000}))
     append_control_trace(records)
 
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
 
 
 def test_load_trace_samples_accepts_skipped_numeric_revisions(ds):
@@ -361,7 +448,7 @@ def test_load_trace_samples_accepts_skipped_numeric_revisions(ds):
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
-    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
 
 
 def test_load_trace_samples_requires_exactly_one_selector():
@@ -396,27 +483,44 @@ def test_load_trace_samples_rejects_recorder_gaps(ds):
         load_trace_samples(session_id=SESSION_ID)
 
 
-def test_load_trace_samples_rejects_inhibited_intervals(ds):
-    append_control_trace(
-        [_session(), _update(2, 1_000, 100.0, 20.0, inhibit=InhibitReason.LID_OPEN), _update(7, 6_000, 110.0, 25.0)]
-    )
+def test_load_trace_samples_rejects_inhibited_updates(ds):
+    records = _lifecycle_records()
+    records[2] = _update(2, 1_000, 100.0, 0.2, inhibit=InhibitReason.LID_OPEN)
+    append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="inhibited"):
         load_trace_samples(session_id=SESSION_ID)
 
 
+def test_load_trace_samples_rejects_stale_updates(ds):
+    records = _lifecycle_records()
+    records[2] = _update(2, 1_000, 100.0, 0.2, stale=True)
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="stale"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
 def test_load_trace_samples_rejects_an_interior_partial_output(ds):
     records = _lifecycle_records()
-    records[4] = _applied(7, 6_001, 1_000, 6_000, None, complete=False)
+    index = _output_index(records, 7)
+    allocation = _allocation(7, 0.25)
+    records[index] = _applied(
+        7, 11_000, 6_000, 11_000, None, auger_duty=allocation.requested_auger_duty, complete=False
+    )
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="latest update"):
         load_trace_samples(session_id=SESSION_ID)
 
 
+
+
 def test_load_trace_samples_rejects_missing_complete_realized_load(ds):
     records = _lifecycle_records()
-    records[4] = _applied(7, 6_001, 1_000, 6_000, None)
+    index = _output_index(records, 7)
+    allocation = _allocation(7, 0.25)
+    records[index] = _applied(7, 11_000, 6_000, 11_000, None, auger_duty=allocation.requested_auger_duty)
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="realized combustion load"):
@@ -425,16 +529,38 @@ def test_load_trace_samples_rejects_missing_complete_realized_load(ds):
 
 def test_load_trace_samples_rejects_overlapping_complete_output(ds):
     records = _lifecycle_records()
-    records.append(_applied(7, 11_002, 1_000, 6_000, 20.0))
+    records.append(_applied(7, 11_002, 6_000, 11_000, 0.25, auger_duty=_allocation(7, 0.25).requested_auger_duty))
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="contiguous intervals"):
         load_trace_samples(session_id=SESSION_ID)
 
 
+def test_load_trace_samples_rejects_non_controller_output_source(ds):
+    records = _lifecycle_records()
+    index = _output_index(records, 2)
+    records[index] = records[index].model_copy(
+        update={"payload": replace(records[index].payload, output_source=OutputSource.LID_OPEN)}
+    )
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="inhibited by lid_open"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_rejects_complete_interval_with_a_mismatched_revision(ds):
+    records = _lifecycle_records()
+    index = _output_index(records, 2)
+    records[index] = records[index].model_copy(update={"payload": replace(records[index].payload, result_revision=4)})
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="does not match an accepted MPC update"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
 def test_load_trace_samples_rejects_output_after_a_terminal_partial(ds):
     records = _lifecycle_records(terminal_partial=True)
-    records.append(_applied(99, 16_002, 16_000, 21_000, 30.0))
+    records.append(_applied(99, 16_002, 16_000, 21_000, 0.3))
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="later update or output"):

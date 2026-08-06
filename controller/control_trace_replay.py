@@ -43,9 +43,6 @@ class _TraceSessionReader(Protocol):
     ) -> list[ControlTraceRecord]: ...
 
 
-class _FrameStart(Protocol):
-    actual_start_active: bool
-
 
 _FLOAT_TOLERANCE = 1e-6
 UpdatePayload = PidUpdatePayload | PidSpUpdatePayload | MpcUpdatePayload
@@ -333,10 +330,9 @@ def _validate_framed_frame(
         add(ReplayIssueCode.FRAME_SCHEDULE_MISMATCH, "framed pulse schedule differs from SESSION slot authority", index)
     if payload.delivered_on_seconds > payload.scheduled_on_seconds + _FLOAT_TOLERANCE:
         add(ReplayIssueCode.FRAME_DELIVERY_MISMATCH, "framed pulse delivered more on-time than scheduled", index)
-    frame_start = cast(_FrameStart, cast(object, payload))
     _validate_transition(
         payload.delivered_on_seconds,
-        frame_start.actual_start_active,
+        payload.actual_start_active,
         payload.transition_count,
         payload.actual_end_active,
         (payload.frame_end_ms - payload.frame_start_ms) / 1000,
@@ -582,10 +578,6 @@ def _close(left: float, right: float) -> bool:
     return abs(left - right) <= _FLOAT_TOLERANCE
 
 
-def _duty_close(left: float, right: float, duration_seconds: float) -> bool:
-    # Auger transitions are persisted as integer milliseconds, so delivered
-    # on-time can differ from a recorded duty by one millisecond per interval.
-    return abs(left - right) <= max(_FLOAT_TOLERANCE, 0.001 / duration_seconds)
 
 
 def _multiple_of(value: float, unit: float) -> bool:
