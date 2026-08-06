@@ -26,6 +26,7 @@ import json
 import math
 import os
 from collections.abc import Mapping
+from dataclasses import asdict, replace
 import time
 
 import numpy as np
@@ -45,7 +46,7 @@ from controller.mpc_model import (
 )
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
-from controller.linear_mpc.adaptation import AdaptationPolicy, OnlineAdaptation
+from controller.linear_mpc.adaptation import AdaptationPolicy, EvaluationDecision, OnlineAdaptation
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
 from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
 from controller.linear_mpc.grey_box import GreyBoxPredictionAdapter
@@ -208,6 +209,21 @@ def _online_optional_score(value, name):
     return value
 
 
+def _online_required_score(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    return float(value)
+
+
+def _online_matches_completed_rmse(errors, reported):
+    if not errors:
+        return reported is None
+    if reported is None or reported < 0.0:
+        return False
+    expected = math.sqrt(sum(error * error for error in errors) / len(errors))
+    return math.isclose(reported, expected, rel_tol=1e-12, abs_tol=1e-12)
+
+
 _EVALUATION_KEYS = frozenset(
     (
         "decision_id",
@@ -223,6 +239,13 @@ _EVALUATION_KEYS = frozenset(
         "challenger_braking_score",
         "sample_count",
         "prospective_digest",
+        "window_start_s",
+        "window_end_s",
+        "incumbent_digest",
+        "challenger_digest",
+        "completed_origins",
+        "horizon_scores",
+        "evaluation_duration_ms",
     )
 )
 _LIFECYCLE_KEYS = frozenset(
@@ -238,6 +261,42 @@ _LIFECYCLE_KEYS = frozenset(
         "parameters",
     )
 )
+_ORIGIN_EVIDENCE_KEYS = frozenset(
+    (
+        "origin_time_s",
+        "completion_time_s",
+        "horizon_steps",
+        "generation",
+        "observed_temperature_c",
+        "incumbent_error_c",
+        "challenger_error_c",
+        "braking",
+    )
+)
+_HORIZON_EVIDENCE_KEYS = frozenset(("horizon_steps", "incumbent_rmse_c", "challenger_rmse_c", "sample_count"))
+
+
+def _online_nonnegative_score(value, name):
+    score = _online_required_score(value, name)
+    if score < 0:
+        raise ValueError(f"{name} must be a non-negative finite number")
+    return score
+
+
+def _online_digest(value, name):
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be a SHA-256 digest")
+    return value
+
+
+def _online_horizon(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value not in (3, 15):
+        raise ValueError(f"{name} must be 3 or 15")
+    return value
 
 
 def _online_evaluation(value):
@@ -245,19 +304,28 @@ def _online_evaluation(value):
         return None
     if not isinstance(value, Mapping) or set(value) != _EVALUATION_KEYS:
         raise ValueError("last_evaluation has an invalid schema")
-    if not isinstance(value["decision_id"], str) or not value["decision_id"]:
+    if not isinstance(value["decision_id"], str) or not value["decision_id"].strip():
         raise ValueError("evaluation decision_id is invalid")
-    evaluated = _online_optional_score(value["evaluated_at_s"], "evaluated_at_s")
-    if evaluated is None:
-        raise ValueError("evaluated_at_s is required")
-    for key in ("role_generation", "consecutive_wins", "sample_count"):
-        _online_count(value[key], key)
+    evaluated = _online_nonnegative_score(value["evaluated_at_s"], "evaluated_at_s")
+    role_generation = _online_count(value["role_generation"], "role_generation")
+    consecutive_wins = _online_count(value["consecutive_wins"], "consecutive_wins")
+    sample_count = _online_count(value["sample_count"], "sample_count")
     for key in ("promoted", "committed"):
         if not isinstance(value[key], bool):
             raise ValueError(f"{key} must be bool")
+    if value["committed"] and not value["promoted"]:
+        raise ValueError("committed evaluation must be promoted")
     reasons = value["rejection_reasons"]
-    if not isinstance(reasons, (list, tuple)) or any(not isinstance(reason, str) or not reason for reason in reasons):
+    if (
+        not isinstance(reasons, (list, tuple))
+        or len(reasons) > 32
+        or any(not isinstance(reason, str) or not reason.strip() for reason in reasons)
+    ):
         raise ValueError("evaluation rejection_reasons are invalid")
+    if (not reasons) != (consecutive_wins > 0):
+        raise ValueError("evaluation wins must match rejection evidence")
+    if value["promoted"] and reasons:
+        raise ValueError("promoted evaluation cannot have rejection reasons")
     for key in (
         "incumbent_prediction_score",
         "challenger_prediction_score",
@@ -265,7 +333,82 @@ def _online_evaluation(value):
         "challenger_braking_score",
     ):
         _online_optional_score(value[key], key)
-    _online_optional_string(value["prospective_digest"], "prospective_digest")
+    prospective_digest = value["prospective_digest"]
+    if (prospective_digest is not None) != value["promoted"]:
+        raise ValueError("evaluation prospective digest must match promotion")
+    if prospective_digest is not None:
+        _online_digest(prospective_digest, "prospective_digest")
+    window_start = _online_nonnegative_score(value["window_start_s"], "window_start_s")
+    window_end = _online_nonnegative_score(value["window_end_s"], "window_end_s")
+    if window_start > window_end or evaluated < window_end:
+        raise ValueError("evaluation window is invalid")
+    _online_digest(value["incumbent_digest"], "incumbent_digest")
+    _online_digest(value["challenger_digest"], "challenger_digest")
+    origins = value["completed_origins"]
+    if not isinstance(origins, (list, tuple)) or len(origins) > 30 or sample_count != len(origins):
+        raise ValueError("evaluation completed origins are invalid")
+    actual_horizon_counts = {3: 0, 15: 0}
+    horizon_errors = {3: ([], []), 15: ([], [])}
+    origin_starts = []
+    origin_ends = []
+    for index, origin in enumerate(origins):
+        if not isinstance(origin, Mapping) or set(origin) != _ORIGIN_EVIDENCE_KEYS:
+            raise ValueError(f"completed origin {index} has an invalid schema")
+        origin_start = _online_nonnegative_score(origin["origin_time_s"], f"completed origin {index} start")
+        origin_end = _online_nonnegative_score(origin["completion_time_s"], f"completed origin {index} end")
+        if origin_start >= origin_end:
+            raise ValueError("completed origin interval must be positive")
+        horizon = _online_horizon(origin["horizon_steps"], f"completed origin {index} horizon")
+        if _online_count(origin["generation"], f"completed origin {index} generation") != role_generation:
+            raise ValueError("completed origin generation must match evaluation")
+        _online_required_score(origin["observed_temperature_c"], f"completed origin {index} observed_temperature_c")
+        incumbent_error = _online_required_score(
+            origin["incumbent_error_c"], f"completed origin {index} incumbent_error_c"
+        )
+        challenger_error = _online_required_score(
+            origin["challenger_error_c"], f"completed origin {index} challenger_error_c"
+        )
+        if not isinstance(origin["braking"], bool):
+            raise ValueError("completed origin braking must be bool")
+        actual_horizon_counts[horizon] += 1
+        incumbent_errors, challenger_errors = horizon_errors[horizon]
+        incumbent_errors.append(incumbent_error)
+        challenger_errors.append(challenger_error)
+        origin_starts.append(origin_start)
+        origin_ends.append(origin_end)
+    if origins:
+        if window_start != min(origin_starts) or window_end != max(origin_ends):
+            raise ValueError("evaluation window must bound completed origins exactly")
+    elif window_start != window_end or window_end != evaluated:
+        raise ValueError("empty evaluation window must coincide with evaluation time")
+    scores = value["horizon_scores"]
+    if not isinstance(scores, (list, tuple)) or len(scores) != 2:
+        raise ValueError("evaluation horizon scores are invalid")
+    scored_horizons = set()
+    for index, score in enumerate(scores):
+        if not isinstance(score, Mapping) or set(score) != _HORIZON_EVIDENCE_KEYS:
+            raise ValueError(f"horizon score {index} has an invalid schema")
+        horizon = _online_horizon(score["horizon_steps"], f"horizon score {index} horizon")
+        scored_horizons.add(horizon)
+        horizon_sample_count = _online_count(score["sample_count"], f"horizon score {index} sample_count")
+        if horizon_sample_count > 0:
+            incumbent = _online_nonnegative_score(score["incumbent_rmse_c"], f"horizon score {index} incumbent_rmse_c")
+            challenger = _online_nonnegative_score(
+                score["challenger_rmse_c"], f"horizon score {index} challenger_rmse_c"
+            )
+        else:
+            incumbent = score["incumbent_rmse_c"]
+            challenger = score["challenger_rmse_c"]
+        incumbent_errors, challenger_errors = horizon_errors[horizon]
+        if (
+            horizon_sample_count != actual_horizon_counts[horizon]
+            or not _online_matches_completed_rmse(incumbent_errors, incumbent)
+            or not _online_matches_completed_rmse(challenger_errors, challenger)
+        ):
+            raise ValueError("evaluation horizon score is inconsistent")
+    if scored_horizons != {3, 15}:
+        raise ValueError("evaluation horizon scores must contain 3 and 15")
+    _online_nonnegative_score(value["evaluation_duration_ms"], "evaluation_duration_ms")
     return copy.deepcopy(dict(value))
 
 
@@ -779,6 +922,18 @@ class Controller(ControllerBase):
             "sample_count": decision.sample_count,
             "prospective_digest": decision.prospective_digest,
         }
+        if isinstance(decision, EvaluationDecision):
+            self._online_last_evaluation.update(
+                {
+                    "window_start_s": decision.window_start_s,
+                    "window_end_s": decision.window_end_s,
+                    "incumbent_digest": decision.incumbent_digest,
+                    "challenger_digest": decision.challenger_digest,
+                    "completed_origins": tuple(asdict(origin) for origin in decision.completed_origins),
+                    "horizon_scores": tuple(asdict(score) for score in decision.horizon_scores),
+                    "evaluation_duration_ms": decision.evaluation_duration_ms,
+                }
+            )
 
     def _online_lifecycle(self, event, detail):
         model = self._online.incumbent
@@ -805,6 +960,8 @@ class Controller(ControllerBase):
         started = time.monotonic()
         decision = self._online.evaluate_due(observation.frame_end_s)
         self._online_evaluation_duration = time.monotonic() - started
+        if isinstance(decision, EvaluationDecision):
+            decision = replace(decision, evaluation_duration_ms=self._online_evaluation_duration * 1_000)
         self._record_evaluation(decision)
         self._model_revision += 1
         if not decision.promoted:
@@ -1167,6 +1324,9 @@ class Controller(ControllerBase):
             payload = snapshot.get("online_adaptation")
             if payload is not None:
                 try:
+                    legacy_online_snapshot = (
+                        isinstance(payload, Mapping) and payload.get("schema") == "online-adaptation/v1"
+                    )
                     required_metadata = {
                         "active_model_kind",
                         "eligible_updates",
@@ -1196,11 +1356,11 @@ class Controller(ControllerBase):
                     previous = restored._previous_incumbent
                     if actual_kind == "scheduled-arx":
                         if (
-                            not isinstance(restored.challenger, _GreyBoxAdaptiveModel)
+                            not isinstance(restored.challenger, ScheduledARX)
                             or not isinstance(previous, _GreyBoxAdaptiveModel)
                             or restored.previous_incumbent_digest is None
                         ):
-                            raise ValueError("active ARX lacks a valid grey-box rollback owner")
+                            raise ValueError("active ARX lacks a valid rollback owner")
                     elif (
                         not isinstance(restored.challenger, ScheduledARX)
                         or previous is not None
@@ -1214,10 +1374,34 @@ class Controller(ControllerBase):
                     lifecycle_reason = _online_optional_string(
                         payload["last_lifecycle_reason"], "last_lifecycle_reason"
                     )
-                    last_evaluation = _online_evaluation(payload["last_evaluation"])
+                    legacy_evaluation_keys = {
+                        "decision_id",
+                        "evaluated_at_s",
+                        "role_generation",
+                        "promoted",
+                        "committed",
+                        "consecutive_wins",
+                        "rejection_reasons",
+                        "incumbent_prediction_score",
+                        "challenger_prediction_score",
+                        "incumbent_braking_score",
+                        "challenger_braking_score",
+                        "sample_count",
+                        "prospective_digest",
+                    }
+                    raw_evaluation = payload["last_evaluation"]
+                    last_evaluation = (
+                        None
+                        if (
+                            legacy_online_snapshot
+                            and isinstance(raw_evaluation, Mapping)
+                            and set(raw_evaluation) == legacy_evaluation_keys
+                        )
+                        else _online_evaluation(raw_evaluation)
+                    )
                     last_lifecycle = _online_lifecycle_metadata(payload["last_lifecycle"])
                     self._online = restored
-                    self._online.begin_restored_session()
+                    self._online.begin_restored_session(preserve_persisted_models=legacy_online_snapshot)
                     self._online_eligible_updates = eligible_updates
                     self._online_rejected_updates = rejected_updates
                     self._online_promotion_count = promotion_count
@@ -1383,8 +1567,10 @@ class Controller(ControllerBase):
         failure_state = MpcFailureState.SUCCESS
         failure_error = None
         active_arx = self._active_arx()
+        # Keep restored ARX authority visible while fresh frames rebuild its lags.
+        arx_policy_active = active_arx and self._online is not None and self._online.lag_warmup_remaining == 0
         try:
-            if active_arx:
+            if arx_policy_active:
                 try:
                     prediction = self._online.incumbent.affine_prediction(
                         self._linear_config.horizon_steps,
@@ -1438,7 +1624,7 @@ class Controller(ControllerBase):
                     f"holding normalized combustion load {combustion_load:.3f}. The grill is not being controlled to "
                     "setpoint -- check the policy artifact and the model configuration."
                 )
-            if active_arx and self._online is not None:
+            if arx_policy_active and self._online is not None:
                 message = str(failure_error)
                 immediate = message in (
                     "non-finite-forecast",
@@ -1481,7 +1667,7 @@ class Controller(ControllerBase):
             residual_move=residual_move,
             bounded_firing_load=combustion_load,
             applied_combustion_load=applied_combustion_load,
-            policy_kind="linear-mpc" if active_arx else ("net" if self._net is not None else "nlp"),
+            policy_kind="linear-mpc" if arx_policy_active else ("net" if self._net is not None else "nlp"),
             failure_state=failure_state,
             consecutive_policy_failures=self._consecutive_policy_failures,
             solve_start_monotonic=solve_start,

@@ -432,7 +432,7 @@ def _active_online_snapshot():
     fallback = coordinator.incumbent
     active_arx = source._new_scheduled_arx()
     coordinator.incumbent = active_arx
-    coordinator.challenger = fallback
+    coordinator.challenger = source._new_scheduled_arx()
     coordinator._previous_incumbent = fallback
     coordinator._previous_incumbent_snapshot = deepcopy(fallback.snapshot())
     coordinator._previous_incumbent_digest = OnlineAdaptation.model_digest(fallback)
@@ -440,11 +440,211 @@ def _active_online_snapshot():
     return source.get_model_snapshot()
 
 
-def test_valid_active_online_snapshot_restores_scheduled_arx_with_owned_grey_fallback():
+def _completed_evaluation():
+    return {
+        "decision_id": "generation-1-evaluation-1",
+        "evaluated_at_s": 400.0,
+        "role_generation": 1,
+        "promoted": False,
+        "committed": False,
+        "consecutive_wins": 1,
+        "rejection_reasons": (),
+        "incumbent_prediction_score": 1.0,
+        "challenger_prediction_score": 1.2,
+        "incumbent_braking_score": None,
+        "challenger_braking_score": None,
+        "sample_count": 2,
+        "prospective_digest": None,
+        "window_start_s": 20.0,
+        "window_end_s": 340.0,
+        "incumbent_digest": "a" * 64,
+        "challenger_digest": "b" * 64,
+        "completed_origins": [
+            {
+                "origin_time_s": 20.0,
+                "completion_time_s": 80.0,
+                "horizon_steps": 3,
+                "generation": 1,
+                "observed_temperature_c": 110.0,
+                "incumbent_error_c": 2.0,
+                "challenger_error_c": 1.0,
+                "braking": True,
+            },
+            {
+                "origin_time_s": 40.0,
+                "completion_time_s": 340.0,
+                "horizon_steps": 15,
+                "generation": 1,
+                "observed_temperature_c": 115.0,
+                "incumbent_error_c": -3.0,
+                "challenger_error_c": -4.0,
+                "braking": False,
+            },
+        ],
+        "horizon_scores": [
+            {
+                "horizon_steps": 3,
+                "incumbent_rmse_c": 2.0,
+                "challenger_rmse_c": 1.0,
+                "sample_count": 1,
+            },
+            {
+                "horizon_steps": 15,
+                "incumbent_rmse_c": 3.0,
+                "challenger_rmse_c": 4.0,
+                "sample_count": 1,
+            },
+        ],
+        "evaluation_duration_ms": 7.5,
+    }
+
+
+def _snapshot_with_completed_evaluation():
+    snapshot = _active_online_snapshot()
+    snapshot["online_adaptation"]["last_evaluation"] = _completed_evaluation()
+    return snapshot
+
+
+def test_snapshot_restore_round_trips_an_exact_completed_evaluation_audit_trail():
+    snapshot = _snapshot_with_completed_evaluation()
+    restored = _c(enable_online_adaptation=True)
+
+    assert restored.restore_model(snapshot) is True
+    assert (
+        restored.get_model_snapshot()["online_adaptation"]["last_evaluation"]
+        == snapshot["online_adaptation"]["last_evaluation"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("origin_index", "field", "invalid"),
+    [
+        (origin_index, field, invalid)
+        for origin_index in (0, 1)
+        for field in ("observed_temperature_c", "incumbent_error_c", "challenger_error_c")
+        for invalid in (None, True, "not-a-number", float("nan"), float("inf"), -float("inf"))
+    ],
+)
+def test_snapshot_restore_rejects_non_finite_or_non_numeric_completed_origin_evidence_to_safe_grey_box(
+    origin_index, field, invalid
+):
+    snapshot = _snapshot_with_completed_evaluation()
+    snapshot["online_adaptation"]["last_evaluation"]["completed_origins"][origin_index][field] = invalid
+
     restored = _c(enable_online_adaptation=True)
     restored.set_target(110.0)
-    assert restored.restore_model(_active_online_snapshot()) is True
+
+    assert restored.restore_model(snapshot) is True
+    assert restored.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+    assert restored.get_status()["adaptation"]["last_evaluation_outcome"] is None
+    assert restored.get_model_snapshot()["online_adaptation"]["last_evaluation"] is None
+
+
+@pytest.mark.parametrize(
+    ("score_index", "field", "inconsistent"),
+    [
+        (0, "incumbent_rmse_c", 2.000_001),
+        (0, "challenger_rmse_c", 0.999_999),
+        (1, "incumbent_rmse_c", 3.000_001),
+        (1, "challenger_rmse_c", 3.999_999),
+        (0, "incumbent_rmse_c", -2.0),
+        (1, "challenger_rmse_c", -4.0),
+    ],
+)
+def test_snapshot_restore_rejects_inconsistent_horizon_rmse_to_safe_grey_box(score_index, field, inconsistent):
+    snapshot = _snapshot_with_completed_evaluation()
+    snapshot["online_adaptation"]["last_evaluation"]["horizon_scores"][score_index][field] = inconsistent
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+
+    assert restored.restore_model(snapshot) is True
+    assert restored.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+    assert restored.get_status()["adaptation"]["last_evaluation_outcome"] is None
+    assert restored.get_model_snapshot()["online_adaptation"]["last_evaluation"] is None
+
+
+def test_pre_ownership_change_promoted_v1_snapshot_restores_a_cloned_arx_challenger():
+    snapshot = _active_online_snapshot()
+    ownership = snapshot["online_adaptation"]
+    ownership["schema"] = "online-adaptation/v1"
+
+    active_arx = deepcopy(ownership["incumbent"])
+    rollback_owner = deepcopy(ownership["previous_incumbent"])
+    rollback_digest = ownership["previous_incumbent_digest"]
+    ownership["challenger"] = deepcopy(rollback_owner)
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(snapshot) is True
+
+    restored_ownership = restored.get_model_snapshot()["online_adaptation"]
     assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+    assert restored_ownership["incumbent"] == active_arx
+    assert restored_ownership["challenger"]["schema"] == "scheduled-arx/v2"
+    assert restored_ownership["challenger"]["candidates"] == active_arx["candidates"]
+    assert restored_ownership["previous_incumbent"] == rollback_owner
+    assert restored_ownership["previous_incumbent_digest"] == rollback_digest
+
+
+def test_pre_audit_v1_non_null_evaluation_migrates_without_losing_learned_online_state():
+    snapshot = _active_online_snapshot()
+    ownership = snapshot["online_adaptation"]
+    ownership["schema"] = "online-adaptation/v1"
+
+    ownership.update(
+        {
+            "eligible_updates": 37,
+            "rejected_updates": 11,
+            "promotion_count": 7,
+            "rollback_count": 2,
+            "last_lifecycle_reason": "promotion",
+            "last_lifecycle": None,
+            "last_evaluation": {
+                "decision_id": "legacy-decision",
+                "evaluated_at_s": 600.0,
+                "role_generation": 1,
+                "promoted": False,
+                "committed": False,
+                "consecutive_wins": 0,
+                "rejection_reasons": [],
+                "incumbent_prediction_score": 1.1,
+                "challenger_prediction_score": 1.2,
+                "incumbent_braking_score": 1.3,
+                "challenger_braking_score": 1.4,
+                "sample_count": 0,
+                "prospective_digest": None,
+            },
+        }
+    )
+    learned_state = {
+        key: deepcopy(ownership[key])
+        for key in (
+            "incumbent",
+            "previous_incumbent",
+            "previous_incumbent_digest",
+            "role_generation",
+            "effective_updates",
+            "consecutive_wins",
+        )
+    }
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(snapshot) is True
+
+    restored_ownership = restored.get_model_snapshot()["online_adaptation"]
+    restored_status = restored.get_status()["adaptation"]
+    for key, value in learned_state.items():
+        assert restored_ownership[key] == value
+    assert restored_status["active_model_kind"] == "scheduled-arx"
+    assert restored_status["eligible_updates"] == 37
+    assert restored_status["rejected_updates"] == 11
+    assert restored_status["promotion_count"] == 7
+    assert restored_status["rollback_count"] == 2
+    assert restored_status["last_evaluation_outcome"] is None
 
 
 @pytest.mark.parametrize("shape", ("missing-owner", "wrong-owner-role", "grey-with-owner"))
@@ -477,7 +677,7 @@ def test_enabled_controller_persists_an_independently_owned_online_member():
     source = _adopted_online_controller()
     snapshot = source.get_model_snapshot()
     json.dumps(snapshot, allow_nan=False)
-    assert snapshot["online_adaptation"]["schema"] == "online-adaptation/v1"
+    assert snapshot["online_adaptation"]["schema"] == "online-adaptation/v2"
 
     restored = _c(enable_online_adaptation=True)
     restored.set_target(110.0)

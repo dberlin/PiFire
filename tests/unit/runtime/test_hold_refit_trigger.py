@@ -161,6 +161,64 @@ def test_exceptional_online_refit_still_persists_the_published_checkpoint(hold_c
     assert store.saved == [("mpc", runner.snapshot)]
 
 
+def test_recorder_construction_failure_still_restores_the_final_online_checkpoint_once(hold_cycle, monkeypatch):
+    """A trace outage cannot discard learning that finished after the last evaluation."""
+
+    class _RestoringStore:
+        def __init__(self):
+            self.models = {}
+            self.saved = []
+
+        def load(self, name):
+            return self.models.get(name)
+
+        def save(self, name, snapshot):
+            persisted = dict(snapshot)
+            self.models[name] = persisted
+            self.saved.append((name, persisted))
+            return True
+
+    class _FinalizingRunner(FakeControllerRunner):
+        def refit_from_cook(self):
+            super().refit_from_cook()
+            self.snapshot = final_snapshot
+            return object()
+
+    def recorder_unavailable(**_kwargs):
+        raise OSError("trace database unavailable")
+
+    import controller.runtime.modes.hold as hold_module
+
+    final_snapshot = {
+        "version": 1,
+        "revision": 8,
+        "coefficients": {"a": -0.92, "b": 0.037, "c": 1.25},
+        "online_adaptation": {},
+    }
+    store = _RestoringStore()
+    runner = _FinalizingRunner(period=0.0).script(
+        [ControllerUpdateResult(cycle_ratio=0.4, fan=None, input_temperature=225.0)]
+    )
+    monkeypatch.setattr(hold_module, "ControlTraceRecorder", recorder_unavailable)
+    hold = _hold(hold_cycle, runner, identification=False, online_adaptation=True, store=store)
+    runner.snapshot = {
+        "version": 1,
+        "revision": 7,
+        "coefficients": {"a": -0.85, "b": 0.031, "c": 1.1},
+        "online_adaptation": {},
+    }
+    hold.on_tick(100.0, 225.0, {"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100})
+    hold.teardown(225.0)
+
+    restarted_runner = FakeControllerRunner(period=0.01)
+    restarted = hold_cycle(restarted_runner, controller="mpc", model_store=store)
+    restarted.setup()
+
+    assert runner.refits == 1
+    assert [snapshot for _name, snapshot in store.saved].count(final_snapshot) == 1
+    assert restarted_runner.restored == [final_snapshot]
+
+
 def test_what_the_refit_learned_is_persisted_for_the_next_cook(hold_cycle):
     store = _RecordingStore()
     runner = FakeControllerRunner(period=0.01)

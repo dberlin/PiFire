@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
+from controller.linear_mpc.adaptation import AdaptationPolicy
 from controller.linear_mpc.adaptation import EvaluationRejectionReason
 from controller.linear_mpc.adaptation import OnlineAdaptation
 from controller.applied_output import AppliedOutput, OutputSource
@@ -174,6 +175,78 @@ class _Candidate(ScheduledARX):
         return AffinePrediction(np.full(horizon_steps, 100.0), np.zeros((horizon_steps, horizon_steps)))
 
 
+class _SnapshotGreyModel:
+    """A frozen, deliberately inferior grey-box origin with a restorable payload."""
+
+    def track(self, observation):
+        return ModelUpdate(90.0, observation.temp_c, observation.temp_c - 90.0, False)
+
+    observe = track
+
+    def affine_prediction(self, horizon_steps, q_previous, ambient_future):
+        del q_previous, ambient_future
+        return AffinePrediction(np.full(horizon_steps, 90.0), np.zeros((horizon_steps, horizon_steps)))
+
+    def snapshot(self):
+        return {
+            "schema": "grey-box-adapter/v1",
+            "state": [90.0],
+            "transition": [[0.0]],
+            "q_gain": [0.0],
+            "ambient_gain": [0.0],
+            "affine_offset": [90.0],
+            "radiation_constant_gain": [0.0],
+            "temperature_index": 0,
+            "radiation_sigma": 0.0,
+            "radiation_slope": 0.0,
+            "chamber_origin_c": 90.0,
+        }
+
+
+def _seeded_candidate() -> _Candidate:
+    model = _Candidate(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=1e-6))
+    model.fit(tuple(replace(_frame(index), temp_c=100.0) for index in range(80)))
+    theta = np.asarray((0.2, 0.1, 0.3, 0.1, 0.1, 0.0), dtype=np.float64)
+    for candidate in model._candidates.values():
+        for region in candidate.regions:
+            region.theta = theta.copy()
+            information = region.information_factor
+            region.normal_rhs = information.T @ information @ theta
+    return model
+
+
+def _constant_prediction(temperature_c):
+    def predict(horizon_steps, q_previous, ambient_future):
+        del q_previous, ambient_future
+        return AffinePrediction(np.full(horizon_steps, temperature_c), np.zeros((horizon_steps, horizon_steps)))
+
+    return predict
+
+
+def _controller_after_first_arx_promotion(monkeypatch):
+    monkeypatch.setattr(Controller, "_new_grey_box_model", lambda _self: _SnapshotGreyModel())
+    controller = _controller(online=True, n_horizon=3)
+    controller._online = OnlineAdaptation(
+        _SnapshotGreyModel(),
+        _seeded_candidate(),
+        AdaptationPolicy(min_effective_updates=0, required_consecutive_wins=1, evaluation_interval_s=1_000_000.0),
+        accepted_sources=("controller",),
+    )
+    controller._linear_config = _LinearConfig()
+    controller._linear_policy = _LinearPolicy()
+    controller._x_hat = np.asarray([0.0])
+
+    latest = None
+    for index in range(80, 96):
+        latest = replace(_frame(index), temp_c=100.0)
+        controller.observe_frame(latest)
+    assert latest is not None
+    controller._online_next_evaluation_s = latest.frame_end_s
+    event = controller._evaluate_online(latest)
+    assert event["lifecycle"]["detail"] == "promotion"
+    return controller
+
+
 class _Coordinator:
     def __init__(self, incumbent, challenger):
         self.incumbent = incumbent
@@ -182,8 +255,13 @@ class _Coordinator:
         self.role_generation = 0
         self._effective_updates = 8
         self.policy = SimpleNamespace(evaluation_interval_s=1.0)
+        self._lag_warmup_remaining = 0
         self.evaluate_calls = 0
         self.observations = []
+
+    @property
+    def lag_warmup_remaining(self):
+        return self._lag_warmup_remaining
 
     @property
     def effective_updates(self):
@@ -411,7 +489,7 @@ def test_active_safety_failures_roll_back_once_with_the_exact_lifecycle_reason(s
     assert controller.trace_diagnostics().model_lifecycle["detail"] == reason
 
 
-def test_active_real_scheduled_arx_restore_rebuilds_lag_before_resuming_arx_authority():
+def test_active_scheduled_arx_restart_holds_default_five_second_solves_until_lag_warmup_completes():
     source = _controller(online=True)
     frames = tuple(_frame(index) for index in range(80))
     active = ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3)))
@@ -426,33 +504,43 @@ def test_active_real_scheduled_arx_restore_rebuilds_lag_before_resuming_arx_auth
     source._online._previous_incumbent_snapshot = fallback.snapshot()
     source._online._previous_incumbent_digest = OnlineAdaptation.model_digest(fallback)
     source._online.incumbent = active
-    source._online.challenger = fallback
+    source._online.challenger = _seeded_candidate()
     source._online._role_generation = 3
     source._online._consecutive_wins = 2
     source._model_revision = 41
     source._applied_combustion_load = 0.4
 
     snapshot = source.get_model_snapshot()
-    source_candidates = snapshot["online_adaptation"]["incumbent"]["candidates"]
-    rollback_owner = snapshot["online_adaptation"]["previous_incumbent_digest"]
+    ownership = snapshot["online_adaptation"]
+    rollback_owner = ownership["previous_incumbent_digest"]
+    assert ownership["incumbent"]["schema"] == "scheduled-arx/v2"
+    assert ownership["challenger"]["schema"] == "scheduled-arx/v2"
+    assert ownership["previous_incumbent"]["schema"] == "grey-box-adapter/v1"
     restored = _controller(online=True)
     assert restored.restore_model(snapshot) is True
     restored._applied_combustion_load = 0.4
 
     restored_status = restored.get_status()["adaptation"]
+    assert restored.cfg["control_period"] == pytest.approx(5.0)
     assert restored_status["active_model_kind"] == "scheduled-arx"
     assert restored_status["role_generation"] == 3
     assert restored._online.consecutive_wins == 2
     assert restored._online.previous_incumbent_digest == rollback_owner
-    assert restored.get_model_snapshot()["online_adaptation"]["incumbent"]["candidates"] == source_candidates
 
     with pytest.raises(RuntimeError, match="lag history"):
         restored._online.incumbent.affine_prediction(4, 0.4, np.full(4, 20.0))
-    held = restored.update(100.0)
-    assert 0.0 <= held["cycle_ratio"] <= CYCLE["u_max"]
-    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
 
-    fresh_outcomes = [restored.observe_frame(replace(_frame(index), role_generation=3)) for index in range(116, 132)]
+    fresh_outcomes = []
+    for index in range(116, 132):
+        for _ in range(4):
+            command = restored.update(100.0)
+            assert 0.0 <= command["cycle_ratio"] <= CYCLE["u_max"]
+            status = restored.get_status()
+            assert status["policy_failures"] == 0
+            assert status["adaptation"]["active_model_kind"] == "scheduled-arx"
+            assert status["adaptation"]["rollback_count"] == 0
+        fresh_outcomes.append(restored.observe_frame(replace(_frame(index), role_generation=3)))
+
     assert fresh_outcomes[-1]["eligible"] is True
     prediction = restored._online.incumbent.affine_prediction(4, 0.4, np.full(4, 20.0))
     assert np.isfinite(prediction.free_output_c).all()
@@ -461,4 +549,222 @@ def test_active_real_scheduled_arx_restore_rebuilds_lag_before_resuming_arx_auth
     assert 0.0 <= resumed["cycle_ratio"] <= CYCLE["u_max"]
     assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
     assert restored.get_status()["adaptation"]["role_generation"] == 3
+    assert restored.get_status()["adaptation"]["rollback_count"] == 0
     assert restored._online.previous_incumbent_digest == rollback_owner
+
+
+def test_promoted_arx_keeps_a_distinct_learning_challenger_and_can_promote_again(monkeypatch):
+    controller = _controller_after_first_arx_promotion(monkeypatch)
+    coordinator = controller._online
+    first_incumbent = coordinator.incumbent
+    first_challenger = coordinator.challenger
+    first_snapshot = coordinator.snapshot()
+
+    assert controller.get_status()["adaptation"]["promotion_count"] == 1
+    assert isinstance(first_incumbent, ScheduledARX)
+    assert isinstance(first_challenger, ScheduledARX)
+    assert first_challenger is not first_incumbent
+    assert first_snapshot["previous_incumbent"]["schema"] == "grey-box-adapter/v1"
+    assert first_snapshot["previous_incumbent_digest"] == OnlineAdaptation.model_digest(_SnapshotGreyModel())
+
+    incumbent_candidates = first_incumbent.snapshot()["candidates"]
+    challenger_candidates = first_challenger.snapshot()["candidates"]
+    monkeypatch.setattr(first_incumbent, "affine_prediction", _constant_prediction(90.0))
+    monkeypatch.setattr(first_challenger, "affine_prediction", _constant_prediction(100.0))
+
+    latest = None
+    for index in range(96, 112):
+        latest = replace(_frame(index, generation=1), temp_c=100.0)
+        outcome = controller.observe_frame(latest)
+        assert outcome["role_generation"] == 1
+        assert controller.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+    assert latest is not None
+
+    assert first_incumbent.snapshot()["candidates"] == incumbent_candidates
+    assert first_challenger.snapshot()["candidates"] != challenger_candidates
+    # Seed one due boundary without creating a timestamp discontinuity that
+    # would invalidate the accumulated origin window.
+    coordinator._last_evaluation_s = latest.frame_end_s - coordinator.policy.evaluation_interval_s
+    controller._online_next_evaluation_s = latest.frame_end_s
+    second = controller._evaluate_online(latest)
+
+    assert second["lifecycle"]["detail"] == "promotion"
+    status = controller.get_status()["adaptation"]
+    assert status["active_model_kind"] == "scheduled-arx"
+    assert status["promotion_count"] == 2
+    assert status["role_generation"] == 2
+
+
+def test_active_arx_ownership_snapshot_round_trip_preserves_the_arx_challenger(monkeypatch):
+    controller = _controller_after_first_arx_promotion(monkeypatch)
+    snapshot = controller.get_model_snapshot()
+    ownership = snapshot["online_adaptation"]
+    assert ownership["incumbent"]["schema"] == "scheduled-arx/v2"
+    assert ownership["challenger"]["schema"] == "scheduled-arx/v2"
+    assert ownership["previous_incumbent"]["schema"] == "grey-box-adapter/v1"
+
+    restored = _controller(online=True, n_horizon=3)
+    assert restored.restore_model(snapshot) is True
+    restored_ownership = restored.get_model_snapshot()["online_adaptation"]
+
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+    assert restored.get_status()["adaptation"]["role_generation"] == 1
+    assert restored_ownership["incumbent"]["candidates"] == ownership["incumbent"]["candidates"]
+    assert restored_ownership["challenger"]["candidates"] == ownership["challenger"]["candidates"]
+    assert restored_ownership["previous_incumbent"] == ownership["previous_incumbent"]
+    assert restored_ownership["previous_incumbent_digest"] == ownership["previous_incumbent_digest"]
+
+
+def test_later_rollback_after_a_second_promotion_rewarms_the_restored_arx(monkeypatch):
+    controller = _controller_after_first_arx_promotion(monkeypatch)
+    coordinator = controller._online
+    first_incumbent = coordinator.incumbent
+    first_challenger = coordinator.challenger
+    first_incumbent_prediction = first_incumbent.affine_prediction
+    first_challenger_prediction = first_challenger.affine_prediction
+    monkeypatch.setattr(first_incumbent, "affine_prediction", _constant_prediction(90.0))
+    monkeypatch.setattr(first_challenger, "affine_prediction", _constant_prediction(100.0))
+
+    latest = None
+    for index in range(96, 112):
+        latest = replace(_frame(index, generation=1), temp_c=100.0)
+        controller.observe_frame(latest)
+    assert latest is not None
+    coordinator._last_evaluation_s = latest.frame_end_s - coordinator.policy.evaluation_interval_s
+    controller._online_next_evaluation_s = latest.frame_end_s
+    assert controller._evaluate_online(latest)["lifecycle"]["detail"] == "promotion"
+    assert coordinator.role_generation == 2
+    assert coordinator._previous_incumbent is first_incumbent
+    monkeypatch.setattr(first_incumbent, "affine_prediction", first_incumbent_prediction)
+    monkeypatch.setattr(first_challenger, "affine_prediction", first_challenger_prediction)
+    for index in range(112, 128):
+        controller.observe_frame(replace(_frame(index, generation=2), temp_c=100.0))
+    assert coordinator.lag_warmup_remaining == 0
+
+    class _FailingActivePolicy:
+        def solve(self, *_args, **_kwargs):
+            raise RuntimeError("active linear solve failed")
+
+    controller._last_combustion_load = 0.4
+    controller._linear_policy = _FailingActivePolicy()
+    controller.update(100.0)
+    rollback_command = controller.update(100.0)
+
+    rolled_back = controller.get_status()
+    assert rolled_back["adaptation"]["active_model_kind"] == "scheduled-arx"
+    assert rolled_back["adaptation"]["role_generation"] == 3
+    assert rolled_back["adaptation"]["rollback_count"] == 1
+    assert coordinator.incumbent is not first_incumbent
+    assert coordinator.lag_warmup_remaining == coordinator.policy.max_delay_steps
+    assert 0.0 <= rollback_command["cycle_ratio"] <= CYCLE["u_max"]
+    assert rolled_back["policy_failures"] == 0
+
+    controller._linear_policy = _LinearPolicy()
+    warmup_command = controller.update(100.0)
+    assert 0.0 <= warmup_command["cycle_ratio"] <= CYCLE["u_max"]
+    assert controller.trace_diagnostics().policy_kind == "nlp"
+    assert controller.get_status()["policy_failures"] == 0
+
+    for index in range(128, 144):
+        if coordinator.lag_warmup_remaining:
+            command = controller.update(100.0)
+            assert 0.0 <= command["cycle_ratio"] <= CYCLE["u_max"]
+            assert controller.trace_diagnostics().policy_kind == "nlp"
+        controller.observe_frame(replace(_frame(index, generation=3), temp_c=100.0))
+        assert controller.get_status()["policy_failures"] == 0
+
+    resumed_command = controller.update(100.0)
+    assert 0.0 <= resumed_command["cycle_ratio"] <= CYCLE["u_max"]
+    assert controller.trace_diagnostics().policy_kind == "linear-mpc"
+    assert controller.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+    assert controller.get_status()["policy_failures"] == 0
+
+
+def test_pre_audit_v1_snapshot_keeps_learned_state_and_drops_only_old_evaluation(monkeypatch):
+    controller = _controller_after_first_arx_promotion(monkeypatch)
+    snapshot = controller.get_model_snapshot()
+    payload = snapshot["online_adaptation"]
+    payload["schema"] = "online-adaptation/v1"
+
+    current_evaluation = payload["last_evaluation"]
+    payload.update(
+        {
+            "eligible_updates": 37,
+            "rejected_updates": 11,
+            "promotion_count": 7,
+            "rollback_count": 2,
+            "last_lifecycle_reason": "promotion",
+            "last_lifecycle": None,
+            "last_evaluation": {
+                key: current_evaluation[key]
+                for key in (
+                    "decision_id",
+                    "evaluated_at_s",
+                    "role_generation",
+                    "promoted",
+                    "committed",
+                    "consecutive_wins",
+                    "rejection_reasons",
+                    "incumbent_prediction_score",
+                    "challenger_prediction_score",
+                    "incumbent_braking_score",
+                    "challenger_braking_score",
+                    "sample_count",
+                    "prospective_digest",
+                )
+            },
+        }
+    )
+    ownership = {
+        key: payload[key]
+        for key in (
+            "incumbent",
+            "challenger",
+            "previous_incumbent",
+            "previous_incumbent_digest",
+            "role_generation",
+            "effective_updates",
+            "consecutive_wins",
+        )
+    }
+
+    restored = _controller(online=True, n_horizon=3)
+    assert restored.restore_model(snapshot) is True
+
+    restored_snapshot = restored.get_model_snapshot()["online_adaptation"]
+    restored_status = restored.get_status()["adaptation"]
+    assert restored_snapshot["incumbent"] == ownership["incumbent"]
+    assert restored_snapshot["challenger"] == ownership["challenger"]
+    assert restored_snapshot["previous_incumbent"] == ownership["previous_incumbent"]
+    assert restored_snapshot["previous_incumbent_digest"] == ownership["previous_incumbent_digest"]
+    assert restored_snapshot["role_generation"] == ownership["role_generation"]
+    assert restored_snapshot["effective_updates"] == ownership["effective_updates"]
+    assert restored_snapshot["consecutive_wins"] == ownership["consecutive_wins"]
+    assert restored_status["eligible_updates"] == 37
+    assert restored_status["rejected_updates"] == 11
+    assert restored_status["promotion_count"] == 7
+    assert restored_status["rollback_count"] == 2
+    assert restored_status["last_evaluation_outcome"] is None
+
+
+def test_pre_ownership_change_v1_promoted_snapshot_clones_an_arx_challenger(monkeypatch):
+    controller = _controller_after_first_arx_promotion(monkeypatch)
+    snapshot = controller.get_model_snapshot()
+    payload = snapshot["online_adaptation"]
+    payload["schema"] = "online-adaptation/v1"
+
+    active_arx = payload["incumbent"]
+    rollback_owner = payload["previous_incumbent"]
+    rollback_digest = payload["previous_incumbent_digest"]
+    payload["challenger"] = rollback_owner
+
+    restored = _controller(online=True, n_horizon=3)
+    assert restored.restore_model(snapshot) is True
+
+    ownership = restored.get_model_snapshot()["online_adaptation"]
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+    assert ownership["incumbent"] == active_arx
+    assert ownership["challenger"]["schema"] == "scheduled-arx/v2"
+    assert ownership["challenger"]["candidates"] == active_arx["candidates"]
+    assert ownership["previous_incumbent"] == rollback_owner
+    assert ownership["previous_incumbent_digest"] == rollback_digest

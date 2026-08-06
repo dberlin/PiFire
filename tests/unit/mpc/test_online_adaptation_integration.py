@@ -489,7 +489,7 @@ def test_restart_restores_one_win_but_rebuilds_a_post_shutdown_scoring_window(mo
         # The boundary origin survives its checkpoint, then the following
         # fifteen endpoints complete thirteen 3-step and one 15-step origin.
         # This exact fresh window proves no shutdown-crossing origin scored.
-        completed_horizons = tuple(origin.horizon_steps for origin in second_core._online.completed_origins)
+        completed_horizons = tuple(origin.horizon_steps for origin in promotion.completed_origins)
         assert promotion.sample_count == 14
         assert completed_horizons.count(3) == 13
         assert completed_horizons.count(15) == 1

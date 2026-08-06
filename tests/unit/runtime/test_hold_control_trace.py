@@ -273,6 +273,42 @@ def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch,
     assert validate_records(recorder.records).valid
 
 
+def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_displays_fahrenheit(
+    hold_cycle, monkeypatch
+):
+    """A physical model parameter must not be converted as a UI temperature."""
+
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.settings["globals"]["units"] = "F"
+    mode.settings["controller"]["config"]["mpc"]["T_amb"] = 20.0
+    mode.setup()
+    mode.state.metrics = {"id": "fahrenheit-ambient"}
+    mode._ensure_trace_session(0.0)
+    controller = mode.state.controller
+    controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
+    controller.pulse_frame_combustion_load = 0.3
+    controller.pulse_frame_requested_auger_duty = 0.3
+    controller.pulse_frame_maximum_duty = 0.5
+
+    from controller.runtime.logic.pulse import PulseFrameResult
+
+    frame = PulseFrameResult(0.0, 20.0, 20.0, True, False, 0.3, 0.0, 0.0, 6, 6.0, 2, False, False, None)
+    mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
+    )
+    mode._reconcile_model_observation_outcomes(now=22.0)
+
+    replayed = next(
+        record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)
+    )
+    session = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.SESSION)
+    assert (runner.observations[0].ambient_c, replayed.ambient_c) == (20.0, 20.0)
+    assert (session.temperature_unit, session.ambient_temperature) == ("F", 68.0)
+
+
 def test_first_framed_results_complete_the_initial_seed_once(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script(
@@ -1046,12 +1082,26 @@ def _model_observation_outcome(*, frame_end_ms, role_generation=0, eligible=Fals
 
 
 def _promotion_outcome(*, frame_end_ms):
+    evaluated_at_s = frame_end_ms / 1_000
+    completed_origins = tuple(
+        {
+            "origin_time_s": evaluated_at_s - 12.0 + index,
+            "completion_time_s": evaluated_at_s - 11.5 + index,
+            "horizon_steps": 3 if index < 6 else 15,
+            "generation": 0,
+            "observed_temperature_c": 225.0,
+            "incumbent_error_c": 2.0,
+            "challenger_error_c": 1.0,
+            "braking": index % 2 == 0,
+        }
+        for index in range(12)
+    )
     return {
         **_model_observation_outcome(frame_end_ms=frame_end_ms),
         "evaluation": {
             "decision_id": "generation-0-evaluation-1",
-            "evaluated_at_s": 20.0,
-            "role_generation": 1,
+            "evaluated_at_s": evaluated_at_s,
+            "role_generation": 0,
             "promoted": True,
             "committed": True,
             "consecutive_wins": 2,
@@ -1060,8 +1110,28 @@ def _promotion_outcome(*, frame_end_ms):
             "challenger_prediction_score": 1.0,
             "incumbent_braking_score": 1.0,
             "challenger_braking_score": 0.5,
-            "sample_count": 12,
+            "sample_count": len(completed_origins),
             "prospective_digest": "b" * 64,
+            "window_start_s": evaluated_at_s - 12.0,
+            "window_end_s": evaluated_at_s - 0.5,
+            "incumbent_digest": "a" * 64,
+            "challenger_digest": "b" * 64,
+            "completed_origins": completed_origins,
+            "horizon_scores": (
+                {
+                    "horizon_steps": 3,
+                    "incumbent_rmse_c": 2.0,
+                    "challenger_rmse_c": 1.0,
+                    "sample_count": 6,
+                },
+                {
+                    "horizon_steps": 15,
+                    "incumbent_rmse_c": 2.0,
+                    "challenger_rmse_c": 1.0,
+                    "sample_count": 6,
+                },
+            ),
+            "evaluation_duration_ms": 0.0,
         },
         "lifecycle": {
             "event": "adopt",

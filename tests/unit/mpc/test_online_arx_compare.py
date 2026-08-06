@@ -37,11 +37,15 @@ from docs.superpowers.experiments.online_arx_compare import (
     run_tiny_mak_grillsim,
 )
 from controller.linear_mpc.contracts import AffinePrediction, FrameObservation
+from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import SignalRecord
+
 
 from controller.runtime.logic.pulse import PulseTransition
 
 
 _PREDICTION_METRICS = frozenset({"prediction_rmse_60_c", "prediction_rmse_300_c"})
+_REVIEWED_SOURCE_REVISION = "a" * 40
+
 _CONTROL_METRICS = frozenset(REQUIRED_METRICS) - _PREDICTION_METRICS
 _SIMULATOR_STACK = {
     "mpc": "Controller",
@@ -160,9 +164,9 @@ def _real_mak_row(*, arm: str) -> dict[str, Any]:
         "raw_timing_ms": {
             "learner": [1.0] if online else [],
             "evaluation": [],
-            "solve": [3.0],
+            "solve": [] if online else [3.0],
         },
-        "timing_applicability": {"learner": online, "evaluation": False, "solve": True},
+        "timing_applicability": {"learner": online, "evaluation": False, "solve": not online},
         "production_stack": (
             {
                 "controller": "Controller",
@@ -195,7 +199,7 @@ def _complete_artifact() -> dict[str, Any]:
     ]
     artifact = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
-        "source_revision": "test-source-revision",
+        "source_revision": _REVIEWED_SOURCE_REVISION,
         "requested": {
             "seeds": list(FIXED_SEEDS),
             "plants": list(PLANTS),
@@ -205,6 +209,13 @@ def _complete_artifact() -> dict[str, Any]:
         "rows": rows,
         "real_mak_rows": [_real_mak_row(arm=arm) for arm in CONTROLLER_ARMS],
         "timing_budgets_ms": {"learner": 5.0, "evaluation": 5.0, "solve": 5.0},
+        "timing_environment": {
+            "classification": "target-device",
+            "platform": "linux",
+            "machine": "aarch64",
+            "model": "Raspberry Pi 5 Model B",
+            "source": "runtime-detected",
+        },
         "aggregates": {
             "baseline": {"control_score": 10.0},
             "online": {"control_score": 9.0},
@@ -300,7 +311,7 @@ def test_contract_is_strict_and_preserves_the_full_required_metric_set() -> None
 
     malformed = deepcopy(artifact)
     malformed.pop("source_revision")
-    assert artifact_contract_errors(malformed)
+    assert "source revision" in artifact_contract_errors(malformed)
 
     malformed = deepcopy(artifact)
     malformed["schema_version"] = ARTIFACT_SCHEMA_VERSION + 1
@@ -318,6 +329,17 @@ def test_contract_is_strict_and_preserves_the_full_required_metric_set() -> None
     malformed = deepcopy(artifact)
     malformed["unrecognized_top_level"] = True
     assert artifact_contract_errors(malformed)
+
+
+@pytest.mark.parametrize(
+    "revision",
+    ("", "not-a-commit", "A" * 40, "a" * 39, "a" * 41),
+)
+def test_artifact_contract_rejects_malformed_reviewed_source_revisions(revision: str) -> None:
+    artifact = _complete_artifact()
+    artifact["source_revision"] = revision
+
+    assert "source revision" in artifact_contract_errors(artifact)
 
 
 def test_completed_50_percent_pulse_has_zero_requested_realized_frame_error() -> None:
@@ -566,6 +588,134 @@ def test_contract_requires_raw_finite_timing_samples_and_finite_strict_json() ->
         json.dumps(malformed, allow_nan=False)
 
 
+def test_shipping_requires_runtime_detected_target_timing_provenance() -> None:
+    artifact = _complete_artifact()
+    for row in artifact["rows"]:
+        row["outcomes"]["safety_inhibits"] = 0
+        row["outcome_evidence"]["safety_inhibits"] = "measured"
+    artifact["ship_decision"] = decide_ship(artifact)
+
+    assert artifact["timing_environment"] == {
+        "classification": "target-device",
+        "platform": "linux",
+        "machine": "aarch64",
+        "model": "Raspberry Pi 5 Model B",
+        "source": "runtime-detected",
+    }
+    assert artifact_contract_errors(artifact) == []
+    assert artifact["ship_decision"]["ship"] is True
+
+    workstation = deepcopy(artifact)
+    workstation["timing_environment"].update(
+        classification="workstation",
+        platform="darwin",
+        machine="unknown",
+        model=None,
+    )
+    workstation["ship_decision"] = decide_ship(workstation)
+
+    assert artifact_contract_errors(workstation) == []
+    assert workstation["ship_decision"] == {
+        "ship": False,
+        "reasons": ["target timing unavailable"],
+    }
+
+    target_device = deepcopy(workstation)
+    target_device["timing_environment"].update(
+        classification="target-device",
+        platform="linux",
+        machine="aarch64",
+        model="Raspberry Pi 5 Model B",
+    )
+    target_device["ship_decision"] = decide_ship(target_device)
+
+    assert artifact_contract_errors(target_device) == []
+    assert target_device["ship_decision"]["ship"] is True
+
+    for field, value in (
+        ("platform", ""),
+        ("machine", ""),
+        ("source", "operator-claimed"),
+    ):
+        forged = deepcopy(target_device)
+        forged["timing_environment"][field] = value
+        forged["ship_decision"] = decide_ship(forged)
+        assert artifact_contract_errors(forged)
+
+    forged = deepcopy(target_device)
+    forged["timing_environment"]["extra"] = "untracked"
+    forged["ship_decision"] = decide_ship(forged)
+    assert artifact_contract_errors(forged)
+
+    stale = deepcopy(workstation)
+    stale["timing_environment"].update(
+        classification="target-device",
+        platform="linux",
+        machine="aarch64",
+        model="Raspberry Pi 5 Model B",
+    )
+    assert artifact_contract_errors(stale) == ["ship decision is not recomputed"]
+
+
+def test_timing_environment_requires_a_recognized_runtime_target_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(online_arx_compare.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(online_arx_compare.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(
+        online_arx_compare.Path,
+        "read_text",
+        lambda _path, *, encoding: "\x00Raspberry Pi 5 Model B\x00",
+    )
+
+    assert online_arx_compare._timing_environment() == {
+        "classification": "target-device",
+        "platform": "Linux",
+        "machine": "aarch64",
+        "model": "Raspberry Pi 5 Model B",
+        "source": "runtime-detected",
+    }
+
+
+def test_timing_environment_marks_an_unrecognized_runtime_as_workstation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(online_arx_compare.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(online_arx_compare.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(
+        online_arx_compare.Path,
+        "read_text",
+        lambda _path, *, encoding: "Apple Mac",
+    )
+
+    assert online_arx_compare._timing_environment() == {
+        "classification": "workstation",
+        "platform": "Darwin",
+        "machine": "arm64",
+        "model": None,
+        "source": "runtime-detected",
+    }
+
+
+@pytest.mark.parametrize(
+    ("classification", "model"),
+    (("target-device", None), ("workstation", "Raspberry Pi 5 Model B")),
+)
+def test_contract_rejects_inconsistent_runtime_timing_classification(
+    classification: str,
+    model: str | None,
+) -> None:
+    artifact = _complete_artifact()
+    artifact["timing_environment"].update(classification=classification, model=model)
+    artifact["ship_decision"] = decide_ship(artifact)
+
+    assert "timing environment" in artifact_contract_errors(artifact)
+
+
+def test_worker_gate_constructs_its_condition() -> None:
+    assert online_arx_compare._WorkerGate()._condition is not None
+
+
 def test_real_mak_control_metrics_are_explicitly_unavailable_not_fabricated() -> None:
     artifact = _complete_artifact()
 
@@ -642,10 +792,70 @@ def test_real_mak_replay_publishes_prediction_only_chronological_evidence() -> N
     assert by_arm["online"]["timing_applicability"] == {
         "learner": True,
         "evaluation": False,
-        "solve": True,
+        "solve": False,
     }
     assert by_arm["online"]["raw_timing_ms"]["learner"]
+    assert by_arm["online"]["raw_timing_ms"]["solve"] == []
     assert all(isfinite(sample) for row in rows for samples in row["raw_timing_ms"].values() for sample in samples)
+
+
+def test_real_mak_replay_passes_normalized_record_q_to_both_arms_without_reinterpretation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    q = np.asarray([0.11, 0.24, 0.37, 0.52, 0.68] * 8, dtype=np.float64)
+    record = SignalRecord(
+        time_s=np.arange(1, q.size + 1, dtype=np.float64) * 20.0,
+        temp_c=np.linspace(90.0, 130.0, q.size, dtype=np.float64),
+        q=q,
+        ambient_c=np.full(q.size, 22.0, dtype=np.float64),
+        provenance="requested-input-reconstruction",
+    )
+    physical_ratio: dict[bool, list[float]] = {False: [], True: []}
+    applied_q: dict[bool, list[float]] = {False: [], True: []}
+    requested_q: dict[bool, list[float]] = {False: [], True: []}
+    controller_u_max: dict[bool, float] = {}
+    controller_arm: dict[int, bool] = {}
+    original_controller = online_arx_compare._controller
+    original_set_output = online_arx_compare.Controller.set_output
+    original_scheduled_arx = online_arx_compare.ScheduledARX
+
+    class RecordingScheduledARX(original_scheduled_arx):
+        observed_q: list[float] = []
+
+        def track(self, observation: FrameObservation) -> Any:
+            type(self).observed_q.append(observation.requested_q)
+            return super().track(observation)
+
+        def observe(self, observation: FrameObservation) -> Any:
+            type(self).observed_q.append(observation.requested_q)
+            return super().observe(observation)
+
+    def controller(*, online: bool) -> Any:
+        instance = original_controller(online=online)
+        controller_arm[id(instance)] = online
+        controller_u_max[online] = instance.u_max
+        return instance
+
+    def record_output(instance: Any, output: Any) -> Any:
+        result = original_set_output(instance, output)
+        arm = controller_arm[id(instance)]
+        physical_ratio[arm].append(output.ratio)
+        requested_q[arm].append(output.requested)
+        applied_q[arm].append(instance._applied_combustion_load)
+        return result
+
+    monkeypatch.setattr(online_arx_compare, "real_mak_record", lambda: record)
+    monkeypatch.setattr(online_arx_compare, "_controller", controller)
+    monkeypatch.setattr(online_arx_compare.Controller, "set_output", record_output)
+    monkeypatch.setattr(online_arx_compare, "ScheduledARX", RecordingScheduledARX)
+
+    run_real_mak_replay()
+
+    for arm in (False, True):
+        np.testing.assert_array_equal(requested_q[arm], q)
+        np.testing.assert_allclose(applied_q[arm], q, rtol=0.0, atol=1e-12)
+        np.testing.assert_allclose(physical_ratio[arm], q * controller_u_max[arm], rtol=0.0, atol=1e-12)
+    np.testing.assert_array_equal(RecordingScheduledARX.observed_q, q)
 
 
 def _break_control_score(artifact: dict[str, Any]) -> None:
@@ -808,6 +1018,76 @@ def test_published_artifact_requires_and_recomputes_ship_decision() -> None:
     stale = deepcopy(_complete_artifact())
     stale["ship_decision"] = {"ship": True, "reasons": []}
     assert artifact_contract_errors(stale)
+
+
+def test_comparison_requires_an_explicit_reviewed_source_revision() -> None:
+    with pytest.raises(TypeError):
+        online_arx_compare.run_comparison(duration_s=2 * online_arx_compare.frame_seconds())
+
+
+@pytest.mark.parametrize(
+    "revision",
+    ("", "not-a-commit", "A" * 40, "a" * 39, "a" * 41),
+)
+def test_comparison_rejects_malformed_reviewed_source_revisions(revision: str) -> None:
+    with pytest.raises(ValueError, match="source revision"):
+        online_arx_compare.run_comparison(
+            duration_s=2 * online_arx_compare.frame_seconds(),
+            source_revision=revision,
+        )
+
+
+def test_comparison_preserves_the_explicit_reviewed_source_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        online_arx_compare,
+        "_run_simulator_cell",
+        lambda *, arm, plant, scenario, seed, duration_s: _row(
+            arm=arm,
+            plant=plant,
+            scenario=scenario.name,
+            seed=seed,
+        ),
+    )
+    monkeypatch.setattr(
+        online_arx_compare,
+        "_chronological_real_mak_row",
+        lambda arm: _real_mak_row(arm=arm),
+    )
+    monkeypatch.setattr(
+        online_arx_compare,
+        "source_revision",
+        lambda: pytest.fail("comparison must not derive its provenance from the mutable workspace"),
+        raising=False,
+    )
+
+    artifact = online_arx_compare.run_comparison(
+        duration_s=2 * online_arx_compare.frame_seconds(),
+        source_revision=_REVIEWED_SOURCE_REVISION,
+    )
+
+    assert artifact["source_revision"] == _REVIEWED_SOURCE_REVISION
+
+
+def test_published_artifact_validates_against_its_reviewed_source_revision(tmp_path: Path) -> None:
+    artifact = _complete_artifact()
+    output = tmp_path / "online-arx-evidence.json"
+
+    online_arx_compare.write_artifact_atomically(artifact, output)
+
+    assert (
+        online_arx_compare.load_artifact(
+            output,
+            expected_source_revision=_REVIEWED_SOURCE_REVISION,
+        )
+        == artifact
+    )
+    with pytest.raises(ValueError, match="source revision"):
+        online_arx_compare.load_artifact(
+            output,
+            expected_source_revision="b" * 40,
+        )
 
 
 def test_experiment_file_is_directly_invokable_from_repo_root() -> None:

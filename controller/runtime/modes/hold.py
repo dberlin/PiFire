@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from math import isfinite
 
 import time
 import uuid
@@ -41,6 +42,7 @@ from controller.runtime.logic.pulse import (
 )
 
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
+from controller.runtime.model_checkpoint import ModelCheckpointWorker
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.model_promotion import ReachabilityState
 from controller.runtime.logic.fan import controller_fan_authority, start_fan
@@ -106,6 +108,8 @@ class HoldMode(ControlMode):
     ) = None
     _pulse_observation_last_frame_key: tuple[int, int] | None = None
     _last_ptemp: float | None = None
+    _checkpoint_worker: ModelCheckpointWorker | None = None
+    _final_refit_done: bool = False
 
     def _pulse_frame_seconds(self) -> float:
         """The scheduler's frame, or zero before one has been built."""
@@ -240,9 +244,8 @@ class HoldMode(ControlMode):
             frame_end_s=frame.ended_at_s,
             temp_c=self._to_c(ptemp, self.settings["globals"]["units"]),
             setpoint_c=self._to_c(self.control["primary_setpoint"], self.settings["globals"]["units"]),
-            ambient_c=self._to_c(
-                self.settings["controller"].get("config", {}).get(self._controller_name, {}).get("T_amb", 0.0),
-                self.settings["globals"]["units"],
+            ambient_c=float(
+                self.settings["controller"].get("config", {}).get(self._controller_name, {}).get("T_amb", 0.0)
             ),
             requested_q=max(0.0, min(1.0, controller.pulse_frame_combustion_load or 0.0)),
             realized_q=normalized_load_from_auger_duty(
@@ -304,26 +307,80 @@ class HoldMode(ControlMode):
         if not isinstance(value, Mapping):
             return None
         try:
-            evaluated_at_s = value["evaluated_at_s"]
-            if isinstance(evaluated_at_s, bool) or not isinstance(evaluated_at_s, int | float):
-                return None
-            rejection_reasons = value["rejection_reasons"]
-            if not isinstance(rejection_reasons, tuple | list):
+
+            def milliseconds(seconds: object) -> int:
+                if isinstance(seconds, bool) or not isinstance(seconds, int | float) or not isfinite(seconds):
+                    raise ValueError("evaluation time must be finite")
+                return int(seconds * 1_000)
+
+            def finite_float(number: object) -> float:
+                if isinstance(number, bool) or not isinstance(number, int | float) or not isfinite(number):
+                    raise ValueError("evaluation number must be finite")
+                return float(number)
+
+            missing = object()
+
+            def aliased_value(internal_key: str, trace_key: str) -> object:
+                internal = value.get(internal_key, missing)
+                trace = value.get(trace_key, missing)
+                if internal is missing and trace is missing:
+                    raise KeyError(trace_key)
+                if internal is not missing and trace is not missing and internal != trace:
+                    raise ValueError(f"evaluation {internal_key} and {trace_key} disagree")
+                return trace if internal is missing else internal
+
+            rejection_reasons = aliased_value("reasons", "rejection_reasons")
+            completed_origins = value["completed_origins"]
+            horizon_scores = value["horizon_scores"]
+            if (
+                not isinstance(rejection_reasons, tuple | list)
+                or not isinstance(completed_origins, tuple | list)
+                or not isinstance(horizon_scores, tuple | list)
+                or not all(isinstance(origin, Mapping) for origin in completed_origins)
+                or not all(isinstance(score, Mapping) for score in horizon_scores)
+            ):
                 return None
             return ModelEvaluationPayload(
                 decision_id=value["decision_id"],
-                evaluated_at_ms=int(evaluated_at_s * 1_000),
-                role_generation=value["role_generation"],
+                evaluated_at_ms=milliseconds(value["evaluated_at_s"]),
+                role_generation=aliased_value("generation", "role_generation"),
                 promoted=value["promoted"],
                 committed=value["committed"],
                 consecutive_wins=value["consecutive_wins"],
                 rejection_reasons=tuple(rejection_reasons),
                 incumbent_prediction_score=value["incumbent_prediction_score"],
-                challenger_prediction_score=value["challenger_prediction_score"],
+                challenger_prediction_score=aliased_value("candidate_prediction_score", "challenger_prediction_score"),
                 incumbent_braking_score=value["incumbent_braking_score"],
-                challenger_braking_score=value["challenger_braking_score"],
+                challenger_braking_score=aliased_value("candidate_braking_score", "challenger_braking_score"),
                 sample_count=value["sample_count"],
                 prospective_digest=value["prospective_digest"],
+                window_start_ms=milliseconds(value["window_start_s"]),
+                window_end_ms=milliseconds(value["window_end_s"]),
+                incumbent_digest=value["incumbent_digest"],
+                challenger_digest=value["challenger_digest"],
+                completed_origins=tuple(
+                    {
+                        "origin_time_ms": milliseconds(origin["origin_time_s"]),
+                        "completion_time_ms": milliseconds(origin["completion_time_s"]),
+                        "horizon_steps": origin["horizon_steps"],
+                        "generation": origin["generation"],
+                        "observed_temperature_c": origin["observed_temperature_c"],
+                        "incumbent_error_c": origin["incumbent_error_c"],
+                        "challenger_error_c": origin["challenger_error_c"],
+                        "braking": origin["braking"],
+                    }
+                    for origin in completed_origins
+                ),
+                horizon_scores=tuple(
+                    {
+                        "horizon_steps": score["horizon_steps"],
+                        "incumbent_rmse_c": score["incumbent_rmse_c"],
+                        "challenger_rmse_c": score["challenger_rmse_c"],
+                        "sample_count": score["sample_count"],
+                    }
+                    for score in horizon_scores
+                ),
+                evaluation_duration_ms=finite_float(value["evaluation_duration_ms"]),
             )
         except KeyError, OverflowError, TypeError, ValueError:
             return None
@@ -757,6 +814,11 @@ class HoldMode(ControlMode):
         self._trace_pending_model_events.append((payload, timestamp_ms))
         self._flush_pending_model_events()
 
+    def _checkpoint_model(self, snapshot: dict[str, object]) -> None:
+        worker = self._checkpoint_worker
+        if worker is not None:
+            _ = worker.submit(self._controller_name, snapshot)
+
     def _ensure_trace_session(self, now: float) -> None:
         if self._trace_session_id is not None:
             self._flush_pending_model_events()
@@ -766,6 +828,9 @@ class HoldMode(ControlMode):
         if not isinstance(cook_id, str) or not cook_id or controller is None:
             return
         config = self.settings["controller"].get("config", {}).get(self._controller_name, {})
+        temperature_unit = str(self.settings["globals"]["units"])
+        ambient_celsius = float(config.get("T_amb", 0.0))
+        session_ambient_temperature = ambient_celsius * 9.0 / 5.0 + 32.0 if temperature_unit == "F" else ambient_celsius
         snapshot = self._trace_session_model_snapshot
         provenance = self._trace_session_model_provenance
         if snapshot is None and self._trace_runner_snapshot_fallback_safe:
@@ -781,7 +846,7 @@ class HoldMode(ControlMode):
         payload = SessionPayload(
             controller=controller,
             controller_config=self._trace_settings(config),
-            temperature_unit=str(self.settings["globals"]["units"]),
+            temperature_unit=temperature_unit,
             control_period_seconds=float(self._runner.control_period() or scheduler.timing.frame_s),
             model_revision=model_revision,
             model_provenance=provenance if model_revision is not None else None,
@@ -792,7 +857,7 @@ class HoldMode(ControlMode):
             fan_min_duty=float(config.get("fan_min_pct", 0.0)),
             fan_max_duty=float(config.get("fan_max_pct", 100.0)),
             setpoint=float(self.control["primary_setpoint"]),
-            ambient_temperature=float(config.get("T_amb", 0.0)),
+            ambient_temperature=session_ambient_temperature,
             software_version=str(self.settings.get("versions", {}).get("server", "unknown")),
             build_version=str(self.settings.get("versions", {}).get("build", "unknown")),
         )
@@ -1124,6 +1189,7 @@ class HoldMode(ControlMode):
         self._pending_model_observations = {}
         self._pulse_observation_last_frame_key = None
         self._last_ptemp = None
+        self._final_refit_done = False
         try:
             self._trace_recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
@@ -1142,6 +1208,7 @@ class HoldMode(ControlMode):
         self._model_store = self._model_store or ControllerModelStore(
             reader=self.ctx.store.read_generic_key, writer=self.ctx.store.write_generic_key
         )
+        self._checkpoint_worker = ModelCheckpointWorker(self._model_store, _control.eventLogger)
         self._controller_name = self.settings["controller"]["selected"]
 
         # Load Controller Module (i.e. PID)
@@ -1335,6 +1402,8 @@ class HoldMode(ControlMode):
             snapshot = self._runner.get_model_snapshot()
             if snapshot is not None and not self._model_store.save(self._controller_name, snapshot):
                 _control.eventLogger.debug(f"Did not persist the {self._controller_name} model this tick")
+            if isinstance(snapshot, dict):
+                self._checkpoint_model(snapshot)
 
         lid_will_open = (
             self.state.target_temp_achieved
@@ -1603,10 +1672,16 @@ class HoldMode(ControlMode):
                             ModelEventType.REFIT, "model checkpoint published after refit failure", snapshot
                         )
                         self._trace_model(ModelEventType.REJECT, f"model refit failed: {refit_error}", snapshot)
-                    if not self._model_store.save(self._controller_name, snapshot):
-                        _control.eventLogger.debug(f"Did not persist a refit {self._controller_name} model")
+                    if isinstance(snapshot, dict):
+                        self._checkpoint_model(snapshot)
             except Exception as error:
                 _control.eventLogger.error(f"Model refit checkpoint persistence failed: {error}")
+
+    def _refit_model_once(self) -> None:
+        if self._final_refit_done:
+            return
+        self._final_refit_done = True
+        self._refit_model()
 
     def teardown(self, ptemp):
         first_trace_teardown = not self._trace_closed and (
@@ -1633,9 +1708,12 @@ class HoldMode(ControlMode):
                 if getattr(self, "ctx", None) is not None:
                     self._reconcile_model_observation_outcomes(self.ctx.clock.now())
                     self._reconcile_model_observation_outcomes(self.ctx.clock.now())
-                if first_trace_teardown:
-                    self._refit_model()
+                self._refit_model_once()
         finally:
+            worker = self._checkpoint_worker
+            if worker is not None:
+                worker.flush_and_stop()
+                self._checkpoint_worker = None
             if first_trace_teardown:
                 self._flush_pending_model_events()
                 self._trace_closed = True

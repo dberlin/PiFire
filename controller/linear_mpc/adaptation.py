@@ -9,13 +9,36 @@ import hashlib
 import json
 from math import isfinite, sqrt
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, cast
 import numpy as np
 from .arx import ScheduledARX
 from .contracts import AffinePrediction, FrameObservation, ModelUpdate
 
-_SCHEMA = "online-adaptation/v1"
+_SCHEMA = "online-adaptation/v2"
+_LEGACY_SCHEMA = "online-adaptation/v1"
 _HORIZONS = (3, 15)
+_SNAPSHOT_FIELDS = frozenset(
+    (
+        "schema",
+        "policy",
+        "parameter_learning",
+        "accepted_sources",
+        "incumbent",
+        "challenger",
+        "previous_incumbent",
+        "previous_incumbent_digest",
+        "last_rollback_digest",
+        "role_generation",
+        "effective_updates",
+        "consecutive_wins",
+        "lag_warmup_remaining",
+        "excitation",
+        "last_duty",
+        "last_evaluation_s",
+        "score_aggregate",
+        "partial_origins",
+    )
+)
 
 
 class AdaptiveModel(Protocol):
@@ -101,6 +124,16 @@ class ObservationOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class HorizonScore:
+    """Immutable incumbent/challenger RMSE evidence for one required horizon."""
+
+    horizon_steps: int
+    incumbent_rmse_c: float | None
+    challenger_rmse_c: float | None
+    sample_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationDecision:
     decision_id: str
     evaluated_at_s: float
@@ -115,6 +148,17 @@ class EvaluationDecision:
     candidate_braking_score: float | None
     sample_count: int
     prospective_digest: str | None
+    window_start_s: float
+    window_end_s: float
+    incumbent_digest: str
+    challenger_digest: str
+    completed_origins: tuple[CompletedOrigin, ...]
+    horizon_scores: tuple[HorizonScore, ...]
+    evaluation_duration_ms: float = 0.0
+
+    @property
+    def role_generation(self) -> int:
+        return self.generation
 
 
 @dataclass(slots=True)
@@ -161,6 +205,7 @@ class CompletedOrigin:
     origin_time_s: float
     completion_time_s: float
     horizon_steps: int
+    generation: int
     observed_temperature_c: float
     incumbent_error_c: float
     challenger_error_c: float
@@ -170,7 +215,6 @@ class CompletedOrigin:
 @dataclass(slots=True)
 class _PendingDecision:
     decision: EvaluationDecision
-    prospective_model_requested: bool = False
 
 
 class OnlineAdaptation:
@@ -194,7 +238,7 @@ class OnlineAdaptation:
             raise ValueError("accepted_sources must not be empty")
         self._excitation: deque[float] = deque(maxlen=policy.excitation_window)
         self._origins: list[_Origin] = []
-        self._completed: deque[CompletedOrigin] = deque(maxlen=2 * max(policy.excitation_window, max(_HORIZONS)))
+        self._completed: deque[CompletedOrigin] = deque(maxlen=2 * max(_HORIZONS))
         self._completed_window: tuple[CompletedOrigin, ...] = ()
         self._scores = _ScoreAggregate()
         self._role_generation = 0
@@ -206,6 +250,7 @@ class OnlineAdaptation:
         self._previous_incumbent_snapshot: Mapping[str, object] | None = None
         self._previous_incumbent_digest: str | None = None
         self._last_rollback_digest: str | None = None
+        self._restored_lag_reset_pending = False
         self._pending: dict[str, _PendingDecision] = {}
         self._decision_sequence = 0
         self._last_duty: float | None = None
@@ -231,21 +276,27 @@ class OnlineAdaptation:
         """Discard continuity after an in-session rejected frame."""
         self._mark_discontinuity()
 
-    def begin_restored_session(self) -> None:
-        """Start fresh post-shutdown evidence without losing durable model state."""
+    def begin_restored_session(self, *, preserve_persisted_models: bool = False) -> None:
+        """Start fresh post-shutdown evidence without losing durable model state.
+
+        Legacy snapshots predate the explicit ownership audit and must round-trip
+        their active learner exactly. Keep its serialized lag state observable
+        until the first new frame, while forcing the controller through warmup;
+        that frame discards the old lags before ARX prediction can resume.
+        """
         self._origins.clear()
         self._pending.clear()
         self._completed.clear()
         self._completed_window = ()
         self._scores.clear()
-        self._excitation.clear()
-        self._last_duty = None
-        self._lag_warmup_remaining = self.policy.max_delay_steps
         self._last_evaluation_s = None
-        for model in (self.incumbent, self.challenger):
-            reset = getattr(model, "reset_lag_history", None)
-            if callable(reset):
-                reset()
+        if preserve_persisted_models:
+            self._excitation.clear()
+            self._last_duty = None
+            self._lag_warmup_remaining = self.policy.max_delay_steps
+            self._restored_lag_reset_pending = True
+            return
+        self._reset_role_lag_history()
 
     @property
     def completed_origins(self) -> tuple[CompletedOrigin, ...]:
@@ -278,6 +329,9 @@ class OnlineAdaptation:
                 None,
                 self._effective_updates,
             )
+        if self._restored_lag_reset_pending:
+            self._reset_role_lag_history()
+            self._restored_lag_reset_pending = False
         self._complete_origins(observation, braking)
         self._excitation.append(observation.realized_q)
         variance, levels = _excitation(self._excitation)
@@ -289,6 +343,7 @@ class OnlineAdaptation:
                 levels,
                 UpdateRejectionReason.LAG_WARMUP,
                 ambient_future,
+                braking,
             )
         if variance < self.policy.min_input_variance or levels < self.policy.min_input_levels:
             return self._track_only(
@@ -297,6 +352,7 @@ class OnlineAdaptation:
                 levels,
                 UpdateRejectionReason.INSUFFICIENT_EXCITATION,
                 ambient_future,
+                braking,
             )
         incumbent_outcome = self.incumbent.track(observation)
         challenger_outcome = (
@@ -304,7 +360,7 @@ class OnlineAdaptation:
         )
         if challenger_outcome.updated:
             self._effective_updates += 1
-        self._capture_origins(observation, ambient_future)
+        self._capture_origins(observation, ambient_future, braking)
         self._last_duty = observation.realized_q
         return ObservationOutcome(
             UpdateGate(True, (), variance, levels),
@@ -326,14 +382,31 @@ class OnlineAdaptation:
         incumbent_braking, candidate_braking = _means(
             self._scores.incumbent_braking_error, self._scores.candidate_braking_error, self._scores.braking_count
         )
+        completed = tuple(self._completed)
+        horizon_scores = _horizon_scores(completed)
         reasons = self._evaluation_reasons(
-            incumbent_prediction, candidate_prediction, incumbent_braking, candidate_braking
+            incumbent_prediction,
+            candidate_prediction,
+            incumbent_braking,
+            candidate_braking,
+            horizon_scores,
         )
         win = not reasons
-        self._consecutive_wins = self._consecutive_wins + 1 if win else 0
+        has_complete_horizon_evidence = all(score.sample_count > 0 for score in horizon_scores)
+        if win:
+            self._consecutive_wins += 1
+        elif has_complete_horizon_evidence:
+            self._consecutive_wins = 0
         eligible = win and self._consecutive_wins >= self.policy.required_consecutive_wins
         self._decision_sequence += 1
         decision_id = f"generation-{self._role_generation}-evaluation-{self._decision_sequence}"
+        if completed:
+            window_start_s = min(origin.origin_time_s for origin in completed)
+            window_end_s = max(origin.completion_time_s for origin in completed)
+        else:
+            window_start_s = window_end_s = at_s
+        incumbent_digest = self.model_digest(self.incumbent)
+        challenger_digest = self.model_digest(self.challenger)
         decision = EvaluationDecision(
             decision_id,
             at_s,
@@ -346,13 +419,19 @@ class OnlineAdaptation:
             candidate_prediction,
             incumbent_braking,
             candidate_braking,
-            self._scores.prediction_count,
-            self.model_digest(self.challenger) if eligible else None,
+            len(completed),
+            challenger_digest if eligible else None,
+            window_start_s,
+            window_end_s,
+            incumbent_digest,
+            challenger_digest,
+            completed,
+            horizon_scores,
         )
         if eligible:
             self._pending.clear()
             self._pending[decision_id] = _PendingDecision(decision)
-        self._completed_window = tuple(self._completed)
+        self._completed_window = completed
         self._completed.clear()
         self._scores.clear()
         self._origins = [origin for origin in self._origins if origin.origin_time_s >= at_s]
@@ -362,7 +441,6 @@ class OnlineAdaptation:
         pending = self._pending.get(decision_id)
         if pending is None or pending.decision.generation != self._role_generation:
             raise ValueError("decision is not a current prospective promotion")
-        pending.prospective_model_requested = True
         return self.challenger
 
     def commit_promotion(self, decision_id: str, prospective_solve: object) -> bool:
@@ -370,20 +448,26 @@ class OnlineAdaptation:
         pending = self._pending.pop(decision_id, None)
         if (
             pending is None
-            or not pending.prospective_model_requested
             or pending.decision.generation != self._role_generation
             or pending.decision.prospective_digest != self.model_digest(self.challenger)
             or not _valid_prospective_solve(prospective_solve)
         ):
             self._consecutive_wins = 0
             return False
-        self._previous_incumbent = self.incumbent
-        self._previous_incumbent_snapshot = _owned_json(self.incumbent.snapshot())
-        self._previous_incumbent_digest = self.model_digest(self.incumbent)
-        self.incumbent, self.challenger = self.challenger, self.incumbent
+        previous_incumbent = self.incumbent
+        self._previous_incumbent = previous_incumbent
+        self._previous_incumbent_snapshot = cast(Mapping[str, object], _owned_json(previous_incumbent.snapshot()))
+        self._previous_incumbent_digest = self.model_digest(previous_incumbent)
+        self.incumbent = self.challenger
+        if isinstance(self.incumbent, ScheduledARX):
+            self.challenger = ScheduledARX.from_snapshot(
+                _mapping(_owned_json(self.incumbent.snapshot()), "promoted challenger")
+            )
+        else:
+            self.challenger = previous_incumbent
         self._role_generation += 1
         self._consecutive_wins = 0
-        self._invalidate_origins()
+        self._begin_role_generation()
         return True
 
     def reject_prospective(self, decision_id: str, reason: str = "invalid-solve") -> bool:
@@ -411,7 +495,14 @@ class OnlineAdaptation:
         self._previous_incumbent_digest = None
         self._role_generation += 1
         self._consecutive_wins = 0
-        self._invalidate_origins()
+        self._begin_role_generation()
+        if callable(getattr(self.incumbent, "reset_lag_history", None)):
+            self._reset_role_lag_history()
+        else:
+            # Grey-box authority has no causal ARX lag to rebuild.  The parked
+            # challenger remains available for a later, independently earned
+            # promotion without blocking the live grey-box controller.
+            self._lag_warmup_remaining = 0
         return True
 
     def snapshot(self) -> dict[str, object]:
@@ -443,9 +534,13 @@ class OnlineAdaptation:
         *,
         model_loader: Callable[[Mapping[str, object]], AdaptiveModel] | None = None,
     ) -> OnlineAdaptation:
-        if snapshot.get("schema") != _SCHEMA:
-            raise ValueError(f"snapshot schema must be {_SCHEMA!r}")
+        schema = snapshot.get("schema")
+        if schema not in (_SCHEMA, _LEGACY_SCHEMA):
+            raise ValueError(f"snapshot schema must be {_SCHEMA!r} or {_LEGACY_SCHEMA!r}")
+        legacy = schema == _LEGACY_SCHEMA
         loader = model_loader or _scheduled_arx_loader
+        if not legacy and not _SNAPSHOT_FIELDS.issubset(snapshot):
+            raise ValueError("snapshot fields are invalid")
         policy_data = _mapping(snapshot.get("policy"), "policy")
         policy = AdaptationPolicy(**dict(policy_data))
         parameter_learning = snapshot.get("parameter_learning")
@@ -468,8 +563,10 @@ class OnlineAdaptation:
         scores = _score_aggregate(_mapping(snapshot.get("score_aggregate"), "score_aggregate"))
         if snapshot.get("partial_origins") != []:
             raise ValueError("partial origins must never be restored")
-        incumbent = loader(_mapping(snapshot.get("incumbent"), "incumbent"))
-        challenger = loader(_mapping(snapshot.get("challenger"), "challenger"))
+        incumbent_payload = _mapping(snapshot.get("incumbent"), "incumbent")
+        challenger_payload = _mapping(snapshot.get("challenger"), "challenger")
+        incumbent = loader(incumbent_payload)
+        challenger = loader(challenger_payload)
         previous_payload = snapshot.get("previous_incumbent")
         previous_digest = _optional_string(
             snapshot.get("previous_incumbent_digest"),
@@ -484,6 +581,19 @@ class OnlineAdaptation:
         previous = None if previous_payload is None else loader(_mapping(previous_payload, "previous_incumbent"))
         if previous is not None and cls.model_digest(previous) != previous_digest:
             raise ValueError("previous incumbent digest does not match model")
+        if not legacy and isinstance(incumbent, ScheduledARX) and isinstance(previous, ScheduledARX):
+            raise ValueError("active ARX rollback owner must be grey-box")
+        if legacy and isinstance(incumbent, ScheduledARX) and not isinstance(challenger, ScheduledARX):
+            # Before role ownership was explicit, an active ARX kept its
+            # grey-box fallback in the challenger slot. Give the active ARX
+            # an independently learnable clone and retain that fallback as the
+            # one-shot rollback owner. Some oldest records had no separate
+            # previous_incumbent field, so their challenger is the owner.
+            if previous is None or isinstance(previous, ScheduledARX):
+                previous = challenger
+                previous_payload = cast(Mapping[str, object], _owned_json(challenger.snapshot()))
+                previous_digest = cls.model_digest(previous)
+            challenger = ScheduledARX.from_snapshot(_mapping(_owned_json(incumbent_payload), "legacy incumbent"))
         manager = cls(
             incumbent,
             challenger,
@@ -492,7 +602,9 @@ class OnlineAdaptation:
             accepted_sources=tuple(sources),
         )
         manager._previous_incumbent = previous
-        manager._previous_incumbent_snapshot = None if previous_payload is None else _owned_json(previous_payload)
+        manager._previous_incumbent_snapshot = (
+            None if previous_payload is None else cast(Mapping[str, object], _owned_json(previous_payload))
+        )
         manager._previous_incumbent_digest = previous_digest
         manager._last_rollback_digest = last_rollback_digest
         manager._role_generation = _nonnegative(
@@ -550,13 +662,24 @@ class OnlineAdaptation:
         levels: int,
         reason: UpdateRejectionReason,
         ambient_future: Sequence[float] | None,
+        braking: bool,
     ) -> ObservationOutcome:
         incumbent, challenger = (self.incumbent.track(observation), self.challenger.track(observation))
-        self._capture_origins(observation, ambient_future)
+        self._capture_origins(observation, ambient_future, braking)
         self._last_duty = observation.realized_q
         return ObservationOutcome(
             UpdateGate(False, (reason,), variance, levels), incumbent, challenger, self._effective_updates
         )
+
+    def _reset_role_lag_history(self) -> None:
+        """Rebuild both role histories before ARX-derived evidence can resume."""
+        self._excitation.clear()
+        self._last_duty = None
+        self._lag_warmup_remaining = self.policy.max_delay_steps
+        for model in (self.incumbent, self.challenger):
+            reset = getattr(model, "reset_lag_history", None)
+            if callable(reset):
+                reset()
 
     def _mark_discontinuity(self) -> None:
         self._invalidate_origins()
@@ -573,10 +696,19 @@ class OnlineAdaptation:
         self._scores.continuous = False
         self._pending.clear()
 
+    def _begin_role_generation(self) -> None:
+        """Discard old-role evidence while preserving continuous new-role scoring."""
+        self._origins.clear()
+        self._pending.clear()
+        self._completed.clear()
+        self._completed_window = ()
+        self._scores.clear()
+
     def _capture_origins(
         self,
         observation: FrameObservation,
         ambient_future: Sequence[float] | None,
+        braking: bool,
     ) -> None:
         if self._lag_warmup_remaining:
             return
@@ -611,7 +743,7 @@ class OnlineAdaptation:
                     incumbent,
                     challenger,
                     duty,
-                    False,
+                    braking,
                 )
             )
             if len(self._origins) > 2 * max(_HORIZONS):
@@ -643,6 +775,7 @@ class OnlineAdaptation:
             duty[step - 1] = observation.realized_q
             duty.setflags(write=False)
             origin.duty = duty
+            origin.braking = origin.braking or braking
             if step < origin.horizon_steps:
                 live.append(origin)
                 continue
@@ -657,16 +790,26 @@ class OnlineAdaptation:
             if not all(isfinite(value) for value in (incumbent_error, challenger_error)):
                 self._scores.continuous = False
                 continue
-            self._scores.add(incumbent_error, challenger_error, braking)
+            if len(self._completed) == self._completed.maxlen:
+                expired = self._completed.popleft()
+                self._scores.incumbent_prediction_error -= expired.incumbent_error_c * expired.incumbent_error_c
+                self._scores.candidate_prediction_error -= expired.challenger_error_c * expired.challenger_error_c
+                self._scores.prediction_count -= 1
+                if expired.braking:
+                    self._scores.incumbent_braking_error -= expired.incumbent_error_c * expired.incumbent_error_c
+                    self._scores.candidate_braking_error -= expired.challenger_error_c * expired.challenger_error_c
+                    self._scores.braking_count -= 1
+            self._scores.add(incumbent_error, challenger_error, origin.braking)
             self._completed.append(
                 CompletedOrigin(
                     origin.origin_time_s,
                     observation.frame_end_s,
                     origin.horizon_steps,
+                    origin.generation,
                     observation.temp_c,
                     incumbent_error,
                     challenger_error,
-                    braking,
+                    origin.braking,
                 )
             )
         self._origins = live
@@ -677,12 +820,19 @@ class OnlineAdaptation:
         candidate_prediction: float | None,
         incumbent_braking: float | None,
         candidate_braking: float | None,
+        horizon_scores: Sequence[HorizonScore],
     ) -> list[EvaluationRejectionReason]:
         reasons: list[EvaluationRejectionReason] = []
         if (
             candidate_prediction is None
             or incumbent_prediction is None
-            or (not candidate_prediction < incumbent_prediction)
+            or not candidate_prediction < incumbent_prediction
+            or any(
+                score.incumbent_rmse_c is None
+                or score.challenger_rmse_c is None
+                or not score.challenger_rmse_c < score.incumbent_rmse_c
+                for score in horizon_scores
+            )
         ):
             reasons.append(EvaluationRejectionReason.PREDICTION)
         if (
@@ -738,6 +888,26 @@ def _means(
     if count == 0:
         return None, None
     return sqrt(incumbent / count), sqrt(challenger / count)
+
+
+def _horizon_scores(completed: Sequence[CompletedOrigin]) -> tuple[HorizonScore, ...]:
+    scores: list[HorizonScore] = []
+    for horizon_steps in _HORIZONS:
+        origins = tuple(origin for origin in completed if origin.horizon_steps == horizon_steps)
+        incumbent_rmse_c, challenger_rmse_c = _means(
+            sum(origin.incumbent_error_c * origin.incumbent_error_c for origin in origins),
+            sum(origin.challenger_error_c * origin.challenger_error_c for origin in origins),
+            len(origins),
+        )
+        scores.append(
+            HorizonScore(
+                horizon_steps,
+                incumbent_rmse_c,
+                challenger_rmse_c,
+                len(origins),
+            )
+        )
+    return tuple(scores)
 
 
 def _score_aggregate(payload: Mapping[str, object]) -> _ScoreAggregate:

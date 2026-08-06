@@ -21,6 +21,7 @@ from common.control_trace import (
     ControlTraceRecord,
 )
 from controller.applied_output import OutputSource
+from controller.mpc_allocator import normalized_load_from_auger_duty
 
 from .contracts import FrameObservation
 
@@ -310,6 +311,35 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
     )
 
 
+_LEGACY_U_MAX_REL_TOLERANCE = 1e-9
+
+
+def _legacy_latched_u_max(frames: tuple[FramedPulseFramePayload, ...]) -> float | None:
+    """Recover the one normalized-load-to-duty scale carried by legacy frames."""
+    u_max: float | None = None
+    for frame in frames:
+        requested_q = frame.requested_combustion_load
+        requested_duty = frame.requested_auger_duty
+        delivered_on_s = frame.delivered_on_seconds
+        if not (0.0 <= requested_q <= 1.0 and 0.0 <= requested_duty <= 1.0 and math.isfinite(delivered_on_s)):
+            raise TraceSelectionError("legacy framed-pulse input evidence is out of bounds")
+        if requested_q == 0.0:
+            if requested_duty != 0.0:
+                raise TraceSelectionError("legacy framed-pulse input scale is unidentifiable")
+            continue
+        if requested_duty == 0.0:
+            raise TraceSelectionError("legacy framed-pulse input scale is unidentifiable")
+        candidate = requested_duty / requested_q
+        if not 0.0 < candidate <= 1.0 or not math.isfinite(candidate):
+            raise TraceSelectionError("legacy framed-pulse input scale is invalid")
+        if u_max is not None and not math.isclose(candidate, u_max, rel_tol=_LEGACY_U_MAX_REL_TOLERANCE, abs_tol=0.0):
+            raise TraceSelectionError("legacy framed-pulse input scale is inconsistent")
+        u_max = candidate
+    if u_max is None and any(frame.delivered_on_seconds != 0.0 for frame in frames):
+        raise TraceSelectionError("legacy framed-pulse input scale is unidentifiable")
+    return u_max
+
+
 def _fallback_observations(
     records: tuple[ControlTraceRecord, ...], session: SessionPayload
 ) -> tuple[FrameObservation, ...]:
@@ -321,6 +351,7 @@ def _fallback_observations(
     frames = tuple(record.payload for record in records if isinstance(record.payload, FramedPulseFramePayload))
     if not frames:
         raise TraceSelectionError("selected control trace has no exact learning observations or framed-pulse frames")
+    u_max = _legacy_latched_u_max(frames)
     for record in records:
         if isinstance(record.payload, MpcUpdatePayload):
             updates.setdefault(record.payload.result_revision, []).append(record.payload)
@@ -358,7 +389,11 @@ def _fallback_observations(
                 setpoint_c=_to_c(update.setpoint, session.temperature_unit),
                 ambient_c=_to_c(session.ambient_temperature, session.temperature_unit),
                 requested_q=frame.requested_combustion_load,
-                realized_q=frame.delivered_on_seconds / frame.frame_seconds,
+                realized_q=(
+                    0.0
+                    if u_max is None
+                    else normalized_load_from_auger_duty(frame.delivered_on_seconds / frame.frame_seconds, u_max=u_max)
+                ),
                 requested_auger_duty=frame.requested_auger_duty,
                 delivered_on_s=frame.delivered_on_seconds,
                 requested_fan_duty=frame.requested_fan_duty,

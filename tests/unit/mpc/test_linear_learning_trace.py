@@ -192,6 +192,7 @@ def test_fahrenheit_and_celsius_fallback_sessions_are_equivalent() -> None:
 
     assert fahrenheit == celsius
 
+
 def test_fallback_normalizes_legacy_framed_delivery_to_canonical_q() -> None:
     legacy_frame = _frame().model_copy(
         update={
@@ -222,6 +223,108 @@ def test_fallback_normalizes_legacy_framed_delivery_to_canonical_q() -> None:
     assert replayed == canonical
     assert replayed[0].realized_q == pytest.approx(0.2)
 
+
+def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale_is_identified() -> None:
+    identified_frame = _frame().model_copy(
+        update={
+            "payload": replace(
+                _frame().payload,
+                requested_combustion_load=0.4,
+                requested_auger_duty=0.36,
+                scheduled_on_seconds=3.6,
+                delivered_on_seconds=3.6,
+            )
+        }
+    )
+    zero_requested_frame = _frame(2).model_copy(
+        update={
+            "ts_ms": 40_000,
+            "payload": replace(
+                _frame(2).payload,
+                frame_start_ms=20_000,
+                frame_end_ms=40_000,
+                requested_combustion_load=0.0,
+                requested_auger_duty=0.0,
+                scheduled_on_seconds=0.0,
+                delivered_on_seconds=1.8,
+            ),
+        }
+    )
+    second_update = _update(2).model_copy(
+        update={
+            "ts_ms": 40_000,
+            "payload": replace(
+                _update(2).payload,
+                monotonic_ms=40_000,
+                wall_ms=40_000,
+            ),
+        }
+    )
+    canonical_first = _observation().model_copy(
+        update={
+            "payload": replace(
+                _observation().payload,
+                requested_combustion_load=0.4,
+                realized_combustion_load=0.2,
+                delivered_on_seconds=3.6,
+                requested_auger_duty=0.36,
+            )
+        }
+    )
+    canonical_second = _observation().model_copy(
+        update={
+            "ts_ms": 40_000,
+            "payload": replace(
+                _observation().payload,
+                frame_start_ms=20_000,
+                frame_end_ms=40_000,
+                requested_combustion_load=0.0,
+                realized_combustion_load=0.1,
+                delivered_on_seconds=1.8,
+                requested_auger_duty=0.0,
+                result_revision=2,
+            ),
+        }
+    )
+
+    replayed = learning_observations(
+        (_session("F"), identified_frame, _update(), zero_requested_frame, second_update)
+    )
+    canonical = learning_observations((_session("F"), canonical_first, canonical_second))
+
+    assert replayed == canonical
+    assert replayed[1].realized_q == pytest.approx(0.1)
+
+
+def test_fallback_clamps_legacy_measured_delivery_above_latched_u_max() -> None:
+    overdelivered_frame = _frame().model_copy(
+        update={
+            "payload": replace(
+                _frame().payload,
+                requested_combustion_load=0.4,
+                requested_auger_duty=0.36,
+                scheduled_on_seconds=7.2,
+                delivered_on_seconds=18.000_002,
+            )
+        }
+    )
+    canonical_observation = _observation().model_copy(
+        update={
+            "payload": replace(
+                _observation().payload,
+                requested_combustion_load=0.4,
+                realized_combustion_load=1.0,
+                delivered_on_seconds=18.000_002,
+                requested_auger_duty=0.36,
+            )
+        }
+    )
+
+    replayed = learning_observations((_session("F"), overdelivered_frame, _update()))
+    canonical = learning_observations((_session("F"), canonical_observation))
+
+    assert replayed == canonical
+    assert replayed[0].realized_q == 1.0
 
 @pytest.mark.parametrize(
     ("requested_q", "requested_duty", "delivered_on_s"),

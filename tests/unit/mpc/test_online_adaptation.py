@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from types import SimpleNamespace
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
 
+from common.control_trace import ControlTraceRecord, ControllerType, TraceEventKind
+from controller.runtime.modes.hold import HoldMode
 from controller.linear_mpc.adaptation import (
     AdaptationPolicy,
     EvaluationRejectionReason,
@@ -75,6 +77,7 @@ class HorizonAffineModel(FixedAffineModel):
             np.full(horizon_steps, self._biases[horizon_steps], dtype=np.float64),
             np.zeros((horizon_steps, horizon_steps), dtype=np.float64),
         )
+
 
 def frame(index: int, *, temperature: float | None = None) -> FrameObservation:
     return FrameObservation(
@@ -191,9 +194,7 @@ def test_matured_origin_retains_braking_status_from_forecast_window() -> None:
         manager.observe(frame(index), braking=False)
 
     completed = next(
-        origin
-        for origin in manager.completed_origins
-        if origin.origin_time_s == 20.0 and origin.horizon_steps == 3
+        origin for origin in manager.completed_origins if origin.origin_time_s == 20.0 and origin.horizon_steps == 3
     )
     assert completed.completion_time_s == 80.0
     assert completed.braking is True
@@ -243,6 +244,61 @@ def _populate_one_window(manager: OnlineAdaptation, start_index: int = 0) -> Non
             frame(index, temperature=0.0),
             braking=index > start_index and index % 2 == 0,
         )
+
+
+def test_evaluation_payload_round_trips_exact_coordinator_audit_evidence() -> None:
+    manager = _winning_manager()
+    _populate_one_window(manager)
+    decision = manager.evaluate_due(at_s=320.0)
+
+    payload = HoldMode._model_evaluation_payload(asdict(decision))
+
+    assert payload is not None
+    record = ControlTraceRecord(
+        ts_ms=320_000,
+        session_id="adaptation-evidence",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_EVALUATION,
+        payload=payload,
+    )
+    restored = ControlTraceRecord.model_validate_json(record.model_dump_json()).payload
+
+    assert restored.completed_origins == payload.completed_origins
+    assert [
+        (
+            origin.origin_time_ms,
+            origin.completion_time_ms,
+            origin.horizon_steps,
+            origin.generation,
+            origin.observed_temperature_c,
+            origin.incumbent_error_c,
+            origin.challenger_error_c,
+            origin.braking,
+        )
+        for origin in restored.completed_origins
+    ] == [
+        (
+            int(origin.origin_time_s * 1_000),
+            int(origin.completion_time_s * 1_000),
+            origin.horizon_steps,
+            origin.generation,
+            origin.observed_temperature_c,
+            origin.incumbent_error_c,
+            origin.challenger_error_c,
+            origin.braking,
+        )
+        for origin in decision.completed_origins
+    ]
+    assert restored.window_start_ms == min(origin.origin_time_s * 1_000 for origin in decision.completed_origins)
+    assert restored.window_end_ms == max(origin.completion_time_s * 1_000 for origin in decision.completed_origins)
+    assert restored.sample_count == len(restored.completed_origins) == decision.sample_count
+    assert restored.incumbent_digest == decision.incumbent_digest == manager.model_digest(manager.incumbent)
+    assert restored.challenger_digest == decision.challenger_digest == manager.model_digest(manager.challenger)
+    assert restored.evaluation_duration_ms == decision.evaluation_duration_ms
+    assert {score.horizon_steps: score.sample_count for score in restored.horizon_scores} == {
+        horizon_steps: sum(origin.horizon_steps == horizon_steps for origin in decision.completed_origins)
+        for horizon_steps in (3, 15)
+    }
 
 
 def test_promotion_requires_two_wins_and_prospective_commit() -> None:
@@ -352,6 +408,41 @@ def test_rollback_restores_exact_digest_and_advances_generation() -> None:
         ),
     )
     assert restored.last_rollback_digest == restored.model_digest(restored.incumbent)
+
+
+def test_rollback_after_a_second_promotion_rewarms_the_restored_prior_arx() -> None:
+    first_incumbent = FixedAffineModel(bias=1.0, digest="grey-box")
+    first_challenger = FixedAffineModel(bias=0.0, digest="first-arx")
+    manager = OnlineAdaptation(
+        first_incumbent,
+        first_challenger,
+        AdaptationPolicy(
+            excitation_window=2,
+            min_effective_updates=1,
+            evaluation_interval_s=300.0,
+            required_consecutive_wins=1,
+        ),
+    )
+
+    _populate_one_window(manager)
+    first = manager.evaluate_due(at_s=300.0)
+    assert first.promoted
+    assert manager.commit_promotion(first.decision_id, SimpleNamespace(objective=0.0, kkt_residual=0.0))
+    restored_on_later_rollback = manager.incumbent
+    manager.incumbent.bias = 1.0
+    manager.challenger.bias = 0.0
+
+    _populate_one_window(manager, start_index=16)
+    second = manager.evaluate_due(at_s=600.0)
+    assert second.promoted
+    assert manager.commit_promotion(second.decision_id, SimpleNamespace(objective=0.0, kkt_residual=0.0))
+    assert manager.previous_incumbent_digest == manager.model_digest(restored_on_later_rollback)
+
+    assert manager.rollback()
+    assert manager.model_digest(manager.incumbent) == manager.model_digest(restored_on_later_rollback)
+    assert manager.lag_warmup_remaining == manager.policy.max_delay_steps
+    assert manager.incumbent.reset_calls == 1
+    assert manager.challenger.reset_calls == 1
 
 
 def test_snapshot_excludes_partial_discontinuous_origins() -> None:

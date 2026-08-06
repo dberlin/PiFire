@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sys
 import threading
 from collections.abc import Mapping, Sequence
@@ -38,7 +39,6 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     frame_seconds,
     real_mak_record,
     record_frames,
-    source_revision,
 )
 from docs.superpowers.experiments.linear_mpc_bakeoff.scenarios import ScenarioDefinition
 
@@ -95,7 +95,61 @@ _REAL_MAK_STACK = {
 _PRECONDITION_MAX_S = 1_800
 _PRECONDITION_HOLD_S = 60
 _PREDICTION_METRICS = frozenset({"prediction_rmse_60_c", "prediction_rmse_300_c"})
+
+_SOURCE_REVISION_HEX = frozenset("0123456789abcdef")
+
+
+def _valid_source_revision(value: object) -> bool:
+    """Require an immutable reviewed Git revision without normalizing it."""
+    return isinstance(value, str) and len(value) == 40 and all(character in _SOURCE_REVISION_HEX for character in value)
+
+
+def _valid_timing_environment(value: object) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and set(value) == {"classification", "platform", "machine", "model", "source"}
+        and value.get("classification") in {"target-device", "workstation"}
+        and isinstance(value.get("platform"), str)
+        and bool(value["platform"].strip())
+        and isinstance(value.get("machine"), str)
+        and bool(value["machine"].strip())
+        and (
+            (value.get("classification") == "workstation" and value.get("model") is None)
+            or (
+                value.get("classification") == "target-device"
+                and isinstance(value.get("model"), str)
+                and bool(value["model"].strip())
+            )
+        )
+        and value.get("source") == "runtime-detected"
+    )
+
+
 _CONTROL_METRICS = REQUIRED_METRICS - _PREDICTION_METRICS
+
+
+def _timing_environment() -> dict[str, str | None]:
+    """Describe the runtime that produced timing evidence."""
+    model = None
+    for candidate in (
+        Path("/sys/firmware/devicetree/base/model"),
+        Path("/proc/device-tree/model"),
+    ):
+        try:
+            detected = candidate.read_text(encoding="utf-8").replace("\x00", "").strip()
+        except OSError:
+            continue
+        if detected.startswith("Raspberry Pi"):
+            model = detected
+            break
+    machine = platform.machine().strip() or "unknown"
+    return {
+        "classification": "target-device" if model is not None else "workstation",
+        "platform": platform.system().strip() or sys.platform,
+        "machine": machine,
+        "model": model,
+        "source": "runtime-detected",
+    }
 
 
 def _scenario_definitions() -> dict[str, ScenarioDefinition]:
@@ -105,9 +159,7 @@ def _scenario_definitions() -> dict[str, ScenarioDefinition]:
         "hold": ScenarioDefinition("hold", 110.0, 110.0),
         "target-increase": ScenarioDefinition("target-increase", 80.0, 135.0, step_at_s=240),
         "target-decrease-coast": ScenarioDefinition("target-decrease-coast", 135.0, 80.0, step_at_s=300),
-        "lid-interruption": ScenarioDefinition(
-            "lid-interruption", 110.0, 110.0, lid_start_s=300, lid_duration_s=45
-        ),
+        "lid-interruption": ScenarioDefinition("lid-interruption", 110.0, 110.0, lid_start_s=300, lid_duration_s=45),
     }
 
 
@@ -183,6 +235,7 @@ def _p99(values: Sequence[float]) -> float:
 
 def _finite_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(float(value))
+
 
 class _WorkerGate:
     """Deterministically release one worker loop and observe its next wait."""
@@ -274,14 +327,8 @@ def _origin_prediction_scores(
             if (
                 len(future) != horizon
                 or not all(_eligible_continuity_frame(frame) for frame in window)
-                or not all(
-                    frame.frame_end_s - frame.frame_start_s == frame_seconds()
-                    for frame in window
-                )
-                or not all(
-                    left.frame_end_s == right.frame_start_s
-                    for left, right in zip(window, window[1:])
-                )
+                or not all(frame.frame_end_s - frame.frame_start_s == frame_seconds() for frame in window)
+                or not all(left.frame_end_s == right.frame_start_s for left, right in zip(window, window[1:]))
             ):
                 continue
             affine = origin.model.affine_prediction(
@@ -296,9 +343,7 @@ def _origin_prediction_scores(
             terminal_residuals.append(float(prediction[-1] - future[-1].temp_c))
         if not terminal_residuals:
             raise RuntimeError(f"no supported {horizon_s}-second prediction origins")
-        scores[f"prediction_rmse_{horizon_s}_c"] = float(
-            sqrt(mean(value * value for value in terminal_residuals))
-        )
+        scores[f"prediction_rmse_{horizon_s}_c"] = float(sqrt(mean(value * value for value in terminal_residuals)))
     return scores
 
 
@@ -349,8 +394,9 @@ def _timing_applicability(*, simulator: bool, online: bool) -> dict[str, bool]:
     return {
         "learner": online,
         "evaluation": simulator and online,
-        "solve": True,
+        "solve": simulator or not online,
     }
+
 
 def _initialize_reheat_equilibrium(simulator: GrillSim, target_c: float) -> float:
     """Prepare an unscored fixed-fan equilibrium and return its steady auger duty."""
@@ -358,9 +404,7 @@ def _initialize_reheat_equilibrium(simulator: GrillSim, target_c: float) -> floa
     fan_multiplier = 1.3  # fixed fan is 1.0: 0.6 + 0.7 * fan
     h_fc = simulator.h_fc0 * fan_multiplier
     h_amb = simulator.h_amb0 * fan_multiplier
-    radiation_loss = simulator.sigma * (
-        (target + 273.15) ** 4 - (simulator.T_amb + 273.15) ** 4
-    )
+    radiation_loss = simulator.sigma * ((target + 273.15) ** 4 - (simulator.T_amb + 273.15) ** 4)
     loss = h_amb * (target - simulator.T_amb) + radiation_loss
     steady_burn = loss / simulator.H
     simulator.T_c = simulator.T_meas = target
@@ -411,9 +455,7 @@ def _run_simulator_cell(
         simulator_kwargs["T0"] = initial_target
     simulator = plant_type(**simulator_kwargs)
     steady_reheat_duty = (
-        _initialize_reheat_equilibrium(simulator, initial_target)
-        if scenario.name != "cold-start"
-        else 0.0
+        _initialize_reheat_equilibrium(simulator, initial_target) if scenario.name != "cold-start" else 0.0
     )
     controller = _controller(online=arm == "online")
     runner_gate = _WorkerGate()
@@ -448,9 +490,7 @@ def _run_simulator_cell(
     last_request = 0.0
     scored_auger_on_s = 0.0
 
-    def record_result(
-        result: Any, *, frame_index: int, scored: bool, chronology_event: str = "runner-result"
-    ) -> None:
+    def record_result(result: Any, *, frame_index: int, scored: bool, chronology_event: str = "runner-result") -> None:
         nonlocal last_request
         if result.revision <= 0 or result.allocation is None:
             raise RuntimeError("threaded Controller runner did not publish a completed production allocation")
@@ -461,9 +501,7 @@ def _run_simulator_cell(
         runner_evidence["result_revisions"].append(int(result.revision))
         active_model = (result.status or {}).get("adaptation", {}).get("active_model_kind")
         runner_evidence["statuses"].append(
-            active_model
-            if active_model in {"grey-box", "scheduled-arx"}
-            else "model-unavailable"
+            active_model if active_model in {"grey-box", "scheduled-arx"} else "model-unavailable"
         )
         runner_evidence["deadline_miss_count"] = int(result.deadline_miss_count)
         policy_failures = (result.status or {}).get("policy_failures")
@@ -497,11 +535,7 @@ def _run_simulator_cell(
         result = runner.latest()
         if result.revision != prior_revision + 1:
             raise RuntimeError("threaded Controller runner failed deterministic revision handoff")
-        chronology_frame_index = (
-            pending_scored_observations[0][1]
-            if pending_scored_observations
-            else frame_index
-        )
+        chronology_frame_index = pending_scored_observations[0][1] if pending_scored_observations else frame_index
         record_result(
             result,
             frame_index=chronology_frame_index,
@@ -641,6 +675,7 @@ def _run_simulator_cell(
             if observation.continuous:
                 requested_loads.append(observation.requested_q)
                 realized_loads.append(observation.realized_q)
+
     def precondition() -> dict[str, Any]:
         if scenario.name == "cold-start":
             return {"applied": False, "duration_s": 0, "hold_established": False}
@@ -678,8 +713,7 @@ def _run_simulator_cell(
                 if second > feedback_start_s:
                     runner.set_output(
                         AppliedOutput(
-                            ratio=(cumulative_delivered_on_s - feedback_delivered_on_s)
-                            / (second - feedback_start_s),
+                            ratio=(cumulative_delivered_on_s - feedback_delivered_on_s) / (second - feedback_start_s),
                             source=OutputSource.CONTROLLER,
                             timestamp=float(second),
                             requested=last_request,
@@ -708,10 +742,7 @@ def _run_simulator_cell(
                 if was_on_before_lid:
                     transitions += 1
                 interrupted = scheduler.reset(PulseResetReason.LID)
-                if (
-                    interrupted is not None
-                    and interrupted.ended_at_s > interrupted.nominal_start_s
-                ):
+                if interrupted is not None and interrupted.ended_at_s > interrupted.nominal_start_s:
                     consume_frame(
                         interrupted,
                         temperature_c=tick_temp,
@@ -740,15 +771,12 @@ def _run_simulator_cell(
                     )
             runner.set_target(target)
             if second > 0 and second % frame_seconds() == 0:
-                interval_source = (
-                    OutputSource.LID_OPEN if interval_lid_open else OutputSource.CONTROLLER
-                )
+                interval_source = OutputSource.LID_OPEN if interval_lid_open else OutputSource.CONTROLLER
                 interval_request = last_request
                 if not lid_open:
                     runner.set_output(
                         AppliedOutput(
-                            ratio=(cumulative_delivered_on_s - feedback_delivered_on_s)
-                            / (second - feedback_start_s),
+                            ratio=(cumulative_delivered_on_s - feedback_delivered_on_s) / (second - feedback_start_s),
                             source=OutputSource.CONTROLLER,
                             timestamp=float(second),
                             requested=last_request,
@@ -803,8 +831,7 @@ def _run_simulator_cell(
             if not last_lid:
                 runner.set_output(
                     AppliedOutput(
-                        ratio=(cumulative_delivered_on_s - feedback_delivered_on_s)
-                        / (duration_s - feedback_start_s),
+                        ratio=(cumulative_delivered_on_s - feedback_delivered_on_s) / (duration_s - feedback_start_s),
                         source=OutputSource.CONTROLLER,
                         timestamp=float(duration_s),
                         requested=last_request,
@@ -859,9 +886,7 @@ def _run_simulator_cell(
             rollbacks=int(adaptation["rollback_count"]),
             braking_errors=braking_errors,
             deadline_misses=int(runner_evidence["deadline_miss_count"]),
-            stale_episodes=sum(
-                state == "stale" for state in runner_evidence["stale_state_transitions"]
-            ),
+            stale_episodes=sum(state == "stale" for state in runner_evidence["stale_state_transitions"]),
         )
         if not requested_loads:
             raise RuntimeError("no continuous completed frames for requested-realized load evidence")
@@ -889,10 +914,13 @@ def _run_simulator_cell(
         runner.stop()
         runner_gate.close()
 
+
 def run_tiny_grillsim() -> list[dict[str, Any]]:
     """Run both production controller arms through a short GrillSim cell."""
     return [
-        _run_simulator_cell(arm=arm, plant="GrillSim", scenario=_scenario_definitions()["cold-start"], seed=0, duration_s=360)
+        _run_simulator_cell(
+            arm=arm, plant="GrillSim", scenario=_scenario_definitions()["cold-start"], seed=0, duration_s=360
+        )
         for arm in CONTROLLER_ARMS
     ]
 
@@ -900,15 +928,18 @@ def run_tiny_grillsim() -> list[dict[str, Any]]:
 def run_tiny_mak_grillsim() -> list[dict[str, Any]]:
     """Run both production controller arms through a short MAKGrillSim cell."""
     return [
-        _run_simulator_cell(arm=arm, plant="MAKGrillSim", scenario=_scenario_definitions()["cold-start"], seed=0, duration_s=360)
+        _run_simulator_cell(
+            arm=arm, plant="MAKGrillSim", scenario=_scenario_definitions()["cold-start"], seed=0, duration_s=360
+        )
         for arm in CONTROLLER_ARMS
     ]
 
 
 def _chronological_real_mak_row(arm: str) -> dict[str, Any]:
-    """Replay reconstructed historical inputs without making control claims."""
-    frames = record_frames(real_mak_record())
-    controller = _controller(online=False)
+    """Replay historical requested inputs without making control claims."""
+    record = real_mak_record()
+    frames = record_frames(record)
+    controller = _controller(online=arm == "online")
     shadow = ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0))
     history_limit = max(
         shadow.config.na + 1,
@@ -924,32 +955,28 @@ def _chronological_real_mak_row(arm: str) -> dict[str, Any]:
         "u_max": float(controller.u_max),
         "applied_once": True,
     }
+    if len(frames) != len(record.q):
+        raise RuntimeError("real-MAK frame reconstruction changed the record length")
     for index, frame in enumerate(frames):
-        duration = frame.frame_end_s - frame.frame_start_s
-        reconstructed_duty = frame.delivered_on_s / duration
+        normalized_q = float(record.q[index])
         controller.set_output(
             AppliedOutput(
-                ratio=reconstructed_duty,
+                ratio=normalized_q * controller.u_max,
                 source=OutputSource.SEED,
                 timestamp=frame.frame_end_s,
-                requested=frame.requested_auger_duty,
+                requested=normalized_q,
             )
         )
         controller.set_target(frame.setpoint_c)
         controller.update(frame.temp_c)
-        diagnostics = controller.trace_diagnostics()
-        if diagnostics is not None:
-            timing["solve"].append(float(diagnostics.solve_duration_seconds) * 1_000.0)
+        if arm == "baseline":
+            diagnostics = controller.trace_diagnostics()
+            if diagnostics is not None:
+                timing["solve"].append(float(diagnostics.solve_duration_seconds) * 1_000.0)
         observation = replace(
             frame,
-            requested_q=normalized_load_from_auger_duty(
-                frame.requested_auger_duty,
-                u_max=controller.u_max,
-            ),
-            realized_q=normalized_load_from_auger_duty(
-                reconstructed_duty,
-                u_max=controller.u_max,
-            ),
+            requested_q=normalized_q,
+            realized_q=normalized_q,
             output_source="requested-input-reconstruction",
             role_generation=0,
         )
@@ -1033,12 +1060,16 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], arm: str) -> dict[str, float |
 
 
 def _expected_simulator_keys() -> set[tuple[str, str, str, int]]:
-    return {(arm, plant, scenario, seed) for arm in CONTROLLER_ARMS for plant in PLANTS for scenario in SCENARIOS for seed in FIXED_SEEDS}
+    return {
+        (arm, plant, scenario, seed)
+        for arm in CONTROLLER_ARMS
+        for plant in PLANTS
+        for scenario in SCENARIOS
+        for seed in FIXED_SEEDS
+    }
 
 
-def artifact_contract_errors(
-    artifact: Mapping[str, Any], *, require_ship_decision: bool = True
-) -> list[str]:
+def artifact_contract_errors(artifact: Mapping[str, Any], *, require_ship_decision: bool = True) -> list[str]:
     """Return every strict schema/evidence violation without repairing evidence."""
     errors: list[str] = []
     allowed = {
@@ -1048,6 +1079,7 @@ def artifact_contract_errors(
         "rows",
         "real_mak_rows",
         "timing_budgets_ms",
+        "timing_environment",
         "aggregates",
         "ship_decision",
     }
@@ -1058,7 +1090,7 @@ def artifact_contract_errors(
         errors.append("top-level fields are incomplete")
     if artifact.get("schema_version") != ARTIFACT_SCHEMA_VERSION:
         errors.append("schema version")
-    if not isinstance(artifact.get("source_revision"), str) or not artifact.get("source_revision"):
+    if not _valid_source_revision(artifact.get("source_revision")):
         errors.append("source revision")
     expected_requested = {
         "seeds": list(FIXED_SEEDS),
@@ -1075,6 +1107,8 @@ def artifact_contract_errors(
         or not all(_finite_number(value) and value > 0 for value in budgets.values())
     ):
         errors.append("timing budgets")
+    if not _valid_timing_environment(artifact.get("timing_environment")):
+        errors.append("timing environment")
     rows = artifact.get("rows")
     if not isinstance(rows, list):
         return [*errors, "rows"]
@@ -1102,7 +1136,9 @@ def artifact_contract_errors(
     else:
         for row in real_rows:
             _validate_real_mak_row(row, errors)
-        by_arm = {row["arm"]: row for row in real_rows if isinstance(row, Mapping) and row.get("arm") in CONTROLLER_ARMS}
+        by_arm = {
+            row["arm"]: row for row in real_rows if isinstance(row, Mapping) and row.get("arm") in CONTROLLER_ARMS
+        }
         if set(by_arm) == set(CONTROLLER_ARMS) and (
             by_arm["baseline"].get("prediction_origins") != by_arm["online"].get("prediction_origins")
         ):
@@ -1114,12 +1150,13 @@ def artifact_contract_errors(
         for arm in CONTROLLER_ARMS:
             score = aggregates[arm].get("control_score") if isinstance(aggregates[arm], Mapping) else None
             completed = any(
-                isinstance(row, Mapping) and row.get("arm") == arm and row.get("status") == "completed"
-                for row in rows
+                isinstance(row, Mapping) and row.get("arm") == arm and row.get("status") == "completed" for row in rows
             )
-            if not isinstance(aggregates[arm], Mapping) or (
-                completed and not _finite_number(score)
-            ) or (not completed and score is not None):
+            if (
+                not isinstance(aggregates[arm], Mapping)
+                or (completed and not _finite_number(score))
+                or (not completed and score is not None)
+            ):
                 errors.append("aggregate control scores")
     decision = artifact.get("ship_decision")
     if require_ship_decision:
@@ -1135,7 +1172,7 @@ def artifact_contract_errors(
             errors.append("ship decision is not recomputed")
     try:
         json.dumps(artifact, allow_nan=False, sort_keys=True, separators=(",", ":"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         errors.append("non-finite strict JSON")
     return errors
 
@@ -1149,9 +1186,7 @@ def _validate_timing(
         errors.append("raw timings")
         return
     for name, samples in value.items():
-        if not isinstance(samples, list) or not all(
-            _finite_number(sample) and sample >= 0 for sample in samples
-        ):
+        if not isinstance(samples, list) or not all(_finite_number(sample) and sample >= 0 for sample in samples):
             errors.append("raw timing samples")
         elif status == "completed" and expected[name] and not samples:
             errors.append(f"missing applicable {name} timing evidence")
@@ -1221,9 +1256,8 @@ def _validate_simulator_row(row: Mapping[str, Any], errors: list[str]) -> None:
         errors.append("simulator metrics")
     elif status == "completed":
         for name, value in metrics.items():
-            nullable = (
-                (name == "settle_s" and not metric_applicability.get("settled"))
-                or (name == "braking_error_c" and not metric_applicability.get("braking_error_c"))
+            nullable = (name == "settle_s" and not metric_applicability.get("settled")) or (
+                name == "braking_error_c" and not metric_applicability.get("braking_error_c")
             )
             if (nullable and value is not None) or (not nullable and not _finite_number(value)):
                 errors.append("simulator metric applicability")
@@ -1254,23 +1288,19 @@ def _validate_simulator_row(row: Mapping[str, Any], errors: list[str]) -> None:
             and (
                 not isinstance(runner_evidence["deadline_miss_count"], int)
                 or runner_evidence["deadline_miss_count"] < 0
-                or not all(isinstance(value, str) and value in {"fresh", "stale"} for value in runner_evidence["stale_state_transitions"])
-                or not runner_evidence["result_revisions"]
                 or not all(
-                    isinstance(value, int) and value > 0
-                    for value in runner_evidence["result_revisions"]
+                    isinstance(value, str) and value in {"fresh", "stale"}
+                    for value in runner_evidence["stale_state_transitions"]
                 )
+                or not runner_evidence["result_revisions"]
+                or not all(isinstance(value, int) and value > 0 for value in runner_evidence["result_revisions"])
                 or not runner_evidence["statuses"]
                 or not all(
-                    isinstance(value, str)
-                    and value in {"grey-box", "scheduled-arx", "model-unavailable"}
+                    isinstance(value, str) and value in {"grey-box", "scheduled-arx", "model-unavailable"}
                     for value in runner_evidence["statuses"]
                 )
                 or not runner_evidence["policy_failure_counts"]
-                or not all(
-                    isinstance(value, int) and value >= 0
-                    for value in runner_evidence["policy_failure_counts"]
-                )
+                or not all(isinstance(value, int) and value >= 0 for value in runner_evidence["policy_failure_counts"])
             )
         )
     ):
@@ -1301,43 +1331,40 @@ def _validate_simulator_row(row: Mapping[str, Any], errors: list[str]) -> None:
                 )
                 or (
                     not expected_preconditioned
-                    and (
-                        preconditioning["hold_established"]
-                        or preconditioning["duration_s"] != 0
-                    )
+                    and (preconditioning["hold_established"] or preconditioning["duration_s"] != 0)
                 )
             )
         )
-        or (
-            status == "failed"
-            and (
-                preconditioning["hold_established"]
-                or preconditioning["duration_s"] is not None
-            )
-        )
+        or (status == "failed" and (preconditioning["hold_established"] or preconditioning["duration_s"] is not None))
     ):
         errors.append("preconditioning evidence")
     outcomes = row.get("outcomes")
     outcome_evidence = row.get("outcome_evidence")
-    expected_outcome_evidence = (
-        {"safety_inhibits": "unavailable", "unreachable_setpoints": "measured"}
-        if status == "completed"
-        else {"safety_inhibits": "unavailable", "unreachable_setpoints": "unavailable"}
-    )
     if (
         not isinstance(outcomes, Mapping)
         or set(outcomes) != {"safety_inhibits", "unreachable_setpoints"}
         or not isinstance(outcome_evidence, Mapping)
-        or outcome_evidence != expected_outcome_evidence
-        or outcomes.get("safety_inhibits") is not None
-        or (
-            status == "completed"
-            and (
-                not isinstance(outcomes.get("unreachable_setpoints"), int)
-                or outcomes["unreachable_setpoints"] < 0
-            )
+        or set(outcome_evidence) != {"safety_inhibits", "unreachable_setpoints"}
+    ):
+        errors.append("simulator outcomes")
+    elif status == "completed":
+        safety_evidence = outcome_evidence["safety_inhibits"]
+        valid_safety = (safety_evidence == "unavailable" and outcomes["safety_inhibits"] is None) or (
+            safety_evidence == "measured"
+            and isinstance(outcomes["safety_inhibits"], int)
+            and outcomes["safety_inhibits"] >= 0
         )
-        or (status == "failed" and outcomes.get("unreachable_setpoints") is not None)
+        if (
+            outcome_evidence["unreachable_setpoints"] != "measured"
+            or not valid_safety
+            or not isinstance(outcomes["unreachable_setpoints"], int)
+            or outcomes["unreachable_setpoints"] < 0
+        ):
+            errors.append("simulator outcomes")
+    elif (
+        outcome_evidence != {"safety_inhibits": "unavailable", "unreachable_setpoints": "unavailable"}
+        or outcomes["safety_inhibits"] is not None
+        or outcomes["unreachable_setpoints"] is not None
     ):
         errors.append("simulator outcomes")
     if row.get("production_stack") != _SIMULATOR_STACK or row.get("actual_delivered_load_feedback") is not True:
@@ -1408,8 +1435,7 @@ def _validate_real_mak_row(row: Mapping[str, Any], errors: list[str]) -> None:
         or origins["warmup_frames"] < 1
         or not isinstance(origins["origin_frame_indices"], list)
         or not all(
-            isinstance(value, int) and value >= origins["warmup_frames"]
-            for value in origins["origin_frame_indices"]
+            isinstance(value, int) and value >= origins["warmup_frames"] for value in origins["origin_frame_indices"]
         )
         or origins["origin_count"] != len(origins["origin_frame_indices"])
         or (status == "completed" and not origins["origin_frame_indices"])
@@ -1433,9 +1459,14 @@ def decide_ship(artifact: Mapping[str, Any]) -> dict[str, Any]:
         return {"ship": False, "reasons": sorted(set(reasons))}
     rows = artifact["rows"]
     real_rows = artifact["real_mak_rows"]
-    if any(row["status"] != "completed" for row in rows) or any(
-        row["status"] != "completed" for row in real_rows
+    timing_environment = artifact["timing_environment"]
+    if (
+        timing_environment["classification"] != "target-device"
+        or not isinstance(timing_environment["model"], str)
+        or not timing_environment["model"].strip()
     ):
+        reasons.append("target timing unavailable")
+    if any(row["status"] != "completed" for row in rows) or any(row["status"] != "completed" for row in real_rows):
         reasons.append("incomplete requested cell")
         return {"ship": False, "reasons": sorted(set(reasons))}
     if any(row["outcome_evidence"]["safety_inhibits"] != "measured" for row in rows):
@@ -1448,12 +1479,8 @@ def decide_ship(artifact: Mapping[str, Any]) -> dict[str, Any]:
             reasons.append("runner deadline miss evidence")
         if any(state == "stale" for state in evidence["stale_state_transitions"]):
             reasons.append("runner stale result evidence")
-    baseline = {
-        (row["plant"], row["scenario"], row["seed"]): row for row in rows if row["arm"] == "baseline"
-    }
-    online = {
-        (row["plant"], row["scenario"], row["seed"]): row for row in rows if row["arm"] == "online"
-    }
+    baseline = {(row["plant"], row["scenario"], row["seed"]): row for row in rows if row["arm"] == "baseline"}
+    online = {(row["plant"], row["scenario"], row["seed"]): row for row in rows if row["arm"] == "online"}
     if not float(artifact["aggregates"]["online"]["control_score"]) < float(
         artifact["aggregates"]["baseline"]["control_score"]
     ):
@@ -1466,11 +1493,9 @@ def decide_ship(artifact: Mapping[str, Any]) -> dict[str, Any]:
             and after["outcomes"]["unreachable_setpoints"] > before["outcomes"]["unreachable_setpoints"]
         ):
             reasons.append("online reachability regression")
-        if (
-            any(count > 0 for count in after["runner_evidence"]["policy_failure_counts"])
-            or max(after["runner_evidence"]["policy_failure_counts"])
-            > max(before["runner_evidence"]["policy_failure_counts"])
-        ):
+        if any(count > 0 for count in after["runner_evidence"]["policy_failure_counts"]) or max(
+            after["runner_evidence"]["policy_failure_counts"]
+        ) > max(before["runner_evidence"]["policy_failure_counts"]):
             reasons.append("online policy failure regression")
         for metric, reason in (
             ("transitions_per_hour", "relay transition"),
@@ -1491,10 +1516,10 @@ def decide_ship(artifact: Mapping[str, Any]) -> dict[str, Any]:
     return {"ship": not reasons, "reasons": sorted(set(reasons))}
 
 
-
-
-def run_comparison(*, duration_s: int = 1_800) -> dict[str, Any]:
+def run_comparison(*, source_revision: str, duration_s: int = 1_800) -> dict[str, Any]:
     """Run the full fixed simulator matrix and chronological real-MAK replay."""
+    if not _valid_source_revision(source_revision):
+        raise ValueError("source revision must be a lowercase 40-hex commit")
     if duration_s < 2 * frame_seconds():
         raise ValueError("duration_s must cover at least two pulse frames")
     definitions = _scenario_definitions()
@@ -1504,7 +1529,15 @@ def run_comparison(*, duration_s: int = 1_800) -> dict[str, Any]:
             for scenario_name in SCENARIOS:
                 for seed in FIXED_SEEDS:
                     try:
-                        rows.append(_run_simulator_cell(arm=arm, plant=plant, scenario=definitions[scenario_name], seed=seed, duration_s=duration_s))
+                        rows.append(
+                            _run_simulator_cell(
+                                arm=arm,
+                                plant=plant,
+                                scenario=definitions[scenario_name],
+                                seed=seed,
+                                duration_s=duration_s,
+                            )
+                        )
                     except Exception as error:
                         rows.append(_failed_row(arm=arm, plant=plant, scenario=scenario_name, seed=seed, error=error))
     real_rows: list[dict[str, Any]] = []
@@ -1537,19 +1570,23 @@ def run_comparison(*, duration_s: int = 1_800) -> dict[str, Any]:
                     },
                     "actual_delivered_load_feedback": False,
                     "raw_timing_ms": {"learner": [], "evaluation": [], "solve": []},
-                    "timing_applicability": _timing_applicability(
-                        simulator=False, online=arm == "online"
-                    ),
+                    "timing_applicability": _timing_applicability(simulator=False, online=arm == "online"),
                     "production_stack": dict(_REAL_MAK_STACK[arm]),
                 }
             )
     artifact = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
-        "source_revision": source_revision(),
-        "requested": {"seeds": list(FIXED_SEEDS), "plants": list(PLANTS), "scenarios": list(SCENARIOS), "controller_arms": list(CONTROLLER_ARMS)},
+        "source_revision": source_revision,
+        "requested": {
+            "seeds": list(FIXED_SEEDS),
+            "plants": list(PLANTS),
+            "scenarios": list(SCENARIOS),
+            "controller_arms": list(CONTROLLER_ARMS),
+        },
         "rows": sorted(rows, key=lambda row: (row["arm"], row["plant"], row["scenario"], row["seed"])),
         "real_mak_rows": sorted(real_rows, key=lambda row: row["arm"]),
         "timing_budgets_ms": dict(_TIMING_BUDGETS_MS),
+        "timing_environment": _timing_environment(),
         "aggregates": {arm: _aggregate(rows, arm) for arm in CONTROLLER_ARMS},
     }
     artifact["ship_decision"] = decide_ship(artifact)
@@ -1581,13 +1618,18 @@ def write_artifact_atomically(artifact: Mapping[str, Any], output: Path) -> None
         temporary.unlink(missing_ok=True)
 
 
-def load_artifact(path: Path | None = None) -> dict[str, Any]:
-    """Load the default strict experiment artifact, rejecting malformed evidence."""
+def load_artifact(path: Path | None = None, *, expected_source_revision: str | None = None) -> dict[str, Any]:
+    """Load strict experiment evidence, optionally bound to a reviewed revision."""
     selected = _DEFAULT_OUTPUT if path is None else Path(path)
     artifact = json.loads(selected.read_text(encoding="utf-8"))
     errors = artifact_contract_errors(artifact)
     if errors:
         raise ValueError("invalid artifact: " + "; ".join(errors))
+    if expected_source_revision is not None:
+        if not _valid_source_revision(expected_source_revision):
+            raise ValueError("expected source revision must be a lowercase 40-hex commit")
+        if artifact["source_revision"] != expected_source_revision:
+            raise ValueError("artifact source revision does not match expected source revision")
     if "ship_decision" in artifact and artifact["ship_decision"] != decide_ship(artifact):
         raise ValueError("invalid artifact: stored ship decision is stale")
     return artifact
@@ -1597,8 +1639,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Compare production MPC with opt-in online scheduled ARX.")
     parser.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT, help="strict JSON artifact path")
     parser.add_argument("--tiny", action="store_true", help="run the full matrix at a six-minute scenario duration")
+    parser.add_argument(
+        "--source-revision",
+        required=True,
+        help="immutable reviewed lowercase 40-hex source revision",
+    )
     args = parser.parse_args(argv)
-    artifact = run_comparison(duration_s=360 if args.tiny else 1_800)
+    artifact = run_comparison(
+        source_revision=args.source_revision,
+        duration_s=360 if args.tiny else 1_800,
+    )
     write_artifact_atomically(artifact, args.output)
     return 0
 

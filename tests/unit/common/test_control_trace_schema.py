@@ -340,7 +340,7 @@ def _payload_cases():
             TraceEventKind.MODEL_EVALUATION,
             ModelEvaluationPayload(
                 decision_id="generation-0-evaluation-1",
-                evaluated_at_ms=21_000,
+                evaluated_at_ms=360_000,
                 role_generation=0,
                 promoted=False,
                 committed=False,
@@ -350,8 +350,49 @@ def _payload_cases():
                 challenger_prediction_score=1.2,
                 incumbent_braking_score=None,
                 challenger_braking_score=None,
-                sample_count=20,
+                sample_count=2,
                 prospective_digest=None,
+                window_start_ms=20_000,
+                window_end_ms=340_000,
+                incumbent_digest="b" * 64,
+                challenger_digest="c" * 64,
+                completed_origins=(
+                    {
+                        "origin_time_ms": 20_000,
+                        "completion_time_ms": 80_000,
+                        "horizon_steps": 3,
+                        "generation": 0,
+                        "observed_temperature_c": 110.0,
+                        "incumbent_error_c": 2.0,
+                        "challenger_error_c": 1.0,
+                        "braking": True,
+                    },
+                    {
+                        "origin_time_ms": 40_000,
+                        "completion_time_ms": 340_000,
+                        "horizon_steps": 15,
+                        "generation": 0,
+                        "observed_temperature_c": 115.0,
+                        "incumbent_error_c": -3.0,
+                        "challenger_error_c": -4.0,
+                        "braking": False,
+                    },
+                ),
+                horizon_scores=(
+                    {
+                        "horizon_steps": 3,
+                        "incumbent_rmse_c": 2.0,
+                        "challenger_rmse_c": 1.0,
+                        "sample_count": 1,
+                    },
+                    {
+                        "horizon_steps": 15,
+                        "incumbent_rmse_c": 3.0,
+                        "challenger_rmse_c": 4.0,
+                        "sample_count": 1,
+                    },
+                ),
+                evaluation_duration_ms=7.5,
             ),
         ),
         (
@@ -449,6 +490,133 @@ def test_every_payload_round_trips_through_pydantic_json(controller, event_kind,
     assert restored.payload.__class__.__slots__
     with pytest.raises(FrozenInstanceError):
         restored.payload.payload_type = "not-allowed"
+
+
+def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins() -> None:
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    record = ControlTraceRecord(
+        ts_ms=360_000,
+        session_id="session-1",
+        cook_id="cook-1",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_EVALUATION,
+        payload=payload,
+    )
+
+    encoded = json.loads(record.model_dump_json())
+    restored = ControlTraceRecord.model_validate_json(json.dumps(encoded))
+
+    assert restored == record
+    assert encoded["payload"] == {
+        "decision_id": "generation-0-evaluation-1",
+        "evaluated_at_ms": 360_000,
+        "role_generation": 0,
+        "promoted": False,
+        "committed": False,
+        "consecutive_wins": 0,
+        "rejection_reasons": ["prediction"],
+        "incumbent_prediction_score": 1.0,
+        "challenger_prediction_score": 1.2,
+        "incumbent_braking_score": None,
+        "challenger_braking_score": None,
+        "sample_count": 2,
+        "prospective_digest": None,
+        "window_start_ms": 20_000,
+        "window_end_ms": 340_000,
+        "incumbent_digest": "b" * 64,
+        "challenger_digest": "c" * 64,
+        "completed_origins": [
+            {
+                "origin_time_ms": 20_000,
+                "completion_time_ms": 80_000,
+                "horizon_steps": 3,
+                "generation": 0,
+                "observed_temperature_c": 110.0,
+                "incumbent_error_c": 2.0,
+                "challenger_error_c": 1.0,
+                "braking": True,
+            },
+            {
+                "origin_time_ms": 40_000,
+                "completion_time_ms": 340_000,
+                "horizon_steps": 15,
+                "generation": 0,
+                "observed_temperature_c": 115.0,
+                "incumbent_error_c": -3.0,
+                "challenger_error_c": -4.0,
+                "braking": False,
+            },
+        ],
+        "horizon_scores": [
+            {
+                "horizon_steps": 3,
+                "incumbent_rmse_c": 2.0,
+                "challenger_rmse_c": 1.0,
+                "sample_count": 1,
+            },
+            {
+                "horizon_steps": 15,
+                "incumbent_rmse_c": 3.0,
+                "challenger_rmse_c": 4.0,
+                "sample_count": 1,
+            },
+        ],
+        "evaluation_duration_ms": 7.5,
+        "payload_type": "model_evaluation",
+    }
+    assert restored.payload.window_start_ms == min(
+        origin.origin_time_ms for origin in restored.payload.completed_origins
+    )
+    assert restored.payload.window_end_ms == max(
+        origin.completion_time_ms for origin in restored.payload.completed_origins
+    )
+    assert restored.payload.evaluated_at_ms >= restored.payload.window_end_ms
+    assert restored.payload.sample_count == len(restored.payload.completed_origins)
+    assert sum(score.sample_count for score in restored.payload.horizon_scores) == restored.payload.sample_count
+    assert restored.payload.incumbent_digest == "b" * 64
+    assert restored.payload.challenger_digest == "c" * 64
+    with pytest.raises(FrozenInstanceError):
+        restored.payload.completed_origins = ()
+
+
+def test_model_evaluation_rejects_unbounded_or_inconsistent_audit_evidence() -> None:
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+
+    with pytest.raises(ValidationError):
+        replace(payload, completed_origins=payload.completed_origins * 1_000)
+    with pytest.raises(ValidationError):
+        replace(payload, horizon_scores=payload.horizon_scores + payload.horizon_scores[:1])
+    with pytest.raises(ValidationError):
+        replace(payload, sample_count=3)
+    with pytest.raises(ValidationError):
+        replace(payload, window_start_ms=20_001)
+    with pytest.raises(ValidationError):
+        replace(payload, evaluated_at_ms=339_999)
+    with pytest.raises(ValidationError):
+        replace(payload, incumbent_digest="B" * 64)
+    with pytest.raises(ValidationError):
+        replace(payload, evaluation_duration_ms=-0.01)
+
+
+@pytest.mark.parametrize(
+    ("score_index", "field", "inconsistent"),
+    [
+        (0, "incumbent_rmse_c", 2.000_001),
+        (0, "challenger_rmse_c", 0.999_999),
+        (1, "incumbent_rmse_c", 3.000_001),
+        (1, "challenger_rmse_c", 3.999_999),
+        (0, "incumbent_rmse_c", -2.0),
+        (1, "challenger_rmse_c", -4.0),
+    ],
+)
+def test_model_evaluation_rejects_horizon_rmse_that_disagrees_with_completed_origins(
+    score_index, field, inconsistent
+) -> None:
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    scores = list(payload.horizon_scores)
+    with pytest.raises(ValidationError):
+        scores[score_index] = replace(scores[score_index], **{field: inconsistent})
+        replace(payload, horizon_scores=tuple(scores))
 
 
 def test_db_row_round_trip_preserves_typed_payload():

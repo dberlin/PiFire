@@ -14,7 +14,16 @@ from dataclasses import dataclass as std_dataclass
 from enum import StrEnum
 from typing import Annotated, ClassVar, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
@@ -445,6 +454,72 @@ class ModelObservationPayload:
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class CompletedOriginPayload:
+    """One completed, immutable forecast origin in an evaluation window."""
+
+    origin_time_ms: NonNegativeInt
+    completion_time_ms: NonNegativeInt
+    horizon_steps: Literal[3, 15]
+    generation: NonNegativeInt
+    observed_temperature_c: FiniteFloat
+    incumbent_error_c: FiniteFloat
+    challenger_error_c: FiniteFloat
+    braking: bool
+
+    @model_validator(mode="after")
+    def validate_origin_interval(self) -> CompletedOriginPayload:
+        if self.origin_time_ms >= self.completion_time_ms:
+            raise ValueError("completed origin interval must be positive")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class HorizonScorePayload:
+    """Immutable per-horizon incumbent/challenger RMSE evidence."""
+
+    horizon_steps: Literal[3, 15]
+    incumbent_rmse_c: NonNegativeFloat | None
+    challenger_rmse_c: NonNegativeFloat | None
+    sample_count: NonNegativeInt
+
+    @model_validator(mode="after")
+    def validate_horizon_score(self) -> HorizonScorePayload:
+        available = self.sample_count > 0
+        if available != (self.incumbent_rmse_c is not None and self.challenger_rmse_c is not None):
+            raise ValueError("horizon RMSE availability must match sample count")
+        return self
+
+
+def _completed_origin_payload(value: object) -> CompletedOriginPayload:
+    if isinstance(value, CompletedOriginPayload):
+        return value
+    if isinstance(value, Mapping):
+        return CompletedOriginPayload(**dict(value))
+    raise ValueError("completed origin must be an object")
+
+
+def _horizon_score_payload(value: object) -> HorizonScorePayload:
+    if isinstance(value, HorizonScorePayload):
+        return value
+    if isinstance(value, Mapping):
+        return HorizonScorePayload(**dict(value))
+    raise ValueError("horizon score must be an object")
+
+
+def _matches_completed_rmse(errors: Sequence[float], reported: float | None) -> bool:
+    if not errors:
+        return reported is None
+    if reported is None or reported < 0.0 or not math.isfinite(reported):
+        return False
+    expected = math.sqrt(sum(error * error for error in errors) / len(errors))
+    return math.isclose(reported, expected, rel_tol=1e-12, abs_tol=1e-12)
+
+
+CompletedOriginEvidence: TypeAlias = Annotated[CompletedOriginPayload, BeforeValidator(_completed_origin_payload)]
+HorizonScoreEvidence: TypeAlias = Annotated[HorizonScorePayload, BeforeValidator(_horizon_score_payload)]
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class ModelEvaluationPayload:
     """Immutable promotion-evaluation evidence for one adaptation generation."""
 
@@ -461,6 +536,13 @@ class ModelEvaluationPayload:
     challenger_braking_score: FiniteFloat | None
     sample_count: NonNegativeInt
     prospective_digest: Digest | None
+    window_start_ms: NonNegativeInt
+    window_end_ms: NonNegativeInt
+    incumbent_digest: Digest
+    challenger_digest: Digest
+    completed_origins: Annotated[tuple[CompletedOriginEvidence, ...], Field(max_length=30)]
+    horizon_scores: Annotated[tuple[HorizonScoreEvidence, ...], Field(min_length=2, max_length=2)]
+    evaluation_duration_ms: NonNegativeFloat
     payload_type: Literal["model_evaluation"] = "model_evaluation"
 
     @model_validator(mode="after")
@@ -473,6 +555,38 @@ class ModelEvaluationPayload:
             raise ValueError("promoted model evaluation must not have rejection reasons")
         if (self.prospective_digest is not None) != self.promoted:
             raise ValueError("model evaluation prospective digest must match promotion")
+        if {score.horizon_steps for score in self.horizon_scores} != {3, 15}:
+            raise ValueError("evaluation horizon scores must contain exactly 3 and 15 steps")
+        if self.sample_count != len(self.completed_origins):
+            raise ValueError("evaluation sample count must match completed origins")
+        if self.completed_origins:
+            origin_start_ms = min(origin.origin_time_ms for origin in self.completed_origins)
+            origin_end_ms = max(origin.completion_time_ms for origin in self.completed_origins)
+            if self.window_start_ms != origin_start_ms or self.window_end_ms != origin_end_ms:
+                raise ValueError("evaluation window must bound completed origins exactly")
+        elif self.window_start_ms != self.window_end_ms or self.window_end_ms != self.evaluated_at_ms:
+            raise ValueError("empty evaluation window must coincide with evaluation time")
+        if self.evaluated_at_ms < self.window_end_ms:
+            raise ValueError("evaluation cannot precede its evidence window")
+        errors_by_horizon: dict[int, tuple[list[float], list[float]]] = {3: ([], []), 15: ([], [])}
+        for origin in self.completed_origins:
+            if origin.generation != self.role_generation:
+                raise ValueError("completed origin generation must match evaluation role")
+            if not self.window_start_ms <= origin.origin_time_ms:
+                raise ValueError("completed origin begins before evaluation window")
+            if not origin.completion_time_ms <= self.window_end_ms:
+                raise ValueError("completed origin completes after evaluation window")
+            incumbent_errors, challenger_errors = errors_by_horizon[origin.horizon_steps]
+            incumbent_errors.append(origin.incumbent_error_c)
+            challenger_errors.append(origin.challenger_error_c)
+        for score in self.horizon_scores:
+            incumbent_errors, challenger_errors = errors_by_horizon[score.horizon_steps]
+            if score.sample_count != len(incumbent_errors):
+                raise ValueError("horizon score count must match completed origins")
+            if not _matches_completed_rmse(incumbent_errors, score.incumbent_rmse_c):
+                raise ValueError("incumbent horizon RMSE must match completed origins")
+            if not _matches_completed_rmse(challenger_errors, score.challenger_rmse_c):
+                raise ValueError("challenger horizon RMSE must match completed origins")
         return self
 
 
