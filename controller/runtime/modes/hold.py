@@ -316,13 +316,12 @@ class HoldMode(ControlMode):
             source=classify_output_source(
                 lid_open=self.state.lid.open_detected,
                 manual_override_active=self.state.manual_override["auger"] >= now,
-                fan_assist_active=False,
             ),
             timestamp=now,
             requested=requested,
         )
         inverse_combustion_load = max(0.0, min(1.0, realized_duty / maximum_duty))
-        measured_source = controller.trace_prior_output_source in (OutputSource.CONTROLLER, OutputSource.FAN_ASSIST)
+        measured_source = controller.trace_prior_output_source is OutputSource.CONTROLLER
         sample_complete = controller.trace_prior_output_source is OutputSource.SEED or measured_source
         if measured_source:
             controller.trace_interval_result_revision = revision
@@ -446,9 +445,6 @@ class HoldMode(ControlMode):
             ),
             model_revision=model_revision,
             model_provenance=provenance if model_revision is not None else None,
-            u_min=None,
-            u_max=None,
-            hold_cycle_seconds=None,
             pulse_slot_seconds=float(scheduler.timing.pulse_s),
             pulse_frame_seconds=float(scheduler.timing.frame_s),
             fan_authority=self.state.controller.controls_fan,
@@ -578,7 +574,6 @@ class HoldMode(ControlMode):
             output_source=classify_output_source(
                 lid_open=self.state.lid.open_detected,
                 manual_override_active=self.state.manual_override["auger"] >= now,
-                fan_assist_active=False,
             ),
             inhibit_reason=InhibitReason.LID_OPEN if self.state.lid.open_detected else InhibitReason.NONE,
         )
@@ -854,7 +849,6 @@ class HoldMode(ControlMode):
                 self.state.controller.cycle_start,
                 lid_open=False,
                 manual_override_active=False,
-                fan_assist_active=False,
                 auger_output=self.grill.get_output_status()["auger"],
             )
             self._runner.set_output(initial_output)
@@ -919,7 +913,6 @@ class HoldMode(ControlMode):
                 now,
                 lid_open=self.state.lid.open_detected,
                 manual_override_active=self.state.manual_override["auger"] > now,
-                fan_assist_active=False,
                 auger_output=False,
             ),
             now,
@@ -1053,7 +1046,6 @@ class HoldMode(ControlMode):
                     source=classify_output_source(
                         lid_open=True,
                         manual_override_active=self.state.manual_override["auger"] >= now,
-                        fan_assist_active=False,
                     ),
                     timestamp=now,
                     requested=self.state.controller.output,
@@ -1093,7 +1085,6 @@ class HoldMode(ControlMode):
                         source=classify_output_source(
                             lid_open=True,
                             manual_override_active=self.state.manual_override["auger"] >= now,
-                            fan_assist_active=False,
                         ),
                         timestamp=now,
                         requested=self.state.controller.output,
@@ -1159,7 +1150,6 @@ class HoldMode(ControlMode):
                 source=classify_output_source(
                     lid_open=False,
                     manual_override_active=True,
-                    fan_assist_active=False,
                 ),
                 timestamp=self._last_now,
             ),

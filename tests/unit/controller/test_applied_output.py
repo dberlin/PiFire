@@ -12,14 +12,10 @@ from controller.applied_output import (
 
 
 PRECEDENCE_CASES = [
-    (False, False, False, OutputSource.CONTROLLER),
-    (False, False, True, OutputSource.FAN_ASSIST),
-    (True, False, False, OutputSource.LID_OPEN),
-    (True, False, True, OutputSource.LID_OPEN),
-    (False, True, False, OutputSource.MANUAL_OVERRIDE),
-    (False, True, True, OutputSource.MANUAL_OVERRIDE),
-    (True, True, False, OutputSource.MANUAL_OVERRIDE),
-    (True, True, True, OutputSource.MANUAL_OVERRIDE),
+    (False, False, OutputSource.CONTROLLER),
+    (True, False, OutputSource.LID_OPEN),
+    (False, True, OutputSource.MANUAL_OVERRIDE),
+    (True, True, OutputSource.MANUAL_OVERRIDE),
 ]
 
 
@@ -30,14 +26,14 @@ def test_precedence_cases_cover_every_boolean_combination():
     assert covered == expected
 
 
-@pytest.mark.parametrize("lid,manual,fan,expected", PRECEDENCE_CASES)
-def test_precedence(lid, manual, fan, expected):
-    assert classify_output_source(lid, manual, fan) is expected
+@pytest.mark.parametrize("lid,manual,expected", PRECEDENCE_CASES)
+def test_precedence(lid, manual, expected):
+    assert classify_output_source(lid, manual) is expected
 
 
 def test_controller_commanded_is_derived_from_source():
     assert AppliedOutput(0.4, OutputSource.CONTROLLER, 1.0).controller_commanded is True
-    for source in (OutputSource.LID_OPEN, OutputSource.MANUAL_OVERRIDE, OutputSource.FAN_ASSIST, OutputSource.SEED):
+    for source in (OutputSource.LID_OPEN, OutputSource.MANUAL_OVERRIDE, OutputSource.SEED):
         assert AppliedOutput(0.4, source, 1.0).controller_commanded is False
 
 
@@ -53,9 +49,7 @@ def test_requested_defaults_to_none():
 
 
 def test_seed_output_is_seed_when_nothing_else_applies():
-    applied = seed_output(
-        0.15, 100.0, lid_open=False, manual_override_active=False, fan_assist_active=False, auger_output=True
-    )
+    applied = seed_output(0.15, 100.0, lid_open=False, manual_override_active=False, auger_output=True)
     assert applied.source is OutputSource.SEED
     assert applied.ratio == 0.15
     assert applied.timestamp == 100.0
@@ -63,28 +57,17 @@ def test_seed_output_is_seed_when_nothing_else_applies():
 
 
 def test_seed_output_keeps_a_real_reason_when_one_exists():
-    applied = seed_output(
-        0.15, 100.0, lid_open=True, manual_override_active=False, fan_assist_active=False, auger_output=False
-    )
+    applied = seed_output(0.15, 100.0, lid_open=True, manual_override_active=False, auger_output=False)
     assert applied.source is OutputSource.LID_OPEN
 
 
 def test_seed_output_reports_zero_when_the_auger_is_off():
-    applied = seed_output(
-        0.5, 100.0, lid_open=False, manual_override_active=False, fan_assist_active=False, auger_output=False
-    )
+    applied = seed_output(0.5, 100.0, lid_open=False, manual_override_active=False, auger_output=False)
     assert applied.ratio == 0.0
 
 
 def test_seed_output_reports_manual_override_when_active():
-    applied = seed_output(
-        0.15, 100.0, lid_open=False, manual_override_active=True, fan_assist_active=False, auger_output=True
-    )
+    applied = seed_output(0.15, 100.0, lid_open=False, manual_override_active=True, auger_output=True)
     assert applied.source is OutputSource.MANUAL_OVERRIDE
 
 
-def test_seed_output_reports_fan_assist_when_active():
-    applied = seed_output(
-        0.15, 100.0, lid_open=False, manual_override_active=False, fan_assist_active=True, auger_output=True
-    )
-    assert applied.source is OutputSource.FAN_ASSIST

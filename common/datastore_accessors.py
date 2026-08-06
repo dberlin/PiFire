@@ -47,7 +47,7 @@ from common.defaults import (
 from common.pellets_schema import validate_pellet_db
 from common.settings_schema import validate_settings_tree
 from common.sqlite_queue import SqliteMembershipList, SqliteQueue
-from common.control_trace import ControlTraceDbRow, ControlTraceRecord
+from common.control_trace import TRACE_SCHEMA_VERSION, ControlTraceDbRow, ControlTraceRecord
 
 
 def flush_control():
@@ -476,8 +476,9 @@ def _read_control_trace_records(
 ) -> list[ControlTraceRecord]:
     with _control_trace_connection(database_path) as connection:
         rows = connection.execute(
-            f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace WHERE {where_column}=? ORDER BY id",
-            (identifier,),
+            f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace "
+            f"WHERE {where_column}=? AND schema_version=? ORDER BY id",
+            (identifier, TRACE_SCHEMA_VERSION),
         ).fetchall()
     return _control_trace_records(rows)
 
@@ -538,8 +539,8 @@ def read_control_trace_range(start_ms: int, end_ms: int, *, limit: int) -> list[
         datastore.connection()
         .execute(
             f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace "
-            "WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY id LIMIT ?",
-            (start_ms, end_ms, limit),
+            "WHERE ts_ms >= ? AND ts_ms <= ? AND schema_version=? ORDER BY id LIMIT ?",
+            (start_ms, end_ms, TRACE_SCHEMA_VERSION, limit),
         )
         .fetchall()
     )
@@ -554,6 +555,21 @@ def prune_control_trace(before_ms: int, *, limit: int) -> int:
         cursor = conn.execute(
             "DELETE FROM control_trace WHERE id IN (SELECT id FROM control_trace WHERE ts_ms < ? ORDER BY id LIMIT ?)",
             (before_ms, limit),
+        )
+    return cursor.rowcount
+
+
+def prune_incompatible_control_trace(before_schema_version: int, *, limit: int) -> int:
+    """Delete at most ``limit`` rows older than the supplied trace schema."""
+    if isinstance(before_schema_version, bool) or not isinstance(before_schema_version, int):
+        raise ValueError("before_schema_version must be an integer")
+    limit = _require_control_trace_limit(limit)
+    with datastore.transaction() as conn:
+        cursor = conn.execute(
+            "DELETE FROM control_trace WHERE id IN ("
+            "SELECT id FROM control_trace WHERE schema_version < ? ORDER BY id LIMIT ?"
+            ")",
+            (before_schema_version, limit),
         )
     return cursor.rowcount
 

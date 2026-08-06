@@ -18,6 +18,7 @@ from common.datastore_accessors import (
     append_control_trace,
     delete_control_trace_session,
     prune_control_trace,
+    prune_incompatible_control_trace,
     read_control_trace_cook,
     read_control_trace_range,
     read_control_trace_session,
@@ -32,11 +33,8 @@ def _record(ts_ms: int, session_id: str, cook_id: str | None = None) -> ControlT
         control_period_seconds=2.0,
         model_revision=None,
         model_provenance=None,
-        u_min=0.1,
-        u_max=0.9,
-        hold_cycle_seconds=25.0,
-        pulse_slot_seconds=None,
-        pulse_frame_seconds=None,
+        pulse_slot_seconds=2.0,
+        pulse_frame_seconds=20.0,
         fan_authority=False,
         fan_pwm_capable=True,
         fan_min_duty=0.0,
@@ -193,3 +191,31 @@ def test_prune_removes_only_rows_strictly_older_than_30_days_in_bounded_batches(
     assert prune_control_trace(cutoff_ms, limit=1) == 1
     assert prune_control_trace(cutoff_ms, limit=1) == 0
     assert read_control_trace_range(cutoff_ms, cutoff_ms + 1, limit=10) == [boundary, newer]
+
+def test_schema_filtered_reads_and_incompatible_pruning_are_bounded(ds):
+    current = _record(1_000, "shared", "shared-cook")
+    conn = ds.connection()
+    conn.executemany(
+        """
+        INSERT INTO control_trace(ts_ms, session_id, cook_id, controller, event_kind, schema_version, payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (999, "shared", "shared-cook", "pid", "session", 2, '"old"'),
+            (998, "old-only", "old-cook", "pid", "session", 2, '"old"'),
+            (997, "future-only", "future-cook", "pid", "session", 4, '"future"'),
+        ],
+    )
+    append_control_trace([current, _record(1_001, "current-second", "shared-cook")])
+
+    assert read_control_trace_session("shared") == [current]
+    assert read_control_trace_cook("shared-cook") == [current, _record(1_001, "current-second", "shared-cook")]
+    assert read_control_trace_range(0, 2_000, limit=2) == [
+        current,
+        _record(1_001, "current-second", "shared-cook"),
+    ]
+
+    assert prune_incompatible_control_trace(3, limit=1) == 1
+    assert prune_incompatible_control_trace(3, limit=1) == 1
+    assert prune_incompatible_control_trace(3, limit=1) == 0
+    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(4,), (3,), (3,)]

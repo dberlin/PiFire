@@ -8,8 +8,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from common.control_trace import ControlTraceRecord, RecorderGapPayload, TraceEventKind
-from common.datastore_accessors import append_control_trace, prune_control_trace
+from common.control_trace import TRACE_SCHEMA_VERSION, ControlTraceRecord, RecorderGapPayload, TraceEventKind
+from common.datastore_accessors import (
+    append_control_trace,
+    prune_control_trace,
+    prune_incompatible_control_trace,
+)
 
 FLUSH_INTERVAL_MS = 5_000
 RETENTION_PERIOD_MS = 30 * 24 * 60 * 60 * 1_000
@@ -40,6 +44,10 @@ class AppendControlTrace(Protocol):
 class PruneControlTrace(Protocol):
     def __call__(self, before_ms: int, *, limit: int) -> int: ...
 
+
+
+class PruneIncompatibleControlTrace(Protocol):
+    def __call__(self, before_schema_version: int, *, limit: int) -> int: ...
 
 @dataclass(slots=True)
 class _LostRecordSpan:
@@ -79,6 +87,7 @@ class ControlTraceRecorder:
         *,
         append: AppendControlTrace = append_control_trace,
         prune: PruneControlTrace = prune_control_trace,
+        prune_incompatible: PruneIncompatibleControlTrace = prune_incompatible_control_trace,
         warning: Callable[[str], None] = _logger.warning,
         monotonic_clock: Callable[[], int] = _monotonic_ms,
         wall_clock: Callable[[], int] = _wall_ms,
@@ -90,6 +99,7 @@ class ControlTraceRecorder:
         self._append: AppendControlTrace = append
         self._prune: PruneControlTrace = prune
         self._warning: Callable[[str], None] = warning
+        self._prune_incompatible: PruneIncompatibleControlTrace = prune_incompatible
         self._monotonic_clock: Callable[[], int] = monotonic_clock
         self._wall_clock: Callable[[], int] = wall_clock
         self._capacity: int = capacity
@@ -100,6 +110,7 @@ class ControlTraceRecorder:
         self._persistence_degraded: bool = False
         self._retention_degraded: bool = False
         self._closed: bool = False
+        self._incompatible_prune_backlog: bool = False
         self._prune_now(wall_clock())
 
     def record(self, record: ControlTraceRecord) -> None:
@@ -166,21 +177,35 @@ class ControlTraceRecorder:
 
     def _prune_if_due(self) -> None:
         now_ms = self._wall_clock()
-        if self._last_prune_ms is None or now_ms - self._last_prune_ms >= DAILY_PRUNE_INTERVAL_MS:
+        if (
+            self._incompatible_prune_backlog
+            or self._last_prune_ms is None
+            or now_ms - self._last_prune_ms >= DAILY_PRUNE_INTERVAL_MS
+        ):
             self._prune_now(now_ms)
 
     def _prune_now(self, now_ms: int) -> None:
         self._last_prune_ms = now_ms
+        failed = False
         cutoff_ms = now_ms - RETENTION_PERIOD_MS
         try:
             while self._prune(cutoff_ms, limit=PRUNE_BATCH_SIZE) == PRUNE_BATCH_SIZE:
                 pass
         except Exception:
+            failed = True
+
+        try:
+            deleted = self._prune_incompatible(TRACE_SCHEMA_VERSION, limit=PRUNE_BATCH_SIZE)
+            self._incompatible_prune_backlog = deleted == PRUNE_BATCH_SIZE
+        except Exception:
+            failed = True
+            self._incompatible_prune_backlog = True
+
+        if failed:
             if not self._retention_degraded:
                 self._warn(_RETENTION_FAILURE_WARNING)
                 self._retention_degraded = True
             return
-
         if self._retention_degraded:
             self._warn(_RETENTION_RECOVERY_WARNING)
             self._retention_degraded = False

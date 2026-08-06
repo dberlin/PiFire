@@ -20,7 +20,6 @@ from common.control_trace import (
     AppliedOutputPayload,
     ControlTraceRecord,
     ControllerType,
-    FixedCycleFramePayload,
     FramedPulseFramePayload,
     InhibitReason,
     MpcUpdatePayload,
@@ -175,7 +174,6 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
 
     updates: dict[int, tuple[int, UpdatePayload]] = {}
     allocations: dict[int, tuple[int, AllocationPayload]] = {}
-    fixed_frames: list[tuple[int, FixedCycleFramePayload]] = []
     framed_frames: list[tuple[int, FramedPulseFramePayload]] = []
     applied_outputs: list[tuple[int, AppliedOutputPayload]] = []
     safety_events: list[tuple[int, SafetyEventPayload]] = []
@@ -184,11 +182,6 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
     lid_active = manual_active = safety_active = False
     seed_seen = False
     seed_eligible = True
-    boundary_safety_events = [
-        (index, record.ts_ms, payload)
-        for index, record in enumerate(ordered)
-        if isinstance(payload := record.payload, SafetyEventPayload)
-    ]
 
     for index, record in enumerate(ordered):
         payload = record.payload
@@ -213,27 +206,11 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
                 updates[payload.result_revision] = (index, payload)
                 _validate_inhibit(payload.inhibit_reason, lid_active, manual_active, safety_active, add, index)
                 _validate_output_source(payload.output_source, lid_active, manual_active, add, index)
-            if payload.actuation_mode is ActuationMode.FIXED_CYCLE:
-                seed_eligible = False
         elif isinstance(payload, AllocationPayload):
             if payload.result_revision in allocations:
                 add(ReplayIssueCode.DUPLICATE_ALLOCATION, "duplicate allocation result revision", index)
             else:
                 allocations[payload.result_revision] = (index, payload)
-        elif isinstance(payload, FixedCycleFramePayload):
-            if payload.result_revision > 0:
-                seed_eligible = False
-            fixed_frames.append((index, payload))
-            _validate_fixed_frame(
-                payload,
-                updates,
-                lid_active,
-                manual_active,
-                safety_active,
-                boundary_safety_events,
-                add,
-                index,
-            )
         elif isinstance(payload, FramedPulseFramePayload):
             if payload.result_revision > 0:
                 seed_eligible = False
@@ -267,7 +244,7 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
     for revision, (index, payload) in updates.items():
         if isinstance(payload, MpcUpdatePayload) and revision not in allocations:
             add(ReplayIssueCode.MISSING_ALLOCATION, "accepted MPC update has no joined allocation", index)
-    _validate_applied_outputs(applied_outputs, fixed_frames, framed_frames, updates, ordered, safety_events, add)
+    _validate_applied_outputs(applied_outputs, framed_frames, updates, ordered, safety_events, add)
     return ReplayReport(session_record.session_id, session.controller, tuple(issues))
 
 
@@ -328,61 +305,6 @@ def _advance_safety(
     return lid, manual, safety
 
 
-def _validate_fixed_frame(
-    payload: FixedCycleFramePayload,
-    updates: dict[int, tuple[int, UpdatePayload]],
-    lid: bool,
-    manual: bool,
-    safety: bool,
-    boundary_safety_events: Sequence[tuple[int, int, SafetyEventPayload]],
-    add: IssueAdder,
-    index: int,
-) -> None:
-    update = updates.get(payload.result_revision)
-    if update is None:
-        add(ReplayIssueCode.MISSING_UPDATE, "fixed-cycle frame cannot join its result revision", index)
-    elif update[1].actuation_mode is not ActuationMode.FIXED_CYCLE:
-        add(ReplayIssueCode.FRAME_MODE_MISMATCH, "fixed-cycle frame joined to a non-fixed update", index)
-    duration = (payload.cycle_end_ms - payload.cycle_start_ms) / 1000
-    if duration <= 0:
-        add(ReplayIssueCode.NON_POSITIVE_INTERVAL, "fixed-cycle frame interval must be positive", index)
-        return
-    bounded = min(payload.u_max, max(payload.u_min, payload.raw_requested_duty))
-    if not (
-        _close(payload.bounded_duty, bounded)
-        and _close(payload.scheduled_on_seconds + payload.scheduled_off_seconds, duration)
-        and _close(payload.scheduled_on_seconds, bounded * duration)
-    ):
-        add(
-            ReplayIssueCode.FRAME_SCHEDULE_MISMATCH,
-            "fixed-cycle schedule does not match recorded duty and bounds",
-            index,
-        )
-    frame_start = cast(_FrameStart, cast(object, payload))
-    _validate_transition(
-        payload.actual_on_seconds,
-        frame_start.actual_start_active,
-        payload.transition_count,
-        payload.output_active,
-        duration,
-        add,
-        index,
-    )
-    boundary_safety = _ending_frame_safety(
-        index,
-        payload.cycle_end_ms,
-        payload.inhibit_reason,
-        payload.result_revision,
-        boundary_safety_events,
-    )
-    _validate_inhibit(
-        payload.inhibit_reason,
-        lid or (payload.inhibit_reason is InhibitReason.LID_OPEN and boundary_safety),
-        manual or (payload.inhibit_reason is InhibitReason.MANUAL_OVERRIDE and boundary_safety),
-        safety or (payload.inhibit_reason is InhibitReason.SAFETY and boundary_safety),
-        add,
-        index,
-    )
 
 
 def _validate_framed_frame(
@@ -456,32 +378,6 @@ def _validate_transition(
         add(ReplayIssueCode.FRAME_TRANSITION_MISMATCH, "zero-transition delivery disagrees with start state", index)
 
 
-def _ending_frame_safety(
-    frame_index: int,
-    end_ms: int,
-    inhibit_reason: InhibitReason,
-    result_revision: int,
-    safety_events: Sequence[tuple[int, int, SafetyEventPayload]],
-) -> bool:
-    expected_events = {
-        InhibitReason.LID_OPEN: {SafetyEventType.LID_DETECTED},
-        InhibitReason.MANUAL_OVERRIDE: {SafetyEventType.MANUAL_TAKEOVER},
-        InhibitReason.SAFETY: {
-            SafetyEventType.STOP,
-            SafetyEventType.ERROR,
-            SafetyEventType.TEMPERATURE_GUARD,
-            SafetyEventType.CONTROLLER_FALLBACK,
-            SafetyEventType.CONTROLLER_RECONFIGURE,
-        },
-    }.get(inhibit_reason, set())
-    return any(
-        event_index > frame_index
-        and event_ts_ms == end_ms
-        and event.event in expected_events
-        and event.inhibit_reason is inhibit_reason
-        and event.result_revision == result_revision
-        for event_index, event_ts_ms, event in safety_events
-    )
 
 
 def _validate_inhibit(
@@ -539,7 +435,6 @@ def _validate_allocations(
 
 def _validate_applied_outputs(
     applied: list[tuple[int, AppliedOutputPayload]],
-    fixed_frames: list[tuple[int, FixedCycleFramePayload]],
     framed_frames: list[tuple[int, FramedPulseFramePayload]],
     updates: dict[int, tuple[int, UpdatePayload]],
     ordered: tuple[ControlTraceRecord, ...],
@@ -564,9 +459,6 @@ def _validate_applied_outputs(
                 add(ReplayIssueCode.INVALID_PARTIAL_OUTPUT, "partial output must omit realized combustion load", index)
             if not _replacement_partial(index, payload, ordered):
                 terminal_partials.append(index)
-        update = updates.get(payload.result_revision)
-        if update is not None and update[1].actuation_mode is ActuationMode.FIXED_CYCLE:
-            _reconcile_fixed_applied_output(payload, index, fixed_frames, add)
     _reconcile_framed_applied_outputs(applied, framed_frames, add)
     if len(terminal_partials) > 1:
         for index in terminal_partials[1:]:
@@ -641,38 +533,6 @@ def _validate_applied_source(
         )
 
 
-def _reconcile_fixed_applied_output(
-    payload: AppliedOutputPayload,
-    index: int,
-    fixed_frames: list[tuple[int, FixedCycleFramePayload]],
-    add: IssueAdder,
-) -> None:
-    if (
-        payload.result_revision <= 0
-        or not payload.sample_complete
-        or payload.output_source not in (OutputSource.CONTROLLER, OutputSource.FAN_ASSIST)
-    ):
-        return
-    matching_fixed = [
-        frame
-        for _, frame in fixed_frames
-        if (
-            payload.interval_start_ms <= frame.cycle_start_ms
-            and frame.cycle_end_ms <= payload.interval_end_ms
-            and frame.result_revision == payload.result_revision
-        )
-    ]
-    if not matching_fixed:
-        add(ReplayIssueCode.APPLIED_OUTPUT_MISMATCH, "applied output lacks a contained same-revision frame", index)
-        return
-    duration = sum((frame.cycle_end_ms - frame.cycle_start_ms) / 1000 for frame in matching_fixed)
-    on_time = sum(frame.actual_on_seconds for frame in matching_fixed)
-    if duration and not _duty_close(payload.realized_auger_duty, on_time / duration, duration):
-        add(
-            ReplayIssueCode.APPLIED_OUTPUT_MISMATCH,
-            "applied auger duty disagrees with same-revision delivered on-time",
-            index,
-        )
 
 
 def _reconcile_framed_applied_outputs(
@@ -687,7 +547,7 @@ def _reconcile_framed_applied_outputs(
         for _, payload in applied:
             if (
                 payload.result_revision != frame.result_revision
-                or payload.output_source not in (OutputSource.CONTROLLER, OutputSource.FAN_ASSIST)
+                or payload.output_source is not OutputSource.CONTROLLER
                 or payload.interval_end_ms <= cursor_ms
                 or payload.interval_start_ms >= frame.frame_end_ms
             ):

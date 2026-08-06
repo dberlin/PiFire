@@ -19,7 +19,7 @@ from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
 
-TRACE_SCHEMA_VERSION = 2
+TRACE_SCHEMA_VERSION = 3
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
@@ -126,11 +126,8 @@ class SessionPayload:
     control_period_seconds: PositiveFloat
     model_revision: NonNegativeInt | None
     model_provenance: NonBlankString | None
-    u_min: FiniteFloat | None
-    u_max: FiniteFloat | None
-    hold_cycle_seconds: PositiveFloat | None
-    pulse_slot_seconds: PositiveFloat | None
-    pulse_frame_seconds: PositiveFloat | None
+    pulse_slot_seconds: PositiveFloat
+    pulse_frame_seconds: PositiveFloat
     fan_authority: bool
     fan_pwm_capable: bool
     fan_min_duty: FiniteFloat
@@ -145,29 +142,9 @@ class SessionPayload:
     def validate_authority(self) -> SessionPayload:
         if self.fan_min_duty > self.fan_max_duty:
             raise ValueError("fan_min_duty must not exceed fan_max_duty")
-        if (self.u_min is None) != (self.u_max is None):
-            raise ValueError("u_min and u_max must be present together")
-        if self.u_min is not None and self.u_max is not None and self.u_min > self.u_max:
-            raise ValueError("u_min must not exceed u_max")
-        # Which authority a session declares is a property of its actuation
-        # mode, not of which controller runs: PID-family controllers ask for
-        # framed pulses now, because a fixed cycle floors the auger at u_min and
-        # that floor is a floor on temperature. The fields present ARE the
-        # declaration, so a session carries one set or the other and never both.
-        framed = self.pulse_slot_seconds is not None or self.pulse_frame_seconds is not None
-        fixed = self.hold_cycle_seconds is not None or self.u_min is not None or self.u_max is not None
-        if framed and fixed:
-            raise ValueError("a session declares one actuation authority, not both")
-        if self.controller is ControllerType.MPC and not framed:
-            raise ValueError("MPC session requires pulse timing authority")
-        if framed:
-            if self.pulse_slot_seconds is None or self.pulse_frame_seconds is None:
-                raise ValueError("framed-pulse session requires both pulse slot and frame timing")
-            slots = self.pulse_frame_seconds / self.pulse_slot_seconds
-            if not math.isclose(slots, round(slots), rel_tol=0, abs_tol=1e-9):
-                raise ValueError("pulse frame must be divisible by pulse slot")
-        elif self.hold_cycle_seconds is None or self.u_min is None or self.u_max is None:
-            raise ValueError("fixed-cycle session requires hold_cycle_seconds, u_min, and u_max")
+        slots = self.pulse_frame_seconds / self.pulse_slot_seconds
+        if not math.isclose(slots, round(slots), rel_tol=0, abs_tol=1e-9):
+            raise ValueError("pulse frame must be divisible by pulse slot")
         return self
 
 
@@ -213,11 +190,8 @@ class PidUpdatePayload(_ControlUpdatePayload):
 
     @model_validator(mode="after")
     def validate_actuation_mode(self) -> PidUpdatePayload:
-        # PID-family controllers ask for framed pulses now, so the mode is no
-        # longer fixed by the controller's identity. Both remain durable trace
-        # contract values and a recorded session says which one applied.
-        if self.actuation_mode not in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
-            raise ValueError("PID diagnostics require a supported actuation mode")
+        if self.actuation_mode is not ActuationMode.FRAMED_PULSE:
+            raise ValueError("PID diagnostics require FRAMED_PULSE actuation")
         return self
 
 
@@ -254,11 +228,8 @@ class PidSpUpdatePayload(_ControlUpdatePayload):
 
     @model_validator(mode="after")
     def validate_actuation_mode(self) -> PidSpUpdatePayload:
-        # PID-family controllers ask for framed pulses now, so the mode is no
-        # longer fixed by the controller's identity. Both remain durable trace
-        # contract values and a recorded session says which one applied.
-        if self.actuation_mode not in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
-            raise ValueError("PID-SP diagnostics require a supported actuation mode")
+        if self.actuation_mode is not ActuationMode.FRAMED_PULSE:
+            raise ValueError("PID-SP diagnostics require FRAMED_PULSE actuation")
         return self
 
 
@@ -289,11 +260,8 @@ class MpcUpdatePayload(_ControlUpdatePayload):
 
     @model_validator(mode="after")
     def validate_state_solve_interval_and_actuation_mode(self) -> MpcUpdatePayload:
-        # Hold currently applies MPC's allocation through its fixed-cycle
-        # producer. The later framed scheduler switches only that producer, so
-        # both modes are durable trace contract values.
-        if self.actuation_mode not in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
-            raise ValueError("MPC diagnostics require a supported actuation mode")
+        if self.actuation_mode is not ActuationMode.FRAMED_PULSE:
+            raise ValueError("MPC diagnostics require FRAMED_PULSE actuation")
         if len(self.state_names) != len(self.state_values):
             raise ValueError("state_names and state_values must have equal length")
         if self.solve_start_ms > self.solve_end_ms:
@@ -333,44 +301,6 @@ class AllocationPayload:
         return self
 
 
-@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
-class FixedCycleFramePayload:
-    result_revision: NonNegativeInt
-    raw_requested_duty: FiniteFloat
-    bounded_duty: FiniteFloat
-    u_min: FiniteFloat
-    u_max: FiniteFloat
-    cycle_start_ms: NonNegativeInt
-    cycle_end_ms: NonNegativeInt
-    scheduled_on_seconds: NonNegativeFloat
-    scheduled_off_seconds: NonNegativeFloat
-    actual_on_seconds: NonNegativeFloat
-    actual_start_active: bool
-    transition_count: NonNegativeInt
-    fan_assist_active: bool
-    inhibit_reason: InhibitReason
-    output_active: bool
-    payload_type: Literal["fixed_cycle_frame"] = "fixed_cycle_frame"
-
-    @model_validator(mode="after")
-    def validate_cycle(self) -> FixedCycleFramePayload:
-        if self.u_min > self.u_max:
-            raise ValueError("u_min must not exceed u_max")
-        if self.cycle_start_ms > self.cycle_end_ms:
-            raise ValueError("cycle_start_ms must not exceed cycle_end_ms")
-        duration_seconds = (self.cycle_end_ms - self.cycle_start_ms) / 1000
-        if self.actual_on_seconds > duration_seconds:
-            raise ValueError("actual_on_seconds must not exceed cycle duration")
-        if self.output_active is not (self.actual_start_active ^ bool(self.transition_count % 2)):
-            raise ValueError("fixed-cycle transition parity must match start and end state")
-        if self.transition_count == 0 and not math.isclose(
-            self.actual_on_seconds,
-            duration_seconds if self.actual_start_active else 0.0,
-            rel_tol=0,
-            abs_tol=1e-9,
-        ):
-            raise ValueError("zero-transition fixed-cycle delivery must match start state")
-        return self
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -480,7 +410,6 @@ ControlTracePayload: TypeAlias = Annotated[
     | PidSpUpdatePayload
     | MpcUpdatePayload
     | AllocationPayload
-    | FixedCycleFramePayload
     | FramedPulseFramePayload
     | AppliedOutputPayload
     | SafetyEventPayload
@@ -515,7 +444,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[3] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -615,7 +544,7 @@ def _payload_event_kind(payload: ControlTracePayload) -> TraceEventKind:
         return TraceEventKind.CONTROL_UPDATE
     if isinstance(payload, AllocationPayload):
         return TraceEventKind.ALLOCATION
-    if isinstance(payload, (FixedCycleFramePayload, FramedPulseFramePayload)):
+    if isinstance(payload, FramedPulseFramePayload):
         return TraceEventKind.ACTUATION_FRAME
     if isinstance(payload, AppliedOutputPayload):
         return TraceEventKind.APPLIED_OUTPUT

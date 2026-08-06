@@ -18,7 +18,6 @@ from common.control_trace import (
     ControllerBranch,
     MpcFailureState,
     ControllerType,
-    FixedCycleFramePayload,
     FramedPulseFramePayload,
     InhibitReason,
     ModelEventPayload,
@@ -87,11 +86,8 @@ def _payload_cases():
                 control_period_seconds=2.0,
                 model_revision=None,
                 model_provenance=None,
-                u_min=0.1,
-                u_max=0.9,
-                hold_cycle_seconds=25.0,
-                pulse_slot_seconds=None,
-                pulse_frame_seconds=None,
+                pulse_slot_seconds=2.0,
+                pulse_frame_seconds=20.0,
                 fan_authority=False,
                 fan_pwm_capable=True,
                 fan_min_duty=0.0,
@@ -116,7 +112,7 @@ def _payload_cases():
                 measured_temperature=220.0,
                 raw_output=0.45,
                 requested_output=0.45,
-                actuation_mode=ActuationMode.FIXED_CYCLE,
+                actuation_mode=ActuationMode.FRAMED_PULSE,
                 prior_requested_auger_duty=0.4,
                 prior_realized_auger_duty=0.35,
                 requested_fan_duty=None,
@@ -154,7 +150,7 @@ def _payload_cases():
                 measured_temperature=220.0,
                 raw_output=0.45,
                 requested_output=0.45,
-                actuation_mode=ActuationMode.FIXED_CYCLE,
+                actuation_mode=ActuationMode.FRAMED_PULSE,
                 prior_requested_auger_duty=0.4,
                 prior_realized_auger_duty=0.35,
                 requested_fan_duty=None,
@@ -250,27 +246,6 @@ def _payload_cases():
                 auger_clamp_reason=AllocationClampReason.NONE,
                 fan_clamp_reason=AllocationClampReason.NONE,
                 allocator_revision=1,
-            ),
-        ),
-        (
-            ControllerType.PID,
-            TraceEventKind.ACTUATION_FRAME,
-            FixedCycleFramePayload(
-                result_revision=3,
-                raw_requested_duty=0.5,
-                bounded_duty=0.45,
-                u_min=0.1,
-                u_max=0.9,
-                cycle_start_ms=100,
-                cycle_end_ms=25_100,
-                scheduled_on_seconds=11.25,
-                scheduled_off_seconds=13.75,
-                actual_on_seconds=10.0,
-                actual_start_active=True,
-                transition_count=2,
-                fan_assist_active=False,
-                inhibit_reason=InhibitReason.NONE,
-                output_active=True,
             ),
         ),
         (
@@ -381,9 +356,6 @@ def _mpc_session_payload() -> SessionPayload:
         control_period_seconds=2.0,
         model_revision=7,
         model_provenance="restored",
-        u_min=None,
-        u_max=None,
-        hold_cycle_seconds=None,
         pulse_slot_seconds=2.0,
         pulse_frame_seconds=20.0,
         fan_authority=True,
@@ -411,11 +383,6 @@ def _mpc_update_payload() -> MpcUpdatePayload:
     raise AssertionError("representative MPC update payload is missing")
 
 
-def _fixed_cycle_frame_payload() -> FixedCycleFramePayload:
-    for _, _, payload in _payload_cases():
-        if isinstance(payload, FixedCycleFramePayload):
-            return payload
-    raise AssertionError("representative fixed-cycle frame payload is missing")
 
 
 @pytest.mark.parametrize(("controller", "event_kind", "payload"), _payload_cases())
@@ -470,7 +437,7 @@ def test_non_finite_numeric_payload_values_are_rejected(invalid):
             measured_temperature=220.0,
             raw_output=invalid,
             requested_output=0.45,
-            actuation_mode=ActuationMode.FIXED_CYCLE,
+            actuation_mode=ActuationMode.FRAMED_PULSE,
             prior_requested_auger_duty=0.4,
             prior_realized_auger_duty=0.35,
             requested_fan_duty=None,
@@ -554,26 +521,6 @@ def test_envelope_rejects_mismatched_event_or_controller(record, message):
         (
             lambda: RecorderGapPayload(lost_record_count=1, gap_start_ms=4, gap_end_ms=3),
             "gap",
-        ),
-        (
-            lambda: FixedCycleFramePayload(
-                result_revision=0,
-                raw_requested_duty=0.4,
-                bounded_duty=0.4,
-                u_min=0.0,
-                u_max=1.0,
-                cycle_start_ms=5,
-                cycle_end_ms=4,
-                scheduled_on_seconds=0.0,
-                scheduled_off_seconds=0.0,
-                actual_on_seconds=0.0,
-                actual_start_active=False,
-                transition_count=0,
-                fan_assist_active=False,
-                inhibit_reason=InhibitReason.NONE,
-                output_active=False,
-            ),
-            "cycle",
         ),
         (
             lambda: FramedPulseFramePayload(
@@ -712,23 +659,6 @@ def test_envelope_rejects_empty_sessions_unknown_enums_and_unsupported_versions(
             fan_clamp_reason=AllocationClampReason.NONE,
             allocator_revision=0,
         ),
-        lambda: FixedCycleFramePayload(
-            result_revision=0,
-            raw_requested_duty=0.4,
-            bounded_duty=0.4,
-            u_min=0.0,
-            u_max=1.0,
-            cycle_start_ms=0,
-            cycle_end_ms=10,
-            scheduled_on_seconds=2.0,
-            scheduled_off_seconds=8.0,
-            actual_on_seconds=11.0,
-            actual_start_active=False,
-            transition_count=0,
-            fan_assist_active=False,
-            inhibit_reason=InhibitReason.NONE,
-            output_active=False,
-        ),
     ],
 )
 def test_negative_counts_revisions_and_excess_delivered_time_are_rejected(factory):
@@ -736,112 +666,16 @@ def test_negative_counts_revisions_and_excess_delivered_time_are_rejected(factor
         factory()
 
 
-def test_duration_and_pulse_timing_must_be_nonnegative_and_positive():
-    with pytest.raises(ValidationError):
-        FixedCycleFramePayload(
-            result_revision=0,
-            raw_requested_duty=0.4,
-            bounded_duty=0.4,
-            u_min=0.0,
-            u_max=1.0,
-            cycle_start_ms=0,
-            cycle_end_ms=10,
-            scheduled_on_seconds=-0.1,
-            scheduled_off_seconds=0.0,
-            actual_on_seconds=0.0,
-            actual_start_active=False,
-            transition_count=0,
-            fan_assist_active=False,
-            inhibit_reason=InhibitReason.NONE,
-            output_active=False,
-        )
-    with pytest.raises(ValidationError):
-        FramedPulseFramePayload(
-            result_revision=0,
-            pulse_slot_seconds=0.0,
-            frame_seconds=20.0,
-            frame_start_ms=0,
-            frame_end_ms=20_000,
-            requested_combustion_load=0.4,
-            requested_auger_duty=0.4,
-            credit_before_seconds=0.0,
-            credit_after_seconds=0.0,
-            scheduled_on_seconds=0.0,
-            delivered_on_seconds=0.0,
-            actual_start_active=False,
-            transition_count=0,
-            actual_end_active=False,
-            requested_fan_duty=None,
-            applied_fan_duty=None,
-            skipped=False,
-            stale_command=False,
-            inhibit_reason=InhibitReason.NONE,
-            reset_reason=None,
-        )
 
 
-def test_fixed_cycle_sessions_require_complete_ordered_cycle_authority():
-    session = _pid_session_payload()
-    with pytest.raises(ValidationError, match="hold_cycle_seconds"):
-        replace(session, hold_cycle_seconds=None)
-    with pytest.raises(ValidationError, match="u_min"):
-        replace(session, u_min=None, u_max=None)
-    with pytest.raises(ValidationError, match="u_min"):
-        replace(session, u_min=0.9, u_max=0.1)
 
 
-def test_mpc_session_requires_divisible_pulse_authority():
-    session = _mpc_session_payload()
-    with pytest.raises(ValidationError, match="pulse"):
-        replace(session, pulse_slot_seconds=None)
-    with pytest.raises(ValidationError, match="divisible"):
-        replace(session, pulse_frame_seconds=21.0)
 
 
-def test_controller_updates_accept_either_actuation_mode():
-    """A controller's identity no longer fixes its actuation mode.
-
-    PID-family controllers ask for framed pulses now, because a fixed cycle
-    floors the auger at u_min and that floor is a floor on temperature. Both
-    modes are durable trace contract values for every controller, and it is the
-    recorded session that says which one applied.
-    """
-    pid_update = _pid_update_payload()
-    mpc_update = _mpc_update_payload()
-    for mode in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
-        assert replace(pid_update, actuation_mode=mode).actuation_mode is mode
-        assert replace(mpc_update, actuation_mode=mode).actuation_mode is mode
 
 
-def test_fixed_cycle_frame_records_typed_inhibit_cause_without_boolean_alias():
-    frame = _fixed_cycle_frame_payload()
-    assert frame.inhibit_reason is InhibitReason.NONE
-    assert "inhibited" not in FixedCycleFramePayload.__annotations__
 
 
-def test_current_mpc_fixed_cycle_update_and_frame_round_trip():
-    mpc_update = _mpc_update_payload()
-    current_update = replace(mpc_update, actuation_mode=ActuationMode.FIXED_CYCLE)
-    frame = _fixed_cycle_frame_payload()
-    record = ControlTraceRecord(
-        ts_ms=25_100,
-        session_id="mpc-current",
-        cook_id="cook-current",
-        controller=ControllerType.MPC,
-        event_kind=TraceEventKind.ACTUATION_FRAME,
-        payload=frame,
-    )
-    update_record = ControlTraceRecord(
-        ts_ms=25_000,
-        session_id="mpc-current",
-        cook_id="cook-current",
-        controller=ControllerType.MPC,
-        event_kind=TraceEventKind.CONTROL_UPDATE,
-        payload=current_update,
-    )
-
-    assert ControlTraceRecord.from_db_row(record.to_db_row()) == record
-    assert ControlTraceRecord.from_db_row(update_record.to_db_row()) == update_record
 
 
 @pytest.mark.parametrize("invalid", ["1", True])
@@ -896,31 +730,49 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
     assert ControlTraceRecord.from_db_row(row) == record
 
 
-def test_a_session_declares_exactly_one_actuation_authority():
-    """The fields present ARE the declaration, so a session cannot claim both.
-
-    A framed session carries pulse slot and frame timing and no cycle floor; a
-    fixed-cycle one carries the floor and the cycle. Before PID moved to framed
-    pulses this was keyed on the controller being MPC, which made a framed PID
-    session unrepresentable and let a framed MPC session carry a cycle floor
-    that could not apply to it.
-    """
-    framed = _mpc_session_payload()
-    with pytest.raises(ValidationError, match="one actuation authority"):
-        replace(framed, hold_cycle_seconds=20.0, u_min=0.1, u_max=0.9)
-    with pytest.raises(ValidationError, match="one actuation authority"):
-        replace(framed, u_min=0.1, u_max=0.9)
 
 
-def test_a_pid_session_may_declare_framed_pulse_authority():
-    fixed = _pid_session_payload()
-    framed = replace(
-        fixed,
-        hold_cycle_seconds=None,
-        u_min=None,
-        u_max=None,
-        pulse_slot_seconds=2.0,
-        pulse_frame_seconds=20.0,
+
+def test_schema_three_has_one_framed_trace_contract():
+    assert TRACE_SCHEMA_VERSION == 3
+    assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
+    assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
+    assert "fixed_cycle_frame" not in str(ControlTraceRecord.model_json_schema())
+    assert "FAN_ASSIST" not in OutputSource.__members__
+    session = _pid_session_payload()
+    with pytest.raises(ValidationError):
+        replace(session, pulse_slot_seconds=None)
+    with pytest.raises(ValidationError):
+        replace(session, pulse_frame_seconds=None)
+
+
+@pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP, ControllerType.MPC])
+def test_framed_sessions_round_trip_for_every_controller(controller):
+    payload = replace(_pid_session_payload(), controller=controller)
+    record = ControlTraceRecord(
+        ts_ms=1,
+        session_id="session",
+        controller=controller,
+        event_kind=TraceEventKind.SESSION,
+        payload=payload,
     )
-    assert framed.pulse_frame_seconds == 20.0
-    assert framed.hold_cycle_seconds is None
+
+    assert ControlTraceRecord.from_db_row(record.to_db_row()) == record
+
+
+def test_envelope_rejects_a_framed_payload_owned_by_a_non_mpc_controller():
+    frame = next(payload for _, _, payload in _payload_cases() if isinstance(payload, FramedPulseFramePayload))
+    with pytest.raises(ValidationError, match="framed-pulse records are MPC-only"):
+        ControlTraceRecord(
+            ts_ms=1,
+            session_id="session",
+            controller=ControllerType.PID,
+            event_kind=TraceEventKind.ACTUATION_FRAME,
+            payload=frame,
+        )
+
+
+@pytest.mark.parametrize("payload", [_pid_update_payload, lambda: _payload_cases()[2][2], _mpc_update_payload])
+def test_current_updates_require_framed_pulse(payload):
+    with pytest.raises(ValidationError, match="FRAMED_PULSE"):
+        replace(payload(), actuation_mode=ActuationMode.FIXED_CYCLE)

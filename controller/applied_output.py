@@ -29,7 +29,6 @@ class OutputSource(Enum):
     CONTROLLER = "controller"
     LID_OPEN = "lid_open"
     MANUAL_OVERRIDE = "manual_override"
-    FAN_ASSIST = "fan_assist"
     SEED = "seed"
 
 
@@ -59,7 +58,7 @@ class AppliedOutput:
         return self.source is OutputSource.CONTROLLER
 
 
-def classify_output_source(lid_open, manual_override_active, fan_assist_active):
+def classify_output_source(lid_open, manual_override_active):
     """The reason the auger is at its current duty.
 
     A human toggling the auger during a lid-open pause reads as manual, not as
@@ -69,18 +68,16 @@ def classify_output_source(lid_open, manual_override_active, fan_assist_active):
         return OutputSource.MANUAL_OVERRIDE
     if lid_open:
         return OutputSource.LID_OPEN
-    if fan_assist_active:
-        return OutputSource.FAN_ASSIST
     return OutputSource.CONTROLLER
 
 
-def seed_output(ratio, timestamp, *, lid_open, manual_override_active, fan_assist_active, auger_output):
+def seed_output(ratio, timestamp, *, lid_open, manual_override_active, auger_output):
     """Actuator state that no command produced -- at setup, or after a rebuild.
 
     `auger_output` is the platform's current auger state; an auger that is off
     is applying zero duty whatever the cycle ratio says.
     """
-    source = classify_output_source(lid_open, manual_override_active, fan_assist_active)
+    source = classify_output_source(lid_open, manual_override_active)
     if source is OutputSource.CONTROLLER:
         source = OutputSource.SEED
     return AppliedOutput(

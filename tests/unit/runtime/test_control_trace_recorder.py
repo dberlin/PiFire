@@ -25,6 +25,16 @@ from controller.runtime.control_trace_recorder import (
 )
 
 
+
+class _IncompatiblePrune(Protocol):
+    def __call__(self, before_schema_version: int, *, limit: int) -> int: ...
+
+
+def _no_incompatible_prune(before_schema_version: int, *, limit: int) -> int:
+    _ = before_schema_version, limit
+    return 0
+
+
 class _Prune(Protocol):
     def __call__(self, before_ms: int, *, limit: int) -> int: ...
 
@@ -72,6 +82,7 @@ def _recorder(
     *,
     append: Callable[[tuple[ControlTraceRecord, ...]], None],
     prune: _Prune | None = None,
+    prune_incompatible: _IncompatiblePrune | None = None,
     warning: Callable[[str], None] | None = None,
     monotonic_clock: _Clock | None = None,
     wall_clock: _Clock | None = None,
@@ -83,6 +94,7 @@ def _recorder(
     return ControlTraceRecorder(
         append=append_batch,
         prune=prune or _no_prune,
+        prune_incompatible=prune_incompatible or _no_incompatible_prune,
         warning=warning or _no_warning,
         monotonic_clock=monotonic_clock or _Clock(0),
         wall_clock=wall_clock or _Clock(RETENTION_PERIOD_MS),
@@ -291,3 +303,46 @@ def test_close_makes_one_best_effort_flush_attempt_without_retrying():
     recorder.close()
 
     assert attempts == [(event,)]
+
+
+def test_incompatible_pruning_is_bounded_backlogged_and_does_not_block_flush():
+    incompatible_calls: list[tuple[int, int]] = []
+    batches: list[tuple[ControlTraceRecord, ...]] = []
+    delete_counts = iter((PRUNE_BATCH_SIZE, 0))
+
+    def prune_incompatible(before_schema_version: int, *, limit: int) -> int:
+        incompatible_calls.append((before_schema_version, limit))
+        return next(delete_counts)
+
+    recorder = _recorder(append=batches.append, prune_incompatible=prune_incompatible)
+    event = _record(10)
+    recorder.record(event)
+    recorder.flush_due(FLUSH_INTERVAL_MS)
+
+    assert batches == [(event,)]
+    assert incompatible_calls == [(3, PRUNE_BATCH_SIZE), (3, PRUNE_BATCH_SIZE)]
+
+
+def test_incompatible_prune_failure_warns_once_retries_and_recovers():
+    warnings: list[str] = []
+    calls = 0
+
+    def prune_incompatible(before_schema_version: int, *, limit: int) -> int:
+        nonlocal calls
+        _ = before_schema_version, limit
+        calls += 1
+        if calls == 1:
+            raise OSError("database unavailable")
+        return 0
+
+    recorder = _recorder(
+        append=_append_nothing,
+        prune_incompatible=prune_incompatible,
+        warning=warnings.append,
+    )
+    recorder.flush_due(FLUSH_INTERVAL_MS)
+
+    assert calls == 2
+    assert len(warnings) == 2
+    assert "failed" in warnings[0].lower()
+    assert "recovered" in warnings[1].lower()
