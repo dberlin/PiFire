@@ -1,6 +1,16 @@
+from dataclasses import replace
+
 import pytest
 
-from common.control_trace import ActuationMode, ControllerType, InhibitReason, SafetyEventType, TraceEventKind
+from common.control_trace import (
+    ActuationMode,
+    ControllerType,
+    InhibitReason,
+    OutputSource,
+    ResultStaleState,
+    SafetyEventType,
+    TraceEventKind,
+)
 from controller.runtime.logic.pulse import PulseResetReason
 from controller.runtime.runner import ControllerUpdateResult
 
@@ -173,18 +183,22 @@ def test_deferred_mpc_to_pid_swap_keeps_one_framed_scheduler(hold_cycle):
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.ctx.store._settings["controller"]["selected"] = "pid"
+    hold.state.metrics = {"id": "deferred-generation-accounting", "augerontime": 0.0}
     hold.control["controller_update"] = True
     status = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
-
     hold.on_tick(2.0, 200.0, status)
-    assert hold._pulse_scheduler is not None
-    assert hold._controller_name == "mpc"
+    hold._advance_framed_pulse(2.0, True)
+
+    assert hold.grill.get_output_status()["auger"] is True
 
     runner.complete_swap()
-    hold.on_tick(4.0, 200.0, status)
+    hold.on_tick(4.0, 200.0, _status(hold))
+
     assert hold._pulse_scheduler is not None
     assert hold.state.cycle.cycle_time == 0.0
     assert hold._controller_name == "pid"
+    assert hold.grill.get_output_status()["auger"] is False
+    assert hold.state.metrics["augerontime"] == 2.0
 
 
 def test_missed_frames_are_recorded_as_skipped_without_catchup(hold_cycle, monkeypatch):
@@ -259,3 +273,60 @@ def test_reset_keeps_cumulative_delivery_baselines_for_feedback_and_metrics(hold
 
     assert hold.state.metrics["augerontime"] == 12.0
     assert runner.applied[-1].ratio == 0.5
+
+
+def test_stale_result_preempts_hardware_and_discards_scheduler_credit(hold_cycle):
+    fresh = _output(1, 0.9)
+    stale = replace(fresh, stale_state=ResultStaleState.STALE)
+    runner = FakeControllerRunner(period=1.0).script([fresh, stale])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+
+    hold.on_tick(2.0, 200.0, _status(hold))
+    assert hold.grill.get_output_status()["auger"] is True
+    hold.on_tick(4.0, 200.0, _status(hold))
+
+    assert hold.grill.get_output_status()["auger"] is False
+    assert hold._pulse_scheduler.advance(0.9, 6.0, False).reset_reason is not None
+
+
+def test_completed_frame_feedback_uses_the_completed_frame_request_bound_and_revision(hold_cycle):
+    runner = FakeControllerRunner()
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    controller = hold.state.controller
+    controller.pulse_result_revision = 1
+    controller.pulse_requested_duty = 0.1
+    controller.pulse_maximum_duty = 0.5
+    hold._advance_framed_pulse(0.0, False)
+    hold._advance_framed_pulse(0.0, True)
+    hold._advance_framed_pulse(2.0, True)
+    hold._advance_framed_pulse(2.0, False)
+    controller.pulse_result_revision = 2
+    controller.pulse_requested_duty = 0.9
+    controller.pulse_maximum_duty = 1.0
+    runner.applied.clear()
+
+    controller.trace_prior_output_source = OutputSource.CONTROLLER
+    hold._advance_framed_pulse(20.0, False)
+
+    assert runner.applied[-1].requested == 0.1
+    assert hold.state.controller.trace_prior_combustion_load == 0.2
+    assert hold.state.controller.trace_interval_result_revision == 1
+
+
+def test_teardown_reports_final_observed_pulse_delivery_before_reset(hold_cycle):
+    runner = FakeControllerRunner()
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    controller = hold.state.controller
+    controller.pulse_result_revision = 1
+    controller.pulse_requested_duty = 0.1
+    hold._advance_framed_pulse(0.0, False)
+    runner.applied.clear()
+    hold.ctx.clock.advance(2.0)
+    hold._advance_framed_pulse(0.0, True)
+
+    hold.teardown(200.0)
+
+    assert any(applied.requested == 0.1 and applied.ratio == 1.0 for applied in runner.applied)

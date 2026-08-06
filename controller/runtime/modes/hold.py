@@ -142,6 +142,7 @@ class HoldMode(ControlMode):
         controller.pulse_frame_requested_auger_duty = 0.0
         controller.pulse_frame_requested_fan_duty = None
         controller.pulse_frame_applied_fan_duty = None
+        controller.pulse_frame_maximum_duty = 1.0
         controller.pulse_frame_stale_command = False
         controller.pulse_feedback_start_s = self.ctx.clock.now()
         controller.pulse_feedback_delivered_on_s = 0.0
@@ -154,6 +155,7 @@ class HoldMode(ControlMode):
         controller.pulse_frame_combustion_load = controller.pulse_combustion_load
         controller.pulse_frame_requested_auger_duty = controller.pulse_requested_duty
         controller.pulse_frame_requested_fan_duty = controller.pulse_requested_fan_duty
+        controller.pulse_frame_maximum_duty = controller.pulse_maximum_duty
         controller.pulse_frame_applied_fan_duty = controller.fan_duty if controller.controls_fan else None
         controller.pulse_frame_stale_command = controller.pulse_stale_command
 
@@ -209,11 +211,14 @@ class HoldMode(ControlMode):
         scheduler = self._pulse_scheduler
         if scheduler is None:
             raise RuntimeError("framed actuation requires a pulse scheduler")
-        previous_frame_revision = self.state.controller.pulse_frame_result_revision
-        decision = scheduler.advance(self.state.controller.pulse_requested_duty, now, actual_auger_on)
+        controller = self.state.controller
+        previous_frame_revision = controller.pulse_frame_result_revision
+        completed_request = controller.pulse_frame_requested_auger_duty
+        completed_maximum_duty = controller.pulse_frame_maximum_duty
+        decision = scheduler.advance(controller.pulse_requested_duty, now, actual_auger_on)
         self._record_pulse_delivery(decision.delivered_on_s)
         for frame in decision.completed_frames:
-            self._trace_pulse_frame(frame, InhibitReason.NONE, self.state.controller.pulse_frame_result_revision)
+            self._trace_pulse_frame(frame, InhibitReason.NONE, controller.pulse_frame_result_revision)
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._latch_pulse_frame()
             transition_at_s: float | None = None
@@ -221,13 +226,19 @@ class HoldMode(ControlMode):
             if decision.completed_frames:
                 transition_at_s = decision.completed_frames[-1].ended_at_s
                 delivered_at_transition_s -= decision.frame_delivered_on_s
-            elif previous_frame_revision == 0 and self.state.controller.pulse_frame_result_revision > 0:
+            elif previous_frame_revision == 0 and controller.pulse_frame_result_revision > 0:
                 transition_at_s = now
+            if not decision.completed_frames:
+                previous_frame_revision = controller.pulse_frame_result_revision
+                completed_request = controller.pulse_frame_requested_auger_duty
+                completed_maximum_duty = controller.pulse_frame_maximum_duty
             if transition_at_s is not None:
                 self._report_framed_feedback(
                     transition_at_s,
                     delivered_at_transition_s,
                     completed_revision=previous_frame_revision,
+                    completed_request=completed_request,
+                    completed_maximum_duty=completed_maximum_duty,
                 )
         if apply_transition and decision.transition is not None:
             if decision.transition.command_on:
@@ -236,7 +247,14 @@ class HoldMode(ControlMode):
                 self.grill.auger_off()
         return decision
 
-    def _reset_framed_pulse(self, reason: PulseResetReason, now: float, inhibit: InhibitReason) -> None:
+    def _reset_framed_pulse(
+        self,
+        reason: PulseResetReason,
+        now: float,
+        inhibit: InhibitReason,
+        *,
+        report_feedback: bool = False,
+    ) -> None:
         scheduler = self._pulse_scheduler
         if scheduler is None:
             return
@@ -252,6 +270,8 @@ class HoldMode(ControlMode):
         self._record_pulse_delivery(decision.delivered_on_s)
         for completed in decision.completed_frames:
             self._trace_pulse_frame(completed, inhibit, self.state.controller.pulse_frame_result_revision)
+        if report_feedback:
+            self._report_framed_feedback(now, decision.delivered_on_s)
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._latch_pulse_frame()
         frame = scheduler.reset(reason)
@@ -264,7 +284,13 @@ class HoldMode(ControlMode):
         self.grill.auger_off()
 
     def _report_framed_feedback(
-        self, now: float, delivered_on_s: float, *, completed_revision: int | None = None
+        self,
+        now: float,
+        delivered_on_s: float,
+        *,
+        completed_revision: int | None = None,
+        completed_request: float | None = None,
+        completed_maximum_duty: float | None = None,
     ) -> None:
         controller = self.state.controller
         start = controller.pulse_feedback_start_s
@@ -276,6 +302,15 @@ class HoldMode(ControlMode):
         if elapsed <= 0:
             return
         realized_duty = max(0.0, min(1.0, (delivered_on_s - controller.pulse_feedback_delivered_on_s) / elapsed))
+        requested = (
+            controller.pulse_frame_requested_auger_duty if completed_request is None else completed_request
+        )
+        maximum_duty = (
+            controller.pulse_frame_maximum_duty
+            if completed_maximum_duty is None
+            else completed_maximum_duty
+        )
+        revision = controller.pulse_frame_result_revision if completed_revision is None else completed_revision
         applied = AppliedOutput(
             ratio=realized_duty,
             source=classify_output_source(
@@ -284,15 +319,13 @@ class HoldMode(ControlMode):
                 fan_assist_active=False,
             ),
             timestamp=now,
-            requested=controller.pulse_frame_requested_auger_duty,
+            requested=requested,
         )
-        inverse_combustion_load = max(0.0, min(1.0, realized_duty / controller.pulse_maximum_duty))
+        inverse_combustion_load = max(0.0, min(1.0, realized_duty / maximum_duty))
         measured_source = controller.trace_prior_output_source in (OutputSource.CONTROLLER, OutputSource.FAN_ASSIST)
         sample_complete = controller.trace_prior_output_source is OutputSource.SEED or measured_source
         if measured_source:
-            controller.trace_interval_result_revision = (
-                controller.pulse_frame_result_revision if completed_revision is None else completed_revision
-            )
+            controller.trace_interval_result_revision = revision
             controller.trace_prior_requested_auger_duty = (
                 applied.requested if applied.requested is not None else applied.ratio
             )
@@ -303,7 +336,7 @@ class HoldMode(ControlMode):
         self._set_output(
             applied,
             now,
-            producing_revision=controller.pulse_frame_result_revision,
+            producing_revision=revision,
             sample_complete=sample_complete,
         )
         if measured_source:
@@ -847,6 +880,7 @@ class HoldMode(ControlMode):
         import control as _control
 
         
+
         self._trace_safety(
             SafetyEventType.CONTROLLER_RECONFIGURE,
             now,
@@ -854,6 +888,7 @@ class HoldMode(ControlMode):
             InhibitReason.NONE,
         )
         self._trace_complete_applied_interval(now, sample_complete=False, realized_combustion_load=None)
+        self._reset_framed_pulse(PulseResetReason.MODE_CHANGE, now, InhibitReason.SAFETY)
         _control.eventLogger.info("Controller reinitialized with updated settings")
         controller_state = self.state.controller
         self._trace_session_id = None
@@ -907,7 +942,12 @@ class HoldMode(ControlMode):
             ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
             self.settings = ctx.store.read_settings()
             settings = self.settings
-            self._reset_framed_pulse(PulseResetReason.MODE_CHANGE, now, InhibitReason.SAFETY)
+            self._reset_framed_pulse(
+                PulseResetReason.MODE_CHANGE,
+                now,
+                InhibitReason.SAFETY,
+                report_feedback=False,
+            )
             self._controller_status = self._runner.reconfigure(settings, control, logger=ctx.control_log)
             if self._controller_status == "Active" and (
                 getattr(self._runner, "configuration_revision", lambda: 0)() != self._runner_configuration_revision
@@ -935,6 +975,7 @@ class HoldMode(ControlMode):
             self._pulse_frame_seconds()
         )
         framed_feedback_due = False
+        pulse_inhibited = False
         if (now - self.state.controller.cycle_start) > controller_interval:
             result = self._runner.latest()
             if isinstance(result.diagnostics, MpcTraceDiagnostics):
@@ -955,6 +996,14 @@ class HoldMode(ControlMode):
                     control["duty_cycle"] = controller.fan_duty
                     ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
             controller.pulse_stale_command = result.stale_state is ResultStaleState.STALE
+            if controller.pulse_stale_command:
+                self._reset_framed_pulse(
+                    PulseResetReason.SAFETY,
+                    now,
+                    InhibitReason.SAFETY,
+                    report_feedback=True,
+                )
+                pulse_inhibited = True
             self.state.cycle.ratio = self.state.cycle.raw_ratio = controller.pulse_requested_duty
             self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
             self._trace_update(result, now, controller_interval)
@@ -968,7 +1017,7 @@ class HoldMode(ControlMode):
             and settings["cycle_data"]["LidOpenDetectEnabled"]
             and ptemp < control["primary_setpoint"] * ((100 - settings["cycle_data"]["LidOpenThreshold"]) / 100)
         )
-        if self.state.manual_override["auger"] < now and not self.state.lid.open_detected:
+        if not pulse_inhibited and self.state.manual_override["auger"] < now and not self.state.lid.open_detected:
             decision = self._advance_framed_pulse(
                 now,
                 current_output_status["auger"],
@@ -1202,8 +1251,13 @@ class HoldMode(ControlMode):
             getattr(self, "_trace_recorder", None) is not None or getattr(self, "_trace_session_id", None) is not None
         )
         now = self.ctx.clock.now()
-        if first_trace_teardown:
-            self._report_framed_feedback(now, self.state.controller.pulse_metrics_delivered_on_s)
+        if self._pulse_scheduler is not None and self._runner is not None:
+            decision = self._advance_framed_pulse(
+                now,
+                self.grill.get_output_status()["auger"],
+                apply_transition=False,
+            )
+            self._report_framed_feedback(now, decision.delivered_on_s)
         self._reset_framed_pulse(PulseResetReason.MODE_CHANGE, now, InhibitReason.SAFETY)
         try:
             if self._runner is not None:

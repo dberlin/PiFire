@@ -52,6 +52,7 @@ class ControllerState:
     pulse_frame_requested_auger_duty: float = 0.0
     pulse_frame_requested_fan_duty: float | None = None
     pulse_frame_applied_fan_duty: float | None = None
+    pulse_frame_maximum_duty: float = 1.0
     pulse_frame_stale_command: bool = False
     pulse_feedback_start_s: float | None = None
     pulse_feedback_delivered_on_s: float = 0.0
