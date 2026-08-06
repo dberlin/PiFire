@@ -182,29 +182,7 @@ def _install_recorder(monkeypatch):
     return recorder
 
 
-def test_pid_hold_records_session_update_applied_output_and_flushes_in_cook(hold_cycle, monkeypatch):
-    recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0).script([_pid_result()])
-    mode = hold_cycle(runner, controller="pid")
-    mode.setup()
-    mode.state.metrics = {"id": "cook-pid"}
-    mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
 
-    assert [record.event_kind for record in recorder.records] == [
-        TraceEventKind.SESSION,
-        TraceEventKind.APPLIED_OUTPUT,
-        TraceEventKind.CONTROL_UPDATE,
-    ]
-    assert all(record.cook_id == "cook-pid" for record in recorder.records)
-    seed = recorder.records[1]
-    update = recorder.records[2]
-    assert update.controller is ControllerType.PID
-    assert seed.payload.result_revision == 0
-    assert seed.payload.output_source is OutputSource.SEED
-    assert update.payload.result_revision == 1
-    assert update.payload.control_period_seconds == 1.0
-    assert seed.payload.realized_auger_duty != runner.applied[-1].ratio
-    assert recorder.flushes
 
 
 def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revision(hold_cycle, monkeypatch):
@@ -414,27 +392,7 @@ def test_mpc_trace_marks_the_first_fresh_result_after_runner_staleness(hold_cycl
     assert updates[1].recovered is True
 
 
-def test_hold_records_branch_local_safety_and_closes_recorder_once(hold_cycle, monkeypatch):
-    recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0).script([_pid_result()])
-    mode = hold_cycle(runner, controller="pid")
-    mode.setup()
-    mode.state.metrics = {"id": "cook-safety"}
-    mode._ensure_trace_session(1.0)
 
-    mode._on_manual_output("auger", True)
-    mode._on_manual_release("auger", 2.0)
-    mode._on_safety_event("temperature_guard", 3.0)
-    mode.teardown(220.0)
-    mode.teardown(220.0)
-    assert [
-        record.payload.event.value for record in recorder.records if record.event_kind is TraceEventKind.SAFETY_EVENT
-    ] == [
-        "manual_takeover",
-        "manual_release",
-        "temperature_guard",
-    ]
-    assert recorder.closed == 1
 
 
 def test_mpc_trace_preserves_a_zero_raw_policy_load(hold_cycle, monkeypatch):
@@ -451,60 +409,10 @@ def test_mpc_trace_preserves_a_zero_raw_policy_load(hold_cycle, monkeypatch):
     assert update.raw_output == 0.0
 
 
-def test_hold_emits_one_incomplete_terminal_interval(hold_cycle, monkeypatch):
-    recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0).script([_pid_result()])
-    mode = hold_cycle(runner, controller="pid")
-    mode.setup()
-    mode.state.metrics = {"id": "cook-terminal"}
-    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
-
-    mode.on_tick(2.0, 220.0, output)
-    mode.ctx.clock.advance(3.0)
-    mode.teardown(220.0)
-    mode.teardown(220.0)
-    terminal = [
-        record.payload
-        for record in recorder.records
-        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and not record.payload.sample_complete
-    ]
-
-    assert len(terminal) == 1
-    assert terminal[0].realized_combustion_load is None
 
 
-def test_hold_flushes_typed_rows_to_sqlite_before_teardown(hold_cycle, monkeypatch, ds):
-    import controller.runtime.modes.hold as hold_module
 
-    recorder = ControlTraceRecorder(
-        monotonic_clock=lambda: 0,
-        wall_clock=lambda: 40 * 24 * 60 * 60 * 1_000,
-    )
-    monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: recorder)
-    monkeypatch.setattr(hold_module.time, "monotonic_ns", lambda: 5_000_000_000)
-    runner = FakeControllerRunner(period=1.0).script([_pid_result()])
-    mode = hold_cycle(runner, controller="pid")
-    mode.setup()
-    mode.state.metrics = {"id": "cook-persisted"}
-    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
-    try:
-        mode.on_tick(2.0, 220.0, output)
-        assert mode._trace_session_id is not None
-        records = read_control_trace_session(mode._trace_session_id)
-
-        assert [record.event_kind for record in records] == [
-            TraceEventKind.SESSION,
-            TraceEventKind.APPLIED_OUTPUT,
-            TraceEventKind.CONTROL_UPDATE,
-        ]
-        assert records[0].cook_id == "cook-persisted"
-        assert records[1].payload.result_revision == 0
-        assert records[1].payload.output_source is OutputSource.SEED
-        assert records[2].payload.result_revision == 1
-    finally:
-        mode.ctx.clock.advance(2.0)
-        mode.teardown(220.0)
 
 
 def test_pid_sp_completed_update_records_exact_typed_fields_and_branch(hold_cycle, monkeypatch):
@@ -614,62 +522,13 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     )
 
 
-def test_fixed_cycle_frame_uses_new_bounded_ratio_for_its_scheduled_times(hold_cycle, monkeypatch):
-    recorder = _install_recorder(monkeypatch)
-    mode = hold_cycle(FakeControllerRunner(period=1.0), cycle_data_extra={"HoldCycleTime": 20.0}, controller="pid")
-    mode.setup()
-    mode.state.metrics = {"id": "cook-cycle"}
-    mode._ensure_trace_session(2.0)
-    mode.state.cycle.ratio = 0.9
-
-    mode._trace_start_frame(2.0, raw_duty=0.9, bounded_duty=0.25, revision=3, active=False)
-    mode._trace_finish_frame(5.0)
-
-    (frame,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
-    assert (frame.bounded_duty, frame.scheduled_on_seconds, frame.scheduled_off_seconds) == (0.25, 5.0, 15.0)
-    assert frame.actual_start_active is False
 
 
-def test_manual_auger_takeover_finishes_the_active_frame_with_actual_delivery(hold_cycle, monkeypatch):
-    recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0)
-    mode = hold_cycle(runner, controller="pid")
-    mode.setup()
-    mode.state.metrics = {"id": "cook-manual"}
-    mode._ensure_trace_session(2.0)
-    mode._trace_start_frame(2.0, raw_duty=0.5, bounded_duty=0.5, revision=4, active=True)
-    mode._last_now = 5.0
-
-    mode._on_manual_output("auger", True)
-
-    (frame,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
-    assert (frame.actual_on_seconds, frame.transition_count, frame.inhibit_reason.value, frame.output_active) == (
-        3.0,
-        0,
-        "manual_override",
-        True,
-    )
-    assert frame.actual_start_active is True
-    assert runner.applied[-1].ratio == 1.0
 
 
-def test_start_active_frame_records_one_transition_when_auger_turns_off(hold_cycle, monkeypatch):
-    recorder = _install_recorder(monkeypatch)
-    mode = hold_cycle(FakeControllerRunner(period=1.0), controller="pid")
-    mode.setup()
-    mode.state.metrics = {"id": "cook-start-active-off"}
-    mode._ensure_trace_session(2.0)
-    mode._trace_start_frame(2.0, raw_duty=0.5, bounded_duty=0.5, revision=4, active=True)
-    mode._on_auger_off(5.0)
-    mode._trace_finish_frame(5.0)
 
-    (frame,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
-    assert (frame.actual_start_active, frame.actual_on_seconds, frame.transition_count, frame.output_active) == (
-        True,
-        3.0,
-        1,
-        False,
-    )
+
+
 
 
 def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle, monkeypatch):
@@ -904,28 +763,13 @@ def _run_first_loop_safety_trace(hold_cycle, monkeypatch, *, control_mode=None, 
     ]
 
 
-def test_first_loop_stop_persists_session_then_typed_safety_through_fake_device_run(hold_cycle, monkeypatch):
-    records = _run_first_loop_safety_trace(hold_cycle, monkeypatch, control_mode="Stop")
-
-    assert [record.event_kind for record in records] == [TraceEventKind.SESSION, TraceEventKind.SAFETY_EVENT]
-    assert records[0].session_id == records[1].session_id
-    assert records[1].payload.event.value == "stop"
 
 
-def test_first_loop_error_persists_session_then_typed_safety_through_fake_device_run(hold_cycle, monkeypatch):
-    records = _run_first_loop_safety_trace(hold_cycle, monkeypatch, control_mode="Error")
-
-    assert [record.event_kind for record in records] == [TraceEventKind.SESSION, TraceEventKind.SAFETY_EVENT]
-    assert records[0].session_id == records[1].session_id
-    assert records[1].payload.event.value == "error"
 
 
-def test_first_loop_universal_temperature_guard_persists_typed_safety_through_fake_device_run(hold_cycle, monkeypatch):
-    records = _run_first_loop_safety_trace(hold_cycle, monkeypatch, guard_temperature=1_000.0)
 
-    assert [record.event_kind for record in records] == [TraceEventKind.SESSION, TraceEventKind.SAFETY_EVENT]
-    assert records[0].session_id == records[1].session_id
-    assert records[1].payload.event.value == "temperature_guard"
+
+
 
 
 @pytest.mark.parametrize(

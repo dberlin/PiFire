@@ -539,41 +539,7 @@ def test_hold_pwm_duty_from_temp_profile():
     assert ("set_duty_cycle", (75,)) in result.grill_calls
 
 
-def test_hold_fan_assist_cycles_fan_via_pid_path():
-    # FanPidEnabled + pwm_control=False + a controller ratio below u_min: the
-    # auger floors to u_min and the Fan-PID-assist block (control.py ~749-783)
-    # takes over, cycling the fan on/off by fan_assist_times() rather than
-    # holding it continuously on. A scripted FakeControllerRunner keeps this
-    # deterministic rather than depending on the real PID's transient math.
-    settings = base_settings()
-    settings["platform"]["dc_fan"] = True
-    settings["cycle_data"]["FanPidEnabled"] = True
-    settings["cycle_data"]["HoldCycleTime"] = 0.3  # small -> small fan on/off times
-    settings["cycle_data"]["u_min"] = 0.1
-    control_data = base_control(mode="Hold")
-    control_data["pwm_control"] = False
-    control_data["primary_setpoint"] = 225
-    probes = FakeProbes().script([230] * 60)  # >= setpoint: arms target_temp_achieved
-    grill = FakeGrillPlatform(dc_fan=True)
-    runner = FakeControllerRunner(period=0.01).script(
-        [ControllerUpdateResult(cycle_ratio=0.02, fan=None, input_temperature=0.0)] * 60
-    )
-    result = run_mode(
-        "Hold",
-        settings=settings,
-        control_data=control_data,
-        pellet_db=base_pellet_db(),
-        probes=probes,
-        probe_cap=50,
-        grill=grill,
-        runner=runner,
-    )
-    fan_calls = [c[0] for c in result.grill_calls if c[0] in ("fan_on", "fan_off")]
-    # More than the single setup fan_on: the assist path is actively cycling.
-    assert fan_calls.count("fan_on") >= 2
-    assert fan_calls.count("fan_off") >= 2
-    assert fan_calls[0] == "fan_on"  # mode setup turns fan on first
-    assert "fan_off" in fan_calls[1:]  # then the PID-fan-assist path cycles it
+
 
 
 def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
@@ -598,7 +564,16 @@ def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
     grill = FakeGrillPlatform(dc_fan=True)
     runner = FakeControllerRunner(period=0.01, commands_fan=True).script(
         [
-            ControllerUpdateResult(cycle_ratio=0.5, fan={"duty": 42}, input_temperature=0.0),
+            ControllerUpdateResult(
+                cycle_ratio=0.5,
+                fan={"duty": 42},
+                input_temperature=0.0,
+                revision=1,
+                solve_start_monotonic=0.0,
+                solve_end_monotonic=0.0,
+                solve_duration_seconds=0.0,
+                completed_wall_time=0.0,
+            ),
             ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0),
             ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0),
             ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0),
