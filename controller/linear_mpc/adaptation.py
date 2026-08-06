@@ -581,8 +581,6 @@ class OnlineAdaptation:
         previous = None if previous_payload is None else loader(_mapping(previous_payload, "previous_incumbent"))
         if previous is not None and cls.model_digest(previous) != previous_digest:
             raise ValueError("previous incumbent digest does not match model")
-        if not legacy and isinstance(incumbent, ScheduledARX) and isinstance(previous, ScheduledARX):
-            raise ValueError("active ARX rollback owner must be grey-box")
         if legacy and isinstance(incumbent, ScheduledARX) and not isinstance(challenger, ScheduledARX):
             # Before role ownership was explicit, an active ARX kept its
             # grey-box fallback in the challenger slot. Give the active ARX

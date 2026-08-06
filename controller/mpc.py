@@ -322,8 +322,6 @@ def _online_evaluation(value):
         or any(not isinstance(reason, str) or not reason.strip() for reason in reasons)
     ):
         raise ValueError("evaluation rejection_reasons are invalid")
-    if (not reasons) != (consecutive_wins > 0):
-        raise ValueError("evaluation wins must match rejection evidence")
     if value["promoted"] and reasons:
         raise ValueError("promoted evaluation cannot have rejection reasons")
     for key in (
@@ -385,12 +383,14 @@ def _online_evaluation(value):
     if not isinstance(scores, (list, tuple)) or len(scores) != 2:
         raise ValueError("evaluation horizon scores are invalid")
     scored_horizons = set()
+    complete_horizon_evidence = True
     for index, score in enumerate(scores):
         if not isinstance(score, Mapping) or set(score) != _HORIZON_EVIDENCE_KEYS:
             raise ValueError(f"horizon score {index} has an invalid schema")
         horizon = _online_horizon(score["horizon_steps"], f"horizon score {index} horizon")
         scored_horizons.add(horizon)
         horizon_sample_count = _online_count(score["sample_count"], f"horizon score {index} sample_count")
+        complete_horizon_evidence = complete_horizon_evidence and horizon_sample_count > 0
         if horizon_sample_count > 0:
             incumbent = _online_nonnegative_score(score["incumbent_rmse_c"], f"horizon score {index} incumbent_rmse_c")
             challenger = _online_nonnegative_score(
@@ -408,6 +408,10 @@ def _online_evaluation(value):
             raise ValueError("evaluation horizon score is inconsistent")
     if scored_horizons != {3, 15}:
         raise ValueError("evaluation horizon scores must contain 3 and 15")
+    if not reasons and consecutive_wins == 0:
+        raise ValueError("successful evaluation must advance the win count")
+    if reasons and complete_horizon_evidence and consecutive_wins != 0:
+        raise ValueError("rejected complete evaluation must reset the win count")
     _online_nonnegative_score(value["evaluation_duration_ms"], "evaluation_duration_ms")
     return copy.deepcopy(dict(value))
 
@@ -1357,7 +1361,7 @@ class Controller(ControllerBase):
                     if actual_kind == "scheduled-arx":
                         if (
                             not isinstance(restored.challenger, ScheduledARX)
-                            or not isinstance(previous, _GreyBoxAdaptiveModel)
+                            or previous is None
                             or restored.previous_incumbent_digest is None
                         ):
                             raise ValueError("active ARX lacks a valid rollback owner")

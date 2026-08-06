@@ -958,10 +958,11 @@ def _chronological_real_mak_row(arm: str) -> dict[str, Any]:
     if len(frames) != len(record.q):
         raise RuntimeError("real-MAK frame reconstruction changed the record length")
     for index, frame in enumerate(frames):
-        normalized_q = float(record.q[index])
+        reconstructed_duty = float(record.q[index])
+        normalized_q = normalized_load_from_auger_duty(reconstructed_duty, u_max=controller.u_max)
         controller.set_output(
             AppliedOutput(
-                ratio=normalized_q * controller.u_max,
+                ratio=reconstructed_duty,
                 source=OutputSource.SEED,
                 timestamp=frame.frame_end_s,
                 requested=normalized_q,

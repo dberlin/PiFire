@@ -5,8 +5,9 @@ from copy import deepcopy
 
 import pytest
 
-from controller.mpc import _DEFAULTS, Controller
 from controller.linear_mpc.adaptation import OnlineAdaptation
+from controller.linear_mpc.arx import ScheduledARX
+from controller.mpc import _DEFAULTS, Controller
 
 #: The schema this controller writes and is the only one it will read back.
 #: A literal, not `Controller._MODEL_SCHEMA`: importing it would move every
@@ -516,6 +517,52 @@ def test_snapshot_restore_round_trips_an_exact_completed_evaluation_audit_trail(
     )
 
 
+def test_snapshot_restore_preserves_a_win_across_incomplete_horizon_evidence():
+    snapshot = _snapshot_with_completed_evaluation()
+    evaluation = snapshot["online_adaptation"]["last_evaluation"]
+    short_origin = evaluation["completed_origins"][:1]
+    evaluation.update(
+        {
+            "consecutive_wins": 1,
+            "rejection_reasons": ("prediction",),
+            "sample_count": 1,
+            "completed_origins": short_origin,
+            "window_end_s": short_origin[0]["completion_time_s"],
+        }
+    )
+    evaluation["horizon_scores"][1].update(
+        {
+            "incumbent_rmse_c": None,
+            "challenger_rmse_c": None,
+            "sample_count": 0,
+        }
+    )
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(snapshot) is True
+    restored_evaluation = restored.get_status()["adaptation"]["last_evaluation_outcome"]
+    assert restored_evaluation["rejection_reasons"] == ("prediction",)
+    assert restored_evaluation["consecutive_wins"] == 1
+
+
+def test_v2_active_arx_snapshot_accepts_a_digest_valid_arx_rollback_owner():
+    snapshot = _active_online_snapshot()
+    ownership = snapshot["online_adaptation"]
+    rollback_snapshot = deepcopy(ownership["challenger"])
+    rollback_owner = ScheduledARX.from_snapshot(rollback_snapshot)
+    ownership["previous_incumbent"] = rollback_snapshot
+    ownership["previous_incumbent_digest"] = OnlineAdaptation.model_digest(rollback_owner)
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(snapshot) is True
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+    assert isinstance(restored._online._previous_incumbent, ScheduledARX)
+    assert restored._online.rollback() is True
+    assert isinstance(restored._online.incumbent, ScheduledARX)
+    assert restored._online.lag_warmup_remaining == restored._online.policy.max_delay_steps
+
 @pytest.mark.parametrize(
     ("origin_index", "field", "invalid"),
     [
@@ -647,18 +694,15 @@ def test_pre_audit_v1_non_null_evaluation_migrates_without_losing_learned_online
     assert restored_status["last_evaluation_outcome"] is None
 
 
-@pytest.mark.parametrize("shape", ("missing-owner", "wrong-owner-role", "grey-with-owner"))
+@pytest.mark.parametrize("shape", ("missing-owner", "digest-mismatch", "grey-with-owner"))
 def test_invalid_active_online_ownership_falls_back_without_discarding_outer_grey(shape):
     snapshot = _active_online_snapshot()
     nested = snapshot["online_adaptation"]
     if shape == "missing-owner":
         nested["previous_incumbent"] = None
         nested["previous_incumbent_digest"] = None
-    elif shape == "wrong-owner-role":
-        nested["previous_incumbent"] = deepcopy(nested["incumbent"])
-        nested["previous_incumbent_digest"] = OnlineAdaptation.model_digest(
-            _adopted_online_controller()._new_scheduled_arx()
-        )
+    elif shape == "digest-mismatch":
+        nested["previous_incumbent_digest"] = "0" * 64
     else:
         nested["incumbent"], nested["challenger"] = (
             deepcopy(nested["challenger"]),

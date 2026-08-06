@@ -549,8 +549,11 @@ class ModelEvaluationPayload:
     def validate_evaluation(self) -> ModelEvaluationPayload:
         if self.committed and not self.promoted:
             raise ValueError("committed model evaluation must be promoted")
-        if (not self.rejection_reasons) != (self.consecutive_wins > 0):
-            raise ValueError("model evaluation win count must match rejection evidence")
+        complete_horizon_evidence = all(score.sample_count > 0 for score in self.horizon_scores)
+        if not self.rejection_reasons and self.consecutive_wins == 0:
+            raise ValueError("successful model evaluation must advance the win count")
+        if self.rejection_reasons and complete_horizon_evidence and self.consecutive_wins != 0:
+            raise ValueError("rejected complete model evaluation must reset the win count")
         if self.promoted and self.rejection_reasons:
             raise ValueError("promoted model evaluation must not have rejection reasons")
         if (self.prospective_digest is not None) != self.promoted:

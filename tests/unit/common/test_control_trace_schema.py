@@ -579,6 +579,29 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
         restored.payload.completed_origins = ()
 
 
+def test_model_evaluation_preserves_a_prior_win_until_both_horizons_are_complete() -> None:
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    short_origin = (payload.completed_origins[0],)
+    short_scores = tuple(
+        score
+        if score.horizon_steps == 3
+        else replace(score, incumbent_rmse_c=None, challenger_rmse_c=None, sample_count=0)
+        for score in payload.horizon_scores
+    )
+
+    preserved = replace(
+        payload,
+        consecutive_wins=1,
+        sample_count=1,
+        completed_origins=short_origin,
+        horizon_scores=short_scores,
+        window_end_ms=short_origin[0].completion_time_ms,
+    )
+
+    assert preserved.rejection_reasons == ("prediction",)
+    assert preserved.consecutive_wins == 1
+
+
 def test_model_evaluation_rejects_unbounded_or_inconsistent_audit_evidence() -> None:
     payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
 

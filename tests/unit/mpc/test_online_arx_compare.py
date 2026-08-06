@@ -799,7 +799,7 @@ def test_real_mak_replay_publishes_prediction_only_chronological_evidence() -> N
     assert all(isfinite(sample) for row in rows for samples in row["raw_timing_ms"].values() for sample in samples)
 
 
-def test_real_mak_replay_passes_normalized_record_q_to_both_arms_without_reinterpretation(
+def test_real_mak_replay_normalizes_reconstructed_duty_once_for_both_arms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     q = np.asarray([0.11, 0.24, 0.37, 0.52, 0.68] * 8, dtype=np.float64)
@@ -852,10 +852,11 @@ def test_real_mak_replay_passes_normalized_record_q_to_both_arms_without_reinter
     run_real_mak_replay()
 
     for arm in (False, True):
-        np.testing.assert_array_equal(requested_q[arm], q)
-        np.testing.assert_allclose(applied_q[arm], q, rtol=0.0, atol=1e-12)
-        np.testing.assert_allclose(physical_ratio[arm], q * controller_u_max[arm], rtol=0.0, atol=1e-12)
-    np.testing.assert_array_equal(RecordingScheduledARX.observed_q, q)
+        expected_normalized_q = q / controller_u_max[arm]
+        np.testing.assert_allclose(requested_q[arm], expected_normalized_q, rtol=0.0, atol=1e-12)
+        np.testing.assert_allclose(applied_q[arm], expected_normalized_q, rtol=0.0, atol=1e-12)
+        np.testing.assert_array_equal(physical_ratio[arm], q)
+    np.testing.assert_allclose(RecordingScheduledARX.observed_q, q / 0.9, rtol=0.0, atol=1e-12)
 
 
 def _break_control_score(artifact: dict[str, Any]) -> None:
