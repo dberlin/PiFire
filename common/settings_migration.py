@@ -277,6 +277,17 @@ def _remove_mpc_affine_load_bounds(settings):
     return changed
 
 
+def _remove_retired_fan_pid(settings):
+    """Remove the retired fixed-cycle fan-assist setting."""
+    cycle_data = settings.get("cycle_data")
+    if not isinstance(cycle_data, MutableMapping):
+        return False
+    if "FanPidEnabled" not in cycle_data:
+        return False
+    cycle_data.pop("FanPidEnabled")
+    return True
+
+
 _RETIRED_CONTROLLER_IDS = (
     "pid_clamping",
     "pid_clamping_percent_pb",
@@ -341,6 +352,7 @@ _SHAPE_MIGRATIONS = [
     (4, _remove_retired_mpc_logging_settings),
     (5, _remove_mpc_affine_load_bounds),
     (6, _clear_mpc_identification_choice),
+    (7, _remove_retired_fan_pid),
 ]
 
 

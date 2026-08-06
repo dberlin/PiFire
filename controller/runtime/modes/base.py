@@ -156,22 +156,19 @@ class ControlMode:
                 _control.eventLogger.debug("Cycle Event: Auger Off")
 
     def _smoke_plus_fan_tick(self, now, ptemp, current_output_status):
-        """Smoke-plus fan cycling + the elif restore chain. Gated to Smoke
-        always, and Hold only once target_temp_achieved -- Hold's on_tick runs
-        the Hold-only lid-open/PWM-duty-from-temp/fan-assist parts BEFORE
-        calling this helper. `ptemp` is the fresh probe reading for this
-        tick."""
+        """Smoke Plus fan cycling + the elif restore chain. Gated to Smoke
+        always, and Hold only once target_temp_achieved. `ptemp` is the fresh
+        probe reading for this tick."""
         import control as _control
 
         settings = self.settings
         control = self.control
         grill_platform = self.grill
 
-        # If in Smoke Plus Mode but not calling for fan pid control, Cycle the Fan
+        # Smoke Plus fan cycling.
         if (
             (self.name == Mode.SMOKE or (self.name == Mode.HOLD and self.state.target_temp_achieved))
             and control["s_plus"]
-            and not self.state.fan.assist
             and not self.state.lid.open_detected
         ):
             # If Temperature is > settings['smoke_plus']['max_temp']
@@ -211,7 +208,6 @@ class ControlMode:
         elif (
             not current_output_status["fan"]
             and not control["s_plus"]
-            and not self.state.fan.assist
             and not self.state.lid.open_detected
             and self.state.manual_override["fan"] < now
         ):

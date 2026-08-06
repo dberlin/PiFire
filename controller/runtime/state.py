@@ -60,9 +60,7 @@ class ControllerState:
 
 @dataclass
 class FanState:
-    """Fan-assist / smoke-plus fan cycling and PWM ramp state."""
-
-    assist: bool = False
+    """Smoke Plus cycling and PWM ramp state."""
     pwm_ramping: bool = False
     cycle_toggle_time: float = 0.0
     update_time: float = 0.0

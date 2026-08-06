@@ -2,7 +2,6 @@
 // GENERATED from schema/settings.schema.json — do not edit. Regenerate: bun run gen:types
 
 export type Selected = string;
-export type Fanpidenabled = boolean;
 export type Holdcycletime = number;
 export type Lidopendetectenabled = boolean;
 export type Lidopenpausetime = number;
@@ -248,7 +247,6 @@ export interface Config {
   };
 }
 export interface CycleData {
-  FanPidEnabled?: Fanpidenabled;
   HoldCycleTime?: Holdcycletime;
   LidOpenDetectEnabled?: Lidopendetectenabled;
   LidOpenPauseTime?: Lidopenpausetime;

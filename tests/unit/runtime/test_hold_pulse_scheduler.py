@@ -261,18 +261,14 @@ def test_framed_accepts_auger_and_fan_only_as_one_latest_allocation(hold_cycle):
     assert hold.state.controller.fan_duty == 75.0
 
 
-def test_fixed_cycle_fan_assist_is_unchanged(hold_cycle):
+def test_fixed_cycle_minimum_output_does_not_enable_fan_assist(hold_cycle):
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(1, 0.1)])
-    hold = hold_cycle(
-        runner,
-        controller="pid",
-        cycle_data_extra={"u_min": 0.3, "FanPidEnabled": True},
-    )
+    hold = hold_cycle(runner, controller="pid", cycle_data_extra={"u_min": 0.3})
     hold.control["pwm_control"] = False
     hold.setup()
 
     hold.on_tick(2.0, 200.0, _status(hold))
-    assert hold.state.fan.assist is True
+    assert not hasattr(hold.state.fan, "assist")
 
 
 @pytest.mark.parametrize("actual_on", [False, True])

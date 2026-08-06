@@ -38,12 +38,7 @@ from controller.runtime.logic.cycle import hold_initial_cycle
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.model_promotion import ReachabilityState
-from controller.runtime.logic.fan import (
-    controller_fan_authority,
-    fan_assist_times,
-    smoke_plus_max_ratio,
-    start_fan,
-)
+from controller.runtime.logic.fan import controller_fan_authority, start_fan
 from controller.runtime.logic.pwm import hold_duty_cycle
 from controller.runtime.modes.base import ControlMode
 import controller.runtime.runner as _runner_mod
@@ -61,9 +56,8 @@ class HoldMode(ControlMode):
     timing driven by the controller's cycle_ratio output (not the plain
     elapsed-time toggle used by other cycling modes), a setup-time fan-ownership
     capability (`self.state.controller.controls_fan`, from the runner's
-    `commands_fan()`), lid-open detection, and the PWM-duty-from-temp-profile /
-    fan-assist-PID fan control paths.
-
+    `commands_fan()`), lid-open detection, and PWM-duty-from-temp-profile fan
+    control paths.
     The pre-loop and in-loop flameout checks are DECLARATIVE guard edges
     (GUARDS["Hold"] in transitions.py, fired by evaluate_phase at base.run's
     pre_loop/pre_act points). setup_safety() survives only to abort to 'Inactive'
@@ -74,16 +68,15 @@ class HoldMode(ControlMode):
     request, then runs the Hold-specific controller sub-block (submit the
     fresh per-tick ptemp to the runner, normalize its output into a cycle
     ratio + optional fan command, route an MPC fan command into
-    `control['duty_cycle']` when one arrives, clamp to u_min/u_max, and
-    decide fan_assist), then the shared (non-Hold) auger-cycle toggle via
-    `_auger_cycle_tick` (Hold overrides `_on_auger_on` to also recompute
-    OnTime/OffTime/CycleTime and publish MQTT PID info -- the shared helper
-    itself is untouched). It then runs the Hold-only fan work on the same
-    fresh ptemp: the target_temp_achieved latch, lid-open detect/clear,
+    `control['duty_cycle']` when one arrives, clamp to u_min/u_max), then the
+    shared (non-Hold) auger-cycle toggle via `_auger_cycle_tick` (Hold
+    overrides `_on_auger_on` to also recompute OnTime/OffTime/CycleTime and
+    publish MQTT PID info -- the shared helper itself is untouched). It then
+    runs the Hold-only fan work on the same fresh ptemp: the
+    target_temp_achieved latch, lid-open detect/clear, and
     PWM-duty-from-temp-profile (gated `not self.state.controller.controls_fan`),
-    and fan-assist-PID parts, then delegates to the shared
-    `_smoke_plus_fan_tick` helper (gated on target_temp_achieved for Hold,
-    unlike Smoke which always runs it).
+    then delegates to the shared `_smoke_plus_fan_tick` helper (gated on
+    target_temp_achieved for Hold, unlike Smoke which always runs it).
 
     status_fragment() adds the Hold-only primary_setpoint/lid_open_detected/
     lid_open_endtime status fields. No mode-specific teardown (Hold is not in
@@ -561,7 +554,7 @@ class HoldMode(ControlMode):
             output_source=classify_output_source(
                 lid_open=self.state.lid.open_detected,
                 manual_override_active=self.state.manual_override["auger"] >= now,
-                fan_assist_active=self.state.fan.assist,
+                fan_assist_active=False,
             ),
             inhibit_reason=InhibitReason.LID_OPEN if self.state.lid.open_detected else InhibitReason.NONE,
         )
@@ -805,7 +798,7 @@ class HoldMode(ControlMode):
                 scheduled_off_seconds=controller.trace_frame_scheduled_off_seconds,
                 actual_on_seconds=controller.trace_frame_actual_on_seconds,
                 transition_count=controller.trace_frame_transition_count,
-                fan_assist_active=self.state.fan.assist,
+                fan_assist_active=False,
                 inhibit_reason=inhibit,
                 output_active=controller.trace_frame_active,
                 actual_start_active=controller.trace_frame_actual_start_active,
@@ -959,7 +952,7 @@ class HoldMode(ControlMode):
                 now,
                 lid_open=self.state.lid.open_detected,
                 manual_override_active=self.state.manual_override["auger"] > now,
-                fan_assist_active=self.state.fan.assist,
+                fan_assist_active=False,
                 auger_output=current_output_status["auger"],
             ),
             now,
@@ -1034,7 +1027,6 @@ class HoldMode(ControlMode):
                 controller.pulse_stale_command = result.stale_state is ResultStaleState.STALE
                 self.state.cycle.ratio = self.state.cycle.raw_ratio = controller.pulse_requested_duty
                 self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
-                self.state.fan.assist = False
                 self._trace_update(result, now, controller_interval)
                 framed_feedback_due = True
             else:
@@ -1053,18 +1045,9 @@ class HoldMode(ControlMode):
                     self.state.controller.fan_duty = fan_cmd["duty"]
                     control["duty_cycle"] = self.state.controller.fan_duty
                     ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                # If ratio is less than min set auger ratio to min and control further via fan.
+                # Keep a nonzero auger cycle at low controller output.
                 if self.state.cycle.ratio < settings["cycle_data"]["u_min"]:
                     self.state.cycle.ratio = settings["cycle_data"]["u_min"]
-                    # FanPid control is only enabled when the user has enabled it in settings.
-                    # It is not compatible with PWM control on DC fans (too many variables).
-                    # To use FanPid Control with DC fans, disable PWM control and enable FanPidEnabled in settings.
-                    if settings["cycle_data"].get("FanPidEnabled", False) and not control["pwm_control"]:
-                        self.state.fan.assist = True
-                    else:
-                        self.state.fan.assist = False
-                else:
-                    self.state.fan.assist = False
                 # Don't set ratio over maximum.
                 self.state.cycle.ratio = min(self.state.cycle.ratio, settings["cycle_data"]["u_max"])
                 self._trace_update(result, now, controller_interval)
@@ -1090,7 +1073,7 @@ class HoldMode(ControlMode):
                             source=classify_output_source(
                                 lid_open=self.state.lid.open_detected,
                                 manual_override_active=False,
-                                fan_assist_active=self.state.fan.assist,
+                                fan_assist_active=False,
                             ),
                             timestamp=now,
                             requested=self.state.controller.output,
@@ -1156,7 +1139,7 @@ class HoldMode(ControlMode):
                     source=classify_output_source(
                         lid_open=True,
                         manual_override_active=self.state.manual_override["auger"] >= now,
-                        fan_assist_active=self.state.fan.assist,
+                        fan_assist_active=False,
                     ),
                     timestamp=now,
                     requested=self.state.controller.output,
@@ -1201,7 +1184,7 @@ class HoldMode(ControlMode):
                         source=classify_output_source(
                             lid_open=True,
                             manual_override_active=self.state.manual_override["auger"] >= now,
-                            fan_assist_active=self.state.fan.assist,
+                            fan_assist_active=False,
                         ),
                         timestamp=now,
                         requested=self.state.controller.output,
@@ -1225,48 +1208,8 @@ class HoldMode(ControlMode):
                 control["duty_cycle"] = _duty
                 self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
 
-        # This added section allows for additional pid control by controlling the fan.
-        # Implemented for AC fans and DC fans not using PWM Control.
-        # If Auger ratio is below minimum Cycle the Fan as additional output control utilizing the pid output.
-        if (
-            self.state.target_temp_achieved
-            and self.state.fan.assist
-            and not self.state.lid.open_detected
-            and not control["pwm_control"]
-        ):
-            # If smoke plus mode is active set max fan ratio to smoke plus ratio otherwise set to 1.
-            if control["s_plus"]:
-                total_fan_cycle = settings["smoke_plus"]["on_time"] + settings["smoke_plus"]["off_time"]
-            else:
-                total_fan_cycle = self.state.cycle.cycle_time
-            max_fan_ratio = smoke_plus_max_ratio(settings["smoke_plus"], control["s_plus"])
-
-            # Divide the pid output by the u_min.
-            # This way when we are at u_min our fan will be at 100% fan ratio and will drop proportionally down to 0 as controller_output drops.
-            # If pid is returning negative values the best we can do is shut off the fan so set min to 0.
-            controller_output_adjusted = max(0, self.state.controller.output / settings["cycle_data"]["u_min"])
-            _ft = fan_assist_times(
-                self.state.controller.output, total_fan_cycle, max_fan_ratio, settings["cycle_data"]["u_min"]
-            )
-            fan_ratio = _ft.ratio
-            fan_on_time = _ft.on_time
-            fan_off_time = _ft.off_time
-            _control.eventLogger.debug(
-                f"Fan PID: Fan ON, controller_output: {self.state.controller.output}, controller_output_adjusted: {controller_output_adjusted}"
-            )
-            _control.eventLogger.debug(
-                f"Fan ratio: {fan_ratio}, Fan on time: {fan_on_time}, Fan off time: {fan_off_time}"
-            )
-            if (now - self.state.fan.cycle_toggle_time) > fan_on_time and current_output_status["fan"]:
-                grill_platform.fan_off()
-                self.state.fan.cycle_toggle_time = now
-                _control.eventLogger.debug("Fan PID: Fan OFF")
-            elif (now - self.state.fan.cycle_toggle_time) > fan_off_time and not current_output_status["fan"]:
-                self.state.fan.cycle_toggle_time = now
-                start_fan(grill_platform, settings, control["duty_cycle"])
-                _control.eventLogger.debug("Fan PID: Fan ON")
-
         self._smoke_plus_fan_tick(now, ptemp, current_output_status)
+
         if self._trace_recorder is not None:
             try:
                 self._trace_recorder.flush_due(time.monotonic_ns() // 1_000_000)

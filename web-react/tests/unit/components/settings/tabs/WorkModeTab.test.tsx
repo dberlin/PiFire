@@ -42,7 +42,6 @@ describe("WorkModeTab", () => {
           LidOpenDetectEnabled: true,
           LidOpenThreshold: 35,
           LidOpenPauseTime: 75,
-          FanPidEnabled: false,
         },
         smoke_plus: {
           enabled: true,
@@ -79,10 +78,7 @@ describe("WorkModeTab", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByRole("button", { name: "Fan PID Enabled" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(screen.queryByRole("button", { name: "Fan PID Enabled" })).not.toBeInTheDocument();
 
     // Check Smoke Plus section
     expect(screen.getByRole("button", { name: "Enabled" })).toHaveAttribute("aria-pressed", "true");
@@ -113,7 +109,6 @@ describe("WorkModeTab", () => {
           LidOpenDetectEnabled: false,
           LidOpenThreshold: 30,
           LidOpenPauseTime: 60,
-          FanPidEnabled: false,
         },
         smoke_plus: {
           enabled: false,
@@ -181,7 +176,6 @@ describe("WorkModeTab", () => {
           LidOpenDetectEnabled: false,
           LidOpenThreshold: 31,
           LidOpenPauseTime: 61,
-          FanPidEnabled: false,
         },
         smoke_plus: {
           enabled: false,
@@ -218,7 +212,6 @@ describe("WorkModeTab", () => {
     change("31", "44");
     change("61", "45");
     fireEvent.click(screen.getByRole("button", { name: "Lid Open Detect Enabled" }));
-    fireEvent.click(screen.getByRole("button", { name: "Fan PID Enabled" }));
 
     // smoke_plus
     fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
@@ -249,7 +242,6 @@ describe("WorkModeTab", () => {
             LidOpenDetectEnabled: true,
             LidOpenThreshold: 44,
             LidOpenPauseTime: 45,
-            FanPidEnabled: true,
           },
           smoke_plus: {
             enabled: true,

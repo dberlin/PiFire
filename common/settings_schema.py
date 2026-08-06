@@ -99,7 +99,6 @@ class CycleData(_Section):
     LidOpenDetectEnabled: bool = False
     LidOpenThreshold: int = 15
     LidOpenPauseTime: int = 60
-    FanPidEnabled: bool = False
 
 
 class ShutdownSettings(_Section):
@@ -642,7 +641,7 @@ class Recipe(_Section):
 #: It lives at the top level of the tree rather than beside versions.server /
 #: versions.build, so that nothing suggests the three move together. They do
 #: not: versions is the RELEASE, read from updater/updater_manifest.json.
-SETTINGS_SCHEMA_VERSION = 6
+SETTINGS_SCHEMA_VERSION = 7
 
 
 class SettingsSchema(_Section):

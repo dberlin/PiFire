@@ -7,7 +7,6 @@ export const SETTINGS_DEFAULTS = {
     "selected": "pid"
   },
   "cycle_data": {
-    "FanPidEnabled": false,
     "HoldCycleTime": 25,
     "LidOpenDetectEnabled": false,
     "LidOpenPauseTime": 60,
@@ -268,7 +267,7 @@ export const SETTINGS_DEFAULTS = {
     "reigniteretries": 1,
     "startup_check": true
   },
-  "schema_version": 5,
+  "schema_version": 7,
   "shutdown": {
     "auto_power_off": false,
     "shutdown_duration": 240

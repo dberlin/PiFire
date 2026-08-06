@@ -19,7 +19,7 @@ def test_work_cycle_state_defaults():
     assert state.controller.cycle_start == 0.0
 
     # FanState
-    assert state.fan.assist is False
+    assert not hasattr(state.fan, "assist")
     assert state.fan.pwm_ramping is False
     assert state.fan.cycle_toggle_time == 0.0
     assert state.fan.update_time == 0.0
@@ -85,9 +85,9 @@ def test_work_cycle_state_field_assignment():
     state.cycle.ratio = 0.5
     assert state.cycle.ratio == 0.5
 
-    # Test boolean assignment on a nested sub-dataclass
-    state.fan.assist = True
-    assert state.fan.assist is True
+    # Test scalar assignment on a nested sub-dataclass
+    state.fan.cycle_toggle_time = 5.0
+    assert state.fan.cycle_toggle_time == 5.0
 
     # Test None -> value assignment on a nested sub-dataclass
     state.controller.fan_duty = 50.0

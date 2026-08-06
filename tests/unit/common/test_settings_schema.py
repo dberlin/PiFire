@@ -71,6 +71,13 @@ def test_a_fresh_tree_is_stamped_with_the_current_shape_version():
     assert default_settings()["schema_version"] == SETTINGS_SCHEMA_VERSION
 
 
+def test_current_schema_omits_retired_fan_pid_setting():
+    settings = default_settings()
+
+    assert "FanPidEnabled" not in settings["cycle_data"]
+    assert "FanPidEnabled" not in SettingsSchema.model_fields["cycle_data"].annotation.model_fields
+
+
 def test_the_shape_version_is_not_derived_from_the_release_version():
     """schema_version must never move because a release number moved."""
     from common.settings_schema import SETTINGS_SCHEMA_VERSION

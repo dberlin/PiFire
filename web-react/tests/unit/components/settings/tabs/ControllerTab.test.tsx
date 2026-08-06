@@ -456,12 +456,10 @@ describe("generated controller config types", () => {
       Ti: 180,
       stable_window: 12,
       center_factor: 0.001,
-      tau: 115,
-      theta: 65,
     };
 
     expect(pid.PB).toBe(60);
-    expect(pidSp.tau).toBe(115);
+    expect(pidSp.stable_window).toBe(12);
   });
 
   it("constrains a list option to its declared values", () => {

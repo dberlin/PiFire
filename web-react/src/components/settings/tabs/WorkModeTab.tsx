@@ -21,7 +21,6 @@ type WorkMode = {
     LidOpenDetectEnabled: boolean;
     LidOpenThreshold: number;
     LidOpenPauseTime: number;
-    FanPidEnabled: boolean;
   };
   smoke_plus: {
     enabled: boolean;
@@ -53,7 +52,6 @@ function readWorkMode(s: Settings): WorkMode {
       LidOpenDetectEnabled: !!cd.LidOpenDetectEnabled,
       LidOpenThreshold: cd.LidOpenThreshold ?? SETTINGS_DEFAULTS.cycle_data.LidOpenThreshold,
       LidOpenPauseTime: cd.LidOpenPauseTime ?? SETTINGS_DEFAULTS.cycle_data.LidOpenPauseTime,
-      FanPidEnabled: !!cd.FanPidEnabled,
     },
     smoke_plus: {
       enabled: !!sp.enabled,
@@ -195,11 +193,6 @@ export function WorkModeTab() {
           max={1000}
           step={1}
           suffix="s"
-        />
-        <Toggle
-          label="Fan PID Enabled"
-          checked={v.cycle_data.FanPidEnabled}
-          onChange={(b) => setCycleData("FanPidEnabled", b)}
         />
       </Section>
 

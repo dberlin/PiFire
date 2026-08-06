@@ -32,14 +32,14 @@ def test_the_switch_ships_on():
     assert default_settings()["controller"]["config"]["mpc"]["enable_identification"] is True
 
 
-def test_schema_version_six_drops_a_stored_identification_choice():
+def test_current_schema_includes_v6_identification_choice_removal():
     settings = _v5_settings(False)
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 6
+    assert SETTINGS_SCHEMA_VERSION == 7
     assert settings == {
-        "schema_version": 6,
+        "schema_version": 7,
         "controller": {
             "selected": "mpc",
             "config": {

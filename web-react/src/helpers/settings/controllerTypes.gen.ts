@@ -14,8 +14,6 @@ export interface PidSpConfig {
   Ti: number;
   stable_window: number;
   center_factor: number;
-  tau: number;
-  theta: number;
 }
 
 export interface MpcConfig {

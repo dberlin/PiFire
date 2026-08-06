@@ -1,13 +1,14 @@
 """Hold reports the duty that actually reached the auger, at every site where it
 diverges from the controller's request."""
 
+from common.control_trace import ActuationMode
 from controller.applied_output import OutputSource
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
 
 
 def test_setup_seeds_the_initial_ratio(hold_cycle):
-    runner = FakeControllerRunner(period=0.01)
+    runner = FakeControllerRunner(period=0.01, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     assert [a.source for a in runner.applied] == [OutputSource.SEED]
@@ -15,7 +16,7 @@ def test_setup_seeds_the_initial_ratio(hold_cycle):
 
 
 def test_per_tick_reports_the_clamped_ratio_and_the_raw_request(hold_cycle):
-    runner = FakeControllerRunner(period=0.0).script([_output(1.4)])
+    runner = FakeControllerRunner(period=0.0, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(1.4)])
     hold = hold_cycle(runner)
     hold.setup()
     runner.applied.clear()
@@ -28,20 +29,20 @@ def test_per_tick_reports_the_clamped_ratio_and_the_raw_request(hold_cycle):
     assert applied.controller_commanded is True
 
 
-def test_per_tick_reports_fan_assist_when_the_auger_is_pinned_at_u_min(hold_cycle):
-    runner = FakeControllerRunner(period=0.0).script([_output(0.01)])
-    hold = hold_cycle(runner, cycle_data_extra={"FanPidEnabled": True})
+def test_per_tick_reports_controller_output_when_the_auger_is_pinned_at_u_min(hold_cycle):
+    runner = FakeControllerRunner(period=0.0, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(0.01)])
+    hold = hold_cycle(runner)
     hold.setup()
     runner.applied.clear()
     hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     (applied,) = runner.applied
-    assert applied.source is OutputSource.FAN_ASSIST
+    assert applied.source is OutputSource.CONTROLLER
     assert applied.ratio == hold.settings["cycle_data"]["u_min"]
-    assert applied.controller_commanded is False
+    assert applied.controller_commanded is True
 
 
 def test_per_tick_is_suppressed_while_a_manual_override_is_live(hold_cycle):
-    runner = FakeControllerRunner(period=0.0).script([_output(0.5)])
+    runner = FakeControllerRunner(period=0.0, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(0.5)])
     hold = hold_cycle(runner)
     hold.setup()
     runner.applied.clear()
@@ -51,7 +52,7 @@ def test_per_tick_is_suppressed_while_a_manual_override_is_live(hold_cycle):
 
 
 def test_per_tick_report_fires_once_per_control_interval_not_once_per_tick(hold_cycle):
-    runner = FakeControllerRunner(period=5.0).script([_output(0.5)])
+    runner = FakeControllerRunner(period=5.0, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(0.5)])
     hold = hold_cycle(runner)
     hold.setup()
     runner.applied.clear()
@@ -80,7 +81,7 @@ def test_per_tick_report_fires_once_per_control_interval_not_once_per_tick(hold_
 
 
 def test_per_tick_report_boundary_matches_the_manual_override_expiry_convention(hold_cycle):
-    runner = FakeControllerRunner(period=0.0).script([_output(0.5)])
+    runner = FakeControllerRunner(period=0.0, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(0.5)])
     hold = hold_cycle(runner)
     hold.setup()
     # base.py's own expiry check (`< now`) treats an override expiring at
@@ -93,7 +94,7 @@ def test_per_tick_report_boundary_matches_the_manual_override_expiry_convention(
 
 
 def test_lid_open_detection_reports_zero(hold_cycle):
-    runner = FakeControllerRunner(period=999).script([_output(0.5)])
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(0.5)])
     hold = hold_cycle(runner)
     hold.setup()
     hold.state.target_temp_achieved = True
@@ -108,7 +109,7 @@ def test_lid_open_detection_reports_zero(hold_cycle):
 
 
 def test_lid_open_detection_reports_the_controllers_request(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     hold.state.target_temp_achieved = True
@@ -123,7 +124,7 @@ def test_lid_open_detection_reports_the_controllers_request(hold_cycle):
 
 
 def test_lid_open_detection_reports_manual_when_an_override_is_live(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     hold.state.target_temp_achieved = True
@@ -137,7 +138,7 @@ def test_lid_open_detection_reports_manual_when_an_override_is_live(hold_cycle):
 
 
 def test_lid_open_toggle_reports_zero(hold_cycle):
-    runner = FakeControllerRunner(period=999).script([_output(0.5)])
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(0.5)])
     hold = hold_cycle(runner)
     hold.setup()
     hold.control["lid_open_toggle"] = True
@@ -148,7 +149,7 @@ def test_lid_open_toggle_reports_zero(hold_cycle):
 
 
 def test_lid_open_toggle_reports_manual_when_an_override_is_live(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     hold.control["lid_open_toggle"] = True
@@ -160,7 +161,7 @@ def test_lid_open_toggle_reports_manual_when_an_override_is_live(hold_cycle):
 
 
 def test_manual_auger_on_reports_full_duty(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     runner.applied.clear()
@@ -172,7 +173,7 @@ def test_manual_auger_on_reports_full_duty(hold_cycle):
 
 
 def test_manual_auger_off_reports_zero(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     runner.applied.clear()
@@ -181,7 +182,7 @@ def test_manual_auger_off_reports_zero(hold_cycle):
 
 
 def test_manual_changes_to_other_actuators_report_nothing(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     runner.applied.clear()
@@ -196,7 +197,7 @@ def test_manual_override_timestamp_uses_last_now_not_a_fresh_clock_read(hold_cyc
     itself reads `self._last_now` rather than taking its own clock reading --
     ctx.clock (a ManualClock) stays at its default 0.0 for the whole test, so a
     fresh read would report 0.0, not the tick this override actually belongs to."""
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     hold._last_now = 100.0  # what _apply_manual_overrides would have set this tick
@@ -207,7 +208,7 @@ def test_manual_override_timestamp_uses_last_now_not_a_fresh_clock_read(hold_cyc
 
 
 def test_per_tick_during_an_active_pause_is_lid_open(hold_cycle):
-    runner = FakeControllerRunner(period=0.0).script([_output(0.5), _output(0.5)])
+    runner = FakeControllerRunner(period=0.0, actuation_mode=ActuationMode.FIXED_CYCLE).script([_output(0.5), _output(0.5)])
     hold = hold_cycle(runner)
     hold.setup()
     hold.control["lid_open_toggle"] = True
@@ -222,7 +223,7 @@ def test_per_tick_during_an_active_pause_is_lid_open(hold_cycle):
 
 
 def test_lid_open_toggle_reports_the_controllers_request(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     hold.control["lid_open_toggle"] = True
@@ -234,7 +235,7 @@ def test_lid_open_toggle_reports_the_controllers_request(hold_cycle):
 
 
 def test_lid_open_detection_treats_an_override_expiring_at_exactly_now_as_still_live(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     hold.state.target_temp_achieved = True
@@ -250,7 +251,7 @@ def test_lid_open_detection_treats_an_override_expiring_at_exactly_now_as_still_
 
 
 def test_lid_open_toggle_treats_an_override_expiring_at_exactly_now_as_still_live(hold_cycle):
-    runner = FakeControllerRunner(period=999)
+    runner = FakeControllerRunner(period=999, actuation_mode=ActuationMode.FIXED_CYCLE)
     hold = hold_cycle(runner)
     hold.setup()
     hold.control["lid_open_toggle"] = True
