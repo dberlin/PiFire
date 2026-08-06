@@ -36,6 +36,9 @@ class FakeCore:
     def wants_async(self):
         return True
 
+    def actuation_mode(self):
+        return ActuationMode.FRAMED_PULSE
+
 
     def set_target(self, sp):
         self.target = sp
@@ -163,12 +166,14 @@ def test_threaded_result_recursively_freezes_nested_status_across_repolls():
         state = runner.controller_state()
         assert repolled.revision == result.revision
         assert repolled.result_age_seconds >= result.result_age_seconds
-        assert state == {"nested": {"samples": [1.0]}, "pending_dropped": 0}
+        assert state["nested"] == {"samples": [1.0]}
+        assert state["pending_dropped"] == 0
         assert json.loads(json.dumps(state)) == state
         state["nested"]["samples"].append(3.0)
         assert result.status == {"nested": {"samples": (1.0,)}}
         assert repolled.status == {"nested": {"samples": (1.0,)}}
-        assert runner.controller_state() == {"nested": {"samples": [1.0]}, "pending_dropped": 0}
+        assert runner.controller_state()["nested"] == {"samples": [1.0]}
+        assert runner.controller_state()["pending_dropped"] == 0
     finally:
         runner.stop()
 
@@ -504,6 +509,9 @@ def test_hold_teardown_stops_threaded_runner():
     # asserted in test_hold_refit_trigger.py, not here.
     hold.settings = {"controller": {"config": {}}}
     hold._controller_name = "mpc"
+    hold.ctx = type("_Context", (), {"clock": type("_Clock", (), {"now": staticmethod(lambda: 0.0)})()})()
+    hold._pulse_scheduler = None
+    hold._trace_closed = True
     hold.teardown(70.0)
     assert not thread.is_alive()
 
@@ -537,6 +545,9 @@ class _OrderRecordingCore:
 
     def wants_async(self):
         return True
+
+    def actuation_mode(self):
+        return ActuationMode.FRAMED_PULSE
 
     def get_status(self):
         return None

@@ -48,7 +48,7 @@ def test_trace_enums_have_exact_members():
         TraceEventKind.MODEL_EVENT,
         TraceEventKind.RECORDER_GAP,
     }
-    assert set(ActuationMode) == {ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE}
+    assert set(ActuationMode) == {ActuationMode.FRAMED_PULSE}
     assert set(ResultStaleState) == {ResultStaleState.FRESH, ResultStaleState.STALE}
     assert set(InhibitReason) == {
         InhibitReason.NONE,
@@ -737,7 +737,6 @@ def test_schema_three_has_one_framed_trace_contract():
     assert TRACE_SCHEMA_VERSION == 3
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
     assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
-    assert "fixed_cycle_frame" not in str(ControlTraceRecord.model_json_schema())
     assert "FAN_ASSIST" not in OutputSource.__members__
     session = _pid_session_payload()
     with pytest.raises(ValidationError):
@@ -774,7 +773,3 @@ def test_envelope_accepts_framed_payload_for_every_controller(controller):
     assert record.payload is frame
 
 
-@pytest.mark.parametrize("payload", [_pid_update_payload, lambda: _payload_cases()[2][2], _mpc_update_payload])
-def test_current_updates_require_framed_pulse(payload):
-    with pytest.raises(ValidationError, match="FRAMED_PULSE"):
-        replace(payload(), actuation_mode=ActuationMode.FIXED_CYCLE)

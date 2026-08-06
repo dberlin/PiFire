@@ -3,7 +3,6 @@ from dataclasses import replace
 import pytest
 
 from common.control_trace import (
-    ActuationMode,
     ControllerType,
     InhibitReason,
     OutputSource,
@@ -52,14 +51,9 @@ def test_every_production_controller_builds_one_pulse_scheduler_and_starts_off(h
     assert hold.state.cycle.cycle_time == 0.0
 
 
-def test_hold_rejects_runner_without_framed_pulse_actuation(hold_cycle):
-    hold = hold_cycle(FakeControllerRunner(actuation_mode=ActuationMode.FIXED_CYCLE), controller="pid")
-
-    with pytest.raises(ValueError, match="framed pulse"):
-        hold.setup()
 
 
-def test_low_duty_accumulates_to_one_quantum_without_fixed_cycle_floor(hold_cycle):
+def test_low_duty_accumulates_to_one_quantum(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.05)])
     hold = hold_cycle(runner, controller="mpc", cycle_data_extra={"u_min": 0.9, "HoldCycleTime": 99})
 

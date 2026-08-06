@@ -52,7 +52,6 @@ def test_pulse_evidence_pins_the_approved_quantum_frame_and_plant_calibration():
 
     assert experiment.PULSE_QUANTUM_S == 2.0
     assert experiment.PULSE_FRAME_S == 20.0
-    assert experiment.FIXED_CYCLE_S == 25.0
     assert payload["header"]["format_version"] >= 1
     assert "mpc_pulse_allocator.py" in payload["header"]["regeneration_command"]
     assert payload["conditions"]["selected_scheduler"] == {

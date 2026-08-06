@@ -46,7 +46,6 @@ class TraceEventKind(StrEnum):
 
 
 class ActuationMode(StrEnum):
-    FIXED_CYCLE = "fixed_cycle"
     FRAMED_PULSE = "framed_pulse"
 
 

@@ -157,8 +157,7 @@ def _quality_status(result: "ControllerUpdateResult") -> dict[str, StatusScalar]
 
 
 def _actuation_mode_for(core) -> ActuationMode:
-    mode = getattr(core, "actuation_mode", None)
-    value = ActuationMode.FIXED_CYCLE if mode is None else mode()
+    value = core.actuation_mode()
     if not isinstance(value, ActuationMode):
         raise TypeError("controller actuation_mode() must return ActuationMode")
     return value

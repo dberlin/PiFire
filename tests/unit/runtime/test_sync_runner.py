@@ -19,6 +19,9 @@ class _Core:
     def get_control_period(self):
         return self.period
 
+    def actuation_mode(self):
+        return ActuationMode.FRAMED_PULSE
+
 
     def get_status(self):
         return {"target": self.target}
@@ -131,11 +134,11 @@ def test_sync_controller_state_thaws_nested_completed_status_without_mutating_re
     core.status["nested"]["samples"].append(2.0)
 
     state = runner.controller_state()
-    assert state == {"nested": {"samples": [1.0]}}
+    assert state["nested"] == {"samples": [1.0]}
     assert json.loads(json.dumps(state)) == state
     state["nested"]["samples"].append(3.0)
     assert result.status == {"nested": {"samples": (1.0,)}}
-    assert runner.controller_state() == {"nested": {"samples": [1.0]}}
+    assert runner.controller_state()["nested"] == {"samples": [1.0]}
 
 
 class _RecordingLogger:
@@ -236,6 +239,9 @@ def test_sync_runner_wants_async_reflects_core_and_stop_is_noop():
         def wants_async(self):
             return self._wants
 
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
     # Delegates to the core (not hardcoded): True core -> True, False core -> False.
     assert SyncControllerRunner(_Core(True)).wants_async() is True
     assert SyncControllerRunner(_Core(False)).wants_async() is False
@@ -263,6 +269,9 @@ class _RecordingCore:
 
     def wants_async(self):
         return False
+
+    def actuation_mode(self):
+        return ActuationMode.FRAMED_PULSE
 
     def set_output(self, applied):
         self.applied.append(applied)

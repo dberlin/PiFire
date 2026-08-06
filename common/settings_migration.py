@@ -278,7 +278,7 @@ def _remove_mpc_affine_load_bounds(settings):
 
 
 def _remove_retired_fan_pid(settings):
-    """Remove the retired fixed-cycle fan-assist setting."""
+    """Remove the retired fan-assist setting."""
     cycle_data = settings.get("cycle_data")
     if not isinstance(cycle_data, MutableMapping):
         return False
