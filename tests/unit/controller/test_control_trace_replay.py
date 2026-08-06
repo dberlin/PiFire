@@ -374,6 +374,33 @@ def test_replay_accepts_exactly_one_same_revision_mpc_stale_observation():
         assert ReplayIssueCode.NON_MONOTONE_REVISION in [issue.code for issue in report.issues]
 
 
+def test_validate_records_rejects_overlapping_same_revision_frames_before_reusing_applied_output():
+    records = _mpc_framed_records()
+    duplicate_frame = _record(22_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, records[3].payload)
+
+    report = validate_records([*records[:4], duplicate_frame, records[4]])
+
+    assert ReplayIssueCode.OVERLAPPING_INTERVAL in [issue.code for issue in report.issues]
+
+
+def test_validate_records_accepts_adjacent_same_revision_framed_intervals():
+    records = _mpc_framed_records()
+    adjacent_frame = _record(
+        42_000,
+        ControllerType.MPC,
+        TraceEventKind.ACTUATION_FRAME,
+        replace(records[3].payload, frame_start_ms=22_000, frame_end_ms=42_000),
+    )
+    adjacent_output = _record(
+        42_000,
+        ControllerType.MPC,
+        TraceEventKind.APPLIED_OUTPUT,
+        replace(records[4].payload, interval_start_ms=22_000, interval_end_ms=42_000),
+    )
+
+    assert validate_records([*records, adjacent_frame, adjacent_output]).valid
+
+
 def test_validate_records_reconciles_framed_delivery_across_feedback_intervals_and_defers_open_tail():
     records = _mpc_framed_records()
     first = replace(_applied(), interval_start_ms=2_000, interval_end_ms=12_000)

@@ -98,6 +98,32 @@ def test_stale_result_continues_last_command_and_measured_feedback(hold_cycle):
     assert runner.applied[-1].requested == 0.1
 
 
+def test_stale_command_inhibits_non_solve_ticks_until_a_fresh_result_arrives(hold_cycle):
+    fresh = _output(1, 0.9)
+    stale = replace(fresh, stale_state=ResultStaleState.STALE)
+    recovered = _output(2, 0.9)
+    runner = FakeControllerRunner(period=1.0).script([fresh, stale, recovered])
+    hold = hold_cycle(runner, controller="mpc")
+
+    hold.state.metrics = {"id": "stale-recovery-no-catchup", "augerontime": 0.0}
+    hold.setup()
+    hold.on_tick(2.0, 200.0, _status(hold))
+    hold.on_tick(4.0, 200.0, _status(hold))
+    delivery_at_reset = hold.state.controller.pulse_feedback_delivered_on_s
+
+    hold.on_tick(4.5, 200.0, _status(hold))
+
+    assert hold.grill.get_output_status()["auger"] is False
+    assert hold.state.controller.pulse_feedback_delivered_on_s == delivery_at_reset
+    hold.on_tick(6.0, 200.0, _status(hold))
+    assert hold.state.controller.pulse_stale_command is False
+    assert hold.grill.get_output_status()["auger"] is True
+    hold.on_tick(8.0, 200.0, _status(hold))
+    hold.on_tick(26.0, 200.0, _status(hold))
+
+    assert hold.state.metrics["augerontime"] == 18.0
+
+
 def test_reconfiguration_replaces_scheduler_and_discards_prior_credit(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.1)])
     hold = hold_cycle(runner, controller="pid")
@@ -111,6 +137,26 @@ def test_reconfiguration_replaces_scheduler_and_discards_prior_credit(hold_cycle
 
     assert hold._pulse_scheduler is not original_scheduler
     assert hold._pulse_scheduler.advance(0.1, 42.0, False).credit_s < 2.0
+
+
+def test_reconfiguration_uses_post_reset_auger_state_for_the_replacement_scheduler(hold_cycle):
+    runner = FakeControllerRunner(period=1.0).script([_output(1, 0.9)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.metrics = {"id": "reconfigure-observed-state", "augerontime": 0.0}
+    hold.on_tick(2.0, 200.0, _status(hold))
+    original_scheduler = hold._pulse_scheduler
+    captured_before_reset = _status(hold)
+    hold.control["controller_update"] = True
+    runner.applied.clear()
+
+    hold.on_tick(4.0, 200.0, captured_before_reset)
+
+    assert hold._pulse_scheduler is not original_scheduler
+    assert hold.grill.get_output_status()["auger"] is True
+    assert hold.state.metrics["augerontime"] == 0.0
+    assert runner.applied[0].ratio == 0.0
+    assert runner.applied[0].source is OutputSource.SEED
 
 
 def test_safety_manual_lid_and_teardown_reset_credit(hold_cycle):
@@ -197,7 +243,7 @@ def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_out
     assert hold._pulse_scheduler is not None
     assert hold.state.cycle.cycle_time == 0.0
     assert hold._controller_name == "pid"
-    assert hold.grill.get_output_status()["auger"] is False
+    assert hold.grill.get_output_status()["auger"] is True
     assert hold.state.metrics["augerontime"] == 2.0
     seed = runner.applied[0]
     assert seed.ratio == 0.0

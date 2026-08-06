@@ -27,7 +27,7 @@ import pytest
 import tests.characterization.harness as harness  # noqa: F401  binds control.eventLogger
 from common.common import ErrorKind
 from common.datastore_accessors import read_errors
-from common.control_trace import ControllerType
+from common.control_trace import ActuationMode, ControllerType
 from controller.runtime.runner import (
     SyncControllerRunner,
     _build_core,
@@ -106,6 +106,7 @@ def test_build_runner_falls_back_to_pid_and_keeps_controlling(no_do_mpc, ds):
     assert status == "Active"
     assert isinstance(runner, SyncControllerRunner)  # pid is synchronous
     assert runner.controller_type() is ControllerType.PID
+    assert runner.actuation_mode() is ActuationMode.FRAMED_PULSE
     # And it genuinely works: a temperature in gives a cycle ratio out. (The raw
     # value is unclamped -- HoldMode applies cycle_data's u_min/u_max -- so this
     # pins that a real number comes back, not the band.)
@@ -203,6 +204,10 @@ def test_hold_cycle_survives_mpc_selected_without_do_mpc(no_do_mpc, ds):
     do_mpc absent. Before the fix this raised out of run_work_cycle -- which on
     a real grill is the control process exiting."""
     settings = _mpc_settings()
+    # Make the fallback PID request one pulse quantum deterministically: once
+    # Hold reaches the next 20-second frame boundary, FRAMED_PULSE must deliver
+    # two seconds on and then turn the auger back off.
+    settings["controller"]["config"]["pid"].update({"PB": 0, "Ti": 0, "Td": 0, "center": 0.1})
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
     grill = FakeGrillPlatform()
@@ -212,15 +217,17 @@ def test_hold_cycle_survives_mpc_selected_without_do_mpc(no_do_mpc, ds):
         settings=settings,
         control_data=control_data,
         pellet_db=base_pellet_db(),
-        probes=FakeProbes().script([200] * 12),
-        probe_cap=8,
+        probes=FakeProbes().script([200] * 500),
+        probe_cap=500,
         grill=grill,
     )
 
-    # It got past setup and ran the work loop rather than aborting at
-    # setup_safety: the loop's own auger cycling is visible.
+    # The selected MPC could not build, but fallback PID drove a complete
+    # 2-second framed pulse instead of the old fixed-cycle edge.
     names = [call[0] for call in result.grill_calls]
-    assert "auger_on" in names
+    auger_on = names.index("auger_on")
+    assert "auger_off" in names[auger_on + 1 :]
+    assert result.final_metrics["augerontime"] == pytest.approx(2.0)
     # Powered up and under control, not dumped into an error/stop state.
     assert "power_on" in names
     # And the user has an explanation waiting on the dashboard.

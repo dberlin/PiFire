@@ -906,6 +906,7 @@ class HoldMode(ControlMode):
         runner_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
         if runner_revision != self._runner_configuration_revision:
             self._adopt_runner_configuration(now, current_output_status)
+            current_output_status = self.grill.get_output_status()
         self._ensure_trace_session(now)
 
         if control["controller_update"]:
@@ -924,6 +925,7 @@ class HoldMode(ControlMode):
                 getattr(self._runner, "configuration_revision", lambda: 0)() != self._runner_configuration_revision
             ):
                 self._adopt_runner_configuration(now, current_output_status)
+                current_output_status = self.grill.get_output_status()
             elif self._controller_status != "Active":
                 self._trace_safety(
                     SafetyEventType.CONTROLLER_FALLBACK,
@@ -944,7 +946,6 @@ class HoldMode(ControlMode):
         # never tuned for.
         controller_interval = self._runner.control_period() or (self._pulse_frame_seconds())
         framed_feedback_due = False
-        pulse_inhibited = False
         if (now - self.state.controller.cycle_start) > controller_interval:
             result = self._runner.latest()
             if isinstance(result.diagnostics, MpcTraceDiagnostics):
@@ -972,7 +973,6 @@ class HoldMode(ControlMode):
                     InhibitReason.SAFETY,
                     report_feedback=True,
                 )
-                pulse_inhibited = True
             self.state.cycle.ratio = self.state.cycle.raw_ratio = controller.pulse_requested_duty
             self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
             self._trace_update(result, now, controller_interval)
@@ -986,7 +986,11 @@ class HoldMode(ControlMode):
             and settings["cycle_data"]["LidOpenDetectEnabled"]
             and ptemp < control["primary_setpoint"] * ((100 - settings["cycle_data"]["LidOpenThreshold"]) / 100)
         )
-        if not pulse_inhibited and self.state.manual_override["auger"] < now and not self.state.lid.open_detected:
+        if (
+            not self.state.controller.pulse_stale_command
+            and self.state.manual_override["auger"] < now
+            and not self.state.lid.open_detected
+        ):
             decision = self._advance_framed_pulse(
                 now,
                 current_output_status["auger"],

@@ -229,9 +229,9 @@ class _StopRecordingRunner(FakeControllerRunner):
 
 
 def test_maxtemp_trip_breaks_before_actuation():
-    # First in-loop probe is over maxtemp -> pre_act max-temp trips on tick 1,
-    # before on_tick, so the controller is never submitted a temp and the auger
-    # is never cycled on the trip tick.
+    # First in-loop probe is over maxtemp -> pre_act max-temp trips on tick 1
+    # before on_tick, so the controller is never submitted a temp and no auger
+    # actuation occurs.
     settings = base_settings()
     settings["safety"]["maxtemp"] = 500
     control_data = base_control(mode="Hold")
@@ -253,15 +253,15 @@ def test_maxtemp_trip_breaks_before_actuation():
     )
     assert result.final_control["mode"] == "Error"
     assert "Grill_Error_01" in result.notifications
-    # on_tick never ran on the trip tick: no controller submit, no in-loop auger_on.
+    # on_tick never ran on the trip tick: no controller submit or auger-on command.
     assert runner.submitted_temps == []
-    assert [c for c in result.grill_calls if c[0] == "auger_on"] == [("auger_on", ())]  # Hold setup only
+    assert [call for call in result.grill_calls if call[0] == "auger_on"] == []
 
 
 def test_check_safety_flameout_breaks_before_actuation():
     # setup_safety passes (afterstarttemp 200 >= startuptemp 150); the in-loop
-    # probe (100 < 150) trips pre_act check_safety flameout on tick 1, before
-    # on_tick -- so again the controller is never submitted a temp.
+    # probe (100 < 150) trips pre_act check_safety flameout on tick 1 before
+    # on_tick, so the controller is never submitted a temp or starts the auger.
     settings = base_settings()
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
@@ -284,7 +284,7 @@ def test_check_safety_flameout_breaks_before_actuation():
     assert result.final_control["mode"] == "Error"
     assert "Grill_Error_02" in result.notifications
     assert runner.submitted_temps == []  # on_tick never ran on the trip tick
-    assert [c for c in result.grill_calls if c[0] == "auger_on"] == [("auger_on", ())]
+    assert [call for call in result.grill_calls if call[0] == "auger_on"] == []
 
 
 def test_setup_safety_inactive_skips_loop_but_runs_teardown():
@@ -301,24 +301,27 @@ def test_setup_safety_inactive_skips_loop_but_runs_teardown():
     runner = _StopRecordingRunner(period=0.0).script(
         [ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 2
     )
+    grill = FakeGrillPlatform()
     result = run_mode(
         "Hold",
         settings=settings,
         control_data=control_data,
         pellet_db=base_pellet_db(),
         probes=probes,
-        grill=FakeGrillPlatform(),
+        grill=grill,
         runner=runner,
     )
     assert result.final_control["mode"] == "Error"
     # Loop skipped: on_tick never ran.
     assert runner.submitted_temps == []
     # Teardown still ran: Hold.teardown (which only runs post-loop) stopped the
-    # runner, and the post-loop universal cleanup turned the auger/igniter off.
-    # (endtime metric stays 0.0 here because the skipped loop never advanced the
-    # ManualClock, so it is not a usable teardown discriminator.)
+    # runner. The shared cleanup and Hold's framed-pulse reset leave both
+    # combustion outputs safely off; their relative command order is not a
+    # safety contract.
     assert runner.stopped is True
-    assert result.grill_calls[-2:] == [("auger_off", ()), ("igniter_off", ())]
+    output_status = grill.get_output_status()
+    assert output_status["auger"] is False
+    assert output_status["igniter"] is False
 
 
 def test_pre_act_priority_maxtemp_beats_check_safety_on_same_tick():

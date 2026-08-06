@@ -40,6 +40,8 @@ from common.control_trace import (
     MpcFailureState,
     MpcUpdatePayload,
     RecorderGapPayload,
+    SafetyEventPayload,
+    SafetyEventType,
     SessionPayload,
     TRACE_SCHEMA_VERSION,
 )
@@ -117,6 +119,67 @@ class TraceSelectionError(ValueError):
     """The selected control trace cannot provide an unambiguous fit input."""
 
 
+def _terminal_safety_tail_output_index(records) -> int | None:
+    """Return the sole applied interval cut short by a terminal safety reset."""
+    if len(records) < 3:
+        return None
+    output_record, safety_record, frame_record = records[-3:]
+    output = output_record.payload
+    safety = safety_record.payload
+    frame = frame_record.payload
+    if not (
+        isinstance(output, AppliedOutputPayload)
+        and output.result_revision > 0
+        and output.sample_complete
+        and output.output_source is OutputSource.CONTROLLER
+        and isinstance(safety, SafetyEventPayload)
+        and safety.event is SafetyEventType.SCHEDULER_RESET
+        and safety.inhibit_reason is InhibitReason.SAFETY
+        and safety.result_revision == output.result_revision
+        and isinstance(frame, FramedPulseFramePayload)
+        and frame.result_revision == output.result_revision
+        and frame.inhibit_reason is InhibitReason.SAFETY
+        and not frame.skipped
+        and frame.reset_reason is not None
+        and frame.frame_start_ms == output.interval_start_ms
+        and frame.frame_end_ms == output.interval_end_ms
+        and frame.frame_end_ms - frame.frame_start_ms < frame.frame_seconds * 1_000
+        and output_record.ts_ms == safety_record.ts_ms == frame_record.ts_ms == output.interval_end_ms
+    ):
+        return None
+
+    if any(
+        isinstance(record.payload, FramedPulseFramePayload)
+        and record.payload.result_revision == output.result_revision
+        and record.payload.inhibit_reason is InhibitReason.NONE
+        and not record.payload.skipped
+        and not record.payload.stale_command
+        and record.payload.reset_reason is None
+        and math.isclose(
+            (record.payload.frame_end_ms - record.payload.frame_start_ms) / 1000.0,
+            record.payload.frame_seconds,
+            rel_tol=0,
+            abs_tol=1e-6,
+        )
+        and record.payload.frame_start_ms <= output.interval_start_ms
+        and output.interval_end_ms <= record.payload.frame_end_ms
+        for record in records
+    ):
+        return None
+    return len(records) - 3
+
+
+def _validate_framed_timeline(frames: dict[int, list[tuple[int, FramedPulseFramePayload]]]) -> None:
+    latest_end_ms: int | None = None
+    for _, frame in sorted(
+        (item for revision_frames in frames.values() for item in revision_frames),
+        key=lambda item: (item[1].frame_start_ms, item[1].frame_end_ms, item[0]),
+    ):
+        if latest_end_ms is not None and frame.frame_start_ms < latest_end_ms:
+            raise TraceSelectionError("selected control trace has overlapping framed intervals")
+        latest_end_ms = frame.frame_end_ms if latest_end_ms is None else max(latest_end_ms, frame.frame_end_ms)
+
+
 def load_trace_samples(
     *,
     cook_id: str | None = None,
@@ -163,11 +226,13 @@ def load_trace_samples(
         if record.ts_ms < previous_ts:
             raise TraceSelectionError("selected control trace timestamps are not ordered")
         previous_ts = record.ts_ms
+    terminal_safety_tail_output_index = _terminal_safety_tail_output_index(records)
 
     updates: list[tuple[int, MpcUpdatePayload]] = []
     allocations: dict[int, tuple[int, AllocationPayload]] = {}
     frames: dict[int, list[tuple[int, FramedPulseFramePayload]]] = {}
     complete_outputs: dict[int, list[tuple[int, AppliedOutputPayload]]] = {}
+    terminal_safety_tail_output: tuple[int, AppliedOutputPayload] | None = None
     seed_outputs = 0
     partial_outputs: list[tuple[int, AppliedOutputPayload]] = []
     actuated_revisions: set[int] = set()
@@ -190,7 +255,6 @@ def load_trace_samples(
                 raise TraceSelectionError("revision-zero applied output must be the one complete initial seed")
             seed_allowed = False
             continue
-        seed_allowed = False
         if isinstance(payload, MpcUpdatePayload):
             revision = payload.result_revision
             if revision <= previous_revision:
@@ -213,6 +277,7 @@ def load_trace_samples(
                 raise TraceSelectionError(f"MPC revision {payload.result_revision} has duplicate allocations")
             allocations[payload.result_revision] = (index, payload)
         elif isinstance(payload, FramedPulseFramePayload):
+            seed_allowed = False
             frames.setdefault(payload.result_revision, []).append((index, payload))
             if (
                 payload.result_revision > 0
@@ -222,6 +287,7 @@ def load_trace_samples(
             ):
                 actuated_revisions.add(payload.result_revision)
         elif isinstance(payload, AppliedOutputPayload):
+            seed_allowed = False
             revision = payload.result_revision
             if payload.output_source is not OutputSource.CONTROLLER:
                 raise TraceSelectionError(f"MPC revision {revision} is inhibited by {payload.output_source.value}")
@@ -232,13 +298,17 @@ def load_trace_samples(
                     raise TraceSelectionError(
                         f"MPC revision {revision} complete applied output must span a positive interval"
                     )
-                complete_outputs.setdefault(revision, []).append((index, payload))
+                if index == terminal_safety_tail_output_index:
+                    terminal_safety_tail_output = (index, payload)
+                else:
+                    complete_outputs.setdefault(revision, []).append((index, payload))
             else:
                 if payload.realized_combustion_load is not None:
                     raise TraceSelectionError(
                         f"MPC revision {revision} has a malformed incomplete applied-output interval"
                     )
                 partial_outputs.append((index, payload))
+    _validate_framed_timeline(frames)
 
     if len(updates) < 2:
         raise TraceSelectionError("selected control trace requires at least two completed MPC control updates")
@@ -331,6 +401,23 @@ def load_trace_samples(
         if previous_end_ms is not None and output.interval_start_ms != previous_end_ms:
             raise TraceSelectionError("complete framed applied-output intervals must be globally contiguous")
         previous_end_ms = output.interval_end_ms
+    if terminal_safety_tail_output is not None:
+        output_index, output = terminal_safety_tail_output
+        revision = output.result_revision
+        if revision not in update_indices:
+            raise TraceSelectionError("complete applied output does not match an accepted MPC update")
+        if output_index <= update_indices[revision]:
+            raise TraceSelectionError("complete applied output must follow its accepted update")
+        allocation_entry = allocations.get(revision)
+        if allocation_entry is None:
+            raise TraceSelectionError(f"MPC revision {revision} terminal safety-reset output has no allocation")
+        delivered_load = min(1.0, max(0.0, output.realized_auger_duty / allocation_entry[1].u_max))
+        if not math.isclose(float(output.realized_combustion_load), delivered_load, rel_tol=0, abs_tol=1e-6):
+            raise TraceSelectionError(
+                f"MPC revision {revision} realized combustion load does not match applied auger duty"
+            )
+        if previous_end_ms is None or output.interval_start_ms != previous_end_ms:
+            raise TraceSelectionError("terminal safety-reset output does not follow its complete interval")
 
     terminal_partial_revision = partial_outputs[0][1].result_revision if partial_outputs else None
     missing_actuated_revisions = sorted(

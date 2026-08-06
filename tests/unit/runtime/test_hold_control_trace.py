@@ -9,11 +9,14 @@ from common.control_trace import (
     ActuationMode,
     ControllerBranch,
     ControllerType,
+    InhibitReason,
     PidSpUpdatePayload,
     ResultStaleState,
+    SafetyEventType,
     TraceEventKind,
 )
 from common.datastore_accessors import read_control_trace_session
+from common import datastore
 from controller.applied_output import OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.control_trace_replay import ReplayIssueCode, validate_records
@@ -21,6 +24,7 @@ from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner
 from tests.fakes.runner import FakeControllerRunner
+from controller.update_mpc import load_trace_samples
 
 
 class _Recorder:
@@ -344,6 +348,85 @@ def test_mpc_allocation_trace_preserves_disabled_fan_evidence(hold_cycle, monkey
 
     assert allocation.requested_fan_duty is None
     assert allocation.fan_enabled is False
+
+
+def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp_path):
+    datastore._reset_for_tests(str(tmp_path / "hold-trace.db"))
+    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [_mpc_result(revision) for revision in range(1, 33)]
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.settings["platform"]["dc_fan"] = True
+    mode.control["pwm_control"] = True
+    mode.ctx.store._settings["platform"]["dc_fan"] = True
+    mode.ctx.store._control["pwm_control"] = True
+    mode.setup()
+    assert isinstance(mode._trace_recorder, ControlTraceRecorder)
+    mode.state.metrics = {"id": "calibration-seed", "augerontime": 0.0}
+    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
+    for now in range(2, 64, 2):
+        mode.on_tick(float(now), 225.0, output)
+        output = mode.grill.get_output_status()
+    mode.ctx.clock.advance(64)
+    mode.teardown(220.0)
+
+    session_id = mode._trace_session_id
+    assert session_id is not None
+    records = read_control_trace_session(session_id)
+    assert [record.event_kind for record in records[:4]] == [
+        TraceEventKind.SESSION,
+        TraceEventKind.CONTROL_UPDATE,
+        TraceEventKind.ALLOCATION,
+        TraceEventKind.APPLIED_OUTPUT,
+    ]
+    seed_index = 3
+    seed = records[seed_index].payload
+    assert seed.result_revision == 0
+    assert seed.output_source is OutputSource.SEED
+    assert seed.sample_complete
+    revision_one_output = next(
+        record.payload
+        for record in records[seed_index + 1 :]
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 1
+    )
+    assert revision_one_output.output_source is OutputSource.CONTROLLER
+    assert revision_one_output.sample_complete
+    terminal_output, terminal_safety, terminal_frame = records[-3:]
+    assert [record.event_kind for record in (terminal_output, terminal_safety, terminal_frame)] == [
+        TraceEventKind.APPLIED_OUTPUT,
+        TraceEventKind.SAFETY_EVENT,
+        TraceEventKind.ACTUATION_FRAME,
+    ]
+    assert (
+        terminal_output.payload.result_revision
+        == terminal_safety.payload.result_revision
+        == terminal_frame.payload.result_revision
+        == 31
+    )
+    assert terminal_output.payload.sample_complete
+    assert terminal_output.payload.output_source is OutputSource.CONTROLLER
+    assert terminal_safety.payload.event is SafetyEventType.SCHEDULER_RESET
+    assert terminal_safety.payload.inhibit_reason is InhibitReason.SAFETY
+    assert terminal_frame.payload.inhibit_reason is InhibitReason.SAFETY
+    assert terminal_frame.payload.reset_reason == "mode_change"
+    assert (
+        terminal_output.payload.interval_start_ms,
+        terminal_output.payload.interval_end_ms,
+    ) == (
+        terminal_frame.payload.frame_start_ms,
+        terminal_frame.payload.frame_end_ms,
+    )
+    assert (
+        terminal_output.payload.interval_start_ms,
+        terminal_output.payload.interval_end_ms,
+    ) == (62_000, 64_000)
+    assert terminal_frame.payload.frame_end_ms - terminal_frame.payload.frame_start_ms < (
+        terminal_frame.payload.frame_seconds * 1_000
+    )
+    time_s, temperatures_c, loads = load_trace_samples(session_id=session_id)
+    assert time_s.tolist() == [0.0, 0.0, 0.0]
+    assert temperatures_c.tolist() == [100.0, 100.0, 100.0]
+    assert loads.tolist() == [0.3, 0.4, 0.3]
 
 
 def test_hold_records_one_same_revision_mpc_stale_observation_without_duplicate_allocation(hold_cycle, monkeypatch):

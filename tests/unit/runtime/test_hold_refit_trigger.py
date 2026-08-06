@@ -6,6 +6,7 @@ what puts a learned model on the grill.
 """
 
 import pytest
+from common.control_trace import ActuationMode
 
 from controller.runtime.runner import (
     ControllerRunner,
@@ -127,6 +128,9 @@ class _CoreWithoutRefit:
 
     def commands_fan(self):
         return False
+
+    def actuation_mode(self):
+        return ActuationMode.FRAMED_PULSE
 
     def get_status(self):
         return {}

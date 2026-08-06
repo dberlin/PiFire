@@ -17,6 +17,8 @@ from common.control_trace import (
     MpcUpdatePayload,
     ResultStaleState,
     RecorderGapPayload,
+    SafetyEventPayload,
+    SafetyEventType,
     SessionPayload,
     TraceEventKind,
     TraceSetting,
@@ -263,6 +265,31 @@ def _lifecycle_records(*, terminal_partial: bool = False) -> list[ControlTraceRe
     return records
 
 
+def _terminal_safety_reset_tail() -> list[ControlTraceRecord]:
+    allocation = _allocation(12, 0.3)
+    frame = _frame(12, 11_000, 12_000, allocation)
+    reset_frame = frame.model_copy(
+        update={"payload": replace(frame.payload, inhibit_reason=InhibitReason.SAFETY, reset_reason="mode_change")}
+    )
+    return [
+        _applied(12, 12_000, 11_000, 12_000, 0.3, auger_duty=allocation.requested_auger_duty),
+        ControlTraceRecord(
+            ts_ms=12_000,
+            session_id=SESSION_ID,
+            cook_id=COOK_ID,
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.SAFETY_EVENT,
+            payload=SafetyEventPayload(
+                event=SafetyEventType.SCHEDULER_RESET,
+                inhibit_reason=InhibitReason.SAFETY,
+                result_revision=12,
+                detail="framed pulse scheduler reset: mode_change",
+            ),
+        ),
+        reset_frame,
+    ]
+
+
 def _output_index(records: list[ControlTraceRecord], revision: int) -> int:
     return next(
         index
@@ -319,7 +346,7 @@ def test_load_trace_samples_rejects_a_complete_controller_interval_without_a_fra
         load_trace_samples(session_id=SESSION_ID)
 
 
-def test_load_trace_samples_rejects_missing_output_for_an_actuated_revision(ds):
+def test_load_trace_samples_rejects_an_overlapping_actuated_frame_before_its_missing_output(ds):
     records = _lifecycle_records()
     allocation = _allocation(4, 0.23)
     records[4:4] = [
@@ -336,7 +363,7 @@ def test_load_trace_samples_rejects_missing_output_for_an_actuated_revision(ds):
     ]
     append_control_trace(records)
 
-    with pytest.raises(TraceSelectionError, match="actuated.*complete framed interval"):
+    with pytest.raises(TraceSelectionError, match="overlapping framed intervals"):
         load_trace_samples(session_id=SESSION_ID)
 
 
@@ -379,7 +406,7 @@ def test_load_trace_samples_rejects_a_late_revision_zero_seed(ds):
 def test_load_trace_samples_rejects_seed_after_a_framed_update(ds):
     records = _lifecycle_records()
     seed = records.pop(1)
-    records.insert(3, seed.model_copy(update={"ts_ms": 1_001}))
+    records.insert(4, seed.model_copy(update={"ts_ms": 6_000}))
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="initial seed"):
@@ -393,6 +420,101 @@ def test_load_trace_samples_accepts_an_active_framed_session_without_a_terminal_
 
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
     np.testing.assert_allclose(combustion_load, (0.2, 0.25))
+
+
+def test_load_trace_samples_ignores_one_terminal_safety_reset_frame_and_its_output(ds):
+    records = _lifecycle_records()
+    records.extend(_terminal_safety_reset_tail())
+    append_control_trace(records)
+
+    _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
+
+    np.testing.assert_allclose(temperature_c, (100.0, 110.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
+
+
+def test_load_trace_samples_does_not_exclude_a_skipped_terminal_safety_reset_frame(ds):
+    records = _lifecycle_records()
+    records.extend(_terminal_safety_reset_tail())
+    reset_frame = records[-1]
+    records[-1] = reset_frame.model_copy(update={"payload": replace(reset_frame.payload, skipped=True)})
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="complete framed interval"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_rejects_overlapping_frames_before_reusing_one_applied_interval(ds):
+    records = _lifecycle_records()
+    duplicate_frame = next(
+        record
+        for record in records
+        if isinstance(record.payload, FramedPulseFramePayload) and record.payload.result_revision == 7
+    )
+    records.append(duplicate_frame)
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="overlapping framed intervals"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_accepts_adjacent_same_revision_framed_intervals(ds):
+    records = _lifecycle_records()[:-2]
+    allocation = _allocation(7, 0.25)
+    records.extend(
+        [
+            _frame(7, 11_000, 16_000, allocation),
+            _applied(7, 16_000, 11_000, 16_000, 0.25, auger_duty=allocation.requested_auger_duty),
+        ]
+    )
+    append_control_trace(records)
+
+    _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
+
+    np.testing.assert_allclose(temperature_c, (100.0, 110.0))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
+
+
+def test_load_trace_samples_rejects_terminal_safety_tail_without_realized_load(ds):
+    records = _lifecycle_records()
+    records.extend(_terminal_safety_reset_tail())
+    output = records[-3]
+    records[-3] = output.model_copy(update={"payload": replace(output.payload, realized_combustion_load=None)})
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="no realized combustion load"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_rejects_terminal_safety_tail_with_mismatched_realized_load(ds):
+    records = _lifecycle_records()
+    records.extend(_terminal_safety_reset_tail())
+    output = records[-3]
+    records[-3] = output.model_copy(update={"payload": replace(output.payload, realized_combustion_load=0.2)})
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="does not match applied auger duty"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_rejects_terminal_safety_frame_without_reset_provenance(ds):
+    records = _lifecycle_records()
+    records.extend(_terminal_safety_reset_tail())
+    del records[-2]
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="complete framed interval"):
+        load_trace_samples(session_id=SESSION_ID)
+
+
+def test_load_trace_samples_rejects_mid_session_safety_reset_frame_and_its_output(ds):
+    records = _lifecycle_records()
+    records.extend(_terminal_safety_reset_tail())
+    records.append(_update(13, 12_001, 125.0, 0.3))
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="complete framed interval"):
+        load_trace_samples(session_id=SESSION_ID)
 
 
 def test_load_trace_samples_ignores_one_terminal_partial_output(ds):

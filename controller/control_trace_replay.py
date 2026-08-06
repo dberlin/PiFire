@@ -238,6 +238,7 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
 
     _validate_allocations(allocations, updates, add)
     _validate_framed_allocations(framed_frames, allocations, add)
+    _validate_framed_timeline(framed_frames, add)
     for revision, (index, payload) in updates.items():
         if isinstance(payload, MpcUpdatePayload) and revision not in allocations:
             add(ReplayIssueCode.MISSING_ALLOCATION, "accepted MPC update has no joined allocation", index)
@@ -436,6 +437,14 @@ def _validate_framed_allocations(
             and _optional_close(frame.requested_fan_duty, payload.requested_fan_duty)
         ):
             add(ReplayIssueCode.FRAME_SCHEDULE_MISMATCH, "framed pulse command differs from joined allocation", index)
+
+
+def _validate_framed_timeline(framed_frames: list[tuple[int, FramedPulseFramePayload]], add: IssueAdder) -> None:
+    latest_end_ms: int | None = None
+    for index, frame in sorted(framed_frames, key=lambda item: (item[1].frame_start_ms, item[1].frame_end_ms, item[0])):
+        if latest_end_ms is not None and frame.frame_start_ms < latest_end_ms:
+            add(ReplayIssueCode.OVERLAPPING_INTERVAL, "framed pulse intervals overlap", index)
+        latest_end_ms = frame.frame_end_ms if latest_end_ms is None else max(latest_end_ms, frame.frame_end_ms)
 
 
 def _validate_applied_outputs(

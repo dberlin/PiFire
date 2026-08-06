@@ -128,9 +128,7 @@ def replay(
 ):
     core = Controller({"policy": "nlp"}, "F", CYCLE_DATA)
     assert core._net is None, "configure policy=nlp; the point is to log the NLP's answers"
-    assert _split_is_live(CYCLE_DATA), (
-        "set_output must update _applied_combustion_load from realized delivery."
-    )
+    assert _split_is_live(CYCLE_DATA), "set_output must update _applied_combustion_load from realized delivery."
     core.set_target(setpoint_f)
     plant = GrillSim(seed=seed)
     period = core.get_control_period()
@@ -140,9 +138,7 @@ def replay(
         "controller configuration and net artifact provenance disagree; "
         "their normalized combustion-load predictions are not comparable."
     )
-    assert not core.cfg["enable_fan_input"], (
-        "enable_fan_input=True requires replaying the allocator's fan output."
-    )
+    assert not core.cfg["enable_fan_input"], "enable_fan_input=True requires replaying the allocator's fan output."
 
     triples, nlp_loads, nlp_raw_loads, solve_failed, in_lid, sample_t = [], [], [], [], [], []
     # The lid window contains two regimes of different length: a full actuator
@@ -276,8 +272,7 @@ def replay(
     )
     if warm_start_s is None:
         raise RuntimeError(
-            f"seed {seed}: the plant never entered the {SETTLE_TOL_F:.0f}F "
-            "set-point band before the lid-open window."
+            f"seed {seed}: the plant never entered the {SETTLE_TOL_F:.0f}F set-point band before the lid-open window."
         )
 
     sample_t_arr = np.asarray(sample_t)

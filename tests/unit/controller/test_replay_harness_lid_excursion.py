@@ -285,6 +285,7 @@ def real_replay():
     plant.scheduler = schedulers[0]
     return row, plant
 
+
 @pytest.mark.slow
 def test_the_real_replay_reports_a_lid_excursion(real_replay):
     """Depth, through the harness rather than through a reconstruction of its
@@ -312,19 +313,13 @@ def test_the_real_replay_recovers_on_the_pause_timer_not_the_lid_window(real_rep
     )
 
 
-
-
 @pytest.mark.slow
 def test_the_real_replay_reports_realized_feedback_at_every_solve(real_replay):
     """Each output arrives before its solve, and lid-pause outputs carry the
     zero delivery that the applied estimator consumes."""
     row, plant = real_replay
     pause_end = LID_OPEN_AT + replay_mod.LID_PAUSE_S
-    paused_outputs = [
-        output
-        for output in plant.applied_outputs
-        if LID_OPEN_AT < output.timestamp < pause_end
-    ]
+    paused_outputs = [output for output in plant.applied_outputs if LID_OPEN_AT < output.timestamp < pause_end]
 
     assert len(plant.applied_outputs) == row["n"]
     assert plant.feedback_events == ["output", "update"] * row["n"]
@@ -344,6 +339,8 @@ def test_the_lid_reset_releases_a_fresh_frame_without_pause_catchup(real_replay)
     assert not any(LID_OPEN_AT < decision.frame_start_s < pause_end for decision in scheduler.advances)
     assert release.reset_reason is PulseResetReason.LID
     assert release.frame_start_s == pause_end
+
+
 @pytest.mark.slow
 def test_the_real_replay_drives_the_two_windows_at_their_own_lengths(real_replay):
     """The sequence the plant was actually driven with. The lid stays open for
