@@ -22,16 +22,12 @@ def synthetic_step(q: np.ndarray) -> np.ndarray:
     delta_temperature = np.zeros_like(q)
     delta_q = np.diff(q, prepend=q[0])
     for index in range(3, len(q)):
-        delta_temperature[index] = (
-            0.92 * delta_temperature[index - 1] + 0.06 * delta_q[index - 3]
-        )
+        delta_temperature[index] = 0.92 * delta_temperature[index - 1] + 0.06 * delta_q[index - 3]
         temperature[index] = temperature[index - 1] + delta_temperature[index]
     return temperature
 
 
-def synthetic_record(
-    step: Callable[[np.ndarray], np.ndarray], *, samples: int, seed: int
-) -> SignalRecord:
+def synthetic_record(step: Callable[[np.ndarray], np.ndarray], *, samples: int, seed: int) -> SignalRecord:
     rng = np.random.default_rng(seed)
     q = rng.uniform(0.0, 1.0, samples)
     return SignalRecord(
@@ -50,9 +46,7 @@ def incremental_step(q: np.ndarray) -> np.ndarray:
     delta_q = np.diff(q, prepend=q[0])
     for index in range(3, q.size):
         delta_temperature[index] = (
-            0.85 * delta_temperature[index - 1]
-            + 0.3 * delta_q[index - 3]
-            + 0.05 * (20.0 - temperature[index - 1])
+            0.85 * delta_temperature[index - 1] + 0.3 * delta_q[index - 3] + 0.05 * (20.0 - temperature[index - 1])
         ) / 1.05
         temperature[index] = temperature[index - 1] + delta_temperature[index]
     return temperature
@@ -124,6 +118,7 @@ def test_arx_fits_incremental_temperature_and_input_regressors() -> None:
     assert coefficients["ar"][0] == pytest.approx(0.85, abs=0.02)
     assert coefficients["input"][0] == pytest.approx(0.3, abs=0.02)
 
+
 def test_snapshot_exposes_arm_neutral_gain_and_delay_diagnostics() -> None:
     snapshot = fitted_model(training_prefix()).snapshot()
 
@@ -156,7 +151,6 @@ def test_arx_reconstructs_incremental_forecast_from_prefix_state() -> None:
     npt.assert_allclose(forecast, record.temp_c[prefix_size:], atol=0.02)
 
 
-
 def test_arx_regressors_use_temperature_and_delayed_input_increments() -> None:
     model = ScheduledARX(ARXConfig(na=1, nb=1, delays=(2,)))
 
@@ -172,6 +166,7 @@ def test_arx_regressors_use_temperature_and_delayed_input_increments() -> None:
     assert feature[1] == pytest.approx(0.1)
     assert feature[-2] == pytest.approx(-7.0)
 
+
 def test_arx_update_is_prequential() -> None:
     prefix = training_prefix()
     model = fitted_model(prefix)
@@ -186,23 +181,17 @@ def test_arx_affine_prediction_matches_direct_forecast() -> None:
     prefix = training_prefix()
     model = fitted_model(prefix)
     ambient = np.zeros(10)
-    affine = model.affine_prediction(
-        10, q_previous=prefix.q[-1], ambient_future=ambient
-    )
+    affine = model.affine_prediction(10, q_previous=prefix.q[-1], ambient_future=ambient)
     q = np.linspace(0.2, 0.5, 10)
     expected = model.forecast(prefix, q, ambient)
 
     assert affine.free_output_c.shape == (10,)
     assert affine.input_response_c.shape == (10, 10)
-    npt.assert_allclose(
-        affine.free_output_c + affine.input_response_c @ q, expected, atol=1e-9
-    )
+    npt.assert_allclose(affine.free_output_c + affine.input_response_c @ q, expected, atol=1e-9)
 
 
 def test_delay_challenger_wins_must_be_consecutive() -> None:
-    model = ScheduledARX(
-        ARXConfig(na=1, nb=1, delays=(1, 2, 3), validation_window=1)
-    )
+    model = ScheduledARX(ARXConfig(na=1, nb=1, delays=(1, 2, 3), validation_window=1))
     active = model._candidates[1]
     winning_challenger = model._candidates[2]
     non_winning_challenger = model._candidates[3]
@@ -231,7 +220,6 @@ def test_scheduled_interpolation_projects_high_order_ar_poles() -> None:
     theta = model._scheduled_theta(candidate, 122.5)
 
     assert np.max(np.abs(np.roots(np.concatenate(([1.0], -theta[:3]))))) <= 0.999
-
 
 
 def test_scheduled_interpolation_retains_slow_poles_and_limits_dc_gain() -> None:
@@ -265,9 +253,8 @@ def test_arx_regularizes_explosive_sixty_minute_input_response() -> None:
     assert model._max_forecast_deviation is not None
     assert np.isfinite(prediction.input_response_c).all()
     assert np.max(np.abs(prediction.input_response_c)) <= model._max_forecast_deviation
-    assert np.max(np.abs(prediction.free_output_c - prefix.temp_c[-1])) <= (
-        model._max_forecast_deviation
-    )
+    assert np.max(np.abs(prediction.free_output_c - prefix.temp_c[-1])) <= (model._max_forecast_deviation)
+
 
 def test_affine_prediction_never_mutates_fitted_arx_regions() -> None:
     """Forecast-envelope limiting must not rewrite fitted theta or RLS state."""
@@ -286,6 +273,7 @@ def test_affine_prediction_never_mutates_fitted_arx_regions() -> None:
 
     assert model.snapshot() == before
 
+
 def test_track_updates_arx_history_without_rewriting_fitted_regions() -> None:
     """A frozen ARX incumbent advances prediction history without an RLS update."""
     prefix = training_prefix()
@@ -297,11 +285,10 @@ def test_track_updates_arx_history_without_rewriting_fitted_regions() -> None:
     assert outcome.updated is False
     assert model.snapshot()["regions"] == before["regions"]
 
+
 def test_forecast_output_is_read_only() -> None:
     prefix = training_prefix()
-    forecast = fitted_model(prefix).forecast(
-        prefix, np.array([0.4]), np.array([20.0])
-    )
+    forecast = fitted_model(prefix).forecast(prefix, np.array([0.4]), np.array([20.0]))
 
     assert forecast.flags.writeable is False
     with pytest.raises(ValueError):
@@ -319,9 +306,7 @@ def test_snapshot_is_recursively_immutable() -> None:
 
 def test_fit_refresh_records_its_actual_sample_index() -> None:
     record = synthetic_record(synthetic_step, samples=25, seed=9)
-    model = ScheduledARX(
-        ARXConfig(na=1, nb=1, delays=(1,), validation_window=10)
-    )
+    model = ScheduledARX(ARXConfig(na=1, nb=1, delays=(1,), validation_window=10))
 
     model.fit(record)
 

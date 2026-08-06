@@ -184,6 +184,7 @@ def _real_mak_row(*, arm: str) -> dict[str, Any]:
         },
     }
 
+
 def _complete_artifact() -> dict[str, Any]:
     rows = [
         _row(arm=arm, plant=plant, scenario=scenario, seed=seed)
@@ -294,9 +295,7 @@ def test_contract_is_strict_and_preserves_the_full_required_metric_set() -> None
     assert artifact_contract_errors(malformed)
 
     malformed = deepcopy(artifact)
-    next(row for row in malformed["rows"] if row["arm"] == "online")[
-        "online_chronology"
-    ].reverse()
+    next(row for row in malformed["rows"] if row["arm"] == "online")["online_chronology"].reverse()
     assert artifact_contract_errors(malformed)
 
     malformed = deepcopy(artifact)
@@ -316,10 +315,10 @@ def test_contract_is_strict_and_preserves_the_full_required_metric_set() -> None
         malformed["requested"][field] = values
         assert artifact_contract_errors(malformed)
 
-
     malformed = deepcopy(artifact)
     malformed["unrecognized_top_level"] = True
     assert artifact_contract_errors(malformed)
+
 
 def test_completed_50_percent_pulse_has_zero_requested_realized_frame_error() -> None:
     metrics, _ = _control_metrics(
@@ -364,9 +363,7 @@ def test_nonsettling_is_censored_and_braking_is_not_applicable_without_a_decreas
 
 
 class _ZeroPredictionModel:
-    def affine_prediction(
-        self, horizon: int, q_previous: float, ambient_c: list[float]
-    ) -> AffinePrediction:
+    def affine_prediction(self, horizon: int, q_previous: float, ambient_c: list[float]) -> AffinePrediction:
         del q_previous, ambient_c
         return AffinePrediction(
             free_output_c=np.zeros(horizon),
@@ -459,10 +456,8 @@ def test_contract_requires_consistent_metric_and_timing_applicability() -> None:
     assert artifact_contract_errors(censored) == []
 
     assert all(
-        row["metric_applicability"]["braking_error_c"]
-        is (row["scenario"] == "target-decrease-coast")
-        and (row["metrics"]["braking_error_c"] is not None)
-        is (row["scenario"] == "target-decrease-coast")
+        row["metric_applicability"]["braking_error_c"] is (row["scenario"] == "target-decrease-coast")
+        and (row["metrics"]["braking_error_c"] is not None) is (row["scenario"] == "target-decrease-coast")
         for row in artifact["rows"]
     )
 
@@ -472,9 +467,7 @@ def test_contract_requires_consistent_metric_and_timing_applicability() -> None:
     assert artifact_contract_errors(malformed)
 
     malformed = deepcopy(artifact)
-    malformed_row = next(
-        row for row in malformed["rows"] if row["scenario"] == "hold" and row["arm"] == "online"
-    )
+    malformed_row = next(row for row in malformed["rows"] if row["scenario"] == "hold" and row["arm"] == "online")
     malformed_row["metrics"]["braking_error_c"] = 0.0
     assert artifact_contract_errors(malformed)
 
@@ -522,6 +515,8 @@ def test_contract_requires_consistent_metric_and_timing_applicability() -> None:
     malformed_row = _online_row(malformed)
     malformed_row["runner_evidence"]["statuses"] = ["invented"]
     assert artifact_contract_errors(malformed)
+
+
 def test_named_non_cold_rows_publish_successful_preconditioning() -> None:
     artifact = load_artifact()
     non_cold_rows = [row for row in artifact["rows"] if row["scenario"] != "cold-start"]
@@ -535,9 +530,7 @@ def test_named_non_cold_rows_publish_successful_preconditioning() -> None:
     )
 
     malformed = deepcopy(artifact)
-    next(row for row in malformed["rows"] if row["scenario"] == "hold")["preconditioning"][
-        "hold_established"
-    ] = False
+    next(row for row in malformed["rows"] if row["scenario"] == "hold")["preconditioning"]["hold_established"] = False
     assert artifact_contract_errors(malformed)
 
 
@@ -545,8 +538,7 @@ def test_unavailable_safety_evidence_honestly_blocks_shipping() -> None:
     artifact = _complete_artifact()
 
     assert all(
-        row["outcomes"]["safety_inhibits"] is None
-        and row["outcome_evidence"]["safety_inhibits"] == "unavailable"
+        row["outcomes"]["safety_inhibits"] is None and row["outcome_evidence"]["safety_inhibits"] == "unavailable"
         for row in artifact["rows"]
     )
     decision = decide_ship(artifact)
@@ -607,9 +599,7 @@ def test_real_mak_replay_publishes_prediction_only_chronological_evidence() -> N
     by_arm = {row["arm"]: row for row in rows}
     origins = [row["prediction_origins"] for row in rows]
     assert {origin["origin_count"] for origin in origins} == {len(origins[0]["origin_frame_indices"])}
-    assert {origin["origin_frame_indices"][0] for origin in origins} == {
-        origins[0]["origin_frame_indices"][0]
-    }
+    assert {origin["origin_frame_indices"][0] for origin in origins} == {origins[0]["origin_frame_indices"][0]}
     assert {origin["warmup_frames"] for origin in origins} == {origins[0]["warmup_frames"]}
 
     for row in rows:
@@ -655,14 +645,7 @@ def test_real_mak_replay_publishes_prediction_only_chronological_evidence() -> N
         "solve": True,
     }
     assert by_arm["online"]["raw_timing_ms"]["learner"]
-    assert all(
-        isfinite(sample)
-        for row in rows
-        for samples in row["raw_timing_ms"].values()
-        for sample in samples
-    )
-
-
+    assert all(isfinite(sample) for row in rows for samples in row["raw_timing_ms"].values() for sample in samples)
 
 
 def _break_control_score(artifact: dict[str, Any]) -> None:
@@ -681,12 +664,11 @@ def _online_real_mak_row(artifact: dict[str, Any]) -> dict[str, Any]:
     return next(row for row in artifact["real_mak_rows"] if row["arm"] == "online")
 
 
-
-
 def _break_safety_inhibit(artifact: dict[str, Any]) -> None:
     for row in _online_rows(artifact):
         row["outcomes"]["safety_inhibits"] = 1
         row["outcome_evidence"]["safety_inhibits"] = "measured"
+
 
 def _break_reachability(artifact: dict[str, Any]) -> None:
     for row in _online_rows(artifact):
@@ -702,6 +684,7 @@ def _break_stale_episodes(artifact: dict[str, Any]) -> None:
     for row in _online_rows(artifact):
         row["metrics"]["stale_result_episodes"] = 1.0
         row["runner_evidence"]["stale_state_transitions"] = ["stale"]
+
 
 def _break_requested_realized_error(artifact: dict[str, Any]) -> None:
     for row in _online_rows(artifact):
@@ -803,9 +786,7 @@ def test_ship_decision_rejects_each_regression_or_incomplete_cell(
         (_break_policy_failure, "online policy failure regression"),
     ),
 )
-def test_ship_decision_reports_runner_evidence_gates(
-    regression: Callable[[dict[str, Any]], None], reason: str
-) -> None:
+def test_ship_decision_reports_runner_evidence_gates(regression: Callable[[dict[str, Any]], None], reason: str) -> None:
     artifact = _complete_artifact()
     regression(artifact)
 
@@ -845,8 +826,6 @@ def test_experiment_file_is_directly_invokable_from_repo_root() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "usage:" in result.stdout.lower()
-
-
 
 
 @pytest.mark.parametrize(
@@ -890,9 +869,7 @@ def test_lid_interruption_preserves_controller_cadence_without_duplicate_entry_r
     assert hold["status"] == lid["status"] == "completed"
     assert len(hold["raw_timing_ms"]["solve"]) == 37
     assert len(lid["raw_timing_ms"]["solve"]) == 37
-    runner_results = [
-        event for event in lid["online_chronology"] if event["event"] == "runner-result"
-    ]
+    runner_results = [event for event in lid["online_chronology"] if event["event"] == "runner-result"]
     assert len(runner_results) == 36
     assert [event["revision"] for event in runner_results] == list(
         range(runner_results[0]["revision"], runner_results[0]["revision"] + 36)
@@ -928,12 +905,12 @@ def test_lid_prediction_frames_use_absolute_grid_and_resume_at_380_seconds(
         and frame.frame_end_s - frame.frame_start_s == 20.0
         for frame in frames
     )
-    origin_end_times = [
-        frames[origin.frame_index].frame_end_s for origin in captured["origins"]
-    ]
+    origin_end_times = [frames[origin.frame_index].frame_end_s for origin in captured["origins"]]
     assert 365.0 not in origin_end_times
 
     assert min(end for end in origin_end_times if end > 345.0) == 380.0
+
+
 def test_partial_reset_observation_ends_at_actual_reset_time() -> None:
     observation = online_arx_compare._frame_observation(
         frame=SimpleNamespace(
@@ -961,7 +938,6 @@ def test_partial_reset_observation_ends_at_actual_reset_time() -> None:
     assert observation.delivered_on_s == 10.0
 
 
-
 def test_lid_entry_keeps_the_pre_lid_completed_frame_and_skips_zero_duration_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -983,17 +959,13 @@ def test_lid_entry_keeps_the_pre_lid_completed_frame_and_skips_zero_duration_res
 
     assert row["status"] == "completed"
     pre_lid = [
-        value
-        for value in observed
-        if value["frame"].nominal_end_s == 300.0
-        and value["frame"].nominal_start_s == 280.0
+        value for value in observed if value["frame"].nominal_end_s == 300.0 and value["frame"].nominal_start_s == 280.0
     ]
     assert len(pre_lid) == 1
     assert pre_lid[0]["source"].value == "controller"
     assert pre_lid[0]["lid_open"] is False
     assert not any(
-        value["source"].value == "lid_open"
-        and value["frame"].ended_at_s <= value["frame"].nominal_start_s
+        value["source"].value == "lid_open" and value["frame"].ended_at_s <= value["frame"].nominal_start_s
         for value in observed
     )
 
@@ -1033,6 +1005,7 @@ def test_lid_forced_off_transition_and_post_close_request_use_runner_feedback(
             self.outputs: list[Any] = []
             self.seen_revision = -1
             self.instances.append(self)
+
         def latest(self) -> Any:
             result = self.delegate.latest()
             if result.revision > self.seen_revision:
@@ -1058,24 +1031,16 @@ def test_lid_forced_off_transition_and_post_close_request_use_runner_feedback(
     )
 
     main_scheduler = next(
-        instance
-        for instance in RecordingScheduler.instances
-        if any(at_s == 300.0 for _, at_s, _, _ in instance.calls)
+        instance for instance in RecordingScheduler.instances if any(at_s == 300.0 for _, at_s, _, _ in instance.calls)
     )
-    (_, _, on_at_lid, lid_interruption) = next(
-        call for call in main_scheduler.calls if call[1] == 300.0
-    )
+    (_, _, on_at_lid, lid_interruption) = next(call for call in main_scheduler.calls if call[1] == 300.0)
     assert on_at_lid is True
     assert lid_interruption.transition is not None
     post_close = next(
-        instance
-        for instance in RecordingScheduler.instances
-        if instance.calls and instance.calls[0][1] == 345.0
+        instance for instance in RecordingScheduler.instances if instance.calls and instance.calls[0][1] == 345.0
     )
     runner = RecordingRunner.instances[0]
-    refreshed_lid_request = next(
-        result.allocation.auger_duty for result in runner.revisions if result.revision == 18
-    )
+    refreshed_lid_request = next(result.allocation.auger_duty for result in runner.revisions if result.revision == 18)
     assert post_close.calls[0][0] == pytest.approx(refreshed_lid_request)
     assert not [output for output in runner.outputs if output.timestamp in {320.0, 340.0}]
     at_lid_entry = [output for output in runner.outputs if output.timestamp == 300.0]
@@ -1091,19 +1056,13 @@ def test_lid_forced_off_transition_and_post_close_request_use_runner_feedback(
     assert at_360.ratio == pytest.approx(delivered_after_close / 60.0)
 
     expected_transitions = sum(
-        decision.transition is not None
-        for _, at_s, _, decision in main_scheduler.calls
-        if at_s < 300.0
+        decision.transition is not None for _, at_s, _, decision in main_scheduler.calls if at_s < 300.0
     )
     expected_transitions += 1
     expected_transitions += sum(
-        decision.transition is not None
-        for _, at_s, _, decision in post_close.calls
-        if at_s < 720.0
+        decision.transition is not None for _, at_s, _, decision in post_close.calls if at_s < 720.0
     )
-    assert row["metrics"]["transitions_per_hour"] == pytest.approx(
-        expected_transitions * 3600.0 / 720.0
-    )
+    assert row["metrics"]["transitions_per_hour"] == pytest.approx(expected_transitions * 3600.0 / 720.0)
 
     def actual_on_seconds(calls: list[tuple[float, float, bool, Any]], *, before: float) -> int:
         return sum(

@@ -180,9 +180,11 @@ def _optional_float(value):
     """Cast to a finite float, or None when there is no number to report."""
     try:
         value = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return value if math.isfinite(value) else None
+
+
 def _online_count(value, name):
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{name} must be a non-negative integer")
@@ -206,16 +208,36 @@ def _online_optional_score(value, name):
     return value
 
 
-_EVALUATION_KEYS = frozenset((
-    "decision_id", "evaluated_at_s", "role_generation", "promoted", "committed",
-    "consecutive_wins", "rejection_reasons", "incumbent_prediction_score",
-    "challenger_prediction_score", "incumbent_braking_score",
-    "challenger_braking_score", "sample_count", "prospective_digest",
-))
-_LIFECYCLE_KEYS = frozenset((
-    "event", "model_revision", "provenance", "detail", "model_kind",
-    "model_schema", "role_generation", "snapshot_digest", "parameters",
-))
+_EVALUATION_KEYS = frozenset(
+    (
+        "decision_id",
+        "evaluated_at_s",
+        "role_generation",
+        "promoted",
+        "committed",
+        "consecutive_wins",
+        "rejection_reasons",
+        "incumbent_prediction_score",
+        "challenger_prediction_score",
+        "incumbent_braking_score",
+        "challenger_braking_score",
+        "sample_count",
+        "prospective_digest",
+    )
+)
+_LIFECYCLE_KEYS = frozenset(
+    (
+        "event",
+        "model_revision",
+        "provenance",
+        "detail",
+        "model_kind",
+        "model_schema",
+        "role_generation",
+        "snapshot_digest",
+        "parameters",
+    )
+)
 
 
 def _online_evaluation(value):
@@ -237,8 +259,10 @@ def _online_evaluation(value):
     if not isinstance(reasons, (list, tuple)) or any(not isinstance(reason, str) or not reason for reason in reasons):
         raise ValueError("evaluation rejection_reasons are invalid")
     for key in (
-        "incumbent_prediction_score", "challenger_prediction_score",
-        "incumbent_braking_score", "challenger_braking_score",
+        "incumbent_prediction_score",
+        "challenger_prediction_score",
+        "incumbent_braking_score",
+        "challenger_braking_score",
     ):
         _online_optional_score(value[key], key)
     _online_optional_string(value["prospective_digest"], "prospective_digest")
@@ -304,10 +328,11 @@ def _load_net_policy(cfg, n_horizon):
                 "state vector. Using NLP -- regenerate it with tools/regenerate_mpc_net.py."
             )
         else:
-
             print("[mpc] net policy calibration does not match config; using NLP")
         return None
     return net
+
+
 class _GreyBoxAdaptiveModel:
     """Immutable grey-box forecast origin with the coordinator model protocol."""
 
@@ -355,9 +380,16 @@ class _GreyBoxAdaptiveModel:
         fields = {
             key: snapshot[key]
             for key in (
-                "state", "transition", "q_gain", "ambient_gain", "affine_offset",
-                "radiation_constant_gain", "temperature_index", "radiation_sigma",
-                "radiation_slope", "chamber_origin_c",
+                "state",
+                "transition",
+                "q_gain",
+                "ambient_gain",
+                "affine_offset",
+                "radiation_constant_gain",
+                "temperature_index",
+                "radiation_sigma",
+                "radiation_slope",
+                "chamber_origin_c",
             )
         }
         return cls(GreyBoxPredictionAdapter(**fields))
@@ -476,9 +508,7 @@ class Controller(ControllerBase):
             self._initialize_online_adaptation()
 
     def _new_scheduled_arx(self):
-        return ScheduledARX(
-            ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0)
-        )
+        return ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0))
 
     def _new_linear_policy(self):
         return _SCHEDULED_ARX_LINEAR_CONFIG, LinearMPC(_SCHEDULED_ARX_LINEAR_CONFIG)
@@ -487,9 +517,7 @@ class Controller(ControllerBase):
         return _GreyBoxAdaptiveModel.from_controller(self)
 
     def _new_online_adaptation(self, incumbent, challenger):
-        coordinator = OnlineAdaptation(
-            incumbent, challenger, AdaptationPolicy(), accepted_sources=("controller",)
-        )
+        coordinator = OnlineAdaptation(incumbent, challenger, AdaptationPolicy(), accepted_sources=("controller",))
         # ScheduledARX only predicts after its complete lag window exists.  Keep
         # adaptation in tracking mode until then, rather than letting the
         # coordinator invoke observe() against an incomplete learner.
@@ -644,7 +672,6 @@ class Controller(ControllerBase):
     def wants_async(self):
         return True
 
-
     @staticmethod
     def _linear_certificate_rejection(solve, config):
         """Return the precise controller-boundary certificate rejection reason."""
@@ -654,7 +681,7 @@ class Controller(ControllerBase):
             kkt = float(solve.kkt_residual)
             iterations = solve.iterations
             condition = float(solve.hessian_condition)
-        except (AttributeError, TypeError, ValueError):
+        except AttributeError, TypeError, ValueError:
             return "invalid-linear-certificate"
         if (
             sequence.shape != (config.horizon_steps,)
@@ -691,14 +718,23 @@ class Controller(ControllerBase):
         coordinator = self._online
         if coordinator is None:
             return {
-                "enabled": False, "active_model_kind": "grey-box", "role_generation": 0,
-                "eligible_updates": 0, "rejected_updates": 0,
-                "current_rejection_reason": None, "active_delay": None,
-                "effective_samples": 0, "last_evaluation_s": None,
-                "last_evaluation_outcome": None, "incumbent_prediction_score": None,
-                "candidate_prediction_score": None, "promotion_count": 0,
-                "rollback_count": 0, "learner_duration_seconds": None,
-                "evaluation_duration_seconds": None, "linear_solve_duration_seconds": None,
+                "enabled": False,
+                "active_model_kind": "grey-box",
+                "role_generation": 0,
+                "eligible_updates": 0,
+                "rejected_updates": 0,
+                "current_rejection_reason": None,
+                "active_delay": None,
+                "effective_samples": 0,
+                "last_evaluation_s": None,
+                "last_evaluation_outcome": None,
+                "incumbent_prediction_score": None,
+                "candidate_prediction_score": None,
+                "promotion_count": 0,
+                "rollback_count": 0,
+                "learner_duration_seconds": None,
+                "evaluation_duration_seconds": None,
+                "linear_solve_duration_seconds": None,
             }
         incumbent = coordinator.incumbent
         return {
@@ -710,10 +746,16 @@ class Controller(ControllerBase):
             "current_rejection_reason": self._online_last_rejection_reason,
             "active_delay": incumbent.snapshot().get("active_delay") if isinstance(incumbent, ScheduledARX) else None,
             "effective_samples": coordinator.effective_updates,
-            "last_evaluation_s": None if self._online_last_evaluation is None else self._online_last_evaluation.get("evaluated_at_s"),
+            "last_evaluation_s": None
+            if self._online_last_evaluation is None
+            else self._online_last_evaluation.get("evaluated_at_s"),
             "last_evaluation_outcome": self._online_last_evaluation,
-            "incumbent_prediction_score": None if self._online_last_evaluation is None else self._online_last_evaluation.get("incumbent_prediction_score"),
-            "candidate_prediction_score": None if self._online_last_evaluation is None else self._online_last_evaluation.get("challenger_prediction_score"),
+            "incumbent_prediction_score": None
+            if self._online_last_evaluation is None
+            else self._online_last_evaluation.get("incumbent_prediction_score"),
+            "candidate_prediction_score": None
+            if self._online_last_evaluation is None
+            else self._online_last_evaluation.get("challenger_prediction_score"),
             "promotion_count": self._online_promotion_count,
             "rollback_count": self._online_rollback_count,
             "learner_duration_seconds": self._online_learner_duration,
@@ -782,7 +824,8 @@ class Controller(ControllerBase):
                 raise ValueError("invalid-disturbance")
             started = time.monotonic()
             solve = self._linear_policy.solve(
-                prediction, setpoint_c=self._set_point_c,
+                prediction,
+                setpoint_c=self._set_point_c,
                 q_previous=self._applied_combustion_load,
                 equilibrium_q=self._equilibrium_load(self._set_point_c, disturbance),
             )
@@ -820,9 +863,12 @@ class Controller(ControllerBase):
             self._online.reset_continuity()
             self._online_rejected_updates += 1
             return {
-                "role_generation": generation, "eligible": False,
-                "rejection_reasons": ("stale-generation",), "input_variance": 0.0,
-                "input_levels": 0, "incumbent_innovation_c": None,
+                "role_generation": generation,
+                "eligible": False,
+                "rejection_reasons": ("stale-generation",),
+                "input_variance": 0.0,
+                "input_levels": 0,
+                "incumbent_innovation_c": None,
                 "challenger_innovation_c": None,
                 "effective_updates": self._online.effective_updates,
                 "model_digest": OnlineAdaptation.model_digest(self._online.challenger),
@@ -834,13 +880,14 @@ class Controller(ControllerBase):
             self._online.incumbent = self._new_grey_box_model()
         actuation_known = observation.output_source != "unknown"
         braking = observation.realized_q <= 0.05 or (
-            self._online_previous_setpoint is not None
-            and observation.setpoint_c < self._online_previous_setpoint
+            self._online_previous_setpoint is not None and observation.setpoint_c < self._online_previous_setpoint
         )
         started = time.monotonic()
         outcome = self._online.observe(
-            observation, actuation_known=actuation_known,
-            ambient_future=np.full(15, observation.ambient_c), braking=braking,
+            observation,
+            actuation_known=actuation_known,
+            ambient_future=np.full(15, observation.ambient_c),
+            braking=braking,
         )
         self._online_previous_setpoint = observation.setpoint_c
         self._online_learner_duration = time.monotonic() - started
@@ -854,8 +901,10 @@ class Controller(ControllerBase):
                 reasons = ("unknown-actuation",)
             self._online_last_rejection_reason = reasons[0]
         result = {
-            "role_generation": generation, "eligible": outcome.gate.permitted,
-            "rejection_reasons": reasons, "input_variance": outcome.gate.input_variance,
+            "role_generation": generation,
+            "eligible": outcome.gate.permitted,
+            "rejection_reasons": reasons,
+            "input_variance": outcome.gate.input_variance,
             "input_levels": outcome.gate.input_levels,
             "incumbent_innovation_c": None if outcome.incumbent is None else outcome.incumbent.innovation_c,
             "challenger_innovation_c": None if outcome.challenger is None else outcome.challenger.innovation_c,
@@ -866,6 +915,7 @@ class Controller(ControllerBase):
         if event:
             result.update(event)
         return result
+
     def get_status(self):
         return {
             "set_point": _finite_float(self.set_point),
@@ -964,6 +1014,7 @@ class Controller(ControllerBase):
             "last_evaluation": copy.deepcopy(self._online_last_evaluation),
             "last_lifecycle": copy.deepcopy(self._online_last_lifecycle),
         }
+
     def get_model_snapshot(self):
         if not self._online_enabled:
             if self._model_meta is None:
@@ -989,10 +1040,11 @@ class Controller(ControllerBase):
             encoded = json.dumps(snapshot, allow_nan=False).encode()
             if len(encoded) > MAX_SNAPSHOT_BYTES:
                 raise ValueError("snapshot exceeds store limit")
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return None if self._online_last_snapshot is None else copy.deepcopy(self._online_last_snapshot)
         self._online_last_snapshot = copy.deepcopy(snapshot)
         return copy.deepcopy(snapshot)
+
     def restore_model(self, snapshot):
         from controller.model_promotion import PROMOTION_BOUNDS, n_delay_is_whole
 
@@ -1064,9 +1116,7 @@ class Controller(ControllerBase):
         # committed so a build that fails leaves the controller solving the
         # model it already had.
         try:
-            rebuilt = self._build_for(
-                merged, model_identified=bool(snapshot.get("grey_box_identified", True))
-            )
+            rebuilt = self._build_for(merged, model_identified=bool(snapshot.get("grey_box_identified", True)))
         except Exception as exc:
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
@@ -1118,12 +1168,18 @@ class Controller(ControllerBase):
             if payload is not None:
                 try:
                     required_metadata = {
-                        "active_model_kind", "eligible_updates", "rejected_updates",
-                        "promotion_count", "rollback_count", "last_lifecycle_reason",
-                        "last_evaluation", "last_lifecycle",
+                        "active_model_kind",
+                        "eligible_updates",
+                        "rejected_updates",
+                        "promotion_count",
+                        "rollback_count",
+                        "last_lifecycle_reason",
+                        "last_evaluation",
+                        "last_lifecycle",
                     }
                     if not required_metadata.issubset(payload):
                         raise ValueError("online snapshot lacks controller metadata")
+
                     def load_model(model_snapshot):
                         schema = model_snapshot.get("schema")
                         if schema == "scheduled-arx/v2":
@@ -1169,12 +1225,11 @@ class Controller(ControllerBase):
                     self._online_last_lifecycle_reason = lifecycle_reason
                     self._online_last_evaluation = last_evaluation
                     self._online_last_lifecycle = last_lifecycle
-                except (TypeError, ValueError, KeyError):
+                except TypeError, ValueError, KeyError:
                     pass
         self._online_last_snapshot = None
         self.get_model_snapshot()
         return True
-
 
     def _online_teardown_checkpoint(self, verdict):
         """Persist the learner exactly once for every refit teardown outcome."""
@@ -1182,6 +1237,7 @@ class Controller(ControllerBase):
             self._model_revision += 1
             self.get_model_snapshot()
         return verdict
+
     def cook_history(self):
         """The cook's (time_s, temp_c, Q_applied) rows, oldest first."""
         return list(self._history)
@@ -1198,10 +1254,9 @@ class Controller(ControllerBase):
         """
         from controller.model_promotion import evaluate
         from controller.update_mpc import fit_params, fit_quality, identifiability
+
         if self._online_enabled and not bool(self.cfg.get("enable_identification", False)):
-            return self._online_teardown_checkpoint(
-                _Verdict(False, "online adaptation checkpoint")
-            )
+            return self._online_teardown_checkpoint(_Verdict(False, "online adaptation checkpoint"))
 
         rows = list(history if history is not None else self._history)
         if len(rows) < _REFIT_MIN_SAMPLES:
@@ -1338,10 +1393,7 @@ class Controller(ControllerBase):
                     )
                 except (ValueError, FloatingPointError, RuntimeError) as error:
                     raise self._normalized_forecast_failure(error) from error
-                if not (
-                    np.isfinite(prediction.free_output_c).all()
-                    and np.isfinite(prediction.input_response_c).all()
-                ):
+                if not (np.isfinite(prediction.free_output_c).all() and np.isfinite(prediction.input_response_c).all()):
                     raise ValueError("non-finite-forecast")
                 linear_started = time.monotonic()
                 solve = self._linear_policy.solve(
@@ -1351,9 +1403,7 @@ class Controller(ControllerBase):
                     equilibrium_q=equilibrium,
                 )
                 self._online_linear_duration = time.monotonic() - linear_started
-                certificate_rejection = self._linear_certificate_rejection(
-                    solve, self._linear_config
-                )
+                certificate_rejection = self._linear_certificate_rejection(solve, self._linear_config)
                 if certificate_rejection is not None:
                     raise ValueError(certificate_rejection)
                 combustion_load = float(solve.sequence_q[0])

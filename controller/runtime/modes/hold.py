@@ -101,9 +101,9 @@ class HoldMode(ControlMode):
     _runner_configuration_revision: int = 0
     _actuation_mode: ActuationMode = ActuationMode.FRAMED_PULSE
     _pulse_scheduler: PulseScheduler | None = None
-    _pending_model_observations: dict[
-        int, tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None]
-    ] | None = None
+    _pending_model_observations: (
+        dict[int, tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None]] | None
+    ) = None
     _pulse_observation_last_frame_key: tuple[int, int] | None = None
     _last_ptemp: float | None = None
 
@@ -212,11 +212,7 @@ class HoldMode(ControlMode):
         self, frame: PulseFrameResult, *, ptemp: float | None, sample_at_s: float, inhibit: InhibitReason
     ) -> tuple[tuple[int, int], FrameObservation] | None:
         controller = self.state.controller
-        if (
-            ptemp is None
-            or controller.pulse_frame_result_revision <= 0
-            or frame.ended_at_s <= frame.nominal_start_s
-        ):
+        if ptemp is None or controller.pulse_frame_result_revision <= 0 or frame.ended_at_s <= frame.nominal_start_s:
             return None
         frame_key = (int(frame.nominal_start_s * 1_000), int(frame.ended_at_s * 1_000))
         if frame_key == self._pulse_observation_last_frame_key:
@@ -269,9 +265,7 @@ class HoldMode(ControlMode):
         )
         return frame_key, observation
 
-    def _deliver_completed_pulse_observation(
-        self, frame_key: tuple[int, int], observation: FrameObservation
-    ) -> None:
+    def _deliver_completed_pulse_observation(self, frame_key: tuple[int, int], observation: FrameObservation) -> None:
         if self._runner is None:
             return
         submission = self._runner.observe_frame(observation)
@@ -331,7 +325,7 @@ class HoldMode(ControlMode):
                 sample_count=value["sample_count"],
                 prospective_digest=value["prospective_digest"],
             )
-        except (KeyError, OverflowError, TypeError, ValueError):
+        except KeyError, OverflowError, TypeError, ValueError:
             return None
 
     @staticmethod
@@ -359,7 +353,7 @@ class HoldMode(ControlMode):
                 snapshot_digest=value["snapshot_digest"],
                 parameters=parameters,
             )
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             return None
 
     def _flush_pending_model_trace(
@@ -426,7 +420,9 @@ class HoldMode(ControlMode):
                 ):
                     self._pending_model_observations.pop(sequence, None)
                     continue
-                output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
+                output_source = (
+                    OutputSource(observation.output_source) if observation.output_source != "unknown" else None
+                )
                 observation_payload = ModelObservationPayload(
                     frame_start_ms=int(observation.frame_start_s * 1_000),
                     frame_end_ms=int(observation.frame_end_s * 1_000),
@@ -458,12 +454,10 @@ class HoldMode(ControlMode):
                     reset=observation.reset,
                     continuous=observation.continuous,
                 )
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 self._pending_model_observations.pop(sequence, None)
                 continue
-            records: list[tuple[TraceEventKind, object]] = [
-                (TraceEventKind.MODEL_OBSERVATION, observation_payload)
-            ]
+            records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
             evaluation_payload = self._model_evaluation_payload(outcome.get("evaluation"))
             if evaluation_payload is not None:
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation_payload))
@@ -1579,8 +1573,7 @@ class HoldMode(ControlMode):
             config = self.settings["controller"].get("config", {})
             controller_config = config.get(self._controller_name, {})
             if not (
-                controller_config.get("enable_identification")
-                or controller_config.get("enable_online_adaptation")
+                controller_config.get("enable_identification") or controller_config.get("enable_online_adaptation")
             ):
                 return
         except Exception as error:
@@ -1606,7 +1599,9 @@ class HoldMode(ControlMode):
                         else:
                             self._trace_model(ModelEventType.REJECT, "refit model rejected", snapshot)
                     else:
-                        self._trace_model(ModelEventType.REFIT, "model checkpoint published after refit failure", snapshot)
+                        self._trace_model(
+                            ModelEventType.REFIT, "model checkpoint published after refit failure", snapshot
+                        )
                         self._trace_model(ModelEventType.REJECT, f"model refit failed: {refit_error}", snapshot)
                     if not self._model_store.save(self._controller_name, snapshot):
                         _control.eventLogger.debug(f"Did not persist a refit {self._controller_name} model")

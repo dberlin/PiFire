@@ -18,9 +18,7 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.dmc import (
 )
 
 
-def delayed_first_order_record(
-    *, delay_steps: int, pole: float, samples: int
-) -> SignalRecord:
+def delayed_first_order_record(*, delay_steps: int, pole: float, samples: int) -> SignalRecord:
     """Return a deterministic excitation of a delayed, positive first-order plant."""
     rng = np.random.default_rng(54)
     q = rng.uniform(0.0, 1.0, samples)
@@ -61,6 +59,7 @@ def fitted_model_with_forced_negative_gain() -> LaguerreDMC:
     model._project_gain(model._active)
     return model
 
+
 def test_track_updates_dmc_runtime_history_without_rewriting_parameters() -> None:
     """The frozen incumbent's state may advance, but its fitted response cannot."""
     record = delayed_first_order_record(delay_steps=3, pole=0.95, samples=300)
@@ -68,9 +67,7 @@ def test_track_updates_dmc_runtime_history_without_rewriting_parameters() -> Non
     model.fit(record)
     before = model.snapshot()
 
-    outcome = model.track(
-        Observation(record.time_s[-1] + 20.0, 1.0, 0.3, 0.0)
-    )
+    outcome = model.track(Observation(record.time_s[-1] + 20.0, 1.0, 0.3, 0.0))
 
     assert outcome.updated is False
     after = model.snapshot()
@@ -97,9 +94,7 @@ def test_laguerre_basis_initializes_every_term_from_the_recurrence() -> None:
 
 
 def test_dmc_recovers_delayed_step_response() -> None:
-    split = chronological_split(
-        delayed_first_order_record(delay_steps=5, pole=0.97, samples=1800), 0.75, 0.05
-    )
+    split = chronological_split(delayed_first_order_record(delay_steps=5, pole=0.97, samples=1800), 0.75, 0.05)
     model = LaguerreDMC(DMCConfig(terms=(8, 12, 16), poles=(0.85, 0.92, 0.97)))
 
     model.fit(split.fit)
@@ -131,6 +126,7 @@ def test_dmc_projects_the_exposed_delayed_snapshot_endpoint() -> None:
 
     assert snapshot["final_gain"] == pytest.approx(0.6)
     assert snapshot["step_response"][-1] == pytest.approx(0.6)
+
 
 def test_snapshot_exposes_arm_neutral_gain_diagnostic() -> None:
     model = LaguerreDMC(DMCConfig(terms=(8,), poles=(0.92,)))

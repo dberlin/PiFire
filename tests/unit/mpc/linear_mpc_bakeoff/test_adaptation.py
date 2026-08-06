@@ -156,21 +156,13 @@ def blocked_observation(reason: str) -> tuple[Observation, dict[str, object]]:
 
 def hot_hold_samples(count: int) -> list[ReplaySample]:
     """Return common hot holding observations that must not evict rare strata."""
-    return [
-        ReplaySample(
-            Observation(index * 20.0, 180.0, 0.85, 20.0), OperatingState.HOLD
-        )
-        for index in range(count)
-    ]
+    return [ReplaySample(Observation(index * 20.0, 180.0, 0.85, 20.0), OperatingState.HOLD) for index in range(count)]
 
 
 def low_coast_samples(count: int) -> list[ReplaySample]:
     """Return rare low-fire coast observations for replay-retention coverage."""
     return [
-        ReplaySample(
-            Observation((500 + index) * 20.0, 55.0, 0.1, 20.0), OperatingState.COAST
-        )
-        for index in range(count)
+        ReplaySample(Observation((500 + index) * 20.0, 55.0, 0.1, 20.0), OperatingState.COAST) for index in range(count)
     ]
 
 
@@ -214,9 +206,7 @@ def promotion_fixture(
         ("unexcited", UpdateRejectionReason.INSUFFICIENT_EXCITATION),
     ],
 )
-def test_blocked_samples_never_update(
-    reason: str, expected: UpdateRejectionReason
-) -> None:
+def test_blocked_samples_never_update(reason: str, expected: UpdateRejectionReason) -> None:
     manager, spy = manager_with_spy_model()
     observation, flags = blocked_observation(reason)
 
@@ -255,6 +245,7 @@ def test_excited_samples_only_train_the_challenger_and_track_the_incumbent() -> 
     assert isinstance(incumbent, SpyModel)
     assert incumbent.observe_calls == 0
     assert incumbent.track_calls == 2
+
 
 def test_replay_retains_temperature_and_transient_strata() -> None:
     replay = StratifiedReplay(capacity=120, seed=1)
@@ -320,7 +311,11 @@ def test_promotion_api_rejects_independent_scalar_scores() -> None:
         ({**viable_snapshot(), "poles": [1.01]}, score_bundle(), PromotionRejectionReason.UNSTABLE_DYNAMICS),
         ({**viable_snapshot(), "steady_gain": 50.0}, score_bundle(), PromotionRejectionReason.IMPLAUSIBLE_GAIN),
         ({**viable_snapshot(), "delay_steps": 99}, score_bundle(), PromotionRejectionReason.IMPLAUSIBLE_DELAY),
-        ({key: value for key, value in viable_snapshot().items() if key != "alignment_error_c"}, score_bundle(), PromotionRejectionReason.STATE_ALIGNMENT),
+        (
+            {key: value for key, value in viable_snapshot().items() if key != "alignment_error_c"},
+            score_bundle(),
+            PromotionRejectionReason.STATE_ALIGNMENT,
+        ),
         ({**viable_snapshot(), "alignment_error_c": 4.0}, score_bundle(), PromotionRejectionReason.STATE_ALIGNMENT),
         (viable_snapshot(), score_bundle(candidate_braking=1.2), PromotionRejectionReason.WORSE_BRAKING),
         (viable_snapshot(), score_bundle(candidate_braking=None), PromotionRejectionReason.WORSE_BRAKING),
@@ -350,9 +345,7 @@ def test_missing_incumbent_stability_evidence_blocks_promotion() -> None:
 
 
 def test_complex_poles_are_checked_by_magnitude() -> None:
-    manager = promotion_fixture(
-        challenger_snapshot={**viable_snapshot(), "poles": [0.6 + 0.4j]}
-    )
+    manager = promotion_fixture(challenger_snapshot={**viable_snapshot(), "poles": [0.6 + 0.4j]})
 
     manager.evaluate(score_bundle())
     decision = manager.evaluate(score_bundle())
@@ -428,11 +421,7 @@ def test_non_state_space_models_may_declare_alignment_not_applicable(
 
 def test_state_space_requires_measured_alignment_evidence() -> None:
     snapshot = {
-        **{
-            key: value
-            for key, value in viable_snapshot().items()
-            if key != "alignment_error_c"
-        },
+        **{key: value for key, value in viable_snapshot().items() if key != "alignment_error_c"},
         "schema": "innovation-state-space/v1",
     }
     manager = promotion_fixture(challenger_snapshot=snapshot)

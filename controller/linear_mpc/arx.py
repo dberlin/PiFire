@@ -69,9 +69,7 @@ class ScheduledARXConfig:
         if initial_covariance <= 0.0:
             raise ValueError("initial_covariance must be positive")
         object.__setattr__(self, "initial_covariance", initial_covariance)
-        object.__setattr__(
-            self, "validation_window", _integer(self.validation_window, "validation_window", minimum=1)
-        )
+        object.__setattr__(self, "validation_window", _integer(self.validation_window, "validation_window", minimum=1))
         challenger_margin = _finite(self.challenger_margin, "challenger_margin")
         if challenger_margin < 0.0:
             raise ValueError("challenger_margin must be non-negative")
@@ -117,6 +115,7 @@ class ScheduledARX:
     def config(self) -> ScheduledARXConfig:
         """Return the immutable learner configuration."""
         return self._config
+
     def reset_lag_history(self) -> None:
         """Discard only lag values after discontinuous or unknown actuation."""
         self._temperature_history.clear()
@@ -139,7 +138,11 @@ class ScheduledARX:
         self._ambient_history = []
         self._refreshes = 0
         self._last_refresh_sample = None
-        self._max_dc_gain = _DC_GAIN_SCALE * max(float(np.ptp(temperatures)), np.finfo(np.float64).eps) / max(float(np.ptp(inputs)), np.finfo(np.float64).eps)
+        self._max_dc_gain = (
+            _DC_GAIN_SCALE
+            * max(float(np.ptp(temperatures)), np.finfo(np.float64).eps)
+            / max(float(np.ptp(inputs)), np.finfo(np.float64).eps)
+        )
         self._max_forecast_deviation = _DC_GAIN_SCALE * max(float(np.ptp(temperatures)), np.finfo(np.float64).eps)
         for sample, frame in enumerate(frames):
             if len(self._temperature_history) >= self._history_limit:
@@ -279,10 +282,7 @@ class ScheduledARX:
                 "realized_q": list(self._input_history),
                 "ambient_c": list(self._ambient_history),
             },
-            "candidates": [
-                self._candidate_snapshot(candidate)
-                for candidate in self._candidates.values()
-            ],
+            "candidates": [self._candidate_snapshot(candidate) for candidate in self._candidates.values()],
             "status": self._status_snapshot(),
         }
 
@@ -290,18 +290,12 @@ class ScheduledARX:
         """Derive evidence-only status from the authoritative learner state."""
         active = self._candidates[self._active_delay]
         active_regions = [
-            self._region_status(region, knot)
-            for knot, region in zip(
-                _TEMPERATURE_KNOTS_C, active.regions, strict=True
-            )
+            self._region_status(region, knot) for knot, region in zip(_TEMPERATURE_KNOTS_C, active.regions, strict=True)
         ]
         return {
             "knots_c": list(_TEMPERATURE_KNOTS_C),
             "regions": active_regions,
-            "steady_gain": sum(
-                float(region["dc_gain"]) for region in active_regions
-            )
-            / len(active_regions),
+            "steady_gain": sum(float(region["dc_gain"]) for region in active_regions) / len(active_regions),
             "max_dc_gain_c_per_q": self._max_dc_gain,
             "max_ar_pole": _MAX_AR_POLE,
             "last_observation_time_s": self._last_observation_time_s,
@@ -319,7 +313,9 @@ class ScheduledARX:
         config = ScheduledARXConfig(
             na=_integer(config_data.get("na"), "config.na", minimum=1),
             nb=_integer(config_data.get("nb"), "config.nb", minimum=1),
-            delays=tuple(_integer(value, "config.delays item") for value in _sequence(config_data.get("delays"), "config.delays")),
+            delays=tuple(
+                _integer(value, "config.delays item") for value in _sequence(config_data.get("delays"), "config.delays")
+            ),
             forgetting_factor=_finite(config_data.get("forgetting_factor"), "config.forgetting_factor"),
             initial_covariance=_finite(config_data.get("initial_covariance"), "config.initial_covariance"),
             validation_window=_integer(config_data.get("validation_window"), "config.validation_window", minimum=1),
@@ -352,7 +348,9 @@ class ScheduledARX:
             raise ValueError("history.realized_q must be in [0, 1]")
         status = _mapping(snapshot.get("status"), "status")
         max_dc_gain = _optional_nonnegative(status.get("max_dc_gain_c_per_q"), "status.max_dc_gain_c_per_q")
-        max_forecast_deviation = _optional_nonnegative(status.get("max_forecast_deviation_c"), "status.max_forecast_deviation_c")
+        max_forecast_deviation = _optional_nonnegative(
+            status.get("max_forecast_deviation_c"), "status.max_forecast_deviation_c"
+        )
         last_observation = _optional_finite(status.get("last_observation_time_s"), "status.last_observation_time_s")
         refreshes = _integer(status.get("refreshes"), "status.refreshes")
         last_refresh = status.get("last_refresh_sample")
@@ -381,7 +379,13 @@ class ScheduledARX:
         for _ in _TEMPERATURE_KNOTS_C:
             theta = np.zeros(self._feature_count, dtype=np.float64)
             theta[self._config.na] = 1e-9
-            regions.append(_Region(theta, np.eye(self._feature_count) * information_scale, np.zeros(self._feature_count, dtype=np.float64)))
+            regions.append(
+                _Region(
+                    theta,
+                    np.eye(self._feature_count) * information_scale,
+                    np.zeros(self._feature_count, dtype=np.float64),
+                )
+            )
         return regions
 
     def _validate_frames(self, frames: Sequence[FrameObservation]) -> None:
@@ -410,13 +414,19 @@ class ScheduledARX:
         self._require_history()
         candidate = self._candidates[self._active_delay]
         theta = self._scheduled_theta(candidate, self._temperature_history[-1])
-        return self._predict_next(theta, self._temperature_history, self._input_history, observation.ambient_c, candidate.delay_steps)
+        return self._predict_next(
+            theta, self._temperature_history, self._input_history, observation.ambient_c, candidate.delay_steps
+        )
 
     def _assimilate(self, ambient_c: float, target_temp_c: float, refresh_sample: int) -> None:
         for candidate in self._candidates.values():
             theta = self._scheduled_theta(candidate, self._temperature_history[-1])
-            feature = self._feature(self._temperature_history, self._input_history, ambient_c, target_temp_c, candidate.delay_steps)
-            prediction = self._predict_next(theta, self._temperature_history, self._input_history, ambient_c, candidate.delay_steps)
+            feature = self._feature(
+                self._temperature_history, self._input_history, ambient_c, target_temp_c, candidate.delay_steps
+            )
+            prediction = self._predict_next(
+                theta, self._temperature_history, self._input_history, ambient_c, candidate.delay_steps
+            )
             error = target_temp_c - prediction
             candidate.validation_error += error * error
             candidate.validation_samples += 1
@@ -427,9 +437,15 @@ class ScheduledARX:
             self._refresh_delay(refresh_sample)
 
     def _refresh_delay(self, refresh_sample: int) -> None:
-        losses = {delay: candidate.validation_error / candidate.validation_samples for delay, candidate in self._candidates.items()}
+        losses = {
+            delay: candidate.validation_error / candidate.validation_samples
+            for delay, candidate in self._candidates.items()
+        }
         challenger_delay = min(losses, key=losses.__getitem__)
-        if challenger_delay != self._active_delay and losses[challenger_delay] + self._config.challenger_margin < losses[self._active_delay]:
+        if (
+            challenger_delay != self._active_delay
+            and losses[challenger_delay] + self._config.challenger_margin < losses[self._active_delay]
+        ):
             challenger = self._candidates[challenger_delay]
             challenger.consecutive_wins += 1
             for delay, candidate in self._candidates.items():
@@ -500,7 +516,14 @@ class ScheduledARX:
                 return ((index - 1, 1.0 - upper_weight), (index, upper_weight))
         raise AssertionError("temperature knot bounds are exhaustive")
 
-    def _feature(self, temperatures: Sequence[float], inputs: Sequence[float], ambient_c: float, target_temp_c: float, delay_steps: int) -> FloatArray:
+    def _feature(
+        self,
+        temperatures: Sequence[float],
+        inputs: Sequence[float],
+        ambient_c: float,
+        target_temp_c: float,
+        delay_steps: int,
+    ) -> FloatArray:
         feature = np.empty(self._feature_count, dtype=np.float64)
         for lag in range(self._config.na):
             feature[lag] = temperatures[-1 - lag] - temperatures[-2 - lag]
@@ -511,7 +534,14 @@ class ScheduledARX:
         feature[-1] = 1.0
         return feature
 
-    def _predict_next(self, theta: FloatArray, temperatures: Sequence[float], inputs: Sequence[float], ambient_c: float, delay_steps: int) -> float:
+    def _predict_next(
+        self,
+        theta: FloatArray,
+        temperatures: Sequence[float],
+        inputs: Sequence[float],
+        ambient_c: float,
+        delay_steps: int,
+    ) -> float:
         increment = float(theta[-1])
         for lag in range(self._config.na):
             increment += theta[lag] * (temperatures[-1 - lag] - temperatures[-2 - lag])
@@ -524,7 +554,14 @@ class ScheduledARX:
         increment += theta[-2] * (ambient_c - temperatures[-1])
         return float(temperatures[-1] + increment / denominator)
 
-    def _forecast_with_theta(self, theta: FloatArray, temperatures: list[float], inputs: list[float], future_q: FloatArray, future_ambient: FloatArray) -> FloatArray:
+    def _forecast_with_theta(
+        self,
+        theta: FloatArray,
+        temperatures: list[float],
+        inputs: list[float],
+        future_q: FloatArray,
+        future_ambient: FloatArray,
+    ) -> FloatArray:
         candidate = self._candidates[self._active_delay]
         output = np.empty(future_ambient.size, dtype=np.float64)
         for step, (q, ambient_c) in enumerate(zip(future_q, future_ambient, strict=True)):
@@ -558,7 +595,12 @@ class ScheduledARX:
         covariance_diagonal = np.diag(inverse_information @ inverse_information.T)
         return {
             "knot_c": knot,
-            "coefficients": {"ar": ar.tolist(), "input": inputs.tolist(), "ambient": float(region.theta[-2]), "intercept": float(region.theta[-1])},
+            "coefficients": {
+                "ar": ar.tolist(),
+                "input": inputs.tolist(),
+                "ambient": float(region.theta[-2]),
+                "intercept": float(region.theta[-1]),
+            },
             "poles": _poles(ar),
             "dc_gain": _dc_gain(ar, inputs),
             "covariance_diagonal": covariance_diagonal.tolist(),
@@ -582,8 +624,14 @@ class ScheduledARX:
         theta = np.asarray(_finite_list(payload.get("theta"), "region.theta"), dtype=np.float64)
         rhs = np.asarray(_finite_list(payload.get("normal_rhs"), "region.normal_rhs"), dtype=np.float64)
         factor_rows = _sequence(payload.get("information_factor"), "region.information_factor")
-        factor = np.asarray([_finite_list(row, "region.information_factor row") for row in factor_rows], dtype=np.float64)
-        if theta.shape != (self._feature_count,) or rhs.shape != (self._feature_count,) or factor.shape != (self._feature_count, self._feature_count):
+        factor = np.asarray(
+            [_finite_list(row, "region.information_factor row") for row in factor_rows], dtype=np.float64
+        )
+        if (
+            theta.shape != (self._feature_count,)
+            or rhs.shape != (self._feature_count,)
+            or factor.shape != (self._feature_count, self._feature_count)
+        ):
             raise ValueError("region RLS dimensions do not match the configured ARX order")
         if not np.allclose(factor, np.triu(factor), atol=1e-12) or np.any(np.diag(factor) <= 0.0):
             raise ValueError("region.information_factor must be upper triangular with positive diagonal")
@@ -640,7 +688,12 @@ def _basis(size: int, index: int) -> FloatArray:
 
 def _poles(ar: FloatArray) -> list[float | dict[str, float]]:
     roots = np.roots(np.concatenate(([1.0], -ar)))
-    return [float(np.round(root.real, 12)) if abs(root.imag) < 1e-12 else {"real": float(np.round(root.real, 12)), "imag": float(np.round(root.imag, 12))} for root in roots]
+    return [
+        float(np.round(root.real, 12))
+        if abs(root.imag) < 1e-12
+        else {"real": float(np.round(root.real, 12)), "imag": float(np.round(root.imag, 12))}
+        for root in roots
+    ]
 
 
 def _dc_gain(ar: FloatArray, inputs: FloatArray) -> float:

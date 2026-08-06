@@ -69,6 +69,7 @@ class ObservationOutcomeDrain:
     def __iter__(self):
         return iter(self.envelopes)
 
+
 def _freeze_status_value(value: object) -> StatusValue:
     if value is None or isinstance(value, bool | int | float | str):
         return value
@@ -767,7 +768,6 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             return self._model_snapshot
 
-
     def observe_frame(self, observation: FrameObservation):
         with self._lock:
             if not self._accept_observations:
@@ -863,9 +863,9 @@ class ThreadedControllerRunner(ControllerRunner):
         if callable(close_wait):
             close_wait()
         self._thread.join(timeout=2.0)
+
+
 FALLBACK_CONTROLLER = "pid"
-
-
 
 
 def _selected_controller(settings):

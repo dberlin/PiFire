@@ -94,6 +94,7 @@ def test_move_penalty_uses_previous_duty_only_for_the_first_move() -> None:
 
     npt.assert_allclose(solve.sequence_q, np.full(2, 0.2), atol=1e-12)
 
+
 def test_equilibrium_duty_seeds_the_initial_steady_sequence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -149,12 +150,8 @@ def test_warm_started_solves_are_deterministic() -> None:
     config = LinearMPCConfig(horizon_steps=3)
     prediction = _prediction(free=119.5, response=np.eye(3))
 
-    first = LinearMPC(config).solve(
-        prediction, setpoint_c=120.0, q_previous=0.2, equilibrium_q=0.35
-    )
-    second = LinearMPC(config).solve(
-        prediction, setpoint_c=120.0, q_previous=0.2, equilibrium_q=0.35
-    )
+    first = LinearMPC(config).solve(prediction, setpoint_c=120.0, q_previous=0.2, equilibrium_q=0.35)
+    second = LinearMPC(config).solve(prediction, setpoint_c=120.0, q_previous=0.2, equilibrium_q=0.35)
 
     npt.assert_allclose(first.sequence_q, second.sequence_q, atol=1e-12)
 

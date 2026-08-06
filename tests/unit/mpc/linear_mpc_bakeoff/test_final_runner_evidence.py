@@ -54,6 +54,7 @@ def test_quick_matrix_contract_includes_calibrated_and_wrong_initializations() -
     config = ExperimentConfig.quick()
     assert config.initializations == ("correct", "wrong-gain", "wrong-pole", "wrong-delay")
 
+
 def test_quick_artifact_persists_one_horizon_and_real_mak_provenance() -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_experiment
 
@@ -90,9 +91,7 @@ def test_quick_simulator_diagnostics_cover_all_horizons_without_unmasked_coast_l
             continue
         document = row.model_evidence["simulator_prediction_diagnostics"]
         split = artifact.splits[f"{row.plant}:{row.seed}"]
-        assert document["boundaries"] == {
-            name: list(split[name]) for name in ("fit", "validation", "test")
-        }
+        assert document["boundaries"] == {name: list(split[name]) for name in ("fit", "validation", "test")}
         diagnostics = document["diagnostics_c"]
         assert tuple(diagnostics) == ("60", "300", "900", "1800", "3600")
         for horizon, evidence in diagnostics.items():
@@ -103,9 +102,7 @@ def test_quick_simulator_diagnostics_cover_all_horizons_without_unmasked_coast_l
                 mask = origin["coast_or_braking_mask"]
                 assert len(mask) == len(origin["residuals_c"])
                 assert origin["coast_braking_residuals_c"] == [
-                    residual
-                    for residual, selected in zip(origin["residuals_c"], mask, strict=True)
-                    if selected
+                    residual for residual, selected in zip(origin["residuals_c"], mask, strict=True) if selected
                 ]
         snapshot = row.model_evidence["batch_fit_snapshot"]
         assert snapshot["steady_gain"] != 0.0
@@ -163,36 +160,30 @@ def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_
         horizon_s=600,
     )
 
-    evaluations = [
-        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
-    ]
+    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
     assert len(evaluations) == 2
     assert all(
-        isfinite(item["candidate_prediction_score"])
-        and isfinite(item["incumbent_prediction_score"])
+        isfinite(item["candidate_prediction_score"]) and isfinite(item["incumbent_prediction_score"])
         for item in evaluations
     )
     assert set(evaluations[0]["horizon_metrics"]) == {"60"}
     assert set(evaluations[1]["horizon_metrics"]) == {"60", "300"}
     assert evaluations[0]["sample_count"] == len(evaluations[0]["score_frame_ids"]) == 12
-    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 30
+    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 14
+    assert len(evaluations[1]["horizon_metrics"]["60"]["origin_frame_ids"]) == 13
+    assert len(evaluations[1]["horizon_metrics"]["300"]["origin_frame_ids"]) == 1
     assert all(
         item["score_frame_ids"] == sorted(item["score_frame_ids"])
         and item["score_role_generations"] == [item["score_role_generation"]]
         for item in evaluations
     )
-    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(
-        evaluations[1]["score_frame_ids"]
-    )
+    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(evaluations[1]["score_frame_ids"])
     assert all(
         set(metrics["origin_frame_ids"]) <= set(item["score_frame_ids"])
         for item in evaluations
         for metrics in item["horizon_metrics"].values()
     )
-    assert any(
-        item["candidate_prediction_score"] != item["incumbent_prediction_score"]
-        for item in evaluations
-    )
+    assert any(item["candidate_prediction_score"] != item["incumbent_prediction_score"] for item in evaluations)
     state_space_row = _run_scenario(
         definition,
         plant="GrillSim",
@@ -224,15 +215,14 @@ def test_runner_clears_real_promotion_window_samples_and_role_generations() -> N
         initialization="wrong-pole",
         horizon_s=600,
     )
-    evaluations = [
-        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
-    ]
+    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
     promoted_index = next(index for index, item in enumerate(evaluations) if item["promoted"])
     assert evaluations[promoted_index - 1]["consecutive_wins"] == 1
     assert evaluations[promoted_index]["consecutive_wins"] == 2
     assert evaluations[promoted_index + 1]["score_role_generation"] == 1
     frame_sets = [set(item["score_frame_ids"]) for item in evaluations]
     assert all(left.isdisjoint(right) for left, right in zip(frame_sets, frame_sets[1:]))
+
 
 def test_runner_constructs_real_arm_managers_with_snapshot_bounds_and_alignment() -> None:
     """Production wiring, rather than a test policy override, must admit fitted arms."""
@@ -280,22 +270,16 @@ def test_runner_scores_untouched_multi_horizon_free_runs_and_clears_windows() ->
         initialization="wrong-gain",
         horizon_s=600,
     )
-    evaluations = [
-        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
-    ]
+    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
     assert len(evaluations) == 2
     assert set(evaluations[0]["horizon_metrics"]) == {"60"}
     assert set(evaluations[1]["horizon_metrics"]) == {"60", "300"}
     assert evaluations[0]["sample_count"] == len(evaluations[0]["score_frame_ids"]) == 12
-    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 30
-    assert all(
-        item["score_frame_ids"] == sorted(item["score_frame_ids"])
-        for item in evaluations
-    )
-    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(
-        evaluations[1]["score_frame_ids"]
-    )
-
+    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 14
+    assert len(evaluations[1]["horizon_metrics"]["60"]["origin_frame_ids"]) == 13
+    assert len(evaluations[1]["horizon_metrics"]["300"]["origin_frame_ids"]) == 1
+    assert all(item["score_frame_ids"] == sorted(item["score_frame_ids"]) for item in evaluations)
+    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(evaluations[1]["score_frame_ids"])
 
 
 def test_downstep_transition_is_braking_without_coast_and_heating_is_excluded() -> None:
@@ -317,6 +301,7 @@ def test_downstep_transition_is_braking_without_coast_and_heating_is_excluded() 
     heating = next(item for item in samples if item["frame_s"] == 40)
     assert downstep["braking"] and downstep["realized_duty"] > 0.05
     assert not heating["braking"]
+
 
 def test_online_and_frozen_paths_track_identical_realized_history() -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
@@ -354,7 +339,6 @@ def test_runner_classifies_realized_zero_duty_frames_as_coast() -> None:
     assert row.model_evidence["runtime_tracking"]["operating_state_counts"]["coast"] > 0
 
 
-
 def test_wrong_model_recovery_requires_real_shadow_promotion() -> None:
     """A wrong model earns recovery evidence only from two managed free-run wins."""
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
@@ -370,9 +354,7 @@ def test_wrong_model_recovery_requires_real_shadow_promotion() -> None:
         initialization="wrong-pole",
         horizon_s=600,
     )
-    evaluations = [
-        item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"
-    ]
+    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
     promoted = [item for item in evaluations if item["promoted"]]
     assert len(promoted) == 1
     assert promoted[0]["consecutive_wins"] == 2

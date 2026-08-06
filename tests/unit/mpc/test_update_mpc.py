@@ -695,7 +695,6 @@ def test_load_trace_samples_rejects_output_after_a_terminal_partial(ds):
         load_trace_samples(session_id=SESSION_ID)
 
 
-
 def test_load_trace_samples_has_equivalent_fahrenheit_and_celsius_frames(ds):
     def session(session_id, unit):
         payload = replace(

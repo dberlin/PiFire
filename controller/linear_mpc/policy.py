@@ -134,14 +134,10 @@ def condense_cost(
     response = prediction.input_response_c
     error = prediction.free_output_c - setpoint
     hessian = 2.0 * (
-        response.T @ (error_weights[:, np.newaxis] * response)
-        + config.move_weight * (difference.T @ difference)
+        response.T @ (error_weights[:, np.newaxis] * response) + config.move_weight * (difference.T @ difference)
     )
     hessian = 0.5 * (hessian + hessian.T)
-    linear = 2.0 * (
-        response.T @ (error_weights * error)
-        - config.move_weight * (difference.T @ previous_move)
-    )
+    linear = 2.0 * (response.T @ (error_weights * error) - config.move_weight * (difference.T @ previous_move))
     return hessian, linear
 
 
@@ -254,9 +250,7 @@ def projected_gradient_qp(
     if float(eigenvalues[0]) < -semidefinite_tolerance:
         raise ValueError("H must be positive semidefinite")
     condition = (
-        float(eigenvalues[-1] / eigenvalues[0])
-        if float(eigenvalues[0]) > semidefinite_tolerance
-        else float("inf")
+        float(eigenvalues[-1] / eigenvalues[0]) if float(eigenvalues[0]) > semidefinite_tolerance else float("inf")
     )
     if np.all(lo == hi):
         return BoxQPSolve(lo, _objective(hessian, linear, lo), 0, 0.0, condition)

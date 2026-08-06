@@ -226,12 +226,12 @@ class _CoreWithRefit(_CoreWithoutRefit):
         return self.snapshot
 
 
-
 class _CoreWithExceptionalRefit(_CoreWithRefit):
     def refit_from_cook(self):
         self.refits += 1
         self.snapshot = {"version": 1, "revision": 4, "params": {}}
         raise RuntimeError("refit failed after checkpoint")
+
 
 def test_the_sync_runner_delegates_a_refit_to_its_core():
     core = _CoreWithRefit()
@@ -255,7 +255,6 @@ def test_the_threaded_runner_republishes_the_snapshot_a_refit_produced():
     assert runner.get_model_snapshot() == {"version": 1, "revision": 3, "params": {}}
 
 
-
 def test_threaded_runner_republishes_snapshot_when_refit_raises():
     core = _CoreWithExceptionalRefit()
     runner = ThreadedControllerRunner(core)
@@ -265,6 +264,7 @@ def test_threaded_runner_republishes_snapshot_when_refit_raises():
         runner.refit_from_cook()
 
     assert runner.get_model_snapshot() == {"version": 1, "revision": 4, "params": {}}
+
 
 def test_a_worker_that_would_not_stop_refuses_the_refit_out_loud():
     """`stop()` joins with a timeout, so it cannot promise the worker is gone.

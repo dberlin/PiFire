@@ -17,6 +17,7 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import ExperimentA
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import load_artifact
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_tiny_matrix
 
+
 def _checkpoint_rows(checkpoint: Path) -> list[dict[str, object]]:
     manifest = json.loads(checkpoint.read_text())
     assert manifest["checkpoint_schema"] == "incremental-cas/v2"
@@ -54,8 +55,10 @@ def test_quick_mode_writes_requested_output_and_table(tmp_path: Path) -> None:
     # Full has 1,080 rows versus quick's 144; eight quick bundles bound its transport.
     assert output.stat().st_size * 8 < 100 * 1024 * 1024
 
+
 def test_source_revision_is_a_plain_commit_id() -> None:
     assert re.fullmatch(r"[0-9a-f]{40}", _source_revision())
+
 
 def test_validation_horizon_selection_uses_only_validation_scores() -> None:
     selection = _select_validation_horizon({600: (1.0,), 800: (0.995,), 1000: (0.991,)})
@@ -114,8 +117,19 @@ def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(t
     checkpoint = output.with_name("resume.checkpoint.manifest.json")
     partial_rows = _checkpoint_rows(checkpoint)
     completed = subprocess.run(
-        [sys.executable, "-m", "docs.superpowers.experiments.linear_mpc_bakeoff", "--quick", "--resume", "--output", str(output)],
-        check=False, capture_output=True, text=True, env={**os.environ, "UV_NO_SYNC": "1"},
+        [
+            sys.executable,
+            "-m",
+            "docs.superpowers.experiments.linear_mpc_bakeoff",
+            "--quick",
+            "--resume",
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "UV_NO_SYNC": "1"},
     )
 
     assert completed.returncode == 0, completed.stderr

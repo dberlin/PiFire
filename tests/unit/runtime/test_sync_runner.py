@@ -24,6 +24,7 @@ def test_runner_import_does_not_load_optional_linear_mpc_dependencies():
 
     assert result.returncode == 0, result.stderr
 
+
 def _frame(index: int) -> FrameObservation:
     return FrameObservation(
         frame_start_s=index * 20.0,
@@ -48,6 +49,7 @@ def _frame(index: int) -> FrameObservation:
         continuous=True,
         role_generation=0,
     )
+
 
 class _Core:
     def __init__(self):
@@ -397,7 +399,6 @@ def test_fake_runner_bounds_outcomes_and_reports_exact_evictions():
     assert [envelope.submission_sequence for envelope in drain] == list(range(2, 32))
 
 
-
 def test_sync_runner_reports_exact_outcome_evictions():
     outcome = {"role_generation": 0, "eligible": False}
 
@@ -431,6 +432,7 @@ def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
 
     assert len(drain.dropped_sequences) == 60
     assert drain.dropped_sequences == tuple(range(2, 62))
+
 
 def test_sync_runner_forwards_snapshot_and_restore():
     core = _RecordingCore()

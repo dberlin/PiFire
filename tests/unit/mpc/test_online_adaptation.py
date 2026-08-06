@@ -56,13 +56,25 @@ class FixedAffineModel:
             "digest": self.digest,
             "status": {
                 "steady_gain": self._gain,
-                "regions": [
-                    {"effective_samples": self._effective_updates, "poles": [self._pole]}
-                ],
+                "regions": [{"effective_samples": self._effective_updates, "poles": [self._pole]}],
             },
             "active_delay": self._delay,
         }
 
+
+class HorizonAffineModel(FixedAffineModel):
+    """Forecast fake with independently controlled 60 s and 300 s bias."""
+
+    def __init__(self, biases: dict[int, float], *, digest: str) -> None:
+        super().__init__(digest=digest)
+        self._biases = biases
+
+    def affine_prediction(self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray) -> AffinePrediction:
+        del q_previous, ambient_future
+        return AffinePrediction(
+            np.full(horizon_steps, self._biases[horizon_steps], dtype=np.float64),
+            np.zeros((horizon_steps, horizon_steps), dtype=np.float64),
+        )
 
 def frame(index: int, *, temperature: float | None = None) -> FrameObservation:
     return FrameObservation(
@@ -167,6 +179,52 @@ def test_prequential_origins_align_interval_duty_to_future_temperature() -> None
     assert fifteen.observed_temperature_c != 0.0
 
 
+def test_matured_origin_retains_braking_status_from_forecast_window() -> None:
+    manager = OnlineAdaptation(
+        FixedAffineModel(),
+        FixedAffineModel(),
+        AdaptationPolicy(excitation_window=2),
+    )
+
+    manager.observe(frame(0), braking=True)
+    for index in range(1, 4):
+        manager.observe(frame(index), braking=False)
+
+    completed = next(
+        origin
+        for origin in manager.completed_origins
+        if origin.origin_time_s == 20.0 and origin.horizon_steps == 3
+    )
+    assert completed.completion_time_s == 80.0
+    assert completed.braking is True
+
+
+def test_candidate_must_win_each_horizon_not_only_the_pooled_score() -> None:
+    manager = OnlineAdaptation(
+        HorizonAffineModel({3: 5.0, 15: 1.0}, digest="incumbent"),
+        HorizonAffineModel({3: 0.0, 15: 2.0}, digest="challenger"),
+        AdaptationPolicy(
+            excitation_window=2,
+            min_effective_updates=1,
+            required_consecutive_wins=1,
+            evaluation_interval_s=300.0,
+        ),
+    )
+
+    for index in range(16):
+        manager.observe(frame(index, temperature=0.0))
+
+    decision = manager.evaluate_due(at_s=320.0)
+    scores = {score.horizon_steps: score for score in decision.horizon_scores}
+
+    assert not decision.promoted
+    assert EvaluationRejectionReason.PREDICTION in decision.reasons
+    assert scores[3].challenger_rmse_c < scores[3].incumbent_rmse_c
+    assert scores[15].challenger_rmse_c > scores[15].incumbent_rmse_c
+    assert scores[3].sample_count > 0
+    assert scores[15].sample_count > 0
+
+
 def _winning_manager() -> OnlineAdaptation:
     return OnlineAdaptation(
         FixedAffineModel(bias=1.0, digest="incumbent"),
@@ -228,18 +286,14 @@ def test_prediction_braking_continuity_and_prospective_gates_are_independent() -
     manager = _winning_manager()
     _populate_one_window(manager)
     manager._scores.candidate_prediction_error = (
-        manager._scores.incumbent_prediction_error
-        + manager._scores.prediction_count
+        manager._scores.incumbent_prediction_error + manager._scores.prediction_count
     )
     decision = manager.evaluate_due(at_s=300.0)
     assert EvaluationRejectionReason.PREDICTION in decision.reasons
 
     manager = _winning_manager()
     _populate_one_window(manager)
-    manager._scores.candidate_braking_error = (
-        manager._scores.incumbent_braking_error
-        + manager._scores.braking_count
-    )
+    manager._scores.candidate_braking_error = manager._scores.incumbent_braking_error + manager._scores.braking_count
     decision = manager.evaluate_due(at_s=300.0)
     assert EvaluationRejectionReason.BRAKING in decision.reasons
 
@@ -307,7 +361,6 @@ def test_snapshot_excludes_partial_discontinuous_origins() -> None:
     snapshot = manager.snapshot()
 
     assert snapshot["partial_origins"] == []
-
 
 
 def test_snapshot_restore_keeps_only_bounded_durable_state() -> None:

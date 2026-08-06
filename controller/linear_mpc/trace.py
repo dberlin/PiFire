@@ -124,7 +124,6 @@ def _exact_observations(payloads: tuple[ModelObservationPayload, ...]) -> tuple[
     return tuple(frames)
 
 
-
 @dataclass(frozen=True, slots=True)
 class CalibrationSample:
     """One trusted legacy calibration sample in the session's canonical unit."""
@@ -240,7 +239,10 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
             raise TraceSelectionError("terminal incomplete applied-output interval does not match its latest update")
         if partial_index <= updates[-1][0]:
             raise TraceSelectionError("terminal incomplete applied-output interval does not follow its latest update")
-        if any(isinstance(record.payload, (MpcUpdatePayload, AppliedOutputPayload)) for record in trace[partial_index + 1 :]):
+        if any(
+            isinstance(record.payload, (MpcUpdatePayload, AppliedOutputPayload))
+            for record in trace[partial_index + 1 :]
+        ):
             raise TraceSelectionError("terminal incomplete applied-output interval has a later update or output")
         if complete_outputs:
             latest_complete = max(
@@ -248,7 +250,9 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
                 key=lambda item: item[0],
             )[1]
             if partial.interval_start_ms < latest_complete.interval_end_ms:
-                raise TraceSelectionError("terminal incomplete applied-output interval does not follow its complete interval")
+                raise TraceSelectionError(
+                    "terminal incomplete applied-output interval does not follow its complete interval"
+                )
 
     update_indices = {payload.result_revision: index for index, payload in updates}
     for revision, revision_outputs in complete_outputs.items():
@@ -282,10 +286,13 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
         if len(revision_outputs) == 1:
             return float(revision_outputs[0][1].realized_combustion_load)
         duration_ms = sum(output.interval_end_ms - output.interval_start_ms for _, output in revision_outputs)
-        return sum(
-            float(output.realized_combustion_load) * (output.interval_end_ms - output.interval_start_ms)
-            for _, output in revision_outputs
-        ) / duration_ms
+        return (
+            sum(
+                float(output.realized_combustion_load) * (output.interval_end_ms - output.interval_start_ms)
+                for _, output in revision_outputs
+            )
+            / duration_ms
+        )
 
     paired_updates = [(index, update) for index, update in updates if update.result_revision in complete_outputs]
     if len(paired_updates) < 2:
@@ -302,13 +309,13 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
         for _, update in paired_updates
     )
 
+
 def _fallback_observations(
     records: tuple[ControlTraceRecord, ...], session: SessionPayload
 ) -> tuple[FrameObservation, ...]:
     updates: dict[int, list[MpcUpdatePayload]] = {}
     if any(
-        isinstance(record.payload, AppliedOutputPayload) and not record.payload.sample_complete
-        for record in records
+        isinstance(record.payload, AppliedOutputPayload) and not record.payload.sample_complete for record in records
     ):
         raise TraceSelectionError("selected control trace contains a partial applied-output interval")
     frames = tuple(record.payload for record in records if isinstance(record.payload, FramedPulseFramePayload))

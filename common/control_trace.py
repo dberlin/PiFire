@@ -439,9 +439,7 @@ class ModelObservationPayload:
             raise ValueError("model observation delivery must not exceed frame duration")
         if self.eligible != (not self.rejection_reasons):
             raise ValueError("model observation eligibility must match rejection reasons")
-        if self.eligible and (
-            self.incumbent_innovation_c is None or self.challenger_innovation_c is None
-        ):
+        if self.eligible and (self.incumbent_innovation_c is None or self.challenger_innovation_c is None):
             raise ValueError("eligible model observation requires innovation scores")
         return self
 
@@ -542,17 +540,19 @@ class ControlTraceRecord(BaseModel):
         expected_event = _payload_event_kind(self.payload)
         if self.event_kind is not expected_event:
             raise ValueError("event_kind does not match payload_type")
-        if self.schema_version == 2 and isinstance(
-            self.payload, (ModelObservationPayload, ModelEvaluationPayload)
-        ):
+        if self.schema_version == 2 and isinstance(self.payload, (ModelObservationPayload, ModelEvaluationPayload)):
             raise ValueError("trace schema version 2 cannot contain learning payloads")
-        if self.schema_version == 2 and isinstance(self.payload, ModelEventPayload) and any(
-            value is not None
-            for value in (
-                self.payload.model_kind,
-                self.payload.model_schema,
-                self.payload.role_generation,
-                self.payload.snapshot_digest,
+        if (
+            self.schema_version == 2
+            and isinstance(self.payload, ModelEventPayload)
+            and any(
+                value is not None
+                for value in (
+                    self.payload.model_kind,
+                    self.payload.model_schema,
+                    self.payload.role_generation,
+                    self.payload.snapshot_digest,
+                )
             )
         ):
             raise ValueError("trace schema version 2 cannot contain enriched model metadata")

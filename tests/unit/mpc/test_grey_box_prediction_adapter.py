@@ -27,10 +27,7 @@ _CONFIG = {
 def _controller_origin(*, sigma: float = 0.0) -> SimpleNamespace:
     config = dict(_CONFIG, sigma=sigma, control_period=20.0)
     estimator = GreyBoxKF(
-        **{
-            name: config[name]
-            for name in ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q")
-        },
+        **{name: config[name] for name in ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q")},
         t_step=20.0,
         q_temp=1e-2,
         q_dist=0.05,
@@ -41,9 +38,7 @@ def _controller_origin(*, sigma: float = 0.0) -> SimpleNamespace:
     return SimpleNamespace(cfg=config, estimator=estimator)
 
 
-def _direct_estimator_forecast(
-    origin: SimpleNamespace, q_future: np.ndarray
-) -> np.ndarray:
+def _direct_estimator_forecast(origin: SimpleNamespace, q_future: np.ndarray) -> np.ndarray:
     """Forecast independently from the frozen production KF's own matrices."""
     estimator = origin.estimator
     state = estimator.x.copy()
@@ -65,7 +60,6 @@ def test_kf_origin_uses_its_actual_discrete_dynamics_when_configured_sigma_is_no
         atol=1e-8,
         rtol=0.0,
     )
-
 
 
 def _ekf_controller_origin() -> SimpleNamespace:
@@ -95,9 +89,7 @@ def _direct_frozen_ekf_forecast(
     output = np.empty(q_future.size)
     for index, (q, ambient_c) in enumerate(zip(q_future, ambient_future, strict=True)):
         estimator.T_amb = float(ambient_c)
-        estimator.Baug[temperature_index, 1] = (
-            float(origin.cfg["h_amb"]) * ambient_c / float(origin.cfg["C_c"])
-        )
+        estimator.Baug[temperature_index, 1] = float(origin.cfg["h_amb"]) * ambient_c / float(origin.cfg["C_c"])
         estimator.x[temperature_index] = chamber_origin
         transition, q_gain, offset = estimator._discretize()
         state = transition @ state + q_gain.ravel() * q + offset.ravel()
@@ -124,6 +116,7 @@ def test_radiative_ekf_origin_applies_each_future_ambient_value() -> None:
         direct,
         atol=1e-8,
     )
+
 
 def test_affine_map_reconstructs_a_frozen_grey_box_forecast_to_machine_precision() -> None:
     controller = _controller_origin()

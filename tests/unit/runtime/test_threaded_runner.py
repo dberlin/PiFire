@@ -43,6 +43,7 @@ def _frame(index: int) -> FrameObservation:
         role_generation=0,
     )
 
+
 class FakeCore:
     """Deterministic core. update() records temps, returns a fixed dict, and
     sets `updated` so tests synchronize on a real event, not a sleep."""
@@ -819,7 +820,6 @@ def test_the_backlog_stays_bounded_after_a_drain():
         runner.stop()
 
 
-
 class _ObservationBarrier:
     def __init__(self):
         self.calls = 0
@@ -976,7 +976,6 @@ def test_threaded_runner_stop_flushes_accepted_observation_outcome():
     ]
 
 
-
 def test_threaded_runner_swap_delivers_pre_swap_observation_to_old_core():
     barrier = _ObservationBarrier()
 
@@ -1105,6 +1104,7 @@ def test_threaded_generation_specific_overflow_marks_only_reserved_generation():
         barrier.release.set()
         runner.stop()
 
+
 def test_threaded_runner_ignores_observations_for_a_core_without_a_learner():
     barrier = _ObservationBarrier()
     core = FakeCore()
@@ -1161,9 +1161,8 @@ def test_threaded_runner_redrains_observations_enqueued_during_learner_delivery(
         barrier.release.set()
         runner.stop()
 
-def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_gates(
-    hold_cycle, monkeypatch
-):
+
+def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_gates(hold_cycle, monkeypatch):
     """Dropped frame identity reaches the real learner as one discontinuity."""
     import controller.runtime.modes.hold as hold_module
 
@@ -1226,6 +1225,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
             realized_q=realized_q,
             requested_auger_duty=realized_q,
         )
+
     recorder = _Recorder()
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda **_kwargs: recorder)
     gate = _Gate()
@@ -1239,9 +1239,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         mode._ensure_trace_session(0.0)
 
         for index in range(31):
-            mode._deliver_completed_pulse_observation(
-                (index * 20, (index + 1) * 20), frame(index, 0.3)
-            )
+            mode._deliver_completed_pulse_observation((index * 20, (index + 1) * 20), frame(index, 0.3))
 
         assert list(mode._pending_model_observations) == list(range(2, 32))
         assert runner.controller_state()["dropped_observations"] == 1
@@ -1250,9 +1248,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         assert core.wait_for_observations(30)
         mode._reconcile_model_observation_outcomes(now=620.0)
         traced_observations = [
-            record
-            for record in recorder.records
-            if record.event_kind is TraceEventKind.MODEL_OBSERVATION
+            record for record in recorder.records if record.event_kind is TraceEventKind.MODEL_OBSERVATION
         ]
         first_traced = traced_observations[0]
         assert isinstance(first_traced.payload, ModelObservationPayload)
@@ -1272,21 +1268,16 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         assert initial[0][0].continuous is False
         assert all(observation.continuous for observation, _outcome in initial[1:])
         assert initial[0][1]["rejection_reasons"] == ("discontinuity",)
-        assert [outcome["rejection_reasons"] for _observation, outcome in initial[1:16]] == [
-            ("lag-warmup",)
-        ] * 15
+        assert [outcome["rejection_reasons"] for _observation, outcome in initial[1:16]] == [("lag-warmup",)] * 15
         assert all(
-            outcome["rejection_reasons"] == ("insufficient-excitation",)
-            for _observation, outcome in initial[16:]
+            outcome["rejection_reasons"] == ("insufficient-excitation",) for _observation, outcome in initial[16:]
         )
         adaptation = core.get_status()["adaptation"]
         assert (adaptation["active_model_kind"], adaptation["promotion_count"]) == ("grey-box", 0)
 
         for index in range(31, 61):
             realized_q = 0.1 if index % 2 else 0.5
-            mode._deliver_completed_pulse_observation(
-                (index * 20, (index + 1) * 20), frame(index, realized_q)
-            )
+            mode._deliver_completed_pulse_observation((index * 20, (index + 1) * 20), frame(index, realized_q))
 
         gate.release.set()
         assert core.wait_for_observations(60)

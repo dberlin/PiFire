@@ -1,4 +1,5 @@
 """RED→GREEN contracts for bounded deterministic bake-off parallelism."""
+
 from __future__ import annotations
 
 import hashlib
@@ -137,9 +138,11 @@ def test_lpt_refills_every_completed_slot_before_yielding_reversed_arrivals(
     assert all(active == 2 for active, submitted_count in occupancy if submitted_count < len(jobs))
     assert [result.ordinal for result in completed] == sorted(result.ordinal for result in completed)
 
+
 def test_prepared_origin_payload_is_picklable() -> None:
     payload = _prepare_origin(("scheduled-arx", "correct", "GrillSim", 2))
     assert pickle.loads(pickle.dumps(payload)).origin == payload.origin
+
 
 def test_spawned_cell_result_is_picklable_document() -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.scenarios import quick_scenarios
@@ -167,7 +170,6 @@ def test_incremental_checkpoint_head_uses_bounded_deltas(tmp_path: Path) -> None
         interrupt_after=5,
     )
 
-
     checkpoint = _checkpoint_path(output)
     manifest = json.loads(checkpoint.read_text())
     entries, nodes = runner_module._checkpoint_delta_entries(
@@ -191,9 +193,7 @@ def test_relative_checkpoint_resumes_and_cleans_exact_verified_deltas(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(runner_module, "_source_revision", lambda: "a" * 40)
     output = Path("relative.manifest.json")
-    partial = _run_matrix(
-        _micro_config(workers=1), checkpoint=output, resume=False, interrupt_after=2
-    )
+    partial = _run_matrix(_micro_config(workers=1), checkpoint=output, resume=False, interrupt_after=2)
     checkpoint = _checkpoint_path(output)
 
     assert len(partial.scenarios) == 2
@@ -225,9 +225,7 @@ def test_resume_rejects_traversal_in_verified_delta_entry(tmp_path: Path) -> Non
         _run_matrix(_micro_config(workers=1), checkpoint=output, resume=True)
 
 
-def test_resume_config_mismatch_aborts_before_preparation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resume_config_mismatch_aborts_before_preparation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output = tmp_path / "micro.manifest.json"
     _run_matrix(_micro_config(workers=1), checkpoint=output, resume=False, interrupt_after=1)
 

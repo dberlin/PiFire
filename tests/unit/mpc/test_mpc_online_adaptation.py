@@ -116,7 +116,6 @@ def test_opt_out_is_identical_to_explicit_false_across_commands_diagnostics_and_
     json.dumps(implicit.get_status(), allow_nan=False)
 
 
-
 def test_bootstrap_exposes_only_the_typed_realized_frame_outcome_and_keeps_grey_box_authority():
     controller = _controller(online=True)
     outcome = controller.observe_frame(_frame(0))
@@ -164,10 +163,10 @@ class _GreyModel:
         return {"schema": "grey-box-adapter/v1", "origin": "test"}
 
 
-
 class _GreyPolicyNet:
     def firing_rate_raw(self, _x_hat, _previous_load, _setpoint_c):
         return 0.5
+
 
 class _Candidate(ScheduledARX):
     def affine_prediction(self, horizon_steps, q_previous, ambient_future):
@@ -380,9 +379,7 @@ def test_repeated_active_failure_holds_once_then_rolls_back_to_the_owned_grey_bo
         ("invalid-certificate", "invalid-kkt-certificate"),
     ],
 )
-def test_active_safety_failures_roll_back_once_with_the_exact_lifecycle_reason(
-    scripted_controller, failure, reason
-):
+def test_active_safety_failures_roll_back_once_with_the_exact_lifecycle_reason(scripted_controller, failure, reason):
     controller = scripted_controller
     controller.observe_frame(_frame(0))
     controller.observe_frame(_frame(1))
@@ -393,9 +390,7 @@ def test_active_safety_failures_roll_back_once_with_the_exact_lifecycle_reason(
             np.full(horizon_steps, np.nan), np.zeros((horizon_steps, horizon_steps))
         )
     else:
-        controller._online.incumbent = _Candidate(
-            ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3))
-        )
+        controller._online.incumbent = _Candidate(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3)))
 
         class _InvalidCertificatePolicy:
             def solve(self, *_args, **_kwargs):
@@ -424,10 +419,7 @@ def test_active_real_scheduled_arx_restore_rebuilds_lag_before_resuming_arx_auth
     for index in range(80, 92):
         active.observe(_frame(index))
 
-    outcomes = [
-        source._online.observe(_frame(index), ambient_future=np.full(15, 20.0))
-        for index in range(92, 116)
-    ]
+    outcomes = [source._online.observe(_frame(index), ambient_future=np.full(15, 20.0)) for index in range(92, 116)]
     assert any(outcome.gate.permitted for outcome in outcomes)
     fallback = source._online.incumbent
     source._online._previous_incumbent = fallback
@@ -460,10 +452,7 @@ def test_active_real_scheduled_arx_restore_rebuilds_lag_before_resuming_arx_auth
     assert 0.0 <= held["cycle_ratio"] <= CYCLE["u_max"]
     assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
 
-    fresh_outcomes = [
-        restored.observe_frame(replace(_frame(index), role_generation=3))
-        for index in range(116, 132)
-    ]
+    fresh_outcomes = [restored.observe_frame(replace(_frame(index), role_generation=3)) for index in range(116, 132)]
     assert fresh_outcomes[-1]["eligible"] is True
     prediction = restored._online.incumbent.affine_prediction(4, 0.4, np.full(4, 20.0))
     assert np.isfinite(prediction.free_output_c).all()

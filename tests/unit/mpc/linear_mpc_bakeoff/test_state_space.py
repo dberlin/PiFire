@@ -89,6 +89,7 @@ def fitted_then_extended_record() -> tuple[InnovationStateSpace, SignalRecord]:
         ),
     )
 
+
 def test_track_corrects_state_without_refreshing_fitted_state_space_matrices() -> None:
     """A frozen state-space incumbent may filter observations but cannot refresh."""
     model, extension = fitted_then_extended_record()
@@ -119,6 +120,7 @@ def test_subspace_fit_recovers_order_two_dynamics() -> None:
     assert model.snapshot()["delay_steps"] == 2
     assert max(abs(p) for p in model.snapshot()["poles"]) < 1.0
     assert free_run_rmse(model, split.test) < 0.25
+
 
 def test_snapshot_exposes_arm_neutral_delay_seconds() -> None:
     model, _ = fitted_then_extended_record()
@@ -159,7 +161,6 @@ def test_rejected_refresh_keeps_incumbent_but_records_attempt_cadence() -> None:
     assert after["update_timing"]["last_attempt_time_s"] == extension.time_s[-1]
 
 
-
 def test_refresh_rejects_candidate_exhaustion_atomically_and_preserves_incumbent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -196,6 +197,7 @@ def test_refresh_rejects_candidate_exhaustion_atomically_and_preserves_incumbent
     with pytest.raises(state_space_module.CandidateExhaustedError):
         InnovationStateSpace(StateSpaceConfig(orders=(1,), delays=(1,))).fit(extension)
 
+
 def test_subspace_fit_is_defensive_and_block_rows_affect_identification() -> None:
     source = known_state_space(seed=4)(samples=800)
     record = SignalRecord(
@@ -217,14 +219,13 @@ def test_subspace_fit_is_defensive_and_block_rows_affect_identification() -> Non
 
 def test_fit_retains_only_bounded_online_history() -> None:
     record = known_state_space(seed=8)(samples=200)
-    model = InnovationStateSpace(
-        StateSpaceConfig(orders=(1, 2), delays=(1, 2), max_buffer_samples=32)
-    )
+    model = InnovationStateSpace(StateSpaceConfig(orders=(1, 2), delays=(1, 2), max_buffer_samples=32))
 
     model.fit(record)
 
     assert model.history_record.time_s.size == 32
     assert model.snapshot()["buffer_samples"] == 32
+
 
 def test_subspace_fit_recovers_nonzero_direct_feedthrough() -> None:
     samples = 500
@@ -251,9 +252,7 @@ def test_affine_prediction_matches_direct_forecast() -> None:
     ambient = extension.ambient_c[:horizon]
     q = extension.q[:horizon]
 
-    affine = model.affine_prediction(
-        horizon, q_previous=model.input_history[-1], ambient_future=ambient
-    )
+    affine = model.affine_prediction(horizon, q_previous=model.input_history[-1], ambient_future=ambient)
     direct = model.forecast(model.history_record, q, ambient)
 
     np.testing.assert_allclose(affine.free_output_c + affine.input_response_c @ q, direct)
@@ -268,7 +267,6 @@ def test_snapshot_is_recursively_immutable() -> None:
         snapshot["order"] = 1  # type: ignore[index]
     with pytest.raises(TypeError):
         snapshot["matrices"]["A"][0] = 0.0  # type: ignore[index]
-
 
 
 def general_latent_state_space(*, seed: int) -> Callable[[int], SignalRecord]:
@@ -307,9 +305,7 @@ def test_projected_realization_initializes_forecast_and_affine_with_direct_feedt
     )
     future_q = record.q[1_200:]
     future_ambient = record.ambient_c[1_200:]
-    model = InnovationStateSpace(
-        StateSpaceConfig(orders=(2,), delays=(2,), block_rows=6)
-    )
+    model = InnovationStateSpace(StateSpaceConfig(orders=(2,), delays=(2,), block_rows=6))
 
     model.fit(prefix)
     forecast = model.forecast(prefix, future_q, future_ambient)
@@ -322,6 +318,7 @@ def test_projected_realization_initializes_forecast_and_affine_with_direct_feedt
     assert abs(model.snapshot()["matrices"]["D"][0]) > 0.1
     assert float(np.sqrt(np.mean((forecast - record.temp_c[1_200:]) ** 2))) < 0.08
     np.testing.assert_allclose(affine.free_output_c + affine.input_response_c @ future_q, forecast)
+
 
 def test_no_viable_candidate_preserves_detailed_rejection_reason() -> None:
     samples = 100
@@ -342,9 +339,7 @@ def test_mak_correct_calibration_accepts_data_scaled_high_gain_candidate() -> No
     record, initialized = _identification_records("MAKGrillSim", 2, "correct")
     fit_end, _ = _simulator_boundaries("MAKGrillSim", record.temp_c.size)
     fit_record = _record_slice(initialized, 0, fit_end)
-    model = InnovationStateSpace(
-        StateSpaceConfig(orders=(1,), delays=(2,), refresh_interval_s=1e12)
-    )
+    model = InnovationStateSpace(StateSpaceConfig(orders=(1,), delays=(2,), refresh_interval_s=1e12))
 
     model.fit(fit_record)
 
@@ -409,9 +404,7 @@ def test_mak_correct_calibration_accepts_data_scaled_high_gain_candidate() -> No
         ),
     ),
 )
-def test_data_scaled_plausibility_rejects_true_negative_candidates(
-    fit: SubspaceFit, reason: str
-) -> None:
+def test_data_scaled_plausibility_rejects_true_negative_candidates(fit: SubspaceFit, reason: str) -> None:
     record = known_state_space(seed=13)(samples=120)
     training = SignalRecord(
         record.time_s[:80],
@@ -428,9 +421,7 @@ def test_data_scaled_plausibility_rejects_true_negative_candidates(
         record.provenance,
     )
 
-    rejection = _candidate_rejection_reason(
-        fit, training, validation, StateSpaceConfig(orders=(1,), delays=(1,))
-    )
+    rejection = _candidate_rejection_reason(fit, training, validation, StateSpaceConfig(orders=(1,), delays=(1,)))
 
     assert rejection is not None
     assert reason in rejection
@@ -440,9 +431,7 @@ def test_snapshot_uses_selected_training_bounds_not_held_out_scale() -> None:
     record = known_state_space(seed=31)(samples=300)
     temperatures = record.temp_c.copy()
     temperatures[-30:] = record.ambient_c[-30:] + 10_000.0
-    widened = SignalRecord(
-        record.time_s, temperatures, record.q, record.ambient_c, record.provenance
-    )
+    widened = SignalRecord(record.time_s, temperatures, record.q, record.ambient_c, record.provenance)
     config = StateSpaceConfig(orders=(1,), delays=(2,))
     model = InnovationStateSpace(config)
 

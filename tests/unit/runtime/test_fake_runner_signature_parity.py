@@ -36,6 +36,7 @@ def _frame() -> FrameObservation:
         role_generation=0,
     )
 
+
 def _params(method):
     return set(inspect.signature(method).parameters) - {"self"}
 
@@ -61,7 +62,6 @@ def test_fake_runner_configuration_revision_advances_only_on_successful_reconfig
     assert runner.configuration_revision() == 0
     assert runner.reconfigure({}, {}) == "Active"
     assert runner.configuration_revision() == 1
-
 
 
 def test_fake_runner_owns_observations_for_inspection():

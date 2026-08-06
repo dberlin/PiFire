@@ -192,6 +192,93 @@ def test_fahrenheit_and_celsius_fallback_sessions_are_equivalent() -> None:
 
     assert fahrenheit == celsius
 
+def test_fallback_normalizes_legacy_framed_delivery_to_canonical_q() -> None:
+    legacy_frame = _frame().model_copy(
+        update={
+            "payload": replace(
+                _frame().payload,
+                requested_combustion_load=0.4,
+                requested_auger_duty=0.36,
+                scheduled_on_seconds=7.2,
+                delivered_on_seconds=3.6,
+            )
+        }
+    )
+    canonical_observation = _observation().model_copy(
+        update={
+            "payload": replace(
+                _observation().payload,
+                requested_combustion_load=0.4,
+                realized_combustion_load=0.2,
+                delivered_on_seconds=3.6,
+                requested_auger_duty=0.36,
+            )
+        }
+    )
+
+    replayed = learning_observations((_session("F"), legacy_frame, _update()))
+    canonical = learning_observations((_session("F"), canonical_observation))
+
+    assert replayed == canonical
+    assert replayed[0].realized_q == pytest.approx(0.2)
+
+
+@pytest.mark.parametrize(
+    ("requested_q", "requested_duty", "delivered_on_s"),
+    [
+        (0.0, 0.0, 3.6),
+        (0.4, 0.5, 3.6),
+    ],
+    ids=("unidentifiable-zero-request-with-delivery", "inconsistent-u-max"),
+)
+def test_fallback_rejects_legacy_frames_without_a_valid_input_scale(
+    requested_q: float, requested_duty: float, delivered_on_s: float
+) -> None:
+    frame = _frame().model_copy(
+        update={
+            "payload": replace(
+                _frame().payload,
+                requested_combustion_load=requested_q,
+                requested_auger_duty=requested_duty,
+                scheduled_on_seconds=delivered_on_s,
+                delivered_on_seconds=delivered_on_s,
+            )
+        }
+    )
+
+    with pytest.raises(TraceSelectionError):
+        learning_observations((_session(), frame, _update()))
+
+
+def test_fallback_preserves_zero_requested_and_delivered_input() -> None:
+    legacy_frame = _frame().model_copy(
+        update={
+            "payload": replace(
+                _frame().payload,
+                requested_combustion_load=0.0,
+                requested_auger_duty=0.0,
+                scheduled_on_seconds=0.0,
+                delivered_on_seconds=0.0,
+            )
+        }
+    )
+    canonical_observation = _observation().model_copy(
+        update={
+            "payload": replace(
+                _observation().payload,
+                requested_combustion_load=0.0,
+                realized_combustion_load=0.0,
+                delivered_on_seconds=0.0,
+                requested_auger_duty=0.0,
+            )
+        }
+    )
+
+    replayed = learning_observations((_session("F"), legacy_frame, _update()))
+    canonical = learning_observations((_session("F"), canonical_observation))
+
+    assert replayed == canonical
+
 
 @pytest.mark.parametrize(
     "records",
@@ -200,9 +287,15 @@ def test_fahrenheit_and_celsius_fallback_sessions_are_equivalent() -> None:
         lambda: (
             _session(),
             _frame(),
-            _update().model_copy(update={"payload": replace(_update().payload, output_source=OutputSource.MANUAL_OVERRIDE)}),
+            _update().model_copy(
+                update={"payload": replace(_update().payload, output_source=OutputSource.MANUAL_OVERRIDE)}
+            ),
         ),
-        lambda: (_session(), _frame().model_copy(update={"payload": replace(_frame().payload, frame_end_ms=10_000)}), _update()),
+        lambda: (
+            _session(),
+            _frame().model_copy(update={"payload": replace(_frame().payload, frame_end_ms=10_000)}),
+            _update(),
+        ),
         lambda: (
             _session(),
             _frame(),
@@ -231,7 +324,10 @@ def test_fahrenheit_and_celsius_fallback_sessions_are_equivalent() -> None:
             _frame(),
             _update(),
             _frame().model_copy(
-                update={"ts_ms": 60_000, "payload": replace(_frame().payload, result_revision=2, frame_start_ms=40_000, frame_end_ms=60_000)}
+                update={
+                    "ts_ms": 60_000,
+                    "payload": replace(_frame().payload, result_revision=2, frame_start_ms=40_000, frame_end_ms=60_000),
+                }
             ),
             _update(2).model_copy(
                 update={"ts_ms": 60_000, "payload": replace(_update(2).payload, wall_ms=60_000, monotonic_ms=60_000)}
@@ -258,11 +354,8 @@ def test_fallback_rejects_ambiguous_or_incomplete_evidence(records) -> None:
         learning_observations(normalized)
 
 
-
 def test_exact_observation_rejects_omitted_gate_or_actuation_evidence() -> None:
-    record = _observation().model_copy(
-        update={"payload": replace(_observation().payload, output_source=None)}
-    )
+    record = _observation().model_copy(update={"payload": replace(_observation().payload, output_source=None)})
     with pytest.raises(TraceSelectionError, match="omits required"):
         learning_observations((_session(), record))
 

@@ -16,7 +16,10 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import (
 
 
 def artifact_with_scores(
-    *, arx: float = 10.0, state_space: float = 12.0, dmc: float = 13.0,
+    *,
+    arx: float = 10.0,
+    state_space: float = 12.0,
+    dmc: float = 13.0,
     state_prediction: float = 3.0,
 ) -> ExperimentArtifact:
     return ExperimentArtifact(
@@ -29,8 +32,15 @@ def artifact_with_scores(
             ArmEvidence("scheduled-arx", {"GrillSim": arx}, 3.0, 3.0, 3.0, 1.0, 0.0, 2.0, 10.0),
             ArmEvidence("dmc", {"GrillSim": dmc}, 4.0, 4.0, 4.0, 1.0, 0.0, 2.0, 10.0),
             ArmEvidence(
-                "state-space", {"GrillSim": state_space}, state_prediction, state_prediction,
-                state_prediction, 1.0, 0.0, 2.0, 10.0,
+                "state-space",
+                {"GrillSim": state_space},
+                state_prediction,
+                state_prediction,
+                state_prediction,
+                1.0,
+                0.0,
+                2.0,
+                10.0,
             ),
         ),
         source_revision="abc123",
@@ -47,7 +57,13 @@ def artifact_with_timings(*, projected_solve_p99_ms: float) -> ExperimentArtifac
         scenarios=(),
         arms=(
             ArmEvidence(
-                "scheduled-arx", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0,
+                "scheduled-arx",
+                {"GrillSim": 10.0},
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                0.0,
                 raw_solve_p99_ms=projected_solve_p99_ms / 5.0,
                 projected_solve_p99_ms=projected_solve_p99_ms,
             ),
@@ -105,8 +121,20 @@ def test_unmeasured_timing_cannot_change_frontier_or_selection() -> None:
             model_snapshots={},
             scenarios=(),
             arms=(
-                ArmEvidence("scheduled-arx", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, arx_timing, runtime_validity="not_measured"),
-                ArmEvidence("dmc", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, dmc_timing, runtime_validity="not_measured"),
+                ArmEvidence(
+                    "scheduled-arx",
+                    {"GrillSim": 10.0},
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    0.0,
+                    arx_timing,
+                    runtime_validity="not_measured",
+                ),
+                ArmEvidence(
+                    "dmc", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, dmc_timing, runtime_validity="not_measured"
+                ),
             ),
             source_revision="abc123",
             environment={"python": "test"},
@@ -129,7 +157,14 @@ def test_mixed_diagnostic_availability_is_not_a_zero_error_advantage() -> None:
         arms=(
             ArmEvidence("scheduled-arx", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0),
             ArmEvidence(
-                "dmc", {"GrillSim": 10.0}, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0,
+                "dmc",
+                {"GrillSim": 10.0},
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                1.0,
                 simulator_diagnostics_available=True,
                 simulator_gain_error_c_per_q=1.0,
                 simulator_delay_error_s=1.0,
@@ -143,10 +178,9 @@ def test_mixed_diagnostic_availability_is_not_a_zero_error_advantage() -> None:
     recommendation = recommend(artifact)
 
     assert not recommendation.arms["scheduled-arx"].valid
-    assert recommendation.arms["scheduled-arx"].reasons == (
-        "simulator diagnostics unavailable",
-    )
+    assert recommendation.arms["scheduled-arx"].reasons == ("simulator diagnostics unavailable",)
     assert recommendation.selected_arm == "dmc"
+
 
 def test_simplest_arm_wins_within_five_percent() -> None:
     artifact = artifact_with_scores(arx=10.4, state_space=10.0, dmc=12.0)
@@ -163,16 +197,17 @@ def test_artifact_is_schema_valid_sorted_and_has_provenance() -> None:
     assert list(document["arms"]) == ["dmc", "scheduled-arx", "state-space"]
     assert json.loads(artifact.to_json()) == document
 
-
-    artifact = artifact.with_failures((
-        ArmFailure(
-            "dmc",
-            "lid-excursion",
-            "wrong-input-semantics",
-            "q was realized",
-            MatrixKey("dmc", "wrong-delay", "GrillSim", "online", "lid-excursion", 2),
-        ),
-    ))
+    artifact = artifact.with_failures(
+        (
+            ArmFailure(
+                "dmc",
+                "lid-excursion",
+                "wrong-input-semantics",
+                "q was realized",
+                MatrixKey("dmc", "wrong-delay", "GrillSim", "online", "lid-excursion", 2),
+            ),
+        )
+    )
 
     recommendation = recommend(artifact)
 
@@ -193,9 +228,7 @@ def test_pareto_frontier_does_not_force_a_winner() -> None:
 
 def test_bootstrap_and_unavailable_horizons_are_preserved() -> None:
     artifact = artifact_with_scores()
-    artifact = artifact.with_horizon_evidence(
-        {"scheduled-arx": {"600": [1.0, 2.0], "real": None}}
-    )
+    artifact = artifact.with_horizon_evidence({"scheduled-arx": {"600": [1.0, 2.0], "real": None}})
 
     evidence = artifact.to_document()["horizon_evidence"]["scheduled-arx"]
     assert evidence["600"]["bootstrap_ci"] == [1.0, 2.0]
@@ -231,7 +264,6 @@ def test_arm_evidence_preserves_raw_distributions_and_horizon_residuals() -> Non
     assert document["horizon_evidence"]["scheduled-arx"]["600"]["residuals_c"] == [1.0, 2.0]
     assert evidence.to_document()["raw_timing_ms"]["learner"] == [1.0, 2.0]
     assert evidence.to_document()["raw_timing_ms"]["solve_p99"] == 5.99
-
 
 
 def test_runtime_gates_apply_to_five_times_learner_and_refresh_p99() -> None:
@@ -323,6 +355,8 @@ def test_simulator_diagnostics_change_validity_and_selection_at_equal_control() 
     assert not recommendation.arms["state-space"].valid
     assert recommendation.pareto_frontier == ("dmc",)
     assert recommendation.selected_arm == "dmc"
+
+
 def document_has_failure(artifact: ExperimentArtifact, category: str) -> bool:
     return any(failure["category"] == category for failure in artifact.to_document()["failures"])
 
@@ -369,7 +403,6 @@ def test_recommendation_uses_recovery_improvement_ratio_not_absolute_after_error
     assert evidence["recovery_improvement_ratio"] == 0.1
     assert evidence["recovery_improvement_delta"] == 90.0
     assert recommend(artifact).pareto_frontier == ("dmc",)
-
 
 
 def test_target_miss_is_explicit_and_table_labels_timing_raw_only() -> None:
@@ -503,6 +536,8 @@ def test_crash_before_manifest_publish_preserves_previous_artifact(tmp_path) -> 
         )
     assert path.read_bytes() == previous_manifest
     assert load_artifact(path).to_document() == artifact.to_document()
+
+
 def test_loader_accepts_legacy_json_and_gzip_transport(tmp_path) -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import load_artifact
 

@@ -1,4 +1,5 @@
 """Bounded, prequential online adaptation for production scheduled ARX models."""
+
 from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -12,45 +13,47 @@ from typing import Protocol
 import numpy as np
 from .arx import ScheduledARX
 from .contracts import AffinePrediction, FrameObservation, ModelUpdate
-_SCHEMA = 'online-adaptation/v1'
+
+_SCHEMA = "online-adaptation/v1"
 _HORIZONS = (3, 15)
 
+
 class AdaptiveModel(Protocol):
+    def observe(self, observation: FrameObservation) -> ModelUpdate: ...
 
-    def observe(self, observation: FrameObservation) -> ModelUpdate:
-        ...
+    def track(self, observation: FrameObservation) -> ModelUpdate: ...
 
-    def track(self, observation: FrameObservation) -> ModelUpdate:
-        ...
+    def affine_prediction(
+        self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray
+    ) -> AffinePrediction: ...
 
-    def affine_prediction(self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray) -> AffinePrediction:
-        ...
+    def snapshot(self) -> Mapping[str, object]: ...
 
-    def snapshot(self) -> Mapping[str, object]:
-        ...
 
 class UpdateRejectionReason(StrEnum):
-    LID_OPEN = 'lid-open'
-    SAFETY = 'safety'
-    MANUAL = 'manual'
-    STALE = 'stale'
-    SKIPPED_OR_RESET = 'skipped-or-reset'
-    NON_CONTROLLER_SOURCE = 'non-controller-source'
-    DISCONTINUITY = 'discontinuity'
-    UNKNOWN_ACTUATION = 'unknown-actuation'
-    INSUFFICIENT_EXCITATION = 'insufficient-excitation'
-    LAG_WARMUP = 'lag-warmup'
+    LID_OPEN = "lid-open"
+    SAFETY = "safety"
+    MANUAL = "manual"
+    STALE = "stale"
+    SKIPPED_OR_RESET = "skipped-or-reset"
+    NON_CONTROLLER_SOURCE = "non-controller-source"
+    DISCONTINUITY = "discontinuity"
+    UNKNOWN_ACTUATION = "unknown-actuation"
+    INSUFFICIENT_EXCITATION = "insufficient-excitation"
+    LAG_WARMUP = "lag-warmup"
+
 
 class EvaluationRejectionReason(StrEnum):
-    PREDICTION = 'prediction'
-    BRAKING = 'braking'
-    STABILITY = 'stability'
-    GAIN = 'gain'
-    DELAY = 'delay'
-    SAMPLES = 'samples'
-    CONTINUITY = 'continuity'
-    STALE_GENERATION = 'stale-generation'
-    PROSPECTIVE = 'prospective'
+    PREDICTION = "prediction"
+    BRAKING = "braking"
+    STABILITY = "stability"
+    GAIN = "gain"
+    DELAY = "delay"
+    SAMPLES = "samples"
+    CONTINUITY = "continuity"
+    STALE_GENERATION = "stale-generation"
+    PROSPECTIVE = "prospective"
+
 
 @dataclass(frozen=True, slots=True)
 class AdaptationPolicy:
@@ -66,15 +69,16 @@ class AdaptationPolicy:
 
     def __post_init__(self) -> None:
         if self.excitation_window < 1 or self.min_input_levels < 1:
-            raise ValueError('excitation history limits must be positive')
+            raise ValueError("excitation history limits must be positive")
         if self.min_input_variance < 0.0 or self.min_effective_updates < 0:
-            raise ValueError('adaptation thresholds must be non-negative')
+            raise ValueError("adaptation thresholds must be non-negative")
         if self.evaluation_interval_s <= 0.0 or self.required_consecutive_wins < 1:
-            raise ValueError('evaluation policy must have positive interval and win count')
+            raise ValueError("evaluation policy must have positive interval and win count")
         if self.max_delay_steps < 1 or not 0.0 < self.max_pole_magnitude < 1.0:
-            raise ValueError('delay and stability policy is invalid')
+            raise ValueError("delay and stability policy is invalid")
         if self.braking_tolerance_c < 0.0:
-            raise ValueError('braking_tolerance_c must be non-negative')
+            raise ValueError("braking_tolerance_c must be non-negative")
+
 
 @dataclass(frozen=True, slots=True)
 class UpdateGate:
@@ -82,6 +86,7 @@ class UpdateGate:
     reasons: tuple[UpdateRejectionReason, ...]
     input_variance: float
     input_levels: int
+
 
 @dataclass(frozen=True, slots=True)
 class ObservationOutcome:
@@ -93,6 +98,7 @@ class ObservationOutcome:
     @property
     def updated(self) -> bool:
         return self.challenger is not None and self.challenger.updated
+
 
 @dataclass(frozen=True, slots=True)
 class EvaluationDecision:
@@ -109,6 +115,7 @@ class EvaluationDecision:
     candidate_braking_score: float | None
     sample_count: int
     prospective_digest: str | None
+
 
 @dataclass(slots=True)
 class _ScoreAggregate:
@@ -136,6 +143,7 @@ class _ScoreAggregate:
         self.braking_count = 0
         self.continuous = True
 
+
 @dataclass(slots=True)
 class _Origin:
     origin_time_s: float
@@ -147,6 +155,7 @@ class _Origin:
     duty: np.ndarray
     braking: bool
 
+
 @dataclass(frozen=True, slots=True)
 class CompletedOrigin:
     origin_time_s: float
@@ -156,33 +165,40 @@ class CompletedOrigin:
     incumbent_error_c: float
     challenger_error_c: float
     braking: bool
+
+
 @dataclass(slots=True)
 class _PendingDecision:
     decision: EvaluationDecision
     prospective_model_requested: bool = False
 
+
 class OnlineAdaptation:
     """Own challenger learning, prequential scoring, and two-phase role changes."""
 
-    def __init__(self, incumbent: AdaptiveModel, challenger: AdaptiveModel, policy: AdaptationPolicy=AdaptationPolicy(), *, parameter_learning: bool=True, accepted_sources: Sequence[str]=('controller',)) -> None:
+    def __init__(
+        self,
+        incumbent: AdaptiveModel,
+        challenger: AdaptiveModel,
+        policy: AdaptationPolicy = AdaptationPolicy(),
+        *,
+        parameter_learning: bool = True,
+        accepted_sources: Sequence[str] = ("controller",),
+    ) -> None:
         self.incumbent = incumbent
         self.challenger = challenger
         self.policy = policy
         self._parameter_learning = parameter_learning
         self._accepted_sources = frozenset(accepted_sources)
         if not self._accepted_sources:
-            raise ValueError('accepted_sources must not be empty')
+            raise ValueError("accepted_sources must not be empty")
         self._excitation: deque[float] = deque(maxlen=policy.excitation_window)
         self._origins: list[_Origin] = []
-        self._completed: deque[CompletedOrigin] = deque(
-            maxlen=2 * max(policy.excitation_window, max(_HORIZONS))
-        )
+        self._completed: deque[CompletedOrigin] = deque(maxlen=2 * max(policy.excitation_window, max(_HORIZONS)))
         self._completed_window: tuple[CompletedOrigin, ...] = ()
         self._scores = _ScoreAggregate()
         self._role_generation = 0
-        self._effective_updates = int(
-            max(_values(challenger.snapshot(), "effective_samples"), default=0.0)
-        )
+        self._effective_updates = int(max(_values(challenger.snapshot(), "effective_samples"), default=0.0))
         self._consecutive_wins = 0
         self._lag_warmup_remaining = 0
         self._last_evaluation_s: float | None = None
@@ -238,6 +254,7 @@ class OnlineAdaptation:
     @property
     def previous_incumbent_digest(self) -> str | None:
         return self._previous_incumbent_digest
+
     @property
     def last_rollback_digest(self) -> str | None:
         return self._last_rollback_digest
@@ -250,12 +267,7 @@ class OnlineAdaptation:
         ambient_future: Sequence[float] | None = None,
         braking: bool = False,
     ) -> ObservationOutcome:
-        destructive_gap = (
-            not actuation_known
-            or observation.skipped
-            or observation.reset
-            or not observation.continuous
-        )
+        destructive_gap = not actuation_known or observation.skipped or observation.reset or not observation.continuous
         hard_reason = self._hard_rejection(observation, actuation_known)
         if destructive_gap:
             self._mark_discontinuity()
@@ -278,10 +290,7 @@ class OnlineAdaptation:
                 UpdateRejectionReason.LAG_WARMUP,
                 ambient_future,
             )
-        if (
-            variance < self.policy.min_input_variance
-            or levels < self.policy.min_input_levels
-        ):
+        if variance < self.policy.min_input_variance or levels < self.policy.min_input_levels:
             return self._track_only(
                 observation,
                 variance,
@@ -291,9 +300,7 @@ class OnlineAdaptation:
             )
         incumbent_outcome = self.incumbent.track(observation)
         challenger_outcome = (
-            self.challenger.observe(observation)
-            if self._parameter_learning
-            else self.challenger.track(observation)
+            self.challenger.observe(observation) if self._parameter_learning else self.challenger.track(observation)
         )
         if challenger_outcome.updated:
             self._effective_updates += 1
@@ -307,19 +314,41 @@ class OnlineAdaptation:
         )
 
     def evaluate_due(self, at_s: float) -> EvaluationDecision:
-        at_s = _finite(at_s, 'at_s')
+        at_s = _finite(at_s, "at_s")
         if self._last_evaluation_s is not None and at_s - self._last_evaluation_s < self.policy.evaluation_interval_s:
-            raise ValueError('evaluation is not due')
+            raise ValueError("evaluation is not due")
         self._last_evaluation_s = at_s
-        incumbent_prediction, candidate_prediction = _means(self._scores.incumbent_prediction_error, self._scores.candidate_prediction_error, self._scores.prediction_count)
-        incumbent_braking, candidate_braking = _means(self._scores.incumbent_braking_error, self._scores.candidate_braking_error, self._scores.braking_count)
-        reasons = self._evaluation_reasons(incumbent_prediction, candidate_prediction, incumbent_braking, candidate_braking)
+        incumbent_prediction, candidate_prediction = _means(
+            self._scores.incumbent_prediction_error,
+            self._scores.candidate_prediction_error,
+            self._scores.prediction_count,
+        )
+        incumbent_braking, candidate_braking = _means(
+            self._scores.incumbent_braking_error, self._scores.candidate_braking_error, self._scores.braking_count
+        )
+        reasons = self._evaluation_reasons(
+            incumbent_prediction, candidate_prediction, incumbent_braking, candidate_braking
+        )
         win = not reasons
         self._consecutive_wins = self._consecutive_wins + 1 if win else 0
         eligible = win and self._consecutive_wins >= self.policy.required_consecutive_wins
         self._decision_sequence += 1
-        decision_id = f'generation-{self._role_generation}-evaluation-{self._decision_sequence}'
-        decision = EvaluationDecision(decision_id, at_s, self._role_generation, eligible, False, self._consecutive_wins, tuple(reasons), incumbent_prediction, candidate_prediction, incumbent_braking, candidate_braking, self._scores.prediction_count, self.model_digest(self.challenger) if eligible else None)
+        decision_id = f"generation-{self._role_generation}-evaluation-{self._decision_sequence}"
+        decision = EvaluationDecision(
+            decision_id,
+            at_s,
+            self._role_generation,
+            eligible,
+            False,
+            self._consecutive_wins,
+            tuple(reasons),
+            incumbent_prediction,
+            candidate_prediction,
+            incumbent_braking,
+            candidate_braking,
+            self._scores.prediction_count,
+            self.model_digest(self.challenger) if eligible else None,
+        )
         if eligible:
             self._pending.clear()
             self._pending[decision_id] = _PendingDecision(decision)
@@ -332,7 +361,7 @@ class OnlineAdaptation:
     def prospective_model(self, decision_id: str) -> AdaptiveModel:
         pending = self._pending.get(decision_id)
         if pending is None or pending.decision.generation != self._role_generation:
-            raise ValueError('decision is not a current prospective promotion')
+            raise ValueError("decision is not a current prospective promotion")
         pending.prospective_model_requested = True
         return self.challenger
 
@@ -357,9 +386,9 @@ class OnlineAdaptation:
         self._invalidate_origins()
         return True
 
-    def reject_prospective(self, decision_id: str, reason: str='invalid-solve') -> bool:
+    def reject_prospective(self, decision_id: str, reason: str = "invalid-solve") -> bool:
         if not reason:
-            raise ValueError('reason must not be empty')
+            raise ValueError("reason must not be empty")
         if self._pending.pop(decision_id, None) is None:
             return False
         self._consecutive_wins = 0
@@ -386,7 +415,26 @@ class OnlineAdaptation:
         return True
 
     def snapshot(self) -> dict[str, object]:
-        return {'schema': _SCHEMA, 'policy': asdict(self.policy), 'parameter_learning': self._parameter_learning, 'accepted_sources': sorted(self._accepted_sources), 'incumbent': _owned_json(self.incumbent.snapshot()), 'challenger': _owned_json(self.challenger.snapshot()), 'previous_incumbent': self._previous_incumbent_snapshot, 'previous_incumbent_digest': self._previous_incumbent_digest, 'last_rollback_digest': self._last_rollback_digest, 'role_generation': self._role_generation, 'effective_updates': self._effective_updates, 'consecutive_wins': self._consecutive_wins, 'lag_warmup_remaining': self._lag_warmup_remaining, 'excitation': list(self._excitation), 'last_duty': self._last_duty, 'last_evaluation_s': self._last_evaluation_s, 'score_aggregate': asdict(self._scores), 'partial_origins': []}
+        return {
+            "schema": _SCHEMA,
+            "policy": asdict(self.policy),
+            "parameter_learning": self._parameter_learning,
+            "accepted_sources": sorted(self._accepted_sources),
+            "incumbent": _owned_json(self.incumbent.snapshot()),
+            "challenger": _owned_json(self.challenger.snapshot()),
+            "previous_incumbent": self._previous_incumbent_snapshot,
+            "previous_incumbent_digest": self._previous_incumbent_digest,
+            "last_rollback_digest": self._last_rollback_digest,
+            "role_generation": self._role_generation,
+            "effective_updates": self._effective_updates,
+            "consecutive_wins": self._consecutive_wins,
+            "lag_warmup_remaining": self._lag_warmup_remaining,
+            "excitation": list(self._excitation),
+            "last_duty": self._last_duty,
+            "last_evaluation_s": self._last_evaluation_s,
+            "score_aggregate": asdict(self._scores),
+            "partial_origins": [],
+        }
 
     @classmethod
     def from_snapshot(
@@ -407,8 +455,7 @@ class OnlineAdaptation:
         if not sources or len(sources) != len(set(sources)):
             raise ValueError("accepted_sources must be a non-empty unique string list")
         excitation = [
-            _finite(value, "excitation item")
-            for value in _sequence(snapshot.get("excitation"), "excitation")
+            _finite(value, "excitation item") for value in _sequence(snapshot.get("excitation"), "excitation")
         ]
         if len(excitation) > policy.excitation_window:
             raise ValueError("excitation exceeds policy excitation_window")
@@ -418,9 +465,7 @@ class OnlineAdaptation:
         )
         if warmup > policy.max_delay_steps:
             raise ValueError("lag_warmup_remaining exceeds max_delay_steps")
-        scores = _score_aggregate(
-            _mapping(snapshot.get("score_aggregate"), "score_aggregate")
-        )
+        scores = _score_aggregate(_mapping(snapshot.get("score_aggregate"), "score_aggregate"))
         if snapshot.get("partial_origins") != []:
             raise ValueError("partial origins must never be restored")
         incumbent = loader(_mapping(snapshot.get("incumbent"), "incumbent"))
@@ -436,11 +481,7 @@ class OnlineAdaptation:
         )
         if (previous_payload is None) != (previous_digest is None):
             raise ValueError("previous incumbent and digest must be jointly present")
-        previous = (
-            None
-            if previous_payload is None
-            else loader(_mapping(previous_payload, "previous_incumbent"))
-        )
+        previous = None if previous_payload is None else loader(_mapping(previous_payload, "previous_incumbent"))
         if previous is not None and cls.model_digest(previous) != previous_digest:
             raise ValueError("previous incumbent digest does not match model")
         manager = cls(
@@ -451,9 +492,7 @@ class OnlineAdaptation:
             accepted_sources=tuple(sources),
         )
         manager._previous_incumbent = previous
-        manager._previous_incumbent_snapshot = (
-            None if previous_payload is None else _owned_json(previous_payload)
-        )
+        manager._previous_incumbent_snapshot = None if previous_payload is None else _owned_json(previous_payload)
         manager._previous_incumbent_digest = previous_digest
         manager._last_rollback_digest = last_rollback_digest
         manager._role_generation = _nonnegative(
@@ -480,7 +519,9 @@ class OnlineAdaptation:
 
     @staticmethod
     def model_digest(model: AdaptiveModel) -> str:
-        encoded = json.dumps(_owned_json(model.snapshot()), sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+        encoded = json.dumps(
+            _owned_json(model.snapshot()), sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
         return hashlib.sha256(encoded).hexdigest()
 
     def _hard_rejection(self, observation: FrameObservation, actuation_known: bool) -> UpdateRejectionReason | None:
@@ -502,11 +543,20 @@ class OnlineAdaptation:
             return UpdateRejectionReason.UNKNOWN_ACTUATION
         return None
 
-    def _track_only(self, observation: FrameObservation, variance: float, levels: int, reason: UpdateRejectionReason, ambient_future: Sequence[float] | None) -> ObservationOutcome:
+    def _track_only(
+        self,
+        observation: FrameObservation,
+        variance: float,
+        levels: int,
+        reason: UpdateRejectionReason,
+        ambient_future: Sequence[float] | None,
+    ) -> ObservationOutcome:
         incumbent, challenger = (self.incumbent.track(observation), self.challenger.track(observation))
         self._capture_origins(observation, ambient_future)
         self._last_duty = observation.realized_q
-        return ObservationOutcome(UpdateGate(False, (reason,), variance, levels), incumbent, challenger, self._effective_updates)
+        return ObservationOutcome(
+            UpdateGate(False, (reason,), variance, levels), incumbent, challenger, self._effective_updates
+        )
 
     def _mark_discontinuity(self) -> None:
         self._invalidate_origins()
@@ -514,7 +564,7 @@ class OnlineAdaptation:
         self._lag_warmup_remaining = self.policy.max_delay_steps
         self._last_duty = None
         for model in (self.incumbent, self.challenger):
-            reset = getattr(model, 'reset_lag_history', None)
+            reset = getattr(model, "reset_lag_history", None)
             if callable(reset):
                 reset()
 
@@ -531,9 +581,7 @@ class OnlineAdaptation:
         if self._lag_warmup_remaining:
             return
         ambient = np.asarray(
-            ambient_future
-            if ambient_future is not None
-            else [observation.ambient_c] * max(_HORIZONS),
+            ambient_future if ambient_future is not None else [observation.ambient_c] * max(_HORIZONS),
             dtype=np.float64,
         )
         if ambient.shape != (max(_HORIZONS),) or not np.isfinite(ambient).all():
@@ -578,24 +626,16 @@ class OnlineAdaptation:
         live: list[_Origin] = []
         interval_s = observation.frame_end_s - observation.frame_start_s
         for origin in self._origins:
-            if (
-                origin.generation != self._role_generation
-                or abs(interval_s - origin.interval_s) > 1e-6
-            ):
+            if origin.generation != self._role_generation or abs(interval_s - origin.interval_s) > 1e-6:
                 self._scores.continuous = False
                 continue
-            step = round(
-                (observation.frame_end_s - origin.origin_time_s) / origin.interval_s
-            )
+            step = round((observation.frame_end_s - origin.origin_time_s) / origin.interval_s)
             if step <= 0:
                 live.append(origin)
                 continue
             if (
                 step > origin.horizon_steps
-                or abs(
-                    origin.origin_time_s + step * origin.interval_s
-                    - observation.frame_end_s
-                ) > 1e-6
+                or abs(origin.origin_time_s + step * origin.interval_s - observation.frame_end_s) > 1e-6
             ):
                 self._scores.continuous = False
                 continue
@@ -607,12 +647,10 @@ class OnlineAdaptation:
                 live.append(origin)
                 continue
             incumbent_prediction = float(
-                origin.incumbent.free_output_c[-1]
-                + origin.incumbent.input_response_c[-1] @ duty
+                origin.incumbent.free_output_c[-1] + origin.incumbent.input_response_c[-1] @ duty
             )
             challenger_prediction = float(
-                origin.challenger.free_output_c[-1]
-                + origin.challenger.input_response_c[-1] @ duty
+                origin.challenger.free_output_c[-1] + origin.challenger.input_response_c[-1] @ duty
             )
             incumbent_error = observation.temp_c - incumbent_prediction
             challenger_error = observation.temp_c - challenger_prediction
@@ -633,15 +671,24 @@ class OnlineAdaptation:
             )
         self._origins = live
 
-    def _evaluation_reasons(self, incumbent_prediction: float | None, candidate_prediction: float | None, incumbent_braking: float | None, candidate_braking: float | None) -> list[EvaluationRejectionReason]:
+    def _evaluation_reasons(
+        self,
+        incumbent_prediction: float | None,
+        candidate_prediction: float | None,
+        incumbent_braking: float | None,
+        candidate_braking: float | None,
+    ) -> list[EvaluationRejectionReason]:
         reasons: list[EvaluationRejectionReason] = []
-        if candidate_prediction is None or incumbent_prediction is None or (not candidate_prediction < incumbent_prediction):
+        if (
+            candidate_prediction is None
+            or incumbent_prediction is None
+            or (not candidate_prediction < incumbent_prediction)
+        ):
             reasons.append(EvaluationRejectionReason.PREDICTION)
         if (
             candidate_braking is not None
             and incumbent_braking is not None
-            and candidate_braking
-            > incumbent_braking + self.policy.braking_tolerance_c
+            and candidate_braking > incumbent_braking + self.policy.braking_tolerance_c
         ):
             reasons.append(EvaluationRejectionReason.BRAKING)
         snapshot = self.challenger.snapshot()
@@ -657,19 +704,31 @@ class OnlineAdaptation:
             reasons.append(EvaluationRejectionReason.CONTINUITY)
         return reasons
 
+
 def _scheduled_arx_loader(snapshot: Mapping[str, object]) -> AdaptiveModel:
-    if snapshot.get('schema') != 'scheduled-arx/v2':
-        raise ValueError('model_loader is required for a non-ScheduledARX snapshot')
+    if snapshot.get("schema") != "scheduled-arx/v2":
+        raise ValueError("model_loader is required for a non-ScheduledARX snapshot")
     return ScheduledARX.from_snapshot(snapshot)
 
+
 def _valid_prospective_solve(value: object) -> bool:
-    objective = getattr(value, 'objective', None)
-    residual = getattr(value, 'kkt_residual', None)
-    return not isinstance(objective, bool) and (not isinstance(residual, bool)) and isinstance(objective, (int, float)) and isinstance(residual, (int, float)) and isfinite(float(objective)) and isfinite(float(residual)) and (float(residual) >= 0.0)
+    objective = getattr(value, "objective", None)
+    residual = getattr(value, "kkt_residual", None)
+    return (
+        not isinstance(objective, bool)
+        and (not isinstance(residual, bool))
+        and isinstance(objective, (int, float))
+        and isinstance(residual, (int, float))
+        and isfinite(float(objective))
+        and isfinite(float(residual))
+        and (float(residual) >= 0.0)
+    )
+
 
 def _excitation(inputs: Sequence[float]) -> tuple[float, int]:
     values = np.asarray(inputs, dtype=np.float64)
     return (float(np.var(values)) if values.size else 0.0, len(set((float(value) for value in values))))
+
 
 def _means(
     incumbent: float,
@@ -679,6 +738,8 @@ def _means(
     if count == 0:
         return None, None
     return sqrt(incumbent / count), sqrt(challenger / count)
+
+
 def _score_aggregate(payload: Mapping[str, object]) -> _ScoreAggregate:
     required = {
         "incumbent_prediction_error",
@@ -735,20 +796,24 @@ def _nonnegative_finite(value: object, name: str) -> float:
 
 
 def _stable(snapshot: Mapping[str, object], maximum: float) -> bool:
-    poles = _values(snapshot, 'poles')
+    poles = _values(snapshot, "poles")
     return bool(poles) and all((abs(value) <= maximum for value in poles))
 
+
 def _positive_gain(snapshot: Mapping[str, object]) -> bool:
-    gains = _values(snapshot, 'steady_gain')
+    gains = _values(snapshot, "steady_gain")
     return bool(gains) and all((value > 0.0 for value in gains))
 
+
 def _valid_delay(snapshot: Mapping[str, object], maximum: int) -> bool:
-    delays = _values(snapshot, 'active_delay') + _values(snapshot, 'delay_steps')
+    delays = _values(snapshot, "active_delay") + _values(snapshot, "delay_steps")
     return bool(delays) and all((0.0 <= delay <= maximum and delay.is_integer() for delay in delays))
 
+
 def _sufficient_model_samples(snapshot: Mapping[str, object], minimum: int) -> bool:
-    samples = _values(snapshot, 'effective_samples')
+    samples = _values(snapshot, "effective_samples")
     return bool(samples) and max(samples) >= minimum
+
 
 def _values(value: object, key: str) -> list[float]:
     if isinstance(value, Mapping):
@@ -760,6 +825,7 @@ def _values(value: object, key: str) -> list[float]:
         return [item for nested in value for item in _values(nested, key)]
     return []
 
+
 def _numeric(value: object) -> list[float]:
     if isinstance(value, bool):
         return []
@@ -768,6 +834,7 @@ def _numeric(value: object) -> list[float]:
     if isinstance(value, (list, tuple)):
         return [item for nested in value for item in _numeric(nested)]
     return []
+
 
 def _owned_json(value: object) -> object:
     if isinstance(value, Mapping):
@@ -780,15 +847,18 @@ def _owned_json(value: object) -> object:
         return value.item()
     return value
 
+
 def _mapping(value: object, name: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping) or not all((isinstance(key, str) for key in value)):
-        raise ValueError(f'{name} must be an object')
+        raise ValueError(f"{name} must be an object")
     return MappingProxyType(dict(value))
+
 
 def _sequence(value: object, name: str) -> Sequence[object]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise ValueError(f'{name} must be an array')
+        raise ValueError(f"{name} must be an array")
     return value
+
 
 def _strings(value: object, name: str) -> list[str]:
     values = list(_sequence(value, name))
@@ -796,22 +866,24 @@ def _strings(value: object, name: str) -> list[str]:
         raise ValueError(f"{name} must contain only non-empty strings")
     return values
 
+
 def _finite(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or (not isfinite(float(value))):
-        raise ValueError(f'{name} must be finite')
+        raise ValueError(f"{name} must be finite")
     return float(value)
+
 
 def _optional_float(value: object, name: str) -> float | None:
     return None if value is None else _finite(value, name)
 
+
 def _optional_string(value: object, name: str) -> str | None:
-    if value is not None and (
-        not isinstance(value, str) or not value
-    ):
+    if value is not None and (not isinstance(value, str) or not value):
         raise ValueError(f"{name} must be a non-empty string or null")
     return value
 
+
 def _nonnegative(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f'{name} must be a non-negative integer')
+        raise ValueError(f"{name} must be a non-negative integer")
     return value

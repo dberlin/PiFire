@@ -39,9 +39,7 @@ class IncrementingForecaster:
         ambient_future: np.ndarray,
     ) -> np.ndarray:
         self.prefix_lengths.append(record_prefix.time_s.size)
-        self.future_temperatures_seen = self.future_temperatures_seen or bool(
-            record_prefix.temp_c[-1] > 23.0
-        )
+        self.future_temperatures_seen = self.future_temperatures_seen or bool(record_prefix.temp_c[-1] > 23.0)
         assert q_future.shape == ambient_future.shape
         return record_prefix.temp_c[-1] + np.arange(1, q_future.size + 1)
 

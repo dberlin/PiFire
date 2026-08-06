@@ -1103,7 +1103,6 @@ def _learning_observation(frame_start_s):
     )
 
 
-
 def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
@@ -1117,6 +1116,7 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
         2: (second, mode._trace_session_id, 0, None),
     }
     return recorder, runner, mode, first, second
+
 
 def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
@@ -1182,7 +1182,6 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     ]
 
 
-
 def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
@@ -1196,6 +1195,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
     controller.pulse_frame_requested_auger_duty = 0.3
     controller.pulse_frame_maximum_duty = 0.5
     from controller.runtime.logic.pulse import PulseFrameResult
+
     frame = PulseFrameResult(0.0, 20.0, 20.0, True, False, 0.3, 0.0, 0.0, 6, 6.0, 2, False, False, None)
     mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
     runner._observation_outcomes.append(
@@ -1372,9 +1372,7 @@ def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_sess
 def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(hold_cycle):
     mode = hold_cycle(FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE), controller="mpc")
     mode.setup()
-    mode._pending_model_observations = {
-        sequence: (None, "old-session", 0, object()) for sequence in range(60)
-    }
+    mode._pending_model_observations = {sequence: (None, "old-session", 0, object()) for sequence in range(60)}
     mode._trace_record = lambda *_: False
 
     mode._reconcile_model_observation_outcomes(now=1.0)
@@ -1392,22 +1390,37 @@ def test_hold_retires_self_evicted_submission_immediately(hold_cycle):
     runner = SelfEvictingRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    existing = {
-        sequence: (None, "existing-session", 0, object())
-        for sequence in range(2, 62)
-    }
+    existing = {sequence: (None, "existing-session", 0, object()) for sequence in range(2, 62)}
     mode._pending_model_observations = dict(existing)
     observation = FrameObservation(
-        0.0, 20.0, 100.0, 120.0, 20.0, 0.2, 0.2, 0.2, 4.0,
-        None, None, 1, "controller", False, False, False, False, False, False, True, 0,
+        0.0,
+        20.0,
+        100.0,
+        120.0,
+        20.0,
+        0.2,
+        0.2,
+        0.2,
+        4.0,
+        None,
+        None,
+        1,
+        "controller",
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        0,
     )
     mode._deliver_completed_pulse_observation((0, 20), observation)
 
     assert mode._pending_model_observations == existing
 
-def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_recovery_gap(
-    hold_cycle, monkeypatch
-):
+
+def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_recovery_gap(hold_cycle, monkeypatch):
     """A full recorder must never stop the next control or learner submission."""
     import controller.runtime.modes.hold as hold_module
 
@@ -1430,9 +1443,9 @@ def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_
     )
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda **_kwargs: recorder)
     monkeypatch.setattr(hold_module.time, "monotonic_ns", lambda: 1_000_000)
-    runner = FakeControllerRunner(
-        period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE
-    ).script([_mpc_result(1), _mpc_result(2)])
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script(
+        [_mpc_result(1), _mpc_result(2)]
+    )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "trace-append-recovery"}
@@ -1445,9 +1458,7 @@ def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_
     mode.on_tick(4.0, 213.0, output)
     runner.observation_outcome = _model_observation_outcome(frame_end_ms=20_000)
     for index in range(3):
-        mode._deliver_completed_pulse_observation(
-            (index * 20, (index + 1) * 20), _learning_observation(index * 20.0)
-        )
+        mode._deliver_completed_pulse_observation((index * 20, (index + 1) * 20), _learning_observation(index * 20.0))
     mode._reconcile_model_observation_outcomes(now=22.0)
 
     assert runner.submitted_temps == [212.0, 213.0]

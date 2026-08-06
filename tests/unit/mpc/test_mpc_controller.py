@@ -837,7 +837,6 @@ def test_configured_horizon_is_the_only_horizon_built_or_reported(capsys):
     assert "horizon" not in capsys.readouterr().out.lower()
 
 
-
 def test_online_adaptation_is_explicitly_opt_in():
     assert _DEFAULTS["enable_online_adaptation"] is False
 
@@ -854,15 +853,16 @@ def test_online_certificate_boundary_rejects_fake_invalid_kkt():
 
     assert not Controller._valid_linear_solve(certificate, config)
     assert Controller._linear_certificate_rejection(certificate, config) == "invalid-kkt-certificate"
-    assert str(Controller._normalized_forecast_failure(RuntimeError("ARX horizon forecast is non-finite"))) == "non-finite-forecast"
+    assert (
+        str(Controller._normalized_forecast_failure(RuntimeError("ARX horizon forecast is non-finite")))
+        == "non-finite-forecast"
+    )
 
 
 def test_online_linear_policy_uses_fixed_bakeoff_config():
     config = mpc_module._SCHEDULED_ARX_LINEAR_CONFIG
     assert (config.horizon_steps, config.temperature_weight, config.terminal_weight) == (30, 1.0, 4.0)
     assert (config.move_weight, config.tolerance) == (0.05, 1e-3)
-
-
 
 
 def test_stale_generation_resets_real_online_continuity_before_next_frame():

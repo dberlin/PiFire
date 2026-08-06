@@ -166,9 +166,7 @@ class GreyBoxPredictionAdapter:
         return cls.from_estimator(estimator, config=config)
 
     @classmethod
-    def from_estimator(
-        cls, estimator: Any, *, config: Mapping[str, object]
-    ) -> GreyBoxPredictionAdapter:
+    def from_estimator(cls, estimator: Any, *, config: Mapping[str, object]) -> GreyBoxPredictionAdapter:
         """Capture owned estimator dynamics and locally linearized physical inputs."""
         required = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
         try:
@@ -287,8 +285,7 @@ class GreyBoxPredictionAdapter:
         output = np.empty(q.size, dtype=np.float64)
         for index, (duty, ambient_c) in enumerate(zip(q, ambient, strict=True)):
             radiation_constant = (
-                -self.radiation_sigma
-                * ((self.chamber_origin_c + _KELVIN) ** 4 - (ambient_c + _KELVIN) ** 4)
+                -self.radiation_sigma * ((self.chamber_origin_c + _KELVIN) ** 4 - (ambient_c + _KELVIN) ** 4)
                 + self.radiation_slope * self.chamber_origin_c
             )
             state = (

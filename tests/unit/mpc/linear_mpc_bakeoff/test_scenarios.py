@@ -42,9 +42,7 @@ def test_tiny_matrix_runs_both_plants_and_modes() -> None:
 
 def test_resume_matches_clean_artifact(tmp_path: Path) -> None:
     clean = run_tiny_matrix(tmp_path / "clean", resume=False)
-    interrupted_then_resumed = run_tiny_matrix(
-        tmp_path / "resume", resume=True, interrupt_after=3
-    )
+    interrupted_then_resumed = run_tiny_matrix(tmp_path / "resume", resume=True, interrupt_after=3)
 
     assert clean.canonical_document() == interrupted_then_resumed.canonical_document()
 
@@ -61,9 +59,7 @@ def test_checkpoint_is_atomic_and_does_not_leave_temporary_file(tmp_path: Path) 
 def test_interrupted_matrix_publishes_exact_content_addressed_checkpoint_objects(tmp_path: Path) -> None:
     output = tmp_path / "artifact.manifest.json"
 
-    partial = run_tiny_matrix(
-        tmp_path, resume=False, interrupt_after=3, output=output
-    )
+    partial = run_tiny_matrix(tmp_path, resume=False, interrupt_after=3, output=output)
 
     checkpoint = tmp_path / "artifact.checkpoint.manifest.json"
     checkpoint_manifest = json.loads(checkpoint.read_text())
@@ -96,9 +92,7 @@ def test_interrupted_matrix_publishes_exact_content_addressed_checkpoint_objects
         assert len(payload["rows"]) + len(payload["failures"]) == 1
         referenced.add(object_path)
 
-    orphan = checkpoint.with_name(
-        f"{checkpoint.stem}.bundle.{'0' * 64}.json.gz"
-    )
+    orphan = checkpoint.with_name(f"{checkpoint.stem}.bundle.{'0' * 64}.json.gz")
     orphan.write_bytes(b"unrelated")
 
     resumed = run_tiny_matrix(tmp_path, resume=True, output=output)
@@ -159,9 +153,7 @@ def test_fresh_matrix_discards_invalid_checkpoint_head_but_resume_rejects_it(
 
 
 @pytest.mark.parametrize("malformed", ([], None, "checkpoint", 42))
-def test_fresh_matrix_discards_nonobject_checkpoint_and_resume_rejects_it(
-    tmp_path: Path, malformed: object
-) -> None:
+def test_fresh_matrix_discards_nonobject_checkpoint_and_resume_rejects_it(tmp_path: Path, malformed: object) -> None:
     output = tmp_path / "artifact.manifest.json"
     checkpoint = tmp_path / "artifact.checkpoint.manifest.json"
     unrelated = tmp_path / "unrelated.gz"

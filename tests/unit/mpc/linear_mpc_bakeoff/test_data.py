@@ -143,9 +143,7 @@ def test_validation_rejects_unknown_input_gap() -> None:
         ),
     ],
 )
-def test_validation_rejects_each_invalid_property(
-    record: SignalRecord, message: str
-) -> None:
+def test_validation_rejects_each_invalid_property(record: SignalRecord, message: str) -> None:
     with pytest.raises(ValidationError, match=message):
         validate_record(record)
 

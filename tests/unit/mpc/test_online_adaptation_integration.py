@@ -81,6 +81,7 @@ class _Estimator:
     def update(self, _load: float, temperature_c: float) -> np.ndarray:
         return np.asarray([0.0] * 8 + [float(temperature_c), 0.0])
 
+
 class _AlternatingGreyBoxPolicy:
     def __init__(self):
         self._calls = 0
@@ -95,12 +96,11 @@ class _DeterministicGreyBox:
 
     def track(self, observation: FrameObservation) -> ModelUpdate:
         return ModelUpdate(90.0, observation.temp_c, observation.temp_c - 90.0, False)
+
     def observe(self, observation: FrameObservation) -> ModelUpdate:
         return ModelUpdate(90.0, observation.temp_c, observation.temp_c - 90.0, False)
 
-    def affine_prediction(
-        self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray
-    ) -> AffinePrediction:
+    def affine_prediction(self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray) -> AffinePrediction:
         del q_previous, ambient_future
         return AffinePrediction(np.full(horizon_steps, 90.0), np.zeros((horizon_steps, horizon_steps)))
 
@@ -123,11 +123,10 @@ class _DeterministicGreyBox:
 class _DeterministicScheduledARX(ScheduledARX):
     """A real ScheduledARX learner with a deterministic public forecast seam."""
 
-    def affine_prediction(
-        self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray
-    ) -> AffinePrediction:
+    def affine_prediction(self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray) -> AffinePrediction:
         del q_previous, ambient_future
         return AffinePrediction(np.full(horizon_steps, 100.0), np.eye(horizon_steps) * 0.1)
+
 
 def _seed_physical_arx(model: ScheduledARX) -> ScheduledARX:
     """Supply stable, positive-gain initial sufficient statistics to real RLS."""
@@ -205,14 +204,11 @@ def _make_live_hold(monkeypatch, *, model_store=None):
         Controller,
         "_new_scheduled_arx",
         lambda self: _seed_physical_arx(
-            _DeterministicScheduledARX(
-                ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=1e-6)
-            )
+            _DeterministicScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=1e-6))
         ),
     )
     deterministic_from_snapshot = _DeterministicScheduledARX.from_snapshot
     monkeypatch.setattr(ScheduledARX, "from_snapshot", deterministic_from_snapshot)
-
 
     core = Controller(
         dict(_DEFAULTS, enable_online_adaptation=True, policy="net", control_period=19.0),
@@ -279,6 +275,7 @@ def _record_indices(records, kind: TraceEventKind) -> list[int]:
 def test_live_scheduled_arx_handoff_is_traced_after_two_real_evaluation_windows(monkeypatch):
     hold, core, runner, recorder, gate, worker_clock = _make_live_hold(monkeypatch)
     try:
+
         def tick(now: float) -> None:
             worker_clock.now = now
             hold.ctx.clock.advance(2.0 if now == 2.0 else 20.0)
@@ -329,8 +326,7 @@ def test_live_scheduled_arx_handoff_is_traced_after_two_real_evaluation_windows(
         control_updates = [
             (index, record.payload)
             for index, record in enumerate(records)
-            if record.event_kind is TraceEventKind.CONTROL_UPDATE
-            and isinstance(record.payload, MpcUpdatePayload)
+            if record.event_kind is TraceEventKind.CONTROL_UPDATE and isinstance(record.payload, MpcUpdatePayload)
         ]
 
         assert len(evaluations) >= 2
@@ -373,7 +369,9 @@ def test_live_scheduled_arx_handoff_is_traced_after_two_real_evaluation_windows(
         session_index = _record_indices(records, TraceEventKind.SESSION)[0]
         frame_indices = _record_indices(records, TraceEventKind.ACTUATION_FRAME)
         observation_indices = _record_indices(records, TraceEventKind.MODEL_OBSERVATION)
-        assert session_index < control_updates[0][0] < frame_indices[0] < observation_indices[0] < first_evaluation_index
+        assert (
+            session_index < control_updates[0][0] < frame_indices[0] < observation_indices[0] < first_evaluation_index
+        )
 
         allocation = next(
             record.payload
@@ -408,9 +406,7 @@ def test_live_scheduled_arx_handoff_is_traced_after_two_real_evaluation_windows(
 
 
 def test_restart_restores_one_win_but_rebuilds_a_post_shutdown_scoring_window(monkeypatch):
-    first_hold, first_core, _first_runner, first_recorder, first_gate, first_worker_clock = _make_live_hold(
-        monkeypatch
-    )
+    first_hold, first_core, _first_runner, first_recorder, first_gate, first_worker_clock = _make_live_hold(monkeypatch)
     try:
         first_win = None
         for now in range(2, 1203, 20):
@@ -473,9 +469,7 @@ def test_restart_restores_one_win_but_rebuilds_a_post_shutdown_scoring_window(mo
             second_hold.ctx.clock.advance(1002.0 if now == 1002 else 20.0)
             second_hold.on_tick(float(now), 212.0, second_hold.grill.get_output_status())
             second_gate.advance()
-            saw_lag_warmup |= (
-                second_core.get_status()["adaptation"]["current_rejection_reason"] == "lag-warmup"
-            )
+            saw_lag_warmup |= second_core.get_status()["adaptation"]["current_rejection_reason"] == "lag-warmup"
             promotion = next(
                 (
                     record.payload

@@ -24,11 +24,7 @@ def frame(
     """Build one deterministic, eligible 20-second control frame."""
     q = 0.2 + 0.2 * ((index // 3) % 3) if requested_q is None else requested_q
     realized = q if realized_q is None else realized_q
-    temperature = (
-        100.0 + 0.13 * index + 1.8 * np.sin(index / 5.0)
-        if temp_c is None
-        else temp_c
-    )
+    temperature = 100.0 + 0.13 * index + 1.8 * np.sin(index / 5.0) if temp_c is None else temp_c
     return FrameObservation(
         frame_start_s=index * 20.0,
         frame_end_s=(index + 1) * 20.0,
@@ -102,29 +98,19 @@ def test_scheduled_arx_snapshot_restores_exact_next_prediction_and_update() -> N
     assert len(json.dumps(snapshot, separators=(",", ":"))) < 30_000
 
     next_frame = frame(92)
-    expected_prediction = model.affine_prediction(
-        4, next_frame.realized_q, np.full(4, next_frame.ambient_c)
-    )
+    expected_prediction = model.affine_prediction(4, next_frame.realized_q, np.full(4, next_frame.ambient_c))
     expected_update = model.observe(next_frame)
-    actual_prediction = restored.affine_prediction(
-        4, next_frame.realized_q, np.full(4, next_frame.ambient_c)
-    )
+    actual_prediction = restored.affine_prediction(4, next_frame.realized_q, np.full(4, next_frame.ambient_c))
     actual_update = restored.observe(next_frame)
 
-    npt.assert_allclose(
-        actual_prediction.free_output_c, expected_prediction.free_output_c, atol=1e-12
-    )
+    npt.assert_allclose(actual_prediction.free_output_c, expected_prediction.free_output_c, atol=1e-12)
     npt.assert_allclose(
         actual_prediction.input_response_c,
         expected_prediction.input_response_c,
         atol=1e-12,
     )
-    assert actual_update.predicted_temp_c == pytest.approx(
-        expected_update.predicted_temp_c, abs=1e-12
-    )
-    assert actual_update.innovation_c == pytest.approx(
-        expected_update.innovation_c, abs=1e-12
-    )
+    assert actual_update.predicted_temp_c == pytest.approx(expected_update.predicted_temp_c, abs=1e-12)
+    assert actual_update.innovation_c == pytest.approx(expected_update.innovation_c, abs=1e-12)
     assert actual_update.updated is expected_update.updated
 
     following_frame = frame(93)
