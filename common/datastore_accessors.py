@@ -553,8 +553,10 @@ def prune_control_trace(before_ms: int, *, limit: int) -> int:
     limit = _require_control_trace_limit(limit)
     with datastore.transaction() as conn:
         cursor = conn.execute(
-            "DELETE FROM control_trace WHERE id IN (SELECT id FROM control_trace WHERE ts_ms < ? ORDER BY id LIMIT ?)",
-            (before_ms, limit),
+            "DELETE FROM control_trace WHERE id IN ("
+            "SELECT id FROM control_trace WHERE ts_ms < ? AND schema_version <= ? ORDER BY id LIMIT ?"
+            ")",
+            (before_ms, TRACE_SCHEMA_VERSION, limit),
         )
     return cursor.rowcount
 

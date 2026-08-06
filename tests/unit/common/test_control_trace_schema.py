@@ -760,16 +760,18 @@ def test_framed_sessions_round_trip_for_every_controller(controller):
     assert ControlTraceRecord.from_db_row(record.to_db_row()) == record
 
 
-def test_envelope_rejects_a_framed_payload_owned_by_a_non_mpc_controller():
+@pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP, ControllerType.MPC])
+def test_envelope_accepts_framed_payload_for_every_controller(controller):
     frame = next(payload for _, _, payload in _payload_cases() if isinstance(payload, FramedPulseFramePayload))
-    with pytest.raises(ValidationError, match="framed-pulse records are MPC-only"):
-        ControlTraceRecord(
-            ts_ms=1,
-            session_id="session",
-            controller=ControllerType.PID,
-            event_kind=TraceEventKind.ACTUATION_FRAME,
-            payload=frame,
-        )
+    record = ControlTraceRecord(
+        ts_ms=1,
+        session_id="session",
+        controller=controller,
+        event_kind=TraceEventKind.ACTUATION_FRAME,
+        payload=frame,
+    )
+
+    assert record.payload is frame
 
 
 @pytest.mark.parametrize("payload", [_pid_update_payload, lambda: _payload_cases()[2][2], _mpc_update_payload])

@@ -463,8 +463,6 @@ class ControlTraceRecord(BaseModel):
             raise ValueError("controller does not match MPC diagnostics")
         if isinstance(self.payload, AllocationPayload) and self.controller is not ControllerType.MPC:
             raise ValueError("allocation records are MPC-only")
-        if isinstance(self.payload, FramedPulseFramePayload) and self.controller is not ControllerType.MPC:
-            raise ValueError("framed-pulse records are MPC-only")
         return self
 
     def to_db_row(self) -> ControlTraceDbRow:

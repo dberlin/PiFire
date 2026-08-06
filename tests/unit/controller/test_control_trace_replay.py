@@ -308,6 +308,14 @@ def _mpc_framed_records():
     ]
 
 
+def _pid_framed_records(controller=ControllerType.PID):
+    pid_records = _pid_records(controller)
+    mpc_records = _mpc_framed_records()
+    frame = _record(22_000, controller, TraceEventKind.ACTUATION_FRAME, mpc_records[3].payload)
+    applied = _record(22_000, controller, TraceEventKind.APPLIED_OUTPUT, mpc_records[4].payload)
+    return [*pid_records[:2], frame, applied]
+
+
 @pytest.mark.parametrize(
     "records", [_pid_records(), _pid_records(ControllerType.PID_SP), _mpc_framed_records()]
 )
@@ -317,6 +325,20 @@ def test_validate_records_accepts_pristine_typed_sessions(records):
     assert report.session_id == _SESSION_ID
     assert report.controller is records[0].controller
     assert report.issues == ()
+
+
+@pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP])
+def test_validate_records_accepts_completed_pid_family_framed_frames(controller):
+    assert validate_records(_pid_framed_records(controller)).valid
+
+
+def test_validate_records_rejects_a_framed_record_owned_by_another_session_controller():
+    records = _pid_framed_records()
+    mismatched_frame = records[2].model_copy(update={"controller": ControllerType.MPC})
+
+    report = validate_records([records[0], records[1], mismatched_frame, records[3]])
+
+    assert ReplayIssueCode.CONTROLLER_MISMATCH in [issue.code for issue in report.issues]
 
 
 def test_replay_accepts_exactly_one_same_revision_mpc_stale_observation():

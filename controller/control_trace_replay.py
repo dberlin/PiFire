@@ -323,8 +323,8 @@ def _validate_framed_frame(
     allocation = allocations.get(payload.result_revision)
     if update is None:
         add(ReplayIssueCode.MISSING_UPDATE, "framed pulse cannot join its result revision", index)
-    elif not isinstance(update[1], MpcUpdatePayload) or update[1].actuation_mode is not ActuationMode.FRAMED_PULSE:
-        add(ReplayIssueCode.FRAME_MODE_MISMATCH, "framed pulse joined to a non-framed MPC update", index)
+    elif update[1].actuation_mode is not ActuationMode.FRAMED_PULSE:
+        add(ReplayIssueCode.FRAME_MODE_MISMATCH, "framed pulse joined to a non-framed update", index)
     if not (
         _close(payload.pulse_slot_seconds, session.pulse_slot_seconds or 0)
         and _close(payload.frame_seconds, session.pulse_frame_seconds or 0)

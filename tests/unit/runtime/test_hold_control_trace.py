@@ -247,6 +247,26 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
     assert validate_records(recorder.records).valid
 
 
+@pytest.mark.parametrize(
+    ("controller", "result_factory"),
+    [("pid", _pid_result), ("pid_sp", _pid_sp_result)],
+)
+def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch, controller, result_factory):
+    recorder = _install_recorder(monkeypatch)
+    result = result_factory()
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script([result, result])
+    mode = hold_cycle(runner, controller=controller)
+    mode.setup()
+    mode.state.metrics = {"id": f"cook-{controller}"}
+
+    mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+
+    frames = [record for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
+    assert frames and all(record.controller.value == controller for record in frames)
+    assert validate_records(recorder.records).valid
+
+
 def test_first_framed_results_complete_the_initial_seed_once(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script(

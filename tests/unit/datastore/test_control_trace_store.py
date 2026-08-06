@@ -23,6 +23,7 @@ from common.datastore_accessors import (
     read_control_trace_range,
     read_control_trace_session,
 )
+from controller.runtime.control_trace_recorder import RETENTION_PERIOD_MS, ControlTraceRecorder
 
 
 def _record(ts_ms: int, session_id: str, cook_id: str | None = None) -> ControlTraceRecord:
@@ -219,3 +220,42 @@ def test_schema_filtered_reads_and_incompatible_pruning_are_bounded(ds):
     assert prune_incompatible_control_trace(3, limit=1) == 1
     assert prune_incompatible_control_trace(3, limit=1) == 0
     assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(4,), (3,), (3,)]
+
+
+def test_age_pruning_never_deletes_a_future_schema_row(ds):
+    conn = ds.connection()
+    conn.execute(
+        """
+        INSERT INTO control_trace(ts_ms, session_id, cook_id, controller, event_kind, schema_version, payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (0, "future", None, "pid", "session", 4, '"future"'),
+    )
+    append_control_trace([_record(1, "current-old"), _record(100, "current-new")])
+
+    assert prune_control_trace(50, limit=10) == 1
+    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(4,), (3,)]
+
+
+def test_recorder_maintenance_preserves_old_future_rows(ds):
+    conn = ds.connection()
+    conn.executemany(
+        """
+        INSERT INTO control_trace(ts_ms, session_id, cook_id, controller, event_kind, schema_version, payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (0, "legacy", None, "pid", "session", 2, '"legacy"'),
+            (0, "future", None, "pid", "session", 4, '"future"'),
+        ],
+    )
+    append_control_trace([_record(0, "current")])
+
+    recorder = ControlTraceRecorder(
+        append=lambda _records: None,
+        monotonic_clock=lambda: 0,
+        wall_clock=lambda: RETENTION_PERIOD_MS + 1,
+    )
+
+    assert recorder is not None
+    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(4,)]
