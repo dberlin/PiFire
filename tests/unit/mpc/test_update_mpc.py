@@ -283,14 +283,14 @@ def test_load_trace_samples_duration_weights_complete_intervals_for_one_framed_r
     index = _output_index(records, 2)
     allocation = _allocation(2, 0.2)
     records[index : index + 1] = [
-        _applied(2, 6_000, 1_000, 3_000, 0.1, auger_duty=allocation.requested_auger_duty),
-        _applied(2, 6_000, 3_000, 6_000, 0.3, auger_duty=allocation.requested_auger_duty),
+        _applied(2, 6_000, 1_000, 3_000, 0.2, auger_duty=allocation.requested_auger_duty),
+        _applied(2, 6_000, 3_000, 6_000, 0.2, auger_duty=allocation.requested_auger_duty),
     ]
     append_control_trace(records)
 
     _, _, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
-    np.testing.assert_allclose(combustion_load, (0.22, 0.25))
+    np.testing.assert_allclose(combustion_load, (0.2, 0.25))
 
 
 def test_load_trace_samples_skips_results_superseded_before_a_framed_interval(ds):

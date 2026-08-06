@@ -246,7 +246,7 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                         interval_start_ms=timestamp_ms,
                         interval_end_ms=interval_end_ms,
                         realized_auger_duty=allocation.requested_auger_duty,
-                        realized_combustion_load=load,
+                        realized_combustion_load=normalized_load,
                         actual_fan_duty=100.0,
                         sample_complete=True,
                         output_source=OutputSource.CONTROLLER,

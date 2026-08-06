@@ -256,6 +256,7 @@ def load_trace_samples(
             if not (
                 math.isclose(frame.requested_combustion_load, allocation.normalized_combustion_load, rel_tol=0, abs_tol=1e-6)
                 and math.isclose(frame.requested_auger_duty, allocation.requested_auger_duty, rel_tol=0, abs_tol=1e-6)
+                and frame.requested_fan_duty == allocation.requested_fan_duty
             ):
                 raise TraceSelectionError(f"MPC revision {revision} framed pulse does not match its allocation")
 
@@ -309,6 +310,12 @@ def load_trace_samples(
                 raise TraceSelectionError(
                     f"MPC revision {revision} complete applied output does not belong to a complete framed interval"
                 )
+            allocation = allocations[revision][1]
+            delivered_load = min(1.0, max(0.0, output.realized_auger_duty / allocation.u_max))
+            if not math.isclose(float(output.realized_combustion_load), delivered_load, rel_tol=0, abs_tol=1e-6):
+                raise TraceSelectionError(
+                    f"MPC revision {revision} realized combustion load does not match applied auger duty"
+                )
             if previous_end_ms is not None and output.interval_start_ms != previous_end_ms:
                 raise TraceSelectionError("repeated complete applied outputs must cover contiguous intervals")
             previous_end_ms = output.interval_end_ms
@@ -348,8 +355,11 @@ def load_trace_samples(
     if not replay.valid:
         first_issue = next(issue for issue in replay.issues if issue.severity.value == "error")
         raise TraceSelectionError(f"selected control trace has invalid framed relationships: {first_issue.detail}")
-
-    paired_updates = [(index, update) for index, update in updates if update.result_revision in complete_outputs]
+    paired_updates = [
+        (index, update)
+        for index, update in updates
+        if update.result_revision in complete_outputs and update.result_revision != terminal_partial_revision
+    ]
     if len(paired_updates) < 2:
         raise TraceSelectionError("selected control trace requires at least two complete framed MPC control updates")
     start_ms = paired_updates[0][1].wall_ms
