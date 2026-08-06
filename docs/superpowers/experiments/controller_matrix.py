@@ -293,6 +293,11 @@ def run_scenario(
                 "controller_config": core_config,
                 "cycle_config": cycle_data,
                 "actuation_mode": "framed_pulse",
+                "scheduler": {
+                    "kind": "framed_pulse",
+                    "frame_seconds": float(scheduler.timing.frame_s),
+                    "pulse_seconds": float(scheduler.timing.pulse_s),
+                },
                 "pulse_timing": {
                     "frame_seconds": float(scheduler.timing.frame_s),
                     "pulse_seconds": float(scheduler.timing.pulse_s),

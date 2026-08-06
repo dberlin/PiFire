@@ -19,6 +19,8 @@ from common.control_trace import ActuationMode
 from controller.applied_output import OutputSource
 from controller.runtime.logic.pulse import PulseScheduler as ProductionPulseScheduler
 
+FRAMED_SCHEDULER = {"kind": "framed_pulse", "frame_seconds": 20.0, "pulse_seconds": 2.0}
+
 
 def _settings(*, config=None, cycle=None):
     return {
@@ -108,6 +110,7 @@ def test_every_run_uses_framed_pulses_without_a_controller_mode_capability(monke
         },
         "actuation_mode": ActuationMode.FRAMED_PULSE.value,
         "pulse_timing": {"frame_seconds": 20.0, "pulse_seconds": 2.0},
+        "scheduler": FRAMED_SCHEDULER,
         "plant": "GrillSim",
         "seed": 7,
         "scenario": "one",
@@ -145,6 +148,13 @@ def test_next_run_resolves_a_manifest_substituted_after_matrix_import(monkeypatc
     assert row["effective_run"]["controller_config"] == {"ratio": 0.37}
 
 
+@pytest.mark.parametrize("controller", ["pid_sp", "mpc"])
+def test_shipped_controllers_record_the_actual_framed_scheduler(controller):
+    row = matrix.run_scenario(controller, matrix.Scenario(f"{controller}_scheduler", 21, [(0, 225.0)]), seed=0)
+
+    assert row["effective_run"]["scheduler"] == FRAMED_SCHEDULER
+
+
 def test_explicit_overrides_change_controller_bounds_but_not_the_framed_scheduler(monkeypatch):
     _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.1}, cycle={"u_max": 0.4}))
@@ -165,6 +175,7 @@ def test_explicit_overrides_change_controller_bounds_but_not_the_framed_schedule
     }
     assert row["effective_run"]["cycle_config"]["u_max"] == 0.7
     assert row["effective_run"]["pulse_timing"] == {"frame_seconds": 20.0, "pulse_seconds": 2.0}
+    assert row["effective_run"]["scheduler"] == FRAMED_SCHEDULER
     assert row["requested_realized_load_error"] == pytest.approx(0.0)
 
 
@@ -179,6 +190,7 @@ def test_low_duty_accumulates_into_framed_pulses_and_reports_completed_delivery(
     assert matrix.PulseScheduler is ProductionPulseScheduler
     assert row["effective_run"]["actuation_mode"] == ActuationMode.FRAMED_PULSE.value
     assert row["effective_run"]["pulse_timing"] == {"frame_seconds": 20.0, "pulse_seconds": 2.0}
+    assert row["effective_run"]["scheduler"] == FRAMED_SCHEDULER
     # 5% duty accumulates one second of credit in the first frame and delivers
     # a two-second pulse in the next, so the core sees measured delivery, not
     # the requested 5%, only once the producing interval has completed.
