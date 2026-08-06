@@ -121,15 +121,31 @@ class ControllerBase:
 
     def get_control_period(self):
         """
-        Desired re-solve / actuation period in seconds. Return None to use the
-        mode's CycleTime (legacy behavior). Controllers that run faster than the
-        auger cycle (e.g. MPC) return a fixed period such as 5.0.
+        Desired re-solve / actuation period in seconds. Return None to delegate
+        to Hold's framed duration. Controllers that run faster than the auger
+        pulse frame (e.g. MPC) return a fixed period such as 5.0.
         """
         return None
 
     def actuation_mode(self) -> ActuationMode:
-        """The timing discipline Hold must use for this controller's request."""
-        return ActuationMode.FIXED_CYCLE
+        """Use framed pulses for every controller request.
+
+        A fixed cycle floors the auger at ``u_min``, and that floor is a floor
+        on temperature: the lowest heat the grill can command is the lowest it
+        can hold. On a plant fitted to a logged MAK cook the shipped 25 s cycle
+        floors at 0.10 duty while a 225 F hold needs 0.092, so the chamber
+        settles near 283 F and no tuning of the loop can reach the set point.
+
+        Framed pulses carry the shortfall as credit instead of rounding it up,
+        so a request below one pulse is delivered as a pulse every few frames
+        rather than as a floor. Measured on that plant, 225 F goes from 0.2% of
+        the cook within 5 F to 84% for the PID controller and 90% for the Smith
+        variant, and 350 F improves for both. It also matches the hardware
+        better than a fixed cycle does: the auger is relay-switched and has
+        mechanical inertia, so arbitrarily fine on-times are a property of the
+        model rather than of the grill.
+        """
+        return ActuationMode.FRAMED_PULSE
 
     def commands_fan(self):
         """Whether this controller issues fan duty commands (vs. auger-only)."""

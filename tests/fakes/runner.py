@@ -9,7 +9,7 @@ class FakeControllerRunner:
         period=None,
         commands_fan=False,
         wants_async=False,
-        actuation_mode=ActuationMode.FIXED_CYCLE,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
         controller_type: ControllerType | None = None,
     ):
         self._script = []

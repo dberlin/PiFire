@@ -29,7 +29,6 @@ import numpy as np
 # do_mpc (CasADi/IPOPT) is imported lazily only when the NLP policy is built; the
 # net policy + EKF path is pure numpy/scipy and never imports it.
 
-from common.control_trace import ActuationMode
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import feasibility_report
@@ -441,8 +440,6 @@ class Controller(ControllerBase):
     def get_control_period(self):
         return float(self.cfg["control_period"])
 
-    def actuation_mode(self) -> ActuationMode:
-        return ActuationMode.FRAMED_PULSE
 
     def commands_fan(self):
         return bool(self.cfg.get("enable_fan_input", False))

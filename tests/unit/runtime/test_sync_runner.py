@@ -19,6 +19,7 @@ class _Core:
     def get_control_period(self):
         return self.period
 
+
     def get_status(self):
         return {"target": self.target}
 

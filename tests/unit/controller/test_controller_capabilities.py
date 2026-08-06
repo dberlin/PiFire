@@ -1,4 +1,4 @@
-"""Every controller answers the four capability methods; the defaults are inert.
+"""Every controller answers the four capability methods.
 
 A controller that does not model the plant must be completely unaffected by
 applied-output feedback, diagnostics, and model persistence existing.
@@ -20,7 +20,7 @@ CYCLE_DATA = {"HoldCycleTime": 20}
 
 def test_base_defaults_are_inert():
     core = ControllerBase({}, "F", dict(CYCLE_DATA))
-    assert core.actuation_mode() is ActuationMode.FIXED_CYCLE
+    assert core.actuation_mode() is ActuationMode.FRAMED_PULSE
     assert core.set_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 1.0)) is None
     assert core.get_status() is None
     assert core.trace_diagnostics() is None
@@ -36,11 +36,13 @@ def test_set_output_does_not_change_a_plain_controller_s_output():
 
 
 @pytest.mark.parametrize("name", PLAIN_CONTROLLERS)
-def test_every_shipped_controller_answers_all_typed_capabilities(name):
+def test_pid_controllers_inherit_framed_pulse_capability(name):
     mod = importlib.import_module(f"controller.{name}")
     core = mod.Controller({}, "F", dict(CYCLE_DATA))
+
+    assert type(core).actuation_mode is ControllerBase.actuation_mode
+    assert core.actuation_mode() is ActuationMode.FRAMED_PULSE
     for method in (
-        "actuation_mode",
         "set_output",
         "get_status",
         "trace_diagnostics",

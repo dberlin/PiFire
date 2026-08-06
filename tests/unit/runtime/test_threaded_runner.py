@@ -36,6 +36,7 @@ class FakeCore:
     def wants_async(self):
         return True
 
+
     def set_target(self, sp):
         self.target = sp
 
@@ -335,12 +336,13 @@ def test_threaded_reconfigure_atomically_refreshes_capabilities_and_stale_budget
     replacement = Core(period=2.0, commands_fan=True, mode=ActuationMode.FRAMED_PULSE)
     monkeypatch.setattr(runner_module, "_build_core", lambda *args, **kwargs: (replacement, "Active"))
     runner = ThreadedControllerRunner(
-        Core(period=5.0, commands_fan=False, mode=ActuationMode.FIXED_CYCLE),
+        Core(period=5.0, commands_fan=False, mode=ActuationMode.FRAMED_PULSE),
         monotonic_clock=clock,
         wall_clock=clock,
         wait_for_period=barrier,
     )
     try:
+        assert runner.actuation_mode() is ActuationMode.FRAMED_PULSE
         assert barrier.first_waiting.wait(2.0)
         assert runner.reconfigure({}, {}) == "Active"
         runner.submit(70.0)
