@@ -45,6 +45,7 @@ from common.control_trace import (
 )
 from common.datastore_accessors import read_control_trace_cook, read_control_trace_session
 from controller.applied_output import OutputSource
+from controller.control_trace_replay import validate_records
 
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, steady_state_at_full_fire
 from controller.mpc_model import simulate_grey_box
@@ -294,6 +295,13 @@ def load_trace_samples(
                 frame.inhibit_reason is InhibitReason.NONE
                 and not frame.skipped
                 and not frame.stale_command
+                and frame.reset_reason is None
+                and math.isclose(
+                    (frame.frame_end_ms - frame.frame_start_ms) / 1000.0,
+                    frame.frame_seconds,
+                    rel_tol=0,
+                    abs_tol=1e-6,
+                )
                 and frame.frame_start_ms <= output.interval_start_ms
                 and output.interval_end_ms <= frame.frame_end_ms
                 for _, frame in revision_frames
@@ -304,6 +312,14 @@ def load_trace_samples(
             if previous_end_ms is not None and output.interval_start_ms != previous_end_ms:
                 raise TraceSelectionError("repeated complete applied outputs must cover contiguous intervals")
             previous_end_ms = output.interval_end_ms
+    previous_end_ms: int | None = None
+    for _, output in sorted(
+        (item for revision_outputs in complete_outputs.values() for item in revision_outputs),
+        key=lambda item: item[0],
+    ):
+        if previous_end_ms is not None and output.interval_start_ms != previous_end_ms:
+            raise TraceSelectionError("complete framed applied-output intervals must be globally contiguous")
+        previous_end_ms = output.interval_end_ms
 
     terminal_partial_revision = partial_outputs[0][1].result_revision if partial_outputs else None
     missing_actuated_revisions = sorted(
@@ -327,6 +343,11 @@ def load_trace_samples(
             )
             / duration_ms
         )
+
+    replay = validate_records(records)
+    if not replay.valid:
+        first_issue = next(issue for issue in replay.issues if issue.severity.value == "error")
+        raise TraceSelectionError(f"selected control trace has invalid framed relationships: {first_issue.detail}")
 
     paired_updates = [(index, update) for index, update in updates if update.result_revision in complete_outputs]
     if len(paired_updates) < 2:

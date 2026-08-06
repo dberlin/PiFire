@@ -45,8 +45,8 @@ def _session() -> ControlTraceRecord:
             control_period_seconds=5.0,
             model_revision=1,
             model_provenance="configured",
-            pulse_slot_seconds=2.0,
-            pulse_frame_seconds=20.0,
+            pulse_slot_seconds=5.0,
+            pulse_frame_seconds=5.0,
             fan_authority=True,
             fan_pwm_capable=True,
             fan_min_duty=40.0,
@@ -118,7 +118,7 @@ def _update(
 
 
 def _allocation(revision: int, load: float) -> AllocationPayload:
-    result = allocate(load, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
+    result = allocate(load, u_max=0.9, fan_min_pct=100.0, fan_max_pct=100.0, enable_fan=True)
     return AllocationPayload(
         result_revision=revision,
         normalized_combustion_load=result.normalized_combustion_load,
@@ -145,15 +145,15 @@ def _frame(revision: int, start_ms: int, end_ms: int, allocation: AllocationPayl
         event_kind=TraceEventKind.ACTUATION_FRAME,
         payload=FramedPulseFramePayload(
             result_revision=revision,
-            pulse_slot_seconds=2.0,
-            frame_seconds=20.0,
+            pulse_slot_seconds=5.0,
+            frame_seconds=5.0,
             frame_start_ms=start_ms,
             frame_end_ms=end_ms,
             requested_combustion_load=allocation.normalized_combustion_load,
             requested_auger_duty=allocation.requested_auger_duty,
             credit_before_seconds=0.0,
             credit_after_seconds=0.0,
-            scheduled_on_seconds=2.0,
+            scheduled_on_seconds=5.0,
             delivered_on_seconds=allocation.requested_auger_duty * duration_seconds,
             transition_count=2,
             actual_start_active=False,
@@ -295,7 +295,9 @@ def test_load_trace_samples_duration_weights_complete_intervals_for_one_framed_r
 
 def test_load_trace_samples_skips_results_superseded_before_a_framed_interval(ds):
     records = _lifecycle_records()
+    allocation = _allocation(4, 0.23)
     records.insert(4, _update(4, 4_000, 105.0, 0.23))
+    records.insert(5, _allocation_record(4_000, allocation))
     append_control_trace(records)
 
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)

@@ -342,6 +342,7 @@ def _validate_framed_frame(
     if allocation is not None and not (
         _close(payload.requested_combustion_load, allocation[1].normalized_combustion_load)
         and _close(payload.requested_auger_duty, allocation[1].requested_auger_duty)
+        and _optional_close(payload.requested_fan_duty, allocation[1].requested_fan_duty)
     ):
         add(ReplayIssueCode.FRAME_SCHEDULE_MISMATCH, "framed pulse command differs from joined allocation", index)
     _validate_inhibit(payload.inhibit_reason, lid, manual, safety, add, index)
@@ -540,6 +541,7 @@ def _reconcile_framed_applied_outputs(
         cursor_ms = frame.frame_start_ms
         delivered_on_seconds = 0.0
         incomplete = False
+        fan_mismatch = False
         for _, payload in applied:
             if (
                 payload.result_revision != frame.result_revision
@@ -554,6 +556,7 @@ def _reconcile_framed_applied_outputs(
             overlap_seconds = (overlap_end_ms - cursor_ms) / 1000
             delivered_on_seconds += payload.realized_auger_duty * overlap_seconds
             incomplete = incomplete or not payload.sample_complete
+            fan_mismatch = fan_mismatch or not _optional_close(payload.actual_fan_duty, frame.applied_fan_duty)
             cursor_ms = overlap_end_ms
             if cursor_ms == frame.frame_end_ms:
                 break
@@ -570,6 +573,12 @@ def _reconcile_framed_applied_outputs(
             add(
                 ReplayIssueCode.APPLIED_OUTPUT_MISMATCH,
                 "framed pulse applied duty disagrees with delivered on-time",
+                frame_index,
+            )
+        if fan_mismatch:
+            add(
+                ReplayIssueCode.APPLIED_OUTPUT_MISMATCH,
+                "framed pulse applied fan disagrees with same-revision applied output",
                 frame_index,
             )
 

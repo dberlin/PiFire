@@ -100,8 +100,8 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                 control_period_seconds=5.0,
                 model_revision=1,
                 model_provenance="configured",
-                pulse_slot_seconds=2.0,
-                pulse_frame_seconds=20.0,
+                pulse_slot_seconds=5.0,
+                pulse_frame_seconds=5.0,
                 fan_authority=True,
                 fan_pwm_capable=True,
                 fan_min_duty=40.0,
@@ -114,7 +114,7 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
         )
     ]
     for revision, (time_s, temperature, load) in enumerate(zip(t, temp, Q), start=1):
-        timestamp_ms = int(float(time_s) * 1000)
+        timestamp_ms = (revision - 1) * 5_000
         load = float(load)
         normalized_load = load if 0.0 <= load <= 1.0 else load / 100.0
         records.append(
@@ -166,10 +166,8 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                 ),
             )
         )
-        if revision == len(t):
-            continue
         allocation_result = allocate(
-            normalized_load, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True
+            normalized_load, u_max=0.9, fan_min_pct=100.0, fan_max_pct=100.0, enable_fan=True
         )
         allocation = AllocationPayload(
             result_revision=revision,
@@ -185,7 +183,19 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
             fan_clamp_reason=allocation_result.fan_clamp_reason,
             allocator_revision=ALLOCATOR_REVISION,
         )
-        interval_end_ms = int(float(t[revision]) * 1000)
+        if revision == len(t):
+            records.append(
+                ControlTraceRecord(
+                    ts_ms=timestamp_ms,
+                    session_id=session_id,
+                    cook_id=cook_id,
+                    controller=ControllerType.MPC,
+                    event_kind=TraceEventKind.ALLOCATION,
+                    payload=allocation,
+                )
+            )
+            continue
+        interval_end_ms = timestamp_ms + 5_000
         records.extend(
             [
                 ControlTraceRecord(
@@ -204,15 +214,15 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                     event_kind=TraceEventKind.ACTUATION_FRAME,
                     payload=FramedPulseFramePayload(
                         result_revision=revision,
-                        pulse_slot_seconds=2.0,
-                        frame_seconds=20.0,
+                        pulse_slot_seconds=5.0,
+                        frame_seconds=5.0,
                         frame_start_ms=timestamp_ms,
                         frame_end_ms=interval_end_ms,
                         requested_combustion_load=allocation.normalized_combustion_load,
                         requested_auger_duty=allocation.requested_auger_duty,
                         credit_before_seconds=0.0,
                         credit_after_seconds=0.0,
-                        scheduled_on_seconds=6.0,
+                        scheduled_on_seconds=5.0,
                         delivered_on_seconds=allocation.requested_auger_duty * 5.0,
                         transition_count=2,
                         actual_start_active=False,
