@@ -1054,16 +1054,37 @@ def test_threaded_runner_swap_delivers_pre_swap_observation_to_old_core():
             runner._pending_controller_type = None
         later = runner.observe_frame(_frame(1))
         barrier.release.set()
-        assert _wait_for(lambda: len(old.observations) == 1)
-        drain = runner.drain_observation_outcomes()
-        assert drain.envelopes[0].submission_sequence == submission.submission_sequence
-        assert drain.envelopes[0].outcome["core"] == "old"
-        assert drain.envelopes[0].configuration_generation == submission.configuration_generation
+        assert _wait_for(lambda: len(old.observations) == 1 and len(new.observations) == 1)
+        envelopes = {item.submission_sequence: item for item in runner.drain_observation_outcomes()}
+        assert envelopes[submission.submission_sequence].outcome["core"] == "old"
+        assert envelopes[submission.submission_sequence].configuration_generation == submission.configuration_generation
+        assert envelopes[later.submission_sequence].outcome["core"] == "new"
+        assert envelopes[later.submission_sequence].configuration_generation == later.configuration_generation
+    finally:
         barrier.release.set()
-        assert _wait_for(lambda: len(new.observations) == 1)
-        later_drain = runner.drain_observation_outcomes()
-        assert later_drain.envelopes[0].submission_sequence == later.submission_sequence
-        assert later_drain.envelopes[0].configuration_generation == later.configuration_generation
+        runner.stop()
+
+
+def test_threaded_runner_drains_reserved_new_generation_before_first_swapped_solve():
+    barrier = _ObservationBarrier()
+    old = _ObservationRecordingCore()
+    new = _ObservationRecordingCore()
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    old.runner = runner
+    new.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        with runner._lock:
+            runner._pending_core = new
+            runner._pending_controller_type = None
+        runner.observe_frame(_frame(0))
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert _wait_for(lambda: len(new.observations) == 1 and ("update", 212.0) in new.calls)
+        with new.lock:
+            calls = list(new.calls)
+        assert calls.index(("observe_frame", 20.0)) < calls.index(("update", 212.0))
     finally:
         barrier.release.set()
         runner.stop()

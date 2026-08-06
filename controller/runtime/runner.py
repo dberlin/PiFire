@@ -689,6 +689,11 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._controller_type = new_controller_type
                     self._quality.control_period = _control_period_seconds(self._control_period)
                     self._configuration_revision += 1
+            if new_core is not None:
+                # A frame accepted after reconfigure is already reserved for
+                # this generation. Redrain under the installed core before its
+                # first solve so observations always precede their update.
+                continue
             if update_temp is not _UNSET and update_temp is not None:
                 result = _capture_completed_result(
                     self._core,
