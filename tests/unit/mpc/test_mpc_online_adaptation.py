@@ -416,7 +416,7 @@ def test_active_safety_failures_roll_back_once_with_the_exact_lifecycle_reason(
     assert controller.trace_diagnostics().model_lifecycle["detail"] == reason
 
 
-def test_active_real_scheduled_arx_snapshot_restores_prediction_command_and_rollback_owner():
+def test_active_real_scheduled_arx_restore_rebuilds_lag_before_resuming_arx_authority():
     source = _controller(online=True)
     frames = tuple(_frame(index) for index in range(80))
     active = ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3)))
@@ -424,15 +424,11 @@ def test_active_real_scheduled_arx_snapshot_restores_prediction_command_and_roll
     for index in range(80, 92):
         active.observe(_frame(index))
 
-    # A real coordinator needs its lag and excitation windows before it may
-    # retain forecast origins.  The alternating contiguous sequence leaves
-    # recent horizons incomplete at the snapshot boundary.
     outcomes = [
         source._online.observe(_frame(index), ambient_future=np.full(15, 20.0))
         for index in range(92, 116)
     ]
     assert any(outcome.gate.permitted for outcome in outcomes)
-    assert source._online._origins
     fallback = source._online.incumbent
     source._online._previous_incumbent = fallback
     source._online._previous_incumbent_snapshot = fallback.snapshot()
@@ -445,30 +441,35 @@ def test_active_real_scheduled_arx_snapshot_restores_prediction_command_and_roll
     source._applied_combustion_load = 0.4
 
     snapshot = source.get_model_snapshot()
+    source_candidates = snapshot["online_adaptation"]["incumbent"]["candidates"]
+    rollback_owner = snapshot["online_adaptation"]["previous_incumbent_digest"]
     restored = _controller(online=True)
     assert restored.restore_model(snapshot) is True
     restored._applied_combustion_load = 0.4
 
+    restored_status = restored.get_status()["adaptation"]
+    assert restored_status["active_model_kind"] == "scheduled-arx"
+    assert restored_status["role_generation"] == 3
+    assert restored._online.consecutive_wins == 2
+    assert restored._online.previous_incumbent_digest == rollback_owner
+    assert restored.get_model_snapshot()["online_adaptation"]["incumbent"]["candidates"] == source_candidates
+
+    with pytest.raises(RuntimeError, match="lag history"):
+        restored._online.incumbent.affine_prediction(4, 0.4, np.full(4, 20.0))
+    held = restored.update(100.0)
+    assert 0.0 <= held["cycle_ratio"] <= CYCLE["u_max"]
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+
+    fresh_outcomes = [
+        restored.observe_frame(replace(_frame(index), role_generation=3))
+        for index in range(116, 132)
+    ]
+    assert fresh_outcomes[-1]["eligible"] is True
+    prediction = restored._online.incumbent.affine_prediction(4, 0.4, np.full(4, 20.0))
+    assert np.isfinite(prediction.free_output_c).all()
+    assert np.isfinite(prediction.input_response_c).all()
+    resumed = restored.update(100.0)
+    assert 0.0 <= resumed["cycle_ratio"] <= CYCLE["u_max"]
     assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
     assert restored.get_status()["adaptation"]["role_generation"] == 3
-    assert restored._online.consecutive_wins == 2
-    assert restored._online.previous_incumbent_digest == OnlineAdaptation.model_digest(fallback)
-    assert restored._online._origins == []
-
-    source_prediction = source._online.incumbent.affine_prediction(4, 0.4, np.full(4, 20.0))
-    restored_prediction = restored._online.incumbent.affine_prediction(4, 0.4, np.full(4, 20.0))
-    np.testing.assert_allclose(restored_prediction.free_output_c, source_prediction.free_output_c, atol=1e-12)
-    np.testing.assert_allclose(
-        restored_prediction.input_response_c, source_prediction.input_response_c, atol=1e-12
-    )
-
-    # Persistence intentionally drops partial scoring origins.  Make both
-    # live coordinators start the next real frame from that persisted boundary.
-    source._online._origins.clear()
-    post_restore_frame = replace(_frame(116), role_generation=3)
-    assert source.observe_frame(post_restore_frame) == restored.observe_frame(post_restore_frame)
-    assert source.get_model_snapshot()["online_adaptation"] == restored.get_model_snapshot()["online_adaptation"]
-    assert restored.update(100.0) == source.update(100.0)
-
-    restored.refit_from_cook([])
-    assert restored.get_model_snapshot()["revision"] == 42
+    assert restored._online.previous_incumbent_digest == rollback_owner

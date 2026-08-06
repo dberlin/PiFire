@@ -314,6 +314,48 @@ def _payload_cases():
         ),
         (
             ControllerType.MPC,
+            TraceEventKind.MODEL_OBSERVATION,
+            ModelObservationPayload(
+                frame_start_ms=1_000,
+                frame_end_ms=21_000,
+                temp_c=110.0,
+                setpoint_c=120.0,
+                ambient_c=20.0,
+                requested_combustion_load=0.4,
+                realized_combustion_load=0.35,
+                delivered_on_seconds=7.0,
+                eligible=True,
+                rejection_reasons=(),
+                input_variance=0.01,
+                input_levels=3,
+                incumbent_innovation_c=1.0,
+                challenger_innovation_c=0.5,
+                effective_updates=21,
+                role_generation=0,
+                model_digest="a" * 64,
+            ),
+        ),
+        (
+            ControllerType.MPC,
+            TraceEventKind.MODEL_EVALUATION,
+            ModelEvaluationPayload(
+                decision_id="generation-0-evaluation-1",
+                evaluated_at_ms=21_000,
+                role_generation=0,
+                promoted=False,
+                committed=False,
+                consecutive_wins=0,
+                rejection_reasons=("prediction",),
+                incumbent_prediction_score=1.0,
+                challenger_prediction_score=1.2,
+                incumbent_braking_score=None,
+                challenger_braking_score=None,
+                sample_count=20,
+                prospective_digest=None,
+            ),
+        ),
+        (
+            ControllerType.MPC,
             TraceEventKind.RECORDER_GAP,
             RecorderGapPayload(lost_record_count=3, gap_start_ms=101, gap_end_ms=102),
         ),
@@ -803,16 +845,26 @@ def test_enriched_model_lifecycle_metadata_is_bounded_and_round_trips():
         replace(payload, parameters=(TraceSetting(key="delay", value=2),) * 33)
 
 
-def test_model_evaluation_rejects_inconsistent_lifecycle_evidence():
+def test_model_evaluation_requires_win_count_to_match_rejection_evidence():
     payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    clean_first_win = replace(payload, rejection_reasons=(), consecutive_wins=1)
+    assert (clean_first_win.promoted, clean_first_win.committed, clean_first_win.prospective_digest) == (
+        False,
+        False,
+        None,
+    )
     with pytest.raises(ValidationError):
         replace(payload, committed=True)
     with pytest.raises(ValidationError):
-        replace(payload, promoted=True, rejection_reasons=())
+        replace(payload, promoted=True, rejection_reasons=(), prospective_digest=None)
     with pytest.raises(ValidationError):
-        replace(payload, rejection_reasons=())
+        replace(payload, promoted=True, prospective_digest="c" * 64)
     with pytest.raises(ValidationError):
         replace(payload, prospective_digest="c" * 64)
+    with pytest.raises(ValidationError):
+        replace(payload, rejection_reasons=(), consecutive_wins=0)
+    with pytest.raises(ValidationError):
+        replace(clean_first_win, rejection_reasons=("prediction",))
 
 
 def test_v2_envelopes_accept_unchanged_payloads_but_reject_v3_learning_payloads():

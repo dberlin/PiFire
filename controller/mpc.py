@@ -1160,8 +1160,8 @@ class Controller(ControllerBase):
                     )
                     last_evaluation = _online_evaluation(payload["last_evaluation"])
                     last_lifecycle = _online_lifecycle_metadata(payload["last_lifecycle"])
-                    restored._last_evaluation_s = None
                     self._online = restored
+                    self._online.begin_restored_session()
                     self._online_eligible_updates = eligible_updates
                     self._online_rejected_updates = rejected_updates
                     self._online_promotion_count = promotion_count

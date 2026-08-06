@@ -2,11 +2,12 @@ import collections
 import threading
 import time
 import json
+from dataclasses import replace
 
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.linear_mpc.contracts import FrameObservation
-from common.control_trace import ActuationMode, ResultStaleState
+from common.control_trace import ActuationMode, ModelObservationPayload, ResultStaleState, TraceEventKind
 from controller.runtime.runner import (
     ThreadedControllerRunner,
     build_runner,
@@ -14,6 +15,7 @@ from controller.runtime.runner import (
     _MAX_PENDING_OUTPUTS,
     _MAX_PENDING_OBSERVATIONS,
 )
+from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
 
 
 def _frame(index: int) -> FrameObservation:
@@ -1126,4 +1128,148 @@ def test_threaded_runner_redrains_observations_enqueued_during_learner_delivery(
     finally:
         core.release_first_delivery.set()
         barrier.release.set()
+        runner.stop()
+
+def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_gates(
+    hold_cycle, monkeypatch
+):
+    """Dropped frame identity reaches the real learner as one discontinuity."""
+    import controller.runtime.modes.hold as hold_module
+
+    class _Recorder:
+        def __init__(self):
+            self.records = []
+
+        def record(self, record):
+            self.records.append(record)
+
+        def flush_due(self, _now_ms):
+            pass
+
+        def close(self):
+            pass
+
+    class _Gate:
+        def __init__(self):
+            self.waiting = threading.Event()
+            self.release = threading.Event()
+            self.closed = threading.Event()
+
+        def __call__(self, _seconds):
+            self.waiting.set()
+            assert self.release.wait(2.0)
+            if not self.closed.is_set():
+                self.release.clear()
+
+        def close(self):
+            self.closed.set()
+            self.release.set()
+
+    class _ObservedMpcController(MpcController):
+        def __init__(self):
+            super().__init__(
+                dict(MPC_DEFAULTS, policy="net", enable_online_adaptation=True),
+                "C",
+                {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25},
+            )
+            self.set_target(110.0)
+            self.observed = []
+            self._observed_condition = threading.Condition()
+
+        def observe_frame(self, observation):
+            outcome = super().observe_frame(observation)
+            with self._observed_condition:
+                self.observed.append((observation, outcome))
+                self._observed_condition.notify_all()
+            return outcome
+
+        def wait_for_observations(self, count):
+            with self._observed_condition:
+                return self._observed_condition.wait_for(lambda: len(self.observed) >= count, timeout=2.0)
+
+    def frame(index, realized_q):
+        return replace(
+            _frame(index),
+            temp_c=100.0,
+            requested_q=realized_q,
+            realized_q=realized_q,
+            requested_auger_duty=realized_q,
+        )
+    recorder = _Recorder()
+    monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda **_kwargs: recorder)
+    gate = _Gate()
+    core = _ObservedMpcController()
+    runner = ThreadedControllerRunner(core, wait_for_period=gate)
+    mode = hold_cycle(runner, controller="mpc")
+    try:
+        assert gate.waiting.wait(2.0)
+        mode.setup()
+        mode.state.metrics = {"id": "hold-observation-overflow"}
+        mode._ensure_trace_session(0.0)
+
+        for index in range(31):
+            mode._deliver_completed_pulse_observation(
+                (index * 20, (index + 1) * 20), frame(index, 0.3)
+            )
+
+        assert list(mode._pending_model_observations) == list(range(2, 32))
+        assert runner.controller_state()["dropped_observations"] == 1
+
+        gate.release.set()
+        assert core.wait_for_observations(30)
+        mode._reconcile_model_observation_outcomes(now=620.0)
+        traced_observations = [
+            record
+            for record in recorder.records
+            if record.event_kind is TraceEventKind.MODEL_OBSERVATION
+        ]
+        first_traced = traced_observations[0]
+        assert isinstance(first_traced.payload, ModelObservationPayload)
+        assert (
+            first_traced.payload.frame_start_ms,
+            first_traced.payload.frame_end_ms,
+            first_traced.payload.role_generation,
+            first_traced.payload.continuous,
+            first_traced.payload.rejection_reasons,
+        ) == (20_000, 40_000, 0, False, ("discontinuity",))
+        assert mode._pending_model_observations == {}
+
+        initial = tuple(core.observed)
+        assert [observation.frame_end_s for observation, _outcome in initial] == [
+            float((index + 1) * 20) for index in range(1, 31)
+        ]
+        assert initial[0][0].continuous is False
+        assert all(observation.continuous for observation, _outcome in initial[1:])
+        assert initial[0][1]["rejection_reasons"] == ("discontinuity",)
+        assert [outcome["rejection_reasons"] for _observation, outcome in initial[1:16]] == [
+            ("lag-warmup",)
+        ] * 15
+        assert all(
+            outcome["rejection_reasons"] == ("insufficient-excitation",)
+            for _observation, outcome in initial[16:]
+        )
+        adaptation = core.get_status()["adaptation"]
+        assert (adaptation["active_model_kind"], adaptation["promotion_count"]) == ("grey-box", 0)
+
+        for index in range(31, 61):
+            realized_q = 0.1 if index % 2 else 0.5
+            mode._deliver_completed_pulse_observation(
+                (index * 20, (index + 1) * 20), frame(index, realized_q)
+            )
+
+        gate.release.set()
+        assert core.wait_for_observations(60)
+
+        recovered = tuple(core.observed[30:])
+        assert all(outcome["eligible"] for _observation, outcome in recovered)
+        assert any(
+            "samples" in outcome["evaluation"]["rejection_reasons"]
+            for _observation, outcome in recovered
+            if "evaluation" in outcome
+        )
+        adaptation = core.get_status()["adaptation"]
+        assert adaptation["effective_samples"] >= 20
+        assert (adaptation["active_model_kind"], adaptation["promotion_count"]) == ("grey-box", 0)
+    finally:
+        gate.close()
         runner.stop()

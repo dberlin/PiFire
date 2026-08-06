@@ -212,8 +212,24 @@ class OnlineAdaptation:
         return self._lag_warmup_remaining
 
     def reset_continuity(self) -> None:
-        """Discard lag/excitation/origin continuity after a rejected frame."""
+        """Discard continuity after an in-session rejected frame."""
         self._mark_discontinuity()
+
+    def begin_restored_session(self) -> None:
+        """Start fresh post-shutdown evidence without losing durable model state."""
+        self._origins.clear()
+        self._pending.clear()
+        self._completed.clear()
+        self._completed_window = ()
+        self._scores.clear()
+        self._excitation.clear()
+        self._last_duty = None
+        self._lag_warmup_remaining = self.policy.max_delay_steps
+        self._last_evaluation_s = None
+        for model in (self.incumbent, self.challenger):
+            reset = getattr(model, "reset_lag_history", None)
+            if callable(reset):
+                reset()
 
     @property
     def completed_origins(self) -> tuple[CompletedOrigin, ...]:
@@ -310,6 +326,7 @@ class OnlineAdaptation:
         self._completed_window = tuple(self._completed)
         self._completed.clear()
         self._scores.clear()
+        self._origins = [origin for origin in self._origins if origin.origin_time_s >= at_s]
         return decision
 
     def prospective_model(self, decision_id: str) -> AdaptiveModel:

@@ -461,14 +461,15 @@ class HoldMode(ControlMode):
             except (KeyError, TypeError, ValueError):
                 self._pending_model_observations.pop(sequence, None)
                 continue
-            records: list[tuple[TraceEventKind, object]] = []
+            records: list[tuple[TraceEventKind, object]] = [
+                (TraceEventKind.MODEL_OBSERVATION, observation_payload)
+            ]
             evaluation_payload = self._model_evaluation_payload(outcome.get("evaluation"))
             if evaluation_payload is not None:
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation_payload))
             lifecycle_payload = self._model_lifecycle_payload(outcome.get("lifecycle"))
             if lifecycle_payload is not None:
                 records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
-            records.append((TraceEventKind.MODEL_OBSERVATION, observation_payload))
             queued = (*pending[:3], tuple(records))
             self._pending_model_observations[sequence] = queued
         for sequence, pending in tuple(self._pending_model_observations.items()):

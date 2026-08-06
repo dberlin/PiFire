@@ -11,6 +11,7 @@ from common.control_trace import (
     ControllerType,
     InhibitReason,
     ModelObservationPayload,
+    RecorderGapPayload,
     PidSpUpdatePayload,
     ResultStaleState,
     SafetyEventType,
@@ -1175,9 +1176,9 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
         in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
     ]
     assert learning_event_kinds == [
+        TraceEventKind.MODEL_OBSERVATION,
         TraceEventKind.MODEL_EVALUATION,
         TraceEventKind.MODEL_EVENT,
-        TraceEventKind.MODEL_OBSERVATION,
     ]
 
 
@@ -1220,7 +1221,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
         for record in recorder.records
         if record.event_kind
         in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
-    ] == [TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION]
+    ] == [TraceEventKind.MODEL_OBSERVATION, TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT]
 
 
 def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle, monkeypatch):
@@ -1252,7 +1253,7 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
         for record in recorder.records
         if record.event_kind is TraceEventKind.MODEL_EVALUATION
     ] == ["generation-0-evaluation-1"]
-    assert len(mode._pending_model_observations[1][3]) == 2
+    assert len(mode._pending_model_observations[1][3]) == 1
     assert len(mode._pending_model_observations[2][3]) == 3
 
     mode._reconcile_model_observation_outcomes(now=23.0)
@@ -1263,12 +1264,12 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
         if record.event_kind
         in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
     ] == [
+        (TraceEventKind.MODEL_OBSERVATION, None),
         (TraceEventKind.MODEL_EVALUATION, "generation-0-evaluation-1"),
         (TraceEventKind.MODEL_EVENT, "promotion"),
         (TraceEventKind.MODEL_OBSERVATION, None),
         (TraceEventKind.MODEL_EVALUATION, "generation-0-evaluation-2"),
         (TraceEventKind.MODEL_EVENT, "promotion-2"),
-        (TraceEventKind.MODEL_OBSERVATION, None),
     ]
 
 
@@ -1297,12 +1298,12 @@ def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeyp
         if record.event_kind
         in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
     ] == [
-        TraceEventKind.MODEL_EVALUATION,
-        TraceEventKind.MODEL_EVENT,
         TraceEventKind.MODEL_OBSERVATION,
         TraceEventKind.MODEL_EVALUATION,
         TraceEventKind.MODEL_EVENT,
         TraceEventKind.MODEL_OBSERVATION,
+        TraceEventKind.MODEL_EVALUATION,
+        TraceEventKind.MODEL_EVENT,
     ]
 
 
@@ -1403,3 +1404,66 @@ def test_hold_retires_self_evicted_submission_immediately(hold_cycle):
     mode._deliver_completed_pulse_observation((0, 20), observation)
 
     assert mode._pending_model_observations == existing
+
+def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_recovery_gap(
+    hold_cycle, monkeypatch
+):
+    """A full recorder must never stop the next control or learner submission."""
+    import controller.runtime.modes.hold as hold_module
+
+    persisted = []
+    append_attempts = 0
+
+    def append(records):
+        nonlocal append_attempts
+        append_attempts += 1
+        if append_attempts == 1:
+            raise OSError("trace store unavailable")
+        persisted.extend(records)
+
+    recorder = ControlTraceRecorder(
+        append=append,
+        prune=lambda *_args, **_kwargs: 0,
+        monotonic_clock=lambda: 0,
+        wall_clock=lambda: 0,
+        capacity=3,
+    )
+    monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda **_kwargs: recorder)
+    monkeypatch.setattr(hold_module.time, "monotonic_ns", lambda: 1_000_000)
+    runner = FakeControllerRunner(
+        period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE
+    ).script([_mpc_result(1), _mpc_result(2)])
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "trace-append-recovery"}
+    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
+
+    mode.on_tick(2.0, 212.0, output)
+    recorder.flush_due(5_000)
+    assert persisted == []
+
+    mode.on_tick(4.0, 213.0, output)
+    runner.observation_outcome = _model_observation_outcome(frame_end_ms=20_000)
+    for index in range(3):
+        mode._deliver_completed_pulse_observation(
+            (index * 20, (index + 1) * 20), _learning_observation(index * 20.0)
+        )
+    mode._reconcile_model_observation_outcomes(now=22.0)
+
+    assert runner.submitted_temps == [212.0, 213.0]
+    assert [observation.frame_end_s for observation in runner.observations] == [20.0, 40.0, 60.0]
+
+    recorder.flush_due(10_000)
+
+    assert [record.event_kind for record in persisted] == [
+        TraceEventKind.RECORDER_GAP,
+        TraceEventKind.MODEL_OBSERVATION,
+        TraceEventKind.MODEL_OBSERVATION,
+        TraceEventKind.MODEL_OBSERVATION,
+    ]
+    assert isinstance(persisted[0].payload, RecorderGapPayload)
+    assert persisted[0].payload.lost_record_count > 0
+    assert persisted[0].payload.gap_start_ms <= persisted[0].payload.gap_end_ms
+    payloads = [record.payload for record in persisted[1:]]
+    assert all(isinstance(payload, ModelObservationPayload) for payload in payloads)
+    assert [payload.frame_end_ms for payload in payloads] == [20_000, 40_000, 60_000]
