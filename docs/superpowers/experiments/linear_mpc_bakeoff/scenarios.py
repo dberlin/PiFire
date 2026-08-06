@@ -32,15 +32,13 @@ class ScenarioDefinition:
     def safety_override_at(self, second: int) -> bool:
         return (
             self.safety_override_start_s is not None
-            and self.safety_override_start_s <= second
-            < self.safety_override_start_s + self.safety_override_duration_s
+            and self.safety_override_start_s <= second < self.safety_override_start_s + self.safety_override_duration_s
         )
 
     def manual_override_at(self, second: int) -> bool:
         return (
             self.manual_override_start_s is not None
-            and self.manual_override_start_s <= second
-            < self.manual_override_start_s + self.manual_override_duration_s
+            and self.manual_override_start_s <= second < self.manual_override_start_s + self.manual_override_duration_s
         )
 
 
@@ -50,9 +48,7 @@ SCENARIOS = (
     ScenarioDefinition("low-step", 55.0, 75.0, 60),
     ScenarioDefinition("middle-step", 90.0, 120.0, 60),
     ScenarioDefinition("high-step-450f", 145.0, (450.0 - 32.0) * 5.0 / 9.0, 60),
-    ScenarioDefinition(
-        "high-step-600f", 175.0, (600.0 - 32.0) * 5.0 / 9.0, 60, applicable_plants=("GrillSim",)
-    ),
+    ScenarioDefinition("high-step-600f", 175.0, (600.0 - 32.0) * 5.0 / 9.0, 60, applicable_plants=("GrillSim",)),
     ScenarioDefinition("down-step", 120.0, 85.0, 60),
     ScenarioDefinition("long-hold", 110.0, 110.0),
     ScenarioDefinition("lid-excursion", 110.0, 110.0, lid_start_s=80, lid_duration_s=30),
@@ -70,6 +66,4 @@ SCENARIOS = (
 
 def quick_scenarios() -> tuple[ScenarioDefinition, ...]:
     """Return the minimal deterministic smoke subset without changing its semantics."""
-    return tuple(
-        item for item in SCENARIOS if item.name in {"low-step", "lid-excursion", "override-window"}
-    )
+    return tuple(item for item in SCENARIOS if item.name in {"low-step", "lid-excursion", "override-window"})

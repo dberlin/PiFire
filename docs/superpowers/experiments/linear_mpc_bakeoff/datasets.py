@@ -11,9 +11,8 @@ from controller.grill_sim import GrillSim, MAKGrillSim
 
 from .contracts import SignalRecord
 from .data import resample_record, validate_record
+
 FRAME_S: Final = 20
-
-
 
 
 @dataclass(frozen=True, slots=True)

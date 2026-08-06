@@ -207,6 +207,7 @@ def test_recorder_construction_failure_still_restores_the_final_online_checkpoin
         "coefficients": {"a": -0.85, "b": 0.031, "c": 1.1},
         "online_adaptation": {},
     }
+    hold.ctx.clock.advance(100.0)
     hold.on_tick(100.0, 225.0, {"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100})
     hold.teardown(225.0)
 

@@ -18,7 +18,5 @@ def select_validation_horizon(validation_scores: Mapping[int, float]) -> int:
     best = min(scores.values())
     threshold = best * 1.01
     return next(
-        horizon_s
-        for horizon_s in _CANDIDATE_HORIZONS_S
-        if scores[horizon_s] < threshold or scores[horizon_s] == best
+        horizon_s for horizon_s in _CANDIDATE_HORIZONS_S if scores[horizon_s] < threshold or scores[horizon_s] == best
     )

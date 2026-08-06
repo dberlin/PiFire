@@ -287,9 +287,7 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
         }
     )
 
-    replayed = learning_observations(
-        (_session("F"), identified_frame, _update(), zero_requested_frame, second_update)
-    )
+    replayed = learning_observations((_session("F"), identified_frame, _update(), zero_requested_frame, second_update))
     canonical = learning_observations((_session("F"), canonical_first, canonical_second))
 
     assert replayed == canonical
@@ -325,6 +323,7 @@ def test_fallback_clamps_legacy_measured_delivery_above_latched_u_max() -> None:
 
     assert replayed == canonical
     assert replayed[0].realized_q == 1.0
+
 
 @pytest.mark.parametrize(
     ("requested_q", "requested_duty", "delivered_on_s"),

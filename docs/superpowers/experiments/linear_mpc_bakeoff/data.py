@@ -80,15 +80,11 @@ def resample_record(record: SignalRecord, frame_s: float) -> SignalRecord:
     frame_count = int(np.floor((record.time_s[-1] - record.time_s[0]) / frame_s))
     boundaries = record.time_s[0] + frame_s * np.arange(1, frame_count + 1)
     elapsed = np.diff(record.time_s)
-    cumulative_q = np.concatenate(
-        (np.array([0.0]), np.cumsum(record.q[:-1] * elapsed))
-    )
+    cumulative_q = np.concatenate((np.array([0.0]), np.cumsum(record.q[:-1] * elapsed)))
 
     def integral_at(boundary_s: np.ndarray) -> np.ndarray:
         indexes = np.searchsorted(record.time_s, boundary_s, side="right") - 1
-        return cumulative_q[indexes] + record.q[indexes] * (
-            boundary_s - record.time_s[indexes]
-        )
+        return cumulative_q[indexes] + record.q[indexes] * (boundary_s - record.time_s[indexes])
 
     starts = boundaries - frame_s
     q = (integral_at(boundaries) - integral_at(starts)) / frame_s

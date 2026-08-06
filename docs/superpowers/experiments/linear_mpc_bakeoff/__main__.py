@@ -13,9 +13,7 @@ from .runner import ExperimentConfig, _checkpoint_path, default_output_path, run
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the linear-MPC model bake-off.")
     parser.add_argument("--quick", action="store_true", help="run deterministic tiny smoke scenarios")
-    parser.add_argument(
-        "--output", type=Path, help="bounded artifact manifest path (*.manifest.json)"
-    )
+    parser.add_argument("--output", type=Path, help="bounded artifact manifest path (*.manifest.json)")
     parser.add_argument("--resume", action="store_true", help="resume from an existing checkpoint")
     parser.add_argument("--workers", type=int, help="spawned process workers (default: bounded auto)")
     parser.add_argument("--blas-threads", type=int, help="native numerical threads per worker (default: 1)")
@@ -34,7 +32,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.quick:
             command.append("--tiny")
         return online_arx_compare_main(command)
-    output = args.output or (default_output_path().with_name("_linear_mpc_bakeoff_quick.manifest.json") if args.quick else default_output_path())
+    output = args.output or (
+        default_output_path().with_name("_linear_mpc_bakeoff_quick.manifest.json")
+        if args.quick
+        else default_output_path()
+    )
     if not output.name.endswith(".manifest.json"):
         parser.error("--output must end with .manifest.json; legacy .gz is load-only")
     checkpoint = _checkpoint_path(output)

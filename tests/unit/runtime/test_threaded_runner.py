@@ -212,18 +212,20 @@ def test_threaded_result_recursively_freezes_nested_status_across_repolls():
         state = runner.controller_state()
         assert repolled.revision == result.revision
         assert repolled.result_age_seconds >= result.result_age_seconds
-        assert state == {
-            "nested": {"samples": [1.0]},
+        assert state["nested"] == {"samples": [1.0]}
+        assert {key: state[key] for key in ("pending_dropped", "pending_observations", "dropped_observations")} == {
             "pending_dropped": 0,
             "pending_observations": 0,
             "dropped_observations": 0,
         }
+        assert state["result_age_seconds"] >= repolled.result_age_seconds
         assert json.loads(json.dumps(state)) == state
         state["nested"]["samples"].append(3.0)
         assert result.status == {"nested": {"samples": (1.0,)}}
         assert repolled.status == {"nested": {"samples": (1.0,)}}
-        assert runner.controller_state() == {
-            "nested": {"samples": [1.0]},
+        current = runner.controller_state()
+        assert current["nested"] == {"samples": [1.0]}
+        assert {key: current[key] for key in ("pending_dropped", "pending_observations", "dropped_observations")} == {
             "pending_dropped": 0,
             "pending_observations": 0,
             "dropped_observations": 0,

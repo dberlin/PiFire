@@ -60,9 +60,7 @@ def _horizon_targets(record: SignalRecord, horizon_s: int) -> tuple[tuple[int, i
     return tuple(targets)
 
 
-def prediction_origins(
-    record: SignalRecord, horizons_s: Iterable[int]
-) -> Mapping[int, tuple[int, ...]]:
+def prediction_origins(record: SignalRecord, horizons_s: Iterable[int]) -> Mapping[int, tuple[int, ...]]:
     """Return every origin whose record tail reaches each requested horizon."""
     validate_record(record)
     availability = {
@@ -123,9 +121,7 @@ def score_free_run(
             )
             truth = record.temp_c[origin + 1 : target + 1]
             if forecast.shape != truth.shape:
-                raise ValueError(
-                    "forecast must return one temperature for each future input frame"
-                )
+                raise ValueError("forecast must return one temperature for each future input frame")
             if not np.isfinite(forecast).all():
                 raise ValueError("forecast must contain only finite temperatures")
             errors.append(forecast - truth)

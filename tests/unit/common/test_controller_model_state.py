@@ -94,6 +94,7 @@ def test_restarted_store_requires_a_newer_composite_mpc_revision():
     assert restarted.save("mpc", {"revision": 41, "online_adaptation": {"role_generation": 4}}) is False
     assert restarted.save("mpc", {"revision": 42, "online_adaptation": {"role_generation": 4}}) is True
 
+
 def test_load_returns_none_for_an_absent_key():
     store, _ = _store()
     assert store.load("pid_sp") is None

@@ -18,6 +18,7 @@ def test_controller_metadata_fixture_matches_production_catalog():
     assert set(fixture) == RETAINED
     assert fixture == metadata
 
+
 def test_mpc_online_adaptation_option_is_an_explicit_opt_in():
     config = json.loads(CATALOG.read_text())["metadata"]["mpc"]["config"]
     option = next(item for item in config if item["option_name"] == "enable_online_adaptation")

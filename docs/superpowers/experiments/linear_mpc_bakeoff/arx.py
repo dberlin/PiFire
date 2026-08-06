@@ -66,9 +66,7 @@ def _record_frames(record: SignalRecord) -> tuple[FrameObservation, ...]:
         raise ValueError("record signal arrays must have equal lengths")
     return tuple(
         _frame(float(time_s), float(temp_c), float(q), float(ambient_c))
-        for time_s, temp_c, q, ambient_c in zip(
-            record.time_s, record.temp_c, record.q, record.ambient_c, strict=True
-        )
+        for time_s, temp_c, q, ambient_c in zip(record.time_s, record.temp_c, record.q, record.ambient_c, strict=True)
     )
 
 

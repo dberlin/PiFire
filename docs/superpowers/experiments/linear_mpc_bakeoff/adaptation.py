@@ -112,6 +112,7 @@ class WindowScores:
         if not self.window_id:
             raise ValueError("window_id must not be empty")
 
+
 @dataclass(frozen=True, slots=True)
 class UpdateGate:
     """Immutable audit of the update eligibility decision for one frame."""
@@ -193,11 +194,7 @@ class StratifiedReplay:
     @property
     def samples(self) -> tuple[ReplaySample, ...]:
         """Return a deterministic, immutable view of all retained observations."""
-        return tuple(
-            sample
-            for stratum in sorted(self._buckets)
-            for sample in self._buckets[stratum]
-        )
+        return tuple(sample for stratum in sorted(self._buckets) for sample in self._buckets[stratum])
 
     def count(self, *, stratum: str | None = None) -> int:
         """Count one full stratum or a ``q-band-state`` aggregate."""
@@ -206,11 +203,7 @@ class StratifiedReplay:
         if stratum in self._buckets:
             return len(self._buckets[stratum])
         suffix = f"-{stratum}"
-        return sum(
-            len(bucket)
-            for key, bucket in self._buckets.items()
-            if key.endswith(suffix)
-        )
+        return sum(len(bucket) for key, bucket in self._buckets.items() if key.endswith(suffix))
 
     def extend(self, samples: Iterable[ReplaySample]) -> None:
         """Admit samples in arrival order with deterministic reservoir replacement."""
@@ -271,9 +264,7 @@ class AdaptationManager:
         self._consecutive_wins = 0
         self._role_generation = 0
         self._tracking_events = 0
-        self._operating_state_counts: dict[OperatingState, int] = {
-            state: 0 for state in OperatingState
-        }
+        self._operating_state_counts: dict[OperatingState, int] = {state: 0 for state in OperatingState}
         self._lock = Lock()
 
     @property
@@ -288,16 +279,17 @@ class AdaptationManager:
         with self._lock:
             return self._challenger
 
-
     @property
     def role_generation(self) -> int:
         """Monotonic role identity; old score windows cannot survive promotion."""
         with self._lock:
             return self._role_generation
+
     @property
     def replay(self) -> StratifiedReplay:
         """Return the manager-owned replay store."""
         return self._replay
+
     @property
     def tracking_evidence(self) -> Mapping[str, object]:
         """Return auditable non-parameter runtime state tracking evidence."""
@@ -306,8 +298,7 @@ class AdaptationManager:
                 {
                     "incumbent_track_count": self._tracking_events,
                     "operating_state_counts": {
-                        state.value: self._operating_state_counts[state]
-                        for state in OperatingState
+                        state.value: self._operating_state_counts[state] for state in OperatingState
                     },
                 }
             )
@@ -370,9 +361,9 @@ class AdaptationManager:
             incumbent_snapshot = _freeze_mapping(self._incumbent.snapshot())
             challenger_alignment = self._challenger_alignment
             incumbent_alignment = self._incumbent_alignment
-            stable = _stable_dynamics(
-                candidate_snapshot, self._policy
-            ) and _stable_dynamics(incumbent_snapshot, self._policy)
+            stable = _stable_dynamics(candidate_snapshot, self._policy) and _stable_dynamics(
+                incumbent_snapshot, self._policy
+            )
             plausible_gain = _plausible_gain(candidate_snapshot, self._policy)
             plausible_delay = _plausible_delay(candidate_snapshot, self._policy)
             effective_updates = self._challenger_effective_updates
@@ -518,9 +509,7 @@ def _strict_score_win(candidate: float, incumbent: float) -> bool:
     return isfinite(candidate) and isfinite(incumbent) and candidate < incumbent
 
 
-def _not_worse(
-    candidate: float | None, incumbent: float | None, tolerance: float
-) -> bool:
+def _not_worse(candidate: float | None, incumbent: float | None, tolerance: float) -> bool:
     if candidate is None and incumbent is None:
         return True
     return (
@@ -536,10 +525,7 @@ def _stable_dynamics(snapshot: Mapping[str, object], policy: AdaptationPolicy) -
     poles = _values_for_key(snapshot, "poles")
     if not poles:
         poles = _values_for_key(snapshot, "pole")
-    return bool(poles) and all(
-        _finite_complex(pole) and abs(pole) < policy.max_pole_magnitude
-        for pole in poles
-    )
+    return bool(poles) and all(_finite_complex(pole) and abs(pole) < policy.max_pole_magnitude for pole in poles)
 
 
 def _plausible_gain(snapshot: Mapping[str, object], policy: AdaptationPolicy) -> bool:
@@ -548,18 +534,12 @@ def _plausible_gain(snapshot: Mapping[str, object], policy: AdaptationPolicy) ->
         + _values_for_key(snapshot, "dc_gain")
         + _values_for_key(snapshot, "final_gain")
     )
-    return bool(gains) and all(
-        _finite_real(gain) and policy.min_gain <= gain <= policy.max_gain
-        for gain in gains
-    )
+    return bool(gains) and all(_finite_real(gain) and policy.min_gain <= gain <= policy.max_gain for gain in gains)
 
 
 def _plausible_delay(snapshot: Mapping[str, object], policy: AdaptationPolicy) -> bool:
     delays = _values_for_key(snapshot, "delay_steps")
-    return bool(delays) and all(
-        _finite_real(delay) and 0.0 <= delay <= policy.max_delay_steps
-        for delay in delays
-    )
+    return bool(delays) and all(_finite_real(delay) and 0.0 <= delay <= policy.max_delay_steps for delay in delays)
 
 
 def _state_aligned(
@@ -573,10 +553,7 @@ def _state_aligned(
             "laguerre-dmc/v1",
         }
     errors = _values_for_key(snapshot, "alignment_error_c")
-    return bool(errors) and all(
-        _finite_real(error) and abs(error) <= policy.max_alignment_error_c
-        for error in errors
-    )
+    return bool(errors) and all(_finite_real(error) and abs(error) <= policy.max_alignment_error_c for error in errors)
 
 
 def _values_for_key(value: object, key: str) -> list[float | complex]:

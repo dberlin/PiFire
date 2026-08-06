@@ -104,6 +104,7 @@ class LaguerreDMC:
         self._refreshes = 0
 
         self._max_plausible_gain: float | None = None
+
     @property
     def _active(self) -> _Candidate:
         if not self._candidates:
@@ -139,8 +140,7 @@ class LaguerreDMC:
 
         self._active_index = min(
             range(len(candidates)),
-            key=lambda index: candidates[index].validation_error
-            / max(1, candidates[index].validation_samples),
+            key=lambda index: candidates[index].validation_error / max(1, candidates[index].validation_samples),
         )
         for candidate in candidates:
             self._fit_candidate(candidate, record, slice(0, record.time_s.size))
@@ -196,10 +196,7 @@ class LaguerreDMC:
                 updated = True
 
         self._append_observation(observation)
-        if (
-            self._last_refresh_time_s is None
-            or observation.time_s - self._last_refresh_time_s >= _REFRESH_SECONDS
-        ):
+        if self._last_refresh_time_s is None or observation.time_s - self._last_refresh_time_s >= _REFRESH_SECONDS:
             self._refresh_candidate(observation.time_s)
         return UpdateOutcome(
             predicted_temp_c=prediction,
@@ -317,19 +314,14 @@ class LaguerreDMC:
                     )
         return candidates
 
-    def _fit_candidate(
-        self, candidate: _Candidate, record: SignalRecord, rows: slice
-    ) -> None:
+    def _fit_candidate(self, candidate: _Candidate, record: SignalRecord, rows: slice) -> None:
         indexes = np.arange(record.time_s.size)[rows]
         input_features = self._input_features(candidate, record.q)[indexes]
         Phi = np.column_stack((input_features, record.ambient_c[indexes], np.ones(indexes.size)))
         target = record.temp_c[indexes]
         D2 = _second_difference(candidate.basis.shape[0])
         basis = candidate.basis
-        normal = (
-            input_features.T @ input_features
-            + self._config.lambda_curve * (D2 @ basis).T @ (D2 @ basis)
-        )
+        normal = input_features.T @ input_features + self._config.lambda_curve * (D2 @ basis).T @ (D2 @ basis)
         rhs = input_features.T @ target
         full_normal = Phi.T @ Phi
         full_normal[: candidate.terms, : candidate.terms] = normal
@@ -342,26 +334,19 @@ class LaguerreDMC:
         candidate.coefficients = _solve_information(factor, full_rhs)
         self._project_gain(candidate)
 
-    def _feature(
-        self, candidate: _Candidate, inputs: FloatArray, ambient_c: float
-    ) -> FloatArray:
+    def _feature(self, candidate: _Candidate, inputs: FloatArray, ambient_c: float) -> FloatArray:
         feature = np.empty(candidate.terms + 2, dtype=np.float64)
         feature[: candidate.terms] = self._input_features(candidate, inputs)[-1]
         feature[-2] = ambient_c
         feature[-1] = 1.0
         return feature
 
-
-    def _predict_indices(
-        self, candidate: _Candidate, inputs: FloatArray, ambient: FloatArray
-    ) -> FloatArray:
+    def _predict_indices(self, candidate: _Candidate, inputs: FloatArray, ambient: FloatArray) -> FloatArray:
         input_features = self._input_features(candidate, inputs)
         design = np.column_stack((input_features, ambient, np.ones(inputs.size)))
         return design @ candidate.coefficients
 
-    def _input_features(
-        self, candidate: _Candidate, inputs: FloatArray
-    ) -> FloatArray:
+    def _input_features(self, candidate: _Candidate, inputs: FloatArray) -> FloatArray:
         delta = np.diff(np.concatenate((np.zeros(1, dtype=np.float64), inputs)))
         output = np.zeros((inputs.size, candidate.terms), dtype=np.float64)
         for term in range(candidate.terms):
@@ -369,19 +354,13 @@ class LaguerreDMC:
             if candidate.delay_steps == 0:
                 output[:, term] = convolution
             elif candidate.delay_steps < inputs.size:
-                output[candidate.delay_steps :, term] = convolution[
-                    : -candidate.delay_steps
-                ]
+                output[candidate.delay_steps :, term] = convolution[: -candidate.delay_steps]
             settled_start = candidate.delay_steps + candidate.basis.shape[0]
             if settled_start < inputs.size:
-                output[settled_start :, term] += (
-                    candidate.basis[-1, term] * inputs[: -settled_start]
-                )
+                output[settled_start:, term] += candidate.basis[-1, term] * inputs[:-settled_start]
         return output
 
-    def _rls_update(
-        self, candidate: _Candidate, feature: FloatArray, target: float
-    ) -> None:
+    def _rls_update(self, candidate: _Candidate, feature: FloatArray, target: float) -> None:
         factor = np.vstack(
             (
                 np.sqrt(self._config.forgetting_factor) * candidate.information_factor,
@@ -392,12 +371,8 @@ class LaguerreDMC:
         signs = np.where(np.diag(information_factor) < 0.0, -1.0, 1.0)
         information_factor *= signs[:, np.newaxis]
         candidate.information_factor = information_factor
-        candidate.normal_rhs = (
-            self._config.forgetting_factor * candidate.normal_rhs + feature * target
-        )
-        candidate.coefficients = _solve_information(
-            candidate.information_factor, candidate.normal_rhs
-        )
+        candidate.normal_rhs = self._config.forgetting_factor * candidate.normal_rhs + feature * target
+        candidate.coefficients = _solve_information(candidate.information_factor, candidate.normal_rhs)
         self._project_gain(candidate)
 
     def _project_gain(self, candidate: _Candidate) -> None:
@@ -410,16 +385,11 @@ class LaguerreDMC:
         candidate.projected_gain = not np.isclose(raw_gain, clipped_gain, atol=1e-10)
         if candidate.projected_gain:
             candidate.coefficients[: candidate.terms] += (
-                (clipped_gain - raw_gain)
-                * response_row
-                / max(float(response_row @ response_row), _EPSILON)
+                (clipped_gain - raw_gain) * response_row / max(float(response_row @ response_row), _EPSILON)
             )
 
     def _refresh_candidate(self, refresh_time_s: float) -> None:
-        losses = [
-            candidate.validation_error / max(1, candidate.validation_samples)
-            for candidate in self._candidates
-        ]
+        losses = [candidate.validation_error / max(1, candidate.validation_samples) for candidate in self._candidates]
         challenger_index = int(np.argmin(losses))
         active_loss = losses[self._active_index]
         if (
@@ -507,9 +477,7 @@ class LaguerreDMC:
             final_gain = max(float(step[-1]), _EPSILON)
             tail = np.zeros(horizon, dtype=np.float64)
             available = min(horizon, step.size)
-            tail[:available] = (
-                final_gain - step[:available]
-            ) / final_gain
+            tail[:available] = (final_gain - step[:available]) / final_gain
             free += correction * np.maximum(tail, 0.0)
         return free, response
 
@@ -531,9 +499,7 @@ def laguerre_basis(length: int, terms: int, pole: float) -> FloatArray:
     for term in range(1, terms):
         for index in range(1, length):
             basis[index, term] = (
-                pole * basis[index - 1, term]
-                + basis[index - 1, term - 1]
-                - pole * basis[index, term - 1]
+                pole * basis[index - 1, term] + basis[index - 1, term - 1] - pole * basis[index, term - 1]
             )
     basis.setflags(write=False)
     return basis

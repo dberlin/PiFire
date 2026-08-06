@@ -74,7 +74,9 @@ class ArmFailure:
     def __post_init__(self) -> None:
         if not all(isinstance(value, str) and value for value in (self.arm, self.scenario, self.category, self.detail)):
             raise ValueError("failure fields must be non-empty strings")
-        if self.matrix_key is not None and (self.matrix_key.arm != self.arm or self.matrix_key.scenario != self.scenario):
+        if self.matrix_key is not None and (
+            self.matrix_key.arm != self.arm or self.matrix_key.scenario != self.scenario
+        ):
             raise ValueError("failure matrix key must match arm and scenario")
 
     def to_document(self) -> dict[str, Any]:
@@ -124,9 +126,7 @@ class ArmEvidence:
         if self.name not in _COMPLEXITY:
             raise ValueError(f"unknown arm {self.name!r}")
         scores = {str(domain): float(score) for domain, score in self.domain_median_scores.items()}
-        ranking_scores = {
-            str(domain): float(score) for domain, score in self.ranking_domain_scores.items()
-        }
+        ranking_scores = {str(domain): float(score) for domain, score in self.ranking_domain_scores.items()}
         if not ranking_scores:
             ranking_scores = scores
         if not scores or not all(isfinite(score) and score >= 0.0 for score in scores.values()):
@@ -142,9 +142,15 @@ class ArmEvidence:
             raise ValueError("raw timing distributions must be finite and non-negative")
         for name, values in distributions.items():
             object.__setattr__(self, name, values)
-        learner_p99 = _p99(distributions["raw_learner_ms"]) if distributions["raw_learner_ms"] else float(self.raw_learner_p99_ms)
-        refresh_p99 = _p99(distributions["raw_refresh_ms"]) if distributions["raw_refresh_ms"] else float(self.raw_refresh_p99_ms)
-        solve_p99 = _p99(distributions["raw_solve_ms"]) if distributions["raw_solve_ms"] else float(self.raw_solve_p99_ms)
+        learner_p99 = (
+            _p99(distributions["raw_learner_ms"]) if distributions["raw_learner_ms"] else float(self.raw_learner_p99_ms)
+        )
+        refresh_p99 = (
+            _p99(distributions["raw_refresh_ms"]) if distributions["raw_refresh_ms"] else float(self.raw_refresh_p99_ms)
+        )
+        solve_p99 = (
+            _p99(distributions["raw_solve_ms"]) if distributions["raw_solve_ms"] else float(self.raw_solve_p99_ms)
+        )
         values = (
             self.prediction_error,
             self.before_mae,
@@ -183,12 +189,8 @@ class ArmEvidence:
         object.__setattr__(self, "projected_solve_p99_ms", float(projected))
         object.__setattr__(self, "runtime_validity", self.runtime_validity)
         object.__setattr__(self, "simulator_diagnostics", _freeze(self.simulator_diagnostics))
-        object.__setattr__(
-            self, "simulator_diagnostics_available", bool(self.simulator_diagnostics_available)
-        )
-        object.__setattr__(
-            self, "simulator_diagnostics_valid", bool(self.simulator_diagnostics_valid)
-        )
+        object.__setattr__(self, "simulator_diagnostics_available", bool(self.simulator_diagnostics_available))
+        object.__setattr__(self, "simulator_diagnostics_valid", bool(self.simulator_diagnostics_valid))
         object.__setattr__(
             self,
             "simulator_gain_error_c_per_q",
@@ -307,16 +309,8 @@ class ExperimentArtifact:
                     "simulator_prediction_diagnostics",
                     "adaptation",
                 )
-                shared = {
-                    key: model_evidence[key]
-                    for key in shared_keys
-                    if key in model_evidence
-                }
-                runtime = {
-                    key: value
-                    for key, value in model_evidence.items()
-                    if key not in shared_keys
-                }
+                shared = {key: model_evidence[key] for key in shared_keys if key in model_evidence}
+                runtime = {key: value for key, value in model_evidence.items() if key not in shared_keys}
                 previous = bundles.setdefault(str(evidence_id), shared)
                 if previous != shared:
                     raise ValueError(f"evidence_id {evidence_id!r} has conflicting raw origins")
@@ -473,9 +467,7 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
             failures_by_arm.setdefault(failure.arm, []).append(reason)
     recommendations: dict[str, ArmRecommendation] = {}
     valid_evidence: list[ArmEvidence] = []
-    diagnostics_present = any(
-        evidence.simulator_diagnostics_available for evidence in artifact.arms
-    )
+    diagnostics_present = any(evidence.simulator_diagnostics_available for evidence in artifact.arms)
     for evidence in artifact.arms:
         reasons = sorted(set(failures_by_arm.get(evidence.name, ())))
         if evidence.runtime_validity == "measured" and (
@@ -489,38 +481,23 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
         elif evidence.simulator_diagnostics_available and not evidence.simulator_diagnostics_valid:
             reasons.append("invalid simulator gain/delay/coast diagnostics")
         valid = not reasons
-        recommendations[evidence.name] = ArmRecommendation(
-            valid, tuple(reasons), evidence.worst_domain_score
-        )
+        recommendations[evidence.name] = ArmRecommendation(valid, tuple(reasons), evidence.worst_domain_score)
         if valid:
             valid_evidence.append(evidence)
-    include_runtime = all(
-        item.runtime_validity == "measured" for item in valid_evidence
-    )
+    include_runtime = all(item.runtime_validity == "measured" for item in valid_evidence)
     include_diagnostics = bool(valid_evidence) and all(
-        item.simulator_diagnostics_available and item.simulator_diagnostics_valid
-        for item in valid_evidence
+        item.simulator_diagnostics_available and item.simulator_diagnostics_valid for item in valid_evidence
     )
-    include_recovery = bool(valid_evidence) and all(
-        item.recovery_available for item in valid_evidence
-    )
-    frontier = _pareto_frontier(
-        valid_evidence, include_runtime, include_diagnostics, include_recovery
-    )
+    include_recovery = bool(valid_evidence) and all(item.recovery_available for item in valid_evidence)
+    frontier = _pareto_frontier(valid_evidence, include_runtime, include_diagnostics, include_recovery)
     ranking_pool = list(frontier) if include_diagnostics else valid_evidence
     selected: str | None = None
-    if ranking_pool and not _material_pareto_conflict(
-        frontier, include_runtime, include_diagnostics, include_recovery
-    ):
+    if ranking_pool and not _material_pareto_conflict(frontier, include_runtime, include_diagnostics, include_recovery):
         best_score = min(item.worst_domain_score for item in ranking_pool)
-        contenders = [
-            item for item in ranking_pool if item.worst_domain_score <= best_score * 1.05
-        ]
+        contenders = [item for item in ranking_pool if item.worst_domain_score <= best_score * 1.05]
         selected = min(
             contenders,
-            key=lambda item: _selection_key(
-                item, include_runtime, include_diagnostics, include_recovery
-            ),
+            key=lambda item: _selection_key(item, include_runtime, include_diagnostics, include_recovery),
         ).name
     return Recommendation(
         MappingProxyType(dict(sorted(recommendations.items()))),
@@ -541,11 +518,7 @@ def render_table(artifact: ExperimentArtifact, recommendation: Recommendation | 
             if evidence.runtime_validity == "not_measured"
             else f"projected-p99={evidence.projected_solve_p99_ms:.3f}ms"
         )
-        miss = (
-            f"true ({evidence.operational_consequence})"
-            if evidence.target_missed
-            else "false"
-        )
+        miss = f"true ({evidence.operational_consequence})" if evidence.target_missed else "false"
         lines.append(
             f"{evidence.name:<17}{str(result.valid):<7}{evidence.worst_domain_score:<13.3f}"
             f"{timing:<25}{miss:<15}{reasons}"
@@ -566,10 +539,7 @@ def _pareto_frontier(
     scales = tuple(
         max(min(values), 1e-12)
         for values in zip(
-            *(
-                _pareto_values(item, include_runtime, include_diagnostics, include_recovery)
-                for item in evidence
-            )
+            *(_pareto_values(item, include_runtime, include_diagnostics, include_recovery) for item in evidence)
         )
     )
     return tuple(
@@ -634,15 +604,11 @@ def _dominates(
 ) -> bool:
     normalized_left = tuple(
         value / scale
-        for value, scale in zip(
-            _pareto_values(left, include_runtime, include_diagnostics, include_recovery), scales
-        )
+        for value, scale in zip(_pareto_values(left, include_runtime, include_diagnostics, include_recovery), scales)
     )
     normalized_right = tuple(
         value / scale
-        for value, scale in zip(
-            _pareto_values(right, include_runtime, include_diagnostics, include_recovery), scales
-        )
+        for value, scale in zip(_pareto_values(right, include_runtime, include_diagnostics, include_recovery), scales)
     )
     return all(a <= b for a, b in zip(normalized_left, normalized_right)) and any(
         a < b * 0.95 for a, b in zip(normalized_left, normalized_right) if b > 0.0
@@ -658,17 +624,12 @@ def _material_pareto_conflict(
     if len(frontier) < 2:
         return False
     for values in zip(
-        *(
-            _pareto_values(item, include_runtime, include_diagnostics, include_recovery)
-            for item in frontier
-        )
+        *(_pareto_values(item, include_runtime, include_diagnostics, include_recovery) for item in frontier)
     ):
         scale = max(1e-12, max(abs(value) for value in values))
         if (max(values) - min(values)) / scale > 0.05:
             return True
     return False
-
-
 
 
 def _p99(values: Sequence[float]) -> float:

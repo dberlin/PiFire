@@ -468,7 +468,7 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     )
     time_s, temperatures_c, loads = load_trace_samples(session_id=session_id)
     assert time_s.tolist() == [0.0, 0.0, 0.0]
-    assert temperatures_c.tolist() == [100.0, 100.0, 100.0]
+    assert temperatures_c.tolist() == pytest.approx([(100.0 - 32.0) * 5.0 / 9.0] * 3)
     assert loads.tolist() == [0.3, 0.4, 0.3]
 
 
