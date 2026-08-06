@@ -705,54 +705,30 @@ def test_load_trace_samples_has_equivalent_fahrenheit_and_celsius_frames(ds):
         )
         return _session().model_copy(update={"session_id": session_id, "payload": payload})
 
-    def update(session_id, revision, end_ms, temperature):
-        record = _update(revision, end_ms, temperature, 0.4, mode=ActuationMode.FRAMED_PULSE)
+    def in_session(record, session_id):
         return record.model_copy(update={"session_id": session_id})
-
-    def frame(session_id, revision, start_ms, end_ms):
-        return ControlTraceRecord(
-            ts_ms=end_ms,
-            session_id=session_id,
-            cook_id=COOK_ID,
-            controller=ControllerType.MPC,
-            event_kind=TraceEventKind.ACTUATION_FRAME,
-            payload=FramedPulseFramePayload(
-                result_revision=revision,
-                pulse_slot_seconds=2.0,
-                frame_seconds=20.0,
-                frame_start_ms=start_ms,
-                frame_end_ms=end_ms,
-                requested_combustion_load=0.4,
-                requested_auger_duty=0.4,
-                credit_before_seconds=0.0,
-                credit_after_seconds=0.0,
-                scheduled_on_seconds=8.0,
-                delivered_on_seconds=7.0,
-                transition_count=2,
-                actual_start_active=False,
-                actual_end_active=False,
-                requested_fan_duty=None,
-                applied_fan_duty=None,
-                skipped=False,
-                stale_command=False,
-                inhibit_reason=InhibitReason.NONE,
-                reset_reason=None,
-            ),
-        )
 
     records = []
     for session_id, temperatures in (("fahrenheit", (212.0, 230.0)), ("celsius", (100.0, 110.0))):
         unit = "F" if session_id == "fahrenheit" else "C"
         records.append(session(session_id, unit))
         for revision, (start_ms, end_ms, temperature) in enumerate(
-            ((0, 20_000, temperatures[0]), (20_000, 40_000, temperatures[1])), start=1
+            ((0, 5_000, temperatures[0]), (5_000, 10_000, temperatures[1])), start=1
         ):
+            allocation = _allocation(revision, 0.4)
             records.extend(
-                (
-                    frame(session_id, revision, start_ms, end_ms),
-                    update(session_id, revision, end_ms, temperature),
-                    _applied(revision, end_ms + 1, start_ms, end_ms, 0.35).model_copy(
-                        update={"session_id": session_id}
+                in_session(record, session_id)
+                for record in (
+                    _update(revision, start_ms, temperature, 0.4),
+                    _allocation_record(start_ms, allocation),
+                    _frame(revision, start_ms, end_ms, allocation),
+                    _applied(
+                        revision,
+                        end_ms,
+                        start_ms,
+                        end_ms,
+                        0.4,
+                        auger_duty=allocation.requested_auger_duty,
                     ),
                 )
             )

@@ -1402,8 +1402,6 @@ class HoldMode(ControlMode):
             self._trace_update(result, now, controller_interval)
             framed_feedback_due = True
             snapshot = self._runner.get_model_snapshot()
-            if snapshot is not None and not self._model_store.save(self._controller_name, snapshot):
-                _control.eventLogger.debug(f"Did not persist the {self._controller_name} model this tick")
             if isinstance(snapshot, dict):
                 self._checkpoint_model(snapshot)
 
