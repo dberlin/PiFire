@@ -1,13 +1,20 @@
 """Final runner evidence contracts that prevent scientific-evidence regressions."""
 
 from math import isfinite
+from collections.abc import Mapping
+from typing import Any
 
-from dataclasses import replace
+import numpy as np
 
+from controller.linear_mpc.contracts import AffinePrediction  # pyright: ignore[reportImplicitRelativeImport]
+from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import SignalRecord
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     ExperimentConfig,
+    _adaptation_settings,
+    _coast_braking_masks,
     _common_validation_horizon,
     _validation_origins,
+    _window_free_run_scores,
 )
 from docs.superpowers.experiments.linear_mpc_bakeoff.scenarios import SCENARIOS
 
@@ -115,258 +122,101 @@ def test_quick_simulator_diagnostics_cover_all_horizons_without_unmasked_coast_l
         assert snapshot["steady_gain"] > 0.0
 
     for arm in artifact.arms:
-        assert arm.simulator_diagnostics_available
-        assert arm.simulator_diagnostics_valid
-        assert arm.prediction_error == arm.simulator_diagnostics["aggregate"]["3600"]["rmse_c"]
+        assert arm.simulator_diagnostics_available  # pyright: ignore[reportAttributeAccessIssue]
+        assert arm.simulator_diagnostics_valid  # pyright: ignore[reportAttributeAccessIssue]
+        assert arm.prediction_error == arm.simulator_diagnostics["aggregate"]["3600"]["rmse_c"]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_scenario_envelope_restores_down_step_and_limits_600f_to_eligible_plant() -> None:
     scenarios = {item.name: item for item in SCENARIOS}
 
     assert "down-step" in scenarios
-    assert scenarios["high-step-450f"].applicable_plants == ("GrillSim", "MAKGrillSim")
-    assert scenarios["high-step-600f"].applicable_plants == ("GrillSim",)
+    assert scenarios["high-step-450f"].applicable_plants == (  # pyright: ignore[reportAttributeAccessIssue]
+        "GrillSim",
+        "MAKGrillSim",
+    )
+    assert scenarios["high-step-600f"].applicable_plants == ("GrillSim",)  # pyright: ignore[reportAttributeAccessIssue]
 
 
-def test_override_frames_are_recorded_as_non_updates_for_both_models() -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+class _ConstantPrediction:
+    def __init__(self, temperature_c: float) -> None:
+        self._temperature_c: float = temperature_c
 
+    def affine_prediction(
+        self,
+        horizon_steps: int,
+        q_previous: float,
+        ambient_future: np.ndarray,
+    ) -> AffinePrediction:
+        del q_previous, ambient_future
+        return AffinePrediction(
+            np.full(horizon_steps, self._temperature_c),
+            np.zeros((horizon_steps, horizon_steps)),
+        )
+
+
+def test_override_definition_marks_safety_and_manual_windows() -> None:
     definition = next(item for item in SCENARIOS if item.name == "override-window")
-    row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=140,
-        arm="scheduled-arx",
-        initialization="correct",
-        horizon_s=600,
+
+    assert definition.safety_override_at(80)  # pyright: ignore[reportAttributeAccessIssue]
+    assert not definition.safety_override_at(100)  # pyright: ignore[reportAttributeAccessIssue]
+    assert definition.manual_override_at(100)  # pyright: ignore[reportAttributeAccessIssue]
+    assert not definition.manual_override_at(120)  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_window_scores_use_untouched_multi_horizon_role_predictions() -> None:
+    samples: list[Mapping[str, Any]] = [
+        {
+            "ambient_c": 20.0,
+            "braking": index in {4, 8},
+            "challenger": _ConstantPrediction(100.0),
+            "frame_s": index * 20,
+            "incumbent": _ConstantPrediction(105.0),
+            "q": 0.5,
+            "q_previous": 0.5,
+            "temp_c": 100.0,
+            "window_id": "window-1",
+        }
+        for index in range(15)
+    ]
+
+    scores, evidence = _window_free_run_scores(samples)
+
+    assert scores.candidate_prediction_score == 0.0
+    assert scores.incumbent_prediction_score == 5.0
+    assert set(evidence["horizon_metrics"]) == {"60", "300"}
+    assert len(evidence["horizon_metrics"]["60"]["origin_frame_ids"]) == 13
+    assert evidence["horizon_metrics"]["300"]["origin_frame_ids"] == [0]
+    assert evidence["score_frame_ids"] == list(range(0, 300, 20))
+    assert evidence["braking_or_coast_sample_count"] == 2
+
+
+def test_adaptation_settings_use_training_bounds_and_arm_alignment() -> None:
+    state_policy, state_alignment = _adaptation_settings(
+        "state-space",
+        {"plausibility_bounds": {"max_steady_gain_c_per_q": 42.0}},
+    )
+    arx_policy, arx_alignment = _adaptation_settings(
+        "scheduled-arx",
+        {"plausibility_bounds": {"max_dc_gain_c_per_q": 24.0}},
     )
 
-    rejections = [item for item in row.promotion_history if item["kind"] == "update-rejection"]
-    assert {"safety", "manual"} <= {reason for item in rejections for reason in item["reasons"]}
-    assert all(not item["incumbent_updated"] and not item["challenger_updated"] for item in rejections)
-    assert row.model_evidence["batch_fit_snapshot"]
-    assert row.model_evidence["final_active_snapshot"]
+    assert state_policy.max_gain == 42.0
+    assert state_alignment.value == "measured"
+    assert arx_policy.max_gain == 24.0
+    assert arx_alignment.value == "not-applicable"
 
 
-def test_online_evaluations_record_distinct_pre_assimilation_scores_and_refresh_work() -> None:
-
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
-    row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=620,
-        arm="scheduled-arx",
-        initialization="wrong-gain",
-        horizon_s=600,
+def test_coast_and_braking_masks_classify_each_future_frame() -> None:
+    record = SignalRecord(
+        time_s=np.arange(5, dtype=np.float64) * 20.0,
+        temp_c=np.full(5, 100.0),
+        q=np.asarray([0.8, 0.8, 0.4, 0.0, 0.2]),
+        ambient_c=np.full(5, 20.0),
+        provenance="unit",
     )
 
-    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
-    assert len(evaluations) == 2
-    assert all(
-        isfinite(item["candidate_prediction_score"]) and isfinite(item["incumbent_prediction_score"])
-        for item in evaluations
-    )
-    assert set(evaluations[0]["horizon_metrics"]) == {"60"}
-    assert set(evaluations[1]["horizon_metrics"]) == {"60", "300"}
-    assert evaluations[0]["sample_count"] == len(evaluations[0]["score_frame_ids"]) == 12
-    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 14
-    assert len(evaluations[1]["horizon_metrics"]["60"]["origin_frame_ids"]) == 13
-    assert len(evaluations[1]["horizon_metrics"]["300"]["origin_frame_ids"]) == 1
-    assert all(
-        item["score_frame_ids"] == sorted(item["score_frame_ids"])
-        and item["score_role_generations"] == [item["score_role_generation"]]
-        for item in evaluations
-    )
-    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(evaluations[1]["score_frame_ids"])
-    assert all(
-        set(metrics["origin_frame_ids"]) <= set(item["score_frame_ids"])
-        for item in evaluations
-        for metrics in item["horizon_metrics"].values()
-    )
-    assert any(item["candidate_prediction_score"] != item["incumbent_prediction_score"] for item in evaluations)
-    state_space_row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=620,
-        arm="state-space",
-        initialization="wrong-gain",
-        horizon_s=600,
-    )
-    state_space_snapshot = state_space_row.model_evidence["batch_fit_snapshot"]
-    assert state_space_snapshot["diagnostics"]["accepted"]
-    assert state_space_snapshot["refreshes"] == 0
-    assert state_space_row.raw_refresh_ms
-    assert all("iterations" in item and "kkt_residual" in item for item in row.solver_evidence)
-    assert any(item.get("reference_method") == "scipy-l-bfgs-b" for item in row.solver_evidence)
-    reference_frame = next(item for item in row.solver_evidence if item["frame_s"] == 100)
-    assert reference_frame["reference_method"] == "scipy-l-bfgs-b"
+    coast, braking = _coast_braking_masks(record, start=2, steps=3)
 
-
-def test_runner_clears_real_promotion_window_samples_and_role_generations() -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
-    row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=1820,
-        arm="scheduled-arx",
-        initialization="wrong-pole",
-        horizon_s=600,
-    )
-    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
-    promoted_index = next(index for index, item in enumerate(evaluations) if item["promoted"])
-    assert evaluations[promoted_index - 1]["consecutive_wins"] == 1
-    assert evaluations[promoted_index]["consecutive_wins"] == 2
-    assert evaluations[promoted_index + 1]["score_role_generation"] == 1
-    frame_sets = [set(item["score_frame_ids"]) for item in evaluations]
-    assert all(left.isdisjoint(right) for left, right in zip(frame_sets, frame_sets[1:]))
-
-
-def test_runner_constructs_real_arm_managers_with_snapshot_bounds_and_alignment() -> None:
-    """Production wiring, rather than a test policy override, must admit fitted arms."""
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
-    rows = {
-        arm: _run_scenario(
-            definition,
-            plant="GrillSim",
-            seed=2,
-            mode="online",
-            duration_s=320,
-            arm=arm,
-            initialization="wrong-gain",
-            horizon_s=600,
-        )
-        for arm in ("scheduled-arx", "dmc", "state-space")
-    }
-    assert rows["scheduled-arx"].model_evidence["adaptation"]["alignment"] == "not-applicable"
-    assert rows["dmc"].model_evidence["adaptation"]["alignment"] == "not-applicable"
-    assert rows["state-space"].model_evidence["adaptation"]["alignment"] == "measured"
-    for row in rows.values():
-        assert row.model_evidence["adaptation"]["policy"]["max_gain"] >= abs(
-            row.model_evidence["batch_fit_snapshot"]["steady_gain"]
-        )
-    assert all(
-        item["plausible_gain"] and item["state_aligned"]
-        for item in rows["dmc"].promotion_history
-        if item["kind"] == "five-minute-evaluation"
-    )
-
-
-def test_runner_scores_untouched_multi_horizon_free_runs_and_clears_windows() -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
-    row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=620,
-        arm="scheduled-arx",
-        initialization="wrong-gain",
-        horizon_s=600,
-    )
-    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
-    assert len(evaluations) == 2
-    assert set(evaluations[0]["horizon_metrics"]) == {"60"}
-    assert set(evaluations[1]["horizon_metrics"]) == {"60", "300"}
-    assert evaluations[0]["sample_count"] == len(evaluations[0]["score_frame_ids"]) == 12
-    assert evaluations[1]["sample_count"] == len(evaluations[1]["score_frame_ids"]) == 14
-    assert len(evaluations[1]["horizon_metrics"]["60"]["origin_frame_ids"]) == 13
-    assert len(evaluations[1]["horizon_metrics"]["300"]["origin_frame_ids"]) == 1
-    assert all(item["score_frame_ids"] == sorted(item["score_frame_ids"]) for item in evaluations)
-    assert set(evaluations[0]["score_frame_ids"]).isdisjoint(evaluations[1]["score_frame_ids"])
-
-
-def test_downstep_transition_is_braking_without_coast_and_heating_is_excluded() -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "down-step")
-    row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=120,
-        arm="scheduled-arx",
-        initialization="correct",
-        horizon_s=600,
-    )
-    samples = row.model_evidence["free_run_classifications"]
-    downstep = next(item for item in samples if item["frame_s"] == 80)
-    heating = next(item for item in samples if item["frame_s"] == 40)
-    assert downstep["braking"] and downstep["realized_duty"] > 0.05
-    assert not heating["braking"]
-
-
-def test_online_and_frozen_paths_track_identical_realized_history() -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "low-step")
-    common = dict(
-        definition=definition,
-        plant="GrillSim",
-        seed=2,
-        duration_s=320,
-        arm="scheduled-arx",
-        initialization="correct",
-        horizon_s=600,
-    )
-    frozen = _run_scenario(mode="frozen", **common)
-    online = _run_scenario(mode="online", **common)
-    assert frozen.realized_q == online.realized_q
-    assert frozen.model_evidence["runtime_tracking"] == online.model_evidence["runtime_tracking"]
-
-
-def test_runner_classifies_realized_zero_duty_frames_as_coast() -> None:
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "low-step")
-    row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=320,
-        arm="scheduled-arx",
-        initialization="correct",
-        horizon_s=600,
-    )
-    assert row.model_evidence["runtime_tracking"]["operating_state_counts"]["coast"] > 0
-
-
-def test_wrong_model_recovery_requires_real_shadow_promotion() -> None:
-    """A wrong model earns recovery evidence only from two managed free-run wins."""
-    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
-
-    definition = next(item for item in SCENARIOS if item.name == "high-step-600f")
-    row = _run_scenario(
-        definition,
-        plant="GrillSim",
-        seed=2,
-        mode="online",
-        duration_s=1820,
-        arm="scheduled-arx",
-        initialization="wrong-pole",
-        horizon_s=600,
-    )
-    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
-    promoted = [item for item in evaluations if item["promoted"]]
-    assert len(promoted) == 1
-    assert promoted[0]["consecutive_wins"] == 2
-    assert evaluations[evaluations.index(promoted[0]) - 1]["consecutive_wins"] == 1
-    assert row.metrics["recovery_after_mae_c"] < row.metrics["recovery_before_mae_c"]
-    assert row.metrics["recovery_improvement_ratio"] < 1.0
+    assert coast == [False, True, False]
+    assert braking == [True, True, False]

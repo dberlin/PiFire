@@ -5,16 +5,13 @@ from __future__ import annotations
 import json
 import gzip
 import re
-import os
-import subprocess
-import sys
+import pytest
 from pathlib import Path
 from docs.superpowers.experiments.linear_mpc_bakeoff import runner as runner_module
-from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _read_artifact_document
+from docs.superpowers.experiments.linear_mpc_bakeoff.__main__ import main
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _select_validation_horizon
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _source_revision
-from docs.superpowers.experiments.linear_mpc_bakeoff.artifact import ExperimentArtifact
-from docs.superpowers.experiments.linear_mpc_bakeoff.runner import load_artifact
+from docs.superpowers.experiments.linear_mpc_bakeoff.runner import load_artifact  # pyright: ignore[reportAttributeAccessIssue]
 from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_tiny_matrix
 
 
@@ -22,7 +19,7 @@ def _checkpoint_rows(checkpoint: Path) -> list[dict[str, object]]:
     manifest = json.loads(checkpoint.read_text())
     assert manifest["checkpoint_schema"] == "incremental-cas/v2"
     rows: list[dict[str, object]] = []
-    entries, _ = runner_module._checkpoint_delta_entries(
+    entries, _ = runner_module._checkpoint_delta_entries(  # pyright: ignore[reportAttributeAccessIssue]
         checkpoint, manifest["head"], manifest["run_fingerprint"], manifest["accepted_count"]
     )
     for entry in entries:
@@ -32,25 +29,15 @@ def _checkpoint_rows(checkpoint: Path) -> list[dict[str, object]]:
     return rows
 
 
-def test_quick_mode_writes_requested_output_and_table(tmp_path: Path) -> None:
+def test_quick_mode_writes_requested_output_and_table(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     output = tmp_path / "quick.manifest.json"
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "docs.superpowers.experiments.linear_mpc_bakeoff",
-            "--quick",
-            "--output",
-            str(output),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "UV_NO_SYNC": "1"},
-    )
 
-    assert completed.returncode == 0, completed.stderr
-    assert "arm" in completed.stdout
+    assert main(["--quick", "--output", str(output)]) == 0
+
+    assert "arm" in capsys.readouterr().out
     assert load_artifact(output).to_document()["schema_version"] == 1
     # Full has 1,080 rows versus quick's 144; eight quick bundles bound its transport.
     assert output.stat().st_size * 8 < 100 * 1024 * 1024
@@ -68,71 +55,45 @@ def test_validation_horizon_selection_uses_only_validation_scores() -> None:
     assert selection["tie_rationale"] == "600 seconds is within 1% of the validation best"
 
 
-def test_resume_requires_existing_checkpoint(tmp_path: Path) -> None:
+def test_resume_requires_existing_checkpoint(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     output = tmp_path / "missing.manifest.json"
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "docs.superpowers.experiments.linear_mpc_bakeoff",
-            "--quick",
-            "--resume",
-            "--output",
-            str(output),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "UV_NO_SYNC": "1"},
-    )
 
-    assert completed.returncode != 0
-    assert "checkpoint" in completed.stderr.lower()
+    with pytest.raises(SystemExit) as error:
+        main(["--quick", "--resume", "--output", str(output)])
+
+    assert error.value.code == 2
+    assert "checkpoint" in capsys.readouterr().err.lower()
 
 
-def test_cli_rejects_non_manifest_output_before_running(tmp_path: Path) -> None:
+def test_cli_rejects_non_manifest_output_before_running(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     output = tmp_path / "unsafe.json.gz"
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "docs.superpowers.experiments.linear_mpc_bakeoff",
-            "--quick",
-            "--output",
-            str(output),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "UV_NO_SYNC": "1"},
-    )
-    assert completed.returncode == 2
-    assert ".manifest.json" in completed.stderr
+
+    with pytest.raises(SystemExit) as error:
+        main(["--quick", "--output", str(output)])
+
+    assert error.value.code == 2
+    assert ".manifest.json" in capsys.readouterr().err
     assert not output.exists()
 
 
-def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(tmp_path: Path) -> None:
+def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     output = tmp_path / "resume.manifest.json"
     run_tiny_matrix(tmp_path / "partial", resume=False, interrupt_after=3, output=output)
     checkpoint = output.with_name("resume.checkpoint.manifest.json")
     partial_rows = _checkpoint_rows(checkpoint)
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "docs.superpowers.experiments.linear_mpc_bakeoff",
-            "--quick",
-            "--resume",
-            "--output",
-            str(output),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "UV_NO_SYNC": "1"},
-    )
 
-    assert completed.returncode == 0, completed.stderr
+    assert main(["--quick", "--resume", "--output", str(output)]) == 0
+
+    assert "arm" in capsys.readouterr().out
     restored = load_artifact(output)
     assert len(restored.scenarios) + len(restored.failures) == 144
     key = lambda row: (row["arm"], row["initialization"], row["plant"], row["scenario"], row["mode"], row["seed"])
