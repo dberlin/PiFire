@@ -51,8 +51,6 @@ def test_every_production_controller_builds_one_pulse_scheduler_and_starts_off(h
     assert hold.state.cycle.cycle_time == 0.0
 
 
-
-
 def test_low_duty_accumulates_to_one_quantum(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.05)])
     hold = hold_cycle(runner, controller="mpc", cycle_data_extra={"u_min": 0.9, "HoldCycleTime": 99})

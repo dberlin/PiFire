@@ -39,7 +39,6 @@ class FakeCore:
     def actuation_mode(self):
         return ActuationMode.FRAMED_PULSE
 
-
     def set_target(self, sp):
         self.target = sp
 

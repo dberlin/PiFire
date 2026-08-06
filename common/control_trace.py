@@ -300,8 +300,6 @@ class AllocationPayload:
         return self
 
 
-
-
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class FramedPulseFramePayload:
     result_revision: NonNegativeInt

@@ -69,5 +69,3 @@ def test_seed_output_reports_zero_when_the_auger_is_off():
 def test_seed_output_reports_manual_override_when_active():
     applied = seed_output(0.15, 100.0, lid_open=False, manual_override_active=True, auger_output=True)
     assert applied.source is OutputSource.MANUAL_OVERRIDE
-
-

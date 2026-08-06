@@ -182,9 +182,6 @@ def _install_recorder(monkeypatch):
     return recorder
 
 
-
-
-
 def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revision(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     result = _mpc_result()
@@ -412,9 +409,6 @@ def test_mpc_trace_marks_the_first_fresh_result_after_runner_staleness(hold_cycl
     assert updates[1].recovered is True
 
 
-
-
-
 def test_mpc_trace_preserves_a_zero_raw_policy_load(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
@@ -427,12 +421,6 @@ def test_mpc_trace_preserves_a_zero_raw_policy_load(hold_cycle, monkeypatch):
     (update,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
 
     assert update.raw_output == 0.0
-
-
-
-
-
-
 
 
 def test_pid_sp_completed_update_records_exact_typed_fields_and_branch(hold_cycle, monkeypatch):
@@ -540,15 +528,6 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
         ).controller
         is ControllerType.MPC
     )
-
-
-
-
-
-
-
-
-
 
 
 def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle, monkeypatch):
@@ -781,15 +760,6 @@ def _run_first_loop_safety_trace(hold_cycle, monkeypatch, *, control_mode=None, 
         for record in recorder.records
         if record.event_kind in (TraceEventKind.SESSION, TraceEventKind.SAFETY_EVENT)
     ]
-
-
-
-
-
-
-
-
-
 
 
 @pytest.mark.parametrize(

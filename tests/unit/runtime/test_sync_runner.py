@@ -22,7 +22,6 @@ class _Core:
     def actuation_mode(self):
         return ActuationMode.FRAMED_PULSE
 
-
     def get_status(self):
         return {"target": self.target}
 

@@ -539,9 +539,6 @@ def test_hold_pwm_duty_from_temp_profile():
     assert ("set_duty_cycle", (75,)) in result.grill_calls
 
 
-
-
-
 def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
     # Pins CURRENT behavior: once a fan-owning controller (MPC) has issued a
     # fan command, later plain-float controller outputs (no 'fan' key) do NOT

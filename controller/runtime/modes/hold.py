@@ -97,8 +97,6 @@ class HoldMode(ControlMode):
     _pulse_scheduler: PulseScheduler | None = None
     _reachability_advisory_key: tuple[float, int, str] | None = None
 
-    
-
     def _pulse_frame_seconds(self) -> float:
         """The scheduler's frame, or zero before one has been built."""
         scheduler = self._pulse_scheduler
@@ -302,14 +300,8 @@ class HoldMode(ControlMode):
         if elapsed <= 0:
             return
         realized_duty = max(0.0, min(1.0, (delivered_on_s - controller.pulse_feedback_delivered_on_s) / elapsed))
-        requested = (
-            controller.pulse_frame_requested_auger_duty if completed_request is None else completed_request
-        )
-        maximum_duty = (
-            controller.pulse_frame_maximum_duty
-            if completed_maximum_duty is None
-            else completed_maximum_duty
-        )
+        requested = controller.pulse_frame_requested_auger_duty if completed_request is None else completed_request
+        maximum_duty = controller.pulse_frame_maximum_duty if completed_maximum_duty is None else completed_maximum_duty
         revision = controller.pulse_frame_result_revision if completed_revision is None else completed_revision
         applied = AppliedOutput(
             ratio=realized_duty,
@@ -433,16 +425,14 @@ class HoldMode(ControlMode):
         if isinstance(model_revision, bool) or not isinstance(model_revision, int) or model_revision < 0:
             model_revision = None
             provenance = None
-        
+
         scheduler = self._pulse_scheduler
-        
+
         payload = SessionPayload(
             controller=controller,
             controller_config=self._trace_settings(config),
             temperature_unit=str(self.settings["globals"]["units"]),
-            control_period_seconds=float(
-                self._runner.control_period() or scheduler.timing.frame_s
-            ),
+            control_period_seconds=float(self._runner.control_period() or scheduler.timing.frame_s),
             model_revision=model_revision,
             model_provenance=provenance if model_revision is not None else None,
             pulse_slot_seconds=float(scheduler.timing.pulse_s),
@@ -681,7 +671,7 @@ class HoldMode(ControlMode):
                 )
         else:
             return False
-        
+
         self.state.controller.trace_result_revision = result.revision
         self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, observed_ms)
         self._trace_last_update_payload = payload
@@ -757,9 +747,7 @@ class HoldMode(ControlMode):
         controller.trace_interval_result_revision = (
             max(0, producing_revision)
             if producing_revision is not None
-            else (
-                max(0, controller.pulse_frame_result_revision)
-            )
+            else (max(0, controller.pulse_frame_result_revision))
         )
         controller.trace_prior_requested_auger_duty = (
             applied.requested if applied.requested is not None else applied.ratio
@@ -770,16 +758,12 @@ class HoldMode(ControlMode):
         controller.trace_combustion_load = None
         controller.trace_prior_combustion_load = None
 
-    
-
-    
-
     name = Mode.HOLD
     _model_store = None
 
     def setup(self):
         import control as _control
-    
+
         self._trace_recorder = None
         self._trace_session_id = None
         self._trace_cook_id = None
@@ -794,26 +778,22 @@ class HoldMode(ControlMode):
             self._trace_recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
             self._trace_warning(f"Control trace recorder unavailable: {error}")
-    
+
         start_fan(self.grill, self.settings)
         self.grill.power_on()
         _control.eventLogger.debug("Power ON, Fan ON, Igniter OFF, Auger OFF")
         # Initialize cycle to minimum ratio.
         self.state.cycle.ratio = self.state.cycle.raw_ratio = 0.0
-        
-        
-        
-        
-        
+
         self.state.lid.open_detected = False
         self.state.lid.expires = 0
         self.state.target_temp_achieved = False
-    
+
         self._model_store = self._model_store or ControllerModelStore(
             reader=self.ctx.store.read_generic_key, writer=self.ctx.store.write_generic_key
         )
         self._controller_name = self.settings["controller"]["selected"]
-    
+
         # Load Controller Module (i.e. PID)
         self._runner, self._controller_status = _runner_mod.build_runner(
             self.settings, self.control, logger=self.ctx.control_log
@@ -822,12 +802,12 @@ class HoldMode(ControlMode):
         if isinstance(actual_type, ControllerType):
             self._controller_name = actual_type.value
         self._runner_configuration_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
-    
+
         if self._runner is not None:
             self._configure_pulse_scheduler()
             self._restore_model()
         self._configure_fan_authority()
-    
+
         _control.eventLogger.debug(
             "On Time = "
             + str(self.state.cycle.on_time)
@@ -838,7 +818,7 @@ class HoldMode(ControlMode):
             + ", CycleRatio = "
             + str(self.state.cycle.ratio)
         )
-    
+
         # Initialize the cycle start time to now. `ControlMode.run()` has not yet
         # set self.state.timers.start_time (that happens after setup_safety,
         # later in the shared pre-loop).
@@ -872,8 +852,6 @@ class HoldMode(ControlMode):
     def _adopt_runner_configuration(self, now, current_output_status):
         """Adopt one actually installed runner generation exactly once."""
         import control as _control
-
-        
 
         self._trace_safety(
             SafetyEventType.CONTROLLER_RECONFIGURE,
@@ -964,9 +942,7 @@ class HoldMode(ControlMode):
         # so deciding more often than that is discarded work, and a PID asked to
         # decide every tick would integrate at the loop rate its gains were
         # never tuned for.
-        controller_interval = self._runner.control_period() or (
-            self._pulse_frame_seconds()
-        )
+        controller_interval = self._runner.control_period() or (self._pulse_frame_seconds())
         framed_feedback_due = False
         pulse_inhibited = False
         if (now - self.state.controller.cycle_start) > controller_interval:
@@ -1118,10 +1094,6 @@ class HoldMode(ControlMode):
                     self._trace_warning(f"Control trace flush failed: {error}")
                     self._trace_warning_active = True
 
-    
-
-    
-
     def _on_manual_output(self, name, output):
         if name != "auger" or self._runner is None:
             return
@@ -1155,7 +1127,6 @@ class HoldMode(ControlMode):
             ),
             self._last_now,
         )
-        
 
     def _on_manual_release(self, name, now):
         if name == "auger":
@@ -1263,7 +1234,7 @@ class HoldMode(ControlMode):
                     sample_complete=False,
                     realized_combustion_load=None,
                 )
-                
+
                 if self._trace_recorder is not None:
                     try:
                         self._trace_recorder.close()

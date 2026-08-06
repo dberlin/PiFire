@@ -25,7 +25,6 @@ from controller.runtime.control_trace_recorder import (
 )
 
 
-
 class _IncompatiblePrune(Protocol):
     def __call__(self, before_schema_version: int, *, limit: int) -> int: ...
 

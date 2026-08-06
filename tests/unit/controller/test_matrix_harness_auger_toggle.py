@@ -83,7 +83,10 @@ def test_low_duty_credit_becomes_two_second_pulses_on_every_solve_cadence(contro
     row, plant = _run_stub(control_period, monkeypatch)
 
     assert row["effective_run"]["actuation_mode"] == "framed_pulse"
-    assert row["effective_run"]["pulse_timing"] == {"frame_seconds": float(PULSE_FRAME_S), "pulse_seconds": float(PULSE_S)}
+    assert row["effective_run"]["pulse_timing"] == {
+        "frame_seconds": float(PULSE_FRAME_S),
+        "pulse_seconds": float(PULSE_S),
+    }
     assert [tick for tick, on in enumerate(plant.on_fracs) if on] == [20, 21, 60, 61]
     assert set(plant.on_fracs) <= {0.0, 1.0}
 

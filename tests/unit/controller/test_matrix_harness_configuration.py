@@ -216,8 +216,6 @@ def test_framed_feedback_windows_do_not_recount_prior_delivery(monkeypatch):
     assert [report.ratio for report in reports] == pytest.approx([0.5, 0.5])
 
 
-
-
 def test_framed_reset_feedback_excludes_delivery_before_the_reset(monkeypatch):
     _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.5, "period": 20}))

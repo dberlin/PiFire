@@ -440,7 +440,6 @@ class Controller(ControllerBase):
     def get_control_period(self):
         return float(self.cfg["control_period"])
 
-
     def commands_fan(self):
         return bool(self.cfg.get("enable_fan_input", False))
 

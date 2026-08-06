@@ -229,7 +229,9 @@ def load_trace_samples(
                 if payload.realized_combustion_load is None:
                     raise TraceSelectionError(f"MPC revision {revision} has no realized combustion load")
                 if payload.interval_end_ms <= payload.interval_start_ms:
-                    raise TraceSelectionError(f"MPC revision {revision} complete applied output must span a positive interval")
+                    raise TraceSelectionError(
+                        f"MPC revision {revision} complete applied output must span a positive interval"
+                    )
                 complete_outputs.setdefault(revision, []).append((index, payload))
             else:
                 if payload.realized_combustion_load is not None:
@@ -254,7 +256,9 @@ def load_trace_samples(
         allocation = allocation_entry[1]
         for _, frame in revision_frames:
             if not (
-                math.isclose(frame.requested_combustion_load, allocation.normalized_combustion_load, rel_tol=0, abs_tol=1e-6)
+                math.isclose(
+                    frame.requested_combustion_load, allocation.normalized_combustion_load, rel_tol=0, abs_tol=1e-6
+                )
                 and math.isclose(frame.requested_auger_duty, allocation.requested_auger_duty, rel_tol=0, abs_tol=1e-6)
                 and frame.requested_fan_duty == allocation.requested_fan_duty
             ):

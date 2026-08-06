@@ -383,8 +383,6 @@ def _mpc_update_payload() -> MpcUpdatePayload:
     raise AssertionError("representative MPC update payload is missing")
 
 
-
-
 @pytest.mark.parametrize(("controller", "event_kind", "payload"), _payload_cases())
 def test_every_payload_round_trips_through_pydantic_json(controller, event_kind, payload):
     record = ControlTraceRecord(
@@ -666,18 +664,6 @@ def test_negative_counts_revisions_and_excess_delivered_time_are_rejected(factor
         factory()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 @pytest.mark.parametrize("invalid", ["1", True])
 def test_strict_scalar_boundaries_reject_coercible_values_in_constructor_json_and_db(invalid):
     with pytest.raises(ValidationError):
@@ -730,9 +716,6 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
     assert ControlTraceRecord.from_db_row(row) == record
 
 
-
-
-
 def test_schema_three_has_one_framed_trace_contract():
     assert TRACE_SCHEMA_VERSION == 3
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
@@ -771,5 +754,3 @@ def test_envelope_accepts_framed_payload_for_every_controller(controller):
     )
 
     assert record.payload is frame
-
-

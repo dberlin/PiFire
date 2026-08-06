@@ -166,9 +166,7 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
                 ),
             )
         )
-        allocation_result = allocate(
-            normalized_load, u_max=0.9, fan_min_pct=100.0, fan_max_pct=100.0, enable_fan=True
-        )
+        allocation_result = allocate(normalized_load, u_max=0.9, fan_min_pct=100.0, fan_max_pct=100.0, enable_fan=True)
         allocation = AllocationPayload(
             result_revision=revision,
             normalized_combustion_load=allocation_result.normalized_combustion_load,

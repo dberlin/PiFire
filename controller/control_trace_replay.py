@@ -43,7 +43,6 @@ class _TraceSessionReader(Protocol):
     ) -> list[ControlTraceRecord]: ...
 
 
-
 _FLOAT_TOLERANCE = 1e-6
 UpdatePayload = PidUpdatePayload | PidSpUpdatePayload | MpcUpdatePayload
 IssueAdder = Callable[["ReplayIssueCode", str, int | None], None]
@@ -303,8 +302,6 @@ def _advance_safety(
     return lid, manual, safety
 
 
-
-
 def _validate_framed_frame(
     payload: FramedPulseFramePayload,
     session: SessionPayload,
@@ -368,8 +365,6 @@ def _validate_transition(
         add(ReplayIssueCode.FRAME_TRANSITION_MISMATCH, "transition parity disagrees with start and end state", index)
     if transitions == 0 and not _close(on_seconds, duration if starts_active else 0.0):
         add(ReplayIssueCode.FRAME_TRANSITION_MISMATCH, "zero-transition delivery disagrees with start state", index)
-
-
 
 
 def _validate_inhibit(
@@ -543,8 +538,6 @@ def _validate_applied_source(
         )
 
 
-
-
 def _reconcile_framed_applied_outputs(
     applied: list[tuple[int, AppliedOutputPayload]],
     framed_frames: list[tuple[int, FramedPulseFramePayload]],
@@ -598,8 +591,6 @@ def _reconcile_framed_applied_outputs(
 
 def _close(left: float, right: float) -> bool:
     return abs(left - right) <= _FLOAT_TOLERANCE
-
-
 
 
 def _multiple_of(value: float, unit: float) -> bool:

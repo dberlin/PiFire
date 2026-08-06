@@ -142,11 +142,10 @@ def _manual_inhibited_at(scenario, t):
 def _manual_inhibit_start_at(scenario, t):
     return any(start == t for start, _ in scenario.manual_inhibit)
 
+
 def _lid_pause_start_at(scenario, t):
     """True on the tick a lid event resets framed scheduler credit."""
     return any(start == t for start, _ in scenario.lid_open)
-
-
 
 
 def _recovery_s(err_from_lid):
@@ -173,8 +172,6 @@ def _report(core, ratio, source_name, t, requested=None):
     setter(AppliedOutput(ratio=ratio, source=OutputSource(source_name), timestamp=float(t), requested=requested))
 
 
-
-
 class _SimClock:
     """Callable replacement for `time.time`, advanced once per simulated
     second so a controller reading the wall clock for its own `dt` observes
@@ -186,8 +183,6 @@ class _SimClock:
 
     def __call__(self):
         return self.t
-
-
 
 
 def _authority(core, cycle_data):

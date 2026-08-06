@@ -44,7 +44,6 @@ class PIDControllerBase(ControllerBase):
         """
         return max(current_time - self.last_update, MIN_ELAPSED_SECONDS)
 
-
     def set_target(self, set_point):
         self.set_point = set_point
         self.error = 0.0

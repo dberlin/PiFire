@@ -45,9 +45,9 @@ class PruneControlTrace(Protocol):
     def __call__(self, before_ms: int, *, limit: int) -> int: ...
 
 
-
 class PruneIncompatibleControlTrace(Protocol):
     def __call__(self, before_schema_version: int, *, limit: int) -> int: ...
+
 
 @dataclass(slots=True)
 class _LostRecordSpan:

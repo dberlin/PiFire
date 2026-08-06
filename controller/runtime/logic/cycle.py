@@ -21,12 +21,6 @@ def smoke_cycle_times(cycle_data):
     return CycleTimes(on_time, off_time, cycle_time, cycle_ratio)
 
 
-
-
-
-
-
-
 def prime_cycle_times(prime_amount, auger_rate):
     prime_duration = int(prime_amount / auger_rate)
     on_time = prime_duration

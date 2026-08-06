@@ -239,8 +239,6 @@ def _allocation(revision=1):
     )
 
 
-
-
 def _applied(revision=1):
     return AppliedOutputPayload(
         result_revision=revision,
@@ -261,8 +259,6 @@ def _pid_records(controller=ControllerType.PID):
         _record(2_000, controller, TraceEventKind.CONTROL_UPDATE, update),
         _record(4_000, controller, TraceEventKind.APPLIED_OUTPUT, replace(_applied(), realized_combustion_load=None)),
     ]
-
-
 
 
 def _mpc_framed_records():
@@ -316,17 +312,13 @@ def _pid_framed_records(controller=ControllerType.PID):
     return [*pid_records[:2], frame, applied]
 
 
-@pytest.mark.parametrize(
-    "records", [_pid_records(), _pid_records(ControllerType.PID_SP), _mpc_framed_records()]
-)
+@pytest.mark.parametrize("records", [_pid_records(), _pid_records(ControllerType.PID_SP), _mpc_framed_records()])
 def test_validate_records_accepts_pristine_typed_sessions(records):
     report = validate_records(records)
     assert report.valid
     assert report.session_id == _SESSION_ID
     assert report.controller is records[0].controller
     assert report.issues == ()
-
-
 
 
 @pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP])
@@ -340,9 +332,7 @@ def test_validate_records_checks_frame_allocation_fan_after_a_deferred_allocatio
 
     assert validate_records(deferred).valid
 
-    mismatched_frame = deferred[2].model_copy(
-        update={"payload": replace(deferred[2].payload, requested_fan_duty=71.0)}
-    )
+    mismatched_frame = deferred[2].model_copy(update={"payload": replace(deferred[2].payload, requested_fan_duty=71.0)})
     report = validate_records([*deferred[:2], mismatched_frame, *deferred[3:]])
 
     assert ReplayIssueCode.FRAME_SCHEDULE_MISMATCH in [issue.code for issue in report.issues]
@@ -429,8 +419,6 @@ def test_validate_records_preserves_deterministic_issue_order_after_typed_round_
     assert validate_records(corrupted).issues == validate_records(round_tripped).issues
 
 
-
-
 @pytest.mark.parametrize(
     ("records", "code"),
     [
@@ -441,13 +429,27 @@ def test_validate_records_preserves_deterministic_issue_order_after_typed_round_
         ),
         (
             _mpc_framed_records()[:2]
-            + [_record(2_000, ControllerType.MPC, TraceEventKind.ALLOCATION, replace(_allocation(), requested_auger_duty=0.1))]
+            + [
+                _record(
+                    2_000,
+                    ControllerType.MPC,
+                    TraceEventKind.ALLOCATION,
+                    replace(_allocation(), requested_auger_duty=0.1),
+                )
+            ]
             + _mpc_framed_records()[3:],
             ReplayIssueCode.ALLOCATION_MISMATCH,
         ),
         (
             _mpc_framed_records()[:3]
-            + [_record(22_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, replace(_mpc_framed_records()[3].payload, delivered_on_seconds=11.0))],
+            + [
+                _record(
+                    22_000,
+                    ControllerType.MPC,
+                    TraceEventKind.ACTUATION_FRAME,
+                    replace(_mpc_framed_records()[3].payload, delivered_on_seconds=11.0),
+                )
+            ],
             ReplayIssueCode.FRAME_DELIVERY_MISMATCH,
         ),
         (
@@ -468,8 +470,6 @@ def test_validate_records_rejects_mixed_session_and_controller_in_deterministic_
         ReplayIssueCode.SESSION_ID_MISMATCH,
         ReplayIssueCode.CONTROLLER_MISMATCH,
     ]
-
-
 
 
 def test_validate_records_requires_scheduler_reset_event_for_framed_reset():
@@ -541,8 +541,6 @@ def test_validate_records_requires_lid_event_for_lid_output():
         + records[2:-1]
         + [_record(4_000, ControllerType.PID, TraceEventKind.APPLIED_OUTPUT, lid_output)]
     ).valid
-
-
 
 
 def test_validate_records_models_terminal_partial_output_and_rejects_interior_partial():
@@ -744,8 +742,6 @@ def test_validate_records_allows_only_seed_applied_output_without_an_update():
     ]
 
 
-
-
 def test_validate_records_allows_framed_feedback_tail_before_frame_completion():
     records = _mpc_framed_records()[:3] + [
         _record(
@@ -760,8 +756,6 @@ def test_validate_records_allows_framed_feedback_tail_before_frame_completion():
 
     assert report.valid
     assert ReplayIssueCode.APPLIED_OUTPUT_MISMATCH not in [issue.code for issue in report.issues]
-
-
 
 
 def test_validate_records_enforces_optional_seed_lifecycle():
@@ -793,5 +787,3 @@ def test_validate_records_enforces_optional_seed_lifecycle():
     ):
         report = validate_records(corrupted)
         assert ReplayIssueCode.INVALID_SEED_OUTPUT in [issue.code for issue in report.issues]
-
-

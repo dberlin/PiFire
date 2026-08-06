@@ -198,7 +198,9 @@ def _applied(
     )
 
 
-def _revision_records(revision: int, start_ms: int, end_ms: int, temperature: float, load: float) -> list[ControlTraceRecord]:
+def _revision_records(
+    revision: int, start_ms: int, end_ms: int, temperature: float, load: float
+) -> list[ControlTraceRecord]:
     allocation = _allocation(revision, load)
     return [
         _update(revision, start_ms, temperature, load),
@@ -259,6 +261,7 @@ def _lifecycle_records(*, terminal_partial: bool = False) -> list[ControlTraceRe
             ]
         )
     return records
+
 
 def _output_index(records: list[ControlTraceRecord], revision: int) -> int:
     return next(
@@ -419,7 +422,9 @@ def test_load_trace_samples_rejects_complete_output_before_its_matching_update(d
         for index, record in enumerate(records)
         if isinstance(record.payload, MpcUpdatePayload) and record.payload.result_revision == 7
     )
-    records.insert(update_index, _applied(7, 6_000, 6_000, 11_000, 0.25, auger_duty=_allocation(7, 0.25).requested_auger_duty))
+    records.insert(
+        update_index, _applied(7, 6_000, 6_000, 11_000, 0.25, auger_duty=_allocation(7, 0.25).requested_auger_duty)
+    )
     append_control_trace(records)
 
     with pytest.raises(TraceSelectionError, match="must follow its accepted update"):
@@ -514,8 +519,6 @@ def test_load_trace_samples_rejects_an_interior_partial_output(ds):
 
     with pytest.raises(TraceSelectionError, match="latest update"):
         load_trace_samples(session_id=SESSION_ID)
-
-
 
 
 def test_load_trace_samples_rejects_missing_complete_realized_load(ds):

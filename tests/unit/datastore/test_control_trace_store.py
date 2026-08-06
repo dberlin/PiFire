@@ -193,6 +193,7 @@ def test_prune_removes_only_rows_strictly_older_than_30_days_in_bounded_batches(
     assert prune_control_trace(cutoff_ms, limit=1) == 0
     assert read_control_trace_range(cutoff_ms, cutoff_ms + 1, limit=10) == [boundary, newer]
 
+
 def test_schema_filtered_reads_and_incompatible_pruning_are_bounded(ds):
     current = _record(1_000, "shared", "shared-cook")
     conn = ds.connection()
