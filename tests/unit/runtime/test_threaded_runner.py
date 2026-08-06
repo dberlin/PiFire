@@ -685,15 +685,17 @@ def test_restore_model_is_applied_on_the_worker_thread():
         runner.stop()
 
 
-def test_restore_model_copies_the_snapshot_on_the_way_in():
+def test_restore_model_deep_copies_the_snapshot_on_the_way_in():
     core = _OrderRecordingCore()
     runner = ThreadedControllerRunner(core)
     try:
-        snapshot = {"revision": 7}
+        snapshot = {"revision": 7, "online_adaptation": {"challenger": {"params": [1.0]}}}
         assert runner.restore_model(snapshot) is True
-        snapshot["revision"] = 999  # mutate the caller's dict after queuing it
+        snapshot["online_adaptation"]["challenger"]["params"][0] = 999.0
         runner.submit(212.0)
-        assert _wait_for(lambda: core.restored == [{"revision": 7}])
+        assert _wait_for(
+            lambda: core.restored == [{"revision": 7, "online_adaptation": {"challenger": {"params": [1.0]}}}]
+        )
     finally:
         runner.stop()
 
@@ -721,19 +723,19 @@ def test_get_model_snapshot_reads_the_worker_s_snapshot():
         runner.stop()
 
 
-def test_get_model_snapshot_returns_a_copy_not_the_core_s_object():
-    # _OrderRecordingCore.get_model_snapshot() hands back the same cached
-    # dict every call, so a runner that passed it through as-is would fail
-    # both assertions below; a fresh-dict-per-call core could not.
+def test_get_model_snapshot_returns_a_deep_copy_not_the_core_s_object():
     core = _OrderRecordingCore()
+    core.snapshot = {"revision": 1, "online_adaptation": {"challenger": {"params": [1.0]}}}
     runner = ThreadedControllerRunner(core)
     try:
         runner.submit(212.0)
         assert _wait_for(lambda: ("update", 212.0) in core.calls)
-        snap = runner.get_model_snapshot()
-        assert snap is not core.snapshot
-        snap["revision"] = 999
-        assert core.snapshot == {"revision": 1}
+        snapshot = runner.get_model_snapshot()
+        assert snapshot is not core.snapshot
+        snapshot["online_adaptation"]["challenger"]["params"][0] = 999.0
+        expected = {"revision": 1, "online_adaptation": {"challenger": {"params": [1.0]}}}
+        assert core.snapshot == expected
+        assert runner.get_model_snapshot() == expected
     finally:
         runner.stop()
 

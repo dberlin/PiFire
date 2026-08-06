@@ -20,6 +20,7 @@ for why both of those matter.
 from __future__ import annotations
 
 import collections
+from copy import deepcopy
 import importlib
 import math
 import threading
@@ -507,10 +508,8 @@ _MAX_PENDING_OBSERVATIONS = 30
 
 
 def _owned_model_snapshot(snapshot):
-    """A copy the caller can hold and mutate without reaching into the core's
-    live model, made where the snapshot is produced rather than where it is
-    read. `get_model_snapshot()` may legitimately answer None."""
-    return None if snapshot is None else dict(snapshot)
+    """Deep-copy a snapshot across every caller, core, and worker boundary."""
+    return None if snapshot is None else deepcopy(snapshot)
 
 
 def _safe_initial_status(core):
@@ -790,7 +789,7 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def get_model_snapshot(self):
         with self._lock:
-            return self._model_snapshot
+            return _owned_model_snapshot(self._model_snapshot)
 
     def observe_frame(self, observation: FrameObservation):
         with self._lock:
@@ -838,7 +837,7 @@ class ThreadedControllerRunner(ControllerRunner):
             # A snapshot queued before the worker gets to the previous one
             # supersedes it -- only the most recent restore request matters,
             # since an older one describes a model the caller has moved past.
-            self._pending_restore = dict(snapshot)
+            self._pending_restore = _owned_model_snapshot(snapshot)
         return True
 
     def refit_from_cook(self):
