@@ -277,33 +277,51 @@ def test_the_integral_accumulates_once_the_set_point_has_been_crossed(clock):
     assert sp.inter - after_one == pytest.approx(2 * 8.0 * 20.0)
 
 
-def test_the_integral_is_seeded_from_the_identified_hold_duty_once(clock):
-    """The identified operating point moves the loop's output to it directly.
+@pytest.mark.parametrize("bias_from_model", [True, False], ids=["bias", "integral_seed"])
+def test_the_identified_hold_duty_becomes_the_loops_zero_error_output(clock, bias_from_model):
+    """`center` is where the loop sits at zero error and is a heuristic -- 0.225
+    at a 225 F set point, where the grill holds near 0.07. Either route puts the
+    loop at the identified duty instead; what differs is when.
 
-    `center` is where the loop sits at zero error and is a heuristic -- 0.225 at
-    a 225 F set point, where the grill holds near 0.07. Without this the whole
-    gap is carried by the integral, which has to wind there before the loop can
-    sit still. Seeded rather than substituted into the proportional term,
-    because that term is also what drives the last stretch up to set point:
-    measured, substituting it slowed the approach enough to cost more than the
-    offset it removed.
+    The seed can only fire inside the stable window, because outside it the
+    integral reset wipes it on the same update that places it -- so on the
+    approach, where the overshoot is made, the loop is still running against
+    0.225. Supplying it as the proportional bias covers the whole climb, which
+    is worth 7.6 F of overshoot down to 2.6 F at 225 F on MAKGrillSim.
     """
-    sp = _controller("pid_sp", clock)
+    config = {**CONFIG, "bias_from_model": bias_from_model}
+    import controller.pid_sp as mod
+
+    sp = mod.Controller(config, "F", dict(CYCLE_DATA))
     sp.set_target(225.0)
     held = 0.07
-    sp.identifier.hold_duty = lambda u_max=1.0: held
+    sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: held
 
-    # Inside the stable window: outside it the integral reset fires every tick
-    # and would wipe the seed on the same update that placed it.
+    # Inside the stable window, so the seeding route is reachable at all.
     clock.t += 20.0
     sp.update(220.0)
 
-    # i = ki * inter, so the seeded accumulator puts the zero-error output at
-    # the identified duty rather than at the heuristic.
-    assert sp.center + sp.ki * sp.inter == pytest.approx(held)
+    # u = bias + ki*inter + kd*derv, so this is the output at zero error.
+    assert sp._bias() + sp.ki * sp.inter == pytest.approx(held)
     assert sp._integral_seeded
+    assert sp.feed_forward == pytest.approx(held)
 
-    # And it is a seed, not a control law: the loop's own integral owns it after.
+
+def test_the_integral_seed_is_a_seed_and_not_a_control_law(clock):
+    """Placed once; after that the accumulator is the loop's own correction and
+    overwriting it would discard what it exists to make."""
+    config = {**CONFIG, "bias_from_model": False}
+    import controller.pid_sp as mod
+
+    sp = mod.Controller(config, "F", dict(CYCLE_DATA))
+    sp.set_target(225.0)
+    held = 0.07
+    sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: held
+
+    clock.t += 20.0
+    sp.update(220.0)
+    assert sp.inter == pytest.approx((held - sp.center) / sp.ki)
+
     sp.inter = 0.0
     clock.t += 20.0
     sp.update(222.0)
@@ -313,7 +331,7 @@ def test_the_integral_is_seeded_from_the_identified_hold_duty_once(clock):
 def test_no_identified_hold_duty_leaves_the_integral_alone(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    sp.identifier.hold_duty = lambda u_max=1.0: None
+    sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: None
 
     clock.t += 20.0
     sp.update(220.0)

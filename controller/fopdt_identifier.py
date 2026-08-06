@@ -381,6 +381,13 @@ RESTORE_BOUNDS = {
 }
 #: How much of a passing revision blends into the trusted values.
 BLEND = 0.1
+#: Still air around the grill. The hold duty scales with the chamber's rise above
+#: it, so carrying an operating point to another set point needs a floor to
+#: measure the rise FROM; a few degrees either way moves the ratio very little.
+AMBIENT_F = 70.0
+#: Below this rise, the ratio's denominator is small enough that its own error
+#: dominates, and the identified duty is used unscaled instead.
+MIN_RISE_F = 20.0
 #: A dt outside this band is a clock jump or a stalled loop, not an observation.
 DT_MIN, DT_MAX = 1.0, 600.0
 
@@ -424,6 +431,7 @@ class FOPDTIdentifier:
         self._accepted_seconds = 0.0
         self._temp_lo = None
         self._temp_hi = None
+        self._identified_at_f = None
         self._duty_n = 0
         self._duty_sum = 0.0
         self._duty_sq = 0.0
@@ -681,6 +689,10 @@ class FOPDTIdentifier:
                 blended[name] = (1.0 - BLEND) * self._trusted[name] + BLEND * candidate[name]
             self._trusted = blended
         self._revision += 1
+        # The chamber temperature this fit describes. c0 absorbs the heat loss at
+        # it, so the hold duty the model implies is a statement about THIS
+        # temperature and needs rescaling to speak about another.
+        self._identified_at_f = None if self._prev is None else float(self._prev[1])
         # This adoption is evidence from the current cook's own plant, so the
         # model has now earned the churn protection a restored one lacks.
         self._restored = False
@@ -692,8 +704,8 @@ class FOPDTIdentifier:
     #: any delay is distinguishable.
     MIN_HOLD_DUTY_SAMPLES = 60
 
-    def hold_duty(self, u_max=1.0):
-        """The duty that holds the current operating point, or None.
+    def hold_duty(self, u_max=1.0, target_f=None):
+        """The duty that holds `target_f`, or the identified operating point.
 
         The integrating fit says the chamber's rate is `K_i*u + c0`, so it holds
         still at `u = -c0/K_i`. That is the operating point a controller would
@@ -701,10 +713,26 @@ class FOPDTIdentifier:
         to compute -- every delay candidate estimates the same gain, differing
         only in which duty history it attributes it to.
 
-        Taken as the median across candidates that pass the physics gate rather
-        than from the lowest-residual one, because with the delay undetermined
-        no single candidate is the right one to trust.
+        That duty describes ONE temperature, because c0 is the chamber's heat
+        loss at the temperature the fit was taken at. Loss is very nearly
+        proportional to the rise above ambient, so the duty that holds another
+        temperature scales with the ratio of rises. Without this, a model earned
+        at 450 F puts a 450 F duty under a 225 F cook: measured at under 1% of
+        the cook within 5 F, against 92% at the setpoint it was learned at.
+
+        A trusted integrating model answers this outright, and is preferred: it
+        has already passed the physics gate and a full confirmation window, and
+        on a restored model it is the ONLY answer available, because the bank
+        below starts every cook empty and cannot repeat last cook's finding
+        until it has re-earned it well into the climb.
+
+        Falling back to the bank, the median across candidates that pass the
+        physics gate rather than the lowest-residual one, because with the delay
+        undetermined no single candidate is the right one to trust.
         """
+        trusted = self._trusted
+        if trusted is not None and trusted.get("form", FORM_FOPDT) == FORM_IPDT and trusted["K_i"]:
+            return self._holdable(self._at_target(-trusted["c0"] / trusted["K_i"], target_f), u_max)
         if self._accepted < self.MIN_HOLD_DUTY_SAMPLES or not self._duty_std() >= MIN_DUTY_STD:
             return None
         params = recover_integrating_parameters(self._ibank.Theta)
@@ -717,15 +745,77 @@ class FOPDTIdentifier:
         held = held[np.isfinite(held)]
         if held.size == 0:
             return None
-        value = float(np.median(held))
-        # A hold duty outside the actuator's own range is not a statement about
-        # this grill, whatever the fit says.
+        # The bank is this cook's own data, so it already describes wherever the
+        # chamber has been sitting; only a carried model needs moving.
+        return self._holdable(float(np.median(held)), u_max)
+
+    def _at_target(self, held, target_f):
+        """Move a hold duty from the temperature it describes to another."""
+        identified_at = self._identified_at_f
+        if target_f is None or identified_at is None:
+            return held
+        rise = float(identified_at) - AMBIENT_F
+        if rise < MIN_RISE_F:
+            return held
+        return held * (float(target_f) - AMBIENT_F) / rise
+
+    def retarget(self, target_f):
+        """Move a trusted integrating model to a different operating point.
+
+        `K_i*u + c0` is a linearisation about one chamber temperature: K_i is the
+        firepot's heating rate and barely moves, but c0 is the loss at that
+        temperature and is proportional to the rise above ambient. Carrying a
+        450 F model into a 225 F cook unchanged asserts 450 F losses at 225 F,
+        and the loop then holds the chamber 6 F above target -- correct duty,
+        wrong temperature, because the predictor it feeds is biased.
+
+        Only a restored model is moved. A model this cook confirmed against its
+        own plant already describes where the chamber has been.
+        """
+        trusted = self._trusted
+        if (
+            trusted is None
+            or not self._restored
+            or trusted.get("form", FORM_FOPDT) != FORM_IPDT
+            or self._identified_at_f is None
+            or target_f is None
+        ):
+            return False
+        rise = self._identified_at_f - AMBIENT_F
+        target_rise = float(target_f) - AMBIENT_F
+        if rise < MIN_RISE_F or target_rise < MIN_RISE_F:
+            return False
+        trusted["c0"] = trusted["c0"] * target_rise / rise
+        self._identified_at_f = float(target_f)
+        return True
+
+    @staticmethod
+    def _holdable(value, u_max):
+        """A hold duty outside the actuator's own range is not a statement about
+        this grill, whatever the fit says."""
+        value = float(value)
+        if not np.isfinite(value):
+            return None
+        return value if 0.0 < value <= u_max else None
+
+    @staticmethod
+    def _holdable(value, u_max):
+        """A hold duty outside the actuator's own range is not a statement about
+        this grill, whatever the fit says."""
+        value = float(value)
+        if not np.isfinite(value):
+            return None
         return value if 0.0 < value <= u_max else None
 
     def trusted_model(self):
         if self._trusted is None:
             return None
-        return {**self._trusted, "revision": self._revision}
+        model = {**self._trusted, "revision": self._revision}
+        # Only when known, so a model that never named its operating point does
+        # not start claiming one of None across the store.
+        if self._identified_at_f is not None:
+            model["identified_at_f"] = self._identified_at_f
+        return model
 
     def restore(self, model):
         """Adopt a persisted model, re-checking the physics the store does not
@@ -752,6 +842,17 @@ class FOPDTIdentifier:
         if theta < float(DELAYS.min()) or theta > float(DELAYS.max()):
             return False
         self._trusted = {"form": form, "theta": theta, **values}
+        # The operating point this fit describes. Records predating the field
+        # named it only as provenance, and that is the same temperature. Kept
+        # only when it is a temperature a chamber could have been holding: the
+        # provenance is written unconditionally and reads 0 on a controller that
+        # never had a target.
+        identified_at = model.get("identified_at_f", model.get("setpoint_f"))
+        self._identified_at_f = (
+            float(identified_at)
+            if identified_at is not None and float(identified_at) > AMBIENT_F + MIN_RISE_F
+            else None
+        )
         self._revision = revision
         # A confirmation window built against the pre-restore trusted state must
         # not count toward confirming a candidate against this one.

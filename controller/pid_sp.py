@@ -98,6 +98,11 @@ class Controller(PIDControllerBase):
         self.stable_window = config.get("stable_window", 12)
         self.cycle_time = cycle_data["HoldCycleTime"]
 
+        # Off is the negative control every measurement of this needs, not a
+        # user-facing choice: the identified operating point beats the heuristic
+        # at every set point measured.
+        self.bias_from_model = config.get("bias_from_model", True)
+
         self.derv = 0.0
         self.inter = 0.0
 
@@ -164,12 +169,31 @@ class Controller(PIDControllerBase):
         """
         if self._integral_seeded or self.ki == 0 or abs(error) > self.stable_window:
             return
-        held = self.identifier.hold_duty()
+        held = self._held_duty()
         if held is None:
             return
         self.feed_forward = held
-        self.inter = (held - self.center) / self.ki
+        # Against whatever the proportional term actually sits at: when the bias
+        # is already the identified duty there is no gap left to seed.
+        self.inter = (held - self._bias()) / self.ki
         self._integral_seeded = True
+
+    def _bias(self):
+        """The output the proportional term sits at when the error is zero.
+
+        The heuristic `center` reads 0.5 everywhere, where 450 F holds at 0.205
+        and 225 F nearer 0.07, so the proportional term asks for far more heat
+        than the chamber needs and the integral spends the approach taking it
+        back. The identified model names that duty outright.
+        """
+        if not self.bias_from_model:
+            return self.center
+        held = self._held_duty()
+        return self.center if held is None else held
+
+    def _held_duty(self):
+        """The duty that holds THIS cook's set point, not the model's own."""
+        return self.identifier.hold_duty(target_f=_to_f(self.set_point, self.units))
 
     # ------------------------------------------------------------------ control
     def update(self, current):
@@ -269,7 +293,7 @@ class Controller(PIDControllerBase):
                 self.derv = 0.0
 
             # P
-            self.p = self.kp * error + self.center
+            self.p = self.kp * error + self._bias()
 
             # I
             self.inter += error * dt
@@ -369,3 +393,7 @@ class Controller(PIDControllerBase):
             # Until the identifier names the operating point, the heuristic
             # centre is the best estimate of it available.
             self.feed_forward = self.center
+        # A carried model describes the chamber temperature it was learned at,
+        # and this is the moment the chamber is told to sit somewhere else.
+        if self.identifier.retarget(_to_f(set_point, self.units)):
+            self.predictor.trust(self.identifier.trusted_model())

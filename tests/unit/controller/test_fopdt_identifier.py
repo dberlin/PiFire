@@ -11,6 +11,7 @@ import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.fopdt_identifier import (
+    AMBIENT_F,
     BLEND,
     CONFIRM_WINDOW,
     DELAYS,
@@ -537,6 +538,68 @@ def test_a_single_gateless_evaluation_does_not_destroy_the_confirmation_window(m
     identifier._evaluate()
 
     assert identifier._confirm == window
+
+
+def _ipdt(**overrides):
+    model = {"form": FORM_IPDT, "K_i": 0.55, "c0": -0.113, "theta": 90.0, "revision": 4, "identified_at_f": 450.0}
+    return {**model, **overrides}
+
+
+def test_a_restored_model_answers_the_hold_duty_the_bank_cannot_yet():
+    """The bank starts every cook empty, so it cannot repeat last cook's finding
+    until it has re-earned it well into the climb -- which is after the approach
+    the operating point exists to shape. A trusted model answers immediately."""
+    identifier = FOPDTIdentifier()
+    assert identifier.hold_duty() is None  # nothing learned, nothing to say
+    assert identifier.restore(_ipdt()) is True
+    assert identifier.hold_duty() == pytest.approx(0.113 / 0.55)
+
+
+def test_the_hold_duty_moves_with_the_set_point_it_is_asked_about():
+    """c0 is the chamber's loss at the temperature the fit was taken at, and loss
+    is proportional to the rise above ambient, so the duty that holds another
+    temperature scales with the ratio of rises."""
+    identifier = FOPDTIdentifier()
+    identifier.restore(_ipdt())
+    at_450 = identifier.hold_duty(target_f=450.0)
+    at_225 = identifier.hold_duty(target_f=225.0)
+    assert at_450 == pytest.approx(0.113 / 0.55)
+    assert at_225 == pytest.approx(at_450 * (225.0 - AMBIENT_F) / (450.0 - AMBIENT_F))
+    # Asking about a colder chamber must lower the duty, not merely change it.
+    assert at_225 < at_450
+
+
+def test_retarget_moves_a_restored_model_to_the_new_operating_point():
+    """Carrying a 450 F model into a 225 F cook unchanged asserts 450 F losses at
+    225 F. Measured before this: the loop held the chamber at 231 F against a
+    225 F target -- right duty, wrong temperature -- and 0.8% of the cook landed
+    within 5 F."""
+    identifier = FOPDTIdentifier()
+    identifier.restore(_ipdt())
+    before = identifier.trusted_model()["c0"]
+
+    assert identifier.retarget(225.0) is True
+
+    after = identifier.trusted_model()["c0"]
+    assert after == pytest.approx(before * (225.0 - AMBIENT_F) / (450.0 - AMBIENT_F))
+    # Losses at a cooler chamber are smaller, and c0 is negative.
+    assert after > before
+    # Moved once, it now describes 225 and must not be moved again for it.
+    assert identifier.retarget(225.0) is True
+    assert identifier.trusted_model()["c0"] == pytest.approx(after)
+
+
+def test_retarget_leaves_a_model_this_cook_earned_alone():
+    """A model confirmed against this cook's own plant already describes where
+    the chamber has been; only a carried one is an extrapolation."""
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=40.0)
+    _drive(identifier, plant, _excitation_schedule(600))
+    earned = identifier.trusted_model()
+    assert earned is not None, identifier.status()
+
+    assert identifier.retarget(225.0) is False
+    assert identifier.trusted_model() == earned
 
 
 def test_every_promotable_form_can_be_restored():

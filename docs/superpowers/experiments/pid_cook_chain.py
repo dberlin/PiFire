@@ -26,6 +26,12 @@ from docs.superpowers.experiments.controller_matrix import SCENARIOS, run_scenar
 PLANT = "MAKGrillSim"
 SCENARIO_NAMES = ("steady_225", "steady_350", "steady_450")
 COOKS = 3
+#: `off` is the negative control: the identified model still drives the
+#: predictor and seeds the integral, it just does not supply the bias.
+ARMS = {
+    "off": {"bias_from_model": False},
+    "bias": {"bias_from_model": True},
+}
 
 
 def _chain(job):
@@ -35,7 +41,7 @@ def _chain(job):
     object the run drove; `run_scenario` constructs the core itself and does not
     hand it back.
     """
-    controller, scenario_name, seed, cooks = job
+    controller, scenario_name, seed, cooks, arm, config = job
     rows, snapshot = [], None
     for cook in range(1, cooks + 1):
         holder = {}
@@ -46,8 +52,11 @@ def _chain(job):
                 _holder["restored"] = bool(core.restore_model(dict(_snapshot)))
 
         started = time.perf_counter()
-        row = run_scenario(controller, SCENARIOS[scenario_name], seed, plant=PLANT, core_setup=setup)
+        row = run_scenario(
+            controller, SCENARIOS[scenario_name], seed, plant=PLANT, config=dict(config), core_setup=setup
+        )
         row["cook"] = cook
+        row["arm"] = arm
         row["wall_s"] = round(time.perf_counter() - started, 1)
         row["model_in"] = None if snapshot is None else dict(snapshot)
         row["restored"] = holder.get("restored")
@@ -65,7 +74,7 @@ def _agg(rows, key):
     return None if not values else statistics.median(values)
 
 
-def _render(rows, controllers, cooks):
+def _render(rows, arms, cooks):
     out = []
 
     def w(line=""):
@@ -74,16 +83,12 @@ def _render(rows, controllers, cooks):
     w("Successive cooks, each restoring the model the previous cook learned.")
     w(f"Plant {PLANT}. Median over seeds. Cook 1 starts with no model at all.")
     w()
-    for controller in controllers:
-        w(f"== {controller} ==")
+    for arm in arms:
+        w(f"== {arm} ==")
         w(f"{'scenario':<14}{'cook':>5}{'overshoot':>11}{'in5%':>8}{'settle_s':>10}{'identified':>12}{'restored':>10}")
         for scenario_name in SCENARIO_NAMES:
             for cook in range(1, cooks + 1):
-                sel = [
-                    r
-                    for r in rows
-                    if r["controller"] == controller and r["scenario"] == scenario_name and r["cook"] == cook
-                ]
+                sel = [r for r in rows if r["arm"] == arm and r["scenario"] == scenario_name and r["cook"] == cook]
                 if not sel:
                     continue
                 identified = sum(1 for r in sel if r.get("identified"))
@@ -103,24 +108,25 @@ def _render(rows, controllers, cooks):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--controllers", default="pid_sp")
+    parser.add_argument("--controller", default="pid_sp")
     parser.add_argument("--seeds", type=int, default=3)
     parser.add_argument("--cooks", type=int, default=COOKS)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--arms", default="off,bias", help="comma-separated arm names (see ARMS)")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
 
-    controllers = tuple(args.controllers.split(","))
+    arms = {name: ARMS[name] for name in args.arms.split(",")}
     jobs = [
-        (controller, scenario_name, seed, args.cooks)
-        for controller in controllers
+        (args.controller, scenario_name, seed, args.cooks, arm, config)
+        for arm, config in arms.items()
         for scenario_name in SCENARIO_NAMES
         for seed in range(args.seeds)
     ]
     with Pool(args.workers) as pool:
         rows = [row for chain in pool.map(_chain, jobs) for row in chain]
 
-    report = _render(rows, controllers, args.cooks)
+    report = _render(rows, list(arms), args.cooks)
     print(report)
     if args.out:
         with open(args.out, "w") as handle:
