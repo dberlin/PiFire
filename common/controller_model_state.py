@@ -126,16 +126,13 @@ class ControllerModelStore:
                 )
                 return False
 
-            # Cold path: nothing cached yet for this controller in this process
-            # (the first save since startup), so the only baseline available is
-            # whatever was actually persisted last time. Skipping this would
-            # let a producer whose revision counter reset across a restart
-            # silently overwrite a far-newer stored model on its first save.
-            if cached is None:
-                existing = models.get(name)
-                if existing is not None and revision <= existing["revision"]:
-                    self._log_non_advancing(name, revision, existing["revision"])
-                    return False
+            # The persisted revision remains authoritative after a cache miss:
+            # another store instance may have advanced it while this instance
+            # retained an older cache entry.
+            existing = models.get(name)
+            if existing is not None and revision <= existing["revision"]:
+                self._log_non_advancing(name, revision, existing["revision"])
+                return False
 
             models[name] = snapshot
             try:

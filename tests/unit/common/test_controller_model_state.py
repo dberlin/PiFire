@@ -239,35 +239,40 @@ def test_a_save_without_a_prior_load_still_honors_the_stored_revision():
     assert second.load("pid_sp")["K"] == 999.0
 
 
-def test_concurrent_store_instances_serialize_revision_guard_and_write():
-    fake = _FakeStore()
-    older_write_entered = threading.Event()
-    release_older_write = threading.Event()
-    newer_finished = threading.Event()
+def test_concurrent_store_instances_recheck_persisted_revision_after_waiting():
+    fake = _FakeStore({MODEL_STATE_KEY: json.dumps({"version": SCHEMA_VERSION, "models": {"mpc": {"revision": 0}}})})
+    advanced_write_entered = threading.Event()
+    release_advanced_write = threading.Event()
+    stale_finished = threading.Event()
+    stale_results = []
 
     def blocking_write(key, value):
         revision = value["models"]["mpc"]["revision"]
-        if revision == 1:
-            older_write_entered.set()
-            assert release_older_write.wait(1.0)
+        if revision == 2:
+            advanced_write_entered.set()
+            assert release_advanced_write.wait(1.0)
         fake.write(key, value)
 
-    older = ControllerModelStore(reader=fake.read, writer=blocking_write)
-    newer = ControllerModelStore(reader=fake.read, writer=blocking_write)
-    older_thread = threading.Thread(target=lambda: older.save("mpc", {"revision": 1}))
-    newer_thread = threading.Thread(target=lambda: (newer.save("mpc", {"revision": 2}), newer_finished.set()))
+    advanced = ControllerModelStore(reader=fake.read, writer=blocking_write)
+    stale = ControllerModelStore(reader=fake.read, writer=blocking_write)
+    assert stale.load("mpc") == {"revision": 0}
+    advanced_thread = threading.Thread(target=lambda: advanced.save("mpc", {"revision": 2}))
+    stale_thread = threading.Thread(
+        target=lambda: (stale_results.append(stale.save("mpc", {"revision": 1})), stale_finished.set())
+    )
 
-    older_thread.start()
-    assert older_write_entered.wait(1.0)
-    newer_thread.start()
-    newer_finished_before_release = newer_finished.wait(0.05)
-    release_older_write.set()
-    older_thread.join(timeout=1.0)
-    newer_thread.join(timeout=1.0)
+    advanced_thread.start()
+    assert advanced_write_entered.wait(1.0)
+    stale_thread.start()
+    stale_finished_before_release = stale_finished.wait(0.05)
+    release_advanced_write.set()
+    advanced_thread.join(timeout=1.0)
+    stale_thread.join(timeout=1.0)
 
-    assert not newer_finished_before_release
-    assert not older_thread.is_alive()
-    assert not newer_thread.is_alive()
+    assert not stale_finished_before_release
+    assert not advanced_thread.is_alive()
+    assert not stale_thread.is_alive()
+    assert stale_results == [False]
     assert fake.read(MODEL_STATE_KEY)["models"]["mpc"]["revision"] == 2
 
 
