@@ -47,6 +47,53 @@ def test_round_trips_any_json_safe_shape(snapshot):
     assert store.load("pid_sp") == snapshot
 
 
+def test_round_trips_a_composite_mpc_snapshot_without_interpreting_the_nested_model():
+    snapshot = {
+        "revision": 7,
+        "version": 3,
+        "params": {"C_c": 2520.0, "h_amb": 0.224},
+        "online_adaptation": {
+            "schema": "online-adaptation/v1",
+            "active_model_kind": "scheduled-arx",
+            "role_generation": 2,
+            "challenger": {"schema": "scheduled-arx/v2", "regions": []},
+        },
+    }
+    store, _ = _store()
+
+    assert store.save("mpc", snapshot) is True
+    assert store.load("mpc") == snapshot
+
+
+def test_accepts_the_exact_default_json_byte_limit_and_rejects_one_more_byte():
+    snapshot = {
+        "revision": 1,
+        "online_adaptation": {"schema": "online-adaptation/v1", "payload": ""},
+    }
+    base_size = len(json.dumps(snapshot, allow_nan=False).encode("utf-8"))
+    snapshot["online_adaptation"]["payload"] = "x" * (MAX_SNAPSHOT_BYTES - base_size)
+    assert len(json.dumps(snapshot, allow_nan=False).encode("utf-8")) == MAX_SNAPSHOT_BYTES
+
+    store, fake = _store()
+    assert store.save("mpc", snapshot) is True
+    writes = fake.writes
+
+    oversized = json.loads(json.dumps(snapshot))
+    oversized["revision"] = 2
+    oversized["online_adaptation"]["payload"] += "x"
+    assert store.save("mpc", oversized) is False
+    assert fake.writes == writes
+
+
+def test_restarted_store_requires_a_newer_composite_mpc_revision():
+    fake = _FakeStore()
+    first = ControllerModelStore(reader=fake.read, writer=fake.write)
+    assert first.save("mpc", {"revision": 41, "online_adaptation": {"role_generation": 3}}) is True
+
+    restarted = ControllerModelStore(reader=fake.read, writer=fake.write)
+    assert restarted.save("mpc", {"revision": 41, "online_adaptation": {"role_generation": 4}}) is False
+    assert restarted.save("mpc", {"revision": 42, "online_adaptation": {"role_generation": 4}}) is True
+
 def test_load_returns_none_for_an_absent_key():
     store, _ = _store()
     assert store.load("pid_sp") is None
@@ -105,6 +152,21 @@ def test_load_primes_the_revision_cache():
 def test_rejects_a_malformed_snapshot(snapshot):
     store, fake = _store()
     assert store.save("pid_sp", snapshot) is False
+    assert fake.writes == 0
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), object()])
+def test_rejects_non_json_safe_values_nested_in_a_composite_snapshot(bad_value):
+    store, fake = _store()
+    snapshot = {
+        "revision": 1,
+        "online_adaptation": {
+            "schema": "online-adaptation/v1",
+            "challenger": {"state": [0.0, bad_value]},
+        },
+    }
+
+    assert store.save("mpc", snapshot) is False
     assert fake.writes == 0
 
 

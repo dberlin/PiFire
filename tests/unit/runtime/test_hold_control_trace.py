@@ -129,6 +129,7 @@ def _mpc_result(
     revision=1,
     *,
     consecutive_policy_failures=0,
+    model_lifecycle=None,
     raw_policy_firing_load=0.4,
     requested_auger_duty=None,
     enable_fan=True,
@@ -153,6 +154,7 @@ def _mpc_result(
         solve_start_monotonic=1.0,
         solve_end_monotonic=1.1,
         solve_duration_seconds=1.1 - 1.0,
+        model_lifecycle=model_lifecycle,
     )
     allocation = allocate(
         0.4,
@@ -1042,6 +1044,79 @@ def _model_observation_outcome(*, frame_end_ms, role_generation=0, eligible=Fals
     }
 
 
+def _promotion_outcome(*, frame_end_ms):
+    return {
+        **_model_observation_outcome(frame_end_ms=frame_end_ms),
+        "evaluation": {
+            "decision_id": "generation-0-evaluation-1",
+            "evaluated_at_s": 20.0,
+            "role_generation": 1,
+            "promoted": True,
+            "committed": True,
+            "consecutive_wins": 2,
+            "rejection_reasons": (),
+            "incumbent_prediction_score": 2.0,
+            "challenger_prediction_score": 1.0,
+            "incumbent_braking_score": 1.0,
+            "challenger_braking_score": 0.5,
+            "sample_count": 12,
+            "prospective_digest": "b" * 64,
+        },
+        "lifecycle": {
+            "event": "adopt",
+            "model_revision": 8,
+            "provenance": "scheduled-arx",
+            "detail": "promotion",
+            "model_kind": "scheduled-arx",
+            "model_schema": "scheduled-arx/v1",
+            "role_generation": 1,
+            "snapshot_digest": "c" * 64,
+            "parameters": (),
+        },
+    }
+
+
+def _learning_observation(frame_start_s):
+    return FrameObservation(
+        frame_start_s,
+        frame_start_s + 20.0,
+        212.0,
+        225.0,
+        20.0,
+        0.3,
+        0.3,
+        0.3,
+        6.0,
+        None,
+        None,
+        1,
+        "controller",
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        0,
+    )
+
+
+
+def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "ordered-learning-trace"}
+    mode._ensure_trace_session(0.0)
+    first, second = _learning_observation(0.0), _learning_observation(20.0)
+    mode._pending_model_observations = {
+        1: (first, mode._trace_session_id, 0, None),
+        2: (second, mode._trace_session_id, 0, None),
+    }
+    return recorder, runner, mode, first, second
+
 def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
 
@@ -1082,7 +1157,7 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
 
     assert not [record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     runner._observation_outcomes.append(
-        ObservationOutcomeEnvelope(1, 0, runner.observations[0], _model_observation_outcome(frame_end_ms=20_000))
+        ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
     mode._reconcile_model_observation_outcomes(now=22.0)
     mode._reconcile_model_observation_outcomes(now=23.0)
@@ -1093,6 +1168,17 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     assert (payload.frame_start_ms, payload.frame_end_ms, payload.role_generation) == (0, 20_000, 0)
     assert payload.eligible is False
     assert payload.rejection_reasons == ("insufficient_excitation",)
+    learning_event_kinds = [
+        record.event_kind
+        for record in recorder.records
+        if record.event_kind
+        in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
+    ]
+    assert learning_event_kinds == [
+        TraceEventKind.MODEL_EVALUATION,
+        TraceEventKind.MODEL_EVENT,
+        TraceEventKind.MODEL_OBSERVATION,
+    ]
 
 
 
@@ -1112,7 +1198,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
     frame = PulseFrameResult(0.0, 20.0, 20.0, True, False, 0.3, 0.0, 0.0, 6, 6.0, 2, False, False, None)
     mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
     runner._observation_outcomes.append(
-        ObservationOutcomeEnvelope(1, 0, runner.observations[0], _model_observation_outcome(frame_end_ms=20_000))
+        ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
     original = mode._trace_record
     attempts = 0
@@ -1120,14 +1206,153 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
     def transient(kind, payload, timestamp):
         nonlocal attempts
         attempts += 1
-        return attempts > 1 and original(kind, payload, timestamp)
+        if attempts == 2:
+            return False
+        return original(kind, payload, timestamp)
 
     mode._trace_record = transient
     mode._reconcile_model_observation_outcomes(now=22.0)
-    assert mode._pending_model_observations[1][3] is not None
+    assert len(mode._pending_model_observations[1][3]) == 2
     mode._reconcile_model_observation_outcomes(now=23.0)
     assert 1 not in mode._pending_model_observations
-    assert len([record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]) == 1
+    assert [
+        record.event_kind
+        for record in recorder.records
+        if record.event_kind
+        in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
+    ] == [TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION]
+
+
+def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle, monkeypatch):
+    recorder, runner, mode, first, second = _two_pending_learning_outcomes(hold_cycle, monkeypatch)
+    first_outcome = _promotion_outcome(frame_end_ms=20_000)
+    second_outcome = _promotion_outcome(frame_end_ms=40_000)
+    second_outcome["evaluation"] = {**second_outcome["evaluation"], "decision_id": "generation-0-evaluation-2"}
+    second_outcome["lifecycle"] = {**second_outcome["lifecycle"], "detail": "promotion-2"}
+    runner._observation_outcomes.extend(
+        [
+            ObservationOutcomeEnvelope(1, 0, first, first_outcome),
+            ObservationOutcomeEnvelope(2, 0, second, second_outcome),
+        ]
+    )
+    original = mode._trace_record
+    failed = False
+
+    def transient(kind, payload, timestamp):
+        nonlocal failed
+        if kind is TraceEventKind.MODEL_EVENT and not failed:
+            failed = True
+            return False
+        return original(kind, payload, timestamp)
+
+    mode._trace_record = transient
+    mode._reconcile_model_observation_outcomes(now=22.0)
+    assert [
+        record.payload.decision_id
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.MODEL_EVALUATION
+    ] == ["generation-0-evaluation-1"]
+    assert len(mode._pending_model_observations[1][3]) == 2
+    assert len(mode._pending_model_observations[2][3]) == 3
+
+    mode._reconcile_model_observation_outcomes(now=23.0)
+
+    assert [
+        (record.event_kind, getattr(record.payload, "decision_id", getattr(record.payload, "detail", None)))
+        for record in recorder.records
+        if record.event_kind
+        in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
+    ] == [
+        (TraceEventKind.MODEL_EVALUATION, "generation-0-evaluation-1"),
+        (TraceEventKind.MODEL_EVENT, "promotion"),
+        (TraceEventKind.MODEL_OBSERVATION, None),
+        (TraceEventKind.MODEL_EVALUATION, "generation-0-evaluation-2"),
+        (TraceEventKind.MODEL_EVENT, "promotion-2"),
+        (TraceEventKind.MODEL_OBSERVATION, None),
+    ]
+
+
+def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeypatch):
+    recorder, runner, mode, first, second = _two_pending_learning_outcomes(hold_cycle, monkeypatch)
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(2, 0, second, _promotion_outcome(frame_end_ms=40_000))
+    )
+
+    mode._reconcile_model_observation_outcomes(now=22.0)
+
+    assert not [
+        record
+        for record in recorder.records
+        if record.event_kind
+        in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
+    ]
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(1, 0, first, _promotion_outcome(frame_end_ms=20_000))
+    )
+    mode._reconcile_model_observation_outcomes(now=23.0)
+
+    assert [
+        record.event_kind
+        for record in recorder.records
+        if record.event_kind
+        in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
+    ] == [
+        TraceEventKind.MODEL_EVALUATION,
+        TraceEventKind.MODEL_EVENT,
+        TraceEventKind.MODEL_OBSERVATION,
+        TraceEventKind.MODEL_EVALUATION,
+        TraceEventKind.MODEL_EVENT,
+        TraceEventKind.MODEL_OBSERVATION,
+    ]
+
+
+def test_mpc_lifecycle_records_one_rollback_event_without_stale_duplicates(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    lifecycle = {
+        "event": "reject",
+        "model_revision": 9,
+        "provenance": "grey-box",
+        "detail": "active-solve-failed",
+        "model_kind": "grey-box",
+        "model_schema": "grey-box/v1",
+        "role_generation": 2,
+        "snapshot_digest": "d" * 64,
+        "parameters": (),
+    }
+    result = _mpc_result(model_lifecycle=lifecycle)
+    mode = hold_cycle(
+        FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE),
+        controller="mpc",
+    )
+    mode.setup()
+    mode.state.metrics = {"id": "rollback-lifecycle"}
+    mode._ensure_trace_session(0.0)
+    original = mode._trace_record
+    failed = False
+
+    def transient(kind, payload, timestamp):
+        nonlocal failed
+        if kind is TraceEventKind.MODEL_EVENT and not failed:
+            failed = True
+            return False
+        return original(kind, payload, timestamp)
+
+    mode._trace_record = transient
+    mode._trace_update(result, now=2.0, controller_interval=1.0)
+    assert len(mode._trace_pending_model_events) == 1
+    mode._ensure_trace_session(2.5)
+    mode._trace_update(
+        replace(result, stale_state=ResultStaleState.STALE, result_age_seconds=1.0),
+        now=3.0,
+        controller_interval=1.0,
+    )
+
+    lifecycle_payloads = [
+        record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVENT
+    ]
+    assert [(payload.event.value, payload.detail) for payload in lifecycle_payloads] == [
+        ("reject", "active-solve-failed")
+    ]
 
 
 def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_session(hold_cycle, monkeypatch):

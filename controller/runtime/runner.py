@@ -840,11 +840,20 @@ class ThreadedControllerRunner(ControllerRunner):
         fn = getattr(self._core, "refit_from_cook", None)
         if fn is None:
             return None
-        verdict = fn()
-        model = _owned_model_snapshot(self._core.get_model_snapshot())
-        with self._lock:
-            self._model_snapshot = model
-        return verdict
+        refit_error = None
+        try:
+            return fn()
+        except BaseException as error:
+            refit_error = error
+            raise
+        finally:
+            try:
+                model = _owned_model_snapshot(self._core.get_model_snapshot())
+                with self._lock:
+                    self._model_snapshot = model
+            except Exception:
+                if refit_error is None:
+                    raise
 
     def stop(self):
         with self._lock:

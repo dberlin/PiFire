@@ -16,6 +16,7 @@ from common.control_trace import (
     FramedPulseFramePayload,
     InhibitReason,
     ModelEventPayload,
+    ModelEvaluationPayload,
     ModelEventType,
     MpcUpdatePayload,
     ModelObservationPayload,
@@ -100,7 +101,9 @@ class HoldMode(ControlMode):
     _runner_configuration_revision: int = 0
     _actuation_mode: ActuationMode = ActuationMode.FRAMED_PULSE
     _pulse_scheduler: PulseScheduler | None = None
-    _pending_model_observations: dict[int, tuple[FrameObservation, str | None, int, ModelObservationPayload | None]] | None = None
+    _pending_model_observations: dict[
+        int, tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None]
+    ] | None = None
     _pulse_observation_last_frame_key: tuple[int, int] | None = None
     _last_ptemp: float | None = None
 
@@ -302,12 +305,83 @@ class HoldMode(ControlMode):
         if captured is not None:
             self._deliver_completed_pulse_observation(*captured)
 
+    @staticmethod
+    def _model_evaluation_payload(value: object) -> ModelEvaluationPayload | None:
+        if not isinstance(value, Mapping):
+            return None
+        try:
+            evaluated_at_s = value["evaluated_at_s"]
+            if isinstance(evaluated_at_s, bool) or not isinstance(evaluated_at_s, int | float):
+                return None
+            rejection_reasons = value["rejection_reasons"]
+            if not isinstance(rejection_reasons, tuple | list):
+                return None
+            return ModelEvaluationPayload(
+                decision_id=value["decision_id"],
+                evaluated_at_ms=int(evaluated_at_s * 1_000),
+                role_generation=value["role_generation"],
+                promoted=value["promoted"],
+                committed=value["committed"],
+                consecutive_wins=value["consecutive_wins"],
+                rejection_reasons=tuple(rejection_reasons),
+                incumbent_prediction_score=value["incumbent_prediction_score"],
+                challenger_prediction_score=value["challenger_prediction_score"],
+                incumbent_braking_score=value["incumbent_braking_score"],
+                challenger_braking_score=value["challenger_braking_score"],
+                sample_count=value["sample_count"],
+                prospective_digest=value["prospective_digest"],
+            )
+        except (KeyError, OverflowError, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _model_lifecycle_payload(value: object) -> ModelEventPayload | None:
+        if not isinstance(value, Mapping):
+            return None
+        try:
+            raw_parameters = value["parameters"]
+            if not isinstance(raw_parameters, tuple | list):
+                return None
+            parameters = tuple(
+                parameter
+                if isinstance(parameter, TraceSetting)
+                else TraceSetting(key=parameter["key"], value=parameter["value"])
+                for parameter in raw_parameters
+            )
+            return ModelEventPayload(
+                event=ModelEventType(value["event"]),
+                model_revision=value["model_revision"],
+                provenance=value["provenance"],
+                detail=value["detail"],
+                model_kind=value["model_kind"],
+                model_schema=value["model_schema"],
+                role_generation=value["role_generation"],
+                snapshot_digest=value["snapshot_digest"],
+                parameters=parameters,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _flush_pending_model_trace(
+        self,
+        sequence: int,
+        pending: tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None],
+        publication_ms: int,
+    ) -> bool:
+        remaining = pending[3]
+        if not isinstance(remaining, tuple):
+            return False
+        while remaining:
+            event_kind, payload = remaining[0]
+            if not self._trace_record(event_kind, payload, publication_ms):
+                self._pending_model_observations[sequence] = (*pending[:3], remaining)
+                return False
+            remaining = remaining[1:]
+        self._pending_model_observations.pop(sequence, None)
+        return True
+
     def _reconcile_model_observation_outcomes(self, now: float | None = None) -> None:
         publication_ms = int((self.ctx.clock.now() if now is None else now) * 1_000)
-        for sequence, pending in tuple(self._pending_model_observations.items()):
-            payload = pending[3]
-            if payload is not None and self._trace_record(TraceEventKind.MODEL_OBSERVATION, payload, publication_ms):
-                del self._pending_model_observations[sequence]
         if not self._pending_model_observations or self._runner is None:
             return
         drain = getattr(self._runner, "drain_observation_outcomes", None)
@@ -353,7 +427,7 @@ class HoldMode(ControlMode):
                     self._pending_model_observations.pop(sequence, None)
                     continue
                 output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
-                payload = ModelObservationPayload(
+                observation_payload = ModelObservationPayload(
                     frame_start_ms=int(observation.frame_start_s * 1_000),
                     frame_end_ms=int(observation.frame_end_s * 1_000),
                     temp_c=observation.temp_c,
@@ -387,10 +461,19 @@ class HoldMode(ControlMode):
             except (KeyError, TypeError, ValueError):
                 self._pending_model_observations.pop(sequence, None)
                 continue
-            if self._trace_record(TraceEventKind.MODEL_OBSERVATION, payload, publication_ms):
-                self._pending_model_observations.pop(sequence, None)
-            else:
-                self._pending_model_observations[sequence] = (pending[0], pending[1], pending[2], payload)
+            records: list[tuple[TraceEventKind, object]] = []
+            evaluation_payload = self._model_evaluation_payload(outcome.get("evaluation"))
+            if evaluation_payload is not None:
+                records.append((TraceEventKind.MODEL_EVALUATION, evaluation_payload))
+            lifecycle_payload = self._model_lifecycle_payload(outcome.get("lifecycle"))
+            if lifecycle_payload is not None:
+                records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
+            records.append((TraceEventKind.MODEL_OBSERVATION, observation_payload))
+            queued = (*pending[:3], tuple(records))
+            self._pending_model_observations[sequence] = queued
+        for sequence, pending in tuple(self._pending_model_observations.items()):
+            if pending[3] is None or not self._flush_pending_model_trace(sequence, pending, publication_ms):
+                break
 
     def _trace_pulse_frame(
         self, frame: PulseFrameResult, inhibit: InhibitReason, result_revision: int | None = None
@@ -664,8 +747,24 @@ class HoldMode(ControlMode):
         self._trace_warning_active = False
         return True
 
+    def _flush_pending_model_events(self) -> None:
+        if self._trace_session_id is None or self._trace_pending_model_events is None:
+            return
+        while self._trace_pending_model_events:
+            payload, timestamp_ms = self._trace_pending_model_events[0]
+            if not self._trace_record(TraceEventKind.MODEL_EVENT, payload, timestamp_ms):
+                return
+            del self._trace_pending_model_events[0]
+
+    def _queue_model_event(self, payload: ModelEventPayload, timestamp_ms: int) -> None:
+        if self._trace_pending_model_events is None:
+            return
+        self._trace_pending_model_events.append((payload, timestamp_ms))
+        self._flush_pending_model_events()
+
     def _ensure_trace_session(self, now: float) -> None:
         if self._trace_session_id is not None:
+            self._flush_pending_model_events()
             return
         cook_id = self.state.metrics.get("id")
         controller = self._trace_type()
@@ -708,10 +807,7 @@ class HoldMode(ControlMode):
             self._trace_session_id = None
             self._trace_cook_id = None
             return
-        if self._trace_pending_model_events is not None:
-            for pending_payload, pending_ts_ms in self._trace_pending_model_events:
-                self._trace_record(TraceEventKind.MODEL_EVENT, pending_payload, pending_ts_ms)
-            self._trace_pending_model_events.clear()
+        self._flush_pending_model_events()
 
     def _trace_safety(
         self,
@@ -745,11 +841,7 @@ class HoldMode(ControlMode):
             provenance="persisted" if revision is not None else None,
             detail=detail,
         )
-        if self._trace_session_id is None:
-            if self._trace_pending_model_events is not None:
-                self._trace_pending_model_events.append((payload, now_ms))
-            return
-        self._trace_record(TraceEventKind.MODEL_EVENT, payload, now_ms)
+        self._queue_model_event(payload, now_ms)
 
     def _trace_update(self, result, now: float, controller_interval: float) -> bool:
         if result is None or result.revision == 0:
@@ -931,6 +1023,10 @@ class HoldMode(ControlMode):
         self.state.controller.trace_result_revision = result.revision
         self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, observed_ms)
         self._trace_last_update_payload = payload
+        if isinstance(diagnostics, MpcTraceDiagnostics):
+            lifecycle_payload = self._model_lifecycle_payload(diagnostics.model_lifecycle)
+            if lifecycle_payload is not None:
+                self._queue_model_event(lifecycle_payload, observed_ms)
         if allocation_payload is not None and not stale_observation:
             self._trace_record(TraceEventKind.ALLOCATION, allocation_payload, observed_ms)
         if isinstance(diagnostics, MpcTraceDiagnostics):
@@ -1480,21 +1576,41 @@ class HoldMode(ControlMode):
 
         try:
             config = self.settings["controller"].get("config", {})
-            if not config.get(self._controller_name, {}).get("enable_identification"):
+            controller_config = config.get(self._controller_name, {})
+            if not (
+                controller_config.get("enable_identification")
+                or controller_config.get("enable_online_adaptation")
+            ):
                 return
-            verdict = self._runner.refit_from_cook()
-            snapshot = self._runner.get_model_snapshot()
-            if snapshot is not None:
-                self._clear_trace_session_model_authority()
-                self._trace_model(ModelEventType.REFIT, "model refit completed", snapshot)
-                if getattr(verdict, "accepted", False):
-                    self._trace_model(ModelEventType.ADOPT, "refit model adopted", snapshot)
-                else:
-                    self._trace_model(ModelEventType.REJECT, "refit model rejected", snapshot)
-                if not self._model_store.save(self._controller_name, snapshot):
-                    _control.eventLogger.debug(f"Did not persist a refit {self._controller_name} model")
         except Exception as error:
             _control.eventLogger.error(f"Model refit failed at cook end: {error}")
+            return
+
+        verdict = None
+        refit_error = None
+        try:
+            verdict = self._runner.refit_from_cook()
+        except Exception as error:
+            refit_error = error
+            _control.eventLogger.error(f"Model refit failed at cook end: {error}")
+        finally:
+            try:
+                snapshot = self._runner.get_model_snapshot()
+                if snapshot is not None:
+                    self._clear_trace_session_model_authority()
+                    if refit_error is None:
+                        self._trace_model(ModelEventType.REFIT, "model refit completed", snapshot)
+                        if getattr(verdict, "accepted", False):
+                            self._trace_model(ModelEventType.ADOPT, "refit model adopted", snapshot)
+                        else:
+                            self._trace_model(ModelEventType.REJECT, "refit model rejected", snapshot)
+                    else:
+                        self._trace_model(ModelEventType.REFIT, "model checkpoint published after refit failure", snapshot)
+                        self._trace_model(ModelEventType.REJECT, f"model refit failed: {refit_error}", snapshot)
+                    if not self._model_store.save(self._controller_name, snapshot):
+                        _control.eventLogger.debug(f"Did not persist a refit {self._controller_name} model")
+            except Exception as error:
+                _control.eventLogger.error(f"Model refit checkpoint persistence failed: {error}")
 
     def teardown(self, ptemp):
         first_trace_teardown = not self._trace_closed and (
@@ -1525,6 +1641,7 @@ class HoldMode(ControlMode):
                     self._refit_model()
         finally:
             if first_trace_teardown:
+                self._flush_pending_model_events()
                 self._trace_closed = True
                 now = self.ctx.clock.now()
                 self._trace_complete_applied_interval(

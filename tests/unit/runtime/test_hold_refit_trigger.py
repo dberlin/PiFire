@@ -29,9 +29,21 @@ class _RecordingStore:
         return True
 
 
-def _hold(hold_cycle, runner, *, identification, store=None, controller="mpc", configure="mpc"):
+def _hold(
+    hold_cycle,
+    runner,
+    *,
+    identification,
+    online_adaptation=False,
+    store=None,
+    controller="mpc",
+    configure="mpc",
+):
     hold = hold_cycle(runner, controller=controller, model_store=store)
-    hold.settings["controller"]["config"][configure] = {"enable_identification": identification}
+    hold.settings["controller"]["config"][configure] = {
+        "enable_identification": identification,
+        "enable_online_adaptation": online_adaptation,
+    }
     hold.setup()
     return hold
 
@@ -48,6 +60,32 @@ def test_no_refit_when_identification_is_off(hold_cycle):
     hold = _hold(hold_cycle, runner, identification=False)
     hold.teardown(225)
     assert runner.refits == 0
+
+
+def test_online_adaptation_checkpoints_and_persists_before_trace_close(hold_cycle, monkeypatch):
+    events = []
+
+    class _CloseRecorder:
+        def close(self):
+            events.append("close")
+
+    class _OrderedStore(_RecordingStore):
+        def save(self, name, snapshot):
+            events.append("save")
+            return super().save(name, snapshot)
+
+    runner = FakeControllerRunner(period=0.01)
+    runner.snapshot = {"version": 1, "revision": 7, "params": {}, "online_adaptation": {}}
+    store = _OrderedStore()
+    hold = _hold(hold_cycle, runner, identification=False, online_adaptation=True, store=store)
+    hold._trace_recorder = _CloseRecorder()
+    monkeypatch.setattr(hold, "_trace_record", lambda *_args: True)
+
+    hold.teardown(225)
+
+    assert runner.stops_before_each_refit == [1]
+    assert store.saved == [("mpc", runner.snapshot)]
+    assert events == ["save", "close"]
 
 
 def test_no_refit_during_the_cook(hold_cycle):
@@ -101,6 +139,28 @@ def test_a_refit_failure_does_not_break_teardown(hold_cycle):
     assert runner.stops == 1
 
 
+def test_missing_checkpoint_does_not_suppress_a_base_refit_exception(hold_cycle):
+    runner = FakeControllerRunner(period=0.01)
+    runner.refit_raises = KeyboardInterrupt()
+    hold = _hold(hold_cycle, runner, identification=True)
+
+    with pytest.raises(KeyboardInterrupt):
+        hold.teardown(225)
+
+
+def test_exceptional_online_refit_still_persists_the_published_checkpoint(hold_cycle):
+    store = _RecordingStore()
+    runner = FakeControllerRunner(period=0.01)
+    runner.refit_raises = RuntimeError("solver exploded")
+    runner.snapshot = {"version": 1, "revision": 8, "params": {}, "online_adaptation": {}}
+    hold = _hold(hold_cycle, runner, identification=False, online_adaptation=True, store=store)
+
+    hold.teardown(225)
+
+    assert runner.stops_before_each_refit == [1]
+    assert store.saved == [("mpc", runner.snapshot)]
+
+
 def test_what_the_refit_learned_is_persisted_for_the_next_cook(hold_cycle):
     store = _RecordingStore()
     runner = FakeControllerRunner(period=0.01)
@@ -108,6 +168,19 @@ def test_what_the_refit_learned_is_persisted_for_the_next_cook(hold_cycle):
     runner.snapshot = {"version": 1, "revision": 7, "params": {}}
     hold.teardown(225)
     assert [snapshot for _name, snapshot in store.saved] == [runner.snapshot]
+
+
+def test_online_checkpoint_is_persisted_when_identification_rejects(hold_cycle):
+    store = _RecordingStore()
+    runner = FakeControllerRunner(period=0.01)
+    runner.refit_verdict = object()
+    runner.snapshot = {"version": 1, "revision": 8, "params": {}, "online_adaptation": {}}
+    hold = _hold(hold_cycle, runner, identification=True, online_adaptation=True, store=store)
+
+    hold.teardown(225)
+
+    assert runner.stops_before_each_refit == [1]
+    assert store.saved == [("mpc", runner.snapshot)]
 
 
 def test_nothing_is_persisted_when_the_controller_learned_nothing(hold_cycle):
@@ -153,6 +226,13 @@ class _CoreWithRefit(_CoreWithoutRefit):
         return self.snapshot
 
 
+
+class _CoreWithExceptionalRefit(_CoreWithRefit):
+    def refit_from_cook(self):
+        self.refits += 1
+        self.snapshot = {"version": 1, "revision": 4, "params": {}}
+        raise RuntimeError("refit failed after checkpoint")
+
 def test_the_sync_runner_delegates_a_refit_to_its_core():
     core = _CoreWithRefit()
     assert SyncControllerRunner(core).refit_from_cook() == "verdict"
@@ -174,6 +254,17 @@ def test_the_threaded_runner_republishes_the_snapshot_a_refit_produced():
     runner.refit_from_cook()
     assert runner.get_model_snapshot() == {"version": 1, "revision": 3, "params": {}}
 
+
+
+def test_threaded_runner_republishes_snapshot_when_refit_raises():
+    core = _CoreWithExceptionalRefit()
+    runner = ThreadedControllerRunner(core)
+    runner.stop()
+
+    with pytest.raises(RuntimeError, match="after checkpoint"):
+        runner.refit_from_cook()
+
+    assert runner.get_model_snapshot() == {"version": 1, "revision": 4, "params": {}}
 
 def test_a_worker_that_would_not_stop_refuses_the_refit_out_loud():
     """`stop()` joins with a timeout, so it cannot promise the worker is gone.

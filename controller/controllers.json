@@ -393,6 +393,14 @@
           "option_type": "bool",
           "option_default": true,
           "hidden": false
+        },
+        {
+          "option_name": "enable_online_adaptation",
+          "option_friendly_name": "Online Model Adaptation",
+          "option_description": "Learn a scheduled linear model during cooks and let it take over after repeated validation wins. Experimental. [Default=false]",
+          "option_type": "bool",
+          "option_default": false,
+          "hidden": false
         }
       ]
     }

@@ -15,6 +15,8 @@
 Imported Libraries
 """
 import time
+from collections.abc import Mapping
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
 
@@ -87,6 +89,7 @@ class MpcTraceDiagnostics:
     stale_state: ResultStaleState = ResultStaleState.FRESH
     recovered: bool = False
     feasibility: "FeasibilityReport | None" = None
+    model_lifecycle: Mapping[str, object] | None = None
 
 
 ControllerTraceDiagnostics: TypeAlias = PidTraceDiagnostics | PidSpTraceDiagnostics | MpcTraceDiagnostics

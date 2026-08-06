@@ -835,3 +835,77 @@ def test_configured_horizon_is_the_only_horizon_built_or_reported(capsys):
     assert not hasattr(controller, "_built_n_horizon")
     assert controller.mpc.settings.n_horizon == configured
     assert "horizon" not in capsys.readouterr().out.lower()
+
+
+
+def test_online_adaptation_is_explicitly_opt_in():
+    assert _DEFAULTS["enable_online_adaptation"] is False
+
+
+def test_online_certificate_boundary_rejects_fake_invalid_kkt():
+    config = mpc_module.LinearMPCConfig(horizon_steps=2)
+    certificate = SimpleNamespace(
+        sequence_q=np.array([0.2, 0.3]),
+        objective=1.0,
+        kkt_residual=config.tolerance * 2.0,
+        iterations=1,
+        hessian_condition=1.0,
+    )
+
+    assert not Controller._valid_linear_solve(certificate, config)
+    assert Controller._linear_certificate_rejection(certificate, config) == "invalid-kkt-certificate"
+    assert str(Controller._normalized_forecast_failure(RuntimeError("ARX horizon forecast is non-finite"))) == "non-finite-forecast"
+
+
+def test_online_linear_policy_uses_fixed_bakeoff_config():
+    config = mpc_module._SCHEDULED_ARX_LINEAR_CONFIG
+    assert (config.horizon_steps, config.temperature_weight, config.terminal_weight) == (30, 1.0, 4.0)
+    assert (config.move_weight, config.tolerance) == (0.05, 1e-3)
+
+
+
+
+def test_stale_generation_resets_real_online_continuity_before_next_frame():
+    controller = Controller(dict(CONFIG, enable_online_adaptation=True), "C", dict(CYCLE))
+    controller.set_target(110.0)
+    controller._online._role_generation = 1
+
+    def observation(index, generation):
+        return mpc_module.FrameObservation(
+            frame_start_s=index * 20.0,
+            frame_end_s=(index + 1) * 20.0,
+            temp_c=100.0 + index * 0.1,
+            setpoint_c=110.0,
+            ambient_c=20.0,
+            requested_q=0.2 if index % 2 else 0.8,
+            realized_q=0.2 if index % 2 else 0.8,
+            requested_auger_duty=0.2 if index % 2 else 0.8,
+            delivered_on_s=4.0,
+            requested_fan_duty=None,
+            actual_fan_duty=None,
+            result_revision=index,
+            output_source="controller",
+            lid_open=False,
+            safety_inhibited=False,
+            manual_override=False,
+            stale=False,
+            skipped=False,
+            reset=False,
+            continuous=True,
+            role_generation=generation,
+        )
+
+    outcomes = [controller.observe_frame(observation(index, 1)) for index in range(20)]
+    assert any(outcome["eligible"] for outcome in outcomes)
+    assert controller._online.lag_warmup_remaining == 0
+    assert controller._online._origins
+
+    stale = controller.observe_frame(observation(20, 0))
+
+    assert stale["challenger_innovation_c"] is None
+    assert stale["rejection_reasons"] == ("stale-generation",)
+    assert controller._online.challenger.snapshot()["history"]["temperature_c"] == []
+
+    next_frame = controller.observe_frame(observation(21, 1))
+    assert next_frame["rejection_reasons"] == ("lag-warmup",)
+    assert controller._online.challenger.snapshot()["history"]["temperature_c"] == pytest.approx([102.1])

@@ -1,10 +1,12 @@
 """What the MPC persists between cooks, and what it refuses to adopt."""
 
 import json
+from copy import deepcopy
 
 import pytest
 
 from controller.mpc import _DEFAULTS, Controller
+from controller.linear_mpc.adaptation import OnlineAdaptation
 
 #: The schema this controller writes and is the only one it will read back.
 #: A literal, not `Controller._MODEL_SCHEMA`: importing it would move every
@@ -416,3 +418,163 @@ def test_status_reports_the_identified_band(capsys):
     assert model["band_c"] == [40.0, 232.0]
     assert model["rmse"] == pytest.approx(2.1)
     json.dumps(model, allow_nan=False)
+
+
+def _adopted_online_controller():
+    controller = _c(enable_online_adaptation=True)
+    controller._adopt_model(PARAMS, rmse=2.1, samples=1730, band_c=(40.0, 232.0))
+    return controller
+
+
+def _active_online_snapshot():
+    source = _adopted_online_controller()
+    coordinator = source._online
+    fallback = coordinator.incumbent
+    active_arx = source._new_scheduled_arx()
+    coordinator.incumbent = active_arx
+    coordinator.challenger = fallback
+    coordinator._previous_incumbent = fallback
+    coordinator._previous_incumbent_snapshot = deepcopy(fallback.snapshot())
+    coordinator._previous_incumbent_digest = OnlineAdaptation.model_digest(fallback)
+    coordinator._role_generation = 1
+    return source.get_model_snapshot()
+
+
+def test_valid_active_online_snapshot_restores_scheduled_arx_with_owned_grey_fallback():
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(_active_online_snapshot()) is True
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
+
+
+@pytest.mark.parametrize("shape", ("missing-owner", "wrong-owner-role", "grey-with-owner"))
+def test_invalid_active_online_ownership_falls_back_without_discarding_outer_grey(shape):
+    snapshot = _active_online_snapshot()
+    nested = snapshot["online_adaptation"]
+    if shape == "missing-owner":
+        nested["previous_incumbent"] = None
+        nested["previous_incumbent_digest"] = None
+    elif shape == "wrong-owner-role":
+        nested["previous_incumbent"] = deepcopy(nested["incumbent"])
+        nested["previous_incumbent_digest"] = OnlineAdaptation.model_digest(
+            _adopted_online_controller()._new_scheduled_arx()
+        )
+    else:
+        nested["incumbent"], nested["challenger"] = (
+            deepcopy(nested["challenger"]),
+            deepcopy(nested["incumbent"]),
+        )
+        nested["active_model_kind"] = "grey-box"
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(snapshot) is True
+    assert restored.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+    assert restored.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+
+
+def test_enabled_controller_persists_an_independently_owned_online_member():
+    source = _adopted_online_controller()
+    snapshot = source.get_model_snapshot()
+    json.dumps(snapshot, allow_nan=False)
+    assert snapshot["online_adaptation"]["schema"] == "online-adaptation/v1"
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(deepcopy(snapshot)) is True
+    assert restored.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+    assert restored.get_status()["adaptation"]["enabled"] is True
+
+    nested = snapshot["online_adaptation"]
+    nested["role_generation"] = 99
+    assert source.get_model_snapshot()["online_adaptation"]["role_generation"] != 99
+
+
+def test_absent_or_malformed_online_member_does_not_discard_valid_grey_box_model():
+    source = _adopted_online_controller()
+    snapshot = source.get_model_snapshot()
+
+    legacy = deepcopy(snapshot)
+    legacy.pop("online_adaptation")
+    restored_legacy = _c(enable_online_adaptation=True)
+    restored_legacy.set_target(110.0)
+    assert restored_legacy.restore_model(legacy) is True
+    assert restored_legacy.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+    assert restored_legacy.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+
+    malformed = deepcopy(snapshot)
+    malformed["online_adaptation"] = {"schema": "wrong/v1"}
+    restored_malformed = _c(enable_online_adaptation=True)
+    restored_malformed.set_target(110.0)
+    assert restored_malformed.restore_model(malformed) is True
+    assert restored_malformed.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+    assert restored_malformed.get_status()["adaptation"]["active_model_kind"] == "grey-box"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("eligible_updates", True),
+        ("rejected_updates", 1.5),
+        ("promotion_count", -1),
+        ("rollback_count", False),
+        ("last_evaluation", {"decision_id": "incomplete"}),
+    ],
+)
+def test_malformed_controller_owned_online_metadata_falls_back_atomically_to_grey_box(field, value):
+    source = _adopted_online_controller()
+    snapshot = source.get_model_snapshot()
+    snapshot["online_adaptation"][field] = value
+
+    restored = _c(enable_online_adaptation=True)
+    restored.set_target(110.0)
+    assert restored.restore_model(snapshot) is True
+    assert restored.cfg["C_c"] == pytest.approx(PARAMS["C_c"])
+
+    adaptation = restored.get_status()["adaptation"]
+    assert adaptation["active_model_kind"] == "grey-box"
+    assert adaptation["role_generation"] == 0
+    assert adaptation["eligible_updates"] == 0
+    assert adaptation["rejected_updates"] == 0
+    assert adaptation["promotion_count"] == 0
+    assert adaptation["rollback_count"] == 0
+    assert adaptation["last_evaluation_outcome"] is None
+
+
+@pytest.mark.parametrize(
+    "online_member",
+    [
+        {"schema": "online-adaptation/v1", "bad": float("nan")},
+        {"schema": "online-adaptation/v1", "payload": "x" * 65_536},
+    ],
+)
+def test_invalid_composite_online_member_returns_the_previous_valid_snapshot(monkeypatch, online_member):
+    controller = _adopted_online_controller()
+    prior = controller.get_model_snapshot()
+    monkeypatch.setattr(controller._online, "snapshot", lambda: online_member)
+
+    assert controller.get_model_snapshot() == prior
+
+
+def test_online_teardown_checkpoint_advances_a_restored_revision():
+    source = _adopted_online_controller()
+    snapshot = source.get_model_snapshot()
+    snapshot["revision"] = 41
+
+    restored = _c(enable_online_adaptation=True)
+    assert restored.restore_model(snapshot) is True
+    restored.refit_from_cook([])
+    assert restored.get_model_snapshot()["revision"] == 42
+
+
+def test_disabled_online_adaptation_keeps_the_legacy_snapshot_byte_for_byte():
+    implicit = _c()
+    explicit = _c(enable_online_adaptation=False)
+    for controller in (implicit, explicit):
+        controller.set_target(110.0)
+        controller._adopt_model(PARAMS, rmse=2.1, samples=1730, band_c=(40.0, 232.0))
+
+    assert json.dumps(implicit.get_model_snapshot(), allow_nan=False) == json.dumps(
+        explicit.get_model_snapshot(), allow_nan=False
+    )
+    assert implicit.get_status()["adaptation"] == explicit.get_status()["adaptation"]

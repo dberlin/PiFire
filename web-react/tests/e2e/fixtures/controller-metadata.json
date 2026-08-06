@@ -234,6 +234,14 @@
           "option_friendly_name": "Learn This Grill",
           "option_name": "enable_identification",
           "option_type": "bool"
+        },
+        {
+          "hidden": false,
+          "option_default": false,
+          "option_description": "Learn a scheduled linear model during cooks and let it take over after repeated validation wins. Experimental. [Default=false]",
+          "option_friendly_name": "Online Model Adaptation",
+          "option_name": "enable_online_adaptation",
+          "option_type": "bool"
         }
       ],
       "contributors": [],

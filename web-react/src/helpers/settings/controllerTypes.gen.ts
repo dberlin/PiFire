@@ -39,6 +39,7 @@ export interface MpcConfig {
   est_q_dist: number;
   est_r_meas: number;
   enable_identification: boolean;
+  enable_online_adaptation: boolean;
 }
 
 export interface ControllerConfigs {

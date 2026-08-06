@@ -1,6 +1,11 @@
 """Hold restores a controller's model at setup and saves it as it changes."""
 
+from common.control_trace import ActuationMode
+from common.controller_model_state import ControllerModelStore
+
 from controller.applied_output import OutputSource
+from controller.runtime.runner import ControllerUpdateResult
+
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
 
@@ -17,6 +22,35 @@ class _FakeModelStore:
         self.saves.append((name, snapshot))
         self.models[name] = snapshot
         return True
+
+
+def _deduplicating_store():
+    state = {}
+    writes = []
+
+    def read(_key):
+        if "value" not in state:
+            raise TypeError("controller model state is absent")
+        return state["value"]
+
+    def write(_key, value):
+        writes.append(value)
+        state["value"] = value
+
+    return ControllerModelStore(reader=read, writer=write), writes
+
+
+def _framed_output():
+    return ControllerUpdateResult(
+        cycle_ratio=0.5,
+        fan=None,
+        input_temperature=0.0,
+        revision=1,
+        solve_start_monotonic=0.0,
+        solve_end_monotonic=0.0,
+        solve_duration_seconds=0.0,
+        completed_wall_time=0.0,
+    )
 
 
 def test_setup_restores_a_stored_model_before_seeding(hold_cycle):
@@ -48,6 +82,33 @@ def test_per_tick_saves_the_controller_snapshot(hold_cycle):
     runner.snapshot = {"revision": 1, "K": 700.0}
     hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     assert store.saves == [("pid_sp", {"revision": 1, "K": 700.0})]
+
+
+def test_framed_ticks_persist_only_advancing_model_revisions(hold_cycle):
+    runner = FakeControllerRunner(period=0.0, actuation_mode=ActuationMode.FRAMED_PULSE).script([_framed_output()])
+    store, writes = _deduplicating_store()
+    hold = hold_cycle(runner, model_store=store, controller="mpc")
+    hold.setup()
+
+    runner.snapshot = {"revision": 1, "params": {}}
+    hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
+    hold.on_tick(now=101.0, ptemp=200.0, current_output_status=_off())
+    runner.snapshot = {"revision": 2, "params": {}}
+    hold.on_tick(now=122.0, ptemp=200.0, current_output_status=_off())
+
+    assert [record["models"]["mpc"]["revision"] for record in writes] == [1, 2]
+
+
+def test_framed_ticks_leave_malformed_snapshots_to_the_model_store(hold_cycle):
+    runner = FakeControllerRunner(period=0.0, actuation_mode=ActuationMode.FRAMED_PULSE).script([_framed_output()])
+    store, writes = _deduplicating_store()
+    hold = hold_cycle(runner, model_store=store, controller="mpc")
+    hold.setup()
+
+    runner.snapshot = {"revision": 1, "params": {"non_finite": float("nan")}}
+    hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
+
+    assert writes == []
 
 
 def test_save_does_not_fire_before_the_control_interval_elapses(hold_cycle):

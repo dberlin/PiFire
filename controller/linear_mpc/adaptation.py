@@ -203,8 +203,17 @@ class OnlineAdaptation:
         return self._consecutive_wins
 
     @property
+    def effective_updates(self) -> int:
+        """Number of challenger parameter updates accepted by the coordinator."""
+        return self._effective_updates
+
+    @property
     def lag_warmup_remaining(self) -> int:
         return self._lag_warmup_remaining
+
+    def reset_continuity(self) -> None:
+        """Discard lag/excitation/origin continuity after a rejected frame."""
+        self._mark_discontinuity()
 
     @property
     def completed_origins(self) -> tuple[CompletedOrigin, ...]:
