@@ -1,128 +1,28 @@
 #!/usr/bin/env python3
-"""Pointwise disagreement between the MPC net policy and the NLP it approximates.
+"""Measure the net policy against the NLP on the NLP's closed-loop states.
 
-Two closed-loop runs diverge on their own and cannot settle whether the net is
-still the same policy. This runs the loop ONCE under the NLP, logs every
-(x_hat, u_prev, set_point_c) the policy was asked about, and replays those exact
-triples through the net. The difference is the approximation error on the states
-the controller actually visits -- including the lid-open interval, which no
-training episode contains.
+The replay runs the plant once under the NLP, records every
+``(x_hat, u_prev, set_point_c)`` input, and evaluates the net on those exact
+states. It reports raw and [0, 1]-clamped disagreement, including a physical
+lid-open window that is outside the training distribution.
 
-Three kinds of figures are reported, and they answer different questions:
+Actuation is production's framed scheduler: 2-second pulses in 20-second
+frames. There is no minimum-duty floor. At lid detection the scheduler resets,
+the auger and fan remain off for ``LID_PAUSE_S``, and resumption starts a fresh
+frame with no carried credit. The physical lid remains open for
+``lid_open_for`` independently of that actuator pause.
 
-  * Excursion counts -- how often the net's UN-clipped answer falls outside
-    [Q_min, Q_max], and by how much. This is the PRIMARY acceptance quantity:
-    it is exactly zero when the net stays in distribution, and the pre-fix
-    regression showed it moving sharply (-63..-38) when it does not -- but
-    that describes only the catastrophic direction. A marginal case lives in
-    the fractional range right at the boundary, which a bare count cannot
-    distinguish from comfortable margin (measured: the lid-window count is
-    0/24 on every seed, but the closest approach to Q_min is +0.468 out of a
-    95-wide box). "margin_min_to_q_min"/"margin_min_to_q_max" are reported
-    UNCONDITIONALLY, whole-run and lid-window, for exactly this reason -- a
-    count of zero can still be a hair's breadth from one.
-  * "_raw" RMS/max -- the net's un-clipped answer against the NLP's un-clipped
-    answer. Clamping both sides before comparing (see "_clamped" below) hides
-    the very failure mode this script exists to catch, so raw is the
-    SECONDARY quantity a later comparison should read, not the clamped one.
-  * "_clamped" RMS/max -- both sides forced into [Q_min, Q_max] first, i.e.
-    what the plant would actually feel if either policy's answer were
-    applied. Reported for completeness, not for the acceptance question.
+Every control solve receives the realized mean auger duty since the preceding
+solve through ``set_output``. During the pause, cumulative delivered time does
+not change, so the reported realized duty is zero. This keeps the estimator's
+``_applied_combustion_load`` and ``_policy_u_prev`` tied to delivery rather
+than request.
 
-The "_all" raw/clamped figures -- and the excursion counts -- are further
-split into "_whole" (every solve) and "_warm" (excluding the startup
-transient). The plant starts at ambient and
-takes real time to approach the set point; every solve before it gets there
-sees a state no calibrated controller would ever revisit, and folding that
-transient into a single RMS inflates it enough to swamp the number a later
-task should be comparing against (measured: whole-run rms_all_raw ~1.58 versus
-~1.44 once the transient is excluded). The warm cutoff is not a hard-coded
-minute count: it is the first simulated second at which the plant lands within
-SETTLE_TOL_F of the set point and never leaves that band again before the
-lid-open window -- i.e. the same "has it settled" test controller_matrix.py
-already uses for its own settle_s metric, applied here to find where the
-transient ends instead of whether it ends. The lid-open window is always well
-past this point (its own onset is a controller/plan-defined disturbance, not a
-symptom of startup), so lid-window figures are not split into whole/warm.
-
-A lid opening drives two windows of different length, as production does:
-
-  * a PHYSICAL lid window, `lid_open_for` seconds long, over which the chamber
-    loses heat to ambient (`GrillSim.step(lid_open=True)`); and
-  * an ACTUATOR pause of `LID_PAUSE_S` (= `LidOpenPauseTime`) seconds, over
-    which the fan stops and the commanded ratio is pinned.
-
-They are not the same length, so the interval between them -- controller back at
-full authority, fan running, chamber still cold -- is a state this harness
-exercises rather than skips. `lid_model` below describes the ACTUATOR pause;
-the physical window is not a model choice, it is the plant losing heat.
-
-The lid-window figures therefore cover two populations, and are reported three
-ways so a reader can pick the one the question needs: `*_lid` over the whole
-physical opening, `*_lid_paused` over its first `LID_PAUSE_S` (the samples taken
-while the auger is pinned), and `*_lid_released` over the remainder. `n_lid` is
-the sum of the two sub-counts, so a `*_lid` figure is not comparable to one
-taken when the pause and the opening were the same length -- the denominator
-covers the same number of seconds but a different mix of states.
-
-`lid_min_temp_f` and `lid_recovery_s` size the excursion the window produces.
-They fail in opposite directions: a pause held for the whole opening digs a
-*deeper* trough than production, satisfying any depth bound while
-misrepresenting how long control was surrendered, and only the recovery figure
-separates the two.
-
-Two knobs select which experiment arm a run measures, and both are recorded
-into every output row so a later comparison can tell arms apart.
-
-`lid_model` chooses how the actuator pause is modelled:
-
-  * "faithful" (default) reproduces controller/runtime/modes/hold.py. At the
-    detection instant hold.py:243-265 turns the auger off, reports a single
-    AppliedOutput(ratio=0.0), and resets the cycle timer; that block cannot
-    re-fire during the pause because it clears target_temp_achieved
-    (hold.py:266), which only re-arms once the plant is back at set point
-    (hold.py:234). For the remainder of the pause hold.py:171-173 pins the
-    commanded ratio to u_min, hold.py:206-217 reports that u_min once per
-    control period, and hold.py:228 calls _auger_cycle_tick unconditionally --
-    base.py:118-147 has no lid gate, so the auger keeps cycling at u_min. The
-    fan is off throughout (hold.py:263 at detection, hold.py:271 at clear).
-  * "stress" holds ratio at 0.0 for the entire pause and keeps the auger fully
-    off. No production path does this; it drives the sub-u_min inverse far
-    harder and far longer than a real grill can, and is kept as a deliberate
-    upper bound on the lid-window disagreement, not as the measurement.
-
-`estimator_input` chooses what the estimator's transport-lag chain is fed:
-
-  * "applied" (default) reports every applied duty through set_output, so
-    _policy_u_prev derives from what reached the auger.
-  * "command" withholds those reports entirely. update() overwrites _applied_Q
-    with each freshly computed command, so with nothing else writing it,
-    _policy_u_prev derives from the command -- reproducing the pre-Task-13
-    behavior on a post-Task-13 checkout. This exists so both arms can be run
-    under the SAME lid model; see the comparability note below.
-
-COMPARABILITY: the stored baseline was captured under lid_model="stress", so a
-lid_model="faithful" run is NOT directly comparable to it -- the lid model
-changes the plant trajectory (auger off for 120s versus cycling at u_min), not
-just the estimator's input, so the two would differ in the lid window on one
-side only. Compare arms within a single lid model. The stored baseline's role
-is to validate that estimator_input="command" + lid_model="stress" reproduces
-it; once that holds, the "command" arm is a trustworthy reference under either
-lid model.
-
-Set applied_q_split_expected=True (or --applied-q-split-expected on the CLI)
-for the after-Task-13 run. The flag is checked against actual behavior, not
-attribute presence: hasattr(core, "_applied_Q") is true on any checkout at
-or after the task that added the field to __init__, which predates the
-behavioral split by one task and so cannot tell a live split from
-ControllerBase's set_output no-op leaving _applied_Q frozen at Q_min. See
-_split_is_live below. The flag's value is recorded into the output JSON so a
-later comparison knows which mode produced each row. Do not re-capture a
-before-run: the stored baseline (_net_vs_nlp_baseline.json) predates both
-_applied_Q and set_output entirely, so it remains a valid "estimator reads
-the command" reference point for every after-run to compare against. The
-provenance pin on core._last_Q in replay() does not depend on this flag and
-must hold in either mode.
+Rows contain whole-run, warm-region, physical-lid, paused-lid, and
+released-lid figures. The raw figures expose out-of-range learned outputs;
+their clamped counterparts describe the bounded load the plant could receive.
+Archived JSON captures are historical artifacts and are intentionally not
+rewritten by this script.
 """
 
 import argparse
@@ -142,7 +42,8 @@ from controller.applied_output import AppliedOutput, OutputSource  # noqa: E402
 from controller.grill_sim import GrillSim  # noqa: E402
 from controller.mpc import Controller  # noqa: E402
 from controller.mpc_net import NetPolicy, net_path_for  # noqa: E402
-from controller_matrix import _auger_toggle_tick, _recovery_s  # noqa: E402
+from controller.runtime.logic.pulse import PulseResetReason, PulseScheduler  # noqa: E402
+from controller_matrix import _recovery_s  # noqa: E402
 
 OUT = os.path.join(_ROOT, "docs/superpowers/experiments/_net_vs_nlp_baseline.json")
 ARTIFACT = os.path.join(_ROOT, "controller/mpc_policy_net.npz")
@@ -160,7 +61,7 @@ LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
 # the test suite binds it against the recovery bound for exactly that reason.
 LID_RECOVERY_WINDOW_S = 300
 
-CYCLE_DATA = {"HoldCycleTime": 20, "u_min": 0.15, "u_max": 0.9}
+CYCLE_DATA = {"HoldCycleTime": 20, "u_max": 0.9}
 
 # A run that has drifted this far from set point over its last simulated hour
 # is not a baseline of controlled behavior -- it is a runaway (a prior version
@@ -173,13 +74,8 @@ REGIME_TOL_F = 20.0
 # and for locating the end of the startup transient below. Matches the
 # +/-5F band controller_matrix.py already uses for its settle_s metric.
 SETTLE_TOL_F = 5.0
-# How far realized mean duty (what the plant actually received, via
-# _auger_toggle_tick) may drift from commanded mean duty (what the policy,
-# clipped to [u_min, u_max], asked for) before this is treated as a duty-cycle
-# realization bug rather than the plant sitting at a floor/ceiling. This is
-# the direct negative control for the actual C1 defect: the broken re-anchor
-# put realized duty at 0.596 against a commanded ~0.17 -- 200%+ off, not a
-# rounding difference.
+# How far realized mean duty may drift from requested duty before this is
+# treated as a framed-scheduler realization bug.
 DUTY_DIVERGENCE_TOL = 0.05
 
 
@@ -192,13 +88,7 @@ def _rms(a):
 
 
 def _sha256(path):
-    """Content identity of the policy artifact a row was measured against.
-
-    `lid_model` and `estimator_input` say which arm a row belongs to; without
-    this, two rows measured against different `.npz` files are indistinguishable
-    from the files themselves, and a re-capture across a retrain reads as a
-    change in the thing under test.
-    """
+    """Return the content identity of the net artifact."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
@@ -207,19 +97,11 @@ def _sha256(path):
 
 
 def _split_is_live(cycle_data):
-    """Task 13's _last_Q/_applied_Q split, detected by behavior, not presence.
-
-    hasattr(core, "_applied_Q") is true on any checkout at or after Task 12,
-    which only added the attribute to __init__ -- not the behavior. The thing
-    this flag actually needs to discriminate is whether a report the
-    controller did not command can move _applied_Q off the command; a probe
-    that only checks presence would let a mis-targeted after-run silently
-    reproduce the baseline and read as "no change" instead of failing loudly.
-    """
+    """Whether applied combustion-load feedback changes controller state."""
     probe = Controller({"policy": "nlp"}, "F", dict(cycle_data))
-    before = getattr(probe, "_applied_Q", None)
-    probe.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 0.0))
-    return before is not None and getattr(probe, "_applied_Q", None) != before
+    before = getattr(probe, "_applied_combustion_load", None)
+    probe.set_output(AppliedOutput(probe.u_max, OutputSource.CONTROLLER, 0.0))
+    return before is not None and getattr(probe, "_applied_combustion_load", None) != before
 
 
 def _lid_windows(t, lid_open_at, lid_open_for):
@@ -243,189 +125,108 @@ def replay(
     lid_open_at=2 * 3600,
     lid_open_for=120,
     setpoint_f=225.0,
-    applied_q_split_expected=False,
-    lid_model="faithful",
-    estimator_input="applied",
 ):
-    if lid_model not in ("faithful", "stress"):
-        raise ValueError(f"lid_model must be 'faithful' or 'stress', got {lid_model!r}")
-    if estimator_input not in ("applied", "command"):
-        raise ValueError(f"estimator_input must be 'applied' or 'command', got {estimator_input!r}")
     core = Controller({"policy": "nlp"}, "F", CYCLE_DATA)
     assert core._net is None, "configure policy=nlp; the point is to log the NLP's answers"
-    # which side of the Task 13 landing we're on is a caller-supplied flag
-    # (recorded below into the output row), not a hard-coded assumption --
-    # checked by behavior (_split_is_live), not by attribute presence, since
-    # presence alone cannot tell a live split from ControllerBase's
-    # set_output no-op (see _split_is_live's docstring). This does not check
-    # that `_last_Q` still means what this harness thinks it means; that is
-    # the provenance pin further down, in the per-solve loop.
-    split_live = _split_is_live(CYCLE_DATA)
-    assert split_live == applied_q_split_expected, (
-        f"applied_q_split_expected={applied_q_split_expected} does not match "
-        "this checkout's actual behavior. A bare hasattr(core, '_applied_Q') "
-        "check would pass here even against a pre-Task-13 checkout -- Task 12 "
-        "added the attribute a task before the behavior existed -- and a "
-        "mis-targeted after-run would then silently reproduce the baseline "
-        "instead of failing loudly. Fix the flag, not this assertion."
-    )
-    # The flag above describes the CHECKOUT; estimator_input describes the ARM.
-    # An "applied" arm on a checkout where set_output cannot move _applied_Q
-    # would silently be a "command" arm wearing the other label -- the same
-    # failure the flag exists to prevent, one level up.
-    assert estimator_input == "command" or split_live, (
-        "estimator_input='applied' on a checkout where set_output cannot move "
-        "_applied_Q -- this arm would silently reproduce the 'command' arm and "
-        "the two would read as agreeing when they were never distinguished."
+    assert _split_is_live(CYCLE_DATA), (
+        "set_output must update _applied_combustion_load from realized delivery."
     )
     core.set_target(setpoint_f)
     plant = GrillSim(seed=seed)
     period = core.get_control_period()
-    cycle_time = CYCLE_DATA["HoldCycleTime"]
-
     net_path = net_path_for(ARTIFACT, bool(core.cfg["enable_fan_input"]))
     net = NetPolicy.load(net_path)
-    assert core.cfg["Q_min"] == net.calib["Q_min"] and core.cfg["Q_max"] == net.calib["Q_max"], (
-        "controller cfg and the net artifact's calibration disagree on "
-        "[Q_min, Q_max] -- the two policies would be clipped to different "
-        "ranges and the disagreement figures below would not be comparable."
+    assert net.matches_config(core.cfg), (
+        "controller configuration and net artifact provenance disagree; "
+        "their normalized combustion-load predictions are not comparable."
     )
-    # Enforced, not just assumed in a comment: this cfg's fan_frac=1.0 (fixed
-    # duty, below) and net_path_for()'s artifact selection (just above) both
-    # depend on enable_fan_input staying False. If it flips, both need
-    # revisiting, not just whichever one happens to be read next.
     assert not core.cfg["enable_fan_input"], (
-        "enable_fan_input=True in this cfg -- the fixed fan_frac=1.0 below and "
-        "the artifact net_path_for() just selected both assumed it was False."
+        "enable_fan_input=True requires replaying the allocator's fan output."
     )
 
-    triples, q_nlp_clamped, q_nlp_raw, solve_failed, in_lid, sample_t = [], [], [], [], [], []
-    # The lid window contains two regimes of different length, so the samples
-    # inside it are not one population: for the first LID_PAUSE_S the auger is
-    # pinned, and for the remainder the controller has full authority over a
-    # chamber that is still open and still cooling. Recorded separately so the
-    # excursion count can be read either way.
+    triples, nlp_loads, nlp_raw_loads, solve_failed, in_lid, sample_t = [], [], [], [], [], []
+    # The lid window contains two regimes of different length: a full actuator
+    # pause, then a still-open chamber under resumed control.
     in_lid_paused = []
     temps = []
-    # `realized_duty` is the auger's actual on-fraction each second, via
-    # _auger_toggle_tick -- NOT what controller_matrix.py calls `duties`
-    # there, which records the *requested* ratio rather than what the plant
-    # received. `commanded_duty` here is that requested-ratio quantity, kept
-    # so the two can be compared directly below.
     realized_duty, commanded_duty = [], []
-    # enable_fan_input is False (asserted above), so the allocator never
-    # returns a fan duty; the fan runs wide open for the whole simulation.
     fan_frac = 1.0
-    ratio, next_solve = core.u_min, 0.0
-    auger_on, auger_toggle = False, 0.0
+    ratio, next_solve = 0.0, 0.0
+    scheduler = PulseScheduler()
+    actual_auger_on = False
+    feedback_start = 0.0
+    feedback_delivered = 0.0
+    feedback_requested = 0.0
+
+    def report_applied(now, source):
+        nonlocal feedback_start, feedback_delivered
+        elapsed = now - feedback_start
+        realized = 0.0 if elapsed == 0.0 else feedback_delivered / elapsed
+        core.set_output(
+            AppliedOutput(
+                ratio=realized,
+                source=source,
+                timestamp=now,
+                requested=feedback_requested,
+            )
+        )
+        feedback_start = now
+        feedback_delivered = 0.0
+
     for t in range(duration_s):
+        # `actual_auger_on` is the state that drove the previous plant step.
+        # Account that observed second before handing its interval to the
+        # estimator at this solve.
+        if t:
+            feedback_delivered += float(actual_auger_on)
         lid, lid_paused = _lid_windows(t, lid_open_at, lid_open_for)
         temp_f = _c_to_f(plant.measured())
-        if t >= next_solve:
+        solved = t >= next_solve
+        if solved:
             next_solve = t + period
-            # Captured before update() runs: update() derives _policy_u_prev
-            # from _applied_Q at entry and then overwrites _applied_Q with the
-            # freshly computed command, so reading _applied_Q back out after
-            # the call is one control step stale relative to what
-            # _policy_u_prev was actually computed from.
-            applied_before_update = float(core._applied_Q)
+            report_applied(
+                float(t),
+                OutputSource.LID_OPEN if lid_paused and t != lid_open_at else OutputSource.CONTROLLER,
+            )
+            applied_before_update = float(core._applied_combustion_load)
             raw = core.update(temp_f)
-            # these are recorded ON the controller during the update() call
-            # just made, not read back out of state it mutates afterward
             triples.append(
                 (np.asarray(core._x_hat).reshape(-1).copy(), float(core._policy_u_prev), float(core._set_point_c))
             )
-            q_nlp_clamped.append(float(core._last_Q))
-            q_nlp_raw.append(float(core._last_Q_raw))
+            nlp_loads.append(float(core._last_combustion_load))
+            nlp_raw_loads.append(float(core._last_raw_combustion_load))
             solve_failed.append(bool(core._last_solve_failed))
             in_lid.append(lid)
             in_lid_paused.append(lid_paused)
             sample_t.append(t)
-            # Semantic pin for `core._last_Q`: PROVENANCE, not consistency.
-            # Comparing allocate(core._last_Q) against raw["cycle_ratio"]
-            # (a prior version of this check) derives both sides from the
-            # same in-memory `_last_Q` in the same call, so a redefinition
-            # shaped like `_last_Q := applied` with `cycle_ratio :=
-            # allocate(applied)` stays internally consistent and slides
-            # through undetected -- verified: that shape survives 40 solves
-            # against the old check. Tying `_last_Q` to `_last_Q_raw` (the
-            # value recorded before update() clips it) catches it instead,
-            # because it checks where `_last_Q` came from, not just what it
-            # agrees with -- verified to fail at solve #0 under that
-            # redefinition, and under `_last_Q := 0.0` / `_last_Q :=
-            # 0.5*_last_Q`.
-            assert core._last_Q == float(np.clip(core._last_Q_raw, core.cfg["Q_min"], core.cfg["Q_max"])), (
-                "core._last_Q is no longer clip(core._last_Q_raw, Q_min, Q_max) "
-                "-- its provenance has changed and every read of it in this "
-                "harness needs re-auditing before this baseline can be trusted "
-                "again."
-            )
-            # Sibling pin for `core._policy_u_prev`, recorded in `triples` above
-            # as "the u_prev the policy was asked about": Task 13 redefined it
-            # from `float(core._last_Q)` to `clip(core._applied_Q, Q_min,
-            # Q_max)`. mpc.py still passes exactly this value to firing_rate_raw(),
-            # so the harness measures what it claims -- pinned here the same
-            # way `_last_Q` is, so a future redefinition fails loudly instead
-            # of sliding through unnoticed. Compared against the value
-            # `_applied_Q` held BEFORE this update() call (see
-            # applied_before_update above): update() derives _policy_u_prev
-            # from _applied_Q at entry, then overwrites _applied_Q with the
-            # new command before this line runs, so comparing against the
-            # post-call value is one control step off by construction (fails
-            # every solve, not just when the split actually breaks).
-            assert core._policy_u_prev == float(np.clip(applied_before_update, core.cfg["Q_min"], core.cfg["Q_max"])), (
-                "core._policy_u_prev is no longer clip(_applied_Q-at-entry, "
-                "Q_min, Q_max) -- its provenance has changed and every read of "
-                "it in this harness needs re-auditing before this baseline can "
-                "be trusted again."
-            )
-            ratio = min(max(float(raw["cycle_ratio"]), core.u_min), core.u_max)
-            # hold.py:171-173 replaces the controller's answer with u_min for
-            # the whole pause, before the u_min floor and u_max ceiling below
-            # it can apply. The stress model leaves the controller's answer in
-            # place and reports 0.0 for it instead.
-            if lid_paused and lid_model == "faithful":
-                ratio = core.u_min
-            if estimator_input == "applied":
-                core.set_output(
-                    AppliedOutput(
-                        ratio=0.0 if (lid_paused and lid_model == "stress") else ratio,
-                        source=OutputSource.LID_OPEN if lid_paused else OutputSource.CONTROLLER,
-                        timestamp=float(t),
-                    )
-                )
-        if lid_paused and lid_model == "stress":
-            auger_on, auger_toggle, auger_frac = False, t, 0.0
-        elif lid_paused and t == lid_open_at:
-            # The harness imposes the pause rather than detecting it, so its
-            # first second stands in for hold.py's detection instant: auger
-            # off, cycle timer reset, and one AppliedOutput(0.0) report
-            # (hold.py:247-264). That block clears target_temp_achieved
-            # (hold.py:266) and so cannot fire again until the plant is back at
-            # set point (hold.py:234) -- hence exactly one 0.0, not a stream.
-            if estimator_input == "applied":
-                core.set_output(AppliedOutput(ratio=0.0, source=OutputSource.LID_OPEN, timestamp=float(t)))
-            auger_on, auger_toggle, auger_frac = False, t, 0.0
+            assert core._last_combustion_load == float(np.clip(core._last_raw_combustion_load, 0.0, 1.0))
+            assert core._policy_u_prev == float(np.clip(applied_before_update, 0.0, 1.0))
+            ratio = min(max(float(raw["cycle_ratio"]), 0.0), core.u_max)
+
+        if lid_paused and t == lid_open_at:
+            scheduler.advance(ratio, float(t), actual_auger_on)
+            scheduler.reset(PulseResetReason.LID)
+            actual_auger_on = False
+        elif lid_paused:
+            actual_auger_on = False
         else:
-            # hold.py:228 calls _auger_cycle_tick unconditionally and
-            # base.py:118-147 has no lid gate, so through the rest of the pause
-            # the auger keeps cycling at the pinned u_min.
-            auger_on, auger_toggle, auger_frac = _auger_toggle_tick(auger_on, auger_toggle, t, ratio, cycle_time)
-        # The fan is off for the whole pause under either model: hold.py:263
-        # cuts it at detection and hold.py:271 only restarts it at clear. The
-        # chamber keeps losing heat past that, for as long as the lid is open.
+            decision = scheduler.advance(ratio, float(t), actual_auger_on)
+            actual_auger_on = decision.command_on
+
+        auger_frac = float(actual_auger_on)
+        if solved:
+            feedback_requested = ratio
         plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_paused else fan_frac, lid_open=lid)
         temps.append(temp_f)
         realized_duty.append(auger_frac)
-        commanded_duty.append(0.0 if (lid_paused and lid_model == "stress") else ratio)
+        commanded_duty.append(ratio)
 
     n_failed = int(sum(solve_failed))
     if n_failed:
         raise RuntimeError(
-            f"seed {seed}: {n_failed} NLP solve(s) fell back to the held-over Q "
-            "(controller/mpc.py's except-branch) -- q_nlp_raw for those steps is "
-            "not a fresh NLP answer, and this baseline would be measuring the "
-            "wrong thing."
+            f"seed {seed}: {n_failed} NLP solve(s) held the previous normalized "
+            "combustion load after an exception; the raw-load comparison needs "
+            "a fresh NLP answer at every solve."
         )
 
     temps = np.asarray(temps)
@@ -465,32 +266,19 @@ def replay(
             "on-fraction does not track what the policy asked for."
         )
 
-    # Locate the end of the startup transient: the first second the plant
-    # lands within SETTLE_TOL_F of set point and never leaves that band again
-    # before the lid opens. Same test controller_matrix.py uses for settle_s,
-    # applied here to find the start of the region worth comparing policies
-    # on, not to score how fast the controller got there.
-    settle_from = None
-    for tt in range(lid_open_at):
-        if abs(temps[tt] - setpoint_f) <= SETTLE_TOL_F:
-            if settle_from is None:
-                settle_from = tt
-        else:
-            settle_from = None
-    if settle_from is None:
+    # Exclude startup from the warm-region comparison at its first entrance
+    # into the set-point band. Framed pulses may subsequently cross the band
+    # while maintaining the requested mean duty, so requiring the per-second
+    # temperature to remain inside it would discard an otherwise controlled run.
+    warm_start_s = next(
+        (tt for tt in range(lid_open_at) if abs(temps[tt] - setpoint_f) <= SETTLE_TOL_F),
+        None,
+    )
+    if warm_start_s is None:
         raise RuntimeError(
-            f"seed {seed}: the plant never settled within {SETTLE_TOL_F:.0f}F of "
-            f"{setpoint_f:.0f}F before the lid-open window -- there is no warm "
-            "region left to measure policy agreement on."
+            f"seed {seed}: the plant never entered the {SETTLE_TOL_F:.0f}F "
+            "set-point band before the lid-open window."
         )
-    warm_start_s = settle_from
-    # warm_start_s is genuinely data-derived (a SETTLE_TOL_F sweep of
-    # 2/3/4/5/6/8/10F gave 4522/607/514/489/451/187/184s -- it is not 30
-    # minutes in disguise), but it is close to the edge of the band it is
-    # derived from: the worst post-settle error against SETTLE_TOL_F=5.0 is
-    # 4.983F, 0.017F of headroom. Nothing in this script gates on
-    # warm_start_s directly -- see the report for why, and what a later
-    # comparison should check before trusting the warm-window figures.
 
     sample_t_arr = np.asarray(sample_t)
     warm_mask = sample_t_arr >= warm_start_s
@@ -503,34 +291,32 @@ def replay(
     lid_paused_mask = np.asarray(in_lid_paused)
     lid_released_mask = lid_mask & ~lid_paused_mask
 
-    net_raw_vals = np.asarray([net.firing_rate_raw(x, u, sp) for x, u, sp in triples])
-    diffs_clamped = np.asarray([abs(np.clip(nq, 0.0, 1.0) - q) for nq, q in zip(net_raw_vals, q_nlp_clamped)])
-    diffs_raw = np.asarray([abs(nq - q) for nq, q in zip(net_raw_vals, q_nlp_raw)])
+    net_raw_loads = np.asarray([net.firing_rate_raw(x, u, sp) for x, u, sp in triples])
+    diffs_clamped = np.asarray(
+        [abs(np.clip(net_load, 0.0, 1.0) - nlp_load) for net_load, nlp_load in zip(net_raw_loads, nlp_loads)]
+    )
+    diffs_raw = np.asarray([abs(net_load - nlp_load) for net_load, nlp_load in zip(net_raw_loads, nlp_raw_loads)])
 
     def _excursions(mask):
-        sel = net_raw_vals[mask]
-        if sel.size == 0:
+        selected = net_raw_loads[mask]
+        if selected.size == 0:
             return {
                 "n": 0,
                 "n_excursions": 0,
-                "worst_below_q_min": None,
-                "worst_above_q_max": None,
-                "margin_min_to_q_min": None,
-                "margin_min_to_q_max": None,
+                "worst_below_zero": None,
+                "worst_above_one": None,
+                "margin_to_zero": None,
+                "margin_to_one": None,
             }
-        below = sel < core.cfg["Q_min"]
-        above = sel > core.cfg["Q_max"]
+        below_zero = selected < 0.0
+        above_one = selected > 1.0
         return {
             "n": int(mask.sum()),
-            "n_excursions": int(below.sum() + above.sum()),
-            "worst_below_q_min": float((core.cfg["Q_min"] - sel[below]).max()) if below.any() else 0.0,
-            "worst_above_q_max": float((sel[above] - core.cfg["Q_max"]).max()) if above.any() else 0.0,
-            # Unconditional (R2): signed distance to each boundary at its
-            # closest approach, whether or not that approach crossed it. A
-            # count of 0 can still be a hair's breadth from 1; this is the
-            # number that says how much breathing room there actually was.
-            "margin_min_to_q_min": float((sel - core.cfg["Q_min"]).min()),
-            "margin_min_to_q_max": float((core.cfg["Q_max"] - sel).min()),
+            "n_excursions": int(below_zero.sum() + above_one.sum()),
+            "worst_below_zero": float((-selected[below_zero]).max()) if below_zero.any() else 0.0,
+            "worst_above_one": float((selected[above_one] - 1.0).max()) if above_one.any() else 0.0,
+            "margin_to_zero": float(selected.min()),
+            "margin_to_one": float((1.0 - selected).min()),
         }
 
     excursions_whole = _excursions(np.ones_like(lid_mask))
@@ -541,89 +327,56 @@ def replay(
 
     return {
         "seed": seed,
-        "applied_q_split_expected": bool(applied_q_split_expected),
-        # Which experiment arm produced this row. Rows from different
-        # lid_models are not comparable to each other (see module docstring).
-        "lid_model": lid_model,
-        "estimator_input": estimator_input,
-        # Which policy artifact this row was measured against. Without it, two
-        # rows separated by a retrain are indistinguishable from the files
-        # themselves and a re-capture across one reads as a change in the arm.
         "net_path": os.path.relpath(net_path, _ROOT),
         "net_sha256": _sha256(net_path),
         "n": int(diffs_clamped.size),
         "n_lid": int(lid_mask.sum()),
-        # The gate's window, split into the two regimes it contains. n_lid is
-        # their sum; only n_lid_paused is "while the auger is paused", which is
-        # how the plan's primary gate is defined.
         "n_lid_paused": int(lid_paused_mask.sum()),
         "n_lid_released": int(lid_released_mask.sum()),
         "warm_start_s": int(warm_start_s),
         "mean_temp_last_hour_f": mean_temp_last_hour_f,
         "lid_min_temp_f": lid_min_temp_f,
-        # Width of the lid excursion (see above): the pair lid_min_temp_f /
-        # lid_recovery_s fails in opposite directions, so neither alone pins
-        # the modelled pause length.
         "lid_recovery_s": lid_recovery_s,
         "realized_duty_mean": realized_duty_mean,
         "commanded_duty_mean": commanded_duty_mean,
-        # PRIMARY acceptance quantity: how often, and how far, the net's
-        # un-clipped answer leaves [Q_min, Q_max] -- warm window (excludes
-        # the startup transient, same as the RMS split below) and lid window.
-        "excursion_n_warm": excursions_warm["n_excursions"],
-        "excursion_pct_warm": 100.0 * excursions_warm["n_excursions"] / excursions_warm["n"],
-        "excursion_worst_below_q_min_warm": excursions_warm["worst_below_q_min"],
-        "excursion_worst_above_q_max_warm": excursions_warm["worst_above_q_max"],
-        "excursion_n_lid": excursions_lid["n_excursions"],
-        "excursion_worst_below_q_min_lid": excursions_lid["worst_below_q_min"],
-        "excursion_worst_above_q_max_lid": excursions_lid["worst_above_q_max"],
-        # The same count over each half of the lid window. The "_paused" half is
-        # the plan's stated gate window; the "_released" half is the harder
-        # extrapolation, since nothing in training visits a chamber that cold
-        # with the controller free to answer.
-        "excursion_n_lid_paused": excursions_lid_paused["n_excursions"],
-        "excursion_worst_below_q_min_lid_paused": excursions_lid_paused["worst_below_q_min"],
-        "excursion_worst_above_q_max_lid_paused": excursions_lid_paused["worst_above_q_max"],
-        "excursion_n_lid_released": excursions_lid_released["n_excursions"],
-        "excursion_worst_below_q_min_lid_released": excursions_lid_released["worst_below_q_min"],
-        "excursion_worst_above_q_max_lid_released": excursions_lid_released["worst_above_q_max"],
-        # SECONDARY/context: whole-run excursion count (includes the startup
-        # transient -- kept, labelled, not the acceptance number).
-        "excursion_n_whole": excursions_whole["n_excursions"],
-        "excursion_pct_whole": 100.0 * excursions_whole["n_excursions"] / excursions_whole["n"],
-        "excursion_worst_below_q_min_whole": excursions_whole["worst_below_q_min"],
-        "excursion_worst_above_q_max_whole": excursions_whole["worst_above_q_max"],
-        # Signed minimum margin to each boundary, unconditional (R2): reported
-        # even when the excursion count above is zero, because a zero count
-        # can still be a knife-edge result. Positive = stayed that far
-        # inside the box; negative = crossed by that much (matches the worst_*
-        # figures above in that case).
-        "margin_min_to_q_min_whole": excursions_whole["margin_min_to_q_min"],
-        "margin_min_to_q_max_whole": excursions_whole["margin_min_to_q_max"],
-        "margin_min_to_q_min_lid": excursions_lid["margin_min_to_q_min"],
-        "margin_min_to_q_max_lid": excursions_lid["margin_min_to_q_max"],
-        "margin_min_to_q_min_lid_paused": excursions_lid_paused["margin_min_to_q_min"],
-        "margin_min_to_q_max_lid_paused": excursions_lid_paused["margin_min_to_q_max"],
-        "margin_min_to_q_min_lid_released": excursions_lid_released["margin_min_to_q_min"],
-        "margin_min_to_q_max_lid_released": excursions_lid_released["margin_min_to_q_max"],
-        # SECONDARY: raw RMS/max, warm-window (what a later comparison should
-        # read) and whole-run (kept, clearly labelled, not hidden).
+        "load_excursion_n_warm": excursions_warm["n_excursions"],
+        "load_excursion_pct_warm": 100.0 * excursions_warm["n_excursions"] / excursions_warm["n"],
+        "load_excursion_worst_below_zero_warm": excursions_warm["worst_below_zero"],
+        "load_excursion_worst_above_one_warm": excursions_warm["worst_above_one"],
+        "load_excursion_n_lid": excursions_lid["n_excursions"],
+        "load_excursion_worst_below_zero_lid": excursions_lid["worst_below_zero"],
+        "load_excursion_worst_above_one_lid": excursions_lid["worst_above_one"],
+        "load_excursion_n_lid_paused": excursions_lid_paused["n_excursions"],
+        "load_excursion_worst_below_zero_lid_paused": excursions_lid_paused["worst_below_zero"],
+        "load_excursion_worst_above_one_lid_paused": excursions_lid_paused["worst_above_one"],
+        "load_excursion_n_lid_released": excursions_lid_released["n_excursions"],
+        "load_excursion_worst_below_zero_lid_released": excursions_lid_released["worst_below_zero"],
+        "load_excursion_worst_above_one_lid_released": excursions_lid_released["worst_above_one"],
+        "load_excursion_n_whole": excursions_whole["n_excursions"],
+        "load_excursion_pct_whole": 100.0 * excursions_whole["n_excursions"] / excursions_whole["n"],
+        "load_excursion_worst_below_zero_whole": excursions_whole["worst_below_zero"],
+        "load_excursion_worst_above_one_whole": excursions_whole["worst_above_one"],
+        "load_margin_to_zero_whole": excursions_whole["margin_to_zero"],
+        "load_margin_to_one_whole": excursions_whole["margin_to_one"],
+        "load_margin_to_zero_lid": excursions_lid["margin_to_zero"],
+        "load_margin_to_one_lid": excursions_lid["margin_to_one"],
+        "load_margin_to_zero_lid_paused": excursions_lid_paused["margin_to_zero"],
+        "load_margin_to_one_lid_paused": excursions_lid_paused["margin_to_one"],
+        "load_margin_to_zero_lid_released": excursions_lid_released["margin_to_zero"],
+        "load_margin_to_one_lid_released": excursions_lid_released["margin_to_one"],
         "rms_all_raw_warm": _rms(diffs_raw[warm_mask]),
         "max_all_raw_warm": float(diffs_raw[warm_mask].max()),
         "rms_all_raw_whole": _rms(diffs_raw),
         "max_all_raw_whole": float(diffs_raw.max()),
         "rms_lid_raw": _rms(diffs_raw[lid_mask]) if lid_mask.any() else None,
         "max_lid_raw": float(diffs_raw[lid_mask].max()) if lid_mask.any() else None,
-        # Reported for completeness, not the acceptance question (see
-        # module docstring for why clamping both sides hides the failure
-        # mode this script exists to catch).
         "rms_all_clamped_warm": _rms(diffs_clamped[warm_mask]),
         "max_all_clamped_warm": float(diffs_clamped[warm_mask].max()),
         "rms_all_clamped_whole": _rms(diffs_clamped),
         "max_all_clamped_whole": float(diffs_clamped.max()),
         "rms_lid_clamped": _rms(diffs_clamped[lid_mask]) if lid_mask.any() else None,
         "max_lid_clamped": float(diffs_clamped[lid_mask].max()) if lid_mask.any() else None,
-        "q_span": float(core.cfg["Q_max"] - core.cfg["Q_min"]),
+        "load_span": 1.0,
     }
 
 
@@ -631,67 +384,41 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Measure net-vs-NLP policy disagreement.")
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--out", default=OUT)
-    ap.add_argument(
-        "--applied-q-split-expected",
-        action="store_true",
-        help="Set for the after-Task-13 run, once Controller exposes _applied_Q.",
-    )
-    ap.add_argument(
-        "--lid-model",
-        choices=("faithful", "stress"),
-        default="faithful",
-        help="'faithful' mirrors hold.py (0.0 once, then u_min, auger cycling); "
-        "'stress' holds 0.0 with the auger off for the whole pause.",
-    )
-    ap.add_argument(
-        "--estimator-input",
-        choices=("applied", "command"),
-        default="applied",
-        help="'applied' reports duty through set_output; 'command' withholds "
-        "those reports, reproducing pre-Task-13 behavior on a post-Task-13 checkout.",
-    )
     args = ap.parse_args(argv)
-    rows = [
-        replay(
-            seed=s,
-            applied_q_split_expected=args.applied_q_split_expected,
-            lid_model=args.lid_model,
-            estimator_input=args.estimator_input,
-        )
-        for s in args.seeds
-    ]
+    rows = [replay(seed=seed) for seed in args.seeds]
     with open(args.out, "w") as f:
         json.dump(rows, f, indent=1, sort_keys=True)
-    for r in rows:
+    for row in rows:
         print(
-            f"seed {r['seed']}: mean_temp_last_hour_f={r['mean_temp_last_hour_f']:.1f} "
-            f"realized_duty={r['realized_duty_mean']:.3f} commanded_duty={r['commanded_duty_mean']:.3f} "
-            f"warm_start_s={r['warm_start_s']} applied_q_split_expected={r['applied_q_split_expected']} "
-            f"lid_model={r['lid_model']} estimator_input={r['estimator_input']}"
+            f"seed {row['seed']}: mean_temp_last_hour_f={row['mean_temp_last_hour_f']:.1f} "
+            f"realized_duty={row['realized_duty_mean']:.3f} "
+            f"commanded_duty={row['commanded_duty_mean']:.3f} warm_start_s={row['warm_start_s']}"
         )
         print(
-            f"  excursions: warm={r['excursion_n_warm']}/{r['n']} lid={r['excursion_n_lid']}/{r['n_lid']} "
-            f"(paused={r['excursion_n_lid_paused']}/{r['n_lid_paused']} "
-            f"released={r['excursion_n_lid_released']}/{r['n_lid_released']}) "
-            f"whole={r['excursion_n_whole']} ({r['excursion_pct_whole']:.1f}%, context only)"
+            f"  load excursions: warm={row['load_excursion_n_warm']}/{row['n']} "
+            f"lid={row['load_excursion_n_lid']}/{row['n_lid']} "
+            f"(paused={row['load_excursion_n_lid_paused']}/{row['n_lid_paused']} "
+            f"released={row['load_excursion_n_lid_released']}/{row['n_lid_released']}) "
+            f"whole={row['load_excursion_n_whole']} "
+            f"({row['load_excursion_pct_whole']:.1f}%, context only)"
         )
         print(
-            f"  lid excursion: lid_min_temp_f={r['lid_min_temp_f']:.2f} lid_recovery_s={r['lid_recovery_s']} "
-            f"net={r['net_path']} sha256={r['net_sha256'][:12]}"
-        )
-        # signed: positive = that far inside the boundary, negative = crossed
-        # it by that much -- do not add a literal sign prefix here, the
-        # values already carry their own.
-        print(
-            f"  margin to boundary (whole run): to_Q_min={r['margin_min_to_q_min_whole']:+.3f} "
-            f"to_Q_max={r['margin_min_to_q_max_whole']:+.3f}   (lid window): "
-            f"to_Q_min={r['margin_min_to_q_min_lid']:+.3f} to_Q_max={r['margin_min_to_q_max_lid']:+.3f}"
+            f"  lid excursion: lid_min_temp_f={row['lid_min_temp_f']:.2f} "
+            f"lid_recovery_s={row['lid_recovery_s']} net={row['net_path']} "
+            f"sha256={row['net_sha256'][:12]}"
         )
         print(
-            f"  rms_all_raw_warm={r['rms_all_raw_warm']:.3f} max_all_raw_warm={r['max_all_raw_warm']:.3f} "
-            f"(whole: rms={r['rms_all_raw_whole']:.3f} max={r['max_all_raw_whole']:.3f}) "
-            f"rms_lid_raw={r['rms_lid_raw']} max_lid_raw={r['max_lid_raw']} "
-            f"(Q span {r['q_span']:.0f})"
+            f"  normalized-load margin (whole): to_zero={row['load_margin_to_zero_whole']:+.3f} "
+            f"to_one={row['load_margin_to_one_whole']:+.3f}; "
+            f"(lid): to_zero={row['load_margin_to_zero_lid']:+.3f} "
+            f"to_one={row['load_margin_to_one_lid']:+.3f}"
+        )
+        print(
+            f"  rms_all_raw_warm={row['rms_all_raw_warm']:.3f} "
+            f"max_all_raw_warm={row['max_all_raw_warm']:.3f} "
+            f"(whole: rms={row['rms_all_raw_whole']:.3f} max={row['max_all_raw_whole']:.3f}) "
+            f"rms_lid_raw={row['rms_lid_raw']} max_lid_raw={row['max_lid_raw']} "
+            f"(normalized span {row['load_span']:.0f})"
         )
 
 

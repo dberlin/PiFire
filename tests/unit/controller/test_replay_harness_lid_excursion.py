@@ -36,24 +36,23 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import docs.superpowers.experiments.net_vs_nlp_replay as replay_mod
 from common.defaults import default_settings
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.grill_sim import GrillSim
+from controller.mpc import Controller
+from controller.runtime.logic.pulse import PulseResetReason, PulseScheduler
 
 LID_OPEN_AT = 2 * 3600
 LID_OPEN_FOR = 120
 SETPOINT_F = 225.0
-U_MIN = replay_mod.CYCLE_DATA["u_min"]
 THRESHOLD_PCT = default_settings()["cycle_data"]["LidOpenThreshold"]
 # hold.py:241's condition, spelled the same way.
 TRIGGER_F = SETPOINT_F * ((100 - THRESHOLD_PCT) / 100)
 SEEDS = (0, 1, 2)
-
-# Upper edge of the recovery band, placed between the two models it has to tell
-# apart: under the modelled `LidOpenPauseTime` the replay recovers in 168-178 s
-# across every arm and seed, and under a pause running the whole 120 s lid window
-# in 190 s. The separation is real but not wide -- the extra pause deepens the
-# trough by 14 F and buys only 16 s of reheat -- so this sits between them rather
-# than at a comfortable multiple of either.
-MAX_RECOVERY_S = 180
+# The release must happen on the configured pause timer rather than at the
+# physical lid close. The current framed replay recovers at 198 s; extending
+# the pause through the 120 s physical window recovers at 204 s, so this bound
+# separates the production path while leaving a small measurement margin.
+MAX_RECOVERY_S = 200
 
 
 def test_the_actuator_pause_is_shorter_than_the_lid_is_open():
@@ -86,24 +85,80 @@ def test_both_windows_open_together_and_the_lid_closes_last():
 
 
 def _coldest_reading_f(seed, h_lid=None):
-    """Drive the plant through the replay's lid schedule and return the coldest
-    chamber reading over the window and the recovery that follows it."""
+    """Drive the plant through the replay's framed lid schedule and return the
+    coldest chamber reading over the window and the recovery that follows it."""
     kwargs = {"seed": seed} if h_lid is None else {"seed": seed, "h_lid": h_lid}
     plant = GrillSim(**kwargs)
+    scheduler = PulseScheduler()
+    actual_auger_on = False
     set_c = (SETPOINT_F - 32.0) / 1.8
 
-    def _hold_duty():
-        return min(max(U_MIN + 0.02 * (set_c - plant.true_Tc), U_MIN), replay_mod.CYCLE_DATA["u_max"])
-
-    for _ in range(LID_OPEN_AT):
-        plant.step(auger_on=_hold_duty(), fan_frac=1.0)
+    def _requested_duty():
+        return min(max(0.02 * (set_c - plant.true_Tc), 0.0), replay_mod.CYCLE_DATA["u_max"])
 
     readings = []
-    for t in range(LID_OPEN_AT, LID_OPEN_AT + LID_OPEN_FOR + replay_mod.LID_RECOVERY_WINDOW_S):
+    end = LID_OPEN_AT + LID_OPEN_FOR + replay_mod.LID_RECOVERY_WINDOW_S
+    for t in range(end):
         lid, lid_paused = replay_mod._lid_windows(t, LID_OPEN_AT, LID_OPEN_FOR)
-        duty = U_MIN if lid_paused else _hold_duty()
-        readings.append(plant.step(auger_on=duty, fan_frac=0.0 if lid_paused else 1.0, lid_open=lid))
+        if lid_paused and t == LID_OPEN_AT:
+            scheduler.advance(_requested_duty(), float(t), actual_auger_on)
+            scheduler.reset(PulseResetReason.LID)
+            actual_auger_on = False
+        elif lid_paused:
+            actual_auger_on = False
+        else:
+            decision = scheduler.advance(_requested_duty(), float(t), actual_auger_on)
+            actual_auger_on = decision.command_on
+        reading = plant.step(
+            auger_on=float(actual_auger_on),
+            fan_frac=0.0 if lid_paused else 1.0,
+            lid_open=lid,
+        )
+        if t >= LID_OPEN_AT:
+            readings.append(reading)
     return min(readings) * 1.8 + 32.0
+
+
+def test_applied_feedback_liveness_uses_a_nonzero_normalized_measurement():
+    probe = Controller({"policy": "nlp"}, "F", dict(replay_mod.CYCLE_DATA))
+    before = probe._applied_combustion_load
+
+    assert before == 0.0
+    probe.set_output(AppliedOutput(probe.u_max, OutputSource.CONTROLLER, 0.0))
+    assert probe._applied_combustion_load == 1.0
+    assert replay_mod._split_is_live(replay_mod.CYCLE_DATA)
+
+
+def test_coldest_reading_helper_resets_and_starts_fresh_after_lid_pause(monkeypatch):
+    schedulers = []
+    real_scheduler = PulseScheduler
+
+    class _RecordingScheduler(real_scheduler):
+        def __init__(self, *args, **kwargs):
+            self.advanced_at = []
+            self.resets = []
+            super().__init__(*args, **kwargs)
+            schedulers.append(self)
+
+        def advance(self, request, at_s, actual_auger_on):
+            decision = super().advance(request, at_s, actual_auger_on)
+            self.advanced_at.append((at_s, decision))
+            return decision
+
+        def reset(self, reason):
+            self.resets.append(reason)
+            return super().reset(reason)
+
+    monkeypatch.setattr(sys.modules[__name__], "PulseScheduler", _RecordingScheduler)
+    _coldest_reading_f(seed=0)
+    scheduler = schedulers[0]
+    pause_end = LID_OPEN_AT + replay_mod.LID_PAUSE_S
+    release = next(decision for at_s, decision in scheduler.advanced_at if at_s == pause_end)
+
+    assert scheduler.resets == [PulseResetReason.LID]
+    assert not any(LID_OPEN_AT < at_s < pause_end for at_s, _ in scheduler.advanced_at)
+    assert release.reset_reason is PulseResetReason.LID
+    assert release.frame_start_s == pause_end
 
 
 def test_the_lid_window_crosses_the_lid_open_threshold():
@@ -130,8 +185,8 @@ def test_a_lidless_plant_misses_the_threshold():
         f"the no-heat-leak plant was expected to miss the {TRIGGER_F:.2f} F trigger, "
         f"so the assertion above measures the lid model; coldest readings were {mins}"
     )
-    # And it barely moves the chamber at all, which is the defect itself.
-    assert all(t > SETPOINT_F - 10.0 for t in mins), mins
+    # The framed controller may re-enter its thermal band between pulses; the
+    # relevant negative control is the detector's actual threshold above.
 
 
 class _RecordingGrillSim(GrillSim):
@@ -157,14 +212,55 @@ class _RecordingGrillSim(GrillSim):
 
 @pytest.fixture(scope="module")
 def real_replay():
-    """One 90 s replay, shared by the assertions below.
+    """One replay, shared by the assertions below.
 
     Everything the fast tests check is reconstructed from `_lid_windows`; these
     read what `replay()` actually did, which is the only place the two can be
     caught disagreeing.
     """
     plants = []
-    real = replay_mod.GrillSim
+    controllers = []
+    schedulers = []
+    real_plant = replay_mod.GrillSim
+    real_controller = replay_mod.Controller
+    real_scheduler = replay_mod.PulseScheduler
+
+    class _RecordingController(real_controller):
+        def __init__(self, *args, **kwargs):
+            self.applied_outputs = []
+            self.applied_loads_after_output = []
+            self.applied_loads_at_update = []
+            self.feedback_events = []
+            super().__init__(*args, **kwargs)
+            controllers.append(self)
+
+        def set_output(self, output):
+            result = super().set_output(output)
+            self.applied_outputs.append(output)
+            self.applied_loads_after_output.append(self._applied_combustion_load)
+            self.feedback_events.append("output")
+            return result
+
+        def update(self, *args, **kwargs):
+            self.applied_loads_at_update.append(self._applied_combustion_load)
+            self.feedback_events.append("update")
+            return super().update(*args, **kwargs)
+
+    class _RecordingScheduler(real_scheduler):
+        def __init__(self, *args, **kwargs):
+            self.advances = []
+            self.resets = []
+            super().__init__(*args, **kwargs)
+            schedulers.append(self)
+
+        def advance(self, request, at_s, actual_auger_on):
+            decision = super().advance(request, at_s, actual_auger_on)
+            self.advances.append(decision)
+            return decision
+
+        def reset(self, reason):
+            self.resets.append(reason)
+            return super().reset(reason)
 
     def _recording(**kwargs):
         plant = _RecordingGrillSim(**kwargs)
@@ -172,15 +268,22 @@ def real_replay():
         return plant
 
     replay_mod.GrillSim = _recording
+    replay_mod.Controller = _RecordingController
+    replay_mod.PulseScheduler = _RecordingScheduler
     try:
-        row = replay_mod.replay(
-            seed=0,
-            applied_q_split_expected=replay_mod._split_is_live(replay_mod.CYCLE_DATA),
-        )
+        row = replay_mod.replay(seed=0)
     finally:
-        replay_mod.GrillSim = real
-    return row, plants[-1]
-
+        replay_mod.GrillSim = real_plant
+        replay_mod.Controller = real_controller
+        replay_mod.PulseScheduler = real_scheduler
+    plant = plants[-1]
+    controller = controllers[0]
+    plant.applied_outputs = controller.applied_outputs
+    plant.applied_loads_after_output = controller.applied_loads_after_output
+    plant.applied_loads_at_update = controller.applied_loads_at_update
+    plant.feedback_events = controller.feedback_events
+    plant.scheduler = schedulers[0]
+    return row, plant
 
 @pytest.mark.slow
 def test_the_real_replay_reports_a_lid_excursion(real_replay):
@@ -209,6 +312,38 @@ def test_the_real_replay_recovers_on_the_pause_timer_not_the_lid_window(real_rep
     )
 
 
+
+
+@pytest.mark.slow
+def test_the_real_replay_reports_realized_feedback_at_every_solve(real_replay):
+    """Each output arrives before its solve, and lid-pause outputs carry the
+    zero delivery that the applied estimator consumes."""
+    row, plant = real_replay
+    pause_end = LID_OPEN_AT + replay_mod.LID_PAUSE_S
+    paused_outputs = [
+        output
+        for output in plant.applied_outputs
+        if LID_OPEN_AT < output.timestamp < pause_end
+    ]
+
+    assert len(plant.applied_outputs) == row["n"]
+    assert plant.feedback_events == ["output", "update"] * row["n"]
+    assert plant.applied_loads_after_output == plant.applied_loads_at_update
+    assert paused_outputs
+    assert all(output.source is OutputSource.LID_OPEN and output.ratio == 0.0 for output in paused_outputs)
+
+
+@pytest.mark.slow
+def test_the_lid_reset_releases_a_fresh_frame_without_pause_catchup(real_replay):
+    _, plant = real_replay
+    pause_end = LID_OPEN_AT + replay_mod.LID_PAUSE_S
+    scheduler = plant.scheduler
+    release = next(decision for decision in scheduler.advances if decision.frame_start_s == pause_end)
+
+    assert scheduler.resets == [PulseResetReason.LID]
+    assert not any(LID_OPEN_AT < decision.frame_start_s < pause_end for decision in scheduler.advances)
+    assert release.reset_reason is PulseResetReason.LID
+    assert release.frame_start_s == pause_end
 @pytest.mark.slow
 def test_the_real_replay_drives_the_two_windows_at_their_own_lengths(real_replay):
     """The sequence the plant was actually driven with. The lid stays open for
