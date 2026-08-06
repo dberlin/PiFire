@@ -166,6 +166,45 @@ The work cannot run on the control path in any case —
 `ThreadedControllerRunner` already owns the core off the Hold loop, and a
 multi-second fit belongs off both.
 
+## A better default is not a substitute, on the plant that matters
+
+The obvious cheaper answer is to ship a `C_c` that is less wrong, which is one
+number rather than a feature. It has to be measured by MOVING the shipped
+default, not by overriding it: `_model_is_identified` calls a grill calibrated
+when any physical parameter differs from the default, and a calibrated grill
+gets an equilibrium feed-forward and a learned-residual objective that an
+uncalibrated one does not. Overriding therefore changes the controller's
+structure alongside the number, and the effect of the structure dwarfs the
+effect of the number. `mpc_default_mass.py` now asserts the controller reports
+itself uncalibrated on every run and refuses to produce a row otherwise.
+
+MAKGrillSim, cook 1, overshoot °F / in-band %, identification off throughout:
+
+| `C_c` | 225 F | 350 F | 450 F |
+|---|---|---|---|
+| 320 (shipped) | **12.9 / 69.4** | **22.7 / 56.3** | 34.1 / 50.8 |
+| 640 | 26.5 / **87.9** | 30.1 / **72.8** | **32.2 / 60.9** |
+| 1600 | 39.8 / 77.0 | 37.9 / 51.8 | 35.6 / 33.7 |
+| 3116 (MAK's own) | 48.7 / 52.0 | 42.4 / 31.8 | 42.1 / 22.2 |
+
+No candidate dominates. 640 holds the band better at every setpoint (+18.5,
++16.5, +10.1 points) and pays for it in overshoot at the two lower ones, where
+225 F roughly doubles. Everything heavier is worse on both axes at once, and
+MAK's own measured capacity is the worst default of the four -- the single
+lump stands in for a firepot, a chamber and a radiative loss together, so the
+value that controls best is far lighter than the chamber actually is.
+
+A doubled overshoot at 225 F is the wrong trade to take blind: low and slow is
+what the plant is for. And the window it argues about is the same twelve
+minutes the mid-cook refit closes properly, by fitting `C_c`, `K_Q` and
+`theta` together rather than guessing one of them -- 34.1 -> 5.6 F at 450 F,
+against 34.1 -> 32.2 for the best default. So this is not an alternative to
+the work above, and on this evidence not a change worth making on its own.
+
+Moving it is also not free elsewhere: the committed policy artifacts assert
+`matches_config(_DEFAULTS)`, so any shipped physical default that moves
+requires regenerating `mpc_policy_net.npz` and `mpc_policy_net_fan.npz`.
+
 ## What this does not establish
 
 - One plant. `MAKGrillSim` is a real grill, but a slow one, and the shipped
