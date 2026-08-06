@@ -4,17 +4,17 @@
 Drives a controller core directly -- no Hold mode or datastore -- while
 resolving the same defaults and controller manifest a fresh Hold run would use.
 Each JSON row contains the immutable effective configuration used to construct
-the core, its typed actuation mode, and feasibility derived from plant/actuator
-authority rather than from the row's score.
+the core, its framed-pulse actuation configuration, and feasibility derived
+from plant/actuator authority rather than from the row's score.
 
-A `lid_open` window opens the physical lid for the whole window. Fixed-cycle
-controllers retain Hold's historical pause: fan off, one forced-off detection
-tick, then cycling at `u_min` until the run's `LidOpenPauseTime` expires.
-Framed MPC instead uses the production `PulseScheduler`: a lid or manual
-inhibit accounts observed delivery to that instant, resets/discards pulse
-credit, and keeps the auger off until the inhibit clears. Its feedback is the
-actually delivered interval duty, reported only at completed producing control
-boundaries.
+A `lid_open` window opens the physical lid for the whole window. Every
+executable controller uses the production `PulseScheduler` with its actual
+2-second pulse/20-second frame timing. A lid or manual inhibit accounts
+observed delivery to that instant, resets/discards pulse credit, and keeps the
+auger off until the inhibit clears. `cycle_config` can still alter controller
+settings and duty authority, but never selects or retimes the scheduler. The
+feedback is actually delivered interval duty, reported only at completed
+producing control boundaries.
 """
 
 import argparse
@@ -31,7 +31,6 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from common.control_trace import ActuationMode  # noqa: E402
 from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
 from controller.runtime.logic.pulse import PulseResetReason, PulseScheduler  # noqa: E402
 from controller.runtime.runner import ControllerType, SyncControllerRunner  # noqa: E402
@@ -88,8 +87,8 @@ class Scenario:
     duration_s: int
     # (start_second, setpoint_F); the first entry must start at 0.
     setpoints: list[tuple[int, float]] = field(default_factory=list)
-    # (start_second, duration_s) physical-lid windows. Fixed-cycle Hold pauses
-    # are derived from the run's current LidOpenPauseTime.
+    # (start_second, duration_s) physical-lid windows. Framed-pulse inhibition
+    # lasts for this run's current LidOpenPauseTime.
     lid_open: list[tuple[int, int]] = field(default_factory=list)
     # (start_second, duration_s) deterministic manual-inhibit windows. They
     # model the auger being unavailable to the controller and exist only for
@@ -131,7 +130,7 @@ def _lid_open_at(scenario, t):
 
 
 def _lid_paused_at(scenario, t, cycle_data):
-    """Fixed-cycle Hold's pause uses this run's current settings."""
+    """Framed-pulse inhibition uses this run's current pause setting."""
     pause_s = cycle_data["LidOpenPauseTime"]
     return any(start <= t < start + pause_s for start, _ in scenario.lid_open)
 
@@ -143,12 +142,11 @@ def _manual_inhibited_at(scenario, t):
 def _manual_inhibit_start_at(scenario, t):
     return any(start == t for start, _ in scenario.manual_inhibit)
 
-
 def _lid_pause_start_at(scenario, t):
-    """True on the single tick a pause begins -- the instant hold.py:247-264
-    forces the auger off and reports one AppliedOutput(0.0), as distinct from
-    the rest of the pause, which keeps cycling at u_min."""
+    """True on the tick a lid event resets framed scheduler credit."""
     return any(start == t for start, _ in scenario.lid_open)
+
+
 
 
 def _recovery_s(err_from_lid):
@@ -175,46 +173,6 @@ def _report(core, ratio, source_name, t, requested=None):
     setter(AppliedOutput(ratio=ratio, source=OutputSource(source_name), timestamp=float(t), requested=requested))
 
 
-def _auger_toggle_tick(auger_on, auger_toggle, t, ratio, cycle_time):
-    """Port of controller.runtime.modes.base.ControlMode._auger_cycle_tick,
-    returning the auger's exact fractional on-time over the window [t, t+1)
-    instead of a single boolean sample of it.
-
-    Production evaluates this strict-`>` toggle at its work-loop resolution
-    (~20 Hz) and drives a physical auger that integrates fuel delivery
-    continuously between samples. GrillSim can only be stepped once per
-    simulated second, so sampling the toggle as a boolean once per second
-    would quantize fuel delivery to whichever side of a transition the sample
-    landed on. Instead, the transition instant within the window is located
-    exactly (continuous time, so `>` vs `>=` at that single instant does not
-    affect the fraction) and returned as the portion of the window it covers.
-    This is arithmetic rather than sub-stepping, and it depends on at most one
-    transition ever falling inside a 1 s window -- the assertion below makes
-    that requirement explicit instead of leaving it to fail silently.
-
-    `auger_toggle` is carried as the exact (possibly fractional) transition
-    time rather than snapped to a tick, so later windows see the true elapsed
-    time since the last transition. A re-solve to a smaller ratio can put the
-    threshold computed from the old `auger_toggle` in the past relative to the
-    current window; `transition` is clamped to `t` so that case reads as "flip
-    right now" instead of a negative or >1 fraction, and the return value is
-    clamped to [0, 1] as a backstop.
-    """
-    assert cycle_time * ratio >= 1 and cycle_time * (1 - ratio) >= 1, (
-        f"ratio={ratio} at cycle_time={cycle_time} gives an on- or off-phase "
-        "shorter than one window -- more than one transition could fall "
-        "inside a single tick, which this closed-form arithmetic can't represent"
-    )
-    was_on = auger_on
-    if not was_on:
-        transition = max(auger_toggle + cycle_time * (1 - ratio), t)
-        if transition >= t + 1:
-            return False, auger_toggle, 0.0
-        return True, transition, min(max(t + 1 - transition, 0.0), 1.0)
-    transition = max(auger_toggle + cycle_time * ratio, t)
-    if transition >= t + 1:
-        return True, auger_toggle, 1.0
-    return False, transition, min(max(transition - t, 0.0), 1.0)
 
 
 class _SimClock:
@@ -230,12 +188,6 @@ class _SimClock:
         return self.t
 
 
-def _actuation_mode(core):
-    """Match runtime.runner's typed controller capability check."""
-    mode = getattr(core, "actuation_mode", lambda: ActuationMode.FIXED_CYCLE)()
-    if not isinstance(mode, ActuationMode):
-        raise TypeError("controller actuation_mode() must return ActuationMode")
-    return mode
 
 
 def _authority(core, cycle_data):
@@ -333,21 +285,18 @@ def run_scenario(
         )
         plant_name = plant
         plant_instance = globals()[plant_name](seed=seed)
-        mode = _actuation_mode(core)
+        scheduler = PulseScheduler()
         cycle_max, controller_max, effective_max, _ = _authority(core, cycle_data)
         del cycle_max, controller_max
-        scheduler = PulseScheduler() if mode is ActuationMode.FRAMED_PULSE else None
-        pulse_timing = (
-            {"frame_seconds": float(scheduler.timing.frame_s), "pulse_seconds": float(scheduler.timing.pulse_s)}
-            if scheduler is not None
-            else None
-        )
         effective_run = _snapshot(
             {
                 "controller_config": core_config,
                 "cycle_config": cycle_data,
-                "actuation_mode": mode.value,
-                "pulse_timing": pulse_timing,
+                "actuation_mode": "framed_pulse",
+                "pulse_timing": {
+                    "frame_seconds": float(scheduler.timing.frame_s),
+                    "pulse_seconds": float(scheduler.timing.pulse_s),
+                },
                 "plant": plant_name,
                 "seed": seed,
                 "scenario": scenario.name,
@@ -355,7 +304,6 @@ def run_scenario(
             }
         )
 
-        u_min, u_max = float(cycle_data["u_min"]), float(cycle_data["u_max"])
         setpoint = _setpoint_at(scenario, 0)
         if runner is None:
             core.set_target(setpoint)
@@ -371,13 +319,11 @@ def run_scenario(
                 control_period_s=period,
                 setpoint=setpoint,
             )
-        requested, ratio, fan_frac = 0.0, (0.0 if scheduler else u_min), 1.0
+        requested, fan_frac = 0.0, 1.0
         next_solve = 0.0
-        auger_on, auger_toggle, actual_auger_on = False, 0.0, False
+        actual_auger_on = False
         feedback_start, feedback_delivered, feedback_requested = 0.0, 0.0, 0.0
         latest_result = None
-        if scheduler is None:
-            _report(core, u_min, "seed", 0)
         temps, duties = [], []
         delivered_request_s = delivered_actual_s = delivered_window_s = 0.0
         solve_durations, deadline_misses, stale_episodes, settle_from = [], [], 0, None
@@ -430,130 +376,84 @@ def run_scenario(
                         stale_episodes += int(latest_result.stale_state.value == "stale")
                 if output_transform is not None:
                     requested = float(output_transform(requested))
-                if scheduler is not None:
-                    # Framed MPC has no fixed-cycle minimum firing floor; its
-                    # only duty authority is the effective controller/cycle cap.
-                    requested = min(max(requested, 0.0), effective_max)
+                requested = min(max(requested, 0.0), effective_max)
                 if trace_sink is not None:
                     assert latest_result is not None
                     trace_sink.solved(t=float(t), result=latest_result, requested=requested)
 
-            if scheduler is None:
-                ratio = min(max(requested, u_min), u_max)
-                if lid_paused:
-                    ratio = u_min
-                if manual_inhibit:
-                    ratio = 0.0
-                if solved and not manual_inhibit:
-                    source = "lid_open" if lid_paused else "controller"
-                if manual_inhibit:
-                    # Hold preserves its toggle timer while manual ownership
-                    # holds the auger off; release resumes the existing phase.
-                    auger_on, auger_frac = False, 0.0
-                    if manual_start:
-                        _report(core, 0.0, "manual_override", t, requested=requested)
-                elif lid_pause_start:
-                    auger_on, auger_toggle, auger_frac = False, t, 0.0
-                    _report(core, 0.0, "lid_open", t, requested=requested)
-                else:
-                    auger_on, auger_toggle, auger_frac = _auger_toggle_tick(
-                        auger_on, auger_toggle, t, ratio, cycle_data["HoldCycleTime"]
+            inhibited = lid_paused or manual_inhibit
+            reset_reason = PulseResetReason.MANUAL if manual_start else PulseResetReason.LID
+            if lid_pause_start or manual_start:
+                # Account the observed interval first, then discard the
+                # interrupted credit exactly as Hold does before preemption.
+                decision = scheduler.advance(requested, float(t), actual_auger_on)
+                if trace_sink is not None and latest_result is not None:
+                    trace_sink.frames(
+                        t=float(t),
+                        revision=latest_result.revision,
+                        frames=decision.completed_frames,
                     )
-                if solved and not manual_inhibit and t > feedback_start:
-                    delivered = feedback_delivered / (t - feedback_start)
-                    _report(core, delivered, source, t, requested=feedback_requested)
-                    if source == "controller":
-                        window_s = float(t) - feedback_start
-                        delivered_request_s += feedback_requested * window_s
-                        delivered_actual_s += delivered * window_s
+                for frame in decision.completed_frames:
+                    if frame.complete:
+                        window_s = frame.nominal_end_s - frame.nominal_start_s
+                        delivered_request_s += frame.latched_request * window_s
+                        delivered_actual_s += frame.delivered_on_s
                         delivered_window_s += window_s
-                    if trace_sink is not None and latest_result is not None:
-                        trace_sink.applied(
-                            interval_start_s=feedback_start,
-                            interval_end_s=float(t),
-                            result=latest_result,
-                            requested=feedback_requested,
-                            realized=delivered,
-                        )
-                    feedback_start = float(t)
-                    feedback_delivered = 0.0
+                if trace_sink is not None and latest_result is not None and t > feedback_start:
+                    delivered = decision.delivered_on_s - feedback_delivered
+                    trace_sink.applied(
+                        interval_start_s=feedback_start,
+                        interval_end_s=float(t),
+                        result=latest_result,
+                        requested=feedback_requested,
+                        realized=delivered / (t - feedback_start),
+                        sample_complete=False,
+                    )
+                scheduler.reset(reset_reason)
+                actual_auger_on = False
+                # PulseScheduler retains its monotone total across reset;
+                # baseline this new feedback interval at that total so an
+                # interrupted frame cannot be charged again after release.
+                feedback_start = float(t)
+                feedback_delivered = decision.delivered_on_s
+            elif inhibited:
+                actual_auger_on = False
             else:
-                inhibited = lid_paused or manual_inhibit
-                reset_reason = PulseResetReason.MANUAL if manual_start else PulseResetReason.LID
-                if lid_pause_start or manual_start:
-                    # Account the observed interval first, then discard the
-                    # interrupted credit exactly as Hold does before preemption.
-                    decision = scheduler.advance(requested, float(t), actual_auger_on)
+                decision = scheduler.advance(requested, float(t), actual_auger_on)
+                if trace_sink is not None and latest_result is not None:
+                    trace_sink.frames(
+                        t=float(t),
+                        revision=latest_result.revision,
+                        frames=decision.completed_frames,
+                    )
+                for frame in decision.completed_frames:
+                    if frame.complete:
+                        window_s = frame.nominal_end_s - frame.nominal_start_s
+                        delivered_request_s += frame.latched_request * window_s
+                        delivered_actual_s += frame.delivered_on_s
+                        delivered_window_s += window_s
+                actual_auger_on = decision.command_on
+                if solved and t > feedback_start:
+                    delivered = decision.delivered_on_s - feedback_delivered
+                    realized = delivered / (t - feedback_start)
+                    _report(
+                        core,
+                        realized,
+                        "controller",
+                        t,
+                        requested=feedback_requested,
+                    )
                     if trace_sink is not None and latest_result is not None:
-                        trace_sink.frames(
-                            t=float(t),
-                            revision=latest_result.revision,
-                            frames=decision.completed_frames,
-                        )
-                    for frame in decision.completed_frames:
-                        if frame.complete:
-                            window_s = frame.nominal_end_s - frame.nominal_start_s
-                            delivered_request_s += frame.latched_request * window_s
-                            delivered_actual_s += frame.delivered_on_s
-                            delivered_window_s += window_s
-                    if trace_sink is not None and latest_result is not None and t > feedback_start:
-                        delivered = decision.delivered_on_s - feedback_delivered
                         trace_sink.applied(
                             interval_start_s=feedback_start,
                             interval_end_s=float(t),
                             result=latest_result,
                             requested=feedback_requested,
-                            realized=delivered / (t - feedback_start),
-                            sample_complete=False,
+                            realized=realized,
                         )
-                    scheduler.reset(reset_reason)
-                    actual_auger_on = False
-                    # PulseScheduler retains its monotone total across reset;
-                    # baseline this new feedback interval at that total so an
-                    # interrupted frame cannot be charged again after release.
                     feedback_start = float(t)
                     feedback_delivered = decision.delivered_on_s
-                elif inhibited:
-                    actual_auger_on = False
-                else:
-                    decision = scheduler.advance(requested, float(t), actual_auger_on)
-                    if trace_sink is not None and latest_result is not None:
-                        trace_sink.frames(
-                            t=float(t),
-                            revision=latest_result.revision,
-                            frames=decision.completed_frames,
-                        )
-                    for frame in decision.completed_frames:
-                        if frame.complete:
-                            window_s = frame.nominal_end_s - frame.nominal_start_s
-                            delivered_request_s += frame.latched_request * window_s
-                            delivered_actual_s += frame.delivered_on_s
-                            delivered_window_s += window_s
-                    actual_auger_on = decision.command_on
-                    if solved and t > feedback_start:
-                        delivered = decision.delivered_on_s - feedback_delivered
-                        realized = delivered / (t - feedback_start)
-                        _report(
-                            core,
-                            realized,
-                            "controller",
-                            t,
-                            requested=feedback_requested,
-                        )
-                        if trace_sink is not None and latest_result is not None:
-                            trace_sink.applied(
-                                interval_start_s=feedback_start,
-                                interval_end_s=float(t),
-                                result=latest_result,
-                                requested=feedback_requested,
-                                realized=realized,
-                            )
-                        feedback_start = float(t)
-                        feedback_delivered = decision.delivered_on_s
-                auger_frac = float(actual_auger_on)
-                ratio = auger_frac
-            if scheduler is None:
-                feedback_delivered += auger_frac
+            auger_frac = float(actual_auger_on)
             if solved:
                 feedback_requested = requested
 
@@ -570,31 +470,26 @@ def run_scenario(
             else:
                 settle_from = None
 
-        final_decision = None
-        if scheduler is not None:
-            final_decision = scheduler.advance(requested, float(scenario.duration_s), actual_auger_on)
-            for frame in final_decision.completed_frames:
-                if frame.complete:
-                    window_s = frame.nominal_end_s - frame.nominal_start_s
-                    delivered_request_s += frame.latched_request * window_s
-                    delivered_actual_s += frame.delivered_on_s
-                    delivered_window_s += window_s
+        final_decision = scheduler.advance(requested, float(scenario.duration_s), actual_auger_on)
+        for frame in final_decision.completed_frames:
+            if frame.complete:
+                window_s = frame.nominal_end_s - frame.nominal_start_s
+                delivered_request_s += frame.latched_request * window_s
+                delivered_actual_s += frame.delivered_on_s
+                delivered_window_s += window_s
 
         temps = np.asarray(temps)
         duties = np.asarray(duties)
         sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
         err = temps - sp_series
         if trace_sink is not None and latest_result is not None and float(scenario.duration_s) > feedback_start:
-            if final_decision is not None:
-                trace_sink.frames(
-                    t=float(scenario.duration_s),
-                    revision=latest_result.revision,
-                    frames=final_decision.completed_frames,
-                )
-                delivered = final_decision.delivered_on_s - feedback_delivered
-                realized = delivered / (float(scenario.duration_s) - feedback_start)
-            else:
-                realized = feedback_delivered / (float(scenario.duration_s) - feedback_start)
+            trace_sink.frames(
+                t=float(scenario.duration_s),
+                revision=latest_result.revision,
+                frames=final_decision.completed_frames,
+            )
+            delivered = final_decision.delivered_on_s - feedback_delivered
+            realized = delivered / (float(scenario.duration_s) - feedback_start)
             trace_sink.applied(
                 interval_start_s=feedback_start,
                 interval_end_s=float(scenario.duration_s),

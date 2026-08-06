@@ -55,14 +55,14 @@ class _AuthorityPlant(_Plant):
         return 130.0
 
 
-class _FixedCore:
+class _ProbeCore:
     instances = []
 
     def __init__(self, config, units, cycle_data):
         self.config = config
         self.cycle_data = cycle_data
         self.reports = []
-        _FixedCore.instances.append(self)
+        _ProbeCore.instances.append(self)
 
     def set_target(self, target):
         self.target = target
@@ -77,14 +77,6 @@ class _FixedCore:
     def set_output(self, applied):
         self.reports.append(applied)
 
-    def actuation_mode(self):
-        return ActuationMode.FIXED_CYCLE
-
-
-class _FramedCore(_FixedCore):
-    def actuation_mode(self):
-        return ActuationMode.FRAMED_PULSE
-
 
 def _install(monkeypatch, core):
     module = types.ModuleType("controller._matrix_probe")
@@ -95,14 +87,14 @@ def _install(monkeypatch, core):
     core.instances.clear()
 
 
-def test_next_run_resolves_patched_defaults_and_records_an_independent_effective_run(monkeypatch):
-    _install(monkeypatch, _FixedCore)
+def test_every_run_uses_framed_pulses_without_a_controller_mode_capability(monkeypatch):
+    _install(monkeypatch, _ProbeCore)
     shipped = _settings(config={"ratio": 0.2}, cycle={"HoldCycleTime": 10, "u_min": 0.05})
     monkeypatch.setattr(defaults, "default_settings", lambda: shipped)
 
     row = matrix.run_scenario("_matrix_probe", matrix.Scenario("one", 11, [(0, 120.0)]), seed=7)
 
-    core = _FixedCore.instances[-1]
+    core = _ProbeCore.instances[-1]
     assert core.config == {"ratio": 0.2}
     assert core.cycle_data["HoldCycleTime"] == 10
     assert row["effective_run"] == {
@@ -114,8 +106,8 @@ def test_next_run_resolves_patched_defaults_and_records_an_independent_effective
             "PMode": 2,
             "LidOpenPauseTime": 6,
         },
-        "actuation_mode": "fixed_cycle",
-        "pulse_timing": None,
+        "actuation_mode": ActuationMode.FRAMED_PULSE.value,
+        "pulse_timing": {"frame_seconds": 20.0, "pulse_seconds": 2.0},
         "plant": "GrillSim",
         "seed": 7,
         "scenario": "one",
@@ -130,7 +122,7 @@ def test_next_run_resolves_patched_defaults_and_records_an_independent_effective
 
 
 def test_next_run_resolves_a_manifest_substituted_after_matrix_import(monkeypatch):
-    _install(monkeypatch, _FixedCore)
+    _install(monkeypatch, _ProbeCore)
     real_read = defaults.read_generic_json
     manifest = {
         "metadata": {
@@ -149,38 +141,40 @@ def test_next_run_resolves_a_manifest_substituted_after_matrix_import(monkeypatc
 
     row = matrix.run_scenario("_matrix_probe", matrix.Scenario("manifest", 2, [(0, 120.0)]), seed=2)
 
-    assert _FixedCore.instances[-1].config == {"ratio": 0.37}
+    assert _ProbeCore.instances[-1].config == {"ratio": 0.37}
     assert row["effective_run"]["controller_config"] == {"ratio": 0.37}
 
 
-def test_explicit_overrides_win_over_current_shipped_defaults_and_are_retained(monkeypatch):
-    _install(monkeypatch, _FixedCore)
+def test_explicit_overrides_change_controller_bounds_but_not_the_framed_scheduler(monkeypatch):
+    _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.1}, cycle={"u_max": 0.4}))
 
     row = matrix.run_scenario(
         "_matrix_probe",
-        matrix.Scenario("override", 4, [(0, 120.0)]),
+        matrix.Scenario("override", 41, [(0, 120.0)]),
         seed=3,
-        config={"ratio": 0.3},
+        config={"ratio": 0.05, "period": 20},
         cycle_config={"HoldCycleTime": 4, "u_max": 0.7},
     )
 
-    assert _FixedCore.instances[-1].config == {"ratio": 0.3}
-    assert _FixedCore.instances[-1].cycle_data["HoldCycleTime"] == 4
+    assert _ProbeCore.instances[-1].config == {"ratio": 0.05, "period": 20}
+    assert _ProbeCore.instances[-1].cycle_data["HoldCycleTime"] == 4
     assert row["effective_run"]["overrides"] == {
-        "controller": {"ratio": 0.3},
+        "controller": {"ratio": 0.05, "period": 20},
         "cycle": {"HoldCycleTime": 4, "u_max": 0.7},
     }
     assert row["effective_run"]["cycle_config"]["u_max"] == 0.7
+    assert row["effective_run"]["pulse_timing"] == {"frame_seconds": 20.0, "pulse_seconds": 2.0}
+    assert row["requested_realized_load_error"] == pytest.approx(0.0)
 
 
-def test_mpc_framed_path_uses_the_production_scheduler_and_reports_completed_delivery(monkeypatch):
-    _install(monkeypatch, _FramedCore)
+def test_low_duty_accumulates_into_framed_pulses_and_reports_completed_delivery(monkeypatch):
+    _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.05, "period": 20}))
 
     row = matrix.run_scenario("_matrix_probe", matrix.Scenario("framed", 41, [(0, 120.0)]), seed=0)
 
-    core = _FramedCore.instances[-1]
+    core = _ProbeCore.instances[-1]
     reports = [report for report in core.reports if report.source is OutputSource.CONTROLLER]
     assert matrix.PulseScheduler is ProductionPulseScheduler
     assert row["effective_run"]["actuation_mode"] == ActuationMode.FRAMED_PULSE.value
@@ -197,7 +191,7 @@ def test_mpc_framed_path_uses_the_production_scheduler_and_reports_completed_del
 
 
 def test_framed_feedback_windows_do_not_recount_prior_delivery(monkeypatch):
-    _install(monkeypatch, _FramedCore)
+    _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(
         defaults,
         "default_settings",
@@ -206,38 +200,21 @@ def test_framed_feedback_windows_do_not_recount_prior_delivery(monkeypatch):
 
     matrix.run_scenario("_matrix_probe", matrix.Scenario("framed_windows", 41, [(0, 120.0)]), seed=0)
 
-    reports = [report for report in _FramedCore.instances[-1].reports if report.source is OutputSource.CONTROLLER]
+    reports = [report for report in _ProbeCore.instances[-1].reports if report.source is OutputSource.CONTROLLER]
     assert [report.ratio for report in reports] == pytest.approx([0.5, 0.5])
 
 
-def test_fixed_cycle_manual_inhibit_reports_once_and_resumes_from_its_existing_phase(monkeypatch):
-    _install(monkeypatch, _FixedCore)
-    monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.25}))
-    scenario = matrix.Scenario("fixed_manual", 35, [(0, 120.0)], manual_inhibit=[(20, 4)])
-
-    matrix.run_scenario("_matrix_probe", scenario, seed=0)
-
-    core = _FixedCore.instances[-1]
-    reports = [(report.timestamp, report.ratio, report.source) for report in core.reports]
-    delivery = [step[0] for step in _Plant.instances[-1].steps]
-    assert reports == [
-        (0.0, 0.1, OutputSource.SEED),
-        (20.0, 0.0, OutputSource.MANUAL_OVERRIDE),
-    ]
-    assert delivery[20:24] == [0.0] * 4
-    assert delivery[24:30] == [0.0] * 6
-    assert delivery[30] == 1.0
 
 
 def test_framed_reset_feedback_excludes_delivery_before_the_reset(monkeypatch):
-    _install(monkeypatch, _FramedCore)
+    _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.5, "period": 20}))
     scenario = matrix.Scenario("framed_reset", 21, [(0, 120.0)], lid_open=[(3, 2)])
 
     matrix.run_scenario("_matrix_probe", scenario, seed=0)
 
     plant = _Plant.instances[-1]
-    reports = [report for report in _FramedCore.instances[-1].reports if report.source is OutputSource.CONTROLLER]
+    reports = [report for report in _ProbeCore.instances[-1].reports if report.source is OutputSource.CONTROLLER]
     # Physical lid closure at t=5 does not release Hold's 6-second pause
     # armed at t=3. The auger remains off through t=8, then the restarted
     # 0.5 frame delivers ten on-seconds before the due solve closes at t=20.
@@ -247,7 +224,7 @@ def test_framed_reset_feedback_excludes_delivery_before_the_reset(monkeypatch):
 
 
 def test_framed_lid_and_manual_inhibits_discard_credit(monkeypatch):
-    _install(monkeypatch, _FramedCore)
+    _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.05, "period": 20}))
     scenario = matrix.Scenario(
         "inhibits",
@@ -259,7 +236,7 @@ def test_framed_lid_and_manual_inhibits_discard_credit(monkeypatch):
 
     matrix.run_scenario("_matrix_probe", scenario, seed=0)
 
-    core = _FramedCore.instances[-1]
+    core = _ProbeCore.instances[-1]
     reports = [report for report in core.reports if report.source is OutputSource.CONTROLLER]
     # Hold reports every positive elapsed interval at the due solve. Both
     # resets land between solves, so their first post-reset measurements are
@@ -271,7 +248,7 @@ def test_framed_lid_and_manual_inhibits_discard_credit(monkeypatch):
 
 
 def test_unreachable_high_row_retains_binding_authority(monkeypatch):
-    _install(monkeypatch, _FixedCore)
+    _install(monkeypatch, _ProbeCore)
     monkeypatch.setattr(matrix, "GrillSim", _AuthorityPlant)
     monkeypatch.setattr(defaults, "default_settings", lambda: _settings(config={"ratio": 0.2}))
 

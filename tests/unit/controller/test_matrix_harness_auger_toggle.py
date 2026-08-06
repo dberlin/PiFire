@@ -1,22 +1,9 @@
-"""Pins controller_matrix.py's auger PWM model.
+"""Pins controller_matrix.py to the production framed pulse scheduler.
 
-`_auger_toggle_tick` ports the free-running toggle in
-`ControlMode._auger_cycle_tick` (controller/runtime/modes/base.py): a toggle
-keyed on elapsed time since its own last flip, independent of the caller's
-re-solve cadence, returning the auger's exact fractional on-time over the
-caller's 1 s window rather than a boolean sample of it (paired with
-`GrillSim.step`'s `float(auger_on)`, which accepts that fraction directly).
-
-The integration test below drives the real `run_scenario` loop (not just the
-extracted helper) with a stub controller whose `get_control_period()` varies,
-so a regression that reintroduces re-anchoring the toggle to each re-solve, or
-reintroduces boolean-per-tick sampling, would be caught regardless of which
-line inside the loop reintroduced it. It covers a ratio whose cycle duration
-is an exact number of ticks (`u_min`) and one that is not (0.4237), so both
-the toggle's timing logic and its fractional-remainder arithmetic are
-exercised. The legacy-model test is a negative control proving the
-period-mismatch assertion is not vacuous: that model passes when the control
-period matches HoldCycleTime and fails when it does not.
+The harness receives controller requests on a configurable solve cadence, but
+all executable experiments must realize those requests through the same 2 s
+pulse / 20 s frame scheduler.  These probes use a non-thermal plant so the
+recorded commands expose scheduler timing directly.
 """
 
 import os
@@ -25,41 +12,18 @@ import types
 
 import pytest
 
-from common.defaults import default_settings
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 import docs.superpowers.experiments.controller_matrix as controller_matrix
 
-CYCLE_TIME = default_settings()["cycle_data"]["HoldCycleTime"]
-RATIO = 0.35
-U_MIN = default_settings()["cycle_data"]["u_min"]
-# cycle_time * NON_INTEGER_RATIO is not a whole number, so the toggle's
-# transition instants fall strictly inside a tick and the fraction returned
-# is neither 0.0 nor 1.0 -- exercises the remainder arithmetic itself, which
-# a ratio like 0.35 or u_min (both exact at cycle_time=20) cannot.
-NON_INTEGER_RATIO = 0.4237
-DURATION = 20 * CYCLE_TIME  # enough full cycles to average out the startup transient
-
-
-def _legacy_on_fraction(ratio, cycle_time, period, duration):
-    """Reproduces a toggle re-anchored to each re-solve, kept local to this
-    test as a negative control -- proves the assertion above actually
-    discriminates rather than always passing."""
-    cycle_anchor = 0.0
-    next_solve = 0.0
-    on_ticks = 0
-    for t in range(duration):
-        if t >= next_solve:
-            next_solve = t + period
-            cycle_anchor = t
-        phase = (t - cycle_anchor) % cycle_time
-        on_ticks += phase < cycle_time * ratio
-    return on_ticks / duration
+PULSE_FRAME_S = 20
+PULSE_S = 2
+LOW_DUTY = 0.05
+DURATION = 81
 
 
 class _StubController:
-    """Constant-ratio controller whose re-solve cadence is configurable."""
+    """Constant-request controller; it intentionally has no mode capability."""
 
     def __init__(self, config, units, cycle_data):
         del units, cycle_data
@@ -78,9 +42,7 @@ class _StubController:
 
 
 class _FakePlant:
-    """Records the exact auger on-fraction the real run_scenario loop drives
-    each window, ignoring thermal physics entirely -- only the toggle's timing
-    is under test here."""
+    """Records each actual auger command without thermal dynamics."""
 
     instances = []
 
@@ -97,8 +59,8 @@ class _FakePlant:
         self.on_fracs.append(float(auger_on))
 
 
-def _run_stub(control_period, ratio, monkeypatch):
-    name = "_stub_toggle_probe"
+def _run_stub(control_period, monkeypatch, *, cycle_config=None):
+    name = "_stub_pulse_probe"
     fake_mod = types.ModuleType(f"controller.{name}")
     fake_mod.Controller = _StubController
     monkeypatch.setitem(sys.modules, f"controller.{name}", fake_mod)
@@ -106,47 +68,29 @@ def _run_stub(control_period, ratio, monkeypatch):
     _FakePlant.instances.clear()
 
     scenario = controller_matrix.Scenario(name, DURATION, [(0, 999.0)])
-    controller_matrix.run_scenario(name, scenario, seed=0, config={"_period": control_period, "_ratio": ratio})
-    return _FakePlant.instances[-1]
+    row = controller_matrix.run_scenario(
+        name,
+        scenario,
+        seed=0,
+        config={"_period": control_period, "_ratio": LOW_DUTY},
+        cycle_config=cycle_config,
+    )
+    return row, _FakePlant.instances[-1]
 
 
-@pytest.mark.parametrize(
-    "control_period,ratio",
-    [
-        (20, RATIO),
-        (5, RATIO),
-        # u_min is where boolean-per-tick sampling would be biased worst
-        # (both controllers sit here for the whole 225 F scenarios), so it is
-        # the case most likely to catch a regression back to boolean sampling.
-        (20, U_MIN),
-        (5, U_MIN),
-        (20, NON_INTEGER_RATIO),
-        (5, NON_INTEGER_RATIO),
-    ],
-)
-def test_run_scenario_realized_duty_matches_ratio_regardless_of_control_period(control_period, ratio, monkeypatch):
-    plant = _run_stub(control_period, ratio, monkeypatch)
-    realized = sum(plant.on_fracs) / len(plant.on_fracs)
-    # Tight enough that boolean-per-tick sampling would fail this assertion at
-    # every ratio tested; the fractional model should be exact modulo
-    # floating point.
-    assert realized == pytest.approx(ratio, abs=0.005)
+@pytest.mark.parametrize("control_period", [5, 20])
+def test_low_duty_credit_becomes_two_second_pulses_on_every_solve_cadence(control_period, monkeypatch):
+    row, plant = _run_stub(control_period, monkeypatch)
+
+    assert row["effective_run"]["actuation_mode"] == "framed_pulse"
+    assert row["effective_run"]["pulse_timing"] == {"frame_seconds": float(PULSE_FRAME_S), "pulse_seconds": float(PULSE_S)}
+    assert [tick for tick, on in enumerate(plant.on_fracs) if on] == [20, 21, 60, 61]
+    assert set(plant.on_fracs) <= {0.0, 1.0}
 
 
-def test_non_integer_ratio_produces_genuine_fractional_on_time(monkeypatch):
-    """u_min and 0.35 both give an exact number of ticks per phase at
-    cycle_time=20, so a toggle that only ever returns 0.0 or 1.0 would still
-    pass the parametrized test above. This asserts the fraction formula
-    itself runs: at least one tick's on-time must be strictly between 0 and 1."""
-    plant = _run_stub(20, NON_INTEGER_RATIO, monkeypatch)
-    assert any(0.0 < frac < 1.0 for frac in plant.on_fracs)
+def test_cycle_override_cannot_retime_the_framed_scheduler(monkeypatch):
+    row, plant = _run_stub(20, monkeypatch, cycle_config={"HoldCycleTime": 4, "u_max": 0.7})
 
-
-def test_legacy_model_actually_fails_the_mismatched_period_case():
-    """Negative control: proves the test above is not vacuous by showing the
-    pre-fix model passes at period==cycle_time and fails at period=5."""
-    matched = _legacy_on_fraction(RATIO, CYCLE_TIME, CYCLE_TIME, DURATION)
-    assert matched == pytest.approx(RATIO, abs=0.02)
-
-    mismatched = _legacy_on_fraction(RATIO, CYCLE_TIME, 5, DURATION)
-    assert mismatched != pytest.approx(RATIO, abs=0.02)
+    assert row["effective_run"]["cycle_config"]["HoldCycleTime"] == 4
+    assert row["effective_run"]["pulse_timing"] == {"frame_seconds": 20.0, "pulse_seconds": 2.0}
+    assert [tick for tick, on in enumerate(plant.on_fracs) if on] == [20, 21, 60, 61]
