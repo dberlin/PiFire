@@ -3,6 +3,7 @@
 import json
 import math
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -76,20 +77,36 @@ def fits(monkeypatch):
     return calls
 
 
-def test_a_refit_moves_the_model_toward_the_grill_that_produced_the_cook():
+@pytest.fixture(scope="module")
+def accepted_refit():
+    """One controller refit from one synthetic cook, and what that produced.
+
+    The refit is the expensive thing in this file: a least-squares that
+    re-simulates the whole cook on every evaluation. Several tests ask
+    different questions of the same one, so it runs once.
+
+    Handed back as values rather than as the live controller, so no test can
+    answer its question out of another's mutation.
+    """
     c = _c()
     before = c.cfg["C_c"] / c.cfg["h_amb"]
     verdict = c.refit_from_cook(_synthetic_cook())
-    assert verdict.accepted is True
-    after = c.cfg["C_c"] / c.cfg["h_amb"]
+    return SimpleNamespace(
+        verdict=verdict,
+        tau_before=before,
+        tau_after=c.cfg["C_c"] / c.cfg["h_amb"],
+        snapshot=c.get_model_snapshot(),
+    )
+
+
+def test_a_refit_moves_the_model_toward_the_grill_that_produced_the_cook(accepted_refit):
+    assert accepted_refit.verdict.accepted is True
     truth = TRUTH["C_c"] / TRUTH["h_amb"]
-    assert abs(after - truth) < abs(before - truth)
+    assert abs(accepted_refit.tau_after - truth) < abs(accepted_refit.tau_before - truth)
 
 
-def test_a_refit_records_the_band_it_learned_in():
-    c = _c()
-    c.refit_from_cook(_synthetic_cook())
-    lo, hi = c.get_model_snapshot()["band_c"]
+def test_a_refit_records_the_band_it_learned_in(accepted_refit):
+    lo, hi = accepted_refit.snapshot["band_c"]
     assert lo < hi
     assert hi > 200.0  # the synthetic cook is a high-temperature run
 
@@ -439,9 +456,15 @@ def test_an_undetermined_first_fit_cannot_slip_through_on_having_no_incumbent():
     assert "does not determine the model" in verdict.reason
 
 
+@pytest.mark.slow
 def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
     """The refit runs synchronously in HoldMode.teardown, so its cost is time
     the shutdown fan's cool-down starts late.
+
+    Marked slow, which is where a wall-clock budget belongs: it fits a full
+    12-hour history to find out, and the answer is a reading of the machine it
+    ran on, so a loaded default run fails it on timing alone rather than on
+    anything about the code. `pytest -m slow` is where it gets asked.
 
     The budget is 30 s. The shipped `shutdown_duration` is 240 s, so a refit
     inside this bound delays the cool-down by at most an eighth of itself,
@@ -479,7 +502,40 @@ def test_the_cook_a_refit_can_be_handed_is_bounded_by_the_history():
 # ---- the fit's starting point is fixed, and stays fixed across cooks ----
 
 
-def test_every_refit_starts_from_the_same_fixed_reference(fits):
+@pytest.fixture(scope="module")
+def four_cooks_in_a_row():
+    """Four cooks refit in sequence, each accepted result left in for the next.
+
+    Two tests below ask different things of this same run -- where each fit
+    started, and where the parameters ended up -- and it is four
+    least-squares solves, so it happens once. The spy is installed by hand
+    rather than through `monkeypatch`, which is function-scoped and cannot
+    reach a fixture shared across tests.
+    """
+    real = update_mpc.fit_params
+    calls = []
+
+    def spy(*args, **kwargs):
+        out = real(*args, **kwargs)
+        calls.append({"init": dict(kwargs["init"]), "out": dict(out), "rows": len(args[0])})
+        return out
+
+    update_mpc.fit_params = spy
+    try:
+        c = _c()
+        shipped = {key: c.cfg[key] for key in FITTED_KEYS}
+        verdicts = [
+            # Distinct excitation per cook, so each is genuinely new evidence
+            # and the loop actually feeds results forward rather than idling.
+            c.refit_from_cook(_synthetic_cook(seed=seed, noise=0.4 + 0.3 * seed))
+            for seed in range(4)
+        ]
+    finally:
+        update_mpc.fit_params = real
+    return SimpleNamespace(fits=calls, verdicts=verdicts, shipped=shipped, cfg=dict(c.cfg))
+
+
+def test_every_refit_starts_from_the_same_fixed_reference(four_cooks_in_a_row):
     """Several cooks in a row, each accepted result left in place for the next.
 
     What this pins is that the starting point is the same every time, not that
@@ -487,22 +543,16 @@ def test_every_refit_starts_from_the_same_fixed_reference(fits):
     they would be a function of every cook before them, and the fit's start is
     the only place that shows. One refit cannot show it either -- the first
     one begins at the shipped model whichever way the code is written -- so
-    this drives the loop and reads the starting point each time round.
+    the fixture drives the loop and this reads the starting point each time
+    round.
     """
-    c = _c()
-    shipped = {key: c.cfg[key] for key in FITTED_KEYS}
-    verdicts = [
-        # Distinct excitation per cook, so each is genuinely new evidence and
-        # the loop actually feeds results forward rather than idling.
-        c.refit_from_cook(_synthetic_cook(seed=seed, noise=0.4 + 0.3 * seed))
-        for seed in range(4)
-    ]
-    assert len(fits) == 4
+    run = four_cooks_in_a_row
+    assert len(run.fits) == 4
     # Without this the later fits would still be starting from the shipped
     # model by accident, and reading their starting point would prove nothing.
-    assert verdicts[0].accepted is True
-    assert {key: c.cfg[key] for key in FITTED_KEYS} != shipped
-    for call in fits:
+    assert run.verdicts[0].accepted is True
+    assert {key: run.cfg[key] for key in FITTED_KEYS} != run.shipped
+    for call in run.fits:
         assert call["init"] == _REFIT_INIT
 
 
@@ -516,15 +566,13 @@ def test_the_fixed_reference_is_the_shipped_model_and_is_not_written_through():
     assert _DEFAULTS == before
 
 
-def test_repeated_refits_leave_the_model_inside_the_promotion_bounds(fits):
+def test_repeated_refits_leave_the_model_inside_the_promotion_bounds(four_cooks_in_a_row):
     """The parameters must not ratchet out of the range a model may live in."""
-    c = _c()
-    for seed in range(4):
-        c.refit_from_cook(_synthetic_cook(seed=seed, noise=0.4 + 0.3 * seed))
+    run = four_cooks_in_a_row
     for key, (lo, hi) in PROMOTION_BOUNDS.items():
-        assert lo <= float(c.cfg[key]) <= hi, key
-    first_tau = fits[0]["out"]["C_c"] / fits[0]["out"]["h_amb"]
-    last_tau = fits[-1]["out"]["C_c"] / fits[-1]["out"]["h_amb"]
+        assert lo <= float(run.cfg[key]) <= hi, key
+    first_tau = run.fits[0]["out"]["C_c"] / run.fits[0]["out"]["h_amb"]
+    last_tau = run.fits[-1]["out"]["C_c"] / run.fits[-1]["out"]["h_amb"]
     assert 0.5 < last_tau / first_tau < 2.0
 
 

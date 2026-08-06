@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from controller.mpc import Controller, _DEFAULTS
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.grill_sim import GrillSim
@@ -38,11 +39,22 @@ def _run(seed=0, minutes=90, setpoint=SETPOINT):
     return np.array(ts), np.array(temps)
 
 
-def test_realistic_steady_band():
+@pytest.fixture(scope="module")
+def steady_run():
+    """One cook, shared by every test below that asks it a different question.
+
+    `_run` is deterministic at a fixed seed, so a second call spends another
+    216 nonlinear solves rebuilding an array this one already holds. The tests
+    only read it.
+    """
+    return _run()
+
+
+def test_realistic_steady_band(steady_run):
     # The shipped model is deliberately uncalibrated and warns that tight
     # tracking requires a grill-specific fit. This contract guards bounded
     # convergence through the production applied-output feedback seam.
-    ts, temps = _run()
+    ts, temps = steady_run
     sm = ts >= 1800  # after 30 min warmup
     err = temps[sm] - SETPOINT
     assert np.sqrt(np.mean(err**2)) <= 5.5  # measured 4.52 C
@@ -50,9 +62,9 @@ def test_realistic_steady_band():
     assert np.max(np.abs(err)) <= 10.0  # measured 8.31 C
 
 
-def test_offset_free_no_steady_bias():
+def test_offset_free_no_steady_bias(steady_run):
     # Even before calibration, applied-load feedback keeps the residual
     # estimator from developing an unbounded offset.
-    ts, temps = _run()
+    ts, temps = steady_run
     sm = ts >= 1800
     assert abs(np.mean(temps[sm] - SETPOINT)) <= 4.0  # measured 3.04 C

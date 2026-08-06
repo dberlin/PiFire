@@ -13,6 +13,20 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # Must be set before any test module imports Qt/PySide6.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Must be set before numpy imports its BLAS backend, which reads these once.
+#
+# The controller suites solve thousands of small nonlinear programs -- a 24-step
+# horizon over a handful of states -- and a matrix that size is far too small to
+# repay starting a thread per operation. Left alone the run burns 711 s of CPU
+# across 5.2 threads to do 126 s of work, and takes LONGER on the wall for it
+# (137.7 s against 127.2 s measured over tests/unit/mpc + tests/unit/controller).
+# So this is not a CPU-for-wall-clock trade: one thread is cheaper on both.
+#
+# setdefault, so a run that wants to measure the threaded behaviour can still
+# ask for it from the environment.
+for _blas_threads in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_blas_threads, "1")
+
 # Must be set before `common.datastore` is imported: it resolves DB_PATH at
 # IMPORT time (`os.environ.get("PIFIRE_DB_PATH", <repo>/pifire.db)`) and caches
 # it as _ORIGINAL_DB_PATH, which `_reset_for_tests(None)` restores to.
