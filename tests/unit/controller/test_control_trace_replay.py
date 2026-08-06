@@ -334,6 +334,20 @@ def test_validate_records_accepts_completed_pid_family_framed_frames(controller)
     assert validate_records(_pid_framed_records(controller)).valid
 
 
+def test_validate_records_checks_frame_allocation_fan_after_a_deferred_allocation():
+    records = _mpc_framed_records()
+    deferred = [records[0], records[1], records[3], records[2], records[4]]
+
+    assert validate_records(deferred).valid
+
+    mismatched_frame = deferred[2].model_copy(
+        update={"payload": replace(deferred[2].payload, requested_fan_duty=71.0)}
+    )
+    report = validate_records([*deferred[:2], mismatched_frame, *deferred[3:]])
+
+    assert ReplayIssueCode.FRAME_SCHEDULE_MISMATCH in [issue.code for issue in report.issues]
+
+
 def test_validate_records_rejects_a_framed_record_owned_by_another_session_controller():
     records = _pid_framed_records()
     mismatched_frame = records[2].model_copy(update={"controller": ControllerType.MPC})

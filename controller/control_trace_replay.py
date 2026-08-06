@@ -238,6 +238,7 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
             seed_eligible = False
 
     _validate_allocations(allocations, updates, add)
+    _validate_framed_allocations(framed_frames, allocations, add)
     for revision, (index, payload) in updates.items():
         if isinstance(payload, MpcUpdatePayload) and revision not in allocations:
             add(ReplayIssueCode.MISSING_ALLOCATION, "accepted MPC update has no joined allocation", index)
@@ -339,12 +340,6 @@ def _validate_framed_frame(
         add,
         index,
     )
-    if allocation is not None and not (
-        _close(payload.requested_combustion_load, allocation[1].normalized_combustion_load)
-        and _close(payload.requested_auger_duty, allocation[1].requested_auger_duty)
-        and _optional_close(payload.requested_fan_duty, allocation[1].requested_fan_duty)
-    ):
-        add(ReplayIssueCode.FRAME_SCHEDULE_MISMATCH, "framed pulse command differs from joined allocation", index)
     _validate_inhibit(payload.inhibit_reason, lid, manual, safety, add, index)
     if payload.reset_reason is not None:
         count = scheduler_resets.get(payload.result_revision, 0)
@@ -428,6 +423,24 @@ def _validate_allocations(
             and payload.fan_clamp_reason is expected.fan_clamp_reason
         ):
             add(ReplayIssueCode.ALLOCATION_MISMATCH, "allocation outputs do not reproduce from recorded inputs", index)
+
+
+def _validate_framed_allocations(
+    framed_frames: list[tuple[int, FramedPulseFramePayload]],
+    allocations: dict[int, tuple[int, AllocationPayload]],
+    add: IssueAdder,
+) -> None:
+    for index, frame in framed_frames:
+        allocation = allocations.get(frame.result_revision)
+        if allocation is None:
+            continue
+        payload = allocation[1]
+        if not (
+            _close(frame.requested_combustion_load, payload.normalized_combustion_load)
+            and _close(frame.requested_auger_duty, payload.requested_auger_duty)
+            and _optional_close(frame.requested_fan_duty, payload.requested_fan_duty)
+        ):
+            add(ReplayIssueCode.FRAME_SCHEDULE_MISMATCH, "framed pulse command differs from joined allocation", index)
 
 
 def _validate_applied_outputs(
