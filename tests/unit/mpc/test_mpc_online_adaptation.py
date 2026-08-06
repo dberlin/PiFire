@@ -154,6 +154,29 @@ def test_bootstrap_exposes_only_the_typed_realized_frame_outcome_and_keeps_grey_
     assert stale_status["current_rejection_reason"] == "stale-generation"
 
 
+def test_observation_failure_rejects_evidence_and_resets_learner_continuity(monkeypatch):
+    controller = _controller(online=True)
+    resets = []
+    original_reset = controller._online.reset_continuity
+
+    def reset_continuity():
+        resets.append(True)
+        original_reset()
+
+    monkeypatch.setattr(controller._online, "reset_continuity", reset_continuity)
+
+    outcome = controller.observation_failure(_frame(0), FloatingPointError("learner failed"))
+
+    assert resets == [True]
+    assert outcome["eligible"] is False
+    assert outcome["rejection_reasons"] == ("learner-exception",)
+    assert outcome["incumbent_innovation_c"] is None
+    assert outcome["challenger_innovation_c"] is None
+    assert re.fullmatch(r"[0-9a-f]{64}", outcome["model_digest"])
+    assert outcome["lifecycle"]["detail"] == "learner-exception:FloatingPointError"
+    assert controller.get_status()["adaptation"]["current_rejection_reason"] == "learner-exception"
+
+
 class _Estimator:
     def update(self, _q, temperature):
         return np.array([0.0, float(temperature), 0.0])

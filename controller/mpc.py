@@ -1298,6 +1298,30 @@ class Controller(ControllerBase):
             result.update(event)
         return result
 
+    def observation_failure(self, observation, error):
+        """Reject one failed learner delivery without stopping grey-box control."""
+        if self._online is None or not isinstance(observation, FrameObservation):
+            return None
+        self._online.reset_continuity()
+        self._online_rejected_updates += 1
+        self._online_last_rejection_reason = "learner-exception"
+        detail = f"learner-exception:{type(error).__name__}"
+        self._online_last_lifecycle_reason = detail
+        lifecycle = self._online_lifecycle("reject", detail)
+        self._online_last_lifecycle = lifecycle
+        return {
+            "role_generation": observation.role_generation,
+            "eligible": False,
+            "rejection_reasons": ("learner-exception",),
+            "input_variance": 0.0,
+            "input_levels": 0,
+            "incumbent_innovation_c": None,
+            "challenger_innovation_c": None,
+            "effective_updates": self._online.effective_updates,
+            "model_digest": OnlineAdaptation.model_digest(self._online.challenger),
+            "lifecycle": lifecycle,
+        }
+
     def get_status(self):
         return {
             "set_point": _finite_float(getattr(self, "set_point", self._set_point_c)),

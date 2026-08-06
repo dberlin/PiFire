@@ -914,6 +914,57 @@ def test_threaded_runner_drains_outcomes_for_exact_delivered_observations():
         runner.stop()
 
 
+def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_discontinuous():
+    barrier = _ObservationBarrier()
+
+    class RaisingCore(_ObservationRecordingCore):
+        def __init__(self):
+            super().__init__()
+            self.failed = False
+            self.failures = []
+
+        def observe_frame(self, observation):
+            super().observe_frame(observation)
+            if not self.failed:
+                self.failed = True
+                raise FloatingPointError("learner failed")
+            return None
+
+        def observation_failure(self, observation, error):
+            self.failures.append((observation, error))
+            return {
+                "role_generation": observation.role_generation,
+                "eligible": False,
+                "rejection_reasons": ("learner-exception",),
+            }
+
+    core = RaisingCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        first = _frame(0)
+        first_submission = runner.observe_frame(first)
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert _wait_for(lambda: ("update", 212.0) in core.calls)
+        first_drain = runner.drain_observation_outcomes()
+        assert len(first_drain.envelopes) == 1
+        assert first_drain.envelopes[0].submission_sequence == first_submission.submission_sequence
+        assert first_drain.envelopes[0].outcome["rejection_reasons"] == ("learner-exception",)
+        assert core.failures and isinstance(core.failures[0][1], FloatingPointError)
+        assert runner._thread.is_alive()
+
+        runner.observe_frame(_frame(1))
+        barrier.release.set()
+        assert _wait_for(lambda: len(core.observations) == 2)
+        assert core.observations[1].continuous is False
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
 def test_threaded_runner_evicts_oldest_timestamps_and_marks_the_next_retained_frame():
     barrier = _ObservationBarrier()
     core = _ObservationRecordingCore()

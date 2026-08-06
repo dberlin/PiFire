@@ -642,7 +642,26 @@ class ThreadedControllerRunner(ControllerRunner):
                     observe = getattr(self._core, "observe_frame", None)
                     if observe is not None:
                         for sequence, generation, observation in pending_observations:
-                            outcome = observe(observation)
+                            try:
+                                outcome = observe(observation)
+                            except Exception as error:
+                                with self._lock:
+                                    self._observations_discontinuous.add(generation)
+                                reject = getattr(self._core, "observation_failure", None)
+                                if callable(reject):
+                                    try:
+                                        outcome = reject(observation, error)
+                                    except Exception:
+                                        outcome = None
+                                else:
+                                    outcome = None
+                                if outcome is None:
+                                    outcome = {
+                                        "role_generation": observation.role_generation,
+                                        "eligible": False,
+                                        "rejection_reasons": ("learner-exception",),
+                                        "learner_error": f"{type(error).__name__}: {error}",
+                                    }
                             if outcome is not None:
                                 with self._lock:
                                     if len(self._observation_outcomes) == self._observation_outcomes.maxlen:
