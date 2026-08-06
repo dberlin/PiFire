@@ -22,6 +22,8 @@ from common.control_trace import (
     ControllerType,
     FramedPulseFramePayload,
     InhibitReason,
+    ModelEvaluationPayload,
+    ModelObservationPayload,
     MpcUpdatePayload,
     ResultStaleState,
     PidSpUpdatePayload,
@@ -223,6 +225,11 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
                 add,
                 index,
             )
+        elif isinstance(payload, (ModelObservationPayload, ModelEvaluationPayload)):
+            # Learning evidence is informational to plant-control replay. Its
+            # discriminated payload has already been validated at the envelope
+            # boundary and must not silently fall through this dispatcher.
+            continue
         elif isinstance(payload, AppliedOutputPayload):
             applied_outputs.append((index, payload))
             if payload.result_revision == 0:

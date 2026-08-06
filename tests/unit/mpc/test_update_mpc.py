@@ -25,8 +25,9 @@ from common.control_trace import (
 )
 from common.datastore_accessors import append_control_trace
 from controller.applied_output import OutputSource
-from controller.update_mpc import TraceSelectionError, load_trace_samples
+from controller.mpc import _DEFAULTS
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
+from controller.update_mpc import TraceSelectionError, _load_trace_calibration, fit_params, load_trace_samples
 
 
 SESSION_ID = "mpc-session"
@@ -692,3 +693,86 @@ def test_load_trace_samples_rejects_output_after_a_terminal_partial(ds):
 
     with pytest.raises(TraceSelectionError, match="later update or output"):
         load_trace_samples(session_id=SESSION_ID)
+
+
+
+def test_load_trace_samples_has_equivalent_fahrenheit_and_celsius_frames(ds):
+    def session(session_id, unit):
+        payload = replace(
+            _session().payload,
+            temperature_unit=unit,
+            setpoint=248.0 if unit == "F" else 120.0,
+            ambient_temperature=86.0 if unit == "F" else 30.0,
+        )
+        return _session().model_copy(update={"session_id": session_id, "payload": payload})
+
+    def update(session_id, revision, end_ms, temperature):
+        record = _update(revision, end_ms, temperature, 0.4, mode=ActuationMode.FRAMED_PULSE)
+        return record.model_copy(update={"session_id": session_id})
+
+    def frame(session_id, revision, start_ms, end_ms):
+        return ControlTraceRecord(
+            ts_ms=end_ms,
+            session_id=session_id,
+            cook_id=COOK_ID,
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.ACTUATION_FRAME,
+            payload=FramedPulseFramePayload(
+                result_revision=revision,
+                pulse_slot_seconds=2.0,
+                frame_seconds=20.0,
+                frame_start_ms=start_ms,
+                frame_end_ms=end_ms,
+                requested_combustion_load=0.4,
+                requested_auger_duty=0.4,
+                credit_before_seconds=0.0,
+                credit_after_seconds=0.0,
+                scheduled_on_seconds=8.0,
+                delivered_on_seconds=7.0,
+                transition_count=2,
+                actual_start_active=False,
+                actual_end_active=False,
+                requested_fan_duty=None,
+                applied_fan_duty=None,
+                skipped=False,
+                stale_command=False,
+                inhibit_reason=InhibitReason.NONE,
+                reset_reason=None,
+            ),
+        )
+
+    records = []
+    for session_id, temperatures in (("fahrenheit", (212.0, 230.0)), ("celsius", (100.0, 110.0))):
+        unit = "F" if session_id == "fahrenheit" else "C"
+        records.append(session(session_id, unit))
+        for revision, (start_ms, end_ms, temperature) in enumerate(
+            ((0, 20_000, temperatures[0]), (20_000, 40_000, temperatures[1])), start=1
+        ):
+            records.extend(
+                (
+                    frame(session_id, revision, start_ms, end_ms),
+                    update(session_id, revision, end_ms, temperature),
+                    _applied(revision, end_ms + 1, start_ms, end_ms, 0.35).model_copy(
+                        update={"session_id": session_id}
+                    ),
+                )
+            )
+    append_control_trace(records)
+
+    fahrenheit = load_trace_samples(session_id="fahrenheit", database_path=ds.DB_PATH)
+    celsius = load_trace_samples(session_id="celsius", database_path=ds.DB_PATH)
+
+    for left, right in zip(fahrenheit, celsius, strict=True):
+        np.testing.assert_allclose(left, right)
+    init = {key: float(_DEFAULTS[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
+    fit_kwargs = dict(
+        T_amb=30.0,
+        init=init,
+        sigma=float(_DEFAULTS["sigma"]),
+        n_delay=int(_DEFAULTS["n_delay"]),
+    )
+    fahrenheit_fit = fit_params(*fahrenheit, **fit_kwargs)
+    celsius_fit = fit_params(*celsius, **fit_kwargs)
+    for key in ("C_c", "h_amb", "K_Q", "theta"):
+        assert fahrenheit_fit[key] == pytest.approx(celsius_fit[key], rel=1e-8)
+    assert _load_trace_calibration(session_id="fahrenheit", database_path=ds.DB_PATH)[3] == pytest.approx(30.0)

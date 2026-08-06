@@ -24,8 +24,10 @@ TRACE_SCHEMA_VERSION = 3
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
 PositiveFloat: TypeAlias = Annotated[FiniteFloat, Field(gt=0)]
+BoundedLoad: TypeAlias = Annotated[FiniteFloat, Field(ge=0, le=1)]
 NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
 NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
+Digest: TypeAlias = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 
 
 class ControllerType(StrEnum):
@@ -42,6 +44,8 @@ class TraceEventKind(StrEnum):
     APPLIED_OUTPUT = "applied_output"
     SAFETY_EVENT = "safety_event"
     MODEL_EVENT = "model_event"
+    MODEL_OBSERVATION = "model_observation"
+    MODEL_EVALUATION = "model_evaluation"
     RECORDER_GAP = "recorder_gap"
 
 
@@ -384,7 +388,92 @@ class ModelEventPayload:
     model_revision: NonNegativeInt | None
     provenance: NonBlankString | None
     detail: NonBlankString
+    model_kind: NonBlankString | None = None
+    model_schema: NonBlankString | None = None
+    role_generation: NonNegativeInt | None = None
+    snapshot_digest: Digest | None = None
+    parameters: Annotated[tuple[TraceSetting, ...], Field(max_length=32)] = ()
     payload_type: Literal["model_event"] = "model_event"
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class ModelObservationPayload:
+    """One immutable, unit-normalized online-learning observation."""
+
+    frame_start_ms: NonNegativeInt
+    frame_end_ms: NonNegativeInt
+    temp_c: FiniteFloat
+    setpoint_c: FiniteFloat
+    ambient_c: FiniteFloat
+    requested_combustion_load: BoundedLoad
+    realized_combustion_load: BoundedLoad
+    delivered_on_seconds: NonNegativeFloat
+    eligible: bool
+    rejection_reasons: Annotated[tuple[NonBlankString, ...], Field(max_length=32)]
+    input_variance: NonNegativeFloat
+    input_levels: NonNegativeInt
+    incumbent_innovation_c: FiniteFloat | None
+    challenger_innovation_c: FiniteFloat | None
+    effective_updates: NonNegativeInt
+    role_generation: NonNegativeInt
+    model_digest: Digest
+    result_revision: NonNegativeInt | None = None
+    requested_auger_duty: BoundedLoad | None = None
+    requested_fan_duty: BoundedLoad | None = None
+    actual_fan_duty: BoundedLoad | None = None
+    output_source: OutputSource | None = None
+    lid_open: bool | None = None
+    safety_inhibited: bool | None = None
+    manual_override: bool | None = None
+    stale: bool | None = None
+    skipped: bool | None = None
+    reset: bool | None = None
+    continuous: bool | None = None
+    payload_type: Literal["model_observation"] = "model_observation"
+
+    @model_validator(mode="after")
+    def validate_observation(self) -> ModelObservationPayload:
+        if self.frame_start_ms >= self.frame_end_ms:
+            raise ValueError("model observation frame interval must be positive")
+        if self.delivered_on_seconds > (self.frame_end_ms - self.frame_start_ms) / 1000:
+            raise ValueError("model observation delivery must not exceed frame duration")
+        if self.eligible != (not self.rejection_reasons):
+            raise ValueError("model observation eligibility must match rejection reasons")
+        if self.eligible and (
+            self.incumbent_innovation_c is None or self.challenger_innovation_c is None
+        ):
+            raise ValueError("eligible model observation requires innovation scores")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class ModelEvaluationPayload:
+    """Immutable promotion-evaluation evidence for one adaptation generation."""
+
+    decision_id: NonBlankString
+    evaluated_at_ms: NonNegativeInt
+    role_generation: NonNegativeInt
+    promoted: bool
+    committed: bool
+    consecutive_wins: NonNegativeInt
+    rejection_reasons: Annotated[tuple[NonBlankString, ...], Field(max_length=32)]
+    incumbent_prediction_score: FiniteFloat | None
+    challenger_prediction_score: FiniteFloat | None
+    incumbent_braking_score: FiniteFloat | None
+    challenger_braking_score: FiniteFloat | None
+    sample_count: NonNegativeInt
+    prospective_digest: Digest | None
+    payload_type: Literal["model_evaluation"] = "model_evaluation"
+
+    @model_validator(mode="after")
+    def validate_evaluation(self) -> ModelEvaluationPayload:
+        if self.committed and not self.promoted:
+            raise ValueError("committed model evaluation must be promoted")
+        if self.promoted != (not self.rejection_reasons):
+            raise ValueError("model evaluation promotion must match rejection reasons")
+        if (self.prospective_digest is not None) != self.promoted:
+            raise ValueError("model evaluation prospective digest must match promotion")
+        return self
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -411,6 +500,8 @@ ControlTracePayload: TypeAlias = Annotated[
     | AppliedOutputPayload
     | SafetyEventPayload
     | ModelEventPayload
+    | ModelObservationPayload
+    | ModelEvaluationPayload
     | RecorderGapPayload,
     Field(discriminator="payload_type"),
 ]
@@ -441,7 +532,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[3] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -449,6 +540,22 @@ class ControlTraceRecord(BaseModel):
         expected_event = _payload_event_kind(self.payload)
         if self.event_kind is not expected_event:
             raise ValueError("event_kind does not match payload_type")
+        if self.schema_version == 2 and isinstance(
+            self.payload, (ModelObservationPayload, ModelEvaluationPayload)
+        ):
+            raise ValueError("trace schema version 2 cannot contain learning payloads")
+        if self.schema_version == 2 and isinstance(self.payload, ModelEventPayload) and any(
+            value is not None
+            for value in (
+                self.payload.model_kind,
+                self.payload.model_schema,
+                self.payload.role_generation,
+                self.payload.snapshot_digest,
+            )
+        ):
+            raise ValueError("trace schema version 2 cannot contain enriched model metadata")
+        if self.schema_version == 2 and isinstance(self.payload, ModelEventPayload) and self.payload.parameters:
+            raise ValueError("trace schema version 2 cannot contain enriched model metadata")
 
         if isinstance(self.payload, SessionPayload) and self.controller is not self.payload.controller:
             raise ValueError("controller does not match session payload")
@@ -460,6 +567,11 @@ class ControlTraceRecord(BaseModel):
             raise ValueError("controller does not match MPC diagnostics")
         if isinstance(self.payload, AllocationPayload) and self.controller is not ControllerType.MPC:
             raise ValueError("allocation records are MPC-only")
+        if (
+            isinstance(self.payload, (ModelObservationPayload, ModelEvaluationPayload))
+            and self.controller is not ControllerType.MPC
+        ):
+            raise ValueError("model learning records are MPC-only")
         return self
 
     def to_db_row(self) -> ControlTraceDbRow:
@@ -547,4 +659,8 @@ def _payload_event_kind(payload: ControlTracePayload) -> TraceEventKind:
         return TraceEventKind.SAFETY_EVENT
     if isinstance(payload, ModelEventPayload):
         return TraceEventKind.MODEL_EVENT
+    if isinstance(payload, ModelObservationPayload):
+        return TraceEventKind.MODEL_OBSERVATION
+    if isinstance(payload, ModelEvaluationPayload):
+        return TraceEventKind.MODEL_EVALUATION
     return TraceEventKind.RECORDER_GAP

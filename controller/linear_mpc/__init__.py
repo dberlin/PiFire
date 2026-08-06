@@ -11,9 +11,12 @@ from .adaptation import (
 from .contracts import AffinePrediction, FrameObservation, ModelUpdate
 from .grey_box import GreyBoxPredictionAdapter
 from .policy import LinearMPC, LinearMPCConfig, LinearSolve
+from .trace import CalibrationSample, TraceSelectionError, calibration_samples, learning_observations
 
 __all__ = (
     "AffinePrediction",
+    "CalibrationSample",
+    "calibration_samples",
     "AdaptationPolicy",
     "FrameObservation",
     "EvaluationDecision",
@@ -26,5 +29,7 @@ __all__ = (
     "OnlineAdaptation",
     "ScheduledARX",
     "ScheduledARXConfig",
+    "TraceSelectionError",
     "UpdateGate",
+    "learning_observations",
 )

@@ -20,8 +20,10 @@ from common.control_trace import (
     ControllerType,
     FramedPulseFramePayload,
     InhibitReason,
+    ModelEvaluationPayload,
     ModelEventPayload,
     ModelEventType,
+    ModelObservationPayload,
     MpcUpdatePayload,
     ResultStaleState,
     PidSpUpdatePayload,
@@ -46,6 +48,8 @@ def test_trace_enums_have_exact_members():
         TraceEventKind.APPLIED_OUTPUT,
         TraceEventKind.SAFETY_EVENT,
         TraceEventKind.MODEL_EVENT,
+        TraceEventKind.MODEL_OBSERVATION,
+        TraceEventKind.MODEL_EVALUATION,
         TraceEventKind.RECORDER_GAP,
     }
     assert set(ActuationMode) == {ActuationMode.FRAMED_PULSE}
@@ -306,6 +310,48 @@ def _payload_cases():
                 model_revision=8,
                 provenance="fit-42",
                 detail="adopted a validated model",
+            ),
+        ),
+        (
+            ControllerType.MPC,
+            TraceEventKind.MODEL_OBSERVATION,
+            ModelObservationPayload(
+                frame_start_ms=1_000,
+                frame_end_ms=21_000,
+                temp_c=110.0,
+                setpoint_c=120.0,
+                ambient_c=20.0,
+                requested_combustion_load=0.4,
+                realized_combustion_load=0.35,
+                delivered_on_seconds=7.0,
+                eligible=True,
+                rejection_reasons=(),
+                input_variance=0.01,
+                input_levels=3,
+                incumbent_innovation_c=1.0,
+                challenger_innovation_c=0.5,
+                effective_updates=21,
+                role_generation=0,
+                model_digest="a" * 64,
+            ),
+        ),
+        (
+            ControllerType.MPC,
+            TraceEventKind.MODEL_EVALUATION,
+            ModelEvaluationPayload(
+                decision_id="generation-0-evaluation-1",
+                evaluated_at_ms=21_000,
+                role_generation=0,
+                promoted=False,
+                committed=False,
+                consecutive_wins=1,
+                rejection_reasons=("prediction",),
+                incumbent_prediction_score=1.0,
+                challenger_prediction_score=1.2,
+                incumbent_braking_score=None,
+                challenger_braking_score=None,
+                sample_count=20,
+                prospective_digest=None,
             ),
         ),
         (
@@ -754,3 +800,81 @@ def test_envelope_accepts_framed_payload_for_every_controller(controller):
     )
 
     assert record.payload is frame
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        {"frame_end_ms": 1_000},
+        {"requested_combustion_load": 1.1},
+        {"eligible": False, "rejection_reasons": ()},
+        {"eligible": True, "rejection_reasons": ("stale",)},
+        {"effective_updates": -1},
+        {"model_digest": "A" * 64},
+    ],
+)
+def test_model_observation_rejects_invalid_learning_evidence(replacement):
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelObservationPayload))
+    with pytest.raises(ValidationError):
+        replace(payload, **replacement)
+
+
+def test_enriched_model_lifecycle_metadata_is_bounded_and_round_trips():
+    payload = ModelEventPayload(
+        event=ModelEventType.ADOPT,
+        model_revision=8,
+        provenance="fit-42",
+        detail="adopted a validated model",
+        model_kind="scheduled-arx",
+        model_schema="scheduled-arx/v2",
+        role_generation=3,
+        snapshot_digest="b" * 64,
+        parameters=(TraceSetting(key="delay", value=2),),
+    )
+    record = ControlTraceRecord(
+        ts_ms=21_000,
+        session_id="session-1",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_EVENT,
+        payload=payload,
+    )
+    assert ControlTraceRecord.from_db_row(record.to_db_row()) == record
+    with pytest.raises(ValidationError):
+        replace(payload, snapshot_digest="B" * 64)
+    with pytest.raises(ValidationError):
+        replace(payload, parameters=(TraceSetting(key="delay", value=2),) * 33)
+
+
+def test_model_evaluation_rejects_inconsistent_lifecycle_evidence():
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    with pytest.raises(ValidationError):
+        replace(payload, committed=True)
+    with pytest.raises(ValidationError):
+        replace(payload, promoted=True, rejection_reasons=())
+    with pytest.raises(ValidationError):
+        replace(payload, rejection_reasons=())
+    with pytest.raises(ValidationError):
+        replace(payload, prospective_digest="c" * 64)
+
+
+def test_v2_envelopes_accept_unchanged_payloads_but_reject_v3_learning_payloads():
+    lifecycle = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEventPayload))
+    legacy = ControlTraceRecord(
+        ts_ms=1,
+        session_id="legacy",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_EVENT,
+        schema_version=2,
+        payload=lifecycle,
+    )
+    assert ControlTraceRecord.from_db_row(legacy.to_db_row()) == legacy
+    observation = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelObservationPayload))
+    with pytest.raises(ValidationError, match="schema version 2"):
+        ControlTraceRecord(
+            ts_ms=1,
+            session_id="legacy",
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.MODEL_OBSERVATION,
+            schema_version=2,
+            payload=observation,
+        )
