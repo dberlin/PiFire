@@ -1,6 +1,8 @@
-from common.control_trace import ActuationMode, ControllerType
-
+from dataclasses import replace
 from typing import Any
+
+from common.control_trace import ActuationMode, ControllerType
+from controller.linear_mpc.contracts import FrameObservation
 
 
 class FakeControllerRunner:
@@ -25,6 +27,7 @@ class FakeControllerRunner:
         self.applied = []
         self.restored = []
         self.snapshot: dict[str, Any] | None = None
+        self.observations = []
         # A single ordered log across restore_model()/set_output() calls, since
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
@@ -80,6 +83,9 @@ class FakeControllerRunner:
     def set_output(self, applied):
         self.applied.append(applied)
         self.calls.append(("apply", applied))
+
+    def observe_frame(self, observation: FrameObservation):
+        self.observations.append(replace(observation))
 
     def get_model_snapshot(self):
         return self.snapshot

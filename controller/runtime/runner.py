@@ -17,6 +17,8 @@ so a live fire never ends up unregulated. See `_build_core` and `build_runner`
 for why both of those matter.
 """
 
+from __future__ import annotations
+
 import collections
 import importlib
 import math
@@ -26,12 +28,15 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from common.control_trace import ActuationMode, ControllerType, ResultStaleState
 
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
+
+if TYPE_CHECKING:
+    from controller.linear_mpc.contracts import FrameObservation
 
 
 StatusScalar: TypeAlias = None | bool | int | float | str
@@ -299,6 +304,8 @@ class ControllerRunner(ABC):
     @abstractmethod
     def set_output(self, applied): ...
     @abstractmethod
+    def observe_frame(self, observation: FrameObservation): ...
+    @abstractmethod
     def get_model_snapshot(self): ...
     @abstractmethod
     def restore_model(self, snapshot): ...
@@ -394,6 +401,10 @@ class SyncControllerRunner(ControllerRunner):
     def set_output(self, applied):
         self._core.set_output(applied)
 
+    def observe_frame(self, observation: FrameObservation):
+        observe = getattr(self._core, "observe_frame", None)
+        return observe(observation) if observe is not None else None
+
     def get_model_snapshot(self):
         return self._core.get_model_snapshot()
 
@@ -431,6 +442,10 @@ _UNSET = object()
 # backlog grow without bound; the oldest reports are the ones to lose, since
 # a consumer identifying a process model cares about recent duty.
 _MAX_PENDING_OUTPUTS = 2048
+
+# A completed learning frame covers 20 seconds. Thirty retained frames span the
+# required ten-minute recovery window while bounding the worker's handoff.
+_MAX_PENDING_OBSERVATIONS = 30
 
 
 def _owned_model_snapshot(snapshot):
@@ -490,6 +505,9 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
         self._pending_dropped = 0
         self._pending_restore = None
+        self._pending_observations: list[FrameObservation] = []
+        self._dropped_observations = 0
+        self._observations_discontinuous = False
         self._model_snapshot = _owned_model_snapshot(core.get_model_snapshot())
         self._initial_status = _safe_initial_status(core)
         self._control_period = core.get_control_period()
@@ -508,7 +526,6 @@ class ThreadedControllerRunner(ControllerRunner):
     def _loop(self):
         while not self._stop_event.is_set():
             with self._lock:
-                temp = self._temp
                 target = self._pending_target
                 self._pending_target = _UNSET
                 new_core = self._pending_core
@@ -539,10 +556,33 @@ class ThreadedControllerRunner(ControllerRunner):
             # caused, and in the order the auger saw it.
             for applied in sorted(pending_outputs, key=lambda a: a.timestamp):
                 self._core.set_output(applied)
-            if temp is not None:
+            # Learner calls must never hold _lock. Drain until a lock-protected
+            # empty observation queue commits this iteration's temperature
+            # update; an observation that wins the lock before that commit is
+            # necessarily delivered first.
+            while True:
+                with self._lock:
+                    if self._pending_observations:
+                        pending_observations = self._pending_observations
+                        self._pending_observations = []
+                        if self._observations_discontinuous:
+                            pending_observations[0] = replace(pending_observations[0], continuous=False)
+                            self._observations_discontinuous = False
+                        update_temp = _UNSET
+                    else:
+                        pending_observations = []
+                        update_temp = self._temp
+                if pending_observations:
+                    observe = getattr(self._core, "observe_frame", None)
+                    if observe is not None:
+                        for observation in pending_observations:
+                            observe(observation)
+                    continue
+                break
+            if update_temp is not None:
                 result = _capture_completed_result(
                     self._core,
-                    temp,
+                    update_temp,
                     self._revision + 1,
                     monotonic_clock=self._monotonic_clock,
                     wall_clock=self._wall_clock,
@@ -617,6 +657,8 @@ class ThreadedControllerRunner(ControllerRunner):
             if self._actuation_mode is ActuationMode.FRAMED_PULSE and self._output.revision > 0:
                 state.update(_quality_status(self._output))
             state["pending_dropped"] = self._pending_dropped
+            state["pending_observations"] = len(self._pending_observations)
+            state["dropped_observations"] = self._dropped_observations
         if transition is not None and self._warning_callback is not None:
             self._warning_callback(transition)
         return state
@@ -630,6 +672,21 @@ class ThreadedControllerRunner(ControllerRunner):
     def get_model_snapshot(self):
         with self._lock:
             return self._model_snapshot
+
+
+    def observe_frame(self, observation: FrameObservation):
+        with self._lock:
+            index = 0
+            while (
+                index < len(self._pending_observations)
+                and self._pending_observations[index].frame_end_s <= observation.frame_end_s
+            ):
+                index += 1
+            self._pending_observations.insert(index, observation)
+            if len(self._pending_observations) > _MAX_PENDING_OBSERVATIONS:
+                self._pending_observations.pop(0)
+                self._dropped_observations += 1
+                self._observations_discontinuous = True
 
     def restore_model(self, snapshot):
         """Queue a snapshot for the worker to attempt to adopt.

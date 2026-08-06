@@ -5,14 +5,41 @@ import json
 
 
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.linear_mpc.contracts import FrameObservation
 from common.control_trace import ActuationMode, ResultStaleState
 from controller.runtime.runner import (
     ThreadedControllerRunner,
     build_runner,
     SyncControllerRunner,
     _MAX_PENDING_OUTPUTS,
+    _MAX_PENDING_OBSERVATIONS,
 )
 
+
+def _frame(index: int) -> FrameObservation:
+    return FrameObservation(
+        frame_start_s=index * 20.0,
+        frame_end_s=(index + 1) * 20.0,
+        temp_c=100.0,
+        setpoint_c=120.0,
+        ambient_c=20.0,
+        requested_q=0.25,
+        realized_q=0.25,
+        requested_auger_duty=0.25,
+        delivered_on_s=5.0,
+        requested_fan_duty=None,
+        actual_fan_duty=None,
+        result_revision=1,
+        output_source="controller",
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+        role_generation=0,
+    )
 
 class FakeCore:
     """Deterministic core. update() records temps, returns a fixed dict, and
@@ -165,14 +192,22 @@ def test_threaded_result_recursively_freezes_nested_status_across_repolls():
         state = runner.controller_state()
         assert repolled.revision == result.revision
         assert repolled.result_age_seconds >= result.result_age_seconds
-        assert state["nested"] == {"samples": [1.0]}
-        assert state["pending_dropped"] == 0
+        assert state == {
+            "nested": {"samples": [1.0]},
+            "pending_dropped": 0,
+            "pending_observations": 0,
+            "dropped_observations": 0,
+        }
         assert json.loads(json.dumps(state)) == state
         state["nested"]["samples"].append(3.0)
         assert result.status == {"nested": {"samples": (1.0,)}}
         assert repolled.status == {"nested": {"samples": (1.0,)}}
-        assert runner.controller_state()["nested"] == {"samples": [1.0]}
-        assert runner.controller_state()["pending_dropped"] == 0
+        assert runner.controller_state() == {
+            "nested": {"samples": [1.0]},
+            "pending_dropped": 0,
+            "pending_observations": 0,
+            "dropped_observations": 0,
+        }
     finally:
         runner.stop()
 
@@ -397,7 +432,11 @@ def test_threaded_runner_never_exposes_core_internals_before_first_result():
     core = FakeCore()
     r = ThreadedControllerRunner(core)
     try:
-        assert r.controller_state() == {"pending_dropped": 0}
+        assert r.controller_state() == {
+            "pending_dropped": 0,
+            "pending_observations": 0,
+            "dropped_observations": 0,
+        }
     finally:
         r.stop()
 
@@ -440,7 +479,11 @@ def test_threaded_runner_survives_get_status_raising_during_init():
     core = _RaisingStatusCore()
     r = ThreadedControllerRunner(core)
     try:
-        assert r.controller_state() == {"pending_dropped": 0}
+        assert r.controller_state() == {
+            "pending_dropped": 0,
+            "pending_observations": 0,
+            "dropped_observations": 0,
+        }
     finally:
         r.stop()
 
@@ -740,4 +783,157 @@ def test_the_backlog_stays_bounded_after_a_drain():
         assert isinstance(runner._pending_outputs, collections.deque)
     finally:
         core.release()
+        runner.stop()
+
+
+
+class _ObservationBarrier:
+    def __init__(self):
+        self.calls = 0
+        self.first_waiting = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, seconds):
+        self.calls += 1
+        if self.calls == 1:
+            self.first_waiting.set()
+        assert self.release.wait(2.0)
+        self.release.clear()
+
+
+class _ObservationRecordingCore(_OrderRecordingCore):
+    def __init__(self):
+        super().__init__()
+        self.observations = []
+        self.learner_lock_free = []
+        self.runner = None
+
+    def observe_frame(self, observation):
+        acquired = self.runner._lock.acquire(blocking=False)
+        if acquired:
+            self.runner._lock.release()
+        self.learner_lock_free.append(acquired)
+        with self.lock:
+            self.observations.append(observation)
+            self.calls.append(("observe_frame", observation.frame_end_s))
+
+
+def test_threaded_runner_delivers_frame_observations_in_timestamp_order_before_update():
+    barrier = _ObservationBarrier()
+    core = _ObservationRecordingCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        runner.observe_frame(_frame(1))
+        runner.observe_frame(_frame(0))
+        runner.observe_frame(_frame(2))
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert _wait_for(lambda: len(core.observations) == 3 and ("update", 212.0) in core.calls)
+        with core.lock:
+            calls = list(core.calls)
+        first_update = next(index for index, call in enumerate(calls) if call == ("update", 212.0))
+        assert calls[:first_update] == [
+            ("observe_frame", 20.0),
+            ("observe_frame", 40.0),
+            ("observe_frame", 60.0),
+        ]
+        assert core.learner_lock_free == [True, True, True]
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+def test_threaded_runner_evicts_oldest_timestamps_and_marks_the_next_retained_frame():
+    barrier = _ObservationBarrier()
+    core = _ObservationRecordingCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        observations = [
+            _frame(30),
+            *(_frame(index) for index in range(29)),
+            _frame(31),
+            _frame(32),
+            _frame(1),
+        ]
+        for observation in observations:
+            runner.observe_frame(observation)
+
+        assert runner.controller_state()["pending_observations"] == _MAX_PENDING_OBSERVATIONS
+        assert runner.controller_state()["dropped_observations"] == 3
+        barrier.release.set()
+
+        assert _wait_for(lambda: len(core.observations) == _MAX_PENDING_OBSERVATIONS)
+        retained_indexes = [*range(2, 29), 30, 31, 32]
+        assert [observation.frame_end_s for observation in core.observations] == [
+            float((index + 1) * 20) for index in retained_indexes
+        ]
+        assert core.observations[0].continuous is False
+        assert all(observation.continuous for observation in core.observations[1:])
+        assert next(observation for observation in observations if observation.frame_end_s == 60.0).continuous is True
+        assert runner.controller_state()["pending_observations"] == 0
+        assert runner.controller_state()["dropped_observations"] == 3
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+def test_threaded_runner_ignores_observations_for_a_core_without_a_learner():
+    barrier = _ObservationBarrier()
+    core = FakeCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        runner.observe_frame(_frame(0))
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert core.updated.wait(2.0)
+        assert runner.controller_state()["pending_observations"] == 0
+        assert runner.controller_state()["dropped_observations"] == 0
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+class _DeliveryBlockingObservationCore(_ObservationRecordingCore):
+    def __init__(self):
+        super().__init__()
+        self.first_delivery_started = threading.Event()
+        self.release_first_delivery = threading.Event()
+
+    def observe_frame(self, observation):
+        super().observe_frame(observation)
+        if len(self.observations) == 1:
+            self.first_delivery_started.set()
+            assert self.release_first_delivery.wait(2.0)
+
+
+def test_threaded_runner_redrains_observations_enqueued_during_learner_delivery():
+    barrier = _ObservationBarrier()
+    core = _DeliveryBlockingObservationCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        runner.observe_frame(_frame(0))
+        runner.submit(212.0)
+        barrier.release.set()
+        assert core.first_delivery_started.wait(2.0)
+
+        runner.observe_frame(_frame(1))
+        core.release_first_delivery.set()
+
+        assert _wait_for(lambda: len(core.observations) == 2 and ("update", 212.0) in core.calls)
+        with core.lock:
+            calls = list(core.calls)
+        first_update = next(index for index, call in enumerate(calls) if call == ("update", 212.0))
+        assert calls[:first_update] == [("observe_frame", 20.0), ("observe_frame", 40.0)]
+    finally:
+        core.release_first_delivery.set()
+        barrier.release.set()
         runner.stop()

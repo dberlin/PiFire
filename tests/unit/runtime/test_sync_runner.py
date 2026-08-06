@@ -1,9 +1,52 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.linear_mpc.contracts import FrameObservation
 from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner, build_runner, _build_core
 from common.control_trace import ActuationMode, ResultStaleState
 
+
+def test_runner_import_does_not_load_optional_linear_mpc_dependencies():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['scipy'] = None; import controller.runtime.runner",
+        ],
+        cwd=Path(__file__).parents[3],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+def _frame(index: int) -> FrameObservation:
+    return FrameObservation(
+        frame_start_s=index * 20.0,
+        frame_end_s=(index + 1) * 20.0,
+        temp_c=100.0,
+        setpoint_c=120.0,
+        ambient_c=20.0,
+        requested_q=0.25,
+        realized_q=0.25,
+        requested_auger_duty=0.25,
+        delivered_on_s=5.0,
+        requested_fan_duty=None,
+        actual_fan_duty=None,
+        result_revision=1,
+        output_source="controller",
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+        role_generation=0,
+    )
 
 class _Core:
     def __init__(self):
@@ -298,6 +341,27 @@ def test_sync_runner_forwards_set_output():
     applied = AppliedOutput(0.4, OutputSource.CONTROLLER, 12.0, requested=0.4)
     runner.set_output(applied)
     assert core.applied == [applied]
+
+
+def test_sync_runner_forwards_completed_frame_observations_immediately():
+    class ObservingCore(_RecordingCore):
+        def __init__(self):
+            super().__init__()
+            self.observations = []
+
+        def observe_frame(self, observation):
+            self.observations.append(observation)
+
+    core = ObservingCore()
+    observation = _frame(0)
+
+    SyncControllerRunner(core).observe_frame(observation)
+
+    assert core.observations == [observation]
+
+
+def test_sync_runner_ignores_observations_for_a_core_without_a_learner():
+    SyncControllerRunner(_RecordingCore()).observe_frame(_frame(0))
 
 
 def test_sync_runner_forwards_snapshot_and_restore():
