@@ -115,7 +115,7 @@ Ineligible frames remain in the audit trail. They may advance wall time but must
 
 ### 4.5 Configuration and provenance
 
-The session record binds observations to:
+The session record and linked typed records bind observations to:
 
 - software and build version;
 - trace and model schema versions;
@@ -123,7 +123,7 @@ The session record binds observations to:
 - temperature units at the UI boundary;
 - control interval;
 - pulse slot and frame durations;
-- `u_max` and allocator revision;
+- same-revision allocation `u_max` and allocator revision; `u_max` is not restored as a session-level MPC knob;
 - fan authority, PWM capability, and fan bounds;
 - grey-box snapshot/provenance/digest;
 - state-space snapshot/provenance/digest;
