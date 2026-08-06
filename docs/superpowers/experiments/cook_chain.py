@@ -50,15 +50,20 @@ ARMS = {
 
 
 def _chain(job):
-    """One controller/scenario/seed: `cooks` cooks, threading the learned model.
+    """One controller/seed: one cook per entry in `scenarios`, threading the model.
+
+    The scenarios are a sequence rather than one name repeated, because what a
+    model learned at one setpoint is worth at another is a different question
+    from what it is worth at its own -- and the answer decides whether a grill
+    has to relearn every time its operator cooks something else.
 
     The core is captured rather than rebuilt so the snapshot comes off the same
     object the run drove; `run_scenario` constructs the core itself and does not
     hand it back.
     """
-    controller, scenario_name, seed, cooks, arm, config, learn, plant = job
+    controller, scenarios, seed, arm, config, learn, plant = job
     rows, snapshot = [], None
-    for cook in range(1, cooks + 1):
+    for cook, scenario_name in enumerate(scenarios, start=1):
         holder = {}
 
         def setup(core, _holder=holder, _snapshot=snapshot):
@@ -72,6 +77,7 @@ def _chain(job):
         )
         row["cook"] = cook
         row["arm"] = arm
+        row["sequence"] = tuple(scenarios)
         row["wall_s"] = round(time.perf_counter() - started, 1)
         row["model_in"] = None if snapshot is None else dict(snapshot)
         row["restored"] = holder.get("restored")
@@ -94,7 +100,7 @@ def _agg(rows, key):
     return None if not values else statistics.median(values)
 
 
-def _render(rows, arms, cooks, plant):
+def _render(rows, arms, sequences, plant):
     out = []
 
     def w(line=""):
@@ -104,14 +110,21 @@ def _render(rows, arms, cooks, plant):
     w(f"Plant {plant}. Median over seeds. Cook 1 starts with no model at all.")
     w()
     for arm in arms:
-        w(f"== {arm} ==")
-        w(
-            f"{'scenario':<14}{'cook':>5}{'overshoot':>11}{'in5%':>8}{'settle_s':>10}"
-            f"{'identified':>12}{'restored':>10}{'promoted':>10}"
-        )
-        for scenario_name in SCENARIO_NAMES:
-            for cook in range(1, cooks + 1):
-                sel = [r for r in rows if r["arm"] == arm and r["scenario"] == scenario_name and r["cook"] == cook]
+        for sequence in sequences:
+            w(f"== {arm}: {' -> '.join(sequence)} ==")
+            w(
+                f"{'scenario':<14}{'cook':>5}{'overshoot':>11}{'in5%':>8}{'settle_s':>10}"
+                f"{'identified':>12}{'restored':>10}{'promoted':>10}"
+            )
+            for cook, scenario_name in enumerate(sequence, start=1):
+                sel = [
+                    r
+                    for r in rows
+                    if r["arm"] == arm
+                    and r["cook"] == cook
+                    and r["sequence"] == sequence
+                    and r["scenario"] == scenario_name
+                ]
                 if not sel:
                     continue
                 identified = sum(1 for r in sel if r.get("identified"))
@@ -143,20 +156,33 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--plant", default=PLANT)
     parser.add_argument("--arms", default="off,bias", help="comma-separated arm names (see ARMS)")
+    parser.add_argument(
+        "--sequences",
+        default=None,
+        help=(
+            "semicolon-separated chains, each a comma-separated scenario per cook "
+            "(e.g. 'steady_225,steady_350;steady_450,steady_350'). Defaults to every "
+            "scenario in SCENARIO_NAMES held for --cooks cooks."
+        ),
+    )
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
 
     arms = {name: ARMS[name] for name in args.arms.split(",")}
+    if args.sequences:
+        sequences = [tuple(chain.split(",")) for chain in args.sequences.split(";")]
+    else:
+        sequences = [(name,) * args.cooks for name in SCENARIO_NAMES]
     jobs = [
-        (args.controller, scenario_name, seed, args.cooks, arm, spec["config"], spec.get("learn", True), args.plant)
+        (args.controller, sequence, seed, arm, spec["config"], spec.get("learn", True), args.plant)
         for arm, spec in arms.items()
-        for scenario_name in SCENARIO_NAMES
+        for sequence in sequences
         for seed in range(args.seeds)
     ]
     with Pool(args.workers) as pool:
         rows = [row for chain in pool.map(_chain, jobs) for row in chain]
 
-    report = _render(rows, list(arms), args.cooks, args.plant)
+    report = _render(rows, list(arms), sequences, args.plant)
     print(report)
     if args.out:
         with open(args.out, "w") as handle:
