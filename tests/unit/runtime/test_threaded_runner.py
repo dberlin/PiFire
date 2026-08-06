@@ -846,6 +846,39 @@ def test_threaded_runner_delivers_frame_observations_in_timestamp_order_before_u
         runner.stop()
 
 
+def test_threaded_runner_drains_outcomes_for_exact_delivered_observations():
+    barrier = _ObservationBarrier()
+
+    class OutcomeCore(_ObservationRecordingCore):
+        def observe_frame(self, observation):
+            super().observe_frame(observation)
+            return {"role_generation": observation.role_generation, "eligible": False}
+
+    core = OutcomeCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        later = _frame(1)
+        earlier = _frame(0)
+        later_sequence = runner.observe_frame(later)
+        earlier_sequence = runner.observe_frame(earlier)
+        runner.submit(212.0)
+        barrier.release.set()
+        assert _wait_for(lambda: len(core.observations) == 2)
+
+        outcomes = runner.drain_observation_outcomes()
+
+        assert [(item.submission_sequence, item.observation) for item in outcomes] == [
+            (earlier_sequence.submission_sequence, earlier),
+            (later_sequence.submission_sequence, later),
+        ]
+        assert runner.drain_observation_outcomes().envelopes == ()
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
 def test_threaded_runner_evicts_oldest_timestamps_and_marks_the_next_retained_frame():
     barrier = _ObservationBarrier()
     core = _ObservationRecordingCore()
@@ -881,6 +914,163 @@ def test_threaded_runner_evicts_oldest_timestamps_and_marks_the_next_retained_fr
         barrier.release.set()
         runner.stop()
 
+
+def test_threaded_runner_stop_flushes_accepted_observation_outcome():
+    barrier = _ObservationBarrier()
+
+    class OutcomeCore(_ObservationRecordingCore):
+        def observe_frame(self, observation):
+            super().observe_frame(observation)
+            return {"role_generation": observation.role_generation, "eligible": False}
+
+    core = OutcomeCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    assert barrier.first_waiting.wait(2.0)
+    submission = runner.observe_frame(_frame(0))
+    errors = []
+    stopper = threading.Thread(target=lambda: errors.append(runner.stop()))
+    stopper.start()
+    assert _wait_for(lambda: runner._stop_event.is_set())
+    barrier.release.set()
+    assert runner.observe_frame(_frame(1)) is None
+    stopper.join(2.0)
+    assert not stopper.is_alive()
+    assert errors == [None]
+    drain = runner.drain_observation_outcomes()
+    assert [(item.submission_sequence, item.observation.frame_end_s) for item in drain] == [
+        (submission.submission_sequence, 20.0)
+    ]
+
+
+
+def test_threaded_runner_swap_delivers_pre_swap_observation_to_old_core():
+    barrier = _ObservationBarrier()
+
+    class OutcomeCore(_ObservationRecordingCore):
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+
+        def observe_frame(self, observation):
+            super().observe_frame(observation)
+            return {"core": self.name, "role_generation": observation.role_generation, "eligible": False}
+
+    old = OutcomeCore("old")
+    new = OutcomeCore("new")
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    old.runner = runner
+    new.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        submission = runner.observe_frame(_frame(0))
+        with runner._lock:
+            runner._pending_core = new
+            runner._pending_controller_type = None
+        later = runner.observe_frame(_frame(1))
+        barrier.release.set()
+        assert _wait_for(lambda: len(old.observations) == 1)
+        drain = runner.drain_observation_outcomes()
+        assert drain.envelopes[0].submission_sequence == submission.submission_sequence
+        assert drain.envelopes[0].outcome["core"] == "old"
+        assert drain.envelopes[0].configuration_generation == submission.configuration_generation
+        barrier.release.set()
+        assert _wait_for(lambda: len(new.observations) == 1)
+        later_drain = runner.drain_observation_outcomes()
+        assert later_drain.envelopes[0].submission_sequence == later.submission_sequence
+        assert later_drain.envelopes[0].configuration_generation == later.configuration_generation
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+def test_threaded_submission_reports_exact_out_of_order_input_eviction():
+    barrier = _ObservationBarrier()
+    core = _ObservationRecordingCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        first = runner.observe_frame(_frame(100))
+        for index in range(30):
+            submission = runner.observe_frame(_frame(index))
+        assert submission.evicted_sequence == 2
+        assert first.evicted_sequence is None
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+def test_threaded_submission_reports_self_eviction_for_new_earliest_frame():
+    barrier = _ObservationBarrier()
+    core = _ObservationRecordingCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        for index in range(1, 31):
+            runner.observe_frame(_frame(index))
+        self_evicted = runner.observe_frame(_frame(0))
+        assert self_evicted.evicted_sequence == self_evicted.submission_sequence
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+def test_threaded_stop_drains_reserved_swap_generation():
+    barrier = _ObservationBarrier()
+
+    class OutcomeCore(_ObservationRecordingCore):
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+
+        def observe_frame(self, observation):
+            super().observe_frame(observation)
+            return {"core": self.name, "role_generation": observation.role_generation, "eligible": False}
+
+    old = OutcomeCore("old")
+    new = OutcomeCore("new")
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    old.runner = new.runner = runner
+    assert barrier.first_waiting.wait(2.0)
+    runner.observe_frame(_frame(0))
+    with runner._lock:
+        runner._pending_core = new
+        runner._pending_controller_type = None
+    runner.observe_frame(_frame(1))
+    stopper = threading.Thread(target=runner.stop)
+    stopper.start()
+    barrier.release.set()
+    stopper.join(2.0)
+    assert not stopper.is_alive()
+    outcomes = runner.drain_observation_outcomes().envelopes
+    assert [item.outcome["core"] for item in outcomes] == ["old", "new"]
+
+
+def test_threaded_generation_specific_overflow_marks_only_reserved_generation():
+    barrier = _ObservationBarrier()
+    old = _ObservationRecordingCore()
+    new = _ObservationRecordingCore()
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    old.runner = new.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        runner.observe_frame(_frame(100))
+        with runner._lock:
+            runner._pending_core = new
+            runner._pending_controller_type = None
+        for index in range(1, 32):
+            runner.observe_frame(_frame(index))
+        barrier.release.set()
+        assert _wait_for(lambda: len(old.observations) == 1)
+        assert old.observations[0].continuous is True
+        barrier.release.set()
+        assert _wait_for(lambda: len(new.observations) > 0)
+        assert new.observations[0].continuous is False
+    finally:
+        barrier.release.set()
+        runner.stop()
 
 def test_threaded_runner_ignores_observations_for_a_core_without_a_learner():
     barrier = _ObservationBarrier()

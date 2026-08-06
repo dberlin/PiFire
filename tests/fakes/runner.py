@@ -1,8 +1,10 @@
+from collections import deque
 from dataclasses import replace
 from typing import Any
 
 from common.control_trace import ActuationMode, ControllerType
 from controller.linear_mpc.contracts import FrameObservation
+from controller.runtime.runner import ObservationOutcomeDrain, ObservationOutcomeEnvelope, ObservationSubmission
 
 
 class FakeControllerRunner:
@@ -28,9 +30,14 @@ class FakeControllerRunner:
         self.restored = []
         self.snapshot: dict[str, Any] | None = None
         self.observations = []
+        self._observation_sequence = 0
+        self._observation_outcomes = []
+        self.observation_outcome = None
         # A single ordered log across restore_model()/set_output() calls, since
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
+        self._outcome_drops_since_drain = 0
+        self._outcome_dropped_sequences = deque(maxlen=60)
         self.calls = []
         self.refits = 0
         self.refit_raises = None
@@ -85,7 +92,31 @@ class FakeControllerRunner:
         self.calls.append(("apply", applied))
 
     def observe_frame(self, observation: FrameObservation):
-        self.observations.append(replace(observation))
+        self._observation_sequence += 1
+        owned = replace(observation)
+        self.observations.append(owned)
+        if self.observation_outcome is not None:
+            if len(self._observation_outcomes) == 30:
+                dropped = self._observation_outcomes.pop(0)
+                self._outcome_drops_since_drain += 1
+                self._outcome_dropped_sequences.append(dropped.submission_sequence)
+            self._observation_outcomes.append(
+                ObservationOutcomeEnvelope(
+                    self._observation_sequence, self._configuration_revision, owned, self.observation_outcome
+                )
+            )
+        return ObservationSubmission(self._observation_sequence, self._configuration_revision)
+
+    def drain_observation_outcomes(self):
+        drain = ObservationOutcomeDrain(
+            tuple(self._observation_outcomes),
+            self._outcome_drops_since_drain,
+            tuple(self._outcome_dropped_sequences),
+        )
+        self._observation_outcomes.clear()
+        self._outcome_drops_since_drain = 0
+        self._outcome_dropped_sequences.clear()
+        return drain
 
     def get_model_snapshot(self):
         return self.snapshot

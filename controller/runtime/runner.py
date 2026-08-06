@@ -43,6 +43,32 @@ StatusScalar: TypeAlias = None | bool | int | float | str
 StatusValue: TypeAlias = StatusScalar | Mapping[str, "StatusValue"] | tuple["StatusValue", ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ObservationOutcomeEnvelope:
+    """One runner-owned learner result for the exact observation the core saw."""
+
+    submission_sequence: int
+    configuration_generation: int
+    observation: FrameObservation
+    outcome: object
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationSubmission:
+    submission_sequence: int
+    configuration_generation: int
+    evicted_sequence: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationOutcomeDrain:
+    envelopes: tuple[ObservationOutcomeEnvelope, ...]
+    dropped_count: int
+    dropped_sequences: tuple[int, ...]
+
+    def __iter__(self):
+        return iter(self.envelopes)
+
 def _freeze_status_value(value: object) -> StatusValue:
     if value is None or isinstance(value, bool | int | float | str):
         return value
@@ -306,6 +332,8 @@ class ControllerRunner(ABC):
     @abstractmethod
     def observe_frame(self, observation: FrameObservation): ...
     @abstractmethod
+    def drain_observation_outcomes(self) -> tuple[ObservationOutcomeEnvelope, ...]: ...
+    @abstractmethod
     def get_model_snapshot(self): ...
     @abstractmethod
     def restore_model(self, snapshot): ...
@@ -331,10 +359,15 @@ class SyncControllerRunner(ControllerRunner):
         self._temp = None
         self._revision = 0
         self._latest_result = None
+        self._outcome_drops_since_drain = 0
+        self._outcome_dropped_sequences = collections.deque(maxlen=60)
         self._monotonic_clock = monotonic_clock
         self._wall_clock = wall_clock
         self._warning_callback = warning_callback
         self._controller_type = controller_type
+        self._observation_sequence = 0
+        self._observation_outcomes = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
+        self._dropped_observation_outcomes = 0
         self._configuration_revision = 0
         period = getattr(core, "get_control_period", lambda: None)()
         self._quality = _ResultQualityTracker(_control_period_seconds(period))
@@ -402,8 +435,32 @@ class SyncControllerRunner(ControllerRunner):
         self._core.set_output(applied)
 
     def observe_frame(self, observation: FrameObservation):
+        self._observation_sequence += 1
         observe = getattr(self._core, "observe_frame", None)
-        return observe(observation) if observe is not None else None
+        outcome = observe(observation) if observe is not None else None
+        if outcome is not None:
+            if len(self._observation_outcomes) == self._observation_outcomes.maxlen:
+                dropped = self._observation_outcomes[0]
+                self._dropped_observation_outcomes += 1
+                self._outcome_drops_since_drain += 1
+                self._outcome_dropped_sequences.append(dropped.submission_sequence)
+            self._observation_outcomes.append(
+                ObservationOutcomeEnvelope(
+                    self._observation_sequence, self._configuration_revision, observation, outcome
+                )
+            )
+        return ObservationSubmission(self._observation_sequence, self._configuration_revision)
+
+    def drain_observation_outcomes(self) -> ObservationOutcomeDrain:
+        drain = ObservationOutcomeDrain(
+            tuple(self._observation_outcomes),
+            self._outcome_drops_since_drain,
+            tuple(self._outcome_dropped_sequences),
+        )
+        self._observation_outcomes.clear()
+        self._outcome_drops_since_drain = 0
+        self._outcome_dropped_sequences.clear()
+        return drain
 
     def get_model_snapshot(self):
         return self._core.get_model_snapshot()
@@ -502,12 +559,18 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_core = None
         self._pending_controller_type = None
         self._configuration_revision = 0
+        self._outcome_drops_since_drain = 0
+        self._outcome_dropped_sequences = collections.deque(maxlen=60)
         self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
         self._pending_dropped = 0
         self._pending_restore = None
-        self._pending_observations: list[FrameObservation] = []
+        self._pending_observations: list[tuple[int, int, FrameObservation]] = []
+        self._accept_observations = True
         self._dropped_observations = 0
-        self._observations_discontinuous = False
+        self._observations_discontinuous: set[int] = set()
+        self._observation_sequence = 0
+        self._observation_outcomes = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
+        self._dropped_observation_outcomes = 0
         self._model_snapshot = _owned_model_snapshot(core.get_model_snapshot())
         self._initial_status = _safe_initial_status(core)
         self._control_period = core.get_control_period()
@@ -524,30 +587,20 @@ class ThreadedControllerRunner(ControllerRunner):
         self._thread.start()
 
     def _loop(self):
-        while not self._stop_event.is_set():
+        while True:
+            stopping = self._stop_event.is_set()
             with self._lock:
                 target = self._pending_target
                 self._pending_target = _UNSET
-                new_core = self._pending_core
-                self._pending_core = None
-                new_controller_type = self._pending_controller_type
-                self._pending_controller_type = None
+                new_core = None
+                new_controller_type = None
                 pending_outputs = list(self._pending_outputs)
                 self._pending_outputs.clear()
                 restore = self._pending_restore
                 self._pending_restore = None
-            if new_core is not None:
-                new_period = new_core.get_control_period()
-                new_commands_fan = new_core.commands_fan()
-                new_actuation_mode = _actuation_mode_for(new_core)
-                with self._lock:
-                    self._core = new_core
-                    self._control_period = new_period
-                    self._commands_fan = new_commands_fan
-                    self._actuation_mode = new_actuation_mode
-                    self._controller_type = new_controller_type
-                    self._quality.control_period = _control_period_seconds(new_period)
-                    self._configuration_revision += 1
+            # A pending core is installed only after the old core has drained
+            # every accepted observation.  The lock-held emptiness check keeps
+            # the returned generation bound to the consuming core.
             if restore is not None:
                 self._core.restore_model(restore)
             if target is not _UNSET:
@@ -563,23 +616,60 @@ class ThreadedControllerRunner(ControllerRunner):
             while True:
                 with self._lock:
                     if self._pending_observations:
-                        pending_observations = self._pending_observations
-                        self._pending_observations = []
-                        if self._observations_discontinuous:
-                            pending_observations[0] = replace(pending_observations[0], continuous=False)
-                            self._observations_discontinuous = False
-                        update_temp = _UNSET
+                        if self._pending_core is not None:
+                            pending_observations = [
+                                item for item in self._pending_observations if item[1] == self._configuration_revision
+                            ]
+                            self._pending_observations = [
+                                item for item in self._pending_observations if item[1] != self._configuration_revision
+                            ]
+                            handoff_batch = bool(pending_observations)
+                        else:
+                            pending_observations = self._pending_observations
+                            self._pending_observations = []
+                            handoff_batch = False
+                        if pending_observations and pending_observations[0][1] in self._observations_discontinuous:
+                            sequence, generation, observation = pending_observations[0]
+                            pending_observations[0] = (sequence, generation, replace(observation, continuous=False))
+                            self._observations_discontinuous.discard(generation)
+                        update_temp = _UNSET if pending_observations else self._temp
                     else:
                         pending_observations = []
+                        handoff_batch = False
                         update_temp = self._temp
                 if pending_observations:
                     observe = getattr(self._core, "observe_frame", None)
                     if observe is not None:
-                        for observation in pending_observations:
-                            observe(observation)
+                        for sequence, generation, observation in pending_observations:
+                            outcome = observe(observation)
+                            if outcome is not None:
+                                with self._lock:
+                                    if len(self._observation_outcomes) == self._observation_outcomes.maxlen:
+                                        dropped = self._observation_outcomes[0]
+                                        self._dropped_observation_outcomes += 1
+                                        self._outcome_drops_since_drain += 1
+                                        self._outcome_dropped_sequences.append(dropped.submission_sequence)
+                                    self._observation_outcomes.append(
+                                        ObservationOutcomeEnvelope(sequence, generation, observation, outcome)
+                                    )
+                    if handoff_batch:
+                        break
                     continue
                 break
-            if update_temp is not None:
+            with self._lock:
+                if self._pending_core is not None:
+                    new_core = self._pending_core
+                    new_controller_type = self._pending_controller_type
+                    self._pending_core = None
+                    self._pending_controller_type = None
+                    self._core = new_core
+                    self._control_period = new_core.get_control_period()
+                    self._commands_fan = new_core.commands_fan()
+                    self._actuation_mode = _actuation_mode_for(new_core)
+                    self._controller_type = new_controller_type
+                    self._quality.control_period = _control_period_seconds(self._control_period)
+                    self._configuration_revision += 1
+            if update_temp is not _UNSET and update_temp is not None:
                 result = _capture_completed_result(
                     self._core,
                     update_temp,
@@ -595,7 +685,11 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._model_snapshot = model
                 if transition is not None and self._warning_callback is not None:
                     self._warning_callback(transition)
-            # Interruptible sleep; wait(None/0) would block forever, so floor it.
+            if stopping:
+                with self._lock:
+                    if self._pending_observations:
+                        continue
+                return
             self._wait_for_period(self._control_period or 1.0)
 
     def set_target(self, setpoint):
@@ -676,17 +770,36 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def observe_frame(self, observation: FrameObservation):
         with self._lock:
+            if not self._accept_observations:
+                return None
+            self._observation_sequence += 1
+            sequence = self._observation_sequence
+            generation = self._configuration_revision + (1 if self._pending_core is not None else 0)
             index = 0
             while (
                 index < len(self._pending_observations)
-                and self._pending_observations[index].frame_end_s <= observation.frame_end_s
+                and self._pending_observations[index][2].frame_end_s <= observation.frame_end_s
             ):
                 index += 1
-            self._pending_observations.insert(index, observation)
+            self._pending_observations.insert(index, (sequence, generation, observation))
+            evicted_sequence = None
             if len(self._pending_observations) > _MAX_PENDING_OBSERVATIONS:
-                self._pending_observations.pop(0)
+                evicted_sequence, evicted_generation, _ = self._pending_observations.pop(0)
                 self._dropped_observations += 1
-                self._observations_discontinuous = True
+                self._observations_discontinuous.add(evicted_generation)
+            return ObservationSubmission(sequence, generation, evicted_sequence)
+
+    def drain_observation_outcomes(self) -> ObservationOutcomeDrain:
+        with self._lock:
+            drain = ObservationOutcomeDrain(
+                tuple(self._observation_outcomes),
+                self._outcome_drops_since_drain,
+                tuple(self._outcome_dropped_sequences),
+            )
+            self._observation_outcomes.clear()
+            self._outcome_drops_since_drain = 0
+            self._outcome_dropped_sequences.clear()
+        return drain
 
     def restore_model(self, snapshot):
         """Queue a snapshot for the worker to attempt to adopt.
@@ -734,13 +847,13 @@ class ThreadedControllerRunner(ControllerRunner):
         return verdict
 
     def stop(self):
+        with self._lock:
+            self._accept_observations = False
         self._stop_event.set()
         self._thread.join(timeout=2.0)
-
-
-# The controller every PiFire install can always build: pure Python, no optional
-# dependencies, and the shipped default.
 FALLBACK_CONTROLLER = "pid"
+
+
 
 
 def _selected_controller(settings):

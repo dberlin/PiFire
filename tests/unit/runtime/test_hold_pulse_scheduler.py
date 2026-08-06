@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from common.control_trace import (
+    ActuationMode,
     ControllerType,
     InhibitReason,
     OutputSource,
@@ -12,6 +13,7 @@ from common.control_trace import (
 )
 from controller.runtime.logic.pulse import PulseResetReason
 from controller.runtime.runner import ControllerUpdateResult
+from controller.runtime.logic.pulse import PulseFrameResult
 
 from tests.fakes.runner import FakeControllerRunner
 
@@ -379,3 +381,148 @@ def test_teardown_reports_final_observed_pulse_delivery_before_reset(hold_cycle)
     hold.teardown(200.0)
 
     assert any(applied.requested == 0.1 and applied.ratio == 1.0 for applied in runner.applied)
+
+
+class _ObservationStatusRunner(FakeControllerRunner):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.observation_status = {}
+
+    def controller_state(self):
+        return {"fake": True, **self.observation_status}
+
+
+def _completed_frame(
+    *,
+    start=0.0,
+    end=20.0,
+    delivered=6.0,
+    skipped=False,
+    reset_reason=None,
+):
+    return PulseFrameResult(
+        nominal_start_s=start,
+        nominal_end_s=start + 20.0,
+        ended_at_s=end,
+        complete=not skipped and reset_reason is None,
+        skipped=skipped,
+        latched_request=0.3,
+        credit_before_s=0.0,
+        credit_after_s=0.0,
+        scheduled_on_s=6,
+        delivered_on_s=delivered,
+        observed_transition_count=2,
+        actual_start_on=False,
+        actual_end_on=False,
+        reset_reason=reset_reason,
+    )
+
+
+def _configure_frame_observation(mode, *, revision=1, u_max=0.5, load=0.3):
+    controller = mode.state.controller
+    controller.pulse_result_revision = revision
+    controller.pulse_frame_result_revision = revision
+    controller.pulse_requested_duty = 0.0 if load is None else load
+    controller.pulse_combustion_load = load
+    controller.pulse_maximum_duty = u_max
+    controller.pulse_requested_fan_duty = 50.0
+    controller.pulse_frame_requested_auger_duty = 0.0 if load is None else load
+    controller.pulse_frame_combustion_load = load
+    controller.pulse_frame_maximum_duty = u_max
+    controller.pulse_frame_applied_fan_duty = 60.0
+    controller.pulse_frame_stale_command = False
+    controller.controls_fan = True
+
+
+def test_framed_completed_observations_are_exactly_aligned_and_deduplicated(hold_cycle):
+    runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "completed-frame-observations"}
+    _configure_frame_observation(mode)
+
+    mode._advance_framed_pulse(0.0, True, ptemp=212.0)
+    mode._advance_framed_pulse(6.0, False, ptemp=212.0)
+    mode._advance_framed_pulse(20.0, False, ptemp=212.0)
+    mode._advance_framed_pulse(20.0, True, ptemp=392.0)
+    mode._advance_framed_pulse(26.0, False, ptemp=392.0)
+    mode._advance_framed_pulse(40.0, False, ptemp=392.0)
+
+    assert len(runner.observations) == 2
+    first, second = runner.observations
+    assert (first.frame_start_s, first.frame_end_s, first.delivered_on_s) == (0.0, 20.0, 6.0)
+    assert first.realized_q == pytest.approx((6.0 / 20.0) / 0.5)
+    assert first.temp_c == pytest.approx(100.0)
+    assert (second.frame_start_s, second.frame_end_s, second.delivered_on_s) == (20.0, 40.0, 6.0)
+    assert second.temp_c == pytest.approx(200.0)
+
+
+@pytest.mark.parametrize(
+    ("case", "inhibit", "skipped", "reset_reason", "expected_source"),
+    [
+        ("lid", InhibitReason.LID_OPEN, False, PulseResetReason.LID, "lid_open"),
+        ("manual", InhibitReason.MANUAL_OVERRIDE, False, PulseResetReason.MANUAL, "manual_override"),
+        ("safety", InhibitReason.SAFETY, False, PulseResetReason.SAFETY, "unknown"),
+        ("stale", InhibitReason.STALE_COMMAND, False, None, "controller"),
+        ("skipped", InhibitReason.NONE, True, None, "controller"),
+        ("reset", InhibitReason.NONE, False, PulseResetReason.MODE_CHANGE, "unknown"),
+        ("unknown", InhibitReason.NONE, False, None, "unknown"),
+    ],
+)
+def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
+    hold_cycle, case, inhibit, skipped, reset_reason, expected_source
+):
+    runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": f"ineligible-{case}"}
+    _configure_frame_observation(mode, load=None if case == "unknown" else 0.3)
+    records = []
+    mode._trace_record = lambda kind, payload, timestamp: records.append((kind, payload, timestamp)) or True
+    runner.observation_outcome = {
+        "role_generation": 0,
+        "eligible": False,
+        "rejection_reasons": ("ineligible_frame",),
+        "input_variance": 0.0,
+        "input_levels": 0,
+        "incumbent_innovation_c": None,
+        "challenger_innovation_c": None,
+        "effective_updates": 0,
+        "model_digest": "a" * 64,
+    }
+
+    mode._observe_completed_pulse_frame(
+        _completed_frame(skipped=skipped, reset_reason=reset_reason),
+        ptemp=212.0,
+        inhibit=inhibit,
+    )
+
+    assert len(runner.observations) == 1
+    mode._reconcile_model_observation_outcomes(now=20.0)
+    observation = runner.observations[0]
+    assert observation.output_source == expected_source
+    assert observation.continuous is False
+    assert observation.lid_open is (case == "lid")
+    assert observation.manual_override is (case == "manual")
+    assert observation.safety_inhibited is (case == "safety")
+    assert observation.stale is (case == "stale")
+    assert observation.skipped is (case == "skipped")
+    assert observation.reset is (case in {"lid", "manual", "safety", "reset"})
+    assert records and records[-1][0] is TraceEventKind.MODEL_OBSERVATION
+    assert records[-1][1].eligible is False
+
+
+def test_seed_and_zero_duration_frames_do_not_reach_the_runner(hold_cycle):
+    runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "seed-zero-observations"}
+    _configure_frame_observation(mode, revision=0)
+
+    mode._observe_completed_pulse_frame(_completed_frame(), ptemp=212.0, inhibit=InhibitReason.NONE)
+    _configure_frame_observation(mode)
+    mode._observe_completed_pulse_frame(
+        _completed_frame(end=0.0, delivered=0.0), ptemp=212.0, inhibit=InhibitReason.NONE
+    )
+
+    assert runner.observations == []

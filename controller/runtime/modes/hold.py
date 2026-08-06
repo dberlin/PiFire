@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 import time
 import uuid
 from dataclasses import replace
@@ -16,6 +18,7 @@ from common.control_trace import (
     ModelEventPayload,
     ModelEventType,
     MpcUpdatePayload,
+    ModelObservationPayload,
     ResultStaleState,
     PidSpUpdatePayload,
     PidUpdatePayload,
@@ -26,6 +29,8 @@ from common.control_trace import (
     TraceSetting,
 )
 from controller.applied_output import AppliedOutput, OutputSource, classify_output_source, seed_output
+from controller.linear_mpc.contracts import FrameObservation
+from controller.mpc_allocator import normalized_load_from_auger_duty
 from controller.runtime.logic.pulse import (
     PulseDecision,
     PulseFrameResult,
@@ -95,7 +100,9 @@ class HoldMode(ControlMode):
     _runner_configuration_revision: int = 0
     _actuation_mode: ActuationMode = ActuationMode.FRAMED_PULSE
     _pulse_scheduler: PulseScheduler | None = None
-    _reachability_advisory_key: tuple[float, int, str] | None = None
+    _pending_model_observations: dict[int, tuple[FrameObservation, str | None, int, ModelObservationPayload | None]] | None = None
+    _pulse_observation_last_frame_key: tuple[int, int] | None = None
+    _last_ptemp: float | None = None
 
     def _pulse_frame_seconds(self) -> float:
         """The scheduler's frame, or zero before one has been built."""
@@ -152,10 +159,238 @@ class HoldMode(ControlMode):
         controller.pulse_frame_result_revision = max(0, controller.pulse_result_revision)
         controller.pulse_frame_combustion_load = controller.pulse_combustion_load
         controller.pulse_frame_requested_auger_duty = controller.pulse_requested_duty
+        controller.pulse_frame_maximum_duty = controller.pulse_maximum_duty
         controller.pulse_frame_requested_fan_duty = controller.pulse_requested_fan_duty
         controller.pulse_frame_maximum_duty = controller.pulse_maximum_duty
         controller.pulse_frame_applied_fan_duty = controller.fan_duty if controller.controls_fan else None
         controller.pulse_frame_stale_command = controller.pulse_stale_command
+
+    def _runner_status(self) -> Mapping[str, object]:
+        if self._runner is None:
+            return {}
+        try:
+            status = self._runner.controller_state()
+        except Exception:
+            return {}
+        return status if isinstance(status, Mapping) else {}
+
+    def _model_role_generation(self, status: Mapping[str, object]) -> int:
+        adaptation = status.get("adaptation")
+        source = adaptation if isinstance(adaptation, Mapping) else status
+        generation = source.get("role_generation", 0)
+        return generation if isinstance(generation, int) and not isinstance(generation, bool) and generation >= 0 else 0
+
+    @staticmethod
+    def _to_c(value: float, units: object) -> float:
+        temperature = float(value)
+        return (temperature - 32.0) * 5.0 / 9.0 if str(units).upper() == "F" else temperature
+
+    @staticmethod
+    def _fan_fraction(duty: float | None) -> float | None:
+        if duty is None:
+            return None
+        return max(0.0, min(1.0, float(duty) / 100.0))
+
+    def _frame_output_source(self, frame: PulseFrameResult, inhibit: InhibitReason) -> str:
+        if inhibit is InhibitReason.MANUAL_OVERRIDE or frame.reset_reason is PulseResetReason.MANUAL:
+            return OutputSource.MANUAL_OVERRIDE.value
+        if inhibit is InhibitReason.LID_OPEN or frame.reset_reason is PulseResetReason.LID:
+            return OutputSource.LID_OPEN.value
+        if (
+            inhibit is InhibitReason.SAFETY
+            or frame.reset_reason is PulseResetReason.SAFETY
+            or frame.reset_reason is PulseResetReason.MODE_CHANGE
+            or self.state.controller.pulse_frame_combustion_load is None
+        ):
+            return "unknown"
+        return OutputSource.CONTROLLER.value
+
+    def _build_completed_pulse_observation(
+        self, frame: PulseFrameResult, *, ptemp: float | None, sample_at_s: float, inhibit: InhibitReason
+    ) -> tuple[tuple[int, int], FrameObservation] | None:
+        controller = self.state.controller
+        if (
+            ptemp is None
+            or controller.pulse_frame_result_revision <= 0
+            or frame.ended_at_s <= frame.nominal_start_s
+        ):
+            return None
+        frame_key = (int(frame.nominal_start_s * 1_000), int(frame.ended_at_s * 1_000))
+        if frame_key == self._pulse_observation_last_frame_key:
+            return None
+        duration_s = frame.ended_at_s - frame.nominal_start_s
+        source = self._frame_output_source(frame, inhibit)
+        lid_open = inhibit is InhibitReason.LID_OPEN or frame.reset_reason is PulseResetReason.LID
+        manual_override = inhibit is InhibitReason.MANUAL_OVERRIDE or frame.reset_reason is PulseResetReason.MANUAL
+        safety_inhibited = inhibit is InhibitReason.SAFETY or frame.reset_reason is PulseResetReason.SAFETY
+        stale = controller.pulse_frame_stale_command or inhibit is InhibitReason.STALE_COMMAND
+        reset = frame.reset_reason is not None
+        continuous = not (
+            lid_open
+            or manual_override
+            or safety_inhibited
+            or stale
+            or frame.skipped
+            or reset
+            or source == "unknown"
+            or frame.ended_at_s < sample_at_s
+        )
+        status = self._runner_status()
+        observation = FrameObservation(
+            frame_start_s=frame.nominal_start_s,
+            frame_end_s=frame.ended_at_s,
+            temp_c=self._to_c(ptemp, self.settings["globals"]["units"]),
+            setpoint_c=self._to_c(self.control["primary_setpoint"], self.settings["globals"]["units"]),
+            ambient_c=self._to_c(
+                self.settings["controller"].get("config", {}).get(self._controller_name, {}).get("T_amb", 0.0),
+                self.settings["globals"]["units"],
+            ),
+            requested_q=max(0.0, min(1.0, controller.pulse_frame_combustion_load or 0.0)),
+            realized_q=normalized_load_from_auger_duty(
+                frame.delivered_on_s / duration_s, u_max=controller.pulse_frame_maximum_duty
+            ),
+            requested_auger_duty=frame.latched_request,
+            delivered_on_s=frame.delivered_on_s,
+            requested_fan_duty=self._fan_fraction(controller.pulse_frame_requested_fan_duty),
+            actual_fan_duty=self._fan_fraction(controller.pulse_frame_applied_fan_duty),
+            result_revision=controller.pulse_frame_result_revision,
+            output_source=source,
+            lid_open=lid_open,
+            safety_inhibited=safety_inhibited,
+            manual_override=manual_override,
+            stale=stale,
+            skipped=frame.skipped,
+            reset=reset,
+            continuous=continuous,
+            role_generation=self._model_role_generation(status),
+        )
+        return frame_key, observation
+
+    def _deliver_completed_pulse_observation(
+        self, frame_key: tuple[int, int], observation: FrameObservation
+    ) -> None:
+        if self._runner is None:
+            return
+        submission = self._runner.observe_frame(observation)
+        sequence = getattr(submission, "submission_sequence", None)
+        generation = getattr(submission, "configuration_generation", None)
+        if (
+            not isinstance(sequence, int)
+            or isinstance(sequence, bool)
+            or sequence < 0
+            or not isinstance(generation, int)
+            or isinstance(generation, bool)
+            or generation < 0
+        ):
+            return
+        self._pulse_observation_last_frame_key = frame_key
+        if self._pending_model_observations is None:
+            self._pending_model_observations = {}
+        self._pending_model_observations[sequence] = (observation, self._trace_session_id, generation, None)
+        evicted_sequence = getattr(submission, "evicted_sequence", None)
+        if isinstance(evicted_sequence, int) and not isinstance(evicted_sequence, bool):
+            self._pending_model_observations.pop(evicted_sequence, None)
+        while len(self._pending_model_observations) > 60:
+            del self._pending_model_observations[next(iter(self._pending_model_observations))]
+
+    def _observe_completed_pulse_frame(
+        self, frame: PulseFrameResult, *, ptemp: float | None, inhibit: InhibitReason, sample_at_s: float | None = None
+    ) -> None:
+        captured = self._build_completed_pulse_observation(
+            frame, ptemp=ptemp, sample_at_s=frame.ended_at_s if sample_at_s is None else sample_at_s, inhibit=inhibit
+        )
+        if captured is not None:
+            self._deliver_completed_pulse_observation(*captured)
+
+    def _reconcile_model_observation_outcomes(self, now: float | None = None) -> None:
+        publication_ms = int((self.ctx.clock.now() if now is None else now) * 1_000)
+        for sequence, pending in tuple(self._pending_model_observations.items()):
+            payload = pending[3]
+            if payload is not None and self._trace_record(TraceEventKind.MODEL_OBSERVATION, payload, publication_ms):
+                del self._pending_model_observations[sequence]
+        if not self._pending_model_observations or self._runner is None:
+            return
+        drain = getattr(self._runner, "drain_observation_outcomes", None)
+        if drain is None:
+            return
+        batch = drain()
+        dropped_sequences = getattr(batch, "dropped_sequences", ())
+        if isinstance(dropped_sequences, tuple):
+            for sequence in dropped_sequences:
+                if isinstance(sequence, int) and not isinstance(sequence, bool):
+                    self._pending_model_observations.pop(sequence, None)
+        envelopes = getattr(batch, "envelopes", batch)
+        for envelope in envelopes:
+            sequence = getattr(envelope, "submission_sequence", None)
+            generation = getattr(envelope, "configuration_generation", None)
+            delivered = getattr(envelope, "observation", None)
+            outcome = getattr(envelope, "outcome", None)
+            pending = self._pending_model_observations.get(sequence)
+            if pending is None:
+                continue
+            if generation != pending[2] or pending[1] != self._trace_session_id:
+                self._pending_model_observations.pop(sequence, None)
+                continue
+            if not isinstance(delivered, FrameObservation) or not isinstance(outcome, Mapping):
+                self._pending_model_observations.pop(sequence, None)
+                continue
+            observation = delivered
+            try:
+                role_generation = outcome["role_generation"]
+                if role_generation != observation.role_generation:
+                    self._pending_model_observations.pop(sequence, None)
+                    continue
+                if outcome.get("eligible") is True and (
+                    observation.output_source != OutputSource.CONTROLLER.value
+                    or observation.lid_open
+                    or observation.safety_inhibited
+                    or observation.manual_override
+                    or observation.stale
+                    or observation.skipped
+                    or observation.reset
+                    or not observation.continuous
+                ):
+                    self._pending_model_observations.pop(sequence, None)
+                    continue
+                output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
+                payload = ModelObservationPayload(
+                    frame_start_ms=int(observation.frame_start_s * 1_000),
+                    frame_end_ms=int(observation.frame_end_s * 1_000),
+                    temp_c=observation.temp_c,
+                    setpoint_c=observation.setpoint_c,
+                    ambient_c=observation.ambient_c,
+                    requested_combustion_load=observation.requested_q,
+                    realized_combustion_load=observation.realized_q,
+                    delivered_on_seconds=observation.delivered_on_s,
+                    eligible=outcome["eligible"],
+                    rejection_reasons=tuple(outcome["rejection_reasons"]),
+                    input_variance=outcome["input_variance"],
+                    input_levels=outcome["input_levels"],
+                    incumbent_innovation_c=outcome["incumbent_innovation_c"],
+                    challenger_innovation_c=outcome["challenger_innovation_c"],
+                    effective_updates=outcome["effective_updates"],
+                    role_generation=role_generation,
+                    model_digest=outcome["model_digest"],
+                    result_revision=observation.result_revision,
+                    requested_auger_duty=observation.requested_auger_duty,
+                    requested_fan_duty=observation.requested_fan_duty,
+                    actual_fan_duty=observation.actual_fan_duty,
+                    output_source=output_source,
+                    lid_open=observation.lid_open,
+                    safety_inhibited=observation.safety_inhibited,
+                    manual_override=observation.manual_override,
+                    stale=observation.stale,
+                    skipped=observation.skipped,
+                    reset=observation.reset,
+                    continuous=observation.continuous,
+                )
+            except (KeyError, TypeError, ValueError):
+                self._pending_model_observations.pop(sequence, None)
+                continue
+            if self._trace_record(TraceEventKind.MODEL_OBSERVATION, payload, publication_ms):
+                self._pending_model_observations.pop(sequence, None)
+            else:
+                self._pending_model_observations[sequence] = (pending[0], pending[1], pending[2], payload)
 
     def _trace_pulse_frame(
         self, frame: PulseFrameResult, inhibit: InhibitReason, result_revision: int | None = None
@@ -204,7 +439,7 @@ class HoldMode(ControlMode):
         self.ctx.store.update_metrics(self.state.metrics)
 
     def _advance_framed_pulse(
-        self, now: float, actual_auger_on: bool, *, apply_transition: bool = True
+        self, now: float, actual_auger_on: bool, *, ptemp: float | None = None, apply_transition: bool = True
     ) -> PulseDecision:
         scheduler = self._pulse_scheduler
         if scheduler is None:
@@ -215,8 +450,18 @@ class HoldMode(ControlMode):
         completed_maximum_duty = controller.pulse_frame_maximum_duty
         decision = scheduler.advance(controller.pulse_requested_duty, now, actual_auger_on)
         self._record_pulse_delivery(decision.delivered_on_s)
+        captured = tuple(
+            observation
+            for frame in decision.completed_frames
+            if (
+                observation := self._build_completed_pulse_observation(
+                    frame, ptemp=ptemp, sample_at_s=now, inhibit=InhibitReason.NONE
+                )
+            )
+            is not None
+        )
         for frame in decision.completed_frames:
-            self._trace_pulse_frame(frame, InhibitReason.NONE, controller.pulse_frame_result_revision)
+            self._trace_pulse_frame(frame, InhibitReason.NONE, previous_frame_revision)
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._latch_pulse_frame()
             transition_at_s: float | None = None
@@ -234,6 +479,7 @@ class HoldMode(ControlMode):
                 self._report_framed_feedback(
                     transition_at_s,
                     delivered_at_transition_s,
+                    ptemp=ptemp,
                     completed_revision=previous_frame_revision,
                     completed_request=completed_request,
                     completed_maximum_duty=completed_maximum_duty,
@@ -243,6 +489,8 @@ class HoldMode(ControlMode):
                 self.grill.auger_on()
             else:
                 self.grill.auger_off()
+        for frame_key, observation in captured:
+            self._deliver_completed_pulse_observation(frame_key, observation)
         return decision
 
     def _reset_framed_pulse(
@@ -251,6 +499,7 @@ class HoldMode(ControlMode):
         now: float,
         inhibit: InhibitReason,
         *,
+        ptemp: float | None = None,
         report_feedback: bool = False,
     ) -> None:
         scheduler = self._pulse_scheduler
@@ -266,13 +515,19 @@ class HoldMode(ControlMode):
         actual_auger_on = self.grill.get_output_status()["auger"]
         decision = scheduler.advance(self.state.controller.pulse_requested_duty, now, actual_auger_on)
         self._record_pulse_delivery(decision.delivered_on_s)
+        observation_temp = self._last_ptemp if ptemp is None else ptemp
         for completed in decision.completed_frames:
             self._trace_pulse_frame(completed, inhibit, self.state.controller.pulse_frame_result_revision)
+            self._observe_completed_pulse_frame(completed, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
         if report_feedback:
-            self._report_framed_feedback(now, decision.delivered_on_s)
+            self._report_framed_feedback(now, decision.delivered_on_s, ptemp=observation_temp)
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._latch_pulse_frame()
         frame = scheduler.reset(reason)
+        if frame is not None:
+            self._observe_completed_pulse_frame(frame, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
+        if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
+            self._latch_pulse_frame()
         if frame is not None:
             self._trace_pulse_frame(frame, inhibit, self.state.controller.pulse_frame_result_revision)
         controller = self.state.controller
@@ -286,6 +541,7 @@ class HoldMode(ControlMode):
         now: float,
         delivered_on_s: float,
         *,
+        ptemp: float | None = None,
         completed_revision: int | None = None,
         completed_request: float | None = None,
         completed_maximum_duty: float | None = None,
@@ -312,7 +568,7 @@ class HoldMode(ControlMode):
             timestamp=now,
             requested=requested,
         )
-        inverse_combustion_load = max(0.0, min(1.0, realized_duty / maximum_duty))
+        inverse_combustion_load = normalized_load_from_auger_duty(realized_duty, u_max=maximum_duty)
         measured_source = controller.trace_prior_output_source is OutputSource.CONTROLLER
         sample_complete = controller.trace_prior_output_source is OutputSource.SEED or measured_source
         if measured_source:
@@ -774,6 +1030,9 @@ class HoldMode(ControlMode):
         self._trace_runner_snapshot_fallback_safe = True
         self._trace_last_update_payload = None
         self._reachability_advisory_key = None
+        self._pending_model_observations = {}
+        self._pulse_observation_last_frame_key = None
+        self._last_ptemp = None
         try:
             self._trace_recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
@@ -865,6 +1124,8 @@ class HoldMode(ControlMode):
         controller_state = self.state.controller
         self._trace_session_id = None
         self._trace_cook_id = None
+        self._pending_model_observations = {}
+        self._pulse_observation_last_frame_key = None
         self._clear_trace_session_model_authority()
         controller_state.trace_result_revision = -1
         controller_state.trace_combustion_load = None
@@ -903,6 +1164,7 @@ class HoldMode(ControlMode):
         ctx = self.ctx
         control = self.control
         settings = self.settings
+        self._last_ptemp = float(ptemp)
         runner_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
         if runner_revision != self._runner_configuration_revision:
             self._adopt_runner_configuration(now, current_output_status)
@@ -918,6 +1180,7 @@ class HoldMode(ControlMode):
                 PulseResetReason.MODE_CHANGE,
                 now,
                 InhibitReason.SAFETY,
+                ptemp=ptemp,
                 report_feedback=False,
             )
             self._controller_status = self._runner.reconfigure(settings, control, logger=ctx.control_log)
@@ -944,7 +1207,8 @@ class HoldMode(ControlMode):
         # so deciding more often than that is discarded work, and a PID asked to
         # decide every tick would integrate at the loop rate its gains were
         # never tuned for.
-        controller_interval = self._runner.control_period() or (self._pulse_frame_seconds())
+        self._reconcile_model_observation_outcomes(now)
+        controller_interval = self._runner.control_period() or self._pulse_frame_seconds()
         framed_feedback_due = False
         if (now - self.state.controller.cycle_start) > controller_interval:
             result = self._runner.latest()
@@ -994,10 +1258,11 @@ class HoldMode(ControlMode):
             decision = self._advance_framed_pulse(
                 now,
                 current_output_status["auger"],
+                ptemp=ptemp,
                 apply_transition=not lid_will_open,
             )
             if framed_feedback_due:
-                self._report_framed_feedback(now, decision.delivered_on_s)
+                self._report_framed_feedback(now, decision.delivered_on_s, ptemp=ptemp)
 
         # ---- Hold-only fan work on the fresh per-tick ptemp ----
         grill_platform = self.grill
@@ -1019,7 +1284,12 @@ class HoldMode(ControlMode):
                 sample_complete=False,
                 realized_combustion_load=None,
             )
-            self._reset_framed_pulse(PulseResetReason.LID, now, InhibitReason.LID_OPEN)
+            self._reset_framed_pulse(
+                PulseResetReason.LID,
+                now,
+                InhibitReason.LID_OPEN,
+                ptemp=ptemp,
+            )
             self._set_output(
                 AppliedOutput(
                     ratio=0.0,
@@ -1058,7 +1328,12 @@ class HoldMode(ControlMode):
                     sample_complete=False,
                     realized_combustion_load=None,
                 )
-                self._reset_framed_pulse(PulseResetReason.LID, now, InhibitReason.LID_OPEN)
+                self._reset_framed_pulse(
+                    PulseResetReason.LID,
+                    now,
+                    InhibitReason.LID_OPEN,
+                    ptemp=ptemp,
+                )
                 self._set_output(
                     AppliedOutput(
                         ratio=0.0,
@@ -1115,7 +1390,12 @@ class HoldMode(ControlMode):
             "manual auger output applied",
             InhibitReason.MANUAL_OVERRIDE,
         )
-        self._reset_framed_pulse(PulseResetReason.MANUAL, self._last_now, InhibitReason.MANUAL_OVERRIDE)
+        self._reset_framed_pulse(
+            PulseResetReason.MANUAL,
+            self._last_now,
+            InhibitReason.MANUAL_OVERRIDE,
+            ptemp=self._last_ptemp,
+        )
         if output and not self.grill.get_output_status()["auger"]:
             self.grill.auger_on()
         elif not output and self.grill.get_output_status()["auger"]:
@@ -1151,7 +1431,12 @@ class HoldMode(ControlMode):
         if event_type is not None:
             self._ensure_trace_session(now)
             self._trace_safety(event_type, now, event.replace("_", " "), InhibitReason.SAFETY)
-            self._reset_framed_pulse(PulseResetReason.SAFETY, now, InhibitReason.SAFETY)
+            self._reset_framed_pulse(
+                PulseResetReason.SAFETY,
+                now,
+                InhibitReason.SAFETY,
+                ptemp=self._last_ptemp,
+            )
 
     def _restore_model(self):
         self._clear_trace_session_model_authority()
@@ -1220,13 +1505,22 @@ class HoldMode(ControlMode):
             decision = self._advance_framed_pulse(
                 now,
                 self.grill.get_output_status()["auger"],
+                ptemp=ptemp,
                 apply_transition=False,
             )
-            self._report_framed_feedback(now, decision.delivered_on_s)
-        self._reset_framed_pulse(PulseResetReason.MODE_CHANGE, now, InhibitReason.SAFETY)
+            self._report_framed_feedback(now, decision.delivered_on_s, ptemp=ptemp)
+        self._reset_framed_pulse(
+            PulseResetReason.MODE_CHANGE,
+            now,
+            InhibitReason.SAFETY,
+            ptemp=ptemp,
+        )
         try:
             if self._runner is not None:
                 self._runner.stop()
+                if getattr(self, "ctx", None) is not None:
+                    self._reconcile_model_observation_outcomes(self.ctx.clock.now())
+                    self._reconcile_model_observation_outcomes(self.ctx.clock.now())
                 if first_trace_teardown:
                     self._refit_model()
         finally:

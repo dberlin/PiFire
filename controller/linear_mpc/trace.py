@@ -145,20 +145,20 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
     trace = tuple(records)
     session = _validate_session(trace)
     exact = tuple(record.payload for record in trace if isinstance(record.payload, ModelObservationPayload))
+    if exact and any(
+        not payload.eligible
+        or payload.output_source is not OutputSource.CONTROLLER
+        or payload.lid_open is not False
+        or payload.safety_inhibited is not False
+        or payload.manual_override is not False
+        or payload.stale is not False
+        or payload.skipped is not False
+        or payload.reset is not False
+        or payload.continuous is not True
+        for payload in exact
+    ):
+        raise TraceSelectionError("exact learning evidence is not eligible controller-owned continuous input")
     if exact:
-        if any(
-            not payload.eligible
-            or payload.output_source is not OutputSource.CONTROLLER
-            or payload.lid_open is not False
-            or payload.safety_inhibited is not False
-            or payload.manual_override is not False
-            or payload.stale is not False
-            or payload.skipped is not False
-            or payload.reset is not False
-            or payload.continuous is not True
-            for payload in exact
-        ):
-            raise TraceSelectionError("exact learning evidence is not eligible controller-owned continuous input")
         frames = _exact_observations(exact)
         start_s = frames[0].frame_end_s if frames else 0.0
         return tuple(

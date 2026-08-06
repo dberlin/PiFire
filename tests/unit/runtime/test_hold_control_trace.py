@@ -10,6 +10,7 @@ from common.control_trace import (
     ControllerBranch,
     ControllerType,
     InhibitReason,
+    ModelObservationPayload,
     PidSpUpdatePayload,
     ResultStaleState,
     SafetyEventType,
@@ -22,7 +23,8 @@ from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiag
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
-from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner
+from controller.runtime.runner import ControllerUpdateResult, ObservationOutcomeEnvelope, SyncControllerRunner
+from controller.linear_mpc.contracts import FrameObservation
 from tests.fakes.runner import FakeControllerRunner
 from controller.update_mpc import load_trace_samples
 
@@ -1023,3 +1025,156 @@ def test_automatic_lid_preempts_same_tick_framed_on_transition_and_keeps_replay_
     assert "auger_on" not in trigger_calls
     assert mode.grill.get_output_status()["auger"] is False
     assert validate_records(recorder.records).valid
+
+
+def _model_observation_outcome(*, frame_end_ms, role_generation=0, eligible=False):
+    return {
+        "frame_end_ms": frame_end_ms,
+        "role_generation": role_generation,
+        "eligible": eligible,
+        "rejection_reasons": () if eligible else ("insufficient_excitation",),
+        "input_variance": 0.2,
+        "input_levels": 2,
+        "incumbent_innovation_c": 1.0 if eligible else None,
+        "challenger_innovation_c": 0.5 if eligible else None,
+        "effective_updates": 4,
+        "model_digest": "a" * 64,
+    }
+
+
+def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+
+    class _Runner(FakeControllerRunner):
+        def __init__(self):
+            super().__init__(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+
+    runner = _Runner()
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "async-learning-trace"}
+    mode._ensure_trace_session(0.0)
+    controller = mode.state.controller
+    controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
+    controller.pulse_frame_combustion_load = 0.3
+    controller.pulse_frame_requested_auger_duty = 0.3
+    controller.pulse_frame_maximum_duty = 0.5
+
+    from controller.runtime.logic.pulse import PulseFrameResult
+
+    frame = PulseFrameResult(
+        nominal_start_s=0.0,
+        nominal_end_s=20.0,
+        ended_at_s=20.0,
+        complete=True,
+        skipped=False,
+        latched_request=0.3,
+        credit_before_s=0.0,
+        credit_after_s=0.0,
+        scheduled_on_s=6,
+        delivered_on_s=6.0,
+        observed_transition_count=2,
+        actual_start_on=False,
+        actual_end_on=False,
+        reset_reason=None,
+    )
+    mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
+
+    assert not [record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(1, 0, runner.observations[0], _model_observation_outcome(frame_end_ms=20_000))
+    )
+    mode._reconcile_model_observation_outcomes(now=22.0)
+    mode._reconcile_model_observation_outcomes(now=23.0)
+
+    payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert (payload.frame_start_ms, payload.frame_end_ms, payload.role_generation) == (0, 20_000, 0)
+    assert payload.eligible is False
+    assert payload.rejection_reasons == ("insufficient_excitation",)
+
+
+
+def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "retry-learning-trace"}
+    mode._ensure_trace_session(0.0)
+    controller = mode.state.controller
+    controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
+    controller.pulse_frame_combustion_load = 0.3
+    controller.pulse_frame_requested_auger_duty = 0.3
+    controller.pulse_frame_maximum_duty = 0.5
+    from controller.runtime.logic.pulse import PulseFrameResult
+    frame = PulseFrameResult(0.0, 20.0, 20.0, True, False, 0.3, 0.0, 0.0, 6, 6.0, 2, False, False, None)
+    mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(1, 0, runner.observations[0], _model_observation_outcome(frame_end_ms=20_000))
+    )
+    original = mode._trace_record
+    attempts = 0
+
+    def transient(kind, payload, timestamp):
+        nonlocal attempts
+        attempts += 1
+        return attempts > 1 and original(kind, payload, timestamp)
+
+    mode._trace_record = transient
+    mode._reconcile_model_observation_outcomes(now=22.0)
+    assert mode._pending_model_observations[1][3] is not None
+    mode._reconcile_model_observation_outcomes(now=23.0)
+    assert 1 not in mode._pending_model_observations
+    assert len([record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]) == 1
+
+
+def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_session(hold_cycle, monkeypatch):
+    _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode._ensure_trace_session(0.0)
+    mode._pending_model_observations = {1: (None, mode._trace_session_id, 0, object())}
+
+    mode._adopt_runner_configuration(1.0, mode.grill.get_output_status())
+
+    assert mode._pending_model_observations == {}
+
+
+def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(hold_cycle):
+    mode = hold_cycle(FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE), controller="mpc")
+    mode.setup()
+    mode._pending_model_observations = {
+        sequence: (None, "old-session", 0, object()) for sequence in range(60)
+    }
+    mode._trace_record = lambda *_: False
+
+    mode._reconcile_model_observation_outcomes(now=1.0)
+
+    assert len(mode._pending_model_observations) == 60
+
+
+def test_hold_retires_self_evicted_submission_immediately(hold_cycle):
+    class SelfEvictingRunner(FakeControllerRunner):
+        def observe_frame(self, observation):
+            from controller.runtime.runner import ObservationSubmission
+
+            return ObservationSubmission(1, 0, 1)
+
+    runner = SelfEvictingRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    existing = {
+        sequence: (None, "existing-session", 0, object())
+        for sequence in range(2, 62)
+    }
+    mode._pending_model_observations = dict(existing)
+    observation = FrameObservation(
+        0.0, 20.0, 100.0, 120.0, 20.0, 0.2, 0.2, 0.2, 4.0,
+        None, None, 1, "controller", False, False, False, False, False, False, True, 0,
+    )
+    mode._deliver_completed_pulse_observation((0, 20), observation)
+
+    assert mode._pending_model_observations == existing

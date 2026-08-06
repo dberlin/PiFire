@@ -7,6 +7,7 @@ from controller.applied_output import AppliedOutput, OutputSource
 from controller.linear_mpc.contracts import FrameObservation
 from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner, build_runner, _build_core
 from common.control_trace import ActuationMode, ResultStaleState
+from tests.fakes.runner import FakeControllerRunner
 
 
 def test_runner_import_does_not_load_optional_linear_mpc_dependencies():
@@ -363,6 +364,73 @@ def test_sync_runner_forwards_completed_frame_observations_immediately():
 def test_sync_runner_ignores_observations_for_a_core_without_a_learner():
     SyncControllerRunner(_RecordingCore()).observe_frame(_frame(0))
 
+
+def test_sync_runner_drains_the_exact_observation_outcome_once():
+    outcome = {"role_generation": 0, "eligible": False}
+
+    class ObservingCore(_RecordingCore):
+        def observe_frame(self, observation):
+            return outcome
+
+    runner = SyncControllerRunner(ObservingCore())
+    observation = _frame(0)
+
+    sequence = runner.observe_frame(observation)
+    envelopes = runner.drain_observation_outcomes()
+
+    assert [(item.submission_sequence, item.observation, item.outcome) for item in envelopes] == [
+        (sequence.submission_sequence, observation, outcome)
+    ]
+    assert runner.drain_observation_outcomes().envelopes == ()
+
+
+def test_fake_runner_bounds_outcomes_and_reports_exact_evictions():
+    runner = FakeControllerRunner()
+    runner.observation_outcome = {"role_generation": 0, "eligible": False}
+    for index in range(31):
+        runner.observe_frame(_frame(index))
+
+    drain = runner.drain_observation_outcomes()
+
+    assert drain.dropped_count == 1
+    assert drain.dropped_sequences == (1,)
+    assert [envelope.submission_sequence for envelope in drain] == list(range(2, 32))
+
+
+
+def test_sync_runner_reports_exact_outcome_evictions():
+    outcome = {"role_generation": 0, "eligible": False}
+
+    class ObservingCore(_RecordingCore):
+        def observe_frame(self, observation):
+            return outcome
+
+    runner = SyncControllerRunner(ObservingCore())
+    for index in range(31):
+        runner.observe_frame(_frame(index))
+
+    drain = runner.drain_observation_outcomes()
+
+    assert drain.dropped_count == 1
+    assert drain.dropped_sequences == (1,)
+    assert [envelope.submission_sequence for envelope in drain] == list(range(2, 32))
+
+
+def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
+    outcome = {"role_generation": 0, "eligible": False}
+
+    class ObservingCore(_RecordingCore):
+        def observe_frame(self, observation):
+            return outcome
+
+    runner = SyncControllerRunner(ObservingCore())
+    for index in range(91):
+        runner.observe_frame(_frame(index))
+
+    drain = runner.drain_observation_outcomes()
+
+    assert len(drain.dropped_sequences) == 60
+    assert drain.dropped_sequences == tuple(range(2, 62))
 
 def test_sync_runner_forwards_snapshot_and_restore():
     core = _RecordingCore()
