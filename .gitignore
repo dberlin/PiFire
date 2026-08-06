@@ -29,6 +29,8 @@ test-working.json
 .idea/
 
 venv/
+.venv
+node_modules
 
 *.code-workspace
 
