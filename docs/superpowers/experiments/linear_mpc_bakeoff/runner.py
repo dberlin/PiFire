@@ -2015,6 +2015,20 @@ def _record_slice(record: SignalRecord, begin: int, end: int) -> SignalRecord:
         metadata=dict(record.metadata),
     )
 
+def record_frames(record: SignalRecord) -> tuple[FrameObservation, ...]:
+    """Convert a deterministic evidence record into complete production frames."""
+    return _record_frames(record)
+
+
+def frame_seconds() -> int:
+    """Return the shared framed-pulse and online-ARX cadence."""
+    return _FRAME_S
+
+
+def real_mak_record() -> SignalRecord:
+    """Return the cached chronological real-MAK record used by bake-off evidence."""
+    return _real_mak_record()
+
 def _record_frames(record: SignalRecord) -> tuple[FrameObservation, ...]:
     return tuple(
         FrameObservation(
@@ -2789,6 +2803,11 @@ def _source_revision() -> str:
     if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
         raise RuntimeError("Jujutsu returned a stale or invalid source revision")
     return revision
+
+
+def source_revision() -> str:
+    """Return the immutable workspace revision recorded by bake-off artifacts."""
+    return _source_revision()
 
 
 def _environment_versions() -> dict[str, str]:

@@ -110,6 +110,23 @@ class BlockingCore(FakeCore):
         return super().update(temp)
 
 
+class CloseAwarePeriodWait:
+    """Blocks the runner worker until stop() closes the injected wait."""
+
+    def __init__(self):
+        self.waiting = threading.Event()
+        self.release = threading.Event()
+        self.closed = threading.Event()
+
+    def __call__(self, _seconds):
+        self.waiting.set()
+        self.release.wait()
+
+    def close(self):
+        self.closed.set()
+        self.release.set()
+
+
 def test_threaded_runner_solves_submitted_temp():
     core = FakeCore()
     r = ThreadedControllerRunner(core)
@@ -410,6 +427,20 @@ def test_threaded_runner_stop_terminates_thread():
     r.stop()
     assert not thread.is_alive()
     r.stop()  # idempotent
+
+
+def test_threaded_runner_stop_closes_blocking_period_wait_before_joining():
+    wait_for_period = CloseAwarePeriodWait()
+    runner = ThreadedControllerRunner(FakeCore(), wait_for_period=wait_for_period)
+    thread = runner._thread
+    try:
+        assert wait_for_period.waiting.wait(2.0)
+        runner.stop()
+        assert wait_for_period.closed.is_set()
+        assert not thread.is_alive()
+    finally:
+        wait_for_period.close()
+        runner.stop()
 
 
 def test_threaded_runner_set_target_and_reconfigure_applied_by_thread():

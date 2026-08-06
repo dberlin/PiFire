@@ -1,12 +1,12 @@
 {
-  "canonical_json_bytes": 516750736,
-  "canonical_json_sha256": "92bd8c1fa8f2011d7531fd1aba9b1988a58819c2a1093941906b01c3fcca2f7b",
-  "compressed_sha256": "f5184f2a47d9d847a3a3bd869db0e637f192fe8907e82398c6060b52c8fbd543",
+  "canonical_json_bytes": 604148957,
+  "canonical_json_sha256": "28667dc4aa06593b833705acf45c7982bb81a6da4872d267a2a27e92e8b1f9bb",
+  "compressed_sha256": "3e0ad895d050d963ebd4d26a48a78a4e866b0c43f32ce42e077eea78308b162c",
   "parts": [
     {
-      "bytes": 61618785,
-      "name": "_linear_mpc_bakeoff.manifest.f5184f2a47d9d847.part0000.f5184f2a47d9d847.gz",
-      "sha256": "f5184f2a47d9d847a3a3bd869db0e637f192fe8907e82398c6060b52c8fbd543"
+      "bytes": 70620321,
+      "name": "_linear_mpc_bakeoff.manifest.3e0ad895d050d963.part0000.3e0ad895d050d963.gz",
+      "sha256": "3e0ad895d050d963ebd4d26a48a78a4e866b0c43f32ce42e077eea78308b162c"
     }
   ],
   "transport": "gzip-shards/v1"
