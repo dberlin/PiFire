@@ -91,8 +91,8 @@ def test_per_tick_saves_the_controller_snapshot(hold_cycle):
     assert store.saves == [("pid_sp", {"revision": 1, "K": 700.0})]
 
 
-def test_checkpoint_writer_does_not_block_hold_and_teardown_flushes_the_latest_snapshot(hold_cycle):
-    """Checkpoint I/O runs outside the tick but remains owned through teardown."""
+def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_snapshot(hold_cycle):
+    """Checkpoint I/O remains owned after nonblocking Hold teardown."""
 
     class _BlockingStore:
         def __init__(self):
@@ -162,11 +162,10 @@ def test_checkpoint_writer_does_not_block_hold_and_teardown_flushes_the_latest_s
 
         teardown_thread = threading.Thread(target=teardown)
         teardown_thread.start()
-        assert not teardown_finished.wait(timeout=0.05), "teardown returned before queued checkpoint I/O drained"
+        assert teardown_finished.wait(timeout=0.2), "teardown waited for blocked checkpoint I/O"
+        assert not teardown_errors
         store.allow_first_write.set()
         assert store.latest_saved.wait(timeout=1.0), "latest owned snapshot was not persisted"
-        assert teardown_finished.wait(timeout=1.0), "teardown did not flush checkpoint persistence"
-        assert not teardown_errors
     finally:
         # Every failure path releases the store before joining the tick or owned
         # writer, so this test neither deadlocks nor leaves a blocked writer.

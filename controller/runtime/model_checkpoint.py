@@ -52,14 +52,21 @@ class ModelCheckpointWorker:
             self._condition.notify()
         return True
 
-    def flush_and_stop(self) -> None:
-        """Persist the final pending snapshot, then join the owned writer."""
+    def flush_and_stop(self, *, timeout: float = 0.1) -> bool:
+        """Stop accepting snapshots without making Hold wait for storage I/O."""
+        if timeout < 0.0:
+            raise ValueError("checkpoint flush timeout must be nonnegative")
         with self._condition:
             self._stopping = True
             thread = self._thread
             self._condition.notify_all()
-        if thread is not None:
-            thread.join()
+        if thread is None:
+            return True
+        thread.join(timeout=timeout)
+        completed = not thread.is_alive()
+        if not completed:
+            self._logger.error("Model checkpoint flush is still pending after Hold teardown")
+        return completed
 
     @staticmethod
     def _revision(snapshot: dict[str, object]) -> int | None:
