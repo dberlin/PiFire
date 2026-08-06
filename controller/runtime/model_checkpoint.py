@@ -45,6 +45,15 @@ class ModelCheckpointWorker:
                     submitted_revision is None or submitted_revision <= pending_revision
                 ):
                     return True
+            stage_owned = getattr(self._store, "stage_owned", None)
+            if callable(stage_owned):
+                try:
+                    if not stage_owned(name, owned_snapshot):
+                        self._logger.error(f"Could not stage {name} model checkpoint")
+                        return False
+                except Exception as error:
+                    self._logger.error(f"Could not stage {name} model checkpoint: {error}")
+                    return False
             self._pending[name] = owned_snapshot
             if self._thread is None:
                 self._thread = Thread(target=self._run, name="controller-model-checkpoint", daemon=True)

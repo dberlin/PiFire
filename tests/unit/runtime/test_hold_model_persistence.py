@@ -313,6 +313,47 @@ class _CheckpointLogger:
         self.errors.append(message)
 
 
+def test_new_store_loads_owned_checkpoint_while_prior_writer_is_blocked():
+    state = {"version": 1, "models": {"mpc": {"revision": 0}}}
+    write_started = threading.Event()
+    release_write = threading.Event()
+    load_finished = threading.Event()
+    loaded = []
+    write_calls = 0
+
+    def read(_key):
+        return state
+
+    def write(_key, value):
+        nonlocal write_calls
+        write_calls += 1
+        if write_calls == 1:
+            write_started.set()
+            assert release_write.wait(1.0)
+            raise RuntimeError("first checkpoint write failed")
+        state.clear()
+        state.update(value)
+
+    prior_store = ControllerModelStore(reader=read, writer=write)
+    replacement_store = ControllerModelStore(reader=read, writer=write)
+    worker = ModelCheckpointWorker(prior_store, _CheckpointLogger())
+    load_thread = threading.Thread(target=lambda: (loaded.append(replacement_store.load("mpc")), load_finished.set()))
+    try:
+        assert worker.submit("mpc", {"revision": 2})
+        assert write_started.wait(1.0)
+        load_thread.start()
+        assert load_finished.wait(0.2), "replacement Hold blocked behind checkpoint I/O"
+        assert loaded == [{"revision": 2}]
+        release_write.set()
+        assert worker.flush_and_stop(timeout=1.0)
+        assert replacement_store.save("mpc", {"revision": 2}) is True
+        assert state["models"]["mpc"] == {"revision": 2}
+    finally:
+        release_write.set()
+        load_thread.join(timeout=1.0)
+        worker.flush_and_stop()
+
+
 def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
     """A blocked A1 write must not let B1 replace the pending latest A2 write."""
     store = _EventGatedCheckpointStore()

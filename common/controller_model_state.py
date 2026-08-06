@@ -46,6 +46,7 @@
 """
 
 import json
+from copy import deepcopy
 import logging
 import threading
 
@@ -61,7 +62,8 @@ SCHEMA_VERSION = 1
 MAX_SNAPSHOT_BYTES = 65536
 
 _logger = logging.getLogger("control")
-_SAVE_LOCK = threading.Lock()
+_BACKEND_STATES_LOCK = threading.Lock()
+_BACKEND_STATES = []
 
 
 def _valid(snapshot):
@@ -83,30 +85,72 @@ def _valid(snapshot):
     return len(encoded.encode("utf-8")) <= MAX_SNAPSHOT_BYTES
 
 
+class _BackendState:
+    def __init__(self):
+        self.transaction_lock = threading.Lock()
+        self.latest_lock = threading.Lock()
+        self.latest = {}
+        self.committed = {}
+
+
+def _callback_identity(callback):
+    owner = getattr(callback, "__self__", None)
+    return callback if owner is None else owner
+
+
+def _shared_backend_state(reader, writer):
+    reader_identity = _callback_identity(reader)
+    writer_identity = _callback_identity(writer)
+    with _BACKEND_STATES_LOCK:
+        for saved_reader, saved_writer, state in _BACKEND_STATES:
+            if saved_reader is reader_identity and saved_writer is writer_identity:
+                return state
+        state = _BackendState()
+        _BACKEND_STATES.append((reader_identity, writer_identity, state))
+        return state
+
+
 class ControllerModelStore:
     def __init__(self, reader=None, writer=None):
         self._reader = reader or read_generic_key
         self._writer = writer or write_generic_key
+        self._backend = _shared_backend_state(self._reader, self._writer)
         self._revisions = {}
 
     def load(self, name):
-        models, _safe = self._read_state()
-        snapshot = models.get(name)
+        snapshot = self._latest_owned(name)
         if snapshot is None:
-            return None
-        self._revisions[name] = snapshot["revision"]
+            models, _safe = self._read_state()
+            persisted = models.get(name)
+            if persisted is None:
+                return None
+            self._remember_owned(name, persisted, committed=True)
+            snapshot = self._latest_owned(name)
+        committed_revision = self._committed_revision(name)
+        if committed_revision is not None:
+            self._revisions[name] = committed_revision
         return snapshot
 
     def save(self, name, snapshot):
         if not _valid(snapshot):
             _logger.warning("controller_model_state: rejecting a malformed or oversized snapshot for %r", name)
             return False
-        revision = snapshot["revision"]
+        try:
+            owned_snapshot = deepcopy(snapshot)
+        except Exception:
+            _logger.warning("controller_model_state: could not own a snapshot for %r", name, exc_info=True)
+            return False
+        revision = owned_snapshot["revision"]
 
         # Workers can outlive a Hold teardown. Serialize the complete
         # read-check-write transaction across store instances so an older
         # orphan cannot overwrite a newer mode's checkpoint.
-        with _SAVE_LOCK:
+        with self._backend.transaction_lock:
+            latest = self._latest_owned(name)
+            if latest is not None and revision < latest["revision"]:
+                self._log_non_advancing(name, revision, latest["revision"])
+                return False
+
             # Cheap path: this process already knows the last revision it
             # persisted for this controller, so a same-or-older revision is
             # rejected without touching storage -- the common case on ticks
@@ -130,11 +174,13 @@ class ControllerModelStore:
             # another store instance may have advanced it while this instance
             # retained an older cache entry.
             existing = models.get(name)
-            if existing is not None and revision <= existing["revision"]:
-                self._log_non_advancing(name, revision, existing["revision"])
-                return False
+            if existing is not None:
+                self._remember_owned(name, existing, committed=True)
+                if revision <= existing["revision"]:
+                    self._log_non_advancing(name, revision, existing["revision"])
+                    return False
 
-            models[name] = snapshot
+            models[name] = owned_snapshot
             try:
                 self._writer(MODEL_STATE_KEY, {"version": SCHEMA_VERSION, "models": models})
             except Exception:
@@ -145,7 +191,41 @@ class ControllerModelStore:
                 )
                 return False
             self._revisions[name] = revision
+            self._remember_owned(name, owned_snapshot, committed=True)
             return True
+
+    def stage_owned(self, name, snapshot):
+        """Publish a worker-owned snapshot before potentially blocking I/O."""
+        if not _valid(snapshot):
+            return False
+        revision = snapshot["revision"]
+        with self._backend.latest_lock:
+            latest = self._backend.latest.get(name)
+            if latest is not None and revision <= latest["revision"]:
+                return True
+            self._backend.latest[name] = snapshot
+        return True
+
+    def _latest_owned(self, name):
+        with self._backend.latest_lock:
+            snapshot = self._backend.latest.get(name)
+        return None if snapshot is None else deepcopy(snapshot)
+
+    def _committed_revision(self, name):
+        with self._backend.latest_lock:
+            return self._backend.committed.get(name)
+
+    def _remember_owned(self, name, snapshot, *, committed):
+        owned_snapshot = deepcopy(snapshot)
+        revision = owned_snapshot["revision"]
+        with self._backend.latest_lock:
+            latest = self._backend.latest.get(name)
+            if latest is None or revision > latest["revision"]:
+                self._backend.latest[name] = owned_snapshot
+            if committed:
+                committed_revision = self._backend.committed.get(name)
+                if committed_revision is None or revision > committed_revision:
+                    self._backend.committed[name] = revision
 
     @staticmethod
     def _log_non_advancing(name, revision, baseline):
