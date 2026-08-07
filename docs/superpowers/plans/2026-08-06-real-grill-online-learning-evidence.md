@@ -1,16 +1,17 @@
 # Real-Grill Online Learning Evidence Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Source design:** `docs/superpowers/specs/2026-08-06-real-grill-online-learning-evidence-design.md`
 
 **Goal:** Record trustworthy real-cook evidence, run guarded empty-grill excitation, evaluate the innovation state-space challenger against untouched future outcomes, and permit exact-digest activation only after every confidence and persistence gate passes.
 
 **Architecture:** Extend the existing typed control trace, `FrameObservation`, `OnlineAdaptation`, `InnovationStateSpace`, runner observation queue, and model checkpoint worker. Raw frame evidence remains in the 30-day trace; a separate typed SQLite ledger stores compact completed origins, decisions, timing, and activation lineage. Grey-box owns every command until an atomic manual activation; after activation, state-space generations use the same causal gate and retain grey-box as immediate fallback.
 
-**Tech Stack:** Python 3.11, frozen Pydantic dataclasses, NumPy/SciPy, SQLite, threaded controller runner, pytest, Ruff, React/TypeScript, Rstest, TanStack Query, Jujutsu.
+**Tech Stack:** Python 3.14, frozen Pydantic dataclasses, NumPy/SciPy, SQLite, threaded controller runner, pytest, Ruff, React/TypeScript, Rstest, TanStack Query, Jujutsu.
 
 ## Global Constraints
 
-- Work directly in the existing checkout and Jujutsu stack. Do not create another worktree and do not use raw Git commands.
+- Execute in the existing `linear-mpc-experiment` Jujutsu workspace, where the linear MPC implementation and source design live. Do not create another worktree, rebase onto the default workspace during execution, or use raw Git commands.
 - The controller catalog remains `pid`, `pid_sp`, and `mpc`; this plan adds no controller or compatibility alias.
 - Grey-box remains the shipped default and sole baseline command owner until successful manual first activation.
 - Before activation, state-space must not alter policy load, allocation, pulse scheduling, fan output, safety handling, or fallback output.
@@ -188,7 +189,6 @@ Run `jj new` after the focused tests and Ruff pass.
 - Modify: `common/datastore_accessors.py`
 - Rename: `controller/runtime/model_checkpoint.py` to `controller/runtime/model_persistence.py`
 - Modify: `controller/runtime/modes/hold.py`
-- Modify: all imports/references returned by LSP for `ModelCheckpointWorker`
 - Create: `tests/unit/common/test_model_evidence_store.py`
 - Create: `tests/unit/runtime/test_model_persistence.py`
 - Modify: `tests/unit/runtime/test_hold_model_persistence.py`
@@ -922,7 +922,24 @@ Run all tests added or modified by Tasks 1–10, then the existing MPC, runtime 
 
 - [ ] **Step 6: Run repository quality gates**
 
-Run the repository's canonical Ruff format check, Ruff lint, Python type check, full Python tests, frontend tests/typecheck/production build, and existing end-to-end suite. Capture exact pass/fail counts and target-hardware timing provenance in the evidence report.
+Run from the `linear-mpc-experiment` workspace root:
+
+```bash
+.venv/bin/ruff format --check common controller blueprints tests
+.venv/bin/ruff check common controller blueprints tests
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  .venv/bin/pytest -q --tb=short
+cd web-react
+bun run typecheck
+bun run lint
+bun run gen:types:check
+bun run test
+bun run test:coverage
+bun run build
+bun run test:e2e
+```
+
+Use the repository's documented platform exclusions only when the full Python suite reaches hardware-specific tests unavailable on the current host; list every exclusion in the execution report. Capture exact pass/fail/skip counts, browser-smoke observations, and target-hardware timing provenance in the evidence report.
 
 - [ ] **Step 7: Perform post-smoke cleanup**
 
