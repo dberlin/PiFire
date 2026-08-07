@@ -259,6 +259,40 @@ class _RecordingOnlineManager:
         return {"policy": {}}
 
 
+class _PromotionManager:
+    def __init__(self, **_: object) -> None:
+        self.incumbent = _RunnerModel(105.0)
+        self.challenger = _RunnerModel(100.0)
+        self.role_generation = 0
+        self._evaluations = 0
+
+    def observe(self, observation: object, **_: object) -> SimpleNamespace:
+        del observation
+        return SimpleNamespace(gate=SimpleNamespace(permitted=True, reasons=()))
+
+    def evaluate(self, scores: object) -> SimpleNamespace:
+        self._evaluations += 1
+        promoted = self._evaluations == 2
+        generation = self.role_generation
+        if promoted:
+            self.role_generation += 1
+        return SimpleNamespace(
+            window_id=scores.window_id,
+            promoted=promoted,
+            reasons=(),
+            consecutive_wins=2 if promoted else 1,
+            candidate_prediction_score=scores.candidate_prediction_score,
+            incumbent_prediction_score=scores.incumbent_prediction_score,
+            candidate_braking_score=scores.candidate_braking_score,
+            incumbent_braking_score=scores.incumbent_braking_score,
+            plausible_gain=True,
+            state_aligned=True,
+            candidate_snapshot=self.challenger.snapshot(),
+            incumbent_snapshot=self.incumbent.snapshot(),
+            generation=generation,
+        )
+
+
 def _install_fast_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     model = _RunnerModel(100.0)
     calibration = _record(20, "unit-calibration")
@@ -333,6 +367,32 @@ def test_window_scores_use_untouched_multi_horizon_role_predictions() -> None:
     assert evidence["horizon_metrics"]["300"]["origin_frame_ids"] == [0]
     assert evidence["score_frame_ids"] == list(range(0, 300, 20))
     assert evidence["braking_or_coast_sample_count"] == 2
+
+
+def test_runner_clears_promotion_windows_and_advances_role_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    _install_fast_runner(monkeypatch)
+    monkeypatch.setattr(runner_module, "AdaptationManager", _PromotionManager)
+    definition = next(item for item in SCENARIOS if item.name == "long-hold")
+
+    row = _run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=920,
+        arm="dmc",
+        initialization="wrong-gain",
+        horizon_s=60,
+    )
+
+    evaluations = [item for item in row.promotion_history if item["kind"] == "five-minute-evaluation"]
+    assert len(evaluations) == 3
+    assert [item["score_role_generation"] for item in evaluations] == [0, 0, 1]
+    assert [item["promoted"] for item in evaluations] == [False, True, False]
+    frame_sets = [set(item["score_frame_ids"]) for item in evaluations]
+    assert all(left.isdisjoint(right) for left, right in zip(frame_sets, frame_sets[1:]))
 
 
 def test_adaptation_settings_use_training_bounds_and_arm_alignment() -> None:
