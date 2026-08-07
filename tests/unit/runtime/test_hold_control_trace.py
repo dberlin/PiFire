@@ -1789,3 +1789,34 @@ def test_invalid_probe_waits_for_an_earlier_learner_outcome_before_trace_publica
         (1, False, ("insufficient_excitation",)),
         (2, False, ("invalid-probe",)),
     ]
+
+def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_retains_fifo(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "invalid-probe-overflow-evidence"}
+    mode._ensure_trace_session(0.0)
+    first = replace(_learning_observation(0.0), observation_sequence=1)
+
+    mode._deliver_completed_pulse_observation((0, 20_000), first)
+    for sequence in range(2, 62):
+        invalid = replace(
+            _learning_observation((sequence - 1) * 20.0),
+            observation_sequence=sequence,
+            probe_valid=False,
+            probe_source=None,
+        )
+        mode._deliver_completed_pulse_observation(((sequence - 1) * 20_000, sequence * 20_000), invalid)
+
+    assert runner.observations == [first]
+    assert len(mode._pending_model_observations) == 60
+    mode._reconcile_model_observation_outcomes(now=1_221.0)
+
+    gaps = [record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload)]
+    payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
+    assert [(gap.reason, gap.observation_sequence) for gap in gaps] == [("pending-observation-overflow", 1)]
+    assert [
+        (payload.observation_sequence, payload.eligible, payload.rejection_reasons)
+        for payload in payloads
+    ] == [(sequence, False, ("invalid-probe",)) for sequence in range(2, 62)]

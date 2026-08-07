@@ -116,6 +116,8 @@ class HoldMode(ControlMode):
     _last_ptemp: float | None = None
     _checkpoint_worker: ModelCheckpointWorker | None = None
     _final_refit_done: bool = False
+    _PENDING_MODEL_OBSERVATION_CAPACITY = 60
+
 
     def _pulse_frame_seconds(self) -> float:
         """The scheduler's frame, or zero before one has been built."""
@@ -318,6 +320,34 @@ class HoldMode(ControlMode):
         )
         return frame_key, observation
 
+    def _record_pending_observation_gap(self, observation: FrameObservation, reason: str) -> None:
+        self._trace_record(
+            TraceEventKind.RECORDER_GAP,
+            RecorderGapPayload(
+                lost_record_count=1,
+                gap_start_ms=int(observation.frame_start_s * 1_000),
+                gap_end_ms=int(observation.frame_end_s * 1_000),
+                reason=reason,
+                frame_start_ms=int(observation.frame_start_s * 1_000),
+                frame_end_ms=int(observation.frame_end_s * 1_000),
+                result_revision=observation.result_revision,
+                observation_sequence=observation.observation_sequence,
+            ),
+            int(observation.frame_end_s * 1_000),
+        )
+
+    def _retire_pending_model_observation(self, sequence: int, reason: str) -> None:
+        pending = self._pending_model_observations.pop(sequence, None)
+        if pending is not None and isinstance(pending[0], FrameObservation):
+            self._record_pending_observation_gap(pending[0], reason)
+
+    def _bound_pending_model_observations(self) -> None:
+        while len(self._pending_model_observations) > self._PENDING_MODEL_OBSERVATION_CAPACITY:
+            self._retire_pending_model_observation(
+                next(iter(self._pending_model_observations)),
+                "pending-observation-overflow",
+            )
+
     def _deliver_completed_pulse_observation(self, frame_key: tuple[int, int], observation: FrameObservation) -> None:
         if not observation.probe_valid:
             self._pulse_observation_last_frame_key = frame_key
@@ -332,6 +362,7 @@ class HoldMode(ControlMode):
                 -1,
                 ((TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(observation, "invalid-probe")),),
             )
+            self._bound_pending_model_observations()
             return
         if self._runner is None:
             return
@@ -353,9 +384,8 @@ class HoldMode(ControlMode):
         self._pending_model_observations[sequence] = (observation, self._trace_session_id, generation, None)
         evicted_sequence = getattr(submission, "evicted_sequence", None)
         if isinstance(evicted_sequence, int) and not isinstance(evicted_sequence, bool):
-            self._pending_model_observations.pop(evicted_sequence, None)
-        while len(self._pending_model_observations) > 60:
-            del self._pending_model_observations[next(iter(self._pending_model_observations))]
+            self._retire_pending_model_observation(evicted_sequence, "runner-observation-evicted")
+        self._bound_pending_model_observations()
 
     def _trace_missing_frame_observation(self, frame: PulseFrameResult, reason: str) -> None:
         if frame.ended_at_s <= frame.nominal_start_s:
