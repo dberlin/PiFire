@@ -106,18 +106,40 @@ def _unit_row(job: _MatrixJob) -> ScenarioResult:
     )
 
 
-def _unit_execute_cells(
-    jobs: Iterable[_MatrixJob],
-    prepared: object,
-    *,
-    workers: int,
-    blas_threads: int,
-) -> Iterator[_CellExecution]:
-    del prepared, workers, blas_threads
-    for job in jobs:
-        row = _unit_row(job)
-        envelope: dict[str, object] = {"kind": "row", "row": row.to_document()}
-        yield _CellExecution(job.ordinal, _canonical_bytes(envelope), 0.0)
+def _unit_cell(job: _MatrixJob, prepared: object) -> _CellExecution:
+    del prepared
+    row = _unit_row(job)
+    envelope: dict[str, object] = {"kind": "row", "row": row.to_document()}
+    return _CellExecution(job.ordinal, _canonical_bytes(envelope), 0.0)
+
+
+class _Future:
+    def __init__(self, execution: _CellExecution) -> None:
+        self._execution = execution
+
+    def result(self) -> _CellExecution:
+        return self._execution
+
+
+class _Executor:
+    def __init__(self, **_: object) -> None:
+        pass
+
+    def __enter__(self) -> _Executor:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def submit(self, function: Any, job: _MatrixJob, prepared: object) -> _Future:
+        return _Future(function(job, prepared))
+
+
+def _complete_futures(
+    futures: Iterable[_Future],
+    **_: object,
+) -> tuple[set[_Future], set[_Future]]:
+    return set(futures), set()
 
 
 @pytest.fixture(autouse=True)
@@ -129,7 +151,9 @@ def _fast_matrix_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
         "_prepare_origins",
         lambda origins, **_: {origin: object() for origin in origins},
     )
-    monkeypatch.setattr(runner_module, "_execute_cells", _unit_execute_cells)
+    monkeypatch.setattr(runner_module, "_run_prepared_cell", _unit_cell)
+    monkeypatch.setattr(runner_module, "ProcessPoolExecutor", _Executor)
+    monkeypatch.setattr(runner_module, "wait", _complete_futures)
     aggregate_diagnostics = runner_module._aggregate_simulator_diagnostics
     monkeypatch.setattr(
         runner_module,

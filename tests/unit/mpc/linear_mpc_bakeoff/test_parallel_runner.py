@@ -151,9 +151,13 @@ def test_spawned_cell_result_is_picklable_document() -> None:
     job = MatrixJob(0, "scheduled-arx", "correct", quick_scenarios()[0], "GrillSim", "frozen", 2, 600, 20)
     result = _run_prepared_cell(job, payload)
     assert isinstance(pickle.loads(pickle.dumps(result)).row, bytes)
+    document, failure = runner_module._execution_parts(result)
+    assert failure is None
+    assert document is not None
+    assert document["arm"] == "scheduled-arx"
 
 
-def test_serial_and_spawned_parallel_micro_matrix_are_canonically_equivalent(tmp_path: Path) -> None:
+def test_serial_and_parallel_router_are_canonically_equivalent(tmp_path: Path) -> None:
     serial = run_experiment(_micro_config(workers=1))
     parallel = run_experiment(_micro_config(workers=2))
 
