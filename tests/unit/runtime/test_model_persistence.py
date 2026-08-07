@@ -22,12 +22,12 @@ class _Store:
         self.first_save_started = threading.Event()
         self.release_first_save = threading.Event()
 
-    def save(self, name, snapshot):
+    def save_outcome(self, name, snapshot):
         self.saved.append((name, snapshot))
         if len(self.saved) == 1:
             self.first_save_started.set()
             self.release_first_save.wait(timeout=1.0)
-        return True
+        return CheckpointSaveOutcome.SAVED
 
 
 class _Logger:
@@ -209,6 +209,43 @@ def test_conditional_checkpoint_writer_failure_blocks_later_submissions():
         conditional_writer=lambda _name, _snapshot: False,
     )
     worker = ModelPersistenceWorker(store, _Logger())
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 1})
+        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.evidence_blocked
+        assert not worker.submit_checkpoint("mpc", {"revision": 2})
+        assert not worker.submit_evidence(_evidence("later")).accepted
+        assert not worker.commit_activation(_activation("later"))
+    finally:
+        worker.flush_and_stop(timeout=1.0)
+
+
+def test_save_only_store_cannot_coalesce_a_failed_checkpoint_as_healthy():
+    class SaveOnlyStore:
+        def __init__(self):
+            self.save_calls = 0
+
+        def save(self, _name, _snapshot):
+            self.save_calls += 1
+            return False
+
+    store = SaveOnlyStore()
+    worker = ModelPersistenceWorker(store, _Logger())
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 1})
+        assert worker.flush_and_stop(timeout=1.0)
+        assert store.save_calls == 0
+        assert worker.evidence_blocked
+    finally:
+        worker.flush_and_stop(timeout=1.0)
+
+
+def test_explicit_failed_checkpoint_outcome_blocks_later_submissions():
+    class FailedStore:
+        def save_outcome(self, _name, _snapshot):
+            return CheckpointSaveOutcome.FAILED
+
+    worker = ModelPersistenceWorker(FailedStore(), _Logger())
     try:
         assert worker.submit_checkpoint("mpc", {"revision": 1})
         assert worker.flush_and_stop(timeout=1.0)

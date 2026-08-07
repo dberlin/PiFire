@@ -5,7 +5,7 @@ from copy import deepcopy
 import threading
 
 from common.control_trace import ActuationMode
-from common.controller_model_state import ControllerModelStore
+from common.controller_model_state import CheckpointSaveOutcome, ControllerModelStore
 
 from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
@@ -23,10 +23,10 @@ class _FakeModelStore:
     def load(self, name):
         return self.models.get(name)
 
-    def save(self, name, snapshot):
+    def save_outcome(self, name, snapshot):
         self.saves.append((name, snapshot))
         self.models[name] = snapshot
-        return True
+        return CheckpointSaveOutcome.SAVED
 
 
 def _deduplicating_store():
@@ -130,7 +130,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
         def load(self, _name):
             return None
 
-        def save(self, name, snapshot):
+        def save_outcome(self, name, snapshot):
             owned_snapshot = dict(snapshot)
             self.writer_threads.append(threading.current_thread())
             self._writes += 1
@@ -141,7 +141,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
             self.saved_snapshots.append((name, owned_snapshot))
             if owned_snapshot["revision"] == 2:
                 self.latest_saved.set()
-            return True
+            return CheckpointSaveOutcome.SAVED
 
     runner = FakeControllerRunner(period=0.01).script([_output(0.5)])
     store = _BlockingStore()
@@ -313,7 +313,7 @@ class _EventGatedCheckpointStore:
         self._lock = threading.Lock()
         self._write_count = 0
 
-    def save(self, name, snapshot):
+    def save_outcome(self, name, snapshot):
         owned_snapshot = dict(snapshot)
         with self._lock:
             self._write_count += 1
@@ -325,7 +325,7 @@ class _EventGatedCheckpointStore:
                 raise TimeoutError("test did not release the first checkpoint write")
         with self._lock:
             self.saved.append((name, owned_snapshot))
-        return True
+        return CheckpointSaveOutcome.SAVED
 
 
 class _CheckpointLogger:

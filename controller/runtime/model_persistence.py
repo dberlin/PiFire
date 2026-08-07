@@ -14,7 +14,7 @@ from common.model_evidence import EvidenceKind, ModelEvidenceRecord, RecorderGap
 
 
 class _ModelStore(Protocol):
-    def save(self, name: str, snapshot: dict[str, object]) -> bool: ...
+    def save_outcome(self, name: str, snapshot: dict[str, object]) -> CheckpointSaveOutcome: ...
 
 
 class _ErrorLogger(Protocol):
@@ -145,10 +145,7 @@ class ModelPersistenceWorker:
         return True
 
     def _save_checkpoint(self, name: str, snapshot: dict[str, object]) -> CheckpointSaveOutcome:
-        save_outcome = getattr(self._store, "save_outcome", None)
-        if callable(save_outcome):
-            return save_outcome(name, snapshot)
-        return CheckpointSaveOutcome.SAVED if self._store.save(name, snapshot) else CheckpointSaveOutcome.NONADVANCING
+        return self._store.save_outcome(name, snapshot)
 
     def flush_and_stop(self, *, timeout: float = 0.1) -> bool:
         """Flush accepted work once while keeping Hold teardown bounded."""
