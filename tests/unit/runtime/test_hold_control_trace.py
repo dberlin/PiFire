@@ -1,6 +1,7 @@
 """End-to-end Hold control-trace contracts using the normal fake runtime seam."""
 
-from copy import deepcopy
+import queue
+import threading
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -28,7 +29,15 @@ from common.datastore_accessors import read_control_trace_session
 from common import datastore
 from controller.applied_output import OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
-from controller.linear_mpc.adaptation import CompletedOrigin, EvaluationDecision, EvaluationRejectionReason, HorizonScore
+from controller.linear_mpc.adaptation import (
+    CompletedOrigin,
+    EvaluationDecision,
+    EvaluationRejectionReason,
+    HorizonScore,
+    ObservationOutcome,
+    OnlineAdaptation,
+    UpdateGate,
+)
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.mpc_allocator import allocate
 from controller.mpc import Controller
@@ -37,9 +46,9 @@ from controller.runtime.runner import (
     ControllerUpdateResult,
     ObservationOutcomeEnvelope,
     SyncControllerRunner,
-    _freeze_evidence,
+    ThreadedControllerRunner,
 )
-from controller.linear_mpc.contracts import FrameObservation
+from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
 from tests.fakes.runner import FakeControllerRunner
@@ -1289,71 +1298,284 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
     return recorder, runner, mode, first, second
 
 
-def test_runner_owned_evidence_batches_exact_completed_origin_once_and_clears_session_context(hold_cycle, monkeypatch):
+def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_teardown_context(
+    hold_cycle, monkeypatch
+):
+    class _WorkerGate:
+        """Advance the real worker only when the test permits its next loop."""
+
+        def __init__(self):
+            self._arrivals: queue.Queue[None] = queue.Queue()
+            self._permits: queue.Queue[None] = queue.Queue()
+            self._closed = threading.Event()
+
+        def __call__(self, _period_s: float) -> None:
+            self._arrivals.put(None)
+            if not self._closed.is_set():
+                self._permits.get()
+
+        def advance(self) -> None:
+            self._arrivals.get(timeout=1.0)
+            self._permits.put(None)
+            self._arrivals.get(timeout=1.0)
+            self._arrivals.put(None)
+
+        def close(self) -> None:
+            self._closed.set()
+            self._permits.put(None)
+
+    class _DigestModel:
+        def snapshot(self):
+            return {"schema": "canonical-evidence-test/v1", "value": 1.0}
+
+    class _OneOriginOnline:
+        def __init__(self, decision):
+            self.role_generation = decision.generation
+            self.challenger = _DigestModel()
+            self.policy = SimpleNamespace(evaluation_interval_s=1.0)
+            self.effective_updates = 1
+            self._decision = decision
+
+        def observe(self, _observation, **_kwargs):
+            return ObservationOutcome(
+                UpdateGate(True, (), 0.04, 2),
+                ModelUpdate(211.0, 212.0, 1.0, True),
+                ModelUpdate(211.5, 212.0, 0.5, True),
+                self.effective_updates,
+            )
+
+        def evaluate_due(self, _now_s):
+            return self._decision
+
+    class _CanonicalEvidenceCore(Controller):
+        """Uses Controller.observe_frame; only the unrelated solve seam is minimal."""
+
+        def __init__(self):
+            digest = OnlineAdaptation.model_digest(_DigestModel())
+            origin = CompletedOrigin(
+                origin_time_s=0.0,
+                completion_time_s=20.0,
+                horizon_steps=3,
+                generation=7,
+                observed_temperature_c=212.0,
+                incumbent_error_c=1.0,
+                challenger_error_c=0.5,
+                braking=False,
+                observation_sequence=1,
+                incumbent_digest=digest,
+                challenger_digest=digest,
+                incumbent_prediction_c=211.0,
+                challenger_prediction_c=211.5,
+                temperature_band="below-target",
+                ambient_source=AmbientSource.CONFIGURED,
+            )
+            decision = EvaluationDecision(
+                decision_id="generation-7-evaluation-1",
+                evaluated_at_s=20.0,
+                generation=7,
+                promoted=False,
+                committed=False,
+                consecutive_wins=0,
+                reasons=(EvaluationRejectionReason.PREDICTION,),
+                incumbent_prediction_score=1.0,
+                candidate_prediction_score=0.5,
+                incumbent_braking_score=None,
+                candidate_braking_score=None,
+                sample_count=1,
+                prospective_digest=None,
+                window_start_s=0.0,
+                window_end_s=20.0,
+                incumbent_digest=digest,
+                challenger_digest=digest,
+                completed_origins=(origin,),
+                horizon_scores=tuple(
+                    HorizonScore(
+                        horizon,
+                        1.0 if horizon == 3 else None,
+                        0.5 if horizon == 3 else None,
+                        1 if horizon == 3 else 0,
+                    )
+                    for horizon in (3, 15, 45, 90, 180)
+                ),
+            )
+            self.cfg = {"control_period": 1.0, "enable_fan_input": False}
+            self._online_enabled = True
+            self._online = _OneOriginOnline(decision)
+            self._online_next_evaluation_s = 0.0
+            self._online_previous_setpoint = None
+            self._online_eligible_updates = 0
+            self._online_rejected_updates = 0
+            self._online_last_rejection_reason = None
+            self._online_last_evaluation = None
+            self._online_last_lifecycle = None
+            self._online_last_lifecycle_reason = None
+            self._online_learner_duration = 0.0
+            self._online_evaluation_duration = 0.0
+            self._online_promotion_count = 0
+            self._online_rollback_count = 0
+            self._model_revision = 0
+
+        def _active_arx(self):
+            return True
+
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
+        def get_status(self):
+            return None
+
+        def get_model_snapshot(self):
+            return None
+
+        def set_output(self, _applied):
+            return None
+
+        def update(self, _temperature):
+            return {"cycle_ratio": 0.0, "fan": None}
+
+        def refit_from_cook(self):
+            return None
+
+
     class _EvidenceWorker:
+        evidence_blocked = False
+
         def __init__(self):
             self.batches = []
+            self.stopped = False
 
         def submit_evidence_batch(self, records):
-            self.batches.append(tuple(records))
+            self.batches.append(records)
             return EvidenceSubmission(accepted=True)
 
-    recorder, runner, mode, first, second = _two_pending_learning_outcomes(hold_cycle, monkeypatch)
+        def flush_and_stop(self):
+            self.stopped = True
+
+    recorder = _install_recorder(monkeypatch)
+    gate = _WorkerGate()
+    core = _CanonicalEvidenceCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=gate)
     worker = _EvidenceWorker()
-    mode._persistence_worker = worker
-    contexts = []
-    runner.set_evidence_context = lambda session_id, cook_id: contexts.append((session_id, cook_id))
-    digest = "a" * 64
-    origin = CompletedOrigin(
-        0.0, 20.0, 3, 0, 212.0, 1.0, 0.5, False, 0, digest, digest, 211.0, 211.5, "below-target",
-        AmbientSource.MEASURED,
-    )
-    scores = tuple(
-        HorizonScore(horizon, 1.0 if horizon == 3 else None, 0.5 if horizon == 3 else None, 1 if horizon == 3 else 0)
-        for horizon in (3, 15, 45, 90, 180)
-    )
-    decision = EvaluationDecision(
-        "generation-0-evaluation-1", 20.0, 0, False, False, 0, (EvaluationRejectionReason.PREDICTION,),
-        1.0, 0.5, None, None, 1, None, 0.0, 20.0, digest, digest, (origin,), scores,
-    )
-    controller = object.__new__(Controller)
-    controller._online = SimpleNamespace(challenger=object())
-    raw, compact = controller._evaluation_payloads(decision)
-    outcome = dict(_promotion_outcome(frame_end_ms=20_000))
-    outcome.update(evaluation_payload=raw, forecast_origin_evidence=compact)
-    evidence = _freeze_evidence(outcome, mode._trace_session_id, mode._trace_cook_id)
-    assert len(evidence) == 1 and isinstance(evidence[0], ModelEvidenceRecord)
-    runner._observation_outcomes.append(ObservationOutcomeEnvelope(1, 0, first, outcome, evidence))
+    monkeypatch.setattr("controller.runtime.modes.hold.ModelPersistenceWorker", lambda *_args: worker)
+    mode = hold_cycle(runner, controller="mpc")
+    stopped = False
+    try:
+        mode.setup()
+        assert mode._persistence_worker is worker
+        assert mode._runner is runner
+        mode.state.metrics = {"id": "threaded-canonical-evidence"}
+        mode._ensure_trace_session(0.0)
+        session_id = mode._trace_session_id
+        cook_id = mode._trace_cook_id
+        assert session_id is not None and cook_id == "threaded-canonical-evidence"
 
-    mode._reconcile_model_observation_outcomes(now=22.0)
-    mode._reconcile_model_observation_outcomes(now=23.0)
+        controller = mode.state.controller
+        controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
+        controller.pulse_frame_combustion_load = 0.3
+        controller.pulse_frame_requested_auger_duty = 0.3
+        controller.pulse_frame_maximum_duty = 0.5
+        mode._pulse_frame_role_generation = 7
 
-    assert worker.batches == [evidence]
-    traced = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVALUATION)
-    raw_origin = traced.completed_origins[0]
-    compact_origin = evidence[0].payload
-    assert (raw_origin.origin_time_ms, raw_origin.completion_time_ms, raw_origin.horizon_steps) == (
-        compact_origin.origin_time_ms,
-        compact_origin.completion_time_ms,
-        compact_origin.horizon_steps,
-    )
-    assert (raw_origin.incumbent_digest, raw_origin.challenger_digest, raw_origin.temperature_band) == (
-        compact_origin.incumbent_digest,
-        compact_origin.challenger_digest,
-        compact_origin.temperature_band,
-    )
-    assert evidence[0].session_id == mode._trace_session_id
-    assert evidence[0].role_generation == raw.role_generation
-    mode._reconcile_model_observation_outcomes(now=24.0)
-    assert worker.batches == [evidence]
+        from controller.runtime.logic.pulse import PulseFrameResult
 
-    mode._trace_session_id = None
-    mode._trace_cook_id = None
-    mode._clear_runner_evidence_context()
-    assert contexts == [(None, None)]
-    runner._observation_outcomes.append(ObservationOutcomeEnvelope(2, 0, second, outcome, _freeze_evidence(outcome, None, None)))
-    mode._reconcile_model_observation_outcomes(now=25.0)
-    assert worker.batches == [evidence]
+        first_frame = PulseFrameResult(
+            nominal_start_s=0.0,
+            nominal_end_s=20.0,
+            ended_at_s=20.0,
+            complete=True,
+            skipped=False,
+            latched_request=0.3,
+            credit_before_s=0.0,
+            credit_after_s=0.0,
+            scheduled_on_s=6,
+            delivered_on_s=6.0,
+            observed_transition_count=2,
+            actual_start_on=False,
+            actual_end_on=False,
+            reset_reason=None,
+        )
+        mode._observe_completed_pulse_frame(first_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
+        gate.advance()
+        mode._reconcile_model_observation_outcomes(now=22.0)
+
+        assert len(worker.batches) == 1
+        batch = worker.batches[0]
+        assert isinstance(batch, tuple) and len(batch) == 1
+        with pytest.raises(AttributeError):
+            batch.append(batch[0])
+        record = batch[0]
+        assert isinstance(record, ModelEvidenceRecord)
+
+        raw = next(
+            record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVALUATION
+        )
+        raw_origin = raw.completed_origins[0]
+        compact_origin = record.payload
+        assert (
+            raw_origin.origin_time_ms,
+            raw_origin.completion_time_ms,
+            raw_origin.horizon_steps,
+            raw_origin.observed_temperature_c,
+            raw_origin.incumbent_prediction_c,
+            raw_origin.challenger_prediction_c,
+            raw_origin.temperature_band,
+            raw_origin.ambient_source,
+        ) == (0, 20_000, 3, 212.0, 211.0, 211.5, "below-target", AmbientSource.CONFIGURED)
+        assert len(raw_origin.incumbent_digest) == len(raw_origin.challenger_digest) == 64
+        assert raw_origin.incumbent_digest == raw_origin.challenger_digest
+        assert (
+            compact_origin.origin_time_ms,
+            compact_origin.completion_time_ms,
+            compact_origin.horizon_steps,
+            compact_origin.observed_temperature_c,
+            compact_origin.incumbent_prediction_c,
+            compact_origin.challenger_prediction_c,
+            compact_origin.incumbent_digest,
+            compact_origin.challenger_digest,
+            compact_origin.temperature_band,
+            compact_origin.ambient_source,
+            compact_origin.phase,
+        ) == (
+            raw_origin.origin_time_ms,
+            raw_origin.completion_time_ms,
+            raw_origin.horizon_steps,
+            raw_origin.observed_temperature_c,
+            raw_origin.incumbent_prediction_c,
+            raw_origin.challenger_prediction_c,
+            raw_origin.incumbent_digest,
+            raw_origin.challenger_digest,
+            raw_origin.temperature_band,
+            raw_origin.ambient_source,
+            "coasting" if raw_origin.braking else "heating",
+        )
+        assert (
+            record.session_id,
+            record.cook_id,
+            record.role_generation,
+            record.evidence_id,
+        ) == (session_id, cook_id, raw.role_generation, f"{session_id}:{raw.decision_id}:1:3:20000")
+
+        mode._reconcile_model_observation_outcomes(now=23.0)
+        assert worker.batches == [batch]
+        assert runner.drain_observation_outcomes().envelopes == ()
+
+        late_frame = replace(first_frame, nominal_start_s=20.0, nominal_end_s=40.0, ended_at_s=40.0)
+        mode._observe_completed_pulse_frame(late_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
+        mode.teardown(212.0)
+        stopped = True
+
+        assert gate._closed.is_set()
+        assert runner._stop_event.is_set()
+        assert (runner._evidence_session_id, runner._evidence_cook_id) == (None, None)
+        assert worker.stopped is True
+        assert worker.batches == [batch]
+        assert len(
+            [record for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVALUATION]
+        ) == 2
+        assert runner.drain_observation_outcomes().envelopes == ()
+    finally:
+        if not stopped:
+            mode.teardown(212.0)
 
 
 def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_cycle, monkeypatch):

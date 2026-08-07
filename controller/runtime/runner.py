@@ -949,6 +949,7 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def stop(self):
         with self._lock:
+            self._stop_event.set()
             self._accept_observations = False
             self._evidence_session_id = None
             self._evidence_cook_id = None
