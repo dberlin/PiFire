@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
 import type { AdminState } from "../../../../src/helpers/admin/adminTypes";
+import { testQueryClient } from "../../test-utils";
 
 // Stubbed through a lazy wrapper so the hoisted mock factory never captures an
 // uninitialised binding. adminErrorText stays REAL: the page's whole job on a
@@ -15,28 +17,35 @@ const fetchAdminStateMock = rs.fn();
 //  here too even though no test below clicks one. Leaving them live would put
 //  this file one future assertion away from a real power-off or a real clear
 //  against whatever backend the runner can see.
-const refuse = (name: string) => () => {
+const refuseCall = (name: string) => () => {
   throw new Error(`${name} must never be reached from AdminPage.test`);
 };
 rs.mock("../../../../src/helpers/admin/adminApi", () => ({
   ...actualAdminApi,
   fetchAdminState: (...a: unknown[]) => fetchAdminStateMock(...a),
-  systemAction: refuse("systemAction"),
-  factoryReset: refuse("factoryReset"),
-  maintenanceAction: refuse("maintenanceAction"),
-  saveAdminSettings: refuse("saveAdminSettings"),
-  createBackup: refuse("createBackup"),
-  restoreBackup: refuse("restoreBackup"),
-  uploadBackup: refuse("uploadBackup"),
-  deleteLogs: refuse("deleteLogs"),
+  systemAction: refuseCall("systemAction"),
+  factoryReset: refuseCall("factoryReset"),
+  maintenanceAction: refuseCall("maintenanceAction"),
+  saveAdminSettings: refuseCall("saveAdminSettings"),
+  createBackup: refuseCall("createBackup"),
+  restoreBackup: refuseCall("restoreBackup"),
+  uploadBackup: refuseCall("uploadBackup"),
+  deleteLogs: refuseCall("deleteLogs"),
 }));
 
 const { AdminPage } = await import("../../../../src/components/admin/AdminPage");
 
 // SystemUpdateCard renders a react-router <Link>, which throws outside a
 // Router context -- every render below needs one even though none of these
-// tests navigate.
-const renderPage = () => render(<AdminPage />, { wrapper: MemoryRouter });
+// tests navigate. Each render gets its own client (gcTime: 0, staleTime: 0)
+// so no test's resolved admin state leaks into the next one's assertions.
+const renderPage = () =>
+  render(
+    <QueryClientProvider client={testQueryClient()}>
+      <AdminPage />
+    </QueryClientProvider>,
+    { wrapper: MemoryRouter },
+  );
 
 //  Copied from a REAL /api/admin/state response, not composed from the type.
 //  The first version of this fixture had os_info as a display string and the
@@ -75,6 +84,8 @@ const STATE: AdminState = {
 };
 
 const ok = (data: AdminState = STATE) => ({ ok: true, status: 200, message: "", data });
+
+const refuse = (status: number, message: string) => ({ ok: false, status, message, data: null });
 
 beforeEach(() => {
   fetchAdminStateMock.mockReset();
@@ -211,16 +222,70 @@ describe("AdminPage", () => {
   });
 
   it("translates a refusal through adminErrorText rather than showing the token", async () => {
+    //  No `mode` here: unwrap()'s ApiError carries only status and message
+    //  across the query boundary (helpers/query/unwrap.ts), so a `mode` on
+    //  this envelope would be silently dropped before adminErrorText ever
+    //  saw it -- asserting only the substring below must not hide that.
     fetchAdminStateMock.mockResolvedValue({
       ok: false,
       status: 409,
       message: "not_stopped",
       data: null,
-      mode: "Hold",
     });
     renderPage();
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("must be stopped first");
     });
+  });
+
+  it("renders the server's refusal message when the envelope reports failure", async () => {
+    fetchAdminStateMock.mockResolvedValue(refuse(409, "not_stopped"));
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
+  });
+
+  it("never re-reads on a timer: the read probes hardware and writes to control", async () => {
+    rs.useFakeTimers();
+    fetchAdminStateMock.mockResolvedValue(ok(STATE));
+    renderPage();
+    //  Not waitFor(): under fake timers it never settles here (confirmed by
+    //  running it -- the test times out even though the assertion inside it
+    //  is already true). Same constraint HistoryPage.test.tsx's `settle()`
+    //  documents -- waitFor polls on a timer fake timers freeze. The mount
+    //  read fires synchronously off render() (React flushes the query's
+    //  effect inside render()'s own act()), so no wait is needed at all.
+    expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
+
+    //  advanceTimersByTimeAsync, not the sync advanceTimersByTime the brief's
+    //  snippet showed: react-query reschedules refetchInterval's next timer
+    //  only after the in-flight fetch's promise settles, and a synchronous
+    //  advance never yields for that microtask, so it fires at most the
+    //  first tick and this assertion would pass even with polling turned ON.
+    //  Confirmed by deliberately setting refetchInterval: 5_000 -- the sync
+    //  form left this test green; only the async form caught it (61 calls).
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(300_000);
+    });
+    expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
+    rs.useRealTimers();
+  });
+
+  it("does not re-probe on a network reconnect: refetchOnReconnect must be false, not merely unset", async () => {
+    //  testQueryClient() sets staleTime: 0, so the read is stale the instant
+    //  it lands -- the one condition under which react-query's default
+    //  refetchOnReconnect (refetch-if-stale) would fire. No fake timers
+    //  needed: onlineManager's offline->online edge is what triggers the
+    //  refetch check, not the clock.
+    fetchAdminStateMock.mockResolvedValue(ok());
+    renderPage();
+    await screen.findByText("Admin");
+    expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      onlineManager.setOnline(false);
+      onlineManager.setOnline(true);
+    });
+
+    expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
   });
 });

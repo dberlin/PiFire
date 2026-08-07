@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 import { adminErrorText, fetchAdminState } from "../../helpers/admin/adminApi";
 import type { AdminResult, AdminState, Reading } from "../../helpers/admin/adminTypes";
+import { queryKeys } from "../../helpers/query/keys";
+import { ApiError, unwrap } from "../../helpers/query/unwrap";
 import "./admin.css";
 import { BackupsCard } from "./BackupsCard";
 import { LogsCard } from "./LogsCard";
@@ -99,6 +102,31 @@ function SystemInfo({ state }: { state: AdminState }) {
 }
 
 /**
+ * Recover adminErrorText's human copy from a failed read's query error.
+ *
+ * unwrap() (helpers/query/unwrap.ts) only carries `message` and `status`
+ * across the query boundary, so a `not_stopped`/`bad_request` refusal loses
+ * the `field`/`mode` detail adminErrorText can use for those cases. That
+ * detail was never reachable from this read in practice anyway --
+ * blueprints/api_admin/routes.py's `/state` route is not mode-gated, only the
+ * destructive actions are -- so the fallback copy those cases produce without
+ * it ("...in another mode.", "The server refused that request.") is the
+ * worst case, not the common one.
+ */
+function queryErrorText(error: unknown): string {
+  const result: AdminResult<unknown> =
+    error instanceof ApiError
+      ? { ok: false, status: error.status, message: error.message, data: null }
+      : {
+          ok: false,
+          status: 0,
+          message: error instanceof Error ? error.message : "Request failed",
+          data: null,
+        };
+  return adminErrorText(result);
+}
+
+/**
  * The admin page: system readings, the destructive actions, maintenance
  * clears, backups and logs.
  *
@@ -114,38 +142,35 @@ function SystemInfo({ state }: { state: AdminState }) {
  * server that will judge the request.
  */
 export function AdminPage() {
-  const [state, setState] = useState<AdminState | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  const apply = useCallback((result: AdminResult<AdminState>) => {
-    if (result.ok && result.data) {
-      setState(result.data);
-      setError(null);
-    } else {
-      setError(adminErrorText(result));
-    }
-    setLoading(false);
-  }, []);
+  const {
+    data: state,
+    isPending,
+    error,
+  } = useQuery({
+    queryKey: queryKeys.adminState,
+    queryFn: () => unwrap(fetchAdminState(BASE_URL)),
+    //  Both explicit, not inherited. adminApi.ts:99 -- state_payload() calls
+    //  gather_system_info(), which probes the platform and writes the readings
+    //  back into control. This is a read with side effects: on mount and after
+    //  a change, never on a timer, and never off an unrelated network blip --
+    //  the query client's defaults (helpers/query/queryClient.ts) leave
+    //  refetchOnReconnect at react-query's default (refetch-if-stale), which
+    //  would otherwise re-probe the platform the moment a Wi-Fi appliance's
+    //  link drops and comes back, with no action from whoever has this page
+    //  open.
+    refetchInterval: false,
+    refetchOnReconnect: false,
+  });
 
-  /** What every card calls once its write lands. */
-  const reload = useCallback(() => fetchAdminState(BASE_URL).then(apply), [apply]);
+  /** What every card -- and the Refresh button -- calls once its write lands. */
+  const reload = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.adminState }),
+    [queryClient],
+  );
 
-  useEffect(() => {
-    //  The `cancelled` latch matters here rather than being ceremony: this
-    //  request probes hardware, so it is one of the slowest on the site, and a
-    //  user who navigates away mid-probe would otherwise land a setState on an
-    //  unmounted tree.
-    let cancelled = false;
-    fetchAdminState(BASE_URL).then((result) => {
-      if (!cancelled) apply(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [apply]);
-
-  if (loading) {
+  if (isPending) {
     return (
       <div className="pf-admin pf-admin-empty">
         <p>Loading system information…</p>
@@ -156,7 +181,7 @@ export function AdminPage() {
   if (!state) {
     return (
       <div className="pf-admin pf-admin-empty">
-        <p role="alert">{error ?? "The server did not answer."}</p>
+        <p role="alert">{error ? queryErrorText(error) : "The server did not answer."}</p>
       </div>
     );
   }
@@ -168,7 +193,7 @@ export function AdminPage() {
       <div className="pf-admin-error">
         {error && (
           <p className="pf-settings-error-text" role="alert">
-            {error}
+            {queryErrorText(error)}
           </p>
         )}
       </div>
