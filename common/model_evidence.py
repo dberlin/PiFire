@@ -7,7 +7,16 @@ from dataclasses import dataclass as std_dataclass
 from enum import StrEnum
 from typing import Annotated, ClassVar, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic.dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason, AmbientSource
@@ -42,7 +51,9 @@ class SessionSummaryEvidence:
     completed_origins: NonNegativeInt
     accepted_observations: NonNegativeInt
     rejected_observations: NonNegativeInt
+    rejection_reasons: tuple[NonBlankString, ...] = ()
     payload_type: Literal["session_summary"] = "session_summary"
+
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class AllocationEvidence:
@@ -68,7 +79,6 @@ class AllocationEvidence:
         if self.fan_enabled != (self.fan_duty is not None):
             raise ValueError("allocation fan output must match enabled input")
         return self
-
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -214,6 +224,8 @@ class RefreshDiagnosticsEvidence:
         if (self.braking_error_c is None) != (self.incumbent_braking_error_c is None):
             raise ValueError("braking diagnostics must include challenger and incumbent errors")
         return self
+
+
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class TimingDistributionEvidence:
     sample_count: NonNegativeInt
@@ -379,7 +391,11 @@ class ModelEvidenceRecord(BaseModel):
             payload = _JSON_VALUE_ADAPTER.validate_json(row.payload)
         except ValidationError as exc:
             raise ValueError("model evidence payload column is invalid JSON") from exc
-        if row.schema_version == 1 and isinstance(payload, dict) and payload.get("payload_type") == "timing_distribution":
+        if (
+            row.schema_version == 1
+            and isinstance(payload, dict)
+            and payload.get("payload_type") == "timing_distribution"
+        ):
             payload = {
                 **payload,
                 "p99_ms": payload.get("p99_ms"),

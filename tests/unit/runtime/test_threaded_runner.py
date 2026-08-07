@@ -8,12 +8,14 @@ from dataclasses import replace
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.linear_mpc.contracts import FrameObservation
 from common.control_trace import ActuationMode, ModelObservationPayload, ResultStaleState, TraceEventKind
+from common.model_evidence import SessionSummaryEvidence
 from controller.runtime.runner import (
-    ThreadedControllerRunner,
-    build_runner,
     SyncControllerRunner,
-    _MAX_PENDING_OUTPUTS,
+    ThreadedControllerRunner,
     _MAX_PENDING_OBSERVATIONS,
+    _MAX_PENDING_OUTPUTS,
+    _freeze_evidence,
+    build_runner,
 )
 from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
 
@@ -42,6 +44,37 @@ def _frame(index: int) -> FrameObservation:
         continuous=True,
         role_generation=0,
     )
+
+
+def test_frozen_observation_evidence_counts_real_eligibility_and_rejections():
+    accepted = _freeze_evidence(
+        {"eligible": True, "rejection_reasons": (), "forecast_origin_evidence": ()},
+        "session",
+        "cook",
+        _frame(1),
+    )
+    rejected = _freeze_evidence(
+        {
+            "eligible": False,
+            "rejection_reasons": ("lid-open", "discontinuity"),
+            "forecast_origin_evidence": (),
+        },
+        "session",
+        "cook",
+        _frame(2),
+    )
+
+    accepted_summary = accepted[0].payload
+    rejected_summary = rejected[0].payload
+    assert isinstance(accepted_summary, SessionSummaryEvidence)
+    assert accepted_summary.accepted_observations == 1
+    assert accepted_summary.rejected_observations == 0
+    assert accepted_summary.rejection_reasons == ()
+    assert isinstance(rejected_summary, SessionSummaryEvidence)
+    assert rejected_summary.accepted_observations == 0
+    assert rejected_summary.rejected_observations == 1
+    assert rejected_summary.rejection_reasons == ("lid-open", "discontinuity")
+    assert accepted[0].evidence_id != rejected[0].evidence_id
 
 
 class FakeCore:
@@ -128,8 +161,6 @@ class CloseAwarePeriodWait:
         self.release.set()
 
 
-
-
 def test_runner_retires_generation_bound_evidence_context_without_default_sleep() -> None:
     sync = SyncControllerRunner(FakeCore())
     sync.bind_evidence_context(0, "session-sync", "cook-sync")
@@ -144,6 +175,8 @@ def test_runner_retires_generation_bound_evidence_context_without_default_sleep(
     threaded.retire_evidence_context(0)
     assert gate.closed.is_set()
     assert threaded._evidence_contexts == {}
+
+
 def test_threaded_runner_solves_submitted_temp():
     core = FakeCore()
     r = ThreadedControllerRunner(core)
@@ -984,6 +1017,7 @@ def test_threaded_runner_withholds_unbound_terminal_drop_until_its_generation_bi
         barrier.release.set()
         runner.stop()
 
+
 def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_discontinuous():
     barrier = _ObservationBarrier()
 
@@ -1450,7 +1484,6 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
     finally:
         gate.close()
         runner.stop()
-
 
 
 def test_threaded_runner_forwards_safety_cancellation_in_submission_order():

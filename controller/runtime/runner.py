@@ -32,7 +32,13 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeAlias
 
 from common.control_trace import ActuationMode, ControllerType, ResultStaleState
-from common.model_evidence import EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord, RefreshDiagnosticsEvidence
+from common.model_evidence import (
+    EvidenceKind,
+    ForecastOriginEvidence,
+    ModelEvidenceRecord,
+    RefreshDiagnosticsEvidence,
+    SessionSummaryEvidence,
+)
 
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
@@ -87,28 +93,60 @@ class ObservationOutcomeDrain:
 
 
 def _freeze_evidence(
-    outcome: object, session_id: str | None, cook_id: str | None
+    outcome: object,
+    session_id: str | None,
+    cook_id: str | None,
+    observation: FrameObservation,
 ) -> tuple[ModelEvidenceRecord, ...]:
-    """Own only typed MPC compact evidence; never reconstruct predictions."""
+    """Own typed MPC compact evidence for the exact completed observation."""
     if session_id is None or cook_id is None or not isinstance(outcome, Mapping):
         return ()
+    eligible = outcome.get("eligible")
+    rejection_reasons = outcome.get("rejection_reasons", ())
+    values = outcome.get("forecast_origin_evidence", ())
+    if (
+        not isinstance(eligible, bool)
+        or not isinstance(rejection_reasons, tuple)
+        or not all(isinstance(reason, str) and reason for reason in rejection_reasons)
+        or not isinstance(values, tuple)
+        or not all(isinstance(value, ForecastOriginEvidence) for value in values)
+    ):
+        return ()
+    timestamp_ms = int(observation.frame_end_s * 1_000)
+    summary = ModelEvidenceRecord(
+        evidence_id=(
+            f"{session_id}:session-summary:{timestamp_ms}:"
+            f"{observation.observation_sequence}:{observation.role_generation}"
+        ),
+        kind=EvidenceKind.SESSION_SUMMARY,
+        session_id=session_id,
+        cook_id=cook_id,
+        timestamp_ms=timestamp_ms,
+        role_generation=observation.role_generation,
+        model_digest=outcome.get("model_digest") if isinstance(outcome.get("model_digest"), str) else None,
+        provenance_digest=None,
+        payload=SessionSummaryEvidence(
+            completed_origins=len(values),
+            accepted_observations=int(eligible),
+            rejected_observations=int(not eligible),
+            rejection_reasons=rejection_reasons,
+        ),
+    )
     evaluation = outcome.get("evaluation_payload")
-    values = outcome.get("forecast_origin_evidence")
     refresh = outcome.get("refresh_diagnostics_evidence")
     decision_id = getattr(evaluation, "decision_id", None)
     evaluated_at_ms = getattr(evaluation, "evaluated_at_ms", None)
     role_generation = getattr(evaluation, "role_generation", None)
     challenger_digest = getattr(evaluation, "challenger_digest", None)
+    incumbent_digest = getattr(evaluation, "incumbent_digest", None)
     if (
         not isinstance(decision_id, str)
         or not isinstance(evaluated_at_ms, int)
         or isinstance(evaluated_at_ms, bool)
         or evaluated_at_ms < 0
         or not isinstance(role_generation, int)
-        or not isinstance(values, tuple)
-        or not all(isinstance(value, ForecastOriginEvidence) for value in values)
     ):
-        return ()
+        return (summary,)
     records = tuple(
         ModelEvidenceRecord(
             evidence_id=f"{session_id}:{decision_id}:{value.origin_sequence}:{value.horizon_steps}:{value.completion_time_ms}",
@@ -124,19 +162,23 @@ def _freeze_evidence(
         for value in values
     )
     if not isinstance(refresh, RefreshDiagnosticsEvidence):
-        return records
-    return records + (
-        ModelEvidenceRecord(
-            evidence_id=f"{session_id}:{decision_id}:refresh:{role_generation}",
-            kind=EvidenceKind.REFRESH_DIAGNOSTICS,
-            session_id=session_id,
-            cook_id=cook_id,
-            timestamp_ms=evaluated_at_ms,
-            role_generation=role_generation,
-            model_digest=challenger_digest,
-            provenance_digest=incumbent_digest,
-            payload=refresh,
-        ),
+        return (summary,) + records
+    return (
+        (summary,)
+        + records
+        + (
+            ModelEvidenceRecord(
+                evidence_id=f"{session_id}:{decision_id}:refresh:{role_generation}",
+                kind=EvidenceKind.REFRESH_DIAGNOSTICS,
+                session_id=session_id,
+                cook_id=cook_id,
+                timestamp_ms=evaluated_at_ms,
+                role_generation=role_generation,
+                model_digest=challenger_digest,
+                provenance_digest=incumbent_digest,
+                payload=refresh,
+            ),
+        )
     )
 
 
@@ -572,7 +614,17 @@ class SyncControllerRunner(ControllerRunner):
                 withheld.append(envelope)
                 continue
             session_id, cook_id = context
-            envelopes.append(replace(envelope, evidence=_freeze_evidence(envelope.outcome, session_id, cook_id)))
+            envelopes.append(
+                replace(
+                    envelope,
+                    evidence=_freeze_evidence(
+                        envelope.outcome,
+                        session_id,
+                        cook_id,
+                        envelope.observation,
+                    ),
+                )
+            )
         self._observation_outcomes = withheld
         terminal_drops: list[ObservationTerminalDrop] = []
         withheld_drops: collections.deque[ObservationTerminalDrop] = collections.deque()
@@ -913,7 +965,6 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._pending_target = setpoint
 
-
     def request_calibration(self, command: "CalibrationCommand") -> None:
         with self._lock:
             self._pending_calibrations.append(("command", command))
@@ -1019,14 +1070,26 @@ class ThreadedControllerRunner(ControllerRunner):
     def drain_observation_outcomes(self) -> ObservationOutcomeDrain:
         with self._lock:
             envelopes: list[ObservationOutcomeEnvelope] = []
-            withheld: collections.deque[ObservationOutcomeEnvelope] = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
+            withheld: collections.deque[ObservationOutcomeEnvelope] = collections.deque(
+                maxlen=_MAX_PENDING_OBSERVATIONS
+            )
             for envelope in self._observation_outcomes:
                 context = self._evidence_contexts.get(envelope.configuration_generation)
                 if context is None:
                     withheld.append(envelope)
                     continue
                 session_id, cook_id = context
-                envelopes.append(replace(envelope, evidence=_freeze_evidence(envelope.outcome, session_id, cook_id)))
+                envelopes.append(
+                    replace(
+                        envelope,
+                        evidence=_freeze_evidence(
+                            envelope.outcome,
+                            session_id,
+                            cook_id,
+                            envelope.observation,
+                        ),
+                    )
+                )
             self._observation_outcomes = withheld
             terminal_drops: list[ObservationTerminalDrop] = []
             withheld_drops: collections.deque[ObservationTerminalDrop] = collections.deque()

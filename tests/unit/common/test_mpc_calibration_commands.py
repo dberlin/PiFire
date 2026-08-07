@@ -1,14 +1,16 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from copy import deepcopy
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 
-from common import api_commands
+from common import api_commands, datastore_accessors
 from common.control_delta import ControlDeltaError, control_delta
 from common.datastore_accessors import (
+    execute_control_writes,
     mpc_calibration_command_state,
     queue_mpc_calibration_command,
+    read_control,
     read_pending_control_writes,
 )
 from common.modes import Mode
@@ -147,6 +149,48 @@ def test_concurrent_equal_revisions_admit_exactly_one_fifo_command(ds):
     assert sorted(outcomes) == ["accepted", "rejected"]
     assert len(pending) == 1
     assert mpc_calibration_command_state({}, pending) == pending[0]["ops"][0]["command"]
+
+
+def test_fifo_drain_serializes_live_revision_and_high_water_reads(ds, monkeypatch):
+    start = _command(revision=4)
+    stop = _command(revision=4, action="stop")
+    assert queue_mpc_calibration_command(
+        control_delta(ops=[{"op": "mpc_calibration.set", "command": start}]),
+        start,
+        "test-start",
+    )
+    entered = Event()
+    release = Event()
+    apply_control_delta = datastore_accessors.apply_control_delta
+
+    def pause_inside_drain(control, delta):
+        entered.set()
+        assert release.wait(2)
+        return apply_control_delta(control, delta)
+
+    monkeypatch.setattr(datastore_accessors, "apply_control_delta", pause_inside_drain)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        drain = executor.submit(execute_control_writes)
+        assert entered.wait(2)
+        high_water = executor.submit(mpc_calibration_command_state)
+        admission = executor.submit(
+            queue_mpc_calibration_command,
+            control_delta(ops=[{"op": "mpc_calibration.set", "command": stop}]),
+            stop,
+            "test-stop",
+        )
+        with pytest.raises(TimeoutError):
+            high_water.result(timeout=0.2)
+        with pytest.raises(TimeoutError):
+            admission.result(timeout=0.2)
+        release.set()
+        assert drain.result(timeout=2) == "OK"
+        assert high_water.result(timeout=2) == start
+        with pytest.raises(ControlDeltaError, match="revision must exceed 4"):
+            admission.result(timeout=2)
+
+    assert read_control()["mpc_calibration"] == start
+    assert read_pending_control_writes() == ()
 
 
 @pytest.mark.parametrize(

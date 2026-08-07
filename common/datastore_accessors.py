@@ -142,18 +142,30 @@ def _mpc_calibration_command_from_delta(delta):
 
 def mpc_calibration_command_state(control=None, pending_writes=None):
     """Return the first accepted command at the highest live-or-queued revision."""
-    if control is None:
-        control = read_control()
+    if control is None and pending_writes is None:
+        with datastore.transaction() as connection:
+            row = connection.execute("SELECT value FROM kv WHERE key = 'control:general'").fetchone()
+            control = json.loads(row[0]) if row is not None else default_control()
+            pending_writes = tuple(
+                json.loads(queued[0])
+                for queued in connection.execute("SELECT value FROM queue_control_write ORDER BY id").fetchall()
+            )
+    else:
+        if control is None:
+            control = read_control()
+        if pending_writes is None:
+            pending_writes = read_pending_control_writes()
     current = control.get("mpc_calibration") if isinstance(control, dict) else None
     accepted = current if isinstance(current, dict) else None
-    if pending_writes is None:
-        pending_writes = read_pending_control_writes()
     for delta in pending_writes:
         command = _mpc_calibration_command_from_delta(delta)
         if command is None:
             continue
         revision = command.get("revision")
-        accepted_revision = accepted.get("revision") if accepted is not None else -1
+        accepted_value = accepted.get("revision") if accepted is not None else -1
+        accepted_revision = (
+            accepted_value if isinstance(accepted_value, int) and not isinstance(accepted_value, bool) else -1
+        )
         if isinstance(revision, int) and not isinstance(revision, bool) and revision > accepted_revision:
             accepted = command
     return accepted
@@ -229,47 +241,49 @@ def execute_control_writes():
 
     :return status : 'OK', 'ERROR'
     """
-    q = SqliteQueue("queue_control_write")
-    # Seed the base row if absent so the first merge on a fresh/flushed DB isn't
-    # silently dropped by the UPDATE below (mirrors read_control()'s default
-    # fallback, which the old read-modify-write path relied on).
-    if q.length() > 0 and datastore.get_blob("control:general") is None:
-        datastore.set_blob("control:general", json.dumps(default_control()))
-    while q.length() > 0:
-        command = q.pop()
-        if command is None:
-            break
-        if is_control_delta(command):
-            # A delta states intent, so nothing is inferred and nothing is reduced.
-            # Ops branch on LIVE state, so this is a read-modify-write rather than
-            # a json_patch: read what earlier patches in this batch already left.
-            # `origin` is deliberately NOT popped first -- apply_control_delta
-            # ignores it, and names it in the unsupported-version error.
-            control = read_control()
-            apply_control_delta(control, command)
-            _write_json_blob("control:general", control)
-            continue
-        origin = command.pop("origin", None)
-        stripped = []
-        patch = strip_null_members(command, stripped)
-        if stripped:
-            # Temporary diagnostic: after the base.py None->False cleanup, no
-            # PiFire-internal MERGE should carry nulls. A hit here means a source
-            # is still sending them (or a client did via /api/control) -- fix that
-            # source, then this strip + log can be removed. Logged at ERROR so it
-            # surfaces even when control.log is at its production ERROR level.
-            logging.getLogger("control").error(
-                "execute_control_writes: stripped null member(s) %s from MERGE partial (origin=%r); "
-                "json_patch would delete these keys. Fix the source to stop sending nulls.",
-                stripped,
-                origin,
-            )
-        if not patch:
-            continue  # nothing to apply; json_patch would be a no-op
-        datastore.execute_write(
-            "UPDATE kv SET value = json_patch(value, ?) WHERE key = 'control:general'", (json.dumps(patch),)
-        )
-    return "OK"
+    while True:
+        with datastore.transaction() as conn:
+            row = conn.execute("SELECT id, value FROM queue_control_write ORDER BY id LIMIT 1").fetchone()
+            if row is None:
+                return "OK"
+            command = json.loads(row[1])
+            control_row = conn.execute("SELECT value FROM kv WHERE key = 'control:general'").fetchone()
+            if control_row is None:
+                control = default_control()
+                conn.execute(
+                    "INSERT INTO kv(key, value) VALUES ('control:general', ?)",
+                    (json.dumps(control),),
+                )
+            else:
+                control = json.loads(control_row[0])
+            if is_control_delta(command):
+                # Admission, dequeue, and live-state replacement share this
+                # write transaction. A revision checker can therefore observe
+                # either the queued command or its applied live value, never
+                # the gap between two independent commits.
+                apply_control_delta(control, command)
+                conn.execute(
+                    "UPDATE kv SET value=? WHERE key='control:general'",
+                    (json.dumps(control),),
+                )
+            else:
+                origin = command.pop("origin", None)
+                stripped = []
+                patch = strip_null_members(command, stripped)
+                if stripped:
+                    logging.getLogger("control").error(
+                        "execute_control_writes: stripped null member(s) %s from MERGE partial "
+                        "(origin=%r); json_patch would delete these keys. Fix the source to stop "
+                        "sending nulls.",
+                        stripped,
+                        origin,
+                    )
+                if patch:
+                    conn.execute(
+                        "UPDATE kv SET value = json_patch(value, ?) WHERE key = 'control:general'",
+                        (json.dumps(patch),),
+                    )
+            conn.execute("DELETE FROM queue_control_write WHERE id=?", (row[0],))
 
 
 def _writable_error_kind(kind):

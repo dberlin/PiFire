@@ -186,7 +186,12 @@ def _records():
     )
     summary = _record(
         "summary",
-        SessionSummaryEvidence(completed_origins=2, accepted_observations=12, rejected_observations=3),
+        SessionSummaryEvidence(
+            completed_origins=2,
+            accepted_observations=12,
+            rejected_observations=3,
+            rejection_reasons=("lid-open", "stale"),
+        ),
         timestamp_ms=125,
         model_digest=_CANDIDATE,
         provenance_digest=_INCUMBENT,
@@ -317,7 +322,7 @@ def test_projection_reports_typed_progress_scores_diagnostics_timing_and_history
         "missing_stages": [],
         "eligible_count": 12,
         "ineligible_count": 3,
-        "ineligible_reasons": [],
+        "ineligible_reasons": ["lid-open", "stale"],
         "timed_out": False,
         "incomplete": False,
         "revision": 7,
@@ -511,6 +516,32 @@ def test_active_calibration_stage_is_not_reported_as_completed():
         "high",
         "coast",
     ]
+
+
+def test_production_terminal_completion_infers_finished_coast_transition():
+    frame = _calibration("high", 3, ("low", "middle", "high"))
+    terminal_payload = replace(
+        frame.payload,
+        accepted=False,
+        status="inactive",
+        stage=None,
+    )
+    terminal = frame.model_copy(
+        update={
+            "evidence_id": "calibration-terminal-complete",
+            "payload": terminal_payload,
+        }
+    )
+
+    payload = build_evidence_report(
+        _confidence((terminal,)),
+        (terminal,),
+    ).to_dict()["calibration"]
+
+    assert payload["status"] == "accepted"
+    assert payload["completed_stages"] == ["low", "middle", "high", "coast"]
+    assert payload["missing_stages"] == []
+    assert payload["incomplete"] is False
 
 
 def test_reset_progress_excludes_prior_stages_reasons_and_counts():

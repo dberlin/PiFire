@@ -316,10 +316,8 @@ def _calibration(records: Sequence[ModelEvidenceRecord]) -> dict[str, object]:
         )
     for record in calibration:
         payload = cast(CalibrationSummaryEvidence, record.payload)
-        if payload.accepted and payload.continuous:
+        if payload.continuous:
             completed.update(payload.completed_stages)
-            if payload.status == "accepted" and payload.stage is not None:
-                completed.add(payload.stage)
         if not payload.accepted and payload.reason is not None:
             reasons.add(payload.reason)
         if payload.cancellation_reason is not None:
@@ -333,19 +331,25 @@ def _calibration(records: Sequence[ModelEvidenceRecord]) -> dict[str, object]:
             )
             if value is not None
         )
+    if set(_STAGE_ORDER[:-1]).issubset(completed):
+        completed.add(_STAGE_ORDER[-1])
     missing = [stage for stage in _STAGE_ORDER if stage not in completed]
     ordered_completed = [stage for stage in _STAGE_ORDER if stage in completed]
-    timed_out = any("timeout" in reason.lower() for reason in reasons)
     if summaries:
         eligible_count = sum(summary.accepted_observations for summary in summaries)
         ineligible_count = sum(summary.rejected_observations for summary in summaries)
+        for summary in summaries:
+            reasons.update(summary.rejection_reasons)
     else:
         eligible_count = latest.eligible_observations if latest is not None else 0
-        ineligible_count = len(reasons)
+        ineligible_count = 0
+    timed_out = any("timeout" in reason.lower() for reason in reasons)
     if latest is None:
         status = "inactive"
     elif latest.status == "active" and latest.command_action == "pause":
         status = "paused"
+    elif not missing and latest.status == "inactive":
+        status = "accepted"
     else:
         status = latest.status
     return {
