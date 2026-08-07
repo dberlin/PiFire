@@ -964,66 +964,53 @@ class HoldMode(ControlMode):
         scheduler = self._pulse_scheduler
         if scheduler is None:
             return
+        controller = self.state.controller
         self._trace_safety(
             SafetyEventType.SCHEDULER_RESET,
             now,
             f"framed pulse scheduler reset: {reason.value}",
             inhibit,
-            result_revision=self.state.controller.pulse_frame_result_revision,
+            result_revision=controller.pulse_frame_result_revision,
         )
-        actual_auger_on = self.grill.get_output_status()["auger"]
-        controller = self.state.controller
         completed_revision = controller.pulse_frame_result_revision
-        completed_request = controller.pulse_frame_requested_auger_duty
         completed_maximum_duty = controller.pulse_frame_maximum_duty
         completed_source = getattr(controller, "pulse_frame_output_source", OutputSource.CONTROLLER)
         completed_calibration_revision = getattr(controller, "pulse_frame_calibration_command_revision", 0)
         completed_calibration_action = getattr(controller, "pulse_frame_calibration_command_action", "none")
         completed_calibration_generation = getattr(controller, "pulse_frame_calibration_command_generation", 0)
-        decision = scheduler.advance(self.state.controller.pulse_requested_duty, now, actual_auger_on)
+        decision = scheduler.advance(
+            controller.pulse_requested_duty, now, self.grill.get_output_status()["auger"]
+        )
         self._record_pulse_delivery(decision.delivered_on_s)
         observation_temp = self._last_ptemp if ptemp is None else ptemp
         for completed in decision.completed_frames:
-            self._trace_pulse_frame(completed, inhibit, self.state.controller.pulse_frame_result_revision)
+            self._trace_pulse_frame(completed, inhibit, completed_revision)
             self._observe_completed_pulse_frame(completed, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
         if report_feedback and decision.completed_frames:
-            completed = decision.completed_frames[0]
-            if completed.ended_at_s > completed.nominal_start_s:
-                self._set_output(
-                    AppliedOutput(
-                        ratio=completed.delivered_on_s / (completed.ended_at_s - completed.nominal_start_s),
-                        source=completed_source,
-                        timestamp=completed.ended_at_s,
-                        requested=completed.latched_request,
-                    ),
-                    completed.ended_at_s,
-                    producing_revision=completed_revision,
-                    producing_calibration_revision=completed_calibration_revision,
-                    producing_calibration_action=completed_calibration_action,
-                    producing_calibration_generation=completed_calibration_generation,
-                    sample_complete=not completed.skipped,
-                    feedback_disposition=(
-                        FrameFeedbackDisposition.DISCARDED
-                        if completed.skipped
-                        else FrameFeedbackDisposition.COMPLETE
-                    ),
-                )
+            first = decision.completed_frames[0]
+            self._record_terminal_framed_output(
+                first,
+                source=completed_source,
+                result_revision=completed_revision,
+                maximum_duty=completed_maximum_duty,
+                calibration_revision=completed_calibration_revision,
+                calibration_action=completed_calibration_action,
+                calibration_generation=completed_calibration_generation,
+                feedback_disposition=(
+                    FrameFeedbackDisposition.DISCARDED
+                    if first.skipped
+                    else FrameFeedbackDisposition.COMPLETE
+                ),
+            )
             for skipped in decision.completed_frames[1:]:
-                if skipped.ended_at_s <= skipped.nominal_start_s:
-                    continue
-                self._set_output(
-                    AppliedOutput(
-                        ratio=skipped.delivered_on_s / (skipped.ended_at_s - skipped.nominal_start_s),
-                        source=completed_source,
-                        timestamp=skipped.ended_at_s,
-                        requested=skipped.latched_request,
-                    ),
-                    skipped.ended_at_s,
-                    producing_revision=completed_revision,
-                    producing_calibration_revision=completed_calibration_revision,
-                    producing_calibration_action=completed_calibration_action,
-                    producing_calibration_generation=completed_calibration_generation,
-                    sample_complete=False,
+                self._record_terminal_framed_output(
+                    skipped,
+                    source=completed_source,
+                    result_revision=completed_revision,
+                    maximum_duty=completed_maximum_duty,
+                    calibration_revision=completed_calibration_revision,
+                    calibration_action=completed_calibration_action,
+                    calibration_generation=completed_calibration_generation,
                     feedback_disposition=FrameFeedbackDisposition.DISCARDED,
                 )
         elif report_feedback and cancellation_reason is None:
@@ -1044,24 +1031,27 @@ class HoldMode(ControlMode):
         if frame is not None:
             self._observe_completed_pulse_frame(frame, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
             self._trace_pulse_frame(frame, inhibit, self.state.controller.pulse_frame_result_revision)
-            if cancellation_reason is not None and frame.ended_at_s > frame.nominal_start_s:
-                self._set_output(
-                    AppliedOutput(
-                        ratio=frame.delivered_on_s / (frame.ended_at_s - frame.nominal_start_s),
-                        source=classify_output_source(
-                            lid_open=self.state.lid.open_detected,
-                            manual_override_active=self.state.manual_override["auger"] >= frame.ended_at_s,
-                        ),
-                        timestamp=frame.ended_at_s,
-                        requested=frame.latched_request,
+            if cancellation_reason is not None:
+                self._record_terminal_framed_output(
+                    frame,
+                    source=classify_output_source(
+                        lid_open=self.state.lid.open_detected,
+                        manual_override_active=self.state.manual_override["auger"] >= frame.ended_at_s,
                     ),
-                    frame.ended_at_s,
-                    producing_revision=self.state.controller.pulse_frame_result_revision,
-                    sample_complete=False,
+                    result_revision=self.state.controller.pulse_frame_result_revision,
+                    maximum_duty=self.state.controller.pulse_frame_maximum_duty,
+                    calibration_revision=getattr(
+                        self.state.controller, "pulse_frame_calibration_command_revision", 0
+                    ),
+                    calibration_action=getattr(
+                        self.state.controller, "pulse_frame_calibration_command_action", "none"
+                    ),
+                    calibration_generation=getattr(
+                        self.state.controller, "pulse_frame_calibration_command_generation", 0
+                    ),
                     feedback_disposition=FrameFeedbackDisposition.DISCARDED,
                 )
         self._pulse_frame_role_generation = 0
-        controller = self.state.controller
         controller.pulse_metrics_delivered_on_s = decision.delivered_on_s
         controller.pulse_feedback_start_s = now
         controller.pulse_feedback_delivered_on_s = decision.delivered_on_s
@@ -1587,6 +1577,66 @@ class HoldMode(ControlMode):
         )
         controller.trace_interval_start_ms = end_ms
 
+    def _record_terminal_framed_output(
+        self,
+        frame: PulseFrameResult,
+        *,
+        source: OutputSource,
+        result_revision: int,
+        maximum_duty: float,
+        calibration_revision: int,
+        calibration_action: str,
+        calibration_generation: int,
+        feedback_disposition: FrameFeedbackDisposition,
+    ) -> None:
+        """Emit one closed physical frame without re-closing a prior interval."""
+        duration_s = frame.ended_at_s - frame.nominal_start_s
+        if duration_s <= 0.0:
+            return
+        ratio = frame.delivered_on_s / duration_s
+        realized_load = normalized_load_from_auger_duty(ratio, u_max=maximum_duty)
+        sample_complete = (
+            feedback_disposition is FrameFeedbackDisposition.COMPLETE
+            and source is OutputSource.CONTROLLER
+        )
+        controller = self.state.controller
+        self._trace_record(
+            TraceEventKind.APPLIED_OUTPUT,
+            AppliedOutputPayload(
+                result_revision=result_revision,
+                interval_start_ms=int(frame.nominal_start_s * 1_000),
+                interval_end_ms=int(frame.ended_at_s * 1_000),
+                realized_auger_duty=ratio,
+                realized_combustion_load=realized_load if sample_complete else None,
+                actual_fan_duty=(
+                    controller.pulse_frame_applied_fan_duty if controller.controls_fan else None
+                ),
+                sample_complete=sample_complete,
+                output_source=source,
+            ),
+            int(frame.ended_at_s * 1_000),
+        )
+        self._runner.set_output(
+            AppliedOutput(
+                ratio=ratio,
+                source=source,
+                timestamp=frame.ended_at_s,
+                requested=frame.latched_request,
+                producing_result_revision=result_revision,
+                producing_calibration_revision=calibration_revision,
+                producing_calibration_action=calibration_action,
+                producing_calibration_generation=calibration_generation,
+                feedback_disposition=feedback_disposition,
+                sample_complete=sample_complete,
+            )
+        )
+        controller.trace_interval_start_ms = int(frame.ended_at_s * 1_000)
+        controller.trace_interval_result_revision = result_revision
+        controller.trace_prior_requested_auger_duty = frame.latched_request
+        controller.trace_prior_realized_auger_duty = ratio
+        controller.trace_prior_output_source = source
+        controller.trace_prior_fan_duty = controller.pulse_frame_applied_fan_duty
+        controller.trace_prior_combustion_load = realized_load
     def _set_output(
         self,
         applied: AppliedOutput,

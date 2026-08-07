@@ -222,7 +222,7 @@ class PulseScheduler:
             latched_request=self._latched_request,
             credit_before_s=credit_before_s,
             credit_after_s=self._credit_s,
-            scheduled_on_s=0,
+            scheduled_on_s=self.timing.frame_s if self._last_actual_on else 0,
             delivered_on_s=delivered_on_s,
             observed_transition_count=0,
             actual_start_on=self._last_actual_on,
