@@ -155,3 +155,5 @@ htmlcov/
 # WAL/shm sidecars change on every read, so tracking them made `jj st` dirty
 # constantly and dragged a 30MB binary toward every commit.
 .tokensave/
+
+.superpowers/
