@@ -1292,39 +1292,69 @@ class Controller(ControllerBase):
 
     def _state_space_refresh_evidence(self, model):
         snapshot = model.snapshot()
-        diagnostics = snapshot.get("diagnostics")
-        if not isinstance(diagnostics, Mapping):
-            return None
-        attempts = tuple(
-            {
-                "order": attempt["order"],
-                "delay": attempt["delay"],
-                "sample_count": attempt["sample_count"],
-                "hankel_shape": tuple(attempt["hankel_shape"]),
-                "singular_values": tuple(attempt["singular_values"]),
-                "effective_rank": attempt["effective_rank"],
-                "alignment_error_c": attempt["alignment_error_c"],
-                "rejection_reasons": tuple(attempt["rejection_reasons"]),
-                "elapsed_ms": attempt["elapsed_ms"],
-            }
-            for attempt in diagnostics.get("attempts", ())
-            if isinstance(attempt, Mapping)
+        latest = (
+            model.diagnostics
+            if isinstance(model, InnovationStateSpace)
+            else model._model.diagnostics
+            if isinstance(model, _StateSpaceShadow) and model._fitted
+            else None
         )
+        if latest is None:
+            diagnostics = snapshot.get("diagnostics")
+            if not isinstance(diagnostics, Mapping):
+                return None
+            attempts = tuple(
+                {
+                    "order": attempt["order"],
+                    "delay": attempt["delay"],
+                    "sample_count": attempt["sample_count"],
+                    "hankel_shape": tuple(attempt["hankel_shape"]),
+                    "singular_values": tuple(attempt["singular_values"]),
+                    "effective_rank": attempt["effective_rank"],
+                    "alignment_error_c": attempt["alignment_error_c"],
+                    "rejection_reasons": tuple(attempt["rejection_reasons"]),
+                    "elapsed_ms": attempt["elapsed_ms"],
+                }
+                for attempt in diagnostics.get("attempts", ())
+                if isinstance(attempt, Mapping)
+            )
+            accepted = diagnostics.get("accepted")
+            terminal_reason = diagnostics.get("terminal_reason")
+            selected_order = diagnostics.get("selected_order")
+            selected_delay = diagnostics.get("selected_delay")
+        else:
+            attempts = tuple(
+                {
+                    "order": attempt.order,
+                    "delay": attempt.delay,
+                    "sample_count": attempt.sample_count,
+                    "hankel_shape": attempt.hankel_shape,
+                    "singular_values": attempt.singular_values,
+                    "effective_rank": attempt.effective_rank,
+                    "alignment_error_c": attempt.alignment_error_c,
+                    "rejection_reasons": tuple(reason.value for reason in attempt.rejection_reasons),
+                    "elapsed_ms": attempt.elapsed_ms,
+                }
+                for attempt in latest.attempts
+            )
+            accepted = latest.accepted
+            terminal_reason = None if latest.terminal_reason is None else latest.terminal_reason.value
+            selected_order = latest.selected_order
+            selected_delay = latest.selected_delay
         evidence = {
-            "accepted": diagnostics.get("accepted"),
-            "terminal_reason": diagnostics.get("terminal_reason"),
+            "accepted": accepted,
+            "terminal_reason": terminal_reason,
             "attempts": attempts,
             "refresh_duration_ms": sum(attempt["elapsed_ms"] for attempt in attempts),
             "state_space_digest": OnlineAdaptation.model_digest(model),
         }
-        if not diagnostics.get("accepted"):
+        if not accepted:
             return evidence
         selected = next(
             (
                 attempt
                 for attempt in attempts
-                if (attempt["order"], attempt["delay"])
-                == (diagnostics.get("selected_order"), diagnostics.get("selected_delay"))
+                if (attempt["order"], attempt["delay"]) == (selected_order, selected_delay)
             ),
             None,
         )

@@ -568,7 +568,6 @@ class OnlineAdaptation:
             challenger_snapshot,
         )
         win = not reasons
-        has_complete_horizon_evidence = all(score.sample_count > 0 for score in horizon_scores)
         if win:
             self._consecutive_wins += 1
         elif self._scores.prediction_count:
@@ -1174,6 +1173,7 @@ class OnlineAdaptation:
             candidate_prediction is None
             or incumbent_prediction is None
             or not candidate_prediction < incumbent_prediction
+            or (self._role_generation > 0 and any(score.sample_count == 0 for score in horizon_scores))
             or any(
                 score.sample_count > 0
                 and (
@@ -1506,9 +1506,20 @@ def _freeze_evidence_value(value: object) -> object:
     return value
 
 
-def _snapshot_digest(snapshot: Mapping[str, object]) -> str:
-    encoded = json.dumps(_owned_json(snapshot), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+def canonical_model_snapshot_digest(snapshot: Mapping[str, object]) -> str:
+    """Hash stable generation parameters, never mutable filter/runtime state."""
+    owned = _owned_json(snapshot)
+    if not isinstance(owned, dict):
+        raise TypeError("snapshot must be a mapping")
+    identity: object = owned
+    if owned.get("schema") == "innovation-state-space/v2":
+        identity = {key: owned.get(key) for key in ("schema", "config", "model", "bounds", "plausibility_bounds")}
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _snapshot_digest(snapshot: Mapping[str, object]) -> str:
+    return canonical_model_snapshot_digest(snapshot)
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:

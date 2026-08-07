@@ -32,7 +32,6 @@ class OutputSource(Enum):
     SEED = "seed"
 
 
-
 class FrameFeedbackDisposition(Enum):
     """Whether an output report is routine state or terminal frame feedback."""
 
@@ -41,15 +40,14 @@ class FrameFeedbackDisposition(Enum):
     DISCARDED = "discarded"
 
 
-_CALIBRATION_ACTIONS = frozenset(
-    {"none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"}
-)
+_CALIBRATION_ACTIONS = frozenset({"none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"})
 
 
 def _non_negative_int(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{name} must be a non-negative integer")
     return value
+
 
 @dataclass(frozen=True)
 class AppliedOutput:

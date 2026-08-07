@@ -384,15 +384,16 @@ def test_the_estimator_and_history_receive_the_applied_normalized_load(mpc_contr
     assert mpc_controller.cook_history()[-1][-1] == pytest.approx(applied)
 
 
-def test_no_output_report_assumes_the_bounded_command_was_applied(mpc_controller, monkeypatch):
+def test_no_output_report_retains_the_last_measured_applied_load(mpc_controller, monkeypatch):
     seen = []
     real = mpc_controller.estimator.update
     monkeypatch.setattr(mpc_controller.estimator, "update", lambda u, y: (seen.append(u), real(u, y))[1])
     mpc_controller.set_target(225.0)
+    applied = mpc_controller._applied_combustion_load
+    first = mpc_controller.update(200.0)
+    assert first["cycle_ratio"] != pytest.approx(applied)
     mpc_controller.update(200.0)
-    commanded = mpc_controller._last_combustion_load
-    mpc_controller.update(200.0)
-    assert seen[-1] == pytest.approx(commanded)
+    assert seen[-1] == pytest.approx(applied)
 
 
 def test_nlp_decision_is_a_residual_with_a_baseline_tvp_and_physical_total_bounds(mpc_controller):

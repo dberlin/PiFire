@@ -365,11 +365,7 @@ class InMemoryStore(Store):
             state = self._generic.get("controller_model_state")
             if state is None:
                 models = {}
-            elif (
-                not isinstance(state, dict)
-                or state.get("version") != 1
-                or not isinstance(state.get("models"), dict)
-            ):
+            elif not isinstance(state, dict) or state.get("version") != 1 or not isinstance(state.get("models"), dict):
                 return False
             else:
                 models = copy.deepcopy(state["models"])

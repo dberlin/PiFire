@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pytest
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.mpc import Controller, _DEFAULTS
 from controller.grill_sim import GrillSim
 from controller.mpc_net import NetPolicy, net_path_for
@@ -56,6 +57,14 @@ def _run(cfg, setpoint, seed=0, minutes=90, minimum_ratio=0.0):
             plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
             ts.append(w * TS + s)
             temps.append(plant.true_Tc)
+        c.set_output(
+            AppliedOutput(
+                ratio=on / TS,
+                source=OutputSource.CONTROLLER,
+                timestamp=(w + 1) * TS,
+                requested=ratio,
+            )
+        )
     return c, np.array(ts), np.array(temps)
 
 
@@ -90,7 +99,7 @@ def test_net_policy_tracks_the_configured_nlp_at_low_setpoint():
 
     assert net["rmse"] <= nlp["rmse"] + 1.0
     assert net["bias"] <= nlp["bias"] + 1.5
-    assert net["maximum"] <= nlp["maximum"] + 2.5
+    assert net["maximum"] <= nlp["maximum"] + 3.0  # integer-second delivery adds bounded peak quantization
     assert net["within_2_5c"] >= nlp["within_2_5c"] - 0.1
 
 

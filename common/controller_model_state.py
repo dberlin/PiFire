@@ -80,7 +80,7 @@ def _valid(snapshot):
         return False
     try:
         encoded = json.dumps(snapshot, allow_nan=False)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return len(encoded.encode("utf-8")) <= MAX_SNAPSHOT_BYTES
 
@@ -92,6 +92,7 @@ def copy_valid_snapshot(snapshot):
     except Exception:
         return None
     return owned_snapshot if _valid(owned_snapshot) else None
+
 
 _logger = logging.getLogger("control")
 _BACKEND_STATES_LOCK = threading.Lock()

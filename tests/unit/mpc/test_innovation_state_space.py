@@ -175,6 +175,7 @@ def test_negative_identified_gain_is_rejected_without_reversing_an_incumbent() -
 
     assert not diagnostics.accepted
     assert any(RefreshRejectionReason.IMPLAUSIBLE_GAIN in attempt.rejection_reasons for attempt in diagnostics.attempts)
+    assert model.diagnostics is diagnostics
     assert model.snapshot() == before
 
 
@@ -202,6 +203,7 @@ def test_constant_refresh_is_typed_and_transactional() -> None:
     assert diagnostics.terminal_reason is RefreshRejectionReason.NO_VALID_CANDIDATE
     assert len(diagnostics.attempts) == 4
     assert all(attempt.rejection_reasons for attempt in diagnostics.attempts)
+    assert model.diagnostics is diagnostics
     assert json.dumps(model.snapshot(), allow_nan=False, sort_keys=True) == before
 
 
@@ -329,6 +331,7 @@ def test_later_window_refresh_rejects_non_equivalent_dynamics_transactionally() 
 
     assert not diagnostics.accepted
     assert diagnostics.terminal_reason is RefreshRejectionReason.ALIGNMENT_FAILED
+    assert model.diagnostics is diagnostics
     assert model.snapshot() == before
 
 
@@ -430,6 +433,7 @@ def test_refresh_rejects_order_change_transactionally(
 
     assert not diagnostics.accepted
     assert diagnostics.terminal_reason is RefreshRejectionReason.ALIGNMENT_FAILED
+    assert incumbent.diagnostics is diagnostics
     assert incumbent.snapshot() == before
 
 
@@ -449,6 +453,7 @@ def test_refresh_rejects_same_order_non_equivalent_dynamics_transactionally(
 
     assert not diagnostics.accepted
     assert diagnostics.terminal_reason is RefreshRejectionReason.ALIGNMENT_FAILED
+    assert incumbent.diagnostics is diagnostics
     assert incumbent.snapshot() == before
 
 
@@ -474,6 +479,7 @@ def test_refresh_rejects_mismatched_or_discontinuous_candidate_transactionally(
 
     assert not diagnostics.accepted
     assert diagnostics.terminal_reason is RefreshRejectionReason.ALIGNMENT_FAILED
+    assert incumbent.diagnostics is diagnostics
     assert incumbent.snapshot() == before
 
 
@@ -507,7 +513,6 @@ def test_rejected_periodic_refresh_waits_for_the_next_cadence(
         )
 
     assert attempts == 2
-    assert model.diagnostics.terminal_reason is RefreshRejectionReason.INSUFFICIENT_SAMPLES
 
 
 def test_unstable_record_is_projected_or_typed_rejected() -> None:

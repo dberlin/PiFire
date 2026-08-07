@@ -812,7 +812,7 @@ def test_real_mak_replay_normalizes_reconstructed_duty_once_for_both_arms(
     )
     physical_ratio: dict[bool, list[float]] = {False: [], True: []}
     applied_q: dict[bool, list[float]] = {False: [], True: []}
-    requested_q: dict[bool, list[float]] = {False: [], True: []}
+    requested_duty: dict[bool, list[float]] = {False: [], True: []}
     controller_u_max: dict[bool, float] = {}
     controller_arm: dict[int, bool] = {}
     original_controller = online_arx_compare._controller
@@ -840,7 +840,7 @@ def test_real_mak_replay_normalizes_reconstructed_duty_once_for_both_arms(
         result = original_set_output(instance, output)
         arm = controller_arm[id(instance)]
         physical_ratio[arm].append(output.ratio)
-        requested_q[arm].append(output.requested)
+        requested_duty[arm].append(output.requested)
         applied_q[arm].append(instance._applied_combustion_load)
         return result
 
@@ -853,7 +853,7 @@ def test_real_mak_replay_normalizes_reconstructed_duty_once_for_both_arms(
 
     for arm in (False, True):
         expected_normalized_q = q / controller_u_max[arm]
-        np.testing.assert_allclose(requested_q[arm], expected_normalized_q, rtol=0.0, atol=1e-12)
+        np.testing.assert_allclose(requested_duty[arm], q, rtol=0.0, atol=1e-12)
         np.testing.assert_allclose(applied_q[arm], expected_normalized_q, rtol=0.0, atol=1e-12)
         np.testing.assert_array_equal(physical_ratio[arm], q)
     np.testing.assert_allclose(RecordingScheduledARX.observed_q, q / 0.9, rtol=0.0, atol=1e-12)

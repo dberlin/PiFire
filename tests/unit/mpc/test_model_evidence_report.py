@@ -25,11 +25,20 @@ from common.datastore_accessors import ModelActivationState
 from controller.linear_mpc import report as report_module
 from controller.linear_mpc.confidence import ConfidenceStatus
 from controller.linear_mpc.report import build_evidence_artifact, build_evidence_report
+from controller.linear_mpc.activation import canonical_snapshot_digest
 
 
-_ACTIVE_JSON = '{"schema":"innovation-state-space/v2"}'
+_ACTIVE_SNAPSHOT = {
+    "schema": "innovation-state-space/v2",
+    "config": {},
+    "model": {"generation": "b"},
+    "bounds": {},
+    "plausibility_bounds": {},
+    "state": {"temperature_c": 123.0},
+}
+_ACTIVE_JSON = json.dumps(_ACTIVE_SNAPSHOT, sort_keys=True, separators=(",", ":"))
 _ROLLBACK_JSON = '{"schema":"grey-box-adapter/v1"}'
-_CANDIDATE = hashlib.sha256(_ACTIVE_JSON.encode()).hexdigest()
+_CANDIDATE = canonical_snapshot_digest(_ACTIVE_SNAPSHOT)
 _INCUMBENT = hashlib.sha256(_ROLLBACK_JSON.encode()).hexdigest()
 _CONTROLLER_CONFIG = "d" * 64
 
@@ -435,6 +444,7 @@ def test_new_candidate_never_inherits_an_older_generation_decision():
 
 
 def test_activation_identity_remains_bound_when_a_later_challenger_arrives():
+    assert _CANDIDATE != hashlib.sha256(_ACTIVE_JSON.encode()).hexdigest()
     records = _records()
     confidence = replace(
         _confidence(records),
@@ -471,8 +481,9 @@ def test_activation_identity_remains_bound_when_a_later_challenger_arrives():
 
 
 def test_fallback_report_projects_prior_state_space_as_the_exact_active_owner():
-    rollback_json = '{"generation":"a","schema":"innovation-state-space/v2"}'
-    rollback_digest = hashlib.sha256(rollback_json.encode()).hexdigest()
+    rollback_snapshot = {**_ACTIVE_SNAPSHOT, "model": {"generation": "a"}}
+    rollback_json = json.dumps(rollback_snapshot, sort_keys=True, separators=(",", ":"))
+    rollback_digest = canonical_snapshot_digest(rollback_snapshot)
     records = tuple(
         record for record in _records() if not isinstance(record.payload, (ActivationEvidence, RollbackEvidence))
     )

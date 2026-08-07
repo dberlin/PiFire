@@ -130,6 +130,7 @@ def test_decision_carries_measured_completed_stage_names() -> None:
     assert coast.stage == "coast"
     assert coast.completed_stages == ("low",)
 
+
 def test_start_fails_closed_when_no_active_grey_box_prediction_is_available():
     decision = CalibrationCoordinator().start(command(), context())
     assert not decision.active
@@ -146,7 +147,9 @@ def test_seed_changes_only_pair_order_and_initial_sign_not_zero_sum_dwell_multis
     assert first.snapshot()["dwell_counts"] == second.snapshot()["dwell_counts"] == (2, 3, 5, 4, 3, 2)
     assert sum(first.snapshot()["signed_dwell_plan"]) == pytest.approx(0.0)
     assert sum(second.snapshot()["signed_dwell_plan"]) == pytest.approx(0.0)
-    assert sorted(map(abs, first.snapshot()["signed_dwell_plan"])) == sorted(map(abs, second.snapshot()["signed_dwell_plan"]))
+    assert sorted(map(abs, first.snapshot()["signed_dwell_plan"])) == sorted(
+        map(abs, second.snapshot()["signed_dwell_plan"])
+    )
 
 
 def test_probes_are_bounded_and_grey_box_overshoot_cancels_without_a_challenger():
@@ -255,6 +258,7 @@ def test_stage_completion_coasts_to_each_upward_band_before_starting_the_next_ex
     high = coordinator.advance(context(now_s=100.0, temp_c=CENTERS[2], target_c=CENTERS[2]))
     assert high.active and high.stage == "high" and high.probe_q != 0.0
 
+
 def test_progress_requires_30_observations_three_levels_variance_signs_rank_coverage_continuity_and_zero_mean():
     coordinator, decision = start()
     current = decision
@@ -341,12 +345,8 @@ def test_completed_history_survives_terminal_coast_stop_and_snapshot_restore():
         ("coverage", {}, {"coverage_progress": 0.0}),
     ],
 )
-def test_each_numeric_ready_gate_below_its_threshold_keeps_the_stage_incomplete(
-    gate, config_changes, runtime_changes
-):
-    coordinator, decision = start(
-        CalibrationCoordinator(CalibrationConfig(**config_changes), safe_prediction)
-    )
+def test_each_numeric_ready_gate_below_its_threshold_keeps_the_stage_incomplete(gate, config_changes, runtime_changes):
+    coordinator, decision = start(CalibrationCoordinator(CalibrationConfig(**config_changes), safe_prediction))
     result = advance_stage(
         coordinator,
         decision,
@@ -381,13 +381,14 @@ def test_final_high_completion_and_terminal_snapshot_preserve_every_completed_st
         coordinator, middle, stage_context=context(now_s=46.0, temp_c=CENTERS[1], target_c=CENTERS[1])
     )
     high = coordinator.advance(context(now_s=100.0, temp_c=CENTERS[2], target_c=CENTERS[2]))
-    final = advance_stage(
-        coordinator, high, stage_context=context(now_s=101.0, temp_c=CENTERS[2], target_c=CENTERS[2])
-    )
+    final = advance_stage(coordinator, high, stage_context=context(now_s=101.0, temp_c=CENTERS[2], target_c=CENTERS[2]))
     assert not final.active and final.events[-1].kind == "completed"
     snapshot = coordinator.snapshot()
     assert len(snapshot["completed_stages"]) == 3
-    assert CalibrationCoordinator.from_snapshot(snapshot, safe_prediction).snapshot()["completed_stages"] == snapshot["completed_stages"]
+    assert (
+        CalibrationCoordinator.from_snapshot(snapshot, safe_prediction).snapshot()["completed_stages"]
+        == snapshot["completed_stages"]
+    )
 
 
 def test_rejected_restart_preserves_completed_history_until_an_accepted_start():
@@ -427,13 +428,9 @@ def test_coast_predictor_exception_and_timeout_preserve_history_and_restore_term
 
 def test_snapshot_restored_historical_discontinuity_blocks_only_readiness():
     coordinator, decision = start()
-    incomplete = advance_stage(
-        coordinator, decision, stage_context=context(now_s=1.0, rank_progress=0.0)
-    )
+    incomplete = advance_stage(coordinator, decision, stage_context=context(now_s=1.0, rank_progress=0.0))
     snapshot = dict(coordinator.snapshot())
-    snapshot["state"] = replace(
-        snapshot["state"], rank_progress=1.0, continuous=False
-    )
+    snapshot["state"] = replace(snapshot["state"], rank_progress=1.0, continuous=False)
     restored = CalibrationCoordinator.from_snapshot(snapshot, safe_prediction)
     result = restored.advance(context(now_s=45.0))
     assert result.active and result.stage == "low"
@@ -479,9 +476,7 @@ def test_timeout_and_post_completion_safety_abort_terminal_snapshots_round_trip_
         coordinator, middle, stage_context=context(now_s=46.0, temp_c=CENTERS[1], target_c=CENTERS[1])
     )
     high = coordinator.advance(context(now_s=100.0, temp_c=CENTERS[2], target_c=CENTERS[2]))
-    advance_stage(
-        coordinator, high, stage_context=context(now_s=101.0, temp_c=CENTERS[2], target_c=CENTERS[2])
-    )
+    advance_stage(coordinator, high, stage_context=context(now_s=101.0, temp_c=CENTERS[2], target_c=CENTERS[2]))
     coordinator.cancel_probe("post_complete_safety")
     safety_snapshot = coordinator.snapshot()
     assert CalibrationCoordinator.from_snapshot(safety_snapshot, safe_prediction).snapshot() == safety_snapshot

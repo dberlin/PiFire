@@ -59,13 +59,13 @@ def learning_observations(records: Iterable[ControlTraceRecord]) -> tuple[FrameO
     return _fallback_observations(trace, session)
 
 
-
 def _allocation_payloads(trace: tuple[ControlTraceRecord, ...]) -> dict[int, list[AllocationPayload]]:
     allocations: dict[int, list[AllocationPayload]] = {}
     for record in trace:
         if isinstance(payload := record.payload, AllocationPayload):
             allocations.setdefault(payload.result_revision, []).append(payload)
     return allocations
+
 
 def _validate_session(records: tuple[ControlTraceRecord, ...]) -> SessionPayload:
     if not records:
@@ -110,7 +110,9 @@ def _exact_observations(
         expected_load = normalized_load_from_auger_duty(payload.realized_auger_duty, u_max=allocation.u_max)
         if (
             allocation.allocator_revision != payload.allocator_revision
-            or not math.isclose(payload.allocated_combustion_load, allocation.normalized_combustion_load, rel_tol=0, abs_tol=1e-9)
+            or not math.isclose(
+                payload.allocated_combustion_load, allocation.normalized_combustion_load, rel_tol=0, abs_tol=1e-9
+            )
             or not math.isclose(payload.requested_auger_duty, allocation.requested_auger_duty, rel_tol=0, abs_tol=1e-9)
             or not math.isclose(payload.realized_auger_duty, expected_duty, rel_tol=0, abs_tol=1e-9)
             or not math.isclose(payload.realized_combustion_load, expected_load, rel_tol=0, abs_tol=1e-9)

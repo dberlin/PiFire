@@ -292,6 +292,7 @@ def test_explicit_failed_checkpoint_outcome_blocks_later_submissions():
     finally:
         worker.flush_and_stop(timeout=1.0)
 
+
 def test_evidence_batch_overflow_preserves_queued_fifo_and_records_every_omitted_origin():
     store = _Store()
     written = []

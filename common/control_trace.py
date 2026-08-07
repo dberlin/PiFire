@@ -516,7 +516,9 @@ class ModelObservationPayload:
     role_generation: NonNegativeInt
     model_digest: Digest | None
     calibration_command_revision: NonNegativeInt = 0
-    calibration_command_action: Literal["none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"] = "none"
+    calibration_command_action: Literal[
+        "none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"
+    ] = "none"
     calibration_cancellation_reason: NonBlankString | None = None
     baseline_allocation: AllocationPayload | None = None
     combined_allocation: AllocationPayload | None = None

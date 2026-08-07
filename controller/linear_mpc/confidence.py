@@ -269,10 +269,16 @@ def evaluate_confidence(
         and not schema_invalidated,
         "schema-integrity",
     )
-    for reason in dict.fromkeys(
-        record.payload.reason for record in selected if isinstance(record.payload, RecorderGapEvidence)
-    ):
-        _gate(gates, f"evidence-continuity:{reason}", False, reason)
+    continuity_records = (
+        record
+        for record in records
+        if isinstance(record.payload, RecorderGapEvidence)
+        and generation is not None
+        and record.role_generation == generation
+        and record.model_digest in (None, digest)
+    )
+    for reason in dict.fromkeys(record.payload.reason for record in continuity_records):
+        _gate(gates, "evidence-continuity", False, reason)
     _gate(gates, "untouched-future-rows", bool(origins), "untouched-future-rows")
 
     intervals = _bootstrap_intervals(origins, config)

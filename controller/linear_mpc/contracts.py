@@ -139,8 +139,8 @@ class FrameObservation:
         object.__setattr__(self, "probe_q", probe_q)
         allocated_q = self.requested_q if self.allocated_q is None else _bounded_duty(self.allocated_q, "allocated_q")
         object.__setattr__(self, "allocated_q", allocated_q)
-        scheduled_on_s = self.delivered_on_s if self.scheduled_on_s is None else _finite_float(
-            self.scheduled_on_s, "scheduled_on_s"
+        scheduled_on_s = (
+            self.delivered_on_s if self.scheduled_on_s is None else _finite_float(self.scheduled_on_s, "scheduled_on_s")
         )
         if scheduled_on_s < 0.0:
             raise ValueError("scheduled_on_s must be non-negative")
@@ -151,8 +151,8 @@ class FrameObservation:
             else _bounded_duty(self.realized_auger_duty, "realized_auger_duty")
         )
         object.__setattr__(self, "realized_auger_duty", realized_auger_duty)
-        allocator_revision = 0 if self.allocator_revision is None else _nonnegative_int(
-            self.allocator_revision, "allocator_revision"
+        allocator_revision = (
+            0 if self.allocator_revision is None else _nonnegative_int(self.allocator_revision, "allocator_revision")
         )
         object.__setattr__(self, "allocator_revision", allocator_revision)
         clamp_reasons = tuple(self.allocation_clamp_reasons)
@@ -161,7 +161,13 @@ class FrameObservation:
         object.__setattr__(self, "allocation_clamp_reasons", clamp_reasons)
         command_revision = _nonnegative_int(self.calibration_command_revision, "calibration_command_revision")
         if self.calibration_command_action not in {
-            "none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"
+            "none",
+            "start",
+            "pause",
+            "resume",
+            "stop",
+            "reset-progress",
+            "safety-cancel",
         }:
             raise ValueError("invalid calibration_command_action")
         if self.calibration_cancellation_reason is not None and (
@@ -183,9 +189,7 @@ class FrameObservation:
         if self.calibration_status not in {"inactive", "accepted", "rejected", "active", "cancelled"}:
             raise ValueError("invalid calibration_status")
         _nonnegative_int(self.cancellation_command_revision, "cancellation_command_revision")
-        if self.cancellation_command_action not in {
-            "none", "pause", "stop", "reset-progress", "safety-cancel"
-        }:
+        if self.cancellation_command_action not in {"none", "pause", "stop", "reset-progress", "safety-cancel"}:
             raise ValueError("invalid cancellation_command_action")
         temperature_band = self.temperature_band
         if temperature_band is None:
@@ -204,9 +208,8 @@ class FrameObservation:
         ):
             raise ValueError("calibration_stage must be a non-empty string when present")
         completed_stages = tuple(self.completed_calibration_stages)
-        if (
-            len(set(completed_stages)) != len(completed_stages)
-            or any(stage not in {"low", "middle", "high"} for stage in completed_stages)
+        if len(set(completed_stages)) != len(completed_stages) or any(
+            stage not in {"low", "middle", "high"} for stage in completed_stages
         ):
             raise ValueError("completed_calibration_stages must be unique known heating stages")
         object.__setattr__(self, "completed_calibration_stages", completed_stages)

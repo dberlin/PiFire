@@ -86,7 +86,7 @@ def test_control_trace_schema_has_indexed_typed_envelope(ds):
     assert index_columns == {("session_id", "id"), ("cook_id", "id"), ("ts_ms",)}
 
 
-def test_v4_database_upgrades_to_v5_without_altering_existing_rows(tmp_path):
+def test_v4_database_upgrades_to_v6_without_altering_existing_rows(tmp_path):
     db_path = str(tmp_path / "v4.db")
     conn = sqlite3.connect(db_path)
     try:
@@ -100,7 +100,7 @@ def test_v4_database_upgrades_to_v5_without_altering_existing_rows(tmp_path):
     datastore._reset_for_tests(db_path)
     try:
         upgraded = datastore.connection()
-        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == 6
         assert upgraded.execute("SELECT value FROM kv WHERE key='preserved'").fetchone()[0] == '{"value": 1}'
         assert upgraded.execute("SELECT COUNT(*) FROM control_trace").fetchone()[0] == 0
     finally:
@@ -205,7 +205,7 @@ def test_schema_filtered_reads_and_incompatible_pruning_are_bounded(ds):
         [
             (999, "shared", "shared-cook", "pid", "session", 2, '"old"'),
             (998, "old-only", "old-cook", "pid", "session", 2, '"old"'),
-            (997, "future-only", "future-cook", "pid", "session", 4, '"future"'),
+            (997, "future-only", "future-cook", "pid", "session", 5, '"future"'),
         ],
     )
     append_control_trace([current, _record(1_001, "current-second", "shared-cook")])
@@ -217,10 +217,10 @@ def test_schema_filtered_reads_and_incompatible_pruning_are_bounded(ds):
         _record(1_001, "current-second", "shared-cook"),
     ]
 
-    assert prune_incompatible_control_trace(3, limit=1) == 1
-    assert prune_incompatible_control_trace(3, limit=1) == 1
-    assert prune_incompatible_control_trace(3, limit=1) == 0
-    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(4,), (3,), (3,)]
+    assert prune_incompatible_control_trace(4, limit=1) == 1
+    assert prune_incompatible_control_trace(4, limit=1) == 1
+    assert prune_incompatible_control_trace(4, limit=1) == 0
+    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(5,), (4,), (4,)]
 
 
 def test_age_pruning_never_deletes_a_future_schema_row(ds):
@@ -230,12 +230,12 @@ def test_age_pruning_never_deletes_a_future_schema_row(ds):
         INSERT INTO control_trace(ts_ms, session_id, cook_id, controller, event_kind, schema_version, payload)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (0, "future", None, "pid", "session", 4, '"future"'),
+        (0, "future", None, "pid", "session", 5, '"future"'),
     )
     append_control_trace([_record(1, "current-old"), _record(100, "current-new")])
 
     assert prune_control_trace(50, limit=10) == 1
-    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(4,), (3,)]
+    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(5,), (4,)]
 
 
 def test_recorder_maintenance_preserves_old_future_rows(ds):
@@ -247,7 +247,7 @@ def test_recorder_maintenance_preserves_old_future_rows(ds):
         """,
         [
             (0, "legacy", None, "pid", "session", 2, '"legacy"'),
-            (0, "future", None, "pid", "session", 4, '"future"'),
+            (0, "future", None, "pid", "session", 5, '"future"'),
         ],
     )
     append_control_trace([_record(0, "current")])
@@ -259,4 +259,4 @@ def test_recorder_maintenance_preserves_old_future_rows(ds):
     )
 
     assert recorder is not None
-    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(4,)]
+    assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [(5,)]

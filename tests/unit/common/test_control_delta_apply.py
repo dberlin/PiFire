@@ -77,6 +77,7 @@ def test_the_applier_does_not_alias_the_envelope():
     control["manual"]["pwm"] = 99
     assert envelope["set"]["manual"]["pwm"] == 50
 
+
 def _calibration_command(revision, maximum_temperature_c=130.0):
     return {
         "action": "start",

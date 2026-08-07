@@ -291,6 +291,7 @@ def test_completed_origin_keeps_classification_from_its_forecast_frame() -> None
     assert completed.temperature_band == "origin-band"
     assert completed.ambient_source is AmbientSource.MEASURED
 
+
 def test_candidate_must_win_each_horizon_not_only_the_pooled_score() -> None:
     manager = OnlineAdaptation(
         HorizonAffineModel({3: 5.0, 15: 1.0}, digest="incumbent"),
@@ -329,14 +330,12 @@ def _winning_manager() -> OnlineAdaptation:
     )
 
 
-def _populate_one_window(manager: OnlineAdaptation, start_index: int = 0) -> None:
-    for index in range(start_index, start_index + 16):
+def _populate_one_window(manager: OnlineAdaptation, start_index: int = 0, frame_count: int = 16) -> None:
+    for index in range(start_index, start_index + frame_count):
         manager.observe(
             frame(index, temperature=0.0),
             braking=index > start_index and index % 2 == 0,
         )
-
-
 
 
 def test_promotion_requires_two_wins_and_prospective_commit() -> None:
@@ -621,8 +620,8 @@ def test_rollback_after_a_second_promotion_rewarms_the_restored_prior_arx() -> N
     manager.incumbent.bias = 1.0
     manager.challenger.bias = 0.0
 
-    _populate_one_window(manager, start_index=16)
-    second = manager.evaluate_due(at_s=600.0)
+    _populate_one_window(manager, start_index=16, frame_count=181)
+    second = manager.evaluate_due(at_s=3940.0)
     assert second.promoted
     assert manager.commit_promotion(second.decision_id, SimpleNamespace(objective=0.0, kkt_residual=0.0))
     assert manager.previous_incumbent_digest == manager.model_digest(restored_on_later_rollback)

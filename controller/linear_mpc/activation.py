@@ -20,7 +20,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
-from .adaptation import state_space_structure_digest
+from .adaptation import canonical_model_snapshot_digest, state_space_structure_digest
 from .confidence import ConfidenceReport, parameter_promotion_blockers
 from .state_space import InnovationStateSpace
 
@@ -647,9 +647,8 @@ class ActivationManager:
 
 
 def canonical_snapshot_digest(snapshot: Mapping[str, object]) -> str:
-    """Return the canonical snapshot identity used by online adaptation."""
-    encoded = _canonical_json(_owned_mapping(snapshot, "snapshot")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    """Return the stable parameter-generation identity used by evidence."""
+    return canonical_model_snapshot_digest(_owned_mapping(snapshot, "snapshot"))
 
 
 def canonical_configuration_digest(configuration: Mapping[str, object]) -> str:

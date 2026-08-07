@@ -911,10 +911,6 @@ def commit_model_rollback(
             current = None if state_row is None else ModelActivationState(*state_row)
             if current != expected_activation:
                 raise ValueError("activation-state-changed")
-            active = json.loads(expected_activation.active_snapshot_json)
-            active_digest = hashlib.sha256(
-                json.dumps(active, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-            ).hexdigest()
             stored_rows = conn.execute(
                 """
                 SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
@@ -937,13 +933,14 @@ def commit_model_rollback(
                     and record.payload.controller_configuration_digest
                     == expected_activation.controller_configuration_digest
                     and record.role_generation == expected_activation.role_generation
-                    and record.model_digest == active_digest
+                    and record.model_digest is not None
                 ),
                 key=lambda record: (record.timestamp_ms, record.evidence_id),
                 default=None,
             )
             if activation is None:
                 raise ValueError("activation-lineage-missing")
+            active_digest = activation.model_digest
             existing = max(
                 (
                     record

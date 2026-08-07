@@ -95,6 +95,20 @@ def test_hold_records_baseline_and_probe_on_framed_observation(hold_cycle):
     assert runner.observations[0].requested_q == 0.4
 
 
+def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cycle):
+    runner = FakeControllerRunner(period=1.0).script([_result(active=True, stage="low")])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(22.0, 200.0, hold.grill.get_output_status())
+
+    observation = runner.observations[0]
+    assert observation.calibration_status == "active"
+    assert observation.probe_q == 0.0
+    assert hold._calibration_frame_evidence(observation, "session", "cook") is None
+
+
 def test_default_five_second_polls_terminalize_only_the_twenty_second_frame(hold_cycle):
     runner = FakeControllerRunner(period=5.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
@@ -245,7 +259,8 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
             stale_state=ResultStaleState.STALE,
             result_age_seconds=1.0,
         )
-    runner = FakeControllerRunner(period=1.0).script([active, following])
+    inactive = _result(3)
+    runner = FakeControllerRunner(period=1.0).script([active, following, inactive])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -265,6 +280,18 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
     assert cancelled.probe_q == pytest.approx(0.1)
     assert runner.calibration_cancellations == [expected_reason]
     assert hold.state.controller.pulse_requested_duty == pytest.approx(following.baseline_allocation.auger_duty)
+
+    if intervention == "scheduler-reset":
+        hold.on_tick(24.0, 200.0, hold.grill.get_output_status())
+        baseline = runner.observations[-1]
+        assert baseline.result_revision == following.revision
+        assert baseline.probe_q == 0.0
+        assert baseline.calibration_status == "inactive"
+        assert baseline.calibration_cancellation_reason is None
+        assert baseline.cancellation_command_revision == 0
+        assert baseline.cancellation_command_action == "none"
+        assert baseline.combined_allocation == following.baseline_allocation
+        assert runner.calibration_cancellations == ["reset"]
 
 
 def test_scheduler_reset_does_not_notify_inactive_calibration_owner(hold_cycle) -> None:
@@ -396,7 +423,7 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     runner.observation_outcome = {
         "role_generation": 0,
         "eligible": False,
-        "rejection_reasons": (),
+        "rejection_reasons": ("insufficient-history",),
         "input_variance": 0.0,
         "input_levels": 0,
         "incumbent_innovation_c": None,
@@ -411,12 +438,11 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(26.0, 200.0, hold.grill.get_output_status())
+    hold._reconcile_model_observation_outcomes(26.0)
     assert runner.observations
     assert runner.observations[-1].calibration_stage == "coast"
     assert runner.observations[-1].calibration_command_revision == 1
-    direct = hold._calibration_frame_evidence(runner.observations[-1], hold._trace_session_id, hold._trace_cook_id)
-    assert direct is not None
-    assert hold._persistence_worker.submit_evidence_batch((direct,)).accepted
     assert hold._persistence_worker.flush_and_stop(timeout=1.0)
 
     coast = [
@@ -424,4 +450,5 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
         for record in persisted
         if record.kind is EvidenceKind.CALIBRATION_SUMMARY and record.payload.stage == "coast"
     ]
-    assert coast and coast[-1].completed_stages == ("low", "middle", "high")
+    assert len(coast) == 1
+    assert coast[0].completed_stages == ("low", "middle", "high")

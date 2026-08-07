@@ -297,7 +297,31 @@ def test_rejected_active_refresh_records_exact_reason_without_mutating_incumbent
     assert model.diagnostics is rejected
     assert model.diagnostics.terminal_reason is RefreshRejectionReason.RANK_DEFICIENT
     refreshed_snapshot = model.snapshot()
-    assert refreshed_snapshot["diagnostics"] != incumbent["diagnostics"]
-    assert {key: value for key, value in refreshed_snapshot.items() if key != "diagnostics"} == {
-        key: value for key, value in incumbent.items() if key != "diagnostics"
-    }
+    assert refreshed_snapshot == incumbent
+    restored = InnovationStateSpace.from_snapshot(refreshed_snapshot)
+    assert restored.snapshot() == incumbent
+    assert restored.diagnostics.accepted
+
+
+def test_generation_digest_changes_only_when_an_accepted_refresh_replaces_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from controller.linear_mpc.activation import canonical_snapshot_digest
+    from controller.linear_mpc.state_space import InnovationStateSpace
+    from tests.unit.mpc.test_innovation_state_space import _alignment_frames, _config
+    import controller.linear_mpc.state_space as state_space_module
+
+    frames = _alignment_frames(count=120)
+    model = InnovationStateSpace(_config(orders=(2,), delays=(1,)))
+    assert model.fit(frames[:96]).accepted
+    generation_digest = canonical_snapshot_digest(model.snapshot())
+
+    model.track(frames[96])
+    assert canonical_snapshot_digest(model.snapshot()) == generation_digest
+    monkeypatch.setattr(
+        state_space_module,
+        "_align_refresh_realization",
+        lambda candidate, state, covariance, *_args: (candidate, state, covariance, 0.0),
+    )
+    assert model.refresh(frames).accepted
+    assert canonical_snapshot_digest(model.snapshot()) != generation_digest

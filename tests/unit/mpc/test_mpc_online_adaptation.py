@@ -12,6 +12,8 @@ import pytest
 
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
 from controller.linear_mpc.adaptation import AdaptationPolicy
+from controller.linear_mpc.adaptation import EvaluationDecision
+from controller.linear_mpc.adaptation import HorizonScore
 from controller.linear_mpc.adaptation import EvaluationRejectionReason
 from controller.linear_mpc.adaptation import OnlineAdaptation
 from controller.applied_output import AppliedOutput, OutputSource
@@ -71,6 +73,7 @@ def _frame(index: int, *, generation: int = 0, realized_q: float | None = None) 
         reset=False,
         continuous=True,
         role_generation=generation,
+        observation_sequence=index + 1,
     )
 
 
@@ -258,7 +261,6 @@ def _controller_after_first_arx_promotion(monkeypatch):
     controller._linear_config = _LinearConfig()
     controller._linear_policy = _LinearPolicy()
     controller._x_hat = np.asarray([0.0])
-
     latest = None
     for index in range(80, 96):
         latest = replace(_frame(index), temp_c=100.0)
@@ -299,20 +301,26 @@ class _Coordinator:
     def evaluate_due(self, at_s):
         self.evaluate_calls += 1
         promoted = self.evaluate_calls == 2
-        return SimpleNamespace(
+        return EvaluationDecision(
             decision_id=f"decision-{self.evaluate_calls}",
             evaluated_at_s=at_s,
+            generation=self.role_generation,
             promoted=promoted,
             committed=False,
             consecutive_wins=self.evaluate_calls,
             reasons=(),
             incumbent_prediction_score=2.0,
             candidate_prediction_score=1.0,
-            generation=self.role_generation,
             incumbent_braking_score=2.0,
             candidate_braking_score=1.0,
-            sample_count=8,
+            sample_count=0,
             prospective_digest="a" * 64 if promoted else None,
+            window_start_s=at_s,
+            window_end_s=at_s,
+            incumbent_digest="b" * 64,
+            challenger_digest="a" * 64,
+            completed_origins=(),
+            horizon_scores=tuple(HorizonScore(horizon, None, None, 0) for horizon in (3, 15, 45, 90, 180)),
         )
 
     def prospective_model(self, decision_id):
@@ -520,7 +528,7 @@ def test_active_scheduled_arx_restart_holds_default_five_second_solves_until_lag
     for index in range(80, 92):
         active.observe(_frame(index))
 
-    outcomes = [source._online.observe(_frame(index), ambient_future=np.full(15, 20.0)) for index in range(92, 116)]
+    outcomes = [source._online.observe(_frame(index), ambient_future=np.full(180, 20.0)) for index in range(92, 116)]
     assert any(outcome.gate.permitted for outcome in outcomes)
     fallback = source._online.incumbent
     source._online._previous_incumbent = fallback
@@ -596,7 +604,7 @@ def test_promoted_arx_keeps_a_distinct_learning_challenger_and_can_promote_again
     monkeypatch.setattr(first_challenger, "affine_prediction", _constant_prediction(100.0))
 
     latest = None
-    for index in range(96, 112):
+    for index in range(96, 277):
         latest = replace(_frame(index, generation=1), temp_c=100.0)
         outcome = controller.observe_frame(latest)
         assert outcome["role_generation"] == 1
@@ -649,7 +657,7 @@ def test_later_rollback_after_a_second_promotion_rewarms_the_restored_arx(monkey
     monkeypatch.setattr(first_challenger, "affine_prediction", _constant_prediction(100.0))
 
     latest = None
-    for index in range(96, 112):
+    for index in range(96, 277):
         latest = replace(_frame(index, generation=1), temp_c=100.0)
         controller.observe_frame(latest)
     assert latest is not None
@@ -660,7 +668,7 @@ def test_later_rollback_after_a_second_promotion_rewarms_the_restored_arx(monkey
     assert coordinator._previous_incumbent is first_incumbent
     monkeypatch.setattr(first_incumbent, "affine_prediction", first_incumbent_prediction)
     monkeypatch.setattr(first_challenger, "affine_prediction", first_challenger_prediction)
-    for index in range(112, 128):
+    for index in range(277, 293):
         controller.observe_frame(replace(_frame(index, generation=2), temp_c=100.0))
     assert coordinator.lag_warmup_remaining == 0
 
@@ -688,7 +696,7 @@ def test_later_rollback_after_a_second_promotion_rewarms_the_restored_arx(monkey
     assert controller.trace_diagnostics().policy_kind == "nlp"
     assert controller.get_status()["policy_failures"] == 0
 
-    for index in range(128, 144):
+    for index in range(293, 309):
         if coordinator.lag_warmup_remaining:
             command = controller.update(100.0)
             assert 0.0 <= command["cycle_ratio"] <= CYCLE["u_max"]

@@ -966,7 +966,7 @@ def _chronological_real_mak_row(arm: str) -> dict[str, Any]:
                 ratio=reconstructed_duty,
                 source=OutputSource.SEED,
                 timestamp=frame.frame_end_s,
-                requested=normalized_q,
+                requested=reconstructed_duty,
             )
         )
         controller.set_target(frame.setpoint_c)
@@ -977,8 +977,11 @@ def _chronological_real_mak_row(arm: str) -> dict[str, Any]:
                 timing["solve"].append(float(diagnostics.solve_duration_seconds) * 1_000.0)
         observation = replace(
             frame,
+            baseline_q=normalized_q,
+            probe_q=0.0,
             requested_q=normalized_q,
             realized_q=normalized_q,
+            allocated_q=normalized_q,
             output_source="requested-input-reconstruction",
             role_generation=0,
         )

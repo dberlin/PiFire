@@ -15,6 +15,7 @@ from common.model_evidence import (
     EvidenceKind,
     FallbackEvidence,
     ModelEvidenceRecord,
+    RecorderGapEvidence,
     RollbackEvidence,
 )
 from controller.linear_mpc.activation import activation_record_for_state, matching_activation_lifecycle
@@ -399,20 +400,41 @@ class HoldMode(ControlMode):
         return frame_key, observation
 
     def _record_pending_observation_gap(self, observation: FrameObservation, reason: str) -> None:
+        publication_ms = int(observation.frame_end_s * 1_000)
         self._trace_record(
             TraceEventKind.RECORDER_GAP,
             RecorderGapPayload(
                 lost_record_count=1,
                 gap_start_ms=int(observation.frame_start_s * 1_000),
-                gap_end_ms=int(observation.frame_end_s * 1_000),
+                gap_end_ms=publication_ms,
                 reason=reason,
                 frame_start_ms=int(observation.frame_start_s * 1_000),
-                frame_end_ms=int(observation.frame_end_s * 1_000),
+                frame_end_ms=publication_ms,
                 result_revision=observation.result_revision,
                 observation_sequence=observation.observation_sequence,
             ),
-            int(observation.frame_end_s * 1_000),
+            publication_ms,
         )
+        worker = self._persistence_worker
+        session_id = self._trace_session_id
+        if worker is None or not isinstance(session_id, str) or not session_id:
+            return
+        gap = ModelEvidenceRecord(
+            evidence_id=(
+                f"{session_id}:recorder-gap:{observation.role_generation}:"
+                f"{observation.observation_sequence}:{publication_ms}"
+            ),
+            kind=EvidenceKind.RECORDER_GAP,
+            session_id=session_id,
+            cook_id=self._trace_cook_id,
+            timestamp_ms=publication_ms,
+            role_generation=observation.role_generation,
+            model_digest=None,
+            provenance_digest=None,
+            payload=RecorderGapEvidence(lost_record_count=1, reason=reason),
+        )
+        if not worker.submit_evidence_batch((gap,)).accepted:
+            self._learning_evidence_available = False
 
     @staticmethod
     def _allocation_evidence(allocation):
@@ -458,6 +480,11 @@ class HoldMode(ControlMode):
             or observation.calibration_command_revision == 0
             or observation.baseline_allocation is None
             or observation.combined_allocation is None
+            or (
+                observation.calibration_status == "active"
+                and observation.probe_q == 0.0
+                and observation.calibration_stage != "coast"
+            )
         ):
             return None
         payload = CalibrationSummaryEvidence(

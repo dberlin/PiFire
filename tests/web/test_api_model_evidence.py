@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -168,10 +169,18 @@ def test_report_route_exposes_the_accepted_calibration_command_high_water(client
 
 
 def test_rollback_is_atomic_truthful_and_idempotent_for_the_exact_activation(client):
-    active_snapshot = {"schema": "innovation-state-space/v2", "generation": "b"}
-    rollback_snapshot = {"schema": "innovation-state-space/v2", "generation": "a"}
+    active_snapshot = {
+        "schema": "innovation-state-space/v2",
+        "config": {},
+        "model": {"generation": "b"},
+        "bounds": {},
+        "plausibility_bounds": {},
+        "state": {"temperature_c": 123.0},
+    }
+    rollback_snapshot = {**active_snapshot, "model": {"generation": "a"}}
     active_json = json.dumps(active_snapshot, sort_keys=True, separators=(",", ":"))
     rollback_json = json.dumps(rollback_snapshot, sort_keys=True, separators=(",", ":"))
+    assert canonical_snapshot_digest(active_snapshot) != hashlib.sha256(active_json.encode()).hexdigest()
     activation = ModelEvidenceRecord(
         evidence_id="activation-b",
         kind=EvidenceKind.ACTIVATION,
@@ -223,6 +232,7 @@ def test_rollback_is_atomic_truthful_and_idempotent_for_the_exact_activation(cli
     )
     rollbacks = [record for record in read_model_evidence() if isinstance(record.payload, RollbackEvidence)]
     assert len(rollbacks) == 1
+    assert rollbacks[0].model_digest == activation.model_digest == canonical_snapshot_digest(active_snapshot)
 
 
 def test_activate_route_reloads_live_authorities_at_commit(client, monkeypatch):

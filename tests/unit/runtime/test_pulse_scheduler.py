@@ -126,7 +126,6 @@ def test_multiple_missed_frames_are_recorded_and_discard_credit():
     assert skipped.scheduled_on_s == 0
 
 
-
 def test_skipped_on_frame_reports_physical_assumed_delivery_as_scheduled():
     scheduler = PulseScheduler()
     _advance(scheduler, 0.05, 0.0, actual_on=True)
@@ -136,6 +135,7 @@ def test_skipped_on_frame_reports_physical_assumed_delivery_as_scheduled():
     assert skipped.skipped is True
     assert skipped.scheduled_on_s == 20
     assert skipped.delivered_on_s == 20.0
+
 
 @pytest.mark.parametrize("at_s", [19.999, 20.0, 20.001])
 def test_nominal_boundary_alignment_is_stable_across_loop_jitter(at_s):

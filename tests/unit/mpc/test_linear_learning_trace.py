@@ -195,7 +195,6 @@ def _observation(*, temp_c: float = 100.0, ambient_c: float = 20.0) -> ControlTr
     )
 
 
-
 def _allocation_record(observation: ControlTraceRecord) -> ControlTraceRecord:
     payload = observation.payload
     assert isinstance(payload, ModelObservationPayload)
@@ -232,7 +231,9 @@ def test_exact_observation_requires_one_same_result_allocation() -> None:
     with pytest.raises(TraceSelectionError, match="missing-allocation"):
         learning_observations((_session(), observation))
     with pytest.raises(TraceSelectionError, match="ambiguous-allocation"):
-        learning_observations((_session(), _allocation_record(observation), _allocation_record(observation), observation))
+        learning_observations(
+            (_session(), _allocation_record(observation), _allocation_record(observation), observation)
+        )
 
 
 def test_calibration_replay_requires_one_same_result_allocation() -> None:
@@ -247,8 +248,11 @@ def test_calibration_replay_requires_one_same_result_allocation() -> None:
     with pytest.raises(TraceSelectionError, match="ambiguous-allocation"):
         calibration_samples((_session(), observation, allocation, allocation))
 
+
 def test_exact_observation_is_canonical_over_fallback_records() -> None:
-    frames = learning_observations((_session("F"), _frame(), _update(), _allocation_record(_observation()), _observation()))
+    frames = learning_observations(
+        (_session("F"), _frame(), _update(), _allocation_record(_observation()), _observation())
+    )
 
     assert len(frames) == 1
     assert frames[0].temp_c == pytest.approx(100.0)
@@ -372,7 +376,13 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
 
     replayed = learning_observations((_session("F"), identified_frame, _update(), zero_requested_frame, second_update))
     canonical = learning_observations(
-        (_session("F"), canonical_first, _allocation_record(canonical_first), canonical_second, _allocation_record(canonical_second))
+        (
+            _session("F"),
+            canonical_first,
+            _allocation_record(canonical_first),
+            canonical_second,
+            _allocation_record(canonical_second),
+        )
     )
 
     assert replayed == canonical
@@ -602,9 +612,7 @@ def test_learning_replay_preserves_rejected_exact_observations() -> None:
 
 
 def test_exact_observation_rejects_out_of_order_observation_sequence() -> None:
-    first = _observation().model_copy(
-        update={"payload": replace(_observation().payload, observation_sequence=1)}
-    )
+    first = _observation().model_copy(update={"payload": replace(_observation().payload, observation_sequence=1)})
     second = _observation().model_copy(
         update={
             "ts_ms": 40_000,

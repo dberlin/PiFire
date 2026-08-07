@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
@@ -274,7 +274,9 @@ def _record_indices(records, kind: TraceEventKind) -> list[int]:
 
 
 def test_live_scheduled_arx_evaluations_trace_all_five_causal_horizons(monkeypatch):
-    hold, _core, runner, recorder, gate, worker_clock = _make_live_hold(monkeypatch)
+    hold, core, runner, recorder, gate, worker_clock = _make_live_hold(monkeypatch)
+    assert core._online is not None
+    core._online.policy = replace(core._online.policy, required_consecutive_wins=99)
     try:
         for now in range(2, 4_203, 20):
             worker_clock.now = float(now)
@@ -290,16 +292,15 @@ def test_live_scheduled_arx_evaluations_trace_all_five_causal_horizons(monkeypat
             {score.horizon_steps for score in evaluation.horizon_scores} == {3, 15, 45, 90, 180}
             for evaluation in evaluations
         )
-        assert {
-            origin.horizon_steps
-            for evaluation in evaluations
-            for origin in evaluation.completed_origins
-        } >= {3, 15, 45, 90}
+        assert {origin.horizon_steps for evaluation in evaluations for origin in evaluation.completed_origins} >= {
+            3,
+            15,
+            45,
+            90,
+        }
     finally:
         gate.close()
         runner.stop()
-
-
 
 
 def test_restart_restores_one_win_but_rebuilds_a_post_shutdown_scoring_window(monkeypatch):

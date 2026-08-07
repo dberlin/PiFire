@@ -16,9 +16,11 @@ class _Policy:
     def make_step(self, state):
         return np.array([[0.4]])
 
+
 def _controller(monkeypatch, *, safe_forecast=True):
     monkeypatch.setattr(Controller, "_build_for", lambda self, cfg: (_Estimator(), None, object(), _Policy()))
     if safe_forecast:
+
         class SafeForecast:
             def forecast(self, q_future, ambient_future):
                 return np.full(len(q_future), 101.0)
@@ -62,7 +64,10 @@ def test_calibration_overlay_returns_baseline_and_combined_allocations(monkeypat
     assert result.calibration.active is True
     assert result.calibration.probe_q > 0.0
     assert result.baseline_allocation.normalized_combustion_load < result.allocation.normalized_combustion_load
-    assert result.allocation.normalized_combustion_load == result.baseline_allocation.normalized_combustion_load + result.calibration.probe_q
+    assert (
+        result.allocation.normalized_combustion_load
+        == result.baseline_allocation.normalized_combustion_load + result.calibration.probe_q
+    )
 
 
 def test_duplicate_calibration_revision_is_idempotent_and_stop_returns_baseline(monkeypatch):
@@ -77,7 +82,6 @@ def test_duplicate_calibration_revision_is_idempotent_and_stop_returns_baseline(
     assert active.calibration.probe_q > 0.0
     assert stopped.calibration.probe_q == 0.0
     assert stopped.allocation == stopped.baseline_allocation
-
 
 
 def test_fifo_commands_are_all_consumed_before_one_result_and_keep_provenance(monkeypatch):
@@ -143,7 +147,6 @@ def test_calibration_advances_once_per_delivered_output_not_per_solve(monkeypatc
     assert feedback.calibration.progress.positive_observations == 1
     assert feedback.calibration.command_revision == 1
     assert feedback.calibration.command_action == "start"
-
 
 
 def test_routine_frame_reports_preserve_the_latched_probe_until_one_completed_frame(monkeypatch):
@@ -215,6 +218,7 @@ def test_old_completed_frame_cannot_advance_a_newer_start(monkeypatch):
     assert after_old_completion.calibration.command_revision == 2
     assert after_old_completion.calibration.active is True
     assert after_old_completion.calibration.progress.eligible_observations == 0
+
 
 def test_delivered_frames_realize_both_probe_polarities_in_fifo_order(monkeypatch):
     controller = _controller(monkeypatch)

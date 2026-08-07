@@ -61,13 +61,14 @@ def _two_session_same_cook_horizon_three(*, first_session_has_block: bool):
             _session_origin(cook_a[2], session_id="session-restarted", origin_sequence=2, evidence_id="b-2"),
             _session_origin(cook_a[0], session_id="session-restarted", origin_sequence=3, evidence_id="b-3"),
         )
-    non_forecasts = tuple(
-        record for record in records if not isinstance(record.payload, ForecastOriginEvidence)
-    )
+    non_forecasts = tuple(record for record in records if not isinstance(record.payload, ForecastOriginEvidence))
     return non_forecasts + cook_b + sessions
 
+
 def _interval(records):
-    report = evaluate_confidence(records, activation_state=_state(), target_timing=None, config=ConfidenceConfig(bootstrap_seed=17))
+    report = evaluate_confidence(
+        records, activation_state=_state(), target_timing=None, config=ConfidenceConfig(bootstrap_seed=17)
+    )
     return next(interval for interval in report.bootstrap_intervals if interval.horizon_steps == 3)
 
 

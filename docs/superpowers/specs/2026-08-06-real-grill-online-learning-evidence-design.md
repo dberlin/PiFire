@@ -29,6 +29,7 @@ The first state-space activation requires explicit operator approval after every
 13. Old model-schema evidence cannot authorize a new model schema.
 14. First activation is manual. Later parameter-generation promotions are automatic only after passing all confidence gates.
 15. Missing, stale, contradictory, truncated, or non-causal evidence blocks readiness and promotion.
+16. A state-space parameter-generation digest covers the schema, identification configuration, accepted realization parameters/covariances, and structural bounds. Mutable filter state/covariance, lag record, runtime status/timing, refresh-attempt diagnostics, and counters do not change generation identity. Activation and rollback still persist the complete snapshot for exact reconstruction.
 
 ## 3. Existing foundation to reuse
 
@@ -447,6 +448,8 @@ Tests must prove:
 - schema invalidation clears readiness;
 - restart restores exact model/evidence generations;
 - corrupted or partial writes fail closed.
+- state/lag updates and rejected refresh diagnostics preserve a state-space generation digest, while an accepted parameter refresh changes it;
+- activation binds the reviewed parameter-generation digest while persisting the complete exact snapshot payload.
 
 ### 15.2 Calibration safety
 

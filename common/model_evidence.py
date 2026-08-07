@@ -166,8 +166,11 @@ class CalibrationSummaryEvidence:
                 raise ValueError("cancelled calibration evidence must retain cancellation attribution")
         if len(set(self.completed_stages)) != len(self.completed_stages):
             raise ValueError("completed calibration stages must be unique")
-        if self.stage == "coast" and not {"low", "middle", "high"} <= set(self.completed_stages):
-            raise ValueError("coast calibration evidence requires completed heating stages")
+        coast_order = ("low", "middle", "high", "coast")
+        if self.stage == "coast" and (
+            not self.completed_stages or self.completed_stages != coast_order[: len(self.completed_stages)]
+        ):
+            raise ValueError("coast calibration evidence requires an ordered completed-stage prefix")
         return self
 
 

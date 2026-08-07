@@ -2,7 +2,13 @@ import pytest
 
 from app import app as flask_app
 from common.common import WriteKind
-from common.datastore_accessors import execute_control_writes, read_control, read_settings, write_control, write_settings
+from common.datastore_accessors import (
+    execute_control_writes,
+    read_control,
+    read_settings,
+    write_control,
+    write_settings,
+)
 from common.modes import Mode
 
 
@@ -69,11 +75,14 @@ def test_path_arguments_cannot_transport_a_calibration_object(client):
 def test_drain_keeps_the_first_newest_queued_command_when_older_and_conflicting_commands_follow(client):
     first = _command(revision=4)
     assert client.post("/api/set_mpc_calibration", json=first).status_code == 201
-    assert client.post("/api/set_mpc_calibration", json=_command(revision=3)).status_code == 201
-    assert client.post(
+    stale = client.post("/api/set_mpc_calibration", json=_command(revision=3))
+    conflict = client.post(
         "/api/set_mpc_calibration",
         json=_command(revision=4, maximum_temperature_c=140.0),
-    ).status_code == 201
+    )
+    assert stale.status_code == conflict.status_code == 400
+    assert stale.get_json()["message"] == "MPC calibration revision must exceed 4"
+    assert conflict.get_json()["message"] == "MPC calibration revision must exceed 4"
 
     assert "mpc_calibration" not in read_control()
     execute_control_writes()

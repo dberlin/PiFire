@@ -97,7 +97,6 @@ def test_sync_runner_float_output_has_no_fan():
     assert out.cycle_ratio == 0.25 and out.fan is None
 
 
-
 def test_sync_runner_forwards_safety_cancellation_without_an_operator_command():
     class CalibrationCore(_Core):
         def __init__(self):
@@ -117,6 +116,7 @@ def test_sync_runner_forwards_safety_cancellation_without_an_operator_command():
     runner.cancel_calibration("lid-open")
 
     assert core.calls == [("command", "operator-command"), ("cancel", "lid-open")]
+
 
 def test_sync_runner_preserves_actuation_mode_and_reports_solve_quality():
     class Clock:

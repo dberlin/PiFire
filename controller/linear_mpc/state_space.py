@@ -243,6 +243,7 @@ class InnovationStateSpace:
         self._last_refresh_time_s: float | None = None
         self._refreshes = 0
         self._last_diagnostics = RefreshDiagnostics(False, RefreshRejectionReason.INSUFFICIENT_SAMPLES, ())
+        self._latest_diagnostics = self._last_diagnostics
         self._alignment_error_c: float | None = None
         self._bounds: _Bounds | None = None
 
@@ -254,18 +255,19 @@ class InnovationStateSpace:
     @property
     def diagnostics(self) -> RefreshDiagnostics:
         """Return the evidence associated with the latest fit/refresh attempt."""
-        return self._last_diagnostics
+        return self._latest_diagnostics
 
     def fit(self, observations: Sequence[FrameObservation]) -> RefreshDiagnostics:
         """Identify and install a realization only after full candidate validation."""
         frames = _bounded_frames(_frames(observations), self._config.max_buffer_samples)
         diagnostics, candidate, bounds = self._identify(frames)
-        self._last_diagnostics = diagnostics
+        self._latest_diagnostics = diagnostics
         if candidate is None:
             return diagnostics
         state = _state_from_frames(frames, candidate)
         covariance = candidate.process_covariance.copy()
         self._install(candidate, state, covariance, frames, bounds, reset_refreshes=True)
+        self._last_diagnostics = diagnostics
         self._alignment_error_c = None
         return diagnostics
 
@@ -273,8 +275,8 @@ class InnovationStateSpace:
         """Try a replacement realization without mutating an incumbent on rejection."""
         frames = _bounded_frames(_frames(observations), self._config.max_buffer_samples)
         diagnostics, candidate, bounds = self._identify(frames)
+        self._latest_diagnostics = diagnostics
         if candidate is None:
-            self._last_diagnostics = diagnostics
             return diagnostics
         state = _state_from_frames(frames, candidate)
         covariance = candidate.process_covariance.copy()
@@ -304,7 +306,7 @@ class InnovationStateSpace:
                     for attempt in diagnostics.attempts
                 )
                 diagnostics = RefreshDiagnostics(False, RefreshRejectionReason.ALIGNMENT_FAILED, attempts)
-                self._last_diagnostics = diagnostics
+                self._latest_diagnostics = diagnostics
                 return diagnostics
             candidate, state, covariance, output_error_c = alignment
             attempts = tuple(
@@ -318,7 +320,7 @@ class InnovationStateSpace:
             )
             self._alignment_error_c = output_error_c
         self._install(candidate, state, covariance, frames, bounds, reset_refreshes=False)
-        self._last_diagnostics = diagnostics
+        self._last_diagnostics = self._latest_diagnostics = diagnostics
         return diagnostics
 
     def observe(self, observation: FrameObservation) -> ModelUpdate:
@@ -328,7 +330,7 @@ class InnovationStateSpace:
             self._last_refresh_time_s is not None
             and observation.frame_end_s - self._last_refresh_time_s >= self._config.refresh_interval_s
         ):
-            self._last_diagnostics = self.refresh(self._history_frames())
+            self.refresh(self._history_frames())
             self._last_refresh_time_s = observation.frame_end_s
         return update
 
@@ -670,6 +672,7 @@ class InnovationStateSpace:
         restored._inputs, restored._ambients = inputs, ambients
         restored._buffer_samples = buffer_samples
         restored._bounds, restored._last_diagnostics = bounds, diagnostics
+        restored._latest_diagnostics = diagnostics
         restored._last_refresh_time_s, restored._refreshes = last_refresh, refreshes
         restored._alignment_error_c = alignment_error
         if restored.snapshot() != dict(snapshot):

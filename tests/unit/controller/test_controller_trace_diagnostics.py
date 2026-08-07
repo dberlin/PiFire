@@ -111,7 +111,11 @@ def _bare_mpc_controller():
     core._model_revision = 3
     core._model_meta = {"source": "cook-fit"}
     core._online = None
+    core._activation_manager = None
     core._online_pending_lifecycle = None
+    core._calibration_feedback = collections.deque()
+    core._calibration_operations = collections.deque()
+    core._trace_calibration = mpc.CalibrationDecision(False, 0.0, None, mpc.CalibrationProgress())
     core._net = _Policy()
     core.mpc = None
     core.estimator = _Estimator()

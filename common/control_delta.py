@@ -53,6 +53,7 @@ CONTROL_DELTA_OPS = frozenset(_OP_FIELDS)
 class ControlDeltaError(ValueError):
     """A malformed envelope raised while constructing a control delta."""
 
+
 def validated_mpc_calibration_command(value):
     """Return a canonical, JSON-safe MPC calibration command or raise ControlDeltaError."""
     if not isinstance(value, Mapping):

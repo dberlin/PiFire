@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from common.control_trace import (
+    TRACE_SCHEMA_VERSION,
     ControlTraceRecord,
     ControllerType,
     InhibitReason,
@@ -319,7 +320,10 @@ def test_incompatible_pruning_is_bounded_backlogged_and_does_not_block_flush():
     recorder.flush_due(FLUSH_INTERVAL_MS)
 
     assert batches == [(event,)]
-    assert incompatible_calls == [(3, PRUNE_BATCH_SIZE), (3, PRUNE_BATCH_SIZE)]
+    assert incompatible_calls == [
+        (TRACE_SCHEMA_VERSION, PRUNE_BATCH_SIZE),
+        (TRACE_SCHEMA_VERSION, PRUNE_BATCH_SIZE),
+    ]
 
 
 def test_incompatible_prune_failure_warns_once_retries_and_recovers():

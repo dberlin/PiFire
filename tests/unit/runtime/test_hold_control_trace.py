@@ -1,6 +1,7 @@
 """End-to-end Hold control-trace contracts using the normal fake runtime seam."""
 
 import queue
+from copy import deepcopy
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
@@ -24,7 +25,7 @@ from common.control_trace import (
     SafetyEventType,
     TraceEventKind,
 )
-from common.model_evidence import ModelEvidenceRecord
+from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
 from common.datastore_accessors import read_control_trace_session
 from common import datastore
 from controller.applied_output import OutputSource
@@ -1198,11 +1199,7 @@ def _promotion_outcome(*, frame_end_ms):
         challenger_digest=evaluation["challenger_digest"],
         completed_origins=tuple(
             {
-                **{
-                    key: value
-                    for key, value in origin.items()
-                    if key not in {"origin_time_s", "completion_time_s"}
-                },
+                **{key: value for key, value in origin.items() if key not in {"origin_time_s", "completion_time_s"}},
                 "origin_time_ms": int(origin["origin_time_s"] * 1_000),
                 "completion_time_ms": int(origin["completion_time_s"] * 1_000),
             }
@@ -1255,8 +1252,6 @@ def _state_space_evaluation():
     return evaluation
 
 
-
-
 def _learning_observation(frame_start_s):
     return FrameObservation(
         frame_start_s,
@@ -1298,9 +1293,7 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
     return recorder, runner, mode, first, second
 
 
-def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_teardown_context(
-    hold_cycle, monkeypatch
-):
+def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_teardown_context(hold_cycle, monkeypatch):
     class _WorkerGate:
         """Advance the real worker only when the test permits its next loop."""
 
@@ -1427,6 +1420,7 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             self._online_promotion_count = 0
             self._online_rollback_count = 0
             self._model_revision = 0
+            self._activation_manager = None
 
         def _active_arx(self):
             return True
@@ -1449,7 +1443,6 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
         def refit_from_cook(self):
             return None
 
-
     class _EvidenceWorker:
         evidence_blocked = False
 
@@ -1461,8 +1454,10 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             self.batches.append(records)
             return EvidenceSubmission(accepted=True)
 
-        def flush_and_stop(self):
+        def flush_and_stop(self, *, timeout=0.1):
+            del timeout
             self.stopped = True
+            return True
 
     recorder = _install_recorder(monkeypatch)
     gate = _WorkerGate()
@@ -1513,10 +1508,10 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
 
         assert len(worker.batches) == 1
         batch = worker.batches[0]
-        assert isinstance(batch, tuple) and len(batch) == 1
+        assert isinstance(batch, tuple) and len(batch) == 2
         with pytest.raises(AttributeError):
             batch.append(batch[0])
-        record = batch[0]
+        record = next(record for record in batch if isinstance(record.payload, ForecastOriginEvidence))
         assert isinstance(record, ModelEvidenceRecord)
 
         raw = next(
@@ -1576,7 +1571,9 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
         mode._observe_completed_pulse_frame(boundary_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
         import controller.runtime.runner as runner_module
 
-        monkeypatch.setattr(runner_module, "_build_core", lambda *_args, **_kwargs: (_CanonicalEvidenceCore(), "Active"))
+        monkeypatch.setattr(
+            runner_module, "_build_core", lambda *_args, **_kwargs: (_CanonicalEvidenceCore(), "Active")
+        )
         assert runner.reconfigure({}, {}) == "Active"
         pre_adoption_frame = replace(first_frame, nominal_start_s=40.0, nominal_end_s=60.0, ended_at_s=60.0)
         mode._observe_completed_pulse_frame(pre_adoption_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
@@ -1585,13 +1582,15 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
 
         old_session_id = session_id
         mode._reconcile_model_observation_outcomes(now=41.0)
-        assert [len(submission) for submission in worker.batches] == [1, 1]
+        assert [len(submission) for submission in worker.batches] == [2, 2]
         assert runner.drain_observation_outcomes().envelopes == ()
         mode._adopt_runner_configuration(42.0, mode.grill.get_output_status())
         new_session_id = mode._trace_session_id
         assert new_session_id is not None and new_session_id != old_session_id
-        assert [len(submission) for submission in worker.batches] == [1, 1, 1]
-        boundary_record = worker.batches[1][0]
+        assert [len(submission) for submission in worker.batches] == [2, 2, 2]
+        boundary_record = next(
+            record for record in worker.batches[1] if isinstance(record.payload, ForecastOriginEvidence)
+        )
         boundary_raw = [
             trace
             for trace in recorder.records
@@ -1608,8 +1607,12 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             boundary_raw.payload.role_generation,
             f"{old_session_id}:{boundary_raw.payload.decision_id}:2:3:40000",
         )
-        assert boundary_record.payload.completion_time_ms == boundary_raw.payload.completed_origins[0].completion_time_ms
-        pre_adoption_record = worker.batches[2][0]
+        assert (
+            boundary_record.payload.completion_time_ms == boundary_raw.payload.completed_origins[0].completion_time_ms
+        )
+        pre_adoption_record = next(
+            record for record in worker.batches[2] if isinstance(record.payload, ForecastOriginEvidence)
+        )
         pre_adoption_raw = [
             trace
             for trace in recorder.records
@@ -1639,10 +1642,10 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
         assert runner._stop_event.is_set()
         assert runner._evidence_contexts == {}
         assert worker.stopped is True
-        assert [len(submission) for submission in worker.batches] == [1, 1, 1, 1]
+        assert [len(submission) for submission in worker.batches] == [2, 2, 2, 2]
         evaluations = [trace for trace in recorder.records if trace.event_kind is TraceEventKind.MODEL_EVALUATION]
         assert len(evaluations) == 4
-        late_record = worker.batches[3][0]
+        late_record = next(record for record in worker.batches[3] if isinstance(record.payload, ForecastOriginEvidence))
         late_raw = [trace for trace in evaluations if trace.session_id == new_session_id][-1].payload
         late_origin = late_raw.completed_origins[0]
         assert (
@@ -1676,7 +1679,7 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             late_origin.challenger_digest,
             late_origin.temperature_band,
         )
-        assert len({record.evidence_id for submission in worker.batches for record in submission}) == 4
+        assert len({record.evidence_id for submission in worker.batches for record in submission}) == 8
         assert runner.drain_observation_outcomes().envelopes == ()
     finally:
         if not stopped:
@@ -1824,7 +1827,6 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         with runner._lock:
             runner._configuration_revision = 0
 
-
         mode.teardown(212.0)
 
         gaps = [
@@ -1842,14 +1844,23 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         assert gaps[1][0] is not None and gaps[1][0] != old_session_id
         assert mode._pending_model_observations == {}
         assert runner.drain_observation_outcomes().terminal_drops == ()
-        assert worker.batches == []
+        assert len(worker.batches) == 2
+        compact_gaps = [batch[0] for batch in worker.batches]
+        assert all(
+            isinstance(record, ModelEvidenceRecord) and isinstance(record.payload, RecorderGapEvidence)
+            for record in compact_gaps
+        )
+        assert [(record.role_generation, record.payload.reason) for record in compact_gaps] == [
+            (0, "runner-stop-timeout"),
+            (1, "runner-stop-timeout"),
+        ]
         core.release_observation.set()
         assert runner._thread.join(1.0) is None
         assert not runner._thread.is_alive()
         assert runner.drain_observation_outcomes().envelopes == ()
         assert runner.drain_observation_outcomes().terminal_drops == ()
         assert mode._pending_model_observations == {}
-        assert worker.batches == []
+        assert len(worker.batches) == 2
     finally:
         core.release_observation.set()
         runner.stop()
@@ -2146,7 +2157,6 @@ def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_sess
     mode._pending_model_observations = {1: (None, mode._trace_session_id, 0, object())}
     assert runner.reconfigure({}, {}) == "Active"
 
-
     mode._adopt_runner_configuration(1.0, mode.grill.get_output_status())
 
     assert mode._pending_model_observations == {}
@@ -2394,13 +2404,11 @@ def test_invalid_probe_waits_for_an_earlier_learner_outcome_before_trace_publica
     mode._reconcile_model_observation_outcomes(now=41.0)
 
     payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
-    assert [
-        (payload.observation_sequence, payload.eligible, payload.rejection_reasons)
-        for payload in payloads
-    ] == [
+    assert [(payload.observation_sequence, payload.eligible, payload.rejection_reasons) for payload in payloads] == [
         (1, False, ("insufficient_excitation",)),
         (2, False, ("invalid-probe",)),
     ]
+
 
 def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_retains_fifo(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
@@ -2428,7 +2436,6 @@ def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_re
     gaps = [record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload)]
     payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     assert [(gap.reason, gap.observation_sequence) for gap in gaps] == [("pending-observation-overflow", 1)]
-    assert [
-        (payload.observation_sequence, payload.eligible, payload.rejection_reasons)
-        for payload in payloads
-    ] == [(sequence, False, ("invalid-probe",)) for sequence in range(2, 62)]
+    assert [(payload.observation_sequence, payload.eligible, payload.rejection_reasons) for payload in payloads] == [
+        (sequence, False, ("invalid-probe",)) for sequence in range(2, 62)
+    ]
