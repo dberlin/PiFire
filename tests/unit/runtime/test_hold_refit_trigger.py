@@ -6,6 +6,8 @@ what puts a learned model on the grill.
 """
 
 import pytest
+from common.controller_model_state import CheckpointSaveOutcome
+
 from common.control_trace import ActuationMode
 
 from controller.runtime.runner import (
@@ -24,9 +26,9 @@ class _RecordingStore:
     def load(self, name):
         return None
 
-    def save(self, name, snapshot):
+    def save_outcome(self, name, snapshot):
         self.saved.append((name, snapshot))
-        return True
+        return CheckpointSaveOutcome.SAVED
 
 
 def _hold(
@@ -70,9 +72,9 @@ def test_online_adaptation_checkpoints_and_persists_before_trace_close(hold_cycl
             events.append("close")
 
     class _OrderedStore(_RecordingStore):
-        def save(self, name, snapshot):
+        def save_outcome(self, name, snapshot):
             events.append("save")
-            return super().save(name, snapshot)
+            return super().save_outcome(name, snapshot)
 
     runner = FakeControllerRunner(period=0.01)
     runner.snapshot = {"version": 1, "revision": 7, "params": {}, "online_adaptation": {}}
@@ -172,11 +174,11 @@ def test_recorder_construction_failure_still_restores_the_final_online_checkpoin
         def load(self, name):
             return self.models.get(name)
 
-        def save(self, name, snapshot):
+        def save_outcome(self, name, snapshot):
             persisted = dict(snapshot)
             self.models[name] = persisted
             self.saved.append((name, persisted))
-            return True
+            return CheckpointSaveOutcome.SAVED
 
     class _FinalizingRunner(FakeControllerRunner):
         def refit_from_cook(self):

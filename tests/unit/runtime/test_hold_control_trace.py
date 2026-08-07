@@ -5,6 +5,8 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from common.controller_model_state import CheckpointSaveOutcome
+
 
 from common.control_trace import (
     ActuationMode,
@@ -590,8 +592,8 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
         def load(self, controller):
             return {"revision": 8} if controller == "mpc" else None
 
-        def save(self, controller, snapshot):
-            return True
+        def save_outcome(self, controller, snapshot):
+            return CheckpointSaveOutcome.SAVED
 
     recorder = _install_recorder(monkeypatch)
     runner = _ReconfiguringRunner(period=1.0, wants_async=True).script([_pid_result(), _mpc_result(2)])
@@ -838,8 +840,8 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
         def load(self, controller):
             return {"revision": 8} if controller == "mpc" else None
 
-        def save(self, controller, snapshot):
-            return True
+        def save_outcome(self, controller, snapshot):
+            return CheckpointSaveOutcome.SAVED
 
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(
@@ -917,8 +919,8 @@ def test_async_reconfigure_does_not_leak_the_old_published_model_into_new_sessio
         def load(self, controller):
             return stored_snapshot if controller == "mpc" else None
 
-        def save(self, controller, snapshot):
-            return True
+        def save_outcome(self, controller, snapshot):
+            return CheckpointSaveOutcome.SAVED
 
     recorder = _install_recorder(monkeypatch)
     runner = _Runner(period=1.0, wants_async=True).script([_pid_result(), _mpc_result(2)])
@@ -978,8 +980,8 @@ def test_sync_runner_with_async_preferring_core_records_completed_restore(hold_c
         def load(self, controller):
             return {"revision": 8}
 
-        def save(self, controller, snapshot):
-            return True
+        def save_outcome(self, controller, snapshot):
+            return CheckpointSaveOutcome.SAVED
 
     recorder = _install_recorder(monkeypatch)
     mode = hold_cycle(SyncControllerRunner(_Core()), controller="mpc", model_store=_ModelStore())
@@ -997,8 +999,8 @@ def test_initial_session_uses_the_current_published_model_without_restore(hold_c
         def load(self, controller):
             return None
 
-        def save(self, controller, snapshot):
-            return True
+        def save_outcome(self, controller, snapshot):
+            return CheckpointSaveOutcome.SAVED
 
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(
