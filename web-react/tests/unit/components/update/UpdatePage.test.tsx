@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { UpdatePage } from "../../../../src/components/update/UpdatePage";
@@ -17,6 +17,19 @@ rs.mock("../../../../src/helpers/update/updateApi", () => ({
   upgradeDeps: rs.fn(),
   rebuildWebUi: rs.fn(),
 }));
+
+const apiMocks = {
+  fetchUpdateState: api.fetchUpdateState as Mock,
+  fetchUpdateCheck: api.fetchUpdateCheck as Mock,
+  fetchUpdateLog: api.fetchUpdateLog as Mock,
+  fetchUpdateStatus: api.fetchUpdateStatus as Mock,
+  fetchBuildLog: api.fetchBuildLog as Mock,
+  refreshBranches: api.refreshBranches as Mock,
+  changeBranch: api.changeBranch as Mock,
+  pullUpdate: api.pullUpdate as Mock,
+  upgradeDeps: api.upgradeDeps as Mock,
+  rebuildWebUi: api.rebuildWebUi as Mock,
+};
 
 // The real panel renders through LazyLog, which virtualizes via virtua and so
 // draws zero rows in jsdom (LogViewer.test.tsx says why). What this file is
@@ -47,16 +60,16 @@ const state = {
   },
 };
 
-function seed(overrides: Partial<Record<keyof typeof api, unknown>> = {}) {
-  (api.fetchUpdateState as ReturnType<typeof rs.fn>).mockResolvedValue(state);
-  (api.fetchUpdateCheck as ReturnType<typeof rs.fn>).mockResolvedValue({
+function seed(overrides: Partial<Record<keyof typeof apiMocks, unknown>> = {}) {
+  apiMocks.fetchUpdateState.mockResolvedValue(state);
+  apiMocks.fetchUpdateCheck.mockResolvedValue({
     ok: true,
     status: 200,
     message: "",
     data: { current: "v1.8.0", behind: 3 },
   });
-  for (const [k, v] of Object.entries(overrides)) {
-    (api[k as keyof typeof api] as ReturnType<typeof rs.fn>).mockResolvedValue(v);
+  for (const [key, value] of Object.entries(overrides)) {
+    apiMocks[key as keyof typeof apiMocks].mockResolvedValue(value);
   }
 }
 
@@ -72,9 +85,8 @@ const renderPage = () =>
 // satisfied by some earlier test's click and assert nothing at all. Cleared,
 // not reset: the implementations seed() installs have to survive.
 beforeEach(() => {
-  for (const fn of Object.values(api)) {
-    const maybeMock = fn as { mockClear?: () => void };
-    maybeMock.mockClear?.();
+  for (const mock of Object.values(apiMocks)) {
+    mock.mockClear();
   }
 });
 

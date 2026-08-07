@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
@@ -24,6 +24,17 @@ import { SystemStatus } from "./SystemStatus";
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
 /** controllers.json's nominal T_amb for settings written before that option existed. */
 const DEFAULT_MPC_AMBIENT_C = 20;
+interface MpcConfig {
+  selectedController: string | null;
+  ambientC: number;
+}
+interface LoadedMpcConfig extends MpcConfig {
+  requestIdentity: symbol;
+}
+const DEFAULT_MPC_CONFIG: MpcConfig = {
+  selectedController: null,
+  ambientC: DEFAULT_MPC_AMBIENT_C,
+};
 // The picker paints all three at once, so it cannot use --accent (which tracks
 // the CURRENT selection); theme.css keeps the three Theme.accentColor branches
 // as constants for exactly this.
@@ -86,18 +97,23 @@ export function Dashboard({
   const queryClient = useQueryClient();
   const now = useClock();
   const health = useControlHealth(controlAlive, apiBase);
-  const [mpcConfig, setMpcConfig] = useState<{
-    selectedController: string | null;
-    ambientC: number;
-  }>({ selectedController: null, ambientC: DEFAULT_MPC_AMBIENT_C });
+  const mpcConfigRequestIdentity = useMemo(() => Symbol(apiBase), [apiBase]);
+  const [loadedMpcConfig, setLoadedMpcConfig] = useState<LoadedMpcConfig | null>(null);
+  // A response belongs only to the specific API-base transition that produced
+  // it. The identity changes even across A → B → A, so a failed second A read
+  // cannot revive the first A response.
+  const mpcConfig =
+    loadedMpcConfig?.requestIdentity === mpcConfigRequestIdentity
+      ? loadedMpcConfig
+      : DEFAULT_MPC_CONFIG;
   useEffect(() => {
     let cancelled = false;
-    setMpcConfig({ selectedController: null, ambientC: DEFAULT_MPC_AMBIENT_C });
     void getSettings(apiBase)
       .then((settings) => {
         if (cancelled) return;
         const configuredAmbient = settings.controller?.config?.mpc?.T_amb;
-        setMpcConfig({
+        setLoadedMpcConfig({
+          requestIdentity: mpcConfigRequestIdentity,
           selectedController: settings.controller?.selected ?? null,
           ambientC:
             typeof configuredAmbient === "number" && Number.isFinite(configuredAmbient)
@@ -112,7 +128,7 @@ export function Dashboard({
     return () => {
       cancelled = true;
     };
-  }, [apiBase]);
+  }, [apiBase, mpcConfigRequestIdentity]);
   // Desktop only. Below 1280px this is inert and the breakpoints in
   // dashboard.css do the work; at 1280px and up the board is fixed and scaled,
   // which is what keeps a literal 1280x720 window from clipping the control

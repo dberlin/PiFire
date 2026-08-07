@@ -244,13 +244,13 @@
    457px against the 480px panel, so any margin worth having would put a
    scrollbar on a dialog that fits. A dialog only reaches the screen edges in
    the case this exists for, where the room matters more than the margin. */
-.pf-dash .pf-modal {
-  max-height: 100%;
-  @apply overflow-y-auto;
-}
 .pf-modal {
   @apply bg-card rounded-[18px] p-[22px] min-w-[320px] flex flex-col gap-[16px];
   border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.pf-dash .pf-modal {
+  max-height: 100%;
+  @apply overflow-y-auto;
 }
 .pf-modal-title {
   font: 700 20px "Barlow";

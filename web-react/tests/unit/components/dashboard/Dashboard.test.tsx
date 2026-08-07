@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
@@ -71,6 +72,68 @@ function renderDashboard(
     undefined,
   );
 }
+
+function DashboardApiHarness() {
+  const [apiBase, setApiBase] = useState("/a");
+  return (
+    <>
+      <button type="button" onClick={() => setApiBase("/a")}>
+        Use API A
+      </button>
+      <button type="button" onClick={() => setApiBase("/b")}>
+        Use API B
+      </button>
+      <Dashboard
+        dash={FIXTURE_DASH}
+        command={makeCommand()}
+        apiBase={apiBase}
+        phase="live"
+        controlAlive={true}
+        accent="ember"
+        setAccent={rs.fn()}
+        animate={false}
+        setAnimate={rs.fn()}
+      />
+    </>
+  );
+}
+
+describe("Dashboard MPC settings authority", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it("fails closed when returning to an API base until fresh settings arrive", async () => {
+    const user = userEvent.setup();
+    const pending = new Promise<Response>(() => {});
+    let apiASettingsRequests = 0;
+    const fetchMock = rs.fn((input: RequestInfo | URL) => {
+      if (String(input) === "/a/api/settings" && apiASettingsRequests++ === 0) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            settings: {
+              controller: { selected: "mpc", config: { mpc: { T_amb: 20 } } },
+            },
+          }),
+        } as Response);
+      }
+      return pending;
+    });
+    rs.stubGlobal("fetch", fetchMock);
+    renderRoute(<DashboardApiHarness />, undefined);
+
+    expect(
+      await screen.findByRole("button", { name: "MPC learning: loading" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use API B" }));
+    expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Use API A" }));
+    expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
+  });
+});
 
 describe("Dashboard", () => {
   it("renders the header with the grill name and a LIVE label when connected", () => {
@@ -231,8 +294,11 @@ function stubNotifyFetch(postBody: unknown = { result: "success" }, postOk = tru
   return fetchMock;
 }
 
+const fetchCallsTo = (fetchMock: ReturnType<typeof rs.fn>, suffix: string) =>
+  fetchMock.mock.calls.filter((call) => String(call[0]).endsWith(suffix));
+
 const postedNotifyUpdates = (fetchMock: ReturnType<typeof rs.fn>): NotifyUpdate[] => {
-  const post = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/api/control"));
+  const post = fetchCallsTo(fetchMock, "/api/control")[0];
   if (post === undefined) throw new Error("no POST /api/control was issued");
   const body = JSON.parse(String((post[1] as RequestInit).body)) as {
     notify_updates: NotifyUpdate[];
@@ -309,7 +375,7 @@ describe("Dashboard target notifications", () => {
     // ONE request, not a read followed by a write, and not one request per
     // entry: the three entries this modal owns travel as three ADDRESSED
     // updates in a single POST.
-    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(1);
     // The (label, type) pair is what tells the three entries sharing this label
     // apart, and naming only these four fields on the `probe` entry is what
     // leaves every other field of it to whatever the control loop holds when the
@@ -346,7 +412,7 @@ describe("Dashboard target notifications", () => {
     await user.type(screen.getByRole("spinbutton", { name: /^high limit/i }), "200");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
+    await waitFor(() => expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(1));
     expect(
       postedNotifyUpdates(fetchMock).find((u) => u.type === "probe_limit_high")?.fields,
     ).toEqual({
@@ -372,7 +438,7 @@ describe("Dashboard target notifications", () => {
     await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "225");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
+    await waitFor(() => expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(1));
     expect(
       postedNotifyUpdates(fetchMock).find(
         (u) => u.label === FIXTURE_DASH.primaryProbe.label && u.type === "probe",
@@ -435,7 +501,7 @@ describe("Dashboard target notifications", () => {
     expect(screen.queryByText("Brisket Notifications")).not.toBeInTheDocument();
     // Flask's Cancel POSTs a wipe of the target AND both limit alerts
     // (dash_default.js:803-831). This one writes nothing at all.
-    expect(fetchMock.mock.calls).toHaveLength(0);
+    expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(0);
   });
 });
 
@@ -476,7 +542,7 @@ describe("Dashboard control-health recheck", () => {
 
     await user.click(screen.getByRole("button", { name: "Recheck" }));
     await waitFor(() => expect(screen.getByText("LIVE")).toBeInTheDocument());
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/sys/check_alive");
+    expect(fetchCallsTo(fetchMock, "/api/sys/check_alive")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
   });
 

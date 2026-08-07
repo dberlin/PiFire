@@ -54,7 +54,8 @@ rs.mock("../../../src/helpers/wizard/wizardApi", () => ({
 }));
 
 const { AppPrefsProvider } = await import("../../../src/components/AppPrefs");
-const { default: App, routes } = await import("../../../src/components/App");
+const { default: App } = await import("../../../src/components/App");
+const { routes } = await import("../../../src/components/appRoutes");
 
 afterEach(() => {
   cleanup();

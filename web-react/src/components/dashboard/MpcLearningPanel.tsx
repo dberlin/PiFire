@@ -92,9 +92,12 @@ function ScoreDetails({ score }: { score: ModelScore }) {
   );
 }
 
-export function MpcLearningPanel({
+export function MpcLearningPanel(props: MpcLearningPanelProps) {
+  return props.selectedController === "mpc" ? <ActiveMpcLearningPanel {...props} /> : null;
+}
+
+function ActiveMpcLearningPanel({
   apiBase,
-  selectedController,
   units,
   safetyMaxTemp,
   ambientC,
@@ -105,7 +108,7 @@ export function MpcLearningPanel({
       : Math.min(((DEFAULT_MAXIMUM_F - 32) * 5) / 9, safetyMaxTemp - 1);
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<ModelEvidenceReport | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [reportError, setReportError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [maximumTemperature, setMaximumTemperature] = useState(String(initialMaximum));
@@ -127,9 +130,8 @@ export function MpcLearningPanel({
     decisionId?: string | null;
   }>({});
 
-  const loadReport = useCallback(async () => {
+  const refreshReport = useCallback(async () => {
     const generation = ++requestGeneration.current;
-    setLoading(true);
     const result = await fetchModelEvidenceReport(apiBase);
     if (generation !== requestGeneration.current) return;
     setLoading(false);
@@ -141,21 +143,24 @@ export function MpcLearningPanel({
     setReportError(null);
   }, [apiBase]);
 
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    await refreshReport();
+  }, [refreshReport]);
+
+  const invalidateReportRequests = useCallback(() => {
+    requestGeneration.current += 1;
+  }, []);
+
   useEffect(() => {
-    if (selectedController !== "mpc") {
-      ++requestGeneration.current;
-      setOpen(false);
-      setReport(null);
-      setReportError(null);
-      return;
-    }
-    void loadReport();
-    const interval = window.setInterval(() => void loadReport(), REPORT_REFRESH_MS);
+    const initialRefresh = window.setTimeout(() => void refreshReport(), 0);
+    const interval = window.setInterval(() => void refreshReport(), REPORT_REFRESH_MS);
     return () => {
-      ++requestGeneration.current;
+      invalidateReportRequests();
+      window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
     };
-  }, [selectedController, loadReport]);
+  }, [invalidateReportRequests, refreshReport]);
 
   useEffect(() => {
     if (!open) {
@@ -181,12 +186,6 @@ export function MpcLearningPanel({
     setCandidateDigestConfirmation("");
     setDecisionIdConfirmation("");
   }, [report?.candidate.digest, report?.decision_id]);
-
-  if (selectedController !== "mpc") return null;
-
-  if (report !== null && report.calibration.revision > nextRevision.current) {
-    nextRevision.current = report.calibration.revision;
-  }
 
   const maximum = Number(maximumTemperature);
   const maximumValid =
@@ -216,7 +215,7 @@ export function MpcLearningPanel({
 
   const runAction = async (action: MpcCalibrationAction) => {
     if (pendingActions.has(action)) return;
-    const revision = nextRevision.current + 1;
+    const revision = Math.max(nextRevision.current, report?.calibration.revision ?? 0) + 1;
     nextRevision.current = revision;
     setPendingActions((current) => new Set(current).add(action));
     setActionError(null);

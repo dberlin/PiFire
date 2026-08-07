@@ -14,14 +14,7 @@ import { GrillPlatformStep } from "./steps/GrillPlatformStep";
 import { ProbesStep } from "./steps/ProbesStep";
 import "./wizard.css";
 
-export const STEPS = [
-  "welcome",
-  "grillplatform",
-  "probes",
-  "display",
-  "distance",
-  "finish",
-] as const;
+const STEPS = ["welcome", "grillplatform", "probes", "display", "distance", "finish"] as const;
 type Step = (typeof STEPS)[number];
 
 interface FinishResult {
