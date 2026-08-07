@@ -142,6 +142,28 @@ def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial
     assert terminal[0].ratio == completed.realized_auger_duty
     assert terminal[1].ratio == cancelled.realized_auger_duty
 
+
+
+def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and_partial(hold_cycle):
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold._advance_framed_pulse(10.0, True, ptemp=200.0)
+    hold.state.lid.open_detected = True
+    hold.on_tick(63.0, 200.0, hold.grill.get_output_status())
+
+    terminal = [item for item in runner.applied if item.feedback_disposition is not FrameFeedbackDisposition.PROGRESS]
+    assert [(item.timestamp, item.feedback_disposition) for item in terminal] == [
+        (22.0, FrameFeedbackDisposition.COMPLETE),
+        (42.0, FrameFeedbackDisposition.DISCARDED),
+        (62.0, FrameFeedbackDisposition.DISCARDED),
+        (63.0, FrameFeedbackDisposition.DISCARDED),
+    ]
+    assert terminal[0].ratio == 12.0 / 20.0
+    assert terminal[1].ratio == terminal[2].ratio == 1.0
+    assert terminal[3].ratio == 1.0
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")

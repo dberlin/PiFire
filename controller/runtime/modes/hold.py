@@ -988,23 +988,44 @@ class HoldMode(ControlMode):
             self._observe_completed_pulse_frame(completed, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
         if report_feedback and decision.completed_frames:
             completed = decision.completed_frames[0]
-            self._report_framed_feedback(
-                completed.ended_at_s,
-                decision.delivered_on_s - decision.frame_delivered_on_s,
-                ptemp=observation_temp,
-                completed_revision=completed_revision,
-                completed_request=completed_request,
-                completed_maximum_duty=completed_maximum_duty,
-                completed_source=completed_source,
-                completed_calibration_revision=completed_calibration_revision,
-                completed_calibration_action=completed_calibration_action,
-                completed_calibration_generation=completed_calibration_generation,
-                feedback_disposition=(
-                    FrameFeedbackDisposition.COMPLETE
-                    if len(decision.completed_frames) == 1 and not completed.skipped
-                    else FrameFeedbackDisposition.DISCARDED
-                ),
-            )
+            if completed.ended_at_s > completed.nominal_start_s:
+                self._set_output(
+                    AppliedOutput(
+                        ratio=completed.delivered_on_s / (completed.ended_at_s - completed.nominal_start_s),
+                        source=completed_source,
+                        timestamp=completed.ended_at_s,
+                        requested=completed.latched_request,
+                    ),
+                    completed.ended_at_s,
+                    producing_revision=completed_revision,
+                    producing_calibration_revision=completed_calibration_revision,
+                    producing_calibration_action=completed_calibration_action,
+                    producing_calibration_generation=completed_calibration_generation,
+                    sample_complete=not completed.skipped,
+                    feedback_disposition=(
+                        FrameFeedbackDisposition.DISCARDED
+                        if completed.skipped
+                        else FrameFeedbackDisposition.COMPLETE
+                    ),
+                )
+            for skipped in decision.completed_frames[1:]:
+                if skipped.ended_at_s <= skipped.nominal_start_s:
+                    continue
+                self._set_output(
+                    AppliedOutput(
+                        ratio=skipped.delivered_on_s / (skipped.ended_at_s - skipped.nominal_start_s),
+                        source=completed_source,
+                        timestamp=skipped.ended_at_s,
+                        requested=skipped.latched_request,
+                    ),
+                    skipped.ended_at_s,
+                    producing_revision=completed_revision,
+                    producing_calibration_revision=completed_calibration_revision,
+                    producing_calibration_action=completed_calibration_action,
+                    producing_calibration_generation=completed_calibration_generation,
+                    sample_complete=False,
+                    feedback_disposition=FrameFeedbackDisposition.DISCARDED,
+                )
         elif report_feedback and cancellation_reason is None:
             self._report_framed_feedback(
                 now,
