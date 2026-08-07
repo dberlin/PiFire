@@ -1847,6 +1847,7 @@ class HoldMode(ControlMode):
                     self._reconcile_model_observation_outcomes(self.ctx.clock.now())
                 self._refit_model_once()
         finally:
+            self._clear_runner_evidence_context()
             worker = self._persistence_worker
             if worker is not None:
                 worker.flush_and_stop()

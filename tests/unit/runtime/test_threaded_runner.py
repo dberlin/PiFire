@@ -128,6 +128,21 @@ class CloseAwarePeriodWait:
         self.release.set()
 
 
+
+
+def test_runner_stop_clears_evidence_context_without_default_sleep() -> None:
+    sync = SyncControllerRunner(FakeCore())
+    sync.set_evidence_context("session-sync", "cook-sync")
+    sync.stop()
+    assert (sync._evidence_session_id, sync._evidence_cook_id) == (None, None)
+
+    gate = CloseAwarePeriodWait()
+    threaded = ThreadedControllerRunner(FakeCore(), wait_for_period=gate)
+    threaded.set_evidence_context("session-threaded", "cook-threaded")
+    assert gate.waiting.wait(1.0)
+    threaded.stop()
+    assert gate.closed.is_set()
+    assert (threaded._evidence_session_id, threaded._evidence_cook_id) == (None, None)
 def test_threaded_runner_solves_submitted_temp():
     core = FakeCore()
     r = ThreadedControllerRunner(core)
