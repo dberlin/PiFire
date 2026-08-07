@@ -572,6 +572,8 @@ class CompletedOriginPayload:
     challenger_digest: Digest
     incumbent_prediction_c: FiniteFloat
     challenger_prediction_c: FiniteFloat
+    temperature_band: NonBlankString
+    ambient_source: AmbientSource
 
     @model_validator(mode="after")
     def validate_origin_interval(self) -> CompletedOriginPayload:
@@ -601,7 +603,9 @@ def _completed_origin_payload(value: object) -> CompletedOriginPayload:
     if isinstance(value, CompletedOriginPayload):
         return value
     if isinstance(value, Mapping):
-        return CompletedOriginPayload(**dict(value))
+        payload = dict(value)
+        payload["ambient_source"] = AmbientSource(payload["ambient_source"])
+        return CompletedOriginPayload(**payload)
     raise ValueError("completed origin must be an object")
 
 

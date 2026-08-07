@@ -11,6 +11,7 @@ from math import isfinite, sqrt
 from types import MappingProxyType
 from typing import Protocol, cast
 import numpy as np
+from common.control_trace import AmbientSource
 from .arx import ScheduledARX
 from .contracts import AffinePrediction, FrameObservation, ModelUpdate
 from .state_space import InnovationStateSpace
@@ -219,6 +220,8 @@ class _Origin:
     challenger_digest: str
     incumbent_prediction_c: float
     challenger_prediction_c: float
+    temperature_band: str
+    ambient_source: AmbientSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +239,8 @@ class CompletedOrigin:
     challenger_digest: str
     incumbent_prediction_c: float
     challenger_prediction_c: float
+    temperature_band: str
+    ambient_source: AmbientSource
 
 
 @dataclass(slots=True)
@@ -838,6 +843,8 @@ class OnlineAdaptation:
                     self.model_digest(self.challenger),
                     incumbent_prediction,
                     challenger_prediction,
+                    observation.temperature_band,
+                    observation.ambient_source,
                 )
             )
             if len(self._origins) > 2 * max(_HORIZONS):
@@ -909,6 +916,8 @@ class OnlineAdaptation:
                     origin.challenger_digest,
                     origin.incumbent_prediction_c,
                     origin.challenger_prediction_c,
+                    origin.temperature_band,
+                    origin.ambient_source,
                 )
             )
         self._origins = live

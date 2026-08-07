@@ -394,6 +394,8 @@ def _payload_cases():
                         "challenger_digest": "c" * 64,
                         "incumbent_prediction_c": 108.0,
                         "challenger_prediction_c": 109.0,
+                        "temperature_band": "near-target",
+                        "ambient_source": AmbientSource.CONFIGURED,
                     },
                     {
                         "origin_time_ms": 40_000,
@@ -409,6 +411,8 @@ def _payload_cases():
                         "challenger_digest": "c" * 64,
                         "incumbent_prediction_c": 118.0,
                         "challenger_prediction_c": 119.0,
+                        "temperature_band": "below-target",
+                        "ambient_source": AmbientSource.MEASURED,
                     },
                 ),
                 horizon_scores=(
@@ -573,6 +577,8 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "challenger_digest": "c" * 64,
                 "incumbent_prediction_c": 108.0,
                 "challenger_prediction_c": 109.0,
+                "temperature_band": "near-target",
+                "ambient_source": "configured",
             },
             {
                 "origin_time_ms": 40_000,
@@ -588,6 +594,8 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "challenger_digest": "c" * 64,
                 "incumbent_prediction_c": 118.0,
                 "challenger_prediction_c": 119.0,
+                "temperature_band": "below-target",
+                "ambient_source": "measured",
             },
         ],
         "horizon_scores": [

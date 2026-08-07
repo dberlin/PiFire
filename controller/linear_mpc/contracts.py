@@ -84,6 +84,7 @@ class FrameObservation:
     calibration_stage: str | None = None
     calibration_fit: bool = False
     allocation_join_reason: str | None = None
+    temperature_band: str | None = None
 
     def __post_init__(self) -> None:
         start = _finite_float(self.frame_start_s, "frame_start_s")
@@ -148,6 +149,18 @@ class FrameObservation:
         if not all(isinstance(reason, AllocationClampReason) for reason in clamp_reasons):
             raise ValueError("allocation_clamp_reasons must contain AllocationClampReason values")
         object.__setattr__(self, "allocation_clamp_reasons", clamp_reasons)
+        temperature_band = self.temperature_band
+        if temperature_band is None:
+            temperature_band = (
+                "below-target"
+                if self.temp_c < self.setpoint_c - 1.0
+                else "above-target"
+                if self.temp_c > self.setpoint_c + 1.0
+                else "near-target"
+            )
+        if not isinstance(temperature_band, str) or not temperature_band.strip():
+            raise ValueError("temperature_band must be a non-empty string")
+        object.__setattr__(self, "temperature_band", temperature_band)
         if self.calibration_stage is not None and (
             not isinstance(self.calibration_stage, str) or not self.calibration_stage.strip()
         ):

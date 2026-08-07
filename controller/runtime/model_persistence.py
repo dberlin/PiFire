@@ -52,6 +52,7 @@ class ModelPersistenceWorker:
         self._condition = Condition()
         self._pending_checkpoints: dict[str, dict[str, object]] = {}
         self._pending_evidence: deque[ModelEvidenceRecord] = deque()
+        self._pending_recorder_gaps: deque[ModelEvidenceRecord] = deque()
         self._pending_activations: deque[ModelEvidenceRecord] = deque()
         self._stopping = False
         self._thread: Thread | None = None
@@ -103,17 +104,26 @@ class ModelPersistenceWorker:
 
     def submit_evidence(self, record: ModelEvidenceRecord) -> EvidenceSubmission:
         """Validate and copy one append-only record without blocking control."""
-        if not isinstance(record, ModelEvidenceRecord):
-            raise TypeError("record must be ModelEvidenceRecord")
-        owned_record = ModelEvidenceRecord.model_validate_json(record.model_dump_json())
+        return self.submit_evidence_batch((record,))
+
+    def submit_evidence_batch(self, records: Sequence[ModelEvidenceRecord]) -> EvidenceSubmission:
+        """Atomically accept a FIFO evidence batch or retain one complete gap."""
+        owned_records = tuple(
+            ModelEvidenceRecord.model_validate_json(record.model_dump_json())
+            if isinstance(record, ModelEvidenceRecord)
+            else self._raise_record_type_error()
+            for record in records
+        )
+        if not owned_records:
+            return EvidenceSubmission(accepted=True)
         with self._condition:
             if self._failed:
-                return self._reject_evidence_locked(owned_record, "persistence-failed")
+                return self._reject_evidence_locked(owned_records, "persistence-failed")
             if self._stopping:
-                return self._reject_evidence_locked(owned_record, "persistence-stopped")
-            if len(self._pending_evidence) >= self._evidence_capacity:
-                return self._reject_evidence_locked(owned_record, "evidence-queue-overflow")
-            self._pending_evidence.append(owned_record)
+                return self._reject_evidence_locked(owned_records, "persistence-stopped")
+            if len(self._pending_evidence) + len(owned_records) > self._evidence_capacity:
+                return self._reject_evidence_locked(owned_records, "evidence-queue-overflow")
+            self._pending_evidence.extend(owned_records)
             self._start_locked()
             self._condition.notify()
         return EvidenceSubmission(accepted=True)
@@ -151,6 +161,10 @@ class ModelPersistenceWorker:
         return completed
 
     @staticmethod
+    def _raise_record_type_error() -> ModelEvidenceRecord:
+        raise TypeError("record must be ModelEvidenceRecord")
+
+    @staticmethod
     def _revision(snapshot: dict[str, object]) -> int | None:
         revision = snapshot.get("revision")
         if isinstance(revision, int) and not isinstance(revision, bool) and revision >= 0:
@@ -162,19 +176,26 @@ class ModelPersistenceWorker:
             self._thread = Thread(target=self._run, name="controller-model-persistence", daemon=True)
             self._thread.start()
 
-    def _reject_evidence_locked(self, record: ModelEvidenceRecord, reason: str) -> EvidenceSubmission:
+    def _reject_evidence_locked(
+        self, records: Sequence[ModelEvidenceRecord], reason: str
+    ) -> EvidenceSubmission:
         self._evidence_blocked = True
+        first = records[0]
         gap = ModelEvidenceRecord(
-            evidence_id=f"{record.evidence_id}:gap",
+            evidence_id=f"{first.evidence_id}:gap",
             kind=EvidenceKind.RECORDER_GAP,
-            session_id=record.session_id,
-            cook_id=record.cook_id,
-            timestamp_ms=record.timestamp_ms,
-            role_generation=record.role_generation,
-            model_digest=record.model_digest,
-            provenance_digest=record.provenance_digest,
-            payload=RecorderGapEvidence(lost_record_count=1, reason=reason),
+            session_id=first.session_id,
+            cook_id=first.cook_id,
+            timestamp_ms=first.timestamp_ms,
+            role_generation=first.role_generation,
+            model_digest=first.model_digest,
+            provenance_digest=first.provenance_digest,
+            payload=RecorderGapEvidence(lost_record_count=len(records), reason=reason),
         )
+        if not self._stopping:
+            self._pending_recorder_gaps.append(gap)
+            self._start_locked()
+            self._condition.notify()
         self._logger.error(f"Model evidence was not queued: {reason}")
         return EvidenceSubmission(accepted=False, recorder_gap=gap)
 
@@ -183,6 +204,8 @@ class ModelPersistenceWorker:
             return "activation", self._pending_activations.popleft()
         if self._pending_evidence:
             return "evidence", self._pending_evidence.popleft()
+        if self._pending_recorder_gaps:
+            return "evidence", self._pending_recorder_gaps.popleft()
         if self._pending_checkpoints:
             name = next(iter(self._pending_checkpoints))
             return "checkpoint", (name, self._pending_checkpoints.pop(name))

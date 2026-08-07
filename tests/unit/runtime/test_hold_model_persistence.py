@@ -1,5 +1,7 @@
 """Hold restores a controller's model at setup and saves it as it changes."""
 
+from copy import deepcopy
+
 import threading
 
 from common.control_trace import ActuationMode
@@ -455,3 +457,50 @@ def test_checkpoint_worker_coalesces_pending_revisions_per_controller():
         {"revision": 3},
     ]
     assert store.writer_threads and all(not thread.is_alive() for thread in store.writer_threads)
+
+
+def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoint():
+    state = {}
+    first_write_started = threading.Event()
+    release_old_write = threading.Event()
+
+    def read(_key):
+        if not state:
+            raise TypeError("controller model state is absent")
+        return deepcopy(state)
+
+    def write(_key, value):
+        state.clear()
+        state.update(deepcopy(value))
+
+    def conditional_write(name, snapshot):
+        if snapshot["revision"] == 1:
+            first_write_started.set()
+            assert release_old_write.wait(1.0)
+        existing = state.get("models", {}).get(name)
+        if existing is not None and existing["revision"] >= snapshot["revision"]:
+            return False
+        state.clear()
+        state.update({"version": 1, "models": {name: deepcopy(snapshot)}})
+        return True
+
+    old_store = ControllerModelStore(reader=read, writer=write, conditional_writer=conditional_write)
+    new_store = ControllerModelStore(reader=read, writer=write, conditional_writer=conditional_write)
+    old_worker = ModelPersistenceWorker(old_store, _CheckpointLogger())
+    new_worker = ModelPersistenceWorker(new_store, _CheckpointLogger())
+    try:
+        assert old_worker.submit_checkpoint("mpc", {"revision": 1})
+        assert first_write_started.wait(timeout=1.0)
+        assert not old_worker.flush_and_stop(timeout=0.01)
+
+        assert new_worker.submit_checkpoint("mpc", {"revision": 2})
+        assert new_worker.flush_and_stop(timeout=0.2)
+        assert state["models"]["mpc"] == {"revision": 2}
+
+        release_old_write.set()
+        assert old_worker.flush_and_stop(timeout=1.0)
+        assert new_store.load("mpc") == {"revision": 2}
+    finally:
+        release_old_write.set()
+        old_worker.flush_and_stop(timeout=1.0)
+        new_worker.flush_and_stop(timeout=1.0)

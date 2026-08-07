@@ -29,6 +29,7 @@ from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.runner import ControllerUpdateResult, ObservationOutcomeEnvelope, SyncControllerRunner
 from controller.linear_mpc.contracts import FrameObservation
+from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
 from tests.fakes.runner import FakeControllerRunner
 from controller.update_mpc import load_trace_samples
@@ -1101,6 +1102,8 @@ def _promotion_outcome(*, frame_end_ms):
             "incumbent_digest": "a" * 64,
             "challenger_digest": "b" * 64,
             "incumbent_prediction_c": 223.0,
+            "temperature_band": "near-target",
+            "ambient_source": AmbientSource.CONFIGURED.value,
             "challenger_prediction_c": 224.0,
         }
         for index in range(12)
@@ -1199,6 +1202,34 @@ def test_hold_evaluation_trace_preserves_typed_state_space_evidence():
     assert payload.state_space_refresh is not None
     assert payload.state_space_refresh.state_space_digest == "d" * 64
     assert payload.state_space_refresh.attempts[0].alignment_error_c == 0.25
+
+def test_completed_origin_evidence_uses_the_originating_frame_classification():
+    class _EvidenceWorker:
+        def __init__(self):
+            self.batches = []
+
+        def submit_evidence_batch(self, records):
+            self.batches.append(tuple(records))
+            return EvidenceSubmission(accepted=True)
+
+    evaluation = deepcopy(_promotion_outcome(frame_end_ms=20_000)["evaluation"])
+    evaluation["completed_origins"][0].update(
+        temperature_band="below-target",
+        ambient_source=AmbientSource.MEASURED.value,
+    )
+    payload = HoldMode._model_evaluation_payload(evaluation)
+    assert payload is not None
+    mode = object.__new__(HoldMode)
+    worker = _EvidenceWorker()
+    mode._persistence_worker = worker
+    mode._trace_session_id = "session-a"
+    mode._trace_cook_id = "cook-a"
+
+    mode._submit_completed_origin_evidence(payload, timestamp_ms=20_000)
+
+    durable = worker.batches[0][0].payload
+    assert durable.temperature_band == "below-target"
+    assert durable.ambient_source is AmbientSource.MEASURED
 
 
 def test_hold_evaluation_trace_rejects_malformed_state_space_refresh_evidence():

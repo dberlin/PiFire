@@ -9,7 +9,7 @@ from dataclasses import asdict, replace
 import numpy as np
 import pytest
 
-from common.control_trace import ControlTraceRecord, ControllerType, TraceEventKind
+from common.control_trace import AmbientSource, ControlTraceRecord, ControllerType, TraceEventKind
 from controller.runtime.modes.hold import HoldMode
 from controller.linear_mpc.adaptation import (
     AdaptationPolicy,
@@ -267,6 +267,28 @@ def test_matured_origin_retains_braking_status_from_forecast_window() -> None:
     assert completed.completion_time_s == 80.0
     assert completed.braking is True
 
+
+def test_completed_origin_keeps_classification_from_its_forecast_frame() -> None:
+    manager = OnlineAdaptation(
+        FixedAffineModel(),
+        FixedAffineModel(),
+        AdaptationPolicy(excitation_window=2),
+    )
+    manager.observe(
+        replace(
+            frame(0),
+            temperature_band="origin-band",
+            ambient_source=AmbientSource.MEASURED,
+        )
+    )
+    for index in range(1, 4):
+        manager.observe(frame(index))
+
+    completed = next(
+        origin for origin in manager.completed_origins if origin.origin_time_s == 20.0 and origin.horizon_steps == 3
+    )
+    assert completed.temperature_band == "origin-band"
+    assert completed.ambient_source is AmbientSource.MEASURED
 
 def test_candidate_must_win_each_horizon_not_only_the_pooled_score() -> None:
     manager = OnlineAdaptation(

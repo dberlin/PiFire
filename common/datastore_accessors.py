@@ -1487,3 +1487,51 @@ def write_generic_key(key, value):
     :parma value: value to write
     """
     datastore.set_blob(key, json.dumps(value))
+
+
+def write_controller_model_checkpoint(name, snapshot):
+    """Atomically persist a strictly newer controller snapshot."""
+    if not isinstance(name, str) or not name.strip() or not isinstance(snapshot, dict):
+        return False
+    revision = snapshot.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        return False
+    try:
+        encoded_snapshot = json.dumps(snapshot, allow_nan=False)
+    except ValueError, TypeError:
+        return False
+    with datastore.transaction() as conn:
+        row = conn.execute("SELECT value FROM kv WHERE key=?", ("controller_model_state",)).fetchone()
+        if row is None:
+            models = {}
+        else:
+            try:
+                state = json.loads(row[0])
+            except (TypeError, ValueError):
+                return False
+            if (
+                not isinstance(state, dict)
+                or state.get("version") != 1
+                or not isinstance(state.get("models"), dict)
+            ):
+                return False
+            models = state["models"]
+        existing = models.get(name)
+        if isinstance(existing, dict):
+            existing_revision = existing.get("revision")
+            if (
+                isinstance(existing_revision, bool)
+                or not isinstance(existing_revision, int)
+                or existing_revision >= revision
+            ):
+                return False
+        elif existing is not None:
+            return False
+        updated_models = dict(models)
+        updated_models[name] = json.loads(encoded_snapshot)
+        encoded_state = json.dumps({"version": 1, "models": updated_models})
+        conn.execute(
+            "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("controller_model_state", encoded_state),
+        )
+    return True

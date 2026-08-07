@@ -501,6 +501,8 @@ class HoldMode(ControlMode):
                         "challenger_digest": origin["challenger_digest"],
                         "incumbent_prediction_c": origin["incumbent_prediction_c"],
                         "challenger_prediction_c": origin["challenger_prediction_c"],
+                        "temperature_band": origin["temperature_band"],
+                        "ambient_source": AmbientSource(origin["ambient_source"]),
                     }
                     for origin in completed_origins
                 ),
@@ -525,39 +527,38 @@ class HoldMode(ControlMode):
         worker = self._persistence_worker
         if worker is None or self._trace_session_id is None:
             return
-        for origin in evaluation.completed_origins:
-            result = worker.submit_evidence(
-                ModelEvidenceRecord(
-                    evidence_id=f"{evaluation.decision_id}:{origin.observation_sequence}:{origin.horizon_steps}",
-                    kind=EvidenceKind.FORECAST_ORIGIN,
-                    session_id=self._trace_session_id,
-                    cook_id=self._trace_cook_id,
-                    timestamp_ms=timestamp_ms,
-                    role_generation=evaluation.role_generation,
-                    model_digest=origin.challenger_digest,
-                    provenance_digest=origin.incumbent_digest,
-                    payload=ForecastOriginEvidence(
-                        origin_sequence=origin.observation_sequence,
-                        origin_time_ms=origin.origin_time_ms,
-                        completion_time_ms=origin.completion_time_ms,
-                        horizon_steps=origin.horizon_steps,
-                        incumbent_digest=origin.incumbent_digest,
-                        challenger_digest=origin.challenger_digest,
-                        incumbent_prediction_c=origin.incumbent_prediction_c,
-                        challenger_prediction_c=origin.challenger_prediction_c,
-                        observed_temperature_c=origin.observed_temperature_c,
-                        incumbent_error_c=origin.incumbent_error_c,
-                        challenger_error_c=origin.challenger_error_c,
-                        temperature_band="unclassified",
-                        phase="coasting" if origin.braking else "heating",
-                        ambient_source=AmbientSource.CONFIGURED,
-                        calibration_fit=False,
-                    ),
-                )
+        records = tuple(
+            ModelEvidenceRecord(
+                evidence_id=f"{evaluation.decision_id}:{origin.observation_sequence}:{origin.horizon_steps}",
+                kind=EvidenceKind.FORECAST_ORIGIN,
+                session_id=self._trace_session_id,
+                cook_id=self._trace_cook_id,
+                timestamp_ms=timestamp_ms,
+                role_generation=evaluation.role_generation,
+                model_digest=origin.challenger_digest,
+                provenance_digest=origin.incumbent_digest,
+                payload=ForecastOriginEvidence(
+                    origin_sequence=origin.observation_sequence,
+                    origin_time_ms=origin.origin_time_ms,
+                    completion_time_ms=origin.completion_time_ms,
+                    horizon_steps=origin.horizon_steps,
+                    incumbent_digest=origin.incumbent_digest,
+                    challenger_digest=origin.challenger_digest,
+                    incumbent_prediction_c=origin.incumbent_prediction_c,
+                    challenger_prediction_c=origin.challenger_prediction_c,
+                    observed_temperature_c=origin.observed_temperature_c,
+                    incumbent_error_c=origin.incumbent_error_c,
+                    challenger_error_c=origin.challenger_error_c,
+                    temperature_band=origin.temperature_band,
+                    phase="coasting" if origin.braking else "heating",
+                    ambient_source=origin.ambient_source,
+                    calibration_fit=False,
+                ),
             )
-            if not result.accepted:
-                self._learning_evidence_available = False
-                return
+            for origin in evaluation.completed_origins
+        )
+        if records and not worker.submit_evidence_batch(records).accepted:
+            self._learning_evidence_available = False
 
     @staticmethod
     def _model_lifecycle_payload(value: object) -> ModelEventPayload | None:
@@ -1434,9 +1435,10 @@ class HoldMode(ControlMode):
         self.state.lid.open_detected = False
         self.state.lid.expires = 0
         self.state.target_temp_achieved = False
-
         self._model_store = self._model_store or ControllerModelStore(
-            reader=self.ctx.store.read_generic_key, writer=self.ctx.store.write_generic_key
+            reader=self.ctx.store.read_generic_key,
+            writer=self.ctx.store.write_generic_key,
+            conditional_writer=self.ctx.store.save_model_checkpoint,
         )
         try:
             self._persistence_worker = ModelPersistenceWorker(self._model_store, _control.eventLogger)

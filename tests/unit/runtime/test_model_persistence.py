@@ -125,7 +125,7 @@ def test_bounded_evidence_overflow_returns_a_typed_gap_and_never_drops_activatio
         store.release_first_save.set()
         worker.flush_and_stop(timeout=1.0)
 
-    assert written == [_evidence("first")]
+    assert written == [_evidence("first"), second.recorder_gap]
     assert activations == [_activation("activation")]
 
 
@@ -172,3 +172,31 @@ def test_equal_checkpoint_store_result_is_a_coalesced_noop_not_worker_failure():
         assert not worker.evidence_blocked
     finally:
         worker.flush_and_stop(timeout=1.0)
+
+def test_evidence_batch_overflow_preserves_queued_fifo_and_records_every_omitted_origin():
+    store = _Store()
+    written = []
+    worker = ModelPersistenceWorker(
+        store,
+        _Logger(),
+        evidence_capacity=1,
+        append_evidence=written.extend,
+    )
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 1})
+        assert store.first_save_started.wait(timeout=1.0)
+        assert worker.submit_evidence(_evidence("first")).accepted
+
+        rejected = worker.submit_evidence_batch((_evidence("second"), _evidence("third")))
+
+        assert not rejected.accepted
+        assert rejected.recorder_gap is not None
+        assert rejected.recorder_gap.payload.lost_record_count == 2
+        assert worker.evidence_blocked
+        store.release_first_save.set()
+        assert worker.flush_and_stop(timeout=1.0)
+    finally:
+        store.release_first_save.set()
+        worker.flush_and_stop(timeout=1.0)
+
+    assert written == [_evidence("first"), rejected.recorder_gap]

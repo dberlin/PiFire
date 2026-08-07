@@ -33,7 +33,7 @@ import numpy as np
 # do_mpc (CasADi/IPOPT) is imported lazily only when the NLP policy is built; the
 # net policy + EKF path is pure numpy/scipy and never imports it.
 
-from common.control_trace import StateSpaceRefreshPayload
+from common.control_trace import AmbientSource, StateSpaceRefreshPayload
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import feasibility_report
@@ -281,6 +281,8 @@ _ORIGIN_EVIDENCE_KEYS = frozenset(
         "challenger_digest",
         "incumbent_prediction_c",
         "challenger_prediction_c",
+        "temperature_band",
+        "ambient_source",
     )
 )
 _HORIZON_EVIDENCE_KEYS = frozenset(("horizon_steps", "incumbent_rmse_c", "challenger_rmse_c", "sample_count"))
@@ -387,6 +389,12 @@ def _online_evaluation(value):
         _online_digest(origin["challenger_digest"], f"completed origin {index} challenger digest")
         _online_required_score(origin["incumbent_prediction_c"], f"completed origin {index} incumbent prediction")
         _online_required_score(origin["challenger_prediction_c"], f"completed origin {index} challenger prediction")
+        if not isinstance(origin["temperature_band"], str) or not origin["temperature_band"].strip():
+            raise ValueError(f"completed origin {index} temperature_band is invalid")
+        try:
+            AmbientSource(origin["ambient_source"])
+        except ValueError, TypeError:
+            raise ValueError(f"completed origin {index} ambient_source is invalid") from None
         actual_horizon_counts[horizon] += 1
         incumbent_errors, challenger_errors = horizon_errors[horizon]
         incumbent_errors.append(incumbent_error)

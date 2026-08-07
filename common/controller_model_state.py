@@ -111,9 +111,10 @@ def _shared_backend_state(reader, writer):
 
 
 class ControllerModelStore:
-    def __init__(self, reader=None, writer=None):
+    def __init__(self, reader=None, writer=None, conditional_writer=None):
         self._reader = reader or read_generic_key
         self._writer = writer or write_generic_key
+        self._conditional_writer = conditional_writer
         self._backend = _shared_backend_state(self._reader, self._writer)
         self._revisions = {}
 
@@ -141,6 +142,21 @@ class ControllerModelStore:
             _logger.warning("controller_model_state: could not own a snapshot for %r", name, exc_info=True)
             return False
         revision = owned_snapshot["revision"]
+        if self._conditional_writer is not None:
+            try:
+                written = self._conditional_writer(name, owned_snapshot)
+            except Exception:
+                _logger.warning(
+                    "controller_model_state: failed to persist a snapshot for %r",
+                    name,
+                    exc_info=True,
+                )
+                return False
+            if not written:
+                return False
+            self._revisions[name] = revision
+            self._remember_owned(name, owned_snapshot, committed=True)
+            return True
 
         # Workers can outlive a Hold teardown. Serialize the complete
         # read-check-write transaction across store instances so an older

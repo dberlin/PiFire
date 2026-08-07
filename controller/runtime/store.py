@@ -3,6 +3,7 @@ global SQLite-backed funcs; InMemoryStore is the hermetic test double."""
 
 import copy
 import time
+import threading
 from abc import ABC, abstractmethod
 from collections import deque
 
@@ -118,6 +119,8 @@ class Store(ABC):
     def read_generic_key(self, key): ...
     @abstractmethod
     def write_generic_key(self, key, value): ...
+    @abstractmethod
+    def save_model_checkpoint(self, name, snapshot): ...
     # --- queues ---
     @abstractmethod
     def system_commands(self): ...
@@ -143,6 +146,7 @@ class InMemoryStore(Store):
         self._systemq = _DequeQueue()
         self._systemo = _DequeQueue()
         self._displayq = _DequeQueue()
+        self._generic_lock = threading.Lock()
 
     def read_control(self):
         return copy.deepcopy(self._control)
@@ -356,6 +360,26 @@ class InMemoryStore(Store):
     def system_commands(self):
         return self._systemq
 
+    def save_model_checkpoint(self, name, snapshot):
+        with self._generic_lock:
+            state = self._generic.get("controller_model_state")
+            if state is None:
+                models = {}
+            elif (
+                not isinstance(state, dict)
+                or state.get("version") != 1
+                or not isinstance(state.get("models"), dict)
+            ):
+                return False
+            else:
+                models = copy.deepcopy(state["models"])
+            existing = models.get(name)
+            if isinstance(existing, dict) and existing.get("revision", -1) >= snapshot["revision"]:
+                return False
+            models[name] = copy.deepcopy(snapshot)
+            self._generic["controller_model_state"] = {"version": 1, "models": models}
+            return True
+
     def system_output(self):
         return self._systemo
 
@@ -484,6 +508,9 @@ class SqliteStore(Store):
 
     def system_commands(self):
         return self._systemq
+
+    def save_model_checkpoint(self, name, snapshot):
+        return _c.write_controller_model_checkpoint(name, snapshot)
 
     def system_output(self):
         return self._systemo
