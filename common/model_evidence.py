@@ -283,6 +283,10 @@ class RollbackEvidence:
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class FallbackEvidence:
     reason: NonBlankString
+    failed_digest: Digest | None = None
+    failed_generation: NonNegativeInt | None = None
+    last_safe_command: NonNegativeFloat | None = None
+    fallback_kind: Literal["grey-box", "innovation-state-space"] | None = None
     payload_type: Literal["fallback"] = "fallback"
 
 

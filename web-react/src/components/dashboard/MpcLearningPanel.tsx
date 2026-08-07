@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  activateModel,
   fetchModelEvidenceReport,
+  rollbackModel,
   setMpcCalibration,
 } from "../../helpers/modelEvidence/modelEvidenceApi";
 import type {
@@ -73,15 +75,13 @@ function ScoreDetails({ score }: { score: ModelScore }) {
       <div>
         <dt className="text-label">Challenger bias / band error</dt>
         <dd>
-          {metric(score.challenger_bias_c, " °C")} /{" "}
-          {metric(score.challenger_band_error_c, " °C")}
+          {metric(score.challenger_bias_c, " °C")} / {metric(score.challenger_band_error_c, " °C")}
         </dd>
       </div>
       <div>
         <dt className="text-label">Incumbent bias / band error</dt>
         <dd>
-          {metric(score.incumbent_bias_c, " °C")} /{" "}
-          {metric(score.incumbent_band_error_c, " °C")}
+          {metric(score.incumbent_bias_c, " °C")} / {metric(score.incumbent_band_error_c, " °C")}
         </dd>
       </div>
       <div>
@@ -112,11 +112,20 @@ export function MpcLearningPanel({
   const [emptyGrill, setEmptyGrill] = useState(false);
   const [pellets, setPellets] = useState(false);
   const [pendingActions, setPendingActions] = useState<Set<MpcCalibrationAction>>(new Set());
+  const [candidateDigestConfirmation, setCandidateDigestConfirmation] = useState("");
+  const [decisionIdConfirmation, setDecisionIdConfirmation] = useState("");
+  const [activationPending, setActivationPending] = useState(false);
+  const [rollbackReason, setRollbackReason] = useState("");
+  const [rollbackPending, setRollbackPending] = useState(false);
   const requestGeneration = useRef(0);
   const nextRevision = useRef(0);
   const triggerButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
+  const confirmationIdentity = useRef<{
+    candidateDigest?: string | null;
+    decisionId?: string | null;
+  }>({});
 
   const loadReport = useCallback(async () => {
     const generation = ++requestGeneration.current;
@@ -163,6 +172,16 @@ export function MpcLearningPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
+  useEffect(() => {
+    const candidateDigest = report?.candidate.digest;
+    const decisionId = report?.decision_id;
+    const previous = confirmationIdentity.current;
+    if (previous.candidateDigest === candidateDigest && previous.decisionId === decisionId) return;
+    confirmationIdentity.current = { candidateDigest, decisionId };
+    setCandidateDigestConfirmation("");
+    setDecisionIdConfirmation("");
+  }, [report?.candidate.digest, report?.decision_id]);
+
   if (selectedController !== "mpc") return null;
 
   if (report !== null && report.calibration.revision > nextRevision.current) {
@@ -186,6 +205,14 @@ export function MpcLearningPanel({
     !emptyGrill ||
     !pellets ||
     pendingActions.has("start");
+  const activationReady =
+    report?.status === "ready-for-review" &&
+    report.candidate.digest !== null &&
+    report.decision_id !== null;
+  const activationConfirmed =
+    activationReady &&
+    candidateDigestConfirmation === report.candidate.digest &&
+    decisionIdConfirmation === report.decision_id;
 
   const runAction = async (action: MpcCalibrationAction) => {
     if (pendingActions.has(action)) return;
@@ -219,6 +246,42 @@ export function MpcLearningPanel({
       setActionError(result.message || `${action} was not accepted`);
       await loadReport();
       return;
+    }
+    await loadReport();
+  };
+
+  const runActivation = async () => {
+    if (!activationConfirmed || activationPending || report === null) return;
+    setActivationPending(true);
+    setActionError(null);
+    const result = await activateModel(
+      {
+        candidate_digest: report.candidate.digest!,
+        decision_id: report.decision_id!,
+      },
+      apiBase,
+    );
+    setActivationPending(false);
+    if (!result.ok) {
+      setActionError(result.message || "Model activation was not accepted");
+    } else {
+      setCandidateDigestConfirmation("");
+      setDecisionIdConfirmation("");
+    }
+    await loadReport();
+  };
+
+  const runRollback = async () => {
+    const reason = rollbackReason.trim();
+    if (reason === "" || rollbackPending) return;
+    setRollbackPending(true);
+    setActionError(null);
+    const result = await rollbackModel({ reason }, apiBase);
+    setRollbackPending(false);
+    if (!result.ok) {
+      setActionError(result.message || "Model rollback was not accepted");
+    } else {
+      setRollbackReason("");
     }
     await loadReport();
   };
@@ -278,7 +341,11 @@ export function MpcLearningPanel({
             {reportError !== null && (
               <div className="rounded-lg border border-danger p-3 text-danger" role="alert">
                 <p>{reportError}</p>
-                <button className="pf-modal-btn mt-2" type="button" onClick={() => void loadReport()}>
+                <button
+                  className="pf-modal-btn mt-2"
+                  type="button"
+                  onClick={() => void loadReport()}
+                >
                   Retry evidence report
                 </button>
               </div>
@@ -350,7 +417,9 @@ export function MpcLearningPanel({
                         aria-busy={pendingActions.has("resume") || undefined}
                         onClick={() => void runAction("resume")}
                       >
-                        {pendingActions.has("resume") ? "Resume calibration…" : "Resume calibration"}
+                        {pendingActions.has("resume")
+                          ? "Resume calibration…"
+                          : "Resume calibration"}
                       </button>
                     ) : (
                       <button
@@ -417,14 +486,19 @@ export function MpcLearningPanel({
                           : `${report.calibration.current_probe >= 0 ? "+" : ""}${report.calibration.current_probe.toFixed(3)} q`}
                       </p>
                       <p>
-                        {report.calibration.eligible_count} eligible / {report.calibration.ineligible_count} ineligible
+                        {report.calibration.eligible_count} eligible /{" "}
+                        {report.calibration.ineligible_count} ineligible
                       </p>
                       <p>
                         Completed stages: {report.calibration.completed_stages.join(", ") || "none"}
                       </p>
-                      <p>Missing stages: {report.calibration.missing_stages.join(", ") || "none"}</p>
+                      <p>
+                        Missing stages: {report.calibration.missing_stages.join(", ") || "none"}
+                      </p>
                       {report.calibration.ineligible_reasons.length > 0 && (
-                        <p>Ineligible reasons: {report.calibration.ineligible_reasons.join(", ")}</p>
+                        <p>
+                          Ineligible reasons: {report.calibration.ineligible_reasons.join(", ")}
+                        </p>
                       )}
                     </div>
                   </section>
@@ -444,11 +518,97 @@ export function MpcLearningPanel({
                       </ul>
                     )}
                     <p className="mt-3 text-sm text-probe-label">
-                      Identifiability: {report.identifiability.accepted ? "accepted" : "not accepted"}
+                      Identifiability:{" "}
+                      {report.identifiability.accepted ? "accepted" : "not accepted"}
                       {report.identifiability.reason ? ` — ${report.identifiability.reason}` : ""}
                     </p>
                   </section>
                 </div>
+
+                {activationReady && (
+                  <section className="min-w-0 rounded-card border border-ok bg-inset p-4">
+                    <h3 className="font-bold">Activate reviewed model</h3>
+                    <p className="mt-2 text-sm">
+                      Confirm both exact values. Preparation and persistence do not alter the
+                      shipped grey-box default.
+                    </p>
+                    <dl className="mt-3 grid gap-2 text-sm">
+                      <div>
+                        <dt className="font-semibold">Candidate digest</dt>
+                        <dd className="break-all text-probe-label">{report.candidate.digest}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-semibold">Confidence decision ID</dt>
+                        <dd className="break-all text-probe-label">{report.decision_id}</dd>
+                      </div>
+                    </dl>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="grid gap-1 text-sm" htmlFor="mpc-activation-digest">
+                        Type the exact candidate digest
+                        <input
+                          id="mpc-activation-digest"
+                          className="min-w-0 rounded-lg border border-card-border bg-card px-3 py-2 font-mono text-xs text-text"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={candidateDigestConfirmation}
+                          onChange={(event) => setCandidateDigestConfirmation(event.target.value)}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm" htmlFor="mpc-activation-decision">
+                        Type the exact confidence decision ID
+                        <input
+                          id="mpc-activation-decision"
+                          className="min-w-0 rounded-lg border border-card-border bg-card px-3 py-2 font-mono text-xs text-text"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={decisionIdConfirmation}
+                          onChange={(event) => setDecisionIdConfirmation(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <button
+                      className="pf-modal-btn accent mt-3"
+                      type="button"
+                      disabled={!activationConfirmed || activationPending}
+                      aria-busy={activationPending || undefined}
+                      onClick={() => void runActivation()}
+                    >
+                      {activationPending ? "Activating exact model…" : "Activate exact model"}
+                    </button>
+                  </section>
+                )}
+
+                {report.status === "active" && (
+                  <section className="min-w-0 rounded-card border border-warn bg-inset p-4">
+                    <h3 className="font-bold">Roll back active model</h3>
+                    <label className="mt-2 grid gap-1 text-sm" htmlFor="mpc-rollback-reason">
+                      Required rollback reason
+                      <input
+                        id="mpc-rollback-reason"
+                        className="min-w-0 rounded-lg border border-card-border bg-card px-3 py-2 text-text"
+                        value={rollbackReason}
+                        onChange={(event) => setRollbackReason(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="pf-modal-btn danger mt-3"
+                      type="button"
+                      disabled={rollbackReason.trim() === "" || rollbackPending}
+                      aria-busy={rollbackPending || undefined}
+                      onClick={() => void runRollback()}
+                    >
+                      {rollbackPending ? "Rolling back model…" : "Roll back to last safe model"}
+                    </button>
+                  </section>
+                )}
+
+                {report.history.length > 0 &&
+                  report.history.at(-1)?.reason !== null &&
+                  report.history.at(-1)?.reason !== undefined && (
+                    <p className="rounded-lg border border-warn p-3 text-warn" role="status">
+                      Latest model decision: {report.history.at(-1)?.reason}
+                    </p>
+                  )}
 
                 <section className="min-w-0 rounded-card border border-card-border bg-inset p-4">
                   <h3 className="font-bold">Prediction scores</h3>
@@ -515,15 +675,20 @@ export function MpcLearningPanel({
                     <h3 className="font-bold">Target timing</h3>
                     {report.target_timing.available ? (
                       <>
-                        <p className="mt-2 break-words">{report.target_timing.hardware_provenance}</p>
+                        <p className="mt-2 break-words">
+                          {report.target_timing.hardware_provenance}
+                        </p>
                         <p className="mt-1 text-sm">
-                          {report.target_timing.sample_count} samples · p50 {metric(report.target_timing.p50_ms, " ms")} · p95{" "}
-                          {metric(report.target_timing.p95_ms, " ms")} · p99 {metric(report.target_timing.p99_ms, " ms")}
+                          {report.target_timing.sample_count} samples · p50{" "}
+                          {metric(report.target_timing.p50_ms, " ms")} · p95{" "}
+                          {metric(report.target_timing.p95_ms, " ms")} · p99{" "}
+                          {metric(report.target_timing.p99_ms, " ms")}
                         </p>
                       </>
                     ) : (
                       <p className="mt-2 text-probe-label">
-                        No target-hardware timing evidence. Workstation timing cannot satisfy this gate.
+                        No target-hardware timing evidence. Workstation timing cannot satisfy this
+                        gate.
                       </p>
                     )}
                   </section>

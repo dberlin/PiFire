@@ -1,6 +1,9 @@
 import type {
+  ModelActivationRequest,
+  ModelActivationResponse,
   ModelEvidenceReport,
   ModelEvidenceResult,
+  ModelRollbackRequest,
   MpcCalibrationCommand,
   MpcCalibrationRequest,
 } from "./types";
@@ -76,6 +79,58 @@ export async function fetchModelEvidenceArtifact(
       data: null,
     };
   }
+}
+
+async function postModelAction<TRequest, TResponse>(
+  path: string,
+  request: TRequest,
+  baseUrl: string,
+): Promise<ModelEvidenceResult<TResponse>> {
+  try {
+    const response = await fetch(endpoint(baseUrl, path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        message: await responseMessage(response),
+        data: null,
+      };
+    }
+    const data = (await response.json()) as TResponse;
+    return {
+      ok: true,
+      status: response.status,
+      message: "",
+      data,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      message: error instanceof Error ? error.message : "network error",
+      data: null,
+    };
+  }
+}
+
+/** Activate only the exact candidate digest and confidence decision the operator reviewed. */
+export function activateModel(
+  request: ModelActivationRequest,
+  baseUrl = DEFAULT_BASE_URL,
+): Promise<ModelEvidenceResult<ModelActivationResponse>> {
+  return postModelAction("model-evidence/activate", request, baseUrl);
+}
+
+/** Roll back active state-space ownership with a required durable operator reason. */
+export function rollbackModel(
+  request: ModelRollbackRequest,
+  baseUrl = DEFAULT_BASE_URL,
+): Promise<ModelEvidenceResult<ModelActivationResponse>> {
+  return postModelAction("model-evidence/rollback", request, baseUrl);
 }
 
 /**

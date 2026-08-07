@@ -7,8 +7,16 @@ from dataclasses import replace
 
 from common.common import WriteKind
 from common.controller_model_state import ControllerModelStore
+from common.datastore_accessors import read_model_activation, read_model_evidence
 from common.modes import Mode
-from common.model_evidence import AllocationEvidence, CalibrationSummaryEvidence, EvidenceKind, ModelEvidenceRecord
+from common.model_evidence import (
+    AllocationEvidence,
+    CalibrationSummaryEvidence,
+    EvidenceKind,
+    FallbackEvidence,
+    ModelEvidenceRecord,
+    RollbackEvidence,
+)
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
@@ -127,10 +135,10 @@ class HoldMode(ControlMode):
     _persistence_worker: ModelPersistenceWorker | None = None
     _learning_evidence_available: bool = True
     _final_refit_done: bool = False
+    _activation_state_identity: tuple[object, ...] | None = None
+    _activation_lifecycle_evidence_id: str | None = None
     _PENDING_MODEL_OBSERVATION_CAPACITY = 60
     _calibration_command_high_water: int = 0
-
-
 
     def _pulse_frame_seconds(self) -> float:
         """The scheduler's frame, or zero before one has been built."""
@@ -249,6 +257,11 @@ class HoldMode(ControlMode):
         return status if isinstance(status, Mapping) else {}
 
     def _model_role_generation(self, status: Mapping[str, object]) -> int:
+        activation = status.get("activation")
+        if isinstance(activation, Mapping):
+            generation = activation.get("role_generation")
+            if isinstance(generation, int) and not isinstance(generation, bool) and generation >= 0:
+                return generation
         adaptation = status.get("adaptation")
         source = adaptation if isinstance(adaptation, Mapping) else status
         generation = source.get("role_generation", 0)
@@ -330,9 +343,7 @@ class HoldMode(ControlMode):
                 self.settings["controller"].get("config", {}).get(self._controller_name, {}).get("T_amb", 0.0)
             ),
             requested_q=requested_q,
-            realized_q=normalized_load_from_auger_duty(
-                realized_auger_duty, u_max=controller.pulse_frame_maximum_duty
-            ),
+            realized_q=normalized_load_from_auger_duty(realized_auger_duty, u_max=controller.pulse_frame_maximum_duty),
             requested_auger_duty=frame.latched_request,
             delivered_on_s=frame.delivered_on_s,
             requested_fan_duty=self._fan_fraction(controller.pulse_frame_requested_fan_duty),
@@ -361,18 +372,14 @@ class HoldMode(ControlMode):
             allocation_clamp_reasons=controller.pulse_frame_allocation_clamp_reasons,
             calibration_command_revision=getattr(controller, "pulse_frame_calibration_command_revision", 0),
             calibration_command_action=getattr(controller, "pulse_frame_calibration_command_action", "none"),
-            calibration_cancellation_reason=getattr(
-                controller, "pulse_frame_calibration_cancellation_reason", None
-            ),
+            calibration_cancellation_reason=getattr(controller, "pulse_frame_calibration_cancellation_reason", None),
             baseline_allocation=getattr(controller, "pulse_frame_baseline_allocation", None),
             calibration_status=getattr(controller, "pulse_frame_calibration_status", "inactive"),
             cancellation_command_revision=getattr(controller, "pulse_frame_cancellation_command_revision", 0),
             cancellation_command_action=getattr(controller, "pulse_frame_cancellation_command_action", "none"),
             combined_allocation=getattr(controller, "pulse_frame_combined_allocation", None),
             calibration_stage=getattr(controller, "pulse_frame_calibration_stage", None),
-            completed_calibration_stages=getattr(
-                controller, "pulse_frame_calibration_completed_stages", ()
-            ),
+            completed_calibration_stages=getattr(controller, "pulse_frame_calibration_completed_stages", ()),
             calibration_fit=getattr(controller, "pulse_frame_calibration_stage", None) is not None,
             allocation_join_reason=(
                 None
@@ -422,6 +429,7 @@ class HoldMode(ControlMode):
             fan_clamp_reason=allocation.fan_clamp_reason,
             allocator_revision=allocation.allocator_revision,
         )
+
     @staticmethod
     def _trace_allocation_payload(allocation, result_revision: int):
         if allocation is None:
@@ -477,8 +485,7 @@ class HoldMode(ControlMode):
         )
         return ModelEvidenceRecord(
             evidence_id=(
-                f"{session_id}:calibration-frame:{observation.result_revision}:"
-                f"{int(observation.frame_start_s * 1_000)}"
+                f"{session_id}:calibration-frame:{observation.result_revision}:{int(observation.frame_start_s * 1_000)}"
             ),
             kind=EvidenceKind.CALIBRATION_SUMMARY,
             session_id=session_id,
@@ -614,7 +621,8 @@ class HoldMode(ControlMode):
     def _rejected_model_observation(observation: FrameObservation, reason: str) -> ModelObservationPayload:
         output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
         return ModelObservationPayload(
-            frame_start_ms=int(observation.frame_start_s * 1_000), frame_end_ms=int(observation.frame_end_s * 1_000),
+            frame_start_ms=int(observation.frame_start_s * 1_000),
+            frame_end_ms=int(observation.frame_end_s * 1_000),
             cancellation_command_revision=observation.cancellation_command_revision,
             cancellation_command_action=observation.cancellation_command_action,
             calibration_command_revision=observation.calibration_command_revision,
@@ -627,23 +635,47 @@ class HoldMode(ControlMode):
             combined_allocation=HoldMode._trace_allocation_payload(
                 observation.combined_allocation, observation.result_revision
             ),
-            temp_c=observation.temp_c, setpoint_c=observation.setpoint_c, ambient_c=observation.ambient_c,
-            observation_sequence=observation.observation_sequence, probe_valid=observation.probe_valid,
-            probe_source=observation.probe_source, ambient_source=observation.ambient_source,
-            ambient_uncertainty=observation.ambient_uncertainty, baseline_combustion_load=observation.baseline_q,
-            calibration_probe_load=observation.probe_q, requested_combustion_load=observation.requested_q,
-            allocated_combustion_load=observation.allocated_q, realized_combustion_load=observation.realized_q,
-            requested_auger_duty=observation.requested_auger_duty, scheduled_on_seconds=observation.scheduled_on_s,
-            delivered_on_seconds=observation.delivered_on_s, realized_auger_duty=observation.realized_auger_duty,
-            allocator_revision=observation.allocator_revision, allocation_clamp_reasons=observation.allocation_clamp_reasons,
-            calibration_stage=observation.calibration_stage, calibration_fit=observation.calibration_fit,
-            result_revision=observation.result_revision, eligible=False, rejection_reasons=(reason,),
-            input_variance=0.0, input_levels=0, incumbent_innovation_c=None, challenger_innovation_c=None,
-            effective_updates=0, role_generation=observation.role_generation, model_digest=None,
-            requested_fan_duty=observation.requested_fan_duty, actual_fan_duty=observation.actual_fan_duty,
-            output_source=output_source, lid_open=observation.lid_open, safety_inhibited=observation.safety_inhibited,
-            manual_override=observation.manual_override, stale=observation.stale, skipped=observation.skipped,
-            reset=observation.reset, continuous=observation.continuous,
+            temp_c=observation.temp_c,
+            setpoint_c=observation.setpoint_c,
+            ambient_c=observation.ambient_c,
+            observation_sequence=observation.observation_sequence,
+            probe_valid=observation.probe_valid,
+            probe_source=observation.probe_source,
+            ambient_source=observation.ambient_source,
+            ambient_uncertainty=observation.ambient_uncertainty,
+            baseline_combustion_load=observation.baseline_q,
+            calibration_probe_load=observation.probe_q,
+            requested_combustion_load=observation.requested_q,
+            allocated_combustion_load=observation.allocated_q,
+            realized_combustion_load=observation.realized_q,
+            requested_auger_duty=observation.requested_auger_duty,
+            scheduled_on_seconds=observation.scheduled_on_s,
+            delivered_on_seconds=observation.delivered_on_s,
+            realized_auger_duty=observation.realized_auger_duty,
+            allocator_revision=observation.allocator_revision,
+            allocation_clamp_reasons=observation.allocation_clamp_reasons,
+            calibration_stage=observation.calibration_stage,
+            calibration_fit=observation.calibration_fit,
+            result_revision=observation.result_revision,
+            eligible=False,
+            rejection_reasons=(reason,),
+            input_variance=0.0,
+            input_levels=0,
+            incumbent_innovation_c=None,
+            challenger_innovation_c=None,
+            effective_updates=0,
+            role_generation=observation.role_generation,
+            model_digest=None,
+            requested_fan_duty=observation.requested_fan_duty,
+            actual_fan_duty=observation.actual_fan_duty,
+            output_source=output_source,
+            lid_open=observation.lid_open,
+            safety_inhibited=observation.safety_inhibited,
+            manual_override=observation.manual_override,
+            stale=observation.stale,
+            skipped=observation.skipped,
+            reset=observation.reset,
+            continuous=observation.continuous,
         )
 
     def _queue_rejected_model_observation(self, sequence: int, reason: str) -> None:
@@ -687,12 +719,7 @@ class HoldMode(ControlMode):
             for drop in terminal_drops:
                 sequence = getattr(drop, "submission_sequence", None)
                 reason = getattr(drop, "reason", None)
-                if (
-                    isinstance(sequence, int)
-                    and not isinstance(sequence, bool)
-                    and isinstance(reason, str)
-                    and reason
-                ):
+                if isinstance(sequence, int) and not isinstance(sequence, bool) and isinstance(reason, str) and reason:
                     self._retire_pending_model_observation(sequence, reason)
         envelopes = getattr(batch, "envelopes", batch)
         for envelope in envelopes:
@@ -794,7 +821,7 @@ class HoldMode(ControlMode):
                     reset=observation.reset,
                     continuous=observation.continuous,
                 )
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
                 continue
             records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
@@ -986,9 +1013,7 @@ class HoldMode(ControlMode):
         completed_calibration_revision = getattr(controller, "pulse_frame_calibration_command_revision", 0)
         completed_calibration_action = getattr(controller, "pulse_frame_calibration_command_action", "none")
         completed_calibration_generation = getattr(controller, "pulse_frame_calibration_command_generation", 0)
-        decision = scheduler.advance(
-            controller.pulse_requested_duty, now, self.grill.get_output_status()["auger"]
-        )
+        decision = scheduler.advance(controller.pulse_requested_duty, now, self.grill.get_output_status()["auger"])
         self._record_pulse_delivery(decision.delivered_on_s)
         observation_temp = self._last_ptemp if ptemp is None else ptemp
         for completed in decision.completed_frames:
@@ -1005,9 +1030,7 @@ class HoldMode(ControlMode):
                 calibration_action=completed_calibration_action,
                 calibration_generation=completed_calibration_generation,
                 feedback_disposition=(
-                    FrameFeedbackDisposition.DISCARDED
-                    if first.skipped
-                    else FrameFeedbackDisposition.COMPLETE
+                    FrameFeedbackDisposition.DISCARDED if first.skipped else FrameFeedbackDisposition.COMPLETE
                 ),
             )
             for skipped in decision.completed_frames[1:]:
@@ -1048,12 +1071,8 @@ class HoldMode(ControlMode):
                     ),
                     result_revision=self.state.controller.pulse_frame_result_revision,
                     maximum_duty=self.state.controller.pulse_frame_maximum_duty,
-                    calibration_revision=getattr(
-                        self.state.controller, "pulse_frame_calibration_command_revision", 0
-                    ),
-                    calibration_action=getattr(
-                        self.state.controller, "pulse_frame_calibration_command_action", "none"
-                    ),
+                    calibration_revision=getattr(self.state.controller, "pulse_frame_calibration_command_revision", 0),
+                    calibration_action=getattr(self.state.controller, "pulse_frame_calibration_command_action", "none"),
                     calibration_generation=getattr(
                         self.state.controller, "pulse_frame_calibration_command_generation", 0
                     ),
@@ -1267,7 +1286,12 @@ class HoldMode(ControlMode):
                     if pending_generation == generation
                     else (observation, session_id, pending_generation, records)
                 )
-                for sequence, (observation, session_id, pending_generation, records) in self._pending_model_observations.items()
+                for sequence, (
+                    observation,
+                    session_id,
+                    pending_generation,
+                    records,
+                ) in self._pending_model_observations.items()
             }
             self._reconcile_model_observation_outcomes(now)
 
@@ -1604,8 +1628,7 @@ class HoldMode(ControlMode):
         ratio = frame.delivered_on_s / duration_s
         realized_load = normalized_load_from_auger_duty(ratio, u_max=maximum_duty)
         sample_complete = (
-            feedback_disposition is FrameFeedbackDisposition.COMPLETE
-            and source is OutputSource.CONTROLLER
+            feedback_disposition is FrameFeedbackDisposition.COMPLETE and source is OutputSource.CONTROLLER
         )
         controller = self.state.controller
         self._trace_record(
@@ -1616,9 +1639,7 @@ class HoldMode(ControlMode):
                 interval_end_ms=int(frame.ended_at_s * 1_000),
                 realized_auger_duty=ratio,
                 realized_combustion_load=realized_load if sample_complete else None,
-                actual_fan_duty=(
-                    controller.pulse_frame_applied_fan_duty if controller.controls_fan else None
-                ),
+                actual_fan_duty=(controller.pulse_frame_applied_fan_duty if controller.controls_fan else None),
                 sample_complete=sample_complete,
                 output_source=source,
             ),
@@ -1645,6 +1666,7 @@ class HoldMode(ControlMode):
         controller.trace_prior_output_source = source
         controller.trace_prior_fan_duty = controller.pulse_frame_applied_fan_duty
         controller.trace_prior_combustion_load = realized_load
+
     def _set_output(
         self,
         applied: AppliedOutput,
@@ -1730,6 +1752,8 @@ class HoldMode(ControlMode):
         self._pulse_observation_last_frame_key = None
         self._last_ptemp = None
         self._final_refit_done = False
+        self._activation_state_identity = None
+        self._activation_lifecycle_evidence_id = None
         try:
             self._trace_recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
@@ -1770,6 +1794,7 @@ class HoldMode(ControlMode):
         if self._runner is not None:
             self._configure_pulse_scheduler()
             self._restore_model()
+            self._reconcile_activation_state()
         self._configure_fan_authority()
 
         _control.eventLogger.debug(
@@ -1858,6 +1883,8 @@ class HoldMode(ControlMode):
         self._configure_pulse_scheduler()
         self._trace_runner_snapshot_fallback_safe = not self._runner.runs_async()
         self._restore_model()
+        self._activation_state_identity = None
+        self._reconcile_activation_state()
         self._configure_fan_authority()
         self._runner_configuration_revision = installed_generation
         self._ensure_trace_session(now)
@@ -1890,7 +1917,11 @@ class HoldMode(ControlMode):
         try:
             configured_ceiling = self.settings["safety"]["maxtemp"]
             units = self.settings["globals"]["units"]
-            if isinstance(configured_ceiling, bool) or not isinstance(configured_ceiling, (int, float)) or not isfinite(configured_ceiling):
+            if (
+                isinstance(configured_ceiling, bool)
+                or not isinstance(configured_ceiling, (int, float))
+                or not isfinite(configured_ceiling)
+            ):
                 raise ValueError("MPC calibration safety maximum is not finite")
             if units == "F":
                 safety_ceiling_c = (float(configured_ceiling) - 32.0) * 5.0 / 9.0
@@ -2027,6 +2058,8 @@ class HoldMode(ControlMode):
             self._adopt_runner_configuration(now, current_output_status)
             current_output_status = self.grill.get_output_status()
         self._ensure_trace_session(now)
+        self._reconcile_activation_state()
+        self._drain_activation_events()
 
         if control["controller_update"]:
             control["controller_update"] = False
@@ -2071,6 +2104,7 @@ class HoldMode(ControlMode):
         framed_feedback_due = False
         if (now - self.state.controller.cycle_start) > controller_interval:
             result = self._runner.latest()
+            self._drain_activation_events()
             cancellation_reason = self._calibration_cancellation_reason(result, now)
             if cancellation_reason is not None:
                 result = self._cancel_calibration_probe(
@@ -2102,9 +2136,7 @@ class HoldMode(ControlMode):
                     result.calibration.probe_q if result.calibration is not None else 0.0
                 )
                 controller.pulse_calibration_stage = (
-                    result.calibration.stage
-                    if result.calibration is not None and result.calibration.active
-                    else None
+                    result.calibration.stage if result.calibration is not None and result.calibration.active else None
                 )
                 controller.pulse_calibration_completed_stages = (
                     result.calibration.completed_stages if result.calibration is not None else ()
@@ -2150,9 +2182,7 @@ class HoldMode(ControlMode):
                     )
                 )
                 controller.pulse_allocation_evidence_checked = True
-                controller.pulse_allocation_result_revision = (
-                    result.revision if result.allocation is not None else None
-                )
+                controller.pulse_allocation_result_revision = result.revision if result.allocation is not None else None
                 controller.pulse_requested_fan_duty = result.fan["duty"] if result.fan is not None else None
                 if result.fan is not None and controller_fan_authority(settings, control):
                     controller.fan_duty = result.fan["duty"]
@@ -2386,6 +2416,66 @@ class HoldMode(ControlMode):
         else:
             _control.eventLogger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
             self._trace_model(ModelEventType.REJECT, "stored model rejected for restore", snapshot)
+
+    @staticmethod
+    def _activation_identity(state) -> tuple[object, ...] | None:
+        if state is None:
+            return None
+        return (
+            state.evidence_decision_id,
+            state.controller_configuration_digest,
+            state.role_generation,
+            state.active_snapshot_json,
+            state.rollback_snapshot_json,
+        )
+
+    def _reconcile_activation_state(self) -> None:
+        """Submit durable ownership changes without persistence work on Hold."""
+        if self._runner is None or self._controller_name != "mpc":
+            return
+        try:
+            state = read_model_activation()
+            records = tuple(read_model_evidence())
+        except Exception as error:
+            self._learning_evidence_available = False
+            self._trace_warning(f"Model activation state unavailable: {error}")
+            return
+        identity = self._activation_identity(state)
+        if state is not None and identity != self._activation_state_identity:
+            self._runner.restore_activation(state, records)
+            self._activation_state_identity = identity
+        lifecycle = max(
+            (
+                record
+                for record in records
+                if record.kind
+                in {
+                    EvidenceKind.ACTIVATION,
+                    EvidenceKind.ROLLBACK,
+                    EvidenceKind.FALLBACK,
+                }
+            ),
+            key=lambda record: (record.timestamp_ms, record.evidence_id),
+            default=None,
+        )
+        if lifecycle is None or lifecycle.evidence_id == self._activation_lifecycle_evidence_id:
+            return
+        self._activation_lifecycle_evidence_id = lifecycle.evidence_id
+        if isinstance(lifecycle.payload, RollbackEvidence):
+            self._runner.rollback_activation(lifecycle.payload.reason)
+        elif isinstance(lifecycle.payload, FallbackEvidence):
+            self._runner.activation_runtime_failure(lifecycle.payload.reason)
+
+    def _drain_activation_events(self) -> None:
+        if self._runner is None:
+            return
+        events = tuple(self._runner.drain_activation_events())
+        if not events:
+            return
+        worker = self._persistence_worker
+        if worker is None or not worker.submit_evidence_batch(events).accepted:
+            self._learning_evidence_available = False
+            self._trace_warning("Model activation fallback evidence was not persisted")
 
     # check_safety is now a declarative pre_act guard (GUARDS["Hold"]); the base
     # ControlMode default (return False) applies here.

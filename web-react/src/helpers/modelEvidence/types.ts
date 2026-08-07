@@ -95,6 +95,10 @@ export interface ModelEvidenceHistoryEntry {
   event: "activation" | "rollback" | "fallback";
   decision_id: string | null;
   reason: string | null;
+  failed_digest?: string | null;
+  failed_generation?: number | null;
+  last_safe_command?: number | null;
+  fallback_kind?: string | null;
 }
 
 export interface EvidenceArtifactMetadata {
@@ -131,6 +135,25 @@ export interface ModelEvidenceResult<T> {
   status: number;
   message: string;
   data: T | null;
+}
+
+export interface ModelActivationRequest {
+  candidate_digest: string;
+  decision_id: string;
+}
+
+export interface ModelActivationResponse {
+  accepted: boolean;
+  active_kind: string;
+  candidate_digest?: string;
+  decision_id: string;
+  role_generation: number;
+  controller_configuration_digest?: string;
+  reason?: string;
+}
+
+export interface ModelRollbackRequest {
+  reason: string;
 }
 
 export type MpcCalibrationAction = "start" | "pause" | "resume" | "stop";

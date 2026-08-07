@@ -1,7 +1,13 @@
+import hashlib
+import json
+import logging
+import time
+
 from flask import Response, abort, jsonify, request
 from common.common import WriteKind, write_log, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
+    append_model_evidence,
     read_settings,
     write_settings,
     read_control,
@@ -16,6 +22,8 @@ from common.datastore_accessors import (
 )
 from common.api_commands import mpc_calibration_command_revision, process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
+from common.controller_model_state import ControllerModelStore
+from common.model_evidence import EvidenceKind, ModelEvidenceRecord, RollbackEvidence
 from common.pellets_actions import PELLETS_DISPATCH
 from blueprints.api.probe_map_actions import (
     module_requires_install,
@@ -32,7 +40,13 @@ from common.modes import Mode
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings_pairs
 from common.controller_deps import guard_controller_selection
+from controller.linear_mpc.activation import (
+    ActivationManager,
+    ActivationRequest,
+    extract_state_space_candidate,
+)
 from controller.linear_mpc.report import build_evidence_artifact, current_evidence_report
+from controller.runtime.model_persistence import ModelPersistenceWorker
 from . import api_bp
 
 
@@ -191,6 +205,187 @@ def api_model_evidence_artifact():
     except (TypeError, ValueError) as exc:
         return jsonify({"error": "model-evidence-artifact-invalid", "detail": str(exc)}), 422
     return Response(artifact, status=200, content_type="application/json; charset=utf-8")
+
+
+def _model_activation_configuration(settings):
+    selected = settings.get("controller", {}).get("selected")
+    config = settings.get("controller", {}).get("config", {}).get(selected)
+    if selected != "mpc" or not isinstance(config, dict):
+        raise ValueError("MPC must be the selected controller")
+    cycle_data = settings.get("cycle_data")
+    units = settings.get("globals", {}).get("units")
+    if not isinstance(cycle_data, dict) or not isinstance(units, str):
+        raise ValueError("controller configuration is incomplete")
+    return {
+        "controller": selected,
+        "config": config,
+        "cycle_data": cycle_data,
+        "units": units,
+    }
+
+
+def _activation_checkpoint():
+    checkpoint = ControllerModelStore().load("mpc")
+    if not isinstance(checkpoint, dict):
+        raise ValueError("candidate-snapshot-not-found")
+    return checkpoint
+
+
+def _activation_rejection(reason, status=409):
+    return jsonify(
+        {
+            "accepted": False,
+            "active_kind": "grey-box",
+            "error": "model-activation-rejected",
+            "detail": reason,
+        }
+    ), status
+
+
+@api_bp.post("/model-evidence/activate")
+def api_model_evidence_activate():
+    """Persist the exact reviewed candidate before runtime ownership can change."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"candidate_digest", "decision_id"}:
+        return _activation_rejection(
+            "request must contain exactly candidate_digest and decision_id",
+            422,
+        )
+    try:
+        activation_request = ActivationRequest(
+            candidate_digest=body["candidate_digest"],
+            decision_id=body["decision_id"],
+        )
+        settings = read_settings()
+        configuration = _model_activation_configuration(settings)
+        report, records = _model_evidence_projection()
+        projection = report.to_dict()
+        if projection["status"] != "ready-for-review":
+            raise ValueError("confidence decision is not ready-for-review")
+        if projection["candidate"]["digest"] != activation_request.candidate_digest:
+            raise ValueError("candidate-digest-changed")
+        if projection["decision_id"] != activation_request.decision_id:
+            raise ValueError("stale-confidence-decision")
+        checkpoint = _activation_checkpoint()
+        candidate = extract_state_space_candidate(checkpoint)
+    except (KeyError, TypeError, ValueError) as error:
+        return _activation_rejection(str(error), 422 if isinstance(error, (KeyError, TypeError)) else 409)
+
+    worker = ModelPersistenceWorker(
+        ControllerModelStore(),
+        logging.getLogger("control"),
+    )
+    manager = ActivationManager(
+        records,
+        candidate_snapshot=candidate,
+        rollback_snapshot=checkpoint,
+        controller_configuration=configuration,
+        persist_activation=worker.commit_activation,
+        session_id="api-manual-activation",
+    )
+    try:
+        persisted_activation = read_model_activation()
+        if persisted_activation is not None:
+            restored = manager.restore(persisted_activation)
+            if not restored.accepted and restored.reason != "restore-generation-already-failed":
+                return _activation_rejection(restored.reason, 409)
+        prepared = manager.prepare(activation_request)
+        decision = manager.commit(prepared)
+    finally:
+        worker.flush_and_stop()
+    if not decision.accepted:
+        status = (
+            503
+            if decision.reason
+            in {
+                "activation-persistence-failed",
+                "activation-persistence-unavailable",
+            }
+            else 409
+        )
+        return _activation_rejection(decision.reason, status)
+    state = manager.state
+    return jsonify(
+        {
+            "accepted": True,
+            "active_kind": state.active_kind,
+            "candidate_digest": state.active_digest,
+            "decision_id": state.decision_id,
+            "role_generation": state.role_generation,
+            "controller_configuration_digest": state.controller_configuration_digest,
+        }
+    ), 200
+
+
+@api_bp.post("/model-evidence/rollback")
+def api_model_evidence_rollback():
+    """Record an explicit operator rollback reason for immediate runtime fallback."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"reason"}:
+        return _activation_rejection("request must contain exactly reason", 422)
+    reason = body.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return _activation_rejection("rollback reason must be non-blank", 422)
+    activation = read_model_activation()
+    if activation is None:
+        return _activation_rejection("there is no active state-space generation", 409)
+    records = tuple(read_model_evidence())
+    source = next(
+        (
+            record
+            for record in reversed(records)
+            if record.kind is EvidenceKind.ACTIVATION
+            and record.role_generation == activation.role_generation
+            and record.evidence_id == activation.evidence_decision_id
+        ),
+        None,
+    )
+    # Older stores used an evidence id distinct from the confidence decision id.
+    if source is None:
+        source = next(
+            (
+                record
+                for record in reversed(records)
+                if record.kind is EvidenceKind.ACTIVATION and record.role_generation == activation.role_generation
+            ),
+            None,
+        )
+    active_snapshot = json.loads(activation.active_snapshot_json)
+    active_digest = (
+        source.model_digest
+        if source is not None
+        else hashlib.sha256(
+            json.dumps(active_snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        ).hexdigest()
+    )
+    now_ms = int(time.time() * 1_000)
+    decision = ModelEvidenceRecord(
+        evidence_id=f"rollback:{activation.evidence_decision_id}:{activation.role_generation + 1}:{now_ms}",
+        kind=EvidenceKind.ROLLBACK,
+        session_id="api-manual-rollback",
+        cook_id=None,
+        timestamp_ms=now_ms,
+        role_generation=activation.role_generation + 1,
+        model_digest=active_digest,
+        provenance_digest=source.provenance_digest if source is not None else None,
+        payload=RollbackEvidence(
+            decision_id=activation.evidence_decision_id,
+            reason=reason.strip(),
+        ),
+    )
+    try:
+        append_model_evidence((decision,))
+    except Exception as error:
+        return _activation_rejection(f"rollback-persistence-failed: {error}", 503)
+    return jsonify(
+        {
+            "accepted": True,
+            "active_kind": "grey-box",
+            "decision_id": activation.evidence_decision_id,
+            "reason": reason.strip(),
+            "role_generation": activation.role_generation + 1,
+        }
+    ), 200
 
 
 _API_GET_ACTIONS = {

@@ -471,6 +471,18 @@ class ControllerRunner(ABC):
     def refit_from_cook(self): ...
     @abstractmethod
     def controller_state(self) -> dict[str, object]: ...
+    def restore_activation(self, persisted, records):
+        return False
+
+    def activation_runtime_failure(self, reason: str):
+        return False
+
+    def rollback_activation(self, reason: str):
+        return False
+
+    def drain_activation_events(self):
+        return ()
+
     @abstractmethod
     def stop(self): ...
 
@@ -519,6 +531,22 @@ class SyncControllerRunner(ControllerRunner):
     def retire_evidence_context(self, generation: int) -> None:
         self._evidence_contexts.pop(generation, None)
 
+    def restore_activation(self, persisted, records):
+        restore = getattr(self._core, "restore_activation", None)
+        return False if restore is None else bool(restore(persisted, records))
+
+    def activation_runtime_failure(self, reason: str):
+        fallback = getattr(self._core, "activation_runtime_failure", None)
+        return False if fallback is None else bool(fallback(reason))
+
+    def rollback_activation(self, reason: str):
+        rollback = getattr(self._core, "rollback_activation", None)
+        return False if rollback is None else bool(rollback(reason))
+
+    def drain_activation_events(self):
+        drain = getattr(self._core, "drain_activation_events", None)
+        return () if drain is None else tuple(drain())
+
     def submit(self, temp):
         self._temp = temp
 
@@ -532,6 +560,8 @@ class SyncControllerRunner(ControllerRunner):
             wall_clock=self._wall_clock,
         )
         self._latest_result, transition = self._quality.completed(result)
+        if self._latest_result.consecutive_deadline_miss_count >= 2:
+            self.activation_runtime_failure("deadline-threshold")
         if transition is not None and self._warning_callback is not None:
             self._warning_callback(transition)
         return self._latest_result
@@ -663,6 +693,8 @@ class SyncControllerRunner(ControllerRunner):
         """A mutable, JSON-safe copy of the current status snapshot."""
         if self._latest_result is not None:
             self._latest_result, transition = self._quality.polled(self._latest_result, self._monotonic_clock())
+            if transition is ResultStaleState.STALE:
+                self.activation_runtime_failure("stale-result-threshold")
             if transition is not None and self._warning_callback is not None:
                 self._warning_callback(transition)
             state = {} if self._latest_result.status is None else _thaw_status(self._latest_result.status)
@@ -747,6 +779,8 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_dropped = 0
         self._pending_restore = None
         self._pending_calibrations: collections.deque[tuple[str, object]] = collections.deque()
+        self._pending_activations: collections.deque[tuple[str, object]] = collections.deque()
+        self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
         self._accepted_observations: dict[int, tuple[int, FrameObservation]] = {}
         self._inflight_observations: set[int] = set()
@@ -814,6 +848,16 @@ class ThreadedControllerRunner(ControllerRunner):
             )
         self._observation_outcomes.append(ObservationOutcomeEnvelope(sequence, generation, observation, outcome))
 
+    def _capture_activation_events(self) -> None:
+        drain = getattr(self._core, "drain_activation_events", None)
+        if not callable(drain):
+            return
+        events = tuple(drain())
+        if not all(isinstance(event, ModelEvidenceRecord) for event in events):
+            raise TypeError("controller activation events must be ModelEvidenceRecord")
+        with self._lock:
+            self._activation_events.extend(events)
+
     def _loop(self):
         while True:
             stopping = self._stop_event.is_set()
@@ -829,10 +873,31 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_restore = None
                 pending_calibrations = tuple(self._pending_calibrations)
                 self._pending_calibrations.clear()
+                pending_activations = tuple(self._pending_activations)
+                self._pending_activations.clear()
             # A pending core is installed only after the old core has drained
             # the returned generation bound to the consuming core.
             if restore is not None:
                 self._core.restore_model(restore)
+            for operation, payload in pending_activations:
+                callback = getattr(
+                    self._core,
+                    {
+                        "restore": "restore_activation",
+                        "rollback": "rollback_activation",
+                        "fallback": "activation_runtime_failure",
+                    }[operation],
+                    None,
+                )
+                if not callable(callback):
+                    continue
+                if operation == "restore":
+                    persisted, records = payload
+                    callback(persisted, records)
+                else:
+                    callback(payload)
+            if pending_activations:
+                self._capture_activation_events()
             if target is not _UNSET:
                 self._core.set_target(target)
             # A command must reach the core before the temperature that command
@@ -952,6 +1017,11 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._revision = result.revision
                     self._output = result
                     self._model_snapshot = model
+                if result.consecutive_deadline_miss_count >= 2:
+                    fallback = getattr(self._core, "activation_runtime_failure", None)
+                    if callable(fallback):
+                        fallback("deadline-threshold")
+                        self._capture_activation_events()
                 if transition is not None and self._warning_callback is not None:
                     self._warning_callback(transition)
             if stopping:
@@ -973,6 +1043,27 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._pending_calibrations.append(("cancel", reason))
 
+    def restore_activation(self, persisted, records):
+        with self._lock:
+            self._pending_activations.append(("restore", (persisted, tuple(records))))
+        return True
+
+    def activation_runtime_failure(self, reason: str):
+        with self._lock:
+            self._pending_activations.append(("fallback", reason))
+        return True
+
+    def rollback_activation(self, reason: str):
+        with self._lock:
+            self._pending_activations.append(("rollback", reason))
+        return True
+
+    def drain_activation_events(self):
+        with self._lock:
+            events = tuple(self._activation_events)
+            self._activation_events.clear()
+        return events
+
     def submit(self, temp):
         with self._lock:
             self._temp = temp
@@ -981,6 +1072,8 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._output, transition = self._quality.polled(self._output, self._monotonic_clock())
             result = self._output
+            if transition is ResultStaleState.STALE:
+                self._pending_activations.append(("fallback", "stale-result-threshold"))
         if transition is not None and self._warning_callback is not None:
             self._warning_callback(transition)
         return result

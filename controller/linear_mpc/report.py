@@ -498,6 +498,10 @@ def _history(records: Sequence[ModelEvidenceRecord]) -> list[dict[str, object]]:
                     "event": "fallback",
                     "decision_id": None,
                     "reason": payload.reason,
+                    "failed_digest": payload.failed_digest,
+                    "failed_generation": payload.failed_generation,
+                    "last_safe_command": payload.last_safe_command,
+                    "fallback_kind": payload.fallback_kind,
                 }
             )
     return history

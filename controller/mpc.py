@@ -54,7 +54,12 @@ from controller.mpc_model import (
 )
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
-from common.model_evidence import ForecastOriginEvidence, RefreshDiagnosticsEvidence
+from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RefreshDiagnosticsEvidence
+from controller.linear_mpc.activation import (
+    ActivationManager,
+    GREY_BOX_KIND,
+    STATE_SPACE_KIND,
+)
 from controller.linear_mpc.adaptation import AdaptationPolicy, EvaluationDecision, OnlineAdaptation
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
 from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
@@ -776,7 +781,11 @@ class CalibrationCommand:
     def __post_init__(self) -> None:
         if self.action not in {"start", "pause", "resume", "stop", "reset-progress"}:
             raise ValueError("invalid calibration action")
-        if isinstance(self.command_revision, bool) or not isinstance(self.command_revision, int) or self.command_revision < 1:
+        if (
+            isinstance(self.command_revision, bool)
+            or not isinstance(self.command_revision, int)
+            or self.command_revision < 1
+        ):
             raise ValueError("calibration command revision must be positive")
         if not all(
             isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
@@ -795,6 +804,12 @@ class Controller(ControllerBase):
             raise ValueError("_online_challenger_kind must be None or 'state-space'")
         super().__init__(config, units, cycle_data)
 
+        self._activation_configuration = {
+            "controller": "mpc",
+            "config": copy.deepcopy(config or {}),
+            "cycle_data": copy.deepcopy(cycle_data),
+            "units": units,
+        }
         cfg = dict(_DEFAULTS)
         cfg.update(config or {})
         cfg.pop("feed_forward", None)
@@ -858,6 +873,10 @@ class Controller(ControllerBase):
         self._trace_calibration = CalibrationDecision(False, 0.0, None, CalibrationProgress())
         self._trace_baseline_allocation: AllocationResult | None = None
         self._trace_allocation: AllocationResult | None = None
+        self._activation_manager: ActivationManager | None = None
+        self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
+        self._activation_expected_temperature_c: float | None = None
+        self._activation_residual_failures = 0
 
         self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
         if self._online_enabled:
@@ -1076,6 +1095,107 @@ class Controller(ControllerBase):
     def _active_arx(self):
         return self._online is not None and isinstance(self._online.incumbent, ScheduledARX)
 
+    def _active_state_space(self):
+        manager = self._activation_manager
+        return manager is not None and manager.active_kind == STATE_SPACE_KIND and manager.active_model is not None
+
+    def _activation_prospective_solve(self, candidate):
+        if self._linear_config is None or self._linear_policy is None:
+            self._linear_config, self._linear_policy = self._new_linear_policy()
+        prediction = candidate.affine_prediction(
+            self._linear_config.horizon_steps,
+            self._applied_combustion_load,
+            np.full(self._linear_config.horizon_steps, self.cfg["T_amb"]),
+        )
+        if not (np.isfinite(prediction.free_output_c).all() and np.isfinite(prediction.input_response_c).all()):
+            raise ValueError("non-finite-forecast")
+        disturbance = 0.0 if self._x_hat is None else float(np.asarray(self._x_hat).reshape(-1)[-1])
+        solve = self._linear_policy.solve(
+            prediction,
+            setpoint_c=self._set_point_c,
+            q_previous=self._applied_combustion_load,
+            equilibrium_q=self._equilibrium_load(self._set_point_c, disturbance),
+        )
+        rejection = self._linear_certificate_rejection(solve, self._linear_config)
+        if rejection is not None:
+            raise ValueError(rejection)
+        return float(solve.sequence_q[0])
+
+    def restore_activation(self, persisted, records):
+        """Restore one durable activation without bypassing its exact lineage."""
+        manager = ActivationManager(
+            tuple(records),
+            candidate_snapshot={},
+            rollback_snapshot={},
+            controller_configuration=self._activation_configuration,
+            prospective_solve=self._activation_prospective_solve,
+            persist_activation=lambda _record: False,
+            append_evidence=self._activation_events.append,
+            session_id="mpc-runtime-activation",
+        )
+        decision = manager.restore(persisted)
+        self._activation_manager = manager
+        self._activation_expected_temperature_c = None
+        self._activation_residual_failures = 0
+        if not decision.accepted:
+            return False
+        if self._online is not None:
+            self._online._invalidate_origins()
+            self._online._role_generation = manager.state.role_generation
+            self._online.reset_continuity()
+        self._model_revision += 1
+        return True
+
+    def activation_runtime_failure(self, reason):
+        """Immediately leave active state-space ownership for a named failure."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("activation fallback reason must be non-blank")
+        manager = self._activation_manager
+        if manager is None or manager.active_kind != STATE_SPACE_KIND:
+            return False
+        manager.fallback(
+            reason.strip(),
+            last_safe_command=self._last_combustion_load,
+        )
+        self._activation_expected_temperature_c = None
+        self._activation_residual_failures = 0
+        if self._online is not None:
+            self._online._invalidate_origins()
+            self._online._role_generation = manager.state.role_generation
+            self._online.reset_continuity()
+        self._model_revision += 1
+        self._online_pending_lifecycle = {
+            "event": "reject",
+            "detail": reason.strip(),
+            "model_revision": self._model_revision,
+            "model_kind": STATE_SPACE_KIND,
+            "role_generation": manager.state.failed_generation,
+            "model_digest": manager.state.failed_digest,
+            "fallback_kind": manager.state.fallback_kind,
+            "last_safe_command": manager.state.last_safe_command,
+        }
+        return True
+
+    def rollback_activation(self, reason):
+        """Apply a persisted operator rollback without duplicating its decision."""
+        manager = self._activation_manager
+        if manager is None or manager.active_kind != STATE_SPACE_KIND:
+            return False
+        manager.fallback(reason, last_safe_command=self._last_combustion_load)
+        self._activation_expected_temperature_c = None
+        self._activation_residual_failures = 0
+        if self._online is not None:
+            self._online._invalidate_origins()
+            self._online._role_generation = manager.state.role_generation
+            self._online.reset_continuity()
+        self._model_revision += 1
+        return True
+
+    def drain_activation_events(self):
+        events = tuple(self._activation_events)
+        self._activation_events.clear()
+        return events
+
     @staticmethod
     def _is_state_space_model(model):
         return isinstance(model, (InnovationStateSpace, _StateSpaceShadow))
@@ -1166,7 +1286,7 @@ class Controller(ControllerBase):
             try:
                 restored = InnovationStateSpace.from_snapshot(snapshot)
                 round_trip = restored.snapshot() == snapshot
-            except (ValueError, FloatingPointError, RuntimeError):
+            except ValueError, FloatingPointError, RuntimeError:
                 round_trip = False
         braking = decision.candidate_braking_score
         incumbent_braking = decision.incumbent_braking_score
@@ -1182,7 +1302,9 @@ class Controller(ControllerBase):
             alignment_error_c=float(alignment) if isinstance(alignment, (int, float)) else None,
             snapshot_round_trip=round_trip,
             sequential_wins=decision.consecutive_wins,
-            generation_continuity=not any(reason.value in {"continuity", "stale-generation"} for reason in decision.reasons),
+            generation_continuity=not any(
+                reason.value in {"continuity", "stale-generation"} for reason in decision.reasons
+            ),
             atomic_persistence=False,
             production_prospective=production_prospective,
             braking_error_c=braking,
@@ -1230,7 +1352,6 @@ class Controller(ControllerBase):
             else self._online_last_evaluation.get("incumbent_prediction_score"),
             "candidate_prediction_score": None
             if self._online_last_evaluation is None
-
             else self._online_last_evaluation.get("challenger_prediction_score"),
             "promotion_count": self._online_promotion_count,
             "rollback_count": self._online_rollback_count,
@@ -1238,6 +1359,7 @@ class Controller(ControllerBase):
             "evaluation_duration_seconds": self._online_evaluation_duration,
             "linear_solve_duration_seconds": self._online_linear_duration,
         }
+
     @staticmethod
     def _completed_origin_payloads(origin) -> tuple[CompletedOriginEvidence, ForecastOriginEvidence]:
         """Serialize one completed causal event into raw and compact forms."""
@@ -1448,9 +1570,7 @@ class Controller(ControllerBase):
             certificate_rejection = self._linear_certificate_rejection(solve, self._linear_config)
             if certificate_rejection is not None:
                 raise ValueError(certificate_rejection)
-            refresh_diagnostics_evidence = self._compact_refresh_evidence(
-                decision, production_prospective=True
-            )
+            refresh_diagnostics_evidence = self._compact_refresh_evidence(decision, production_prospective=True)
         except Exception as error:
             detail = str(error)
             self._online.reject_prospective(decision.decision_id, detail)
@@ -1489,10 +1609,15 @@ class Controller(ControllerBase):
 
     def observe_frame(self, observation):
         """Consume one completed framed-pulse observation on Hold's worker."""
-        if not self._online_enabled:
-            return None
         if not isinstance(observation, FrameObservation):
             raise TypeError("observation must be a FrameObservation")
+        if self._active_state_space():
+            try:
+                self._activation_manager.active_model.track(observation)
+            except Exception as error:
+                self.activation_runtime_failure(f"invalid-active-state:{type(error).__name__}:{error}")
+        if not self._online_enabled:
+            return None
         generation = observation.role_generation
         if generation != self._online.role_generation:
             self._online_last_rejection_reason = "stale-generation"
@@ -1613,6 +1738,21 @@ class Controller(ControllerBase):
             },
             "feasibility": None if self._last_feasibility is None else self._last_feasibility.as_status(),
             "adaptation": self._online_status(),
+            "activation": (
+                {
+                    "active_kind": GREY_BOX_KIND,
+                    "active_digest": None,
+                    "decision_id": None,
+                    "role_generation": 0,
+                    "failed_digest": None,
+                    "failed_generation": None,
+                    "last_safe_command": None,
+                    "fallback_kind": None,
+                    "fallback_reason": None,
+                }
+                if self._activation_manager is None
+                else asdict(self._activation_manager.state)
+            ),
         }
 
     #: The model structure a snapshot describes, shared with every other thing
@@ -2051,9 +2191,7 @@ class Controller(ControllerBase):
             raise ValueError("calibration cancellation reason must be a non-empty string")
         self._calibration_operations.append(("cancel", reason))
 
-    def _predict_calibration_max(
-        self, baseline_q: float, probe_q: float, runtime: CalibrationRuntimeContext
-    ) -> float:
+    def _predict_calibration_max(self, baseline_q: float, probe_q: float, runtime: CalibrationRuntimeContext) -> float:
         """Forecast the incumbent grey-box horizon for one requested probe."""
         horizon = max(1, int(self.cfg["n_horizon"]))
         requested_q = float(np.clip(baseline_q + probe_q, 0.0, 1.0))
@@ -2278,12 +2416,24 @@ class Controller(ControllerBase):
         failure_state = MpcFailureState.SUCCESS
         failure_error = None
         active_arx = self._active_arx()
+        state_space_policy_active = self._active_state_space()
         # Keep restored ARX authority visible while fresh frames rebuild its lags.
         arx_policy_active = active_arx and self._online is not None and self._online.lag_warmup_remaining == 0
+        linear_policy_active = state_space_policy_active or arx_policy_active
+        state_space_failed = False
         try:
-            if arx_policy_active:
+            if linear_policy_active:
+                if (
+                    state_space_policy_active
+                    and self._activation_expected_temperature_c is not None
+                    and abs(y - self._activation_expected_temperature_c) > 15.0
+                ):
+                    raise ValueError("residual-degradation")
+                linear_model = (
+                    self._activation_manager.active_model if state_space_policy_active else self._online.incumbent
+                )
                 try:
-                    prediction = self._online.incumbent.affine_prediction(
+                    prediction = linear_model.affine_prediction(
                         self._linear_config.horizon_steps,
                         self._applied_combustion_load,
                         np.full(self._linear_config.horizon_steps, self.cfg["T_amb"]),
@@ -2306,17 +2456,35 @@ class Controller(ControllerBase):
                 combustion_load = float(solve.sequence_q[0])
                 raw_firing_load = combustion_load
                 residual_move = combustion_load - equilibrium
+                if state_space_policy_active:
+                    self._activation_manager.note_safe_command(combustion_load)
+                    self._activation_expected_temperature_c = float(
+                        prediction.free_output_c[0] + prediction.input_response_c[0] @ np.asarray(solve.sequence_q)
+                    )
+                    self._activation_residual_failures = 0
             else:
                 residual_move = self._policy_residual(x_hat, self._policy_u_prev, equilibrium)
                 raw_firing_load = equilibrium + residual_move
                 combustion_load = float(np.clip(raw_firing_load, 0.0, 1.0))
         except Exception as error:
-            combustion_load = self._last_combustion_load
             failure_state = MpcFailureState.POLICY_EXCEPTION
             failure_error = error
-            equilibrium = None
-            residual_move = None
-            raw_firing_load = None
+            if state_space_policy_active:
+                state_space_failed = self.activation_runtime_failure(str(error) or type(error).__name__)
+                try:
+                    residual_move = self._policy_residual(x_hat, self._policy_u_prev, equilibrium)
+                    raw_firing_load = equilibrium + residual_move
+                    combustion_load = float(np.clip(raw_firing_load, 0.0, 1.0))
+                except Exception:
+                    combustion_load = self._last_combustion_load
+                    equilibrium = None
+                    residual_move = None
+                    raw_firing_load = None
+            else:
+                combustion_load = self._last_combustion_load
+                equilibrium = None
+                residual_move = None
+                raw_firing_load = None
         finally:
             solve_end = time.monotonic()
 
@@ -2351,6 +2519,8 @@ class Controller(ControllerBase):
                     self._online_pending_lifecycle = self._online_lifecycle("reject", reason)
                     self._online_last_lifecycle = self._online_pending_lifecycle
                     self._consecutive_policy_failures = 0
+            elif state_space_failed:
+                self._consecutive_policy_failures = 0
 
         self._last_equilibrium_load = equilibrium
         self._last_residual_load = residual_move
@@ -2383,7 +2553,7 @@ class Controller(ControllerBase):
             residual_move=residual_move,
             bounded_firing_load=combustion_load,
             applied_combustion_load=applied_combustion_load,
-            policy_kind="linear-mpc" if arx_policy_active else ("net" if self._net is not None else "nlp"),
+            policy_kind="linear-mpc" if linear_policy_active else ("net" if self._net is not None else "nlp"),
             failure_state=failure_state,
             consecutive_policy_failures=self._consecutive_policy_failures,
             solve_start_monotonic=solve_start,

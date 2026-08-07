@@ -35,6 +35,10 @@ class FakeControllerRunner:
         self._configuration_revision = 0
         self.applied = []
         self.restored = []
+        self.activation_restores = []
+        self.activation_failures = []
+        self.activation_rollbacks = []
+        self.activation_events = []
         self.snapshot: dict[str, Any] | None = None
         self.observations = []
         self._observation_sequence = 0
@@ -70,6 +74,23 @@ class FakeControllerRunner:
 
     def cancel_calibration(self, reason):
         self.calibration_cancellations.append(reason)
+
+    def restore_activation(self, persisted, records):
+        self.activation_restores.append((persisted, tuple(records)))
+        return True
+
+    def activation_runtime_failure(self, reason):
+        self.activation_failures.append(reason)
+        return True
+
+    def rollback_activation(self, reason):
+        self.activation_rollbacks.append(reason)
+        return True
+
+    def drain_activation_events(self):
+        events = tuple(self.activation_events)
+        self.activation_events.clear()
+        return events
 
     def submit(self, temp):
         self.submitted_temps.append(temp)

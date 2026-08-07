@@ -29,6 +29,13 @@ class EvidenceSubmission:
     recorder_gap: ModelEvidenceRecord | None = None
 
 
+@dataclass(slots=True)
+class _ActivationWork:
+    decision: ModelEvidenceRecord
+    completed: bool = False
+    succeeded: bool = False
+
+
 class ModelPersistenceWorker:
     """Serialize durable writes without putting SQLite or model I/O on Hold."""
 
@@ -52,7 +59,7 @@ class ModelPersistenceWorker:
         self._pending_checkpoints: dict[str, dict[str, object]] = {}
         self._pending_evidence: deque[tuple[ModelEvidenceRecord, ...]] = deque()
         self._pending_recorder_gaps: deque[ModelEvidenceRecord] = deque()
-        self._pending_activations: deque[ModelEvidenceRecord] = deque()
+        self._pending_activations: deque[_ActivationWork] = deque()
         self._stopping = False
         self._thread: Thread | None = None
         self._evidence_blocked = False
@@ -83,7 +90,9 @@ class ModelPersistenceWorker:
             if pending_snapshot is not None:
                 pending_revision = self._revision(pending_snapshot)
                 submitted_revision = self._revision(owned_snapshot)
-                if pending_revision is not None and (submitted_revision is None or submitted_revision <= pending_revision):
+                if pending_revision is not None and (
+                    submitted_revision is None or submitted_revision <= pending_revision
+                ):
                     return True
             stage_owned = getattr(self._store, "stage_owned", None)
             if callable(stage_owned):
@@ -125,13 +134,22 @@ class ModelPersistenceWorker:
             self._condition.notify()
         return EvidenceSubmission(accepted=True)
 
-    def commit_activation(self, decision: ModelEvidenceRecord) -> bool:
-        """Queue a validated activation on its unbounded serialized channel."""
+    def commit_activation(
+        self,
+        decision: ModelEvidenceRecord,
+        *,
+        wait: bool = False,
+        timeout: float | None = None,
+    ) -> bool:
+        """Queue activation, optionally waiting for its durable transaction."""
         if not isinstance(decision, ModelEvidenceRecord):
             raise TypeError("decision must be ModelEvidenceRecord")
+        if timeout is not None and (not isinstance(timeout, (int, float)) or timeout < 0.0):
+            raise ValueError("activation persistence timeout must be nonnegative")
         owned_decision = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
         if owned_decision.kind is not EvidenceKind.ACTIVATION:
             raise ValueError("activation worker requires activation evidence")
+        work = _ActivationWork(owned_decision)
         with self._condition:
             if self._failed:
                 self._logger.error("Could not commit model activation after persistence failed")
@@ -139,10 +157,13 @@ class ModelPersistenceWorker:
             if self._stopping:
                 self._logger.error("Could not commit model activation after teardown began")
                 return False
-            self._pending_activations.append(owned_decision)
+            self._pending_activations.append(work)
             self._start_locked()
             self._condition.notify()
-        return True
+            if not wait:
+                return True
+            completed = self._condition.wait_for(lambda: work.completed, timeout=timeout)
+            return completed and work.succeeded
 
     def _save_checkpoint(self, name: str, snapshot: dict[str, object]) -> CheckpointSaveOutcome:
         return self._store.save_outcome(name, snapshot)
@@ -179,9 +200,7 @@ class ModelPersistenceWorker:
             self._thread = Thread(target=self._run, name="controller-model-persistence", daemon=True)
             self._thread.start()
 
-    def _reject_evidence_locked(
-        self, records: Sequence[ModelEvidenceRecord], reason: str
-    ) -> EvidenceSubmission:
+    def _reject_evidence_locked(self, records: Sequence[ModelEvidenceRecord], reason: str) -> EvidenceSubmission:
         self._evidence_blocked = True
         first = records[0]
         gap = ModelEvidenceRecord(
@@ -222,6 +241,8 @@ class ModelPersistenceWorker:
                 if work is None:
                     return
             kind, payload = work
+            activation_work = payload if kind == "activation" and isinstance(payload, _ActivationWork) else None
+            succeeded = False
             try:
                 if kind == "checkpoint":
                     name, snapshot = payload
@@ -232,8 +253,13 @@ class ModelPersistenceWorker:
                         raise RuntimeError(f"unknown checkpoint store outcome: {outcome!r}")
                 elif kind == "evidence":
                     self._append_evidence(self._durable_evidence_batch(payload))
+                elif activation_work is not None:
+                    result = self._commit_activation(activation_work.decision)
+                    if result is False:
+                        raise RuntimeError("activation transaction declined")
                 else:
-                    self._commit_activation(payload)
+                    raise TypeError("activation work is malformed")
+                succeeded = True
             except Exception as error:
                 with self._condition:
                     self._failed = True
@@ -241,20 +267,18 @@ class ModelPersistenceWorker:
                 self._logger.error(f"Could not persist model {kind}: {error}")
             finally:
                 with self._condition:
+                    if activation_work is not None:
+                        activation_work.succeeded = succeeded
+                        activation_work.completed = True
                     self._condition.notify_all()
-
 
     @staticmethod
     def _durable_evidence_batch(payload: object) -> tuple[ModelEvidenceRecord, ...]:
         """Stamp atomicity only on the immutable tuple handed to one transaction."""
-        if not isinstance(payload, tuple) or not all(
-            isinstance(record, ModelEvidenceRecord) for record in payload
-        ):
+        if not isinstance(payload, tuple) or not all(isinstance(record, ModelEvidenceRecord) for record in payload):
             raise TypeError("evidence work must contain one immutable record batch")
         return tuple(
-            record.model_copy(
-                update={"payload": replace(record.payload, atomic_persistence=True)}
-            )
+            record.model_copy(update={"payload": replace(record.payload, atomic_persistence=True)})
             if isinstance(record.payload, RefreshDiagnosticsEvidence)
             else record
             for record in payload

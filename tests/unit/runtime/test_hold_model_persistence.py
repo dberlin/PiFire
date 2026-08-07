@@ -6,6 +6,8 @@ import threading
 
 from common.control_trace import ActuationMode
 from common.controller_model_state import CheckpointSaveOutcome, ControllerModelStore
+from common.datastore_accessors import ModelActivationState
+from common.model_evidence import ActivationEvidence, EvidenceKind, ModelEvidenceRecord
 
 from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
@@ -79,6 +81,51 @@ def test_setup_with_no_stored_model_restores_nothing(hold_cycle):
     assert runner.restored == []
 
 
+def test_setup_restores_durable_activation_before_control_ownership(hold_cycle, monkeypatch):
+    from controller.runtime.modes import hold as hold_module
+
+    active_json = '{"schema":"innovation-state-space/v2","model":{}}'
+    rollback_json = '{"schema":"grey-box-adapter/v1"}'
+    persisted = ModelActivationState(
+        active_snapshot_json=active_json,
+        rollback_snapshot_json=rollback_json,
+        evidence_decision_id="decision-7",
+        controller_configuration_digest="a" * 64,
+        role_generation=8,
+    )
+    activation = ModelEvidenceRecord(
+        evidence_id="activation-8",
+        kind=EvidenceKind.ACTIVATION,
+        session_id="session-8",
+        cook_id=None,
+        timestamp_ms=1_000,
+        role_generation=8,
+        model_digest="b" * 64,
+        provenance_digest="c" * 64,
+        payload=ActivationEvidence(
+            decision_id="decision-7",
+            active_snapshot_json=active_json,
+            rollback_snapshot_json=rollback_json,
+            controller_configuration_digest="a" * 64,
+        ),
+    )
+    monkeypatch.setattr(hold_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: [activation])
+    runner = FakeControllerRunner(period=0.01)
+    hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
+
+    hold.setup()
+
+    assert runner.activation_restores == [(persisted, (activation,))]
+    assert hold._activation_state_identity == (
+        "decision-7",
+        "a" * 64,
+        8,
+        active_json,
+        rollback_json,
+    )
+
+
 def test_per_tick_saves_the_controller_snapshot(hold_cycle):
     runner = FakeControllerRunner(period=0.0).script([_output(0.5)])
     store = _FakeModelStore()
@@ -113,6 +160,7 @@ def test_checkpoint_persistence_failure_disables_hold_learning(hold_cycle):
     finally:
         hold.ctx.clock.advance(400.0)
         hold.teardown(200.0)
+
 
 def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_snapshot(hold_cycle):
     """Checkpoint I/O remains owned after nonblocking Hold teardown."""

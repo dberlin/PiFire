@@ -98,9 +98,7 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-type FetchMock = Mock<
-  (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
->;
+type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>;
 interface PromiseResolvers<T> {
   promise: Promise<T>;
   resolve(value: T): void;
@@ -123,9 +121,7 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderPanel(
-  props: Partial<React.ComponentProps<typeof MpcLearningPanel>> = {},
-) {
+function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningPanel>> = {}) {
   return render(
     <MpcLearningPanel
       apiBase=""
@@ -313,7 +309,9 @@ describe("MpcLearningPanel", () => {
   it("shows the backend's exact action rejection, including duplicate revisions", async () => {
     fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) =>
       init?.method === "POST"
-        ? Promise.resolve(jsonResponse({ result: "ERROR", message: "duplicate calibration revision" }, 400))
+        ? Promise.resolve(
+            jsonResponse({ result: "ERROR", message: "duplicate calibration revision" }, 400),
+          )
         : Promise.resolve(jsonResponse(REPORT)),
     );
     renderPanel();
@@ -324,11 +322,92 @@ describe("MpcLearningPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("duplicate calibration revision");
   });
 
+  it("requires both exact confirmations and sends the reviewed digest and decision ID", async () => {
+    const ready = { ...REPORT, status: "ready-for-review" as const, blockers: [] };
+    fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve(
+            jsonResponse({
+              accepted: true,
+              active_kind: "innovation-state-space",
+              candidate_digest: ready.candidate.digest,
+              decision_id: ready.decision_id,
+              role_generation: 8,
+            }),
+          )
+        : Promise.resolve(jsonResponse(ready)),
+    );
+    renderPanel();
+    await openPanel();
+
+    const activate = screen.getByRole("button", { name: "Activate exact model" });
+    expect(activate).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText("Type the exact candidate digest"),
+      String(ready.candidate.digest),
+    );
+    expect(activate).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText("Type the exact confidence decision ID"),
+      String(ready.decision_id),
+    );
+    expect(activate).toBeEnabled();
+    await userEvent.click(activate);
+
+    const post = fetchMock.mock.calls.find((call) => call[1]?.method === "POST");
+    expect(String(post?.[0])).toContain("/api/model-evidence/activate");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      candidate_digest: ready.candidate.digest,
+      decision_id: ready.decision_id,
+    });
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3));
+  });
+
+  it("keeps grey-box review visible with the backend's exact activation rejection", async () => {
+    const ready = { ...REPORT, status: "ready-for-review" as const, blockers: [] };
+    fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve(
+            jsonResponse(
+              {
+                accepted: false,
+                active_kind: "grey-box",
+                error: "model-activation-rejected",
+                detail: "candidate-digest-changed",
+              },
+              409,
+            ),
+          )
+        : Promise.resolve(jsonResponse(ready)),
+    );
+    renderPanel();
+    await openPanel();
+    await userEvent.type(
+      screen.getByLabelText("Type the exact candidate digest"),
+      String(ready.candidate.digest),
+    );
+    await userEvent.type(
+      screen.getByLabelText("Type the exact confidence decision ID"),
+      String(ready.decision_id),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Activate exact model" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("candidate-digest-changed");
+    expect(screen.getByText(/Active model: grey-box/i)).toBeInTheDocument();
+    expect(screen.getAllByText(String(ready.candidate.digest)).length).toBeGreaterThanOrEqual(1);
+  });
+
   it("states timeout and incomplete outcomes explicitly", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
         ...REPORT,
-        calibration: { ...REPORT.calibration, status: "timed-out", timed_out: true, incomplete: true },
+        calibration: {
+          ...REPORT.calibration,
+          status: "timed-out",
+          timed_out: true,
+          incomplete: true,
+        },
       }),
     );
     renderPanel();
