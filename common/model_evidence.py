@@ -125,6 +125,23 @@ class CalibrationSummaryEvidence:
                 raise ValueError("combined allocation must match combined load")
             if self.delivered_on_seconds > self.scheduled_on_seconds:
                 raise ValueError("delivered calibration on-time must not exceed scheduled on-time")
+        if self.status == "active":
+            if not self.accepted or self.probe_count != 1 or self.probe_q in (None, 0.0):
+                raise ValueError("active calibration evidence requires one accepted completed probe")
+        elif self.status == "accepted":
+            if not self.accepted or self.probe_count != 0 or self.probe_q != 0.0:
+                raise ValueError("accepted calibration evidence must not claim a probe")
+        elif self.status == "rejected":
+            if self.accepted or self.probe_count != 0 or self.probe_q != 0.0:
+                raise ValueError("rejected calibration evidence must not claim a probe")
+        elif self.status == "cancelled":
+            if (
+                self.accepted
+                or self.probe_count != 0
+                or self.cancellation_reason is None
+                or self.cancellation_command_action == "none"
+            ):
+                raise ValueError("cancelled calibration evidence must retain cancellation attribution")
         return self
 
 

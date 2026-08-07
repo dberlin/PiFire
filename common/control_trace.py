@@ -540,9 +540,13 @@ class ModelObservationPayload:
         if self.frame_start_ms >= self.frame_end_ms:
             raise ValueError("model observation frame interval must be positive")
         duration_s = (self.frame_end_ms - self.frame_start_ms) / 1000
-        if not math.isclose(duration_s, 20.0, rel_tol=0, abs_tol=1e-9):
-            raise ValueError("model observation frame must be twenty seconds")
-        if self.scheduled_on_seconds > duration_s or self.delivered_on_seconds > duration_s:
+        if not math.isclose(duration_s, 20.0, rel_tol=0, abs_tol=1e-9) and not (
+            self.reset and self.calibration_status == "cancelled"
+        ):
+            raise ValueError("model observation frame must be twenty seconds unless cancellation closed it early")
+        if self.delivered_on_seconds > duration_s or (
+            self.scheduled_on_seconds > duration_s and not (self.reset and self.calibration_status == "cancelled")
+        ):
             raise ValueError("model observation delivery must not exceed frame duration")
         requested = min(1.0, max(0.0, self.baseline_combustion_load + self.calibration_probe_load))
         if not math.isclose(self.requested_combustion_load, requested, rel_tol=0, abs_tol=1e-9):

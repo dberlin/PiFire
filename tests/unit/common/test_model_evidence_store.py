@@ -92,6 +92,28 @@ def test_calibration_summary_requires_matching_completed_frame_allocations() -> 
         replace(payload, result_revision=0)
 
 
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        {"status": "rejected"},
+        {"status": "rejected", "accepted": False, "probe_count": 1},
+        {"status": "active", "probe_count": 0},
+        {"status": "cancelled"},
+    ),
+)
+def test_calibration_summary_rejects_status_that_contradicts_completed_frame(replacement) -> None:
+    baseline = AllocationEvidence(0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
+    combined = AllocationEvidence(0.4, 0.36, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
+    payload = CalibrationSummaryEvidence(
+        accepted=True, probe_count=1, result_revision=3, command_revision=2, command_action="start",
+        baseline_q=0.3, probe_q=0.1, combined_q=0.4, baseline_allocation=baseline,
+        combined_allocation=combined, scheduled_on_seconds=8.0, delivered_on_seconds=7.0, status="active",
+    )
+
+    with pytest.raises(ValidationError):
+        replace(payload, **replacement)
+
 def test_append_only_identity_and_insertion_order(ds):
     later = _forecast("forecast-later", 200, sequence=2)
     first = _forecast("forecast-first", 100)

@@ -903,6 +903,25 @@ class HoldMode(ControlMode):
             self._deliver_completed_pulse_observation(frame_key, observation)
         return decision
 
+    def _stamp_latched_calibration_cancellation(
+        self,
+        reason: str,
+        *,
+        command_revision: int = 0,
+        command_action: str = "safety-cancel",
+    ) -> None:
+        """Mark an active probe on the frame that is about to be closed."""
+        controller = self.state.controller
+        if (
+            getattr(controller, "pulse_frame_calibration_status", "inactive") != "active"
+            or getattr(controller, "pulse_frame_calibration_probe_load", 0.0) == 0.0
+        ):
+            return
+        controller.pulse_frame_calibration_cancellation_reason = reason
+        controller.pulse_frame_calibration_status = "cancelled"
+        controller.pulse_frame_cancellation_command_revision = command_revision
+        controller.pulse_frame_cancellation_command_action = command_action
+
     def _reset_framed_pulse(
         self,
         reason: PulseResetReason,
@@ -915,6 +934,9 @@ class HoldMode(ControlMode):
         scheduler = self._pulse_scheduler
         if scheduler is None:
             return
+        self._stamp_latched_calibration_cancellation(
+            "reset" if reason is PulseResetReason.MODE_CHANGE else reason.value
+        )
         self._trace_safety(
             SafetyEventType.SCHEDULER_RESET,
             now,
@@ -1747,16 +1769,18 @@ class HoldMode(ControlMode):
             InhibitReason.SAFETY,
             result_revision=result.revision,
         )
-        controller = self.state.controller
         raw = self.control.get("mpc_calibration")
         if reason.startswith("operator_") and isinstance(raw, dict) and isinstance(raw.get("revision"), int):
-            controller.pulse_frame_cancellation_command_revision = raw["revision"]
-            controller.pulse_frame_cancellation_command_action = reason.removeprefix("operator_")
+            cancellation_command_revision = raw["revision"]
+            cancellation_command_action = reason.removeprefix("operator_")
         else:
-            controller.pulse_frame_cancellation_command_revision = 0
-            controller.pulse_frame_cancellation_command_action = "safety-cancel"
-        controller.pulse_frame_calibration_cancellation_reason = reason
-        controller.pulse_frame_calibration_status = "cancelled"
+            cancellation_command_revision = 0
+            cancellation_command_action = "safety-cancel"
+        self._stamp_latched_calibration_cancellation(
+            reason,
+            command_revision=cancellation_command_revision,
+            command_action=cancellation_command_action,
+        )
         self._reset_framed_pulse(
             PulseResetReason.SAFETY,
             now,

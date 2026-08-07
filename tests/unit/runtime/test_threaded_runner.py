@@ -1509,3 +1509,38 @@ def test_threaded_reconfigure_transfers_fifo_calibration_operations_to_replaceme
     finally:
         barrier.release.set()
         runner.stop()
+
+
+def test_threaded_public_reconfigure_transfers_queued_calibration_without_replay(monkeypatch):
+    import controller.runtime.runner as runner_module
+
+    class CalibrationCore(FakeCore):
+        def __init__(self, name):
+            super().__init__(period=0.001)
+            self.name = name
+            self.calibration_calls = []
+
+        def request_calibration(self, command):
+            self.calibration_calls.append(("command", command))
+
+        def cancel_calibration(self, reason):
+            self.calibration_calls.append(("cancel", reason))
+
+    barrier = _ObservationBarrier()
+    old = CalibrationCore("old")
+    new = CalibrationCore("new")
+    monkeypatch.setattr(runner_module, "_build_core", lambda settings, control, logger=None: (new, "Active"))
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
+        runner.request_calibration("start")
+        runner.request_calibration("pause")
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert _wait_for(lambda: new.calibration_calls == [("command", "start"), ("command", "pause")])
+        assert old.calibration_calls == []
+    finally:
+        barrier.release.set()
+        runner.stop()
