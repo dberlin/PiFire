@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 from pydantic import ValidationError
 
-from common.control_trace import AmbientSource
+from common.control_trace import AllocationClampReason, AmbientSource
 from common.datastore_accessors import (
     append_model_evidence,
     commit_model_activation,
@@ -18,6 +18,8 @@ from common.datastore_accessors import (
 )
 from common.model_evidence import (
     ActivationEvidence,
+    AllocationEvidence,
+    CalibrationSummaryEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
@@ -74,6 +76,20 @@ def _activation(evidence_id: str = "activation-a") -> ModelEvidenceRecord:
             controller_configuration_digest=_OTHER_DIGEST,
         ),
     )
+
+def test_calibration_summary_requires_matching_completed_frame_allocations() -> None:
+    baseline = AllocationEvidence(0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
+    combined = AllocationEvidence(0.4, 0.36, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
+
+    payload = CalibrationSummaryEvidence(
+        accepted=True, probe_count=1, result_revision=3, command_revision=2, command_action="start",
+        baseline_q=0.3, probe_q=0.1, combined_q=0.4, baseline_allocation=baseline,
+        combined_allocation=combined, scheduled_on_seconds=8.0, delivered_on_seconds=7.0,
+    )
+
+    assert payload.combined_allocation == combined
+    with pytest.raises(ValidationError):
+        replace(payload, result_revision=0)
 
 
 def test_append_only_identity_and_insertion_order(ds):

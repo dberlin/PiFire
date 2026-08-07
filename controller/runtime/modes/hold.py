@@ -8,6 +8,7 @@ from dataclasses import replace
 from common.common import WriteKind
 from common.controller_model_state import ControllerModelStore
 from common.modes import Mode
+from common.model_evidence import AllocationEvidence, CalibrationSummaryEvidence, EvidenceKind, ModelEvidenceRecord
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
@@ -121,6 +122,8 @@ class HoldMode(ControlMode):
     _learning_evidence_available: bool = True
     _final_refit_done: bool = False
     _PENDING_MODEL_OBSERVATION_CAPACITY = 60
+    _calibration_command_high_water: int = 0
+
 
 
     def _pulse_frame_seconds(self) -> float:
@@ -180,8 +183,13 @@ class HoldMode(ControlMode):
         controller.pulse_feedback_start_s = self.ctx.clock.now()
         controller.pulse_feedback_delivered_on_s = 0.0
         controller.pulse_metrics_delivered_on_s = 0.0
-        controller.calibration_command_revision = 0
+        controller.calibration_command_revision = self._calibration_command_high_water
         controller.pulse_baseline_combustion_load = 0.0
+        controller.pulse_calibration_command_revision = 0
+        controller.pulse_calibration_command_action = "none"
+        controller.pulse_calibration_cancellation_reason = None
+        controller.pulse_baseline_allocation = None
+        controller.pulse_combined_allocation = None
         controller.pulse_calibration_probe_load = 0.0
         controller.pulse_calibration_stage = None
         self.grill.auger_off()
@@ -201,6 +209,11 @@ class HoldMode(ControlMode):
         controller.pulse_frame_allocation_clamp_reasons = controller.pulse_allocation_clamp_reasons
         controller.pulse_frame_allocation_evidence_checked = controller.pulse_allocation_evidence_checked
         controller.pulse_frame_allocation_result_revision = controller.pulse_allocation_result_revision
+        controller.pulse_frame_calibration_command_revision = controller.pulse_calibration_command_revision
+        controller.pulse_frame_calibration_command_action = controller.pulse_calibration_command_action
+        controller.pulse_frame_calibration_cancellation_reason = controller.pulse_calibration_cancellation_reason
+        controller.pulse_frame_baseline_allocation = controller.pulse_baseline_allocation
+        controller.pulse_frame_combined_allocation = controller.pulse_combined_allocation
         controller.pulse_frame_calibration_probe_load = controller.pulse_calibration_probe_load
         controller.pulse_frame_calibration_stage = controller.pulse_calibration_stage
         self._pulse_frame_role_generation = self._model_role_generation(self._runner_status())
@@ -325,6 +338,13 @@ class HoldMode(ControlMode):
             realized_auger_duty=realized_auger_duty,
             allocator_revision=controller.pulse_frame_allocator_revision,
             allocation_clamp_reasons=controller.pulse_frame_allocation_clamp_reasons,
+            calibration_command_revision=getattr(controller, "pulse_frame_calibration_command_revision", 0),
+            calibration_command_action=getattr(controller, "pulse_frame_calibration_command_action", "none"),
+            calibration_cancellation_reason=getattr(
+                controller, "pulse_frame_calibration_cancellation_reason", None
+            ),
+            baseline_allocation=getattr(controller, "pulse_frame_baseline_allocation", None),
+            combined_allocation=getattr(controller, "pulse_frame_combined_allocation", None),
             calibration_stage=getattr(controller, "pulse_frame_calibration_stage", None),
             calibration_fit=getattr(controller, "pulse_frame_calibration_stage", None) is not None,
             allocation_join_reason=(
@@ -357,6 +377,84 @@ class HoldMode(ControlMode):
                 observation_sequence=observation.observation_sequence,
             ),
             int(observation.frame_end_s * 1_000),
+        )
+
+    @staticmethod
+    def _allocation_evidence(allocation):
+        if allocation is None:
+            return None
+        return AllocationEvidence(
+            normalized_combustion_load=allocation.normalized_combustion_load,
+            auger_duty=allocation.auger_duty,
+            fan_duty=allocation.fan_duty,
+            u_max=allocation.u_max,
+            fan_min_pct=allocation.fan_min_pct,
+            fan_max_pct=allocation.fan_max_pct,
+            fan_enabled=allocation.fan_enabled,
+            auger_clamp_reason=allocation.auger_clamp_reason,
+            fan_clamp_reason=allocation.fan_clamp_reason,
+            allocator_revision=allocation.allocator_revision,
+        )
+    @staticmethod
+    def _trace_allocation_payload(allocation, result_revision: int):
+        if allocation is None:
+            return None
+        return AllocationPayload(
+            result_revision=result_revision,
+            normalized_combustion_load=allocation.normalized_combustion_load,
+            requested_auger_duty=allocation.auger_duty,
+            requested_fan_duty=allocation.fan_duty,
+            u_max=allocation.u_max,
+            fan_min_pct=allocation.fan_min_pct,
+            fan_max_pct=allocation.fan_max_pct,
+            fan_enabled=allocation.fan_enabled,
+            mpc_has_fan_authority=allocation.fan_enabled,
+            auger_clamp_reason=allocation.auger_clamp_reason,
+            fan_clamp_reason=allocation.fan_clamp_reason,
+            allocator_revision=allocation.allocator_revision,
+        )
+
+    def _calibration_frame_evidence(
+        self, observation: FrameObservation, session_id: str | None, cook_id: str | None
+    ) -> ModelEvidenceRecord | None:
+        if (
+            session_id is None
+            or observation.calibration_command_revision == 0
+            or observation.baseline_allocation is None
+            or observation.combined_allocation is None
+        ):
+            return None
+        payload = CalibrationSummaryEvidence(
+            accepted=observation.calibration_cancellation_reason is None,
+            probe_count=1,
+            reason=observation.calibration_cancellation_reason,
+            result_revision=observation.result_revision,
+            command_revision=observation.calibration_command_revision,
+            command_action=observation.calibration_command_action,
+            baseline_q=observation.baseline_q,
+            probe_q=observation.probe_q,
+            combined_q=observation.requested_q,
+            baseline_allocation=self._allocation_evidence(observation.baseline_allocation),
+            combined_allocation=self._allocation_evidence(observation.combined_allocation),
+            scheduled_on_seconds=observation.scheduled_on_s,
+            delivered_on_seconds=observation.delivered_on_s,
+            requested_fan_duty=observation.requested_fan_duty,
+            actual_fan_duty=observation.actual_fan_duty,
+            cancellation_reason=observation.calibration_cancellation_reason,
+        )
+        return ModelEvidenceRecord(
+            evidence_id=(
+                f"{session_id}:calibration-frame:{observation.result_revision}:"
+                f"{int(observation.frame_start_s * 1_000)}"
+            ),
+            kind=EvidenceKind.CALIBRATION_SUMMARY,
+            session_id=session_id,
+            cook_id=cook_id,
+            timestamp_ms=int(observation.frame_end_s * 1_000),
+            role_generation=observation.role_generation,
+            model_digest=None,
+            provenance_digest=None,
+            payload=payload,
         )
 
     def _retire_pending_model_observation(self, sequence: int, reason: str) -> None:
@@ -484,6 +582,15 @@ class HoldMode(ControlMode):
         output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
         return ModelObservationPayload(
             frame_start_ms=int(observation.frame_start_s * 1_000), frame_end_ms=int(observation.frame_end_s * 1_000),
+            calibration_command_revision=observation.calibration_command_revision,
+            calibration_command_action=observation.calibration_command_action,
+            calibration_cancellation_reason=observation.calibration_cancellation_reason,
+            baseline_allocation=HoldMode._trace_allocation_payload(
+                observation.baseline_allocation, observation.result_revision
+            ),
+            combined_allocation=HoldMode._trace_allocation_payload(
+                observation.combined_allocation, observation.result_revision
+            ),
             temp_c=observation.temp_c, setpoint_c=observation.setpoint_c, ambient_c=observation.ambient_c,
             observation_sequence=observation.observation_sequence, probe_valid=observation.probe_valid,
             probe_source=observation.probe_source, ambient_source=observation.ambient_source,
@@ -625,6 +732,15 @@ class HoldMode(ControlMode):
                     input_levels=outcome["input_levels"],
                     incumbent_innovation_c=outcome["incumbent_innovation_c"],
                     challenger_innovation_c=outcome["challenger_innovation_c"],
+                    calibration_command_revision=observation.calibration_command_revision,
+                    calibration_command_action=observation.calibration_command_action,
+                    calibration_cancellation_reason=observation.calibration_cancellation_reason,
+                    baseline_allocation=self._trace_allocation_payload(
+                        observation.baseline_allocation, observation.result_revision
+                    ),
+                    combined_allocation=self._trace_allocation_payload(
+                        observation.combined_allocation, observation.result_revision
+                    ),
                     effective_updates=outcome["effective_updates"],
                     role_generation=role_generation,
                     model_digest=outcome["model_digest"],
@@ -651,11 +767,16 @@ class HoldMode(ControlMode):
                 records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
             queued = (*pending[:3], tuple(records))
             self._pending_model_observations[sequence] = queued
+            compact = self._calibration_frame_evidence(observation, pending[1], self._trace_cook_id)
+            compact_batch = (
+                (*(evidence if isinstance(evidence, tuple) else ()), compact)
+                if compact is not None
+                else (evidence if isinstance(evidence, tuple) else ())
+            )
             if (
-                isinstance(evidence, tuple)
-                and evidence
+                compact_batch
                 and self._persistence_worker is not None
-                and not self._persistence_worker.submit_evidence_batch(evidence).accepted
+                and not self._persistence_worker.submit_evidence_batch(compact_batch).accepted
             ):
                 self._learning_evidence_available = False
         for sequence, pending in tuple(self._pending_model_observations.items()):
@@ -1524,9 +1645,9 @@ class HoldMode(ControlMode):
         if not isinstance(raw, dict):
             return
         revision = raw.get("revision")
-        controller = self.state.controller
-        if not isinstance(revision, int) or revision <= controller.calibration_command_revision:
+        if not isinstance(revision, int) or revision <= self._calibration_command_high_water:
             return
+        controller = self.state.controller
         try:
             command = CalibrationCommand(
                 action=raw["action"],
@@ -1546,6 +1667,7 @@ class HoldMode(ControlMode):
                 InhibitReason.SAFETY,
             )
             return
+        self._calibration_command_high_water = revision
         controller.calibration_command_revision = revision
 
     def _calibration_cancellation_reason(self, result, now: float) -> str | None:
@@ -1562,10 +1684,22 @@ class HoldMode(ControlMode):
             return "reset"
         if self.control.get("mode") != Mode.HOLD:
             return "safety"
+        raw = self.control.get("mpc_calibration")
+        if isinstance(raw, dict):
+            revision = raw.get("revision")
+            action = raw.get("action")
+            if (
+                isinstance(revision, int)
+                and revision > calibration.command_revision
+                and action in {"pause", "stop", "reset-progress"}
+            ):
+                return f"operator_{action}"
         return None
 
-    def _cancel_calibration_probe(self, result, reason: str, now: float, ptemp: float) -> object:
-        """Discard current probe credit before latching the supplied baseline."""
+    def _cancel_calibration_probe(
+        self, result, reason: str, now: float, ptemp: float, *, notify_runner: bool
+    ) -> object:
+        """Discard probe credit and latch the producing result's baseline allocation."""
         self._trace_safety(
             SafetyEventType.SCHEDULER_RESET,
             now,
@@ -1580,24 +1714,8 @@ class HoldMode(ControlMode):
             ptemp=ptemp,
             report_feedback=True,
         )
-        raw = self.control.get("mpc_calibration")
-        if isinstance(raw, dict):
-            try:
-                revision = max(self.state.controller.calibration_command_revision, raw["revision"]) + 1
-                self._runner.request_calibration(
-                    CalibrationCommand(
-                        action="stop",
-                        command_revision=revision,
-                        maximum_temperature_c=raw["maximum_temperature_c"],
-                        ambient_c=raw["ambient_c"],
-                        ambient_source=raw["ambient_source"],
-                        empty_grill_confirmed=True,
-                        pellets_confirmed=True,
-                    )
-                )
-                self.state.controller.calibration_command_revision = revision
-            except (KeyError, TypeError, ValueError):
-                pass
+        if notify_runner:
+            self._runner.cancel_calibration(reason)
         baseline = result.baseline_allocation
         if baseline is None:
             return result
@@ -1613,7 +1731,6 @@ class HoldMode(ControlMode):
         decision = result.calibration
         if decision is None:
             return
-        revision = self.state.controller.calibration_command_revision
         for event in decision.events:
             try:
                 event_type = CalibrationEventType(event.kind)
@@ -1623,7 +1740,9 @@ class HoldMode(ControlMode):
                 TraceEventKind.CALIBRATION,
                 CalibrationTracePayload(
                     event=event_type,
-                    command_revision=revision,
+                    command_revision=decision.command_revision,
+                    command_action=decision.command_action,
+                    result_revision=result.revision,
                     stage=event.stage,
                     intended_probe_load=event.intended_probe_q,
                     bounded_probe_load=event.bounded_probe_q,
@@ -1694,12 +1813,20 @@ class HoldMode(ControlMode):
             result = self._runner.latest()
             cancellation_reason = self._calibration_cancellation_reason(result, now)
             if cancellation_reason is not None:
-                result = self._cancel_calibration_probe(result, cancellation_reason, now, ptemp)
+                result = self._cancel_calibration_probe(
+                    result,
+                    cancellation_reason,
+                    now,
+                    ptemp,
+                    notify_runner=not cancellation_reason.startswith("operator_"),
+                )
             if isinstance(result.diagnostics, MpcTraceDiagnostics):
                 self._observe_reachability_advisory(result.diagnostics)
             controller = self.state.controller
             controller.cycle_start = now
-            if result.revision > 0 and result.revision > controller.pulse_result_revision:
+            if result.revision > 0 and (
+                result.revision > controller.pulse_result_revision or cancellation_reason is not None
+            ):
                 controller.output = result.cycle_ratio
                 controller.pulse_result_revision = result.revision
                 controller.pulse_requested_duty = max(0.0, min(1.0, result.cycle_ratio))
@@ -1732,6 +1859,15 @@ class HoldMode(ControlMode):
                     if result.allocation is not None
                     else ()
                 )
+                controller.pulse_baseline_allocation = result.baseline_allocation
+                controller.pulse_combined_allocation = result.allocation
+                controller.pulse_calibration_command_revision = (
+                    result.calibration.command_revision if result.calibration is not None else 0
+                )
+                controller.pulse_calibration_command_action = (
+                    result.calibration.command_action if result.calibration is not None else "none"
+                )
+                controller.pulse_calibration_cancellation_reason = cancellation_reason
                 controller.pulse_allocation_evidence_checked = True
                 controller.pulse_allocation_result_revision = (
                     result.revision if result.allocation is not None else None

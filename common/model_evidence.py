@@ -10,7 +10,7 @@ from typing import Annotated, ClassVar, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, ValidationError, field_validator, model_validator
 from pydantic.dataclasses import dataclass
 
-from common.control_trace import AmbientSource
+from common.control_trace import AllocationClampReason, AmbientSource
 
 MODEL_EVIDENCE_SCHEMA_VERSION = 1
 
@@ -43,13 +43,86 @@ class SessionSummaryEvidence:
     rejected_observations: NonNegativeInt
     payload_type: Literal["session_summary"] = "session_summary"
 
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class AllocationEvidence:
+    normalized_combustion_load: NonNegativeFloat
+    auger_duty: NonNegativeFloat
+    fan_duty: NonNegativeFloat | None
+    u_max: NonNegativeFloat
+    fan_min_pct: NonNegativeFloat
+    fan_max_pct: NonNegativeFloat
+    fan_enabled: bool
+    auger_clamp_reason: AllocationClampReason
+    fan_clamp_reason: AllocationClampReason
+    allocator_revision: NonNegativeInt
+
+    @model_validator(mode="after")
+    def validate_allocator_inputs(self) -> AllocationEvidence:
+        if self.normalized_combustion_load > 1.0:
+            raise ValueError("allocation normalized combustion load must not exceed one")
+        if self.auger_duty > self.u_max:
+            raise ValueError("allocation auger duty must not exceed u_max")
+        if self.fan_min_pct > self.fan_max_pct:
+            raise ValueError("allocation fan bounds must be ordered")
+        if self.fan_enabled != (self.fan_duty is not None):
+            raise ValueError("allocation fan output must match enabled input")
+        return self
+
+
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class CalibrationSummaryEvidence:
     accepted: bool
     probe_count: NonNegativeInt
     reason: NonBlankString | None = None
+    result_revision: NonNegativeInt | None = None
+    command_revision: NonNegativeInt | None = None
+    command_action: Literal["none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"] = "none"
+    baseline_q: NonNegativeFloat | None = None
+    probe_q: FiniteFloat | None = None
+    combined_q: NonNegativeFloat | None = None
+    baseline_allocation: AllocationEvidence | None = None
+    combined_allocation: AllocationEvidence | None = None
+    scheduled_on_seconds: NonNegativeFloat | None = None
+    delivered_on_seconds: NonNegativeFloat | None = None
+    requested_fan_duty: NonNegativeFloat | None = None
+    actual_fan_duty: NonNegativeFloat | None = None
+    cancellation_reason: NonBlankString | None = None
     payload_type: Literal["calibration_summary"] = "calibration_summary"
+
+    @model_validator(mode="after")
+    def validate_completed_frame(self) -> CalibrationSummaryEvidence:
+        values = (
+            self.result_revision,
+            self.command_revision,
+            self.baseline_q,
+            self.probe_q,
+            self.combined_q,
+            self.baseline_allocation,
+            self.combined_allocation,
+            self.scheduled_on_seconds,
+            self.delivered_on_seconds,
+        )
+        if any(value is not None for value in values):
+            if any(value is None for value in values):
+                raise ValueError("completed calibration frame evidence must be complete")
+            assert self.baseline_q is not None and self.probe_q is not None and self.combined_q is not None
+            assert self.baseline_allocation is not None and self.combined_allocation is not None
+            if not -1.0 <= self.probe_q <= 1.0 or self.combined_q > 1.0:
+                raise ValueError("calibration loads must be bounded")
+            if abs(self.combined_q - min(1.0, max(0.0, self.baseline_q + self.probe_q))) > 1e-12:
+                raise ValueError("combined calibration load must match baseline plus probe")
+            if self.result_revision < 1:
+                raise ValueError("completed calibration frame requires result revision")
+            if self.command_revision != 0 and self.command_action == "none":
+                raise ValueError("producing calibration command action is required")
+            if self.baseline_allocation.normalized_combustion_load != self.baseline_q:
+                raise ValueError("baseline allocation must match baseline load")
+            if self.combined_allocation.normalized_combustion_load != self.combined_q:
+                raise ValueError("combined allocation must match combined load")
+            if self.delivered_on_seconds > self.scheduled_on_seconds:
+                raise ValueError("delivered calibration on-time must not exceed scheduled on-time")
+        return self
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)

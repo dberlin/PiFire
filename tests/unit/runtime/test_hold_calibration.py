@@ -23,8 +23,8 @@ def _result(revision=1, *, baseline=0.3, probe=0.0):
     )
 
 
-def test_hold_consumes_latest_calibration_revision_once(hold_cycle):
-    runner = FakeControllerRunner(period=1.0).script([_result(), _result(2)])
+def test_hold_consumes_latest_calibration_revision_once_across_reconfiguration(hold_cycle):
+    runner = FakeControllerRunner(period=1.0).script([_result(), _result(2), _result(3)])
     hold = hold_cycle(runner, controller="mpc")
     hold.control["mpc_calibration"] = {
         "action": "start",
@@ -38,10 +38,23 @@ def test_hold_consumes_latest_calibration_revision_once(hold_cycle):
     hold.setup()
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.control["controller_update"] = True
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
 
-    assert len(runner.calibration_requests) == 1
-    assert runner.calibration_requests[0].action == "start"
+    assert [command.command_revision for command in runner.calibration_requests] == [1]
+
+
+def test_hold_cancels_active_probe_without_reserving_an_operator_revision(hold_cycle):
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.lid.open_detected = True
+    hold.on_tick(22.0, 200.0, hold.grill.get_output_status())
+
+    assert runner.calibration_cancellations == ["lid_open"]
+    assert runner.calibration_requests == []
+
 
 
 def test_hold_records_baseline_and_probe_on_framed_observation(hold_cycle):

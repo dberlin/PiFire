@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 
 from common.control_trace import AllocationClampReason, AmbientSource, AmbientUncertainty
+from controller.mpc_allocator import AllocationResult
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -85,6 +86,11 @@ class FrameObservation:
     calibration_fit: bool = False
     allocation_join_reason: str | None = None
     temperature_band: str | None = None
+    calibration_command_revision: int = 0
+    calibration_command_action: str = "none"
+    calibration_cancellation_reason: str | None = None
+    baseline_allocation: AllocationResult | None = None
+    combined_allocation: AllocationResult | None = None
 
     def __post_init__(self) -> None:
         start = _finite_float(self.frame_start_s, "frame_start_s")
@@ -149,6 +155,27 @@ class FrameObservation:
         if not all(isinstance(reason, AllocationClampReason) for reason in clamp_reasons):
             raise ValueError("allocation_clamp_reasons must contain AllocationClampReason values")
         object.__setattr__(self, "allocation_clamp_reasons", clamp_reasons)
+        command_revision = _nonnegative_int(self.calibration_command_revision, "calibration_command_revision")
+        if self.calibration_command_action not in {
+            "none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"
+        }:
+            raise ValueError("invalid calibration_command_action")
+        if self.calibration_cancellation_reason is not None and (
+            not isinstance(self.calibration_cancellation_reason, str)
+            or not self.calibration_cancellation_reason.strip()
+        ):
+            raise ValueError("calibration_cancellation_reason must be a non-empty string when present")
+        object.__setattr__(self, "calibration_command_revision", command_revision)
+        for name, expected in (
+            ("baseline_allocation", baseline_q),
+            ("combined_allocation", self.requested_q),
+        ):
+            allocation = getattr(self, name)
+            if allocation is not None and (
+                not isinstance(allocation, AllocationResult)
+                or not np.isclose(allocation.normalized_combustion_load, expected, rtol=0.0, atol=1e-12)
+            ):
+                raise ValueError(f"{name} must match its attributed combustion load")
         temperature_band = self.temperature_band
         if temperature_band is None:
             temperature_band = (

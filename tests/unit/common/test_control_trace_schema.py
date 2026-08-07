@@ -1433,6 +1433,8 @@ def test_calibration_trace_payload_round_trips_and_rejects_incoherent_reasons() 
     payload = CalibrationTracePayload(
         event=CalibrationEventType.STAGE_STARTED,
         command_revision=7,
+        command_action="start",
+        result_revision=19,
         stage="low",
         intended_probe_load=0.05,
         bounded_probe_load=0.05,

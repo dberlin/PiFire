@@ -443,6 +443,8 @@ class CalibrationTracePayload:
 
     event: CalibrationEventType
     command_revision: NonNegativeInt
+    command_action: Literal["none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"]
+    result_revision: NonNegativeInt
     stage: NonBlankString | None
     intended_probe_load: BoundedSignedLoad
     bounded_probe_load: BoundedSignedLoad
@@ -513,6 +515,11 @@ class ModelObservationPayload:
     effective_updates: NonNegativeInt
     role_generation: NonNegativeInt
     model_digest: Digest | None
+    calibration_command_revision: NonNegativeInt = 0
+    calibration_command_action: Literal["none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"] = "none"
+    calibration_cancellation_reason: NonBlankString | None = None
+    baseline_allocation: AllocationPayload | None = None
+    combined_allocation: AllocationPayload | None = None
     requested_fan_duty: BoundedLoad | None = None
     actual_fan_duty: BoundedLoad | None = None
     output_source: OutputSource | None = None
@@ -548,6 +555,26 @@ class ModelObservationPayload:
             raise ValueError("calibration fit observation requires a calibration stage")
         if self.eligible != (not self.rejection_reasons):
             raise ValueError("model observation eligibility must match rejection reasons")
+        if self.baseline_allocation is not None:
+            if self.baseline_allocation.result_revision != self.result_revision:
+                raise ValueError("baseline allocation revision must match observation result")
+            if not math.isclose(
+                self.baseline_allocation.normalized_combustion_load,
+                self.baseline_combustion_load,
+                rel_tol=0,
+                abs_tol=1e-12,
+            ):
+                raise ValueError("baseline allocation must match baseline combustion load")
+        if self.combined_allocation is not None:
+            if self.combined_allocation.result_revision != self.result_revision:
+                raise ValueError("combined allocation revision must match observation result")
+            if not math.isclose(
+                self.combined_allocation.normalized_combustion_load,
+                self.requested_combustion_load,
+                rel_tol=0,
+                abs_tol=1e-12,
+            ):
+                raise ValueError("combined allocation must match requested combustion load")
         if self.eligible and self.model_digest is None:
             raise ValueError("eligible model observation requires a model digest")
         if self.eligible and (self.incumbent_innovation_c is None or self.challenger_innovation_c is None):
