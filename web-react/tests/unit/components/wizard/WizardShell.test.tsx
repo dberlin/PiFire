@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import type { WizardState } from "../../../../src/helpers/wizard/wizardTypes";
+import { testQueryClient } from "../../test-utils";
 
 const getWizardStateMock = rs.fn();
 const saveDraftMock = rs.fn();
@@ -74,7 +76,18 @@ function renderShell(state: WizardState) {
     ],
     { initialEntries: ["/wizard"] },
   );
-  return render(<RouterProvider router={router} />);
+  // A fresh client, not the singleton: this shell now reaches its
+  // QueryClient via useQueryClient(), but no settings query is mocked or
+  // subscribed to here, so Exit Setup's invalidateQueries(settingsRoot) is a
+  // safe no-op against a throwaway client, same as it was against the module
+  // singleton before this test had any provider at all. WizardExitRoundTrip
+  // is where the singleton actually matters -- it renders WizardShell and
+  // DashboardRoute together and checks the cache handoff between them.
+  return render(
+    <QueryClientProvider client={testQueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
 }
 
 const STEP_HEADINGS = [

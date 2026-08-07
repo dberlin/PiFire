@@ -42,6 +42,11 @@ describe("queryKeys.historyChart", () => {
     expect(queryKeys.historyChart(undefined)).toEqual(queryKeys.historyChart(undefined));
     expect(queryKeys.historyChart(undefined)).not.toEqual(queryKeys.historyChart(1));
   });
+
+  it.each([[60], [undefined]])("historyRoot is a true prefix of historyChart(%s)", (minutes) => {
+    const key = queryKeys.historyChart(minutes);
+    expect(key.slice(0, queryKeys.historyRoot.length)).toEqual(queryKeys.historyRoot);
+  });
 });
 
 describe("queryKeys.cookfileDetail / cookfileChart", () => {

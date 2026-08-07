@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
@@ -12,6 +13,8 @@ import * as actualFilesApi from "../../../../src/helpers/files/filesApi" with {
   rstest: "importActual",
 };
 import type { FileListing } from "../../../../src/helpers/files/fileTypes";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { testQueryClient } from "../../test-utils";
 
 const fetchFileListingMock = rs.fn();
 rs.mock("../../../../src/helpers/files/filesApi", () => ({
@@ -54,11 +57,13 @@ const EMPTY: FileListing = {
   total: 0,
 };
 
-function mount() {
+function mount(queryClient: QueryClient = testQueryClient()) {
   return render(
-    <MemoryRouter>
-      <CookFileList />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <CookFileList />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -168,6 +173,37 @@ describe("CookFileList", () => {
       expect(deleteCookFileMock).toHaveBeenCalledWith("2026-07-20--1400-CookFile.pifire"),
     );
     await waitFor(() => expect(fetchFileListingMock.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("a successful delete invalidates the deleted file's own cache entry", async () => {
+    // This list keeps its own listing state, not react-query's -- reload()
+    // already covers ITS refetch. What it does not cover is CookFilePage's
+    // cache, keyed on queryKeys.cookfileRoot(file), which knows nothing about
+    // a delete that happened from this list. Seed it on a real QueryClient and
+    // assert against cache state directly: fetchFileListingMock refetching is
+    // not evidence this specific key was touched.
+    const filename = "2026-07-20--1400-CookFile.pifire";
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: Number.POSITIVE_INFINITY } },
+    });
+    queryClient.setQueryData(queryKeys.cookfileDetail(filename), { seeded: true });
+    queryClient.setQueryData(queryKeys.cookfileChart(filename), { seeded: true });
+
+    const user = userEvent.setup();
+    mount(queryClient);
+    await screen.findByRole("link", { name: "Sunday Brisket" });
+
+    await user.click(screen.getByRole("button", { name: `Delete ${filename}` }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(queryKeys.cookfileDetail(filename))?.isInvalidated).toBe(
+        true,
+      );
+      expect(queryClient.getQueryState(queryKeys.cookfileChart(filename))?.isInvalidated).toBe(
+        true,
+      );
+    });
   });
 
   it("dismissing the delete confirmation deletes nothing", async () => {

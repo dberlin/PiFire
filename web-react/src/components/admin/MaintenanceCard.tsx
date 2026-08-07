@@ -1,6 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { adminErrorText, maintenanceAction, saveAdminSettings } from "../../helpers/admin/adminApi";
 import type { AdminSettings, MaintenanceAction } from "../../helpers/admin/adminTypes";
+import { queryKeys } from "../../helpers/query/keys";
 import type { SaveStatus } from "../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { Toggle } from "../settings/fields/Toggle";
@@ -63,6 +65,7 @@ export function MaintenanceCard({
 }) {
   const [pending, setPending] = useState<Clear | null>(null);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
+  const queryClient = useQueryClient();
 
   const runClear = async (clear: Clear) => {
     setPending(null);
@@ -70,6 +73,16 @@ export function MaintenanceCard({
     const result = await maintenanceAction(clear.key);
     if (result.ok) {
       setStatus({ kind: "saved" });
+      // clear_history wipes the temperature history, the current readings AND
+      // the cook metrics server-side (blueprints/api_admin/routes.py), but
+      // `onChanged` only reaches this page's own adminState entry. Without
+      // this, /metrics and /history keep serving the just-deleted data for up
+      // to their 30s staleTime. Scoped to this one action -- a backup restore
+      // or a log clear has no bearing on either cache.
+      if (clear.key === "clear_history") {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.metrics });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.historyRoot });
+      }
       await onChanged();
     } else {
       setStatus({ kind: "error", message: adminErrorText(result) });

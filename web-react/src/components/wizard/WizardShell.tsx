@@ -1,8 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
 import { systemAction } from "../../helpers/admin/adminApi";
 import { queryKeys } from "../../helpers/query/keys";
-import { queryClient } from "../../helpers/query/queryClient";
 import { cancelWizard, finishWizard, saveDraft } from "../../helpers/wizard/wizardApi";
 import { BASE_URL } from "../../helpers/wizard/wizardRoutes";
 import { initialWorking } from "../../helpers/wizard/wizardState";
@@ -76,6 +76,7 @@ export function WizardShell() {
   const [exiting, setExiting] = useState(false);
   const [exitError, setExitError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const currentStep = STEPS[step];
   // Belt-and-suspenders with the server's 409 (system_active): the server is

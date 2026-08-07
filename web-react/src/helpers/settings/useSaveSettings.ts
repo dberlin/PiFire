@@ -1,7 +1,7 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
 import { queryKeys } from "../query/keys";
-import { queryClient } from "../query/queryClient";
 import { applySettings, type SaveFieldError, type SettingsFlag } from "./settingsApi";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
@@ -25,6 +25,7 @@ export function normalizeSaveError(message: string): string {
 
 export function useSaveSettings() {
   const revalidator = useRevalidator();
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   const [errors, setErrors] = useState<SaveFieldError[]>([]);
@@ -54,7 +55,7 @@ export function useSaveSettings() {
       }
       return r.ok;
     },
-    [revalidator],
+    [revalidator, queryClient],
   );
   return { save, saving, status, errors, baseUrl: BASE_URL };
 }

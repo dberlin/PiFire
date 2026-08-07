@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
 import type { AdminSettings } from "../../../../src/helpers/admin/adminTypes";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { testQueryClient } from "../../test-utils";
 
 const maintenanceActionMock = rs.fn();
 const saveAdminSettingsMock = rs.fn();
@@ -35,8 +38,12 @@ beforeEach(() => {
   onChanged = rs.fn();
 });
 
-function mount(settings: AdminSettings = SETTINGS) {
-  render(<MaintenanceCard settings={settings} onChanged={onChanged} />);
+function mount(settings: AdminSettings = SETTINGS, queryClient: QueryClient = testQueryClient()) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MaintenanceCard settings={settings} onChanged={onChanged} />
+    </QueryClientProvider>,
+  );
 }
 
 describe("MaintenanceCard clears", () => {
@@ -93,6 +100,48 @@ describe("MaintenanceCard clears", () => {
     await waitFor(() => {
       expect(onChanged).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("invalidates the metrics and history caches on a successful Clear History", async () => {
+    // clear_history wipes the temperature history, the current readings AND
+    // the cook metrics server-side (blueprints/api_admin/routes.py), but
+    // `onChanged` only refetches this page's own adminState entry. Seed both
+    // caches on a real QueryClient and assert against its cache state
+    // directly -- onChanged is a mock and would stay green even if the
+    // invalidation this test targets were deleted.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: Number.POSITIVE_INFINITY } },
+    });
+    queryClient.setQueryData(queryKeys.metrics, { seeded: true });
+    queryClient.setQueryData(queryKeys.historyChart(60), { seeded: true });
+
+    mount(SETTINGS, queryClient);
+    fireEvent.click(screen.getByRole("button", { name: "Clear History" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(queryKeys.metrics)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(queryKeys.historyChart(60))?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("does not invalidate metrics or history for a clear that is not Clear History", async () => {
+    // Scoped to clear_history alone: a pellet-log clear has no bearing on
+    // either cache, and invalidating them anyway would trigger refetches the
+    // action gives no reason for.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: Number.POSITIVE_INFINITY } },
+    });
+    queryClient.setQueryData(queryKeys.metrics, { seeded: true });
+    queryClient.setQueryData(queryKeys.historyChart(60), { seeded: true });
+
+    mount(SETTINGS, queryClient);
+    fireEvent.click(screen.getByRole("button", { name: "Clear Event Log" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(queryClient.getQueryState(queryKeys.metrics)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(queryKeys.historyChart(60))?.isInvalidated).toBe(false);
   });
 
   it("does not refetch when the server refuses", async () => {

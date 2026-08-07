@@ -18,6 +18,10 @@ export const queryKeys = {
   metrics: ["metrics"] as const,
   webUiBuild: ["webui-build"] as const,
   adminState: ["admin", "state"] as const,
+  /** Prefix of every history window, so one invalidate reaches all of them at
+   * once -- used by clear_history, which wipes every window server-side, not
+   * just whichever one happens to be on screen. */
+  historyRoot: ["history"] as const,
   historyChart: (minutes: number | undefined) => ["history", "chart", minutes ?? null] as const,
   /** Prefix of both cook-file entries, so one invalidate reaches detail+chart. */
   cookfileRoot: (filename: string) => ["cookfile", filename] as const,

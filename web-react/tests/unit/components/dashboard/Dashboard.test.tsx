@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -22,7 +23,7 @@ rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
 }));
 
 const { Dashboard } = await import("../../../../src/components/dashboard/Dashboard");
-const { renderRoute } = await import("../../test-utils");
+const { renderRoute, testQueryClient } = await import("../../test-utils");
 
 afterEach(cleanup);
 
@@ -179,27 +180,29 @@ describe("Dashboard", () => {
   it("clicking the settings gear navigates to /settings", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/"]}>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <Dashboard
-                dash={FIXTURE_DASH}
-                command={makeCommand()}
-                apiBase=""
-                phase="live"
-                controlAlive={true}
-                accent="ember"
-                setAccent={rs.fn()}
-                animate={false}
-                setAnimate={rs.fn()}
-              />
-            }
-          />
-          <Route path="/settings" element={<div data-testid="settings-route" />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <Dashboard
+                  dash={FIXTURE_DASH}
+                  command={makeCommand()}
+                  apiBase=""
+                  phase="live"
+                  controlAlive={true}
+                  accent="ember"
+                  setAccent={rs.fn()}
+                  animate={false}
+                  setAnimate={rs.fn()}
+                />
+              }
+            />
+            <Route path="/settings" element={<div data-testid="settings-route" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     await user.click(screen.getByRole("button", { name: "settings" }));
     expect(screen.getByTestId("settings-route")).toBeInTheDocument();

@@ -33,7 +33,11 @@ export function CookFileChart({ filename }: { filename: string }) {
   const loading = isPending;
   const failed = !loading && error != null;
 
-  const chart = data ? toCookChartInput(data) : null;
+  // react-query does not clear `data` on a failed refetch -- the last good
+  // payload stays cached under this key, only `error` flips. Without the
+  // `!failed` guard the previous window's chart would keep rendering right
+  // behind the error banner below.
+  const chart = data && !failed ? toCookChartInput(data) : null;
   const annotations = data && showAnnotations ? toChartAnnotations(data.annotations) : undefined;
   //  A payload with string time labels is a pre-v1.5 archive, not an empty one,
   //  and the fix is Attempt Repair -- so the two are never reported alike.

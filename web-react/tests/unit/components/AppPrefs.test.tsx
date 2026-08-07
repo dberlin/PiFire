@@ -6,7 +6,7 @@ import { queryKeys } from "../../../src/helpers/query/keys";
 import * as actualSettingsApi from "../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };
-import { renderWithQuery, testQueryClient } from "../test-utils";
+import { flushObservers, renderWithQuery, testQueryClient } from "../test-utils";
 
 // The API module is mocked, not `fetch` -- the idiom MetricsPage.test.tsx
 // established. Stubbed through a lazy wrapper so the hoisted mock factory
@@ -131,6 +131,7 @@ describe("AppPrefsProvider", () => {
     expect(screen.getByTestId("accent")).toHaveTextContent("ice");
 
     await act(() => client.invalidateQueries({ queryKey: queryKeys.settings }));
+    await flushObservers();
     expect(screen.getByTestId("accent")).toHaveTextContent("ice");
   });
 });

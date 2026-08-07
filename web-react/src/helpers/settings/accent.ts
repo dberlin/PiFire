@@ -1,5 +1,5 @@
+import type { QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../query/keys";
-import { queryClient } from "../query/queryClient";
 import type { AccentName } from "../types";
 import { setPath } from "./delta";
 import type { SettingsPath } from "./paths";
@@ -37,8 +37,17 @@ export function storedAccentName(a: AccentName): string {
  *
  * Advisory: the caller has already applied the accent locally, so a failed
  * write costs the persistence, not the appearance.
+ *
+ * `queryClient` is passed in rather than imported as the module singleton:
+ * this is a plain function, not a hook, but its one caller (Dashboard.tsx) is
+ * a component sitting inside the app's QueryClientProvider, and the plan's
+ * invariant is that only App.tsx reaches for the singleton directly.
  */
-export async function saveAccent(baseUrl: string, accent: AccentName): Promise<boolean> {
+export async function saveAccent(
+  baseUrl: string,
+  accent: AccentName,
+  queryClient: QueryClient,
+): Promise<boolean> {
   try {
     const settings = await getSettings(baseUrl);
     const path = accentPath(settings);

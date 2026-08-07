@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { Dashboard } from "../../../../src/components/dashboard/Dashboard";
@@ -7,6 +8,7 @@ import type { CommandClient, CommandResult } from "../../../../src/helpers/comma
 import { FIT_QUERY } from "../../../../src/helpers/dashboard/hooks";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import type { LiveState } from "../../../../src/helpers/types";
+import { testQueryClient } from "../../test-utils";
 
 afterEach(cleanup);
 
@@ -36,19 +38,21 @@ function makeCommand(): CommandClient {
 
 function renderDash(dash: LiveState = FIXTURE_DASH) {
   return render(
-    <MemoryRouter>
-      <Dashboard
-        dash={dash}
-        command={makeCommand()}
-        apiBase=""
-        phase="live"
-        controlAlive={true}
-        accent="ember"
-        setAccent={rs.fn()}
-        animate={false}
-        setAnimate={rs.fn()}
-      />
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter>
+        <Dashboard
+          dash={dash}
+          command={makeCommand()}
+          apiBase=""
+          phase="live"
+          controlAlive={true}
+          accent="ember"
+          setAccent={rs.fn()}
+          animate={false}
+          setAnimate={rs.fn()}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useLoaderData, useOutletContext, useRevalidator } from "react-router";
 import {
@@ -7,7 +8,6 @@ import {
 } from "../../../helpers/probes/probeMapApi";
 import type { ProbeModuleCatalog } from "../../../helpers/probes/probeMapTypes";
 import { queryKeys } from "../../../helpers/query/keys";
-import { queryClient } from "../../../helpers/query/queryClient";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { ProbeMap } from "../../../helpers/wizard/probeTypes";
@@ -42,6 +42,7 @@ export function ProbesTab() {
   const { settings, mode } = useOutletContext<{ settings: Settings; mode: string }>();
   const catalog = useLoaderData() as ProbeModuleCatalog;
   const revalidator = useRevalidator();
+  const queryClient = useQueryClient();
 
   const live = readLiveProbeMap(settings);
   // Held on SettingsShell, so a half-built probe map survives a trip to another

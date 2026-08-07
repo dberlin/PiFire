@@ -6,7 +6,7 @@ import { queryKeys } from "../../../../src/helpers/query/keys";
 import * as actualTunerApi from "../../../../src/helpers/tuner/tunerApi" with {
   rstest: "importActual",
 };
-import { renderWithQuery, testQueryClient } from "../../test-utils";
+import { flushObservers, renderWithQuery, testQueryClient } from "../../test-utils";
 
 const openMock = rs.fn();
 const closeMock = rs.fn();
@@ -137,6 +137,7 @@ describe("TunerPage", () => {
       },
     });
     await act(() => client.invalidateQueries({ queryKey: queryKeys.settings }));
+    await flushObservers();
 
     expect(screen.getByRole("combobox", { name: /probe/i })).toHaveValue("Probe1");
   });

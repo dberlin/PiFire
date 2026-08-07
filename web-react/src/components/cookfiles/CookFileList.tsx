@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 import {
@@ -7,6 +8,7 @@ import {
 } from "../../helpers/files/cookfileApi";
 import { fetchFileListing, thumbnailUrl } from "../../helpers/files/filesApi";
 import { type FileListing, PER_PAGE_CHOICES } from "../../helpers/files/fileTypes";
+import { queryKeys } from "../../helpers/query/keys";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 // The saved-cook list, rendered as a second section of /history exactly as
@@ -52,6 +54,7 @@ export function CookFileList() {
   const [actionError, setActionError] = useState<string | null>(null);
   const uploadId = useId();
   const perPageId = useId();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +89,16 @@ export function CookFileList() {
     if (!file) return;
     setActionError(null);
     deleteCookFile(file)
-      .then(reload)
+      .then(() => {
+        // This list keeps its own listing state, not react-query's -- reload()
+        // alone refreshes it fine. But CookFilePage caches the SAME file under
+        // queryKeys.cookfileRoot(file) with its own staleTime, and that cache
+        // does not know a delete happened here. Without this, a back-navigation
+        // to the deleted cook's detail page within the gc window renders data
+        // for a file that no longer exists.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.cookfileRoot(file) });
+        reload();
+      })
       .catch((err: Error) => setActionError(err.message));
   };
 

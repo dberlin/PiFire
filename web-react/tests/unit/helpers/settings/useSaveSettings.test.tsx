@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -75,7 +76,16 @@ function renderWithLoader(loader: () => unknown = () => ({})) {
   const router = createMemoryRouter([{ path: "/", element: <Probe />, loader }], {
     initialEntries: ["/"],
   });
-  return render(<RouterProvider router={router} />);
+  // The singleton, not a throwaway test client: useSaveSettings resolves its
+  // QueryClient via useQueryClient() now, but "makes settingsLoader return the
+  // post-save settings" drives the REAL settingsLoader directly (outside
+  // React), which always reads the singleton -- so the hook and the loader
+  // have to be looking at the exact same cache for that test to mean anything.
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
 }
 
 describe("useSaveSettings", () => {

@@ -1,9 +1,28 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import { AppPrefsProvider } from "../../src/components/AppPrefs";
 import { useSettingsDraftStore } from "../../src/helpers/settings/settingsDrafts";
+
+/**
+ * Flush the macrotask hop react-query's `notifyManager` schedules before it
+ * delivers an observer re-render.
+ *
+ * `await act(() => client.invalidateQueries(...))` resolves as soon as the
+ * refetch promise settles -- BEFORE notifyManager hands the result to
+ * subscribed observers. notifyManager.cjs's `defaultScheduler` is
+ * `systemSetTimeoutZero` (timeoutManager.cjs), i.e. a real `setTimeout(fn, 0)`
+ * macrotask, not a microtask `invalidateQueries` already awaits. Sampling the
+ * DOM immediately after `invalidateQueries` therefore reads the component one
+ * render too early. Await this once more after any `invalidateQueries` (or
+ * other query-client mutation) whose effect you assert on synchronously.
+ */
+export async function flushObservers() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 /**
  * A fresh client per render.

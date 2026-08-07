@@ -74,7 +74,7 @@ describe("saveAccent", () => {
       });
     }) as typeof fetch);
 
-    expect(await saveAccent("", "crimson")).toBe(true);
+    expect(await saveAccent("", "crimson", queryClient)).toBe(true);
 
     const post = calls.find((c) => c.url.includes("settings_update"));
     expect(post?.body).toEqual({
@@ -91,7 +91,7 @@ describe("saveAccent", () => {
       }),
     );
 
-    expect(await saveAccent("", "ice")).toBe(false);
+    expect(await saveAccent("", "ice", queryClient)).toBe(false);
   });
 
   // The caller has already applied the accent locally, so a write that cannot
@@ -99,7 +99,7 @@ describe("saveAccent", () => {
   it("reports failure rather than throwing when the fetch rejects", async () => {
     rs.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
 
-    expect(await saveAccent("", "ice")).toBe(false);
+    expect(await saveAccent("", "ice", queryClient)).toBe(false);
   });
 
   it("invalidates the shared settings entry so other readers see the new accent", async () => {
@@ -112,7 +112,7 @@ describe("saveAccent", () => {
       });
     }) as typeof fetch);
 
-    expect(await saveAccent("", "crimson")).toBe(true);
+    expect(await saveAccent("", "crimson", queryClient)).toBe(true);
     expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(true);
   });
 
@@ -127,7 +127,7 @@ describe("saveAccent", () => {
       });
     }) as typeof fetch);
 
-    expect(await saveAccent("", "crimson")).toBe(false);
+    expect(await saveAccent("", "crimson", queryClient)).toBe(false);
     expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
@@ -79,6 +80,7 @@ export function Dashboard({
 }: DashboardProps) {
   const view = deriveView(dash);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const now = useClock();
   const health = useControlHealth(controlAlive, apiBase);
   // Desktop only. Below 1280px this is inert and the breakpoints in
@@ -227,7 +229,7 @@ export function Dashboard({
                   // persisted for the next load and for the attached screen.
                   onClick={() => {
                     setAccent(a);
-                    void saveAccent(apiBase, a);
+                    void saveAccent(apiBase, a, queryClient);
                   }}
                   aria-label={a}
                 />

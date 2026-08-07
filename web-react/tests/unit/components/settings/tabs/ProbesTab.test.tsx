@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import { ProbesTab } from "../../../../../src/components/settings/tabs/ProbesTab";
 import type { ProbeModuleCatalog } from "../../../../../src/helpers/probes/probeMapTypes";
+import { testQueryClient } from "../../../test-utils";
 
 // DevicesCard's add flow calls the wizard's bus-kind validator over HTTP
 // (DevicesCard.tsx submit()). The tab does not own that call and must not be
@@ -54,7 +56,15 @@ function renderTab(ui: ReactElement, context: unknown, catalog: ProbeModuleCatal
     ],
     { initialEntries: ["/"] },
   );
-  return render(<RouterProvider router={router} />);
+  // A fresh client, not the singleton: this tab now reaches its QueryClient
+  // via useQueryClient(), and nothing in this file asserts against cache
+  // state -- only that the save flow itself still behaves, so there is
+  // nothing the singleton would buy here that a throwaway client does not.
+  return render(
+    <QueryClientProvider client={testQueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
 }
 
 const PROFILE = { id: "TWPS00", name: "Thermoworks", A: 1, B: 2, C: 3 };

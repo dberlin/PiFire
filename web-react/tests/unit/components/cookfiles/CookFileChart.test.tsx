@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };
 import type { CookFileChartData } from "../../../../src/helpers/files/cookfileApi";
-import { testQueryClient } from "../../test-utils";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { flushObservers, testQueryClient } from "../../test-utils";
 
 const fetchCookFileChartMock = rs.fn();
 rs.mock("../../../../src/helpers/files/cookfileApi", () => ({
@@ -67,9 +68,9 @@ const PAYLOAD: CookFileChartData = {
   },
 };
 
-function renderChart(filename: string) {
+function renderChart(filename: string, queryClient: QueryClient = testQueryClient()) {
   return render(
-    <QueryClientProvider client={testQueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <CookFileChart filename={filename} />
     </QueryClientProvider>,
   );
@@ -159,5 +160,29 @@ describe("CookFileChart", () => {
     fetchCookFileChartMock.mockRejectedValue(new Error("HTTP 500"));
     renderChart("Sunday.pifire");
     expect(await screen.findByText(/Couldn't load this cook's chart data/)).toBeInTheDocument();
+  });
+
+  it("drops the old chart once a refetch fails, rather than leaving it behind the error banner", async () => {
+    // react-query does not clear `data` when a refetch errors -- the last
+    // good payload stays cached under the same key, only `error`/`isError`
+    // change. Rendering straight off `data` (as CookFileChart used to) would
+    // therefore keep the PREVIOUS window's chart on screen right behind the
+    // "couldn't load" banner, which reads as "here is the current chart, also
+    // something went wrong" instead of "this chart is not trustworthy".
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: Number.POSITIVE_INFINITY } },
+    });
+    fetchCookFileChartMock.mockResolvedValueOnce(PAYLOAD);
+    renderChart("Sunday.pifire", queryClient);
+    await screen.findByTestId("chart");
+
+    fetchCookFileChartMock.mockRejectedValueOnce(new Error("HTTP 500"));
+    await act(() =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.cookfileChart("Sunday.pifire") }),
+    );
+    await flushObservers();
+
+    expect(await screen.findByText(/Couldn't load this cook's chart data/)).toBeInTheDocument();
+    expect(screen.queryByTestId("chart")).not.toBeInTheDocument();
   });
 });

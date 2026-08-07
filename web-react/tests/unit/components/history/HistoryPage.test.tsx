@@ -496,9 +496,11 @@ describe("HistoryPage — auto refresh", () => {
   });
 
   it("does not stack a poll on top of a request that is still in flight", async () => {
-    // The in-flight guard is the page's own request id (via `loading`), not a
-    // second mechanism: while a request is outstanding no timer is armed at
-    // all, so a response slower than the interval cannot pile polls up.
+    // The in-flight guard is react-query's own request dedup, not something
+    // this page hand-rolls anymore (see HistoryPage.tsx's useQuery comment):
+    // refetchInterval ticks while a fetch for that key is still outstanding
+    // are absorbed rather than queued, so a response slower than the interval
+    // cannot pile polls up.
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
     rs.useFakeTimers();
     fetchHistoryChartMock.mockReturnValue(new Promise(() => {})); // never settles
