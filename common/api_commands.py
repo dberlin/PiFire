@@ -690,21 +690,25 @@ def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
     """Validate and queue one revisioned calibration intent for the live drain."""
     try:
         command = validated_mpc_calibration_command(arglist[1])
-        safety_ceiling_c = _mpc_calibration_safety_ceiling_c(settings)
-    except (ControlDeltaError, ValueError) as error:
+    except ControlDeltaError as error:
         data["result"] = "ERROR"
         data["message"] = str(error)
         return
-    if command["action"] == "start" and (
-        control.get("mode") != Mode.HOLD or not _mpc_grey_box_active(settings)
-    ):
-        data["result"] = "ERROR"
-        data["message"] = "MPC calibration start requires MPC Hold with grey-box control"
-        return
-    if command["maximum_temperature_c"] >= safety_ceiling_c:
-        data["result"] = "ERROR"
-        data["message"] = "MPC calibration maximum temperature must be below the configured safety ceiling"
-        return
+    if command["action"] == "start":
+        if control.get("mode") != Mode.HOLD or not _mpc_grey_box_active(settings):
+            data["result"] = "ERROR"
+            data["message"] = "MPC calibration start requires MPC Hold with grey-box control"
+            return
+        try:
+            safety_ceiling_c = _mpc_calibration_safety_ceiling_c(settings)
+        except ValueError as error:
+            data["result"] = "ERROR"
+            data["message"] = str(error)
+            return
+        if command["maximum_temperature_c"] >= safety_ceiling_c:
+            data["result"] = "ERROR"
+            data["message"] = "MPC calibration maximum temperature must be below the configured safety ceiling"
+            return
     _write_control_delta(
         control,
         control_delta(ops=[{"op": "mpc_calibration.set", "command": command}]),

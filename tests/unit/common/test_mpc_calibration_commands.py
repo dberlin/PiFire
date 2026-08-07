@@ -97,6 +97,22 @@ def test_maximum_at_configured_safety_ceiling_is_rejected_before_queueing(
     assert writes == []
 
 
+@pytest.mark.parametrize("action", ("pause", "resume", "stop", "reset-progress"))
+def test_non_start_actions_remain_issuable_after_the_safety_ceiling_is_lowered(monkeypatch, action):
+    settings = _settings()
+    settings["globals"]["units"] = "C"
+    settings["safety"]["maxtemp"] = 100
+    result, writes = _invoke(
+        monkeypatch,
+        _control(),
+        settings,
+        _command(action=action, maximum_temperature_c=130.0),
+    )
+
+    assert result["result"] == "OK"
+    assert len(writes) == 1
+
+
 @pytest.mark.parametrize(
     "control,settings",
     [
