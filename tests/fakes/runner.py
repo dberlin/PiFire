@@ -8,6 +8,7 @@ from controller.runtime.runner import (
     ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
+    ObservationTerminalDrop,
 )
 
 
@@ -36,7 +37,7 @@ class FakeControllerRunner:
         self.observations = []
         self._observation_sequence = 0
         self._observation_outcomes = []
-        self._terminal_drops_since_drain = deque(maxlen=60)
+        self._terminal_drops_since_drain = deque()
         self.observation_outcome = None
         # A single ordered log across restore_model()/set_output() calls, since
         # `restored` and `applied` are separate lists and so cannot express
@@ -112,6 +113,14 @@ class FakeControllerRunner:
                 dropped = self._observation_outcomes.pop(0)
                 self._outcome_drops_since_drain += 1
                 self._outcome_dropped_sequences.append(dropped.submission_sequence)
+                self._terminal_drops_since_drain.append(
+                    ObservationTerminalDrop(
+                        dropped.submission_sequence,
+                        dropped.configuration_generation,
+                        dropped.observation,
+                        "runner-outcome-evicted",
+                    )
+                )
             self._observation_outcomes.append(
                 ObservationOutcomeEnvelope(
                     self._observation_sequence, self._configuration_revision, owned, self.observation_outcome
@@ -128,13 +137,20 @@ class FakeControllerRunner:
             else:
                 withheld.append(envelope)
         self._observation_outcomes = withheld
+        terminal_drops = []
+        withheld_drops = deque()
+        for drop in self._terminal_drops_since_drain:
+            if drop.configuration_generation in self._evidence_contexts:
+                terminal_drops.append(drop)
+            else:
+                withheld_drops.append(drop)
+        self._terminal_drops_since_drain = withheld_drops
         drain = ObservationOutcomeDrain(
             tuple(envelopes),
-            tuple(self._terminal_drops_since_drain),
+            tuple(terminal_drops),
             self._outcome_drops_since_drain,
             tuple(self._outcome_dropped_sequences),
         )
-        self._terminal_drops_since_drain.clear()
         self._outcome_drops_since_drain = 0
         self._outcome_dropped_sequences.clear()
         return drain

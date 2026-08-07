@@ -460,6 +460,7 @@ def _run_simulator_cell(
     controller = _controller(online=arm == "online")
     runner_gate = _WorkerGate()
     runner = ThreadedControllerRunner(controller, wait_for_period=runner_gate)
+    runner.bind_evidence_context(0, "online-arx-compare", scenario.name)
     timing: dict[str, list[float]] = {"learner": [], "evaluation": [], "solve": []}
     chronology: list[dict[str, Any]] = []
     runner_evidence: dict[str, Any] = {
@@ -551,7 +552,7 @@ def _run_simulator_cell(
         adaptation = status.get("adaptation", {})
         if arm == "online":
             drain = runner.drain_observation_outcomes()
-            if drain.dropped_count:
+            if drain.dropped_count or drain.terminal_drops:
                 raise RuntimeError("threaded Controller runner dropped online observation outcome")
             for envelope in drain:
                 frame_index = pending_submission_indices.get(envelope.submission_sequence)

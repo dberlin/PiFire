@@ -962,6 +962,28 @@ def test_threaded_runner_withholds_completed_unbound_generation_until_bound():
         runner.stop()
 
 
+def test_threaded_runner_withholds_unbound_terminal_drop_until_its_generation_binds():
+    barrier = _ObservationBarrier()
+    core = _ObservationRecordingCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        submission = runner.observe_frame(_frame(0))
+        barrier.release.set()
+        assert _wait_for(lambda: len(core.observations) == 1)
+
+        assert runner.drain_observation_outcomes().terminal_drops == ()
+
+        runner.bind_evidence_context(0, "generation-zero", "cook")
+        drops = runner.drain_observation_outcomes().terminal_drops
+        assert [(drop.submission_sequence, drop.configuration_generation, drop.reason) for drop in drops] == [
+            (submission.submission_sequence, 0, "runner-no-observation-outcome")
+        ]
+    finally:
+        barrier.release.set()
+        runner.stop()
+
 def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_discontinuous():
     barrier = _ObservationBarrier()
 

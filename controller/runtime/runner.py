@@ -58,7 +58,7 @@ class ObservationOutcomeEnvelope:
 
 @dataclass(frozen=True, slots=True)
 class ObservationTerminalDrop:
-    """One accepted observation that the runner terminalized without an outcome."""
+    """One accepted observation terminalized without a releasable envelope."""
 
     submission_sequence: int
     configuration_generation: int
@@ -531,13 +531,20 @@ class SyncControllerRunner(ControllerRunner):
             session_id, cook_id = context
             envelopes.append(replace(envelope, evidence=_freeze_evidence(envelope.outcome, session_id, cook_id)))
         self._observation_outcomes = withheld
+        terminal_drops: list[ObservationTerminalDrop] = []
+        withheld_drops: collections.deque[ObservationTerminalDrop] = collections.deque()
+        for drop in self._terminal_drops_since_drain:
+            if drop.configuration_generation in self._evidence_contexts:
+                terminal_drops.append(drop)
+            else:
+                withheld_drops.append(drop)
+        self._terminal_drops_since_drain = withheld_drops
         drain = ObservationOutcomeDrain(
             tuple(envelopes),
-            tuple(self._terminal_drops_since_drain),
+            tuple(terminal_drops),
             self._outcome_drops_since_drain,
             tuple(self._outcome_dropped_sequences),
         )
-        self._terminal_drops_since_drain.clear()
         self._outcome_drops_since_drain = 0
         self._outcome_dropped_sequences.clear()
         return drain
@@ -957,13 +964,20 @@ class ThreadedControllerRunner(ControllerRunner):
                 session_id, cook_id = context
                 envelopes.append(replace(envelope, evidence=_freeze_evidence(envelope.outcome, session_id, cook_id)))
             self._observation_outcomes = withheld
+            terminal_drops: list[ObservationTerminalDrop] = []
+            withheld_drops: collections.deque[ObservationTerminalDrop] = collections.deque()
+            for drop in self._terminal_drops_since_drain:
+                if drop.configuration_generation in self._evidence_contexts:
+                    terminal_drops.append(drop)
+                else:
+                    withheld_drops.append(drop)
+            self._terminal_drops_since_drain = withheld_drops
             drain = ObservationOutcomeDrain(
                 tuple(envelopes),
-                tuple(self._terminal_drops_since_drain),
+                tuple(terminal_drops),
                 self._outcome_drops_since_drain,
                 tuple(self._outcome_dropped_sequences),
             )
-            self._terminal_drops_since_drain.clear()
             self._outcome_drops_since_drain = 0
             self._outcome_dropped_sequences.clear()
         return drain

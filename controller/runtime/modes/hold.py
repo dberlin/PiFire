@@ -940,6 +940,39 @@ class HoldMode(ControlMode):
         if callable(retire):
             retire(generation)
 
+    def _rotate_evidence_session_for_installed_runner(self, now: float) -> None:
+        """Drain the current generation, then bind and release an installed one.
+
+        Unlike configuration adoption, this performs no pulse, output, restore,
+        or fan work and is therefore safe while teardown is closing resources.
+        """
+        if self._runner is None:
+            return
+        retiring_generation = self._runner_configuration_revision
+        self._reconcile_model_observation_outcomes(now)
+        installed_generation = getattr(self._runner, "configuration_revision", lambda: retiring_generation)()
+        if installed_generation == retiring_generation:
+            return
+        pending = self._pending_model_observations or {}
+        self._pending_model_observations = {
+            sequence: value for sequence, value in pending.items() if value[2] == installed_generation
+        }
+        self._retire_runner_evidence_context(retiring_generation)
+        self._trace_session_id = None
+        self._trace_cook_id = None
+        self._clear_trace_session_model_authority()
+        actual_type = getattr(self._runner, "controller_type", lambda: None)()
+        if isinstance(actual_type, ControllerType):
+            self._controller_name = actual_type.value
+        self._trace_runner_snapshot_fallback_safe = not self._runner.runs_async()
+        self._runner_configuration_revision = installed_generation
+        self._ensure_trace_session(now)
+        self._pending_model_observations = {
+            sequence: (observation, self._trace_session_id, generation, records)
+            for sequence, (observation, _session, generation, records) in self._pending_model_observations.items()
+        }
+        self._reconcile_model_observation_outcomes(now)
+
     def _ensure_trace_session(self, now: float) -> None:
         if self._trace_session_id is not None:
             self._flush_pending_model_events()
@@ -1865,7 +1898,7 @@ class HoldMode(ControlMode):
             if self._runner is not None:
                 self._runner.stop()
                 if getattr(self, "ctx", None) is not None:
-                    self._reconcile_model_observation_outcomes(self.ctx.clock.now())
+                    self._rotate_evidence_session_for_installed_runner(self.ctx.clock.now())
                 self._refit_model_once()
         finally:
             self._retire_runner_evidence_context(self._runner_configuration_revision)

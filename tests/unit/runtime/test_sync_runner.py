@@ -435,6 +435,11 @@ def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
 
     assert len(drain.dropped_sequences) == 60
     assert drain.dropped_sequences == tuple(range(2, 62))
+    assert drain.terminal_drops == ()
+
+    runner.bind_evidence_context(0, "session", "cook")
+    released = runner.drain_observation_outcomes()
+    assert [drop.submission_sequence for drop in released.terminal_drops] == list(range(1, 62))
 
 
 def test_sync_runner_forwards_snapshot_and_restore():
