@@ -11,6 +11,7 @@ from common.model_evidence import (
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
+    RecorderGapEvidence,
     RefreshDiagnosticsEvidence,
     TimingDistributionEvidence,
 )
@@ -62,24 +63,77 @@ def _legacy_calibration(stage: str, *, timestamp: int) -> ModelEvidenceRecord:
             continuous=True,
         ),
     )
+
+
 _INCUMBENT = sha256(b"incumbent").hexdigest()
 
 
 def _record(kind: EvidenceKind, payload: object, *, cook: str = "cook-a", timestamp: int = 1) -> ModelEvidenceRecord:
     return ModelEvidenceRecord(
-        evidence_id=f"{kind.value}:{cook}:{timestamp}", kind=kind, session_id=f"session-{cook}", cook_id=cook,
-        timestamp_ms=timestamp, role_generation=4, model_digest=_CANDIDATE, provenance_digest=_INCUMBENT, payload=payload
+        evidence_id=f"{kind.value}:{cook}:{timestamp}",
+        kind=kind,
+        session_id=f"session-{cook}",
+        cook_id=cook,
+        timestamp_ms=timestamp,
+        role_generation=4,
+        model_digest=_CANDIDATE,
+        provenance_digest=_INCUMBENT,
+        payload=payload,
     )
 
 
 def _qualifying() -> tuple[ModelEvidenceRecord, ...]:
     records: list[ModelEvidenceRecord] = [
-        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="low", continuous=True), timestamp=1),
-        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="middle", continuous=True), timestamp=2),
-        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="high", continuous=True), timestamp=3),
-        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="coast", completed_stages=("low", "middle", "high"), continuous=True), timestamp=4),
-        _record(EvidenceKind.REFRESH_DIAGNOSTICS, RefreshDiagnosticsEvidence(accepted=True, full_rank=True, finite_diagnostics=True, pole_magnitude=0.9, gain=1.0, delay_steps=3, covariance_finite=True, alignment_error_c=1.0, snapshot_round_trip=True, sequential_wins=2, generation_continuity=True, atomic_persistence=True, production_prospective=True, braking_error_c=1.0, incumbent_braking_error_c=2.0), timestamp=5),
-        _record(EvidenceKind.TIMING_DISTRIBUTION, TimingDistributionEvidence(sample_count=50, p50_ms=10.0, p95_ms=20.0, p99_ms=200.0, hardware_provenance="target-hardware"), timestamp=6),
+        _record(
+            EvidenceKind.CALIBRATION_SUMMARY,
+            CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="low", continuous=True),
+            timestamp=1,
+        ),
+        _record(
+            EvidenceKind.CALIBRATION_SUMMARY,
+            CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="middle", continuous=True),
+            timestamp=2,
+        ),
+        _record(
+            EvidenceKind.CALIBRATION_SUMMARY,
+            CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="high", continuous=True),
+            timestamp=3,
+        ),
+        _record(
+            EvidenceKind.CALIBRATION_SUMMARY,
+            CalibrationSummaryEvidence(
+                accepted=True, probe_count=0, stage="coast", completed_stages=("low", "middle", "high"), continuous=True
+            ),
+            timestamp=4,
+        ),
+        _record(
+            EvidenceKind.REFRESH_DIAGNOSTICS,
+            RefreshDiagnosticsEvidence(
+                accepted=True,
+                full_rank=True,
+                finite_diagnostics=True,
+                pole_magnitude=0.9,
+                gain=1.0,
+                delay_steps=3,
+                covariance_finite=True,
+                alignment_error_c=1.0,
+                snapshot_round_trip=True,
+                sequential_wins=2,
+                generation_continuity=True,
+                atomic_persistence=True,
+                production_prospective=True,
+                braking_error_c=1.0,
+                incumbent_braking_error_c=2.0,
+            ),
+            timestamp=5,
+        ),
+        _record(
+            EvidenceKind.TIMING_DISTRIBUTION,
+            TimingDistributionEvidence(
+                sample_count=50, p50_ms=10.0, p95_ms=20.0, p99_ms=200.0, hardware_provenance="target-hardware"
+            ),
+            timestamp=6,
+        ),
     ]
     timestamp = 7
     for cook in ("cook-a", "cook-b"):
@@ -87,11 +141,21 @@ def _qualifying() -> tuple[ModelEvidenceRecord, ...]:
             for sequence in range(horizon):
                 error = (-0.5, 0.5, 0.0)[sequence % 3]
                 payload = ForecastOriginEvidence(
-                    origin_sequence=sequence, origin_time_ms=sequence * 20, completion_time_ms=(sequence + horizon) * 20,
-                    horizon_steps=horizon, incumbent_digest=_INCUMBENT, challenger_digest=_CANDIDATE,
-                    incumbent_prediction_c=100.0, challenger_prediction_c=100.0, observed_temperature_c=100.0 + error,
-                    incumbent_error_c=2.0 * error, challenger_error_c=error, temperature_band="middle",
-                    phase="heating", ambient_source=AmbientSource.CONFIGURED, calibration_fit=False,
+                    origin_sequence=sequence,
+                    origin_time_ms=sequence * 20,
+                    completion_time_ms=(sequence + horizon) * 20,
+                    horizon_steps=horizon,
+                    incumbent_digest=_INCUMBENT,
+                    challenger_digest=_CANDIDATE,
+                    incumbent_prediction_c=100.0,
+                    challenger_prediction_c=100.0,
+                    observed_temperature_c=100.0 + error,
+                    incumbent_error_c=2.0 * error,
+                    challenger_error_c=error,
+                    temperature_band="middle",
+                    phase="heating",
+                    ambient_source=AmbientSource.CONFIGURED,
+                    calibration_fit=False,
                 )
                 records.append(_record(EvidenceKind.FORECAST_ORIGIN, payload, cook=cook, timestamp=timestamp))
                 timestamp += 1
@@ -99,7 +163,12 @@ def _qualifying() -> tuple[ModelEvidenceRecord, ...]:
 
 
 def _state() -> dict[str, object]:
-    return {"status": "collecting", "active_kind": "grey_box", "candidate_digest": _CANDIDATE, "candidate_generation": 4}
+    return {
+        "status": "collecting",
+        "active_kind": "grey_box",
+        "candidate_digest": _CANDIDATE,
+        "candidate_generation": 4,
+    }
 
 
 def _report(records: tuple[ModelEvidenceRecord, ...], *, config: ConfidenceConfig | None = None):
@@ -115,8 +184,7 @@ def _forecast_records(records: tuple[ModelEvidenceRecord, ...], horizon: int) ->
     return tuple(
         record
         for record in records
-        if isinstance(record.payload, ForecastOriginEvidence)
-        and record.payload.horizon_steps == horizon
+        if isinstance(record.payload, ForecastOriginEvidence) and record.payload.horizon_steps == horizon
     )
 
 
@@ -127,8 +195,7 @@ def _replace_forecasts(
 ) -> tuple[ModelEvidenceRecord, ...]:
     return tuple(
         _rebuild(record, payload=replacement(record.payload))
-        if isinstance(record.payload, ForecastOriginEvidence)
-        and record.payload.horizon_steps == horizon
+        if isinstance(record.payload, ForecastOriginEvidence) and record.payload.horizon_steps == horizon
         else record
         for record in records
     )
@@ -149,14 +216,29 @@ def test_typed_qualifying_ledger_is_ready_without_ownership_change() -> None:
         (lambda record: _rebuild(record, payload=replace(record.payload, pole_magnitude=0.999)), ("pole-magnitude",)),
         (lambda record: _rebuild(record, payload=replace(record.payload, gain=-1.0)), ("positive-gain",)),
         (lambda record: _rebuild(record, payload=replace(record.payload, delay_steps=16)), ("delay-limit",)),
-        (lambda record: _rebuild(record, payload=replace(record.payload, covariance_finite=False)), ("finite-covariance",)),
+        (
+            lambda record: _rebuild(record, payload=replace(record.payload, covariance_finite=False)),
+            ("finite-covariance",),
+        ),
         (lambda record: _rebuild(record, payload=replace(record.payload, alignment_error_c=2.1)), ("state-alignment",)),
-        (lambda record: _rebuild(record, payload=replace(record.payload, snapshot_round_trip=False)), ("snapshot-round-trip",)),
+        (
+            lambda record: _rebuild(record, payload=replace(record.payload, snapshot_round_trip=False)),
+            ("snapshot-round-trip",),
+        ),
         (lambda record: _rebuild(record, payload=replace(record.payload, sequential_wins=1)), ("sequential-wins",)),
-        (lambda record: _rebuild(record, payload=replace(record.payload, generation_continuity=False)), ("generation-continuity",)),
+        (
+            lambda record: _rebuild(record, payload=replace(record.payload, generation_continuity=False)),
+            ("generation-continuity",),
+        ),
         (lambda record: _rebuild(record, payload=replace(record.payload, braking_error_c=3.0)), ("braking-error",)),
-        (lambda record: _rebuild(record, payload=replace(record.payload, atomic_persistence=False)), ("atomic-persistence",)),
-        (lambda record: _rebuild(record, payload=replace(record.payload, production_prospective=False)), ("production-prospective-construction",)),
+        (
+            lambda record: _rebuild(record, payload=replace(record.payload, atomic_persistence=False)),
+            ("atomic-persistence",),
+        ),
+        (
+            lambda record: _rebuild(record, payload=replace(record.payload, production_prospective=False)),
+            ("production-prospective-construction",),
+        ),
     ],
 )
 def test_each_refresh_gate_has_only_its_expected_blocker(replacement, expected: tuple[str, ...]) -> None:
@@ -171,7 +253,10 @@ def test_each_refresh_gate_has_only_its_expected_blocker(replacement, expected: 
     ("replacement", "expected"),
     [
         (lambda record: _rebuild(record, payload=replace(record.payload, p99_ms=251.0)), ("target-timing",)),
-        (lambda record: _rebuild(record, payload=replace(record.payload, hardware_provenance="workstation")), ("target-timing",)),
+        (
+            lambda record: _rebuild(record, payload=replace(record.payload, hardware_provenance="workstation")),
+            ("target-timing",),
+        ),
         (lambda record: _rebuild(record, schema_version=1), ("schema-integrity",)),
     ],
 )
@@ -193,8 +278,6 @@ def test_discontinuous_coast_is_the_only_calibration_blocker() -> None:
     report = _report(tuple(records))
 
     assert report.blockers == ("calibration-completeness",)
-
-
 
 
 def test_one_cook_and_duplicate_rows_cannot_create_cross_session_confidence() -> None:
@@ -224,15 +307,26 @@ def test_one_cook_across_sessions_remains_one_bootstrap_unit() -> None:
 
 
 def test_only_typed_model_evidence_records_are_authority() -> None:
-    report = evaluate_confidence(({"kind": "forecast_origin"},), activation_state=_state(), target_timing=None, config=ConfidenceConfig())
+    report = evaluate_confidence(
+        ({"kind": "forecast_origin"},), activation_state=_state(), target_timing=None, config=ConfidenceConfig()
+    )
     assert report.status is ConfidenceStatus.COLLECTING
     assert report.blockers[0] == "ledger-integrity"
 
 
 def test_active_fallback_and_schema_states_remain_authoritative() -> None:
     records = _qualifying()
-    for status, expected in (("active", ConfidenceStatus.ACTIVE), ("fallback", ConfidenceStatus.FALLBACK), ("schema-invalidated", ConfidenceStatus.SCHEMA_INVALIDATED)):
-        assert evaluate_confidence(records, activation_state=_state() | {"status": status}, target_timing=None, config=ConfidenceConfig()).status is expected
+    for status, expected in (
+        ("active", ConfidenceStatus.ACTIVE),
+        ("fallback", ConfidenceStatus.FALLBACK),
+        ("schema-invalidated", ConfidenceStatus.SCHEMA_INVALIDATED),
+    ):
+        assert (
+            evaluate_confidence(
+                records, activation_state=_state() | {"status": status}, target_timing=None, config=ConfidenceConfig()
+            ).status
+            is expected
+        )
 
 
 def test_config_is_frozen_and_replicates_are_fixed() -> None:
@@ -257,9 +351,7 @@ def test_current_schema_calibration_ignores_legacy_reader_history() -> None:
 
 def test_legacy_only_calibration_is_incomplete_not_schema_poison() -> None:
     records = tuple(
-        record
-        for record in _qualifying()
-        if not isinstance(record.payload, CalibrationSummaryEvidence)
+        record for record in _qualifying() if not isinstance(record.payload, CalibrationSummaryEvidence)
     ) + tuple(
         _legacy_calibration(stage, timestamp=1_000 + index)
         for index, stage in enumerate(("low", "middle", "high", "coast"))
@@ -268,7 +360,6 @@ def test_legacy_only_calibration_is_incomplete_not_schema_poison() -> None:
     report = _report(records)
 
     assert report.blockers == ("calibration-completeness",)
-
 
     report = _report(
         _replace_forecasts(
@@ -337,9 +428,7 @@ def test_relative_bootstrap_upper_has_exact_blocker_below_point_rmse_limit() -> 
         3,
         lambda payload: replace(
             payload,
-            challenger_error_c=(
-                0.1 if payload.origin_sequence % 2 else -0.1
-            ),
+            challenger_error_c=(0.1 if payload.origin_sequence % 2 else -0.1),
             incumbent_error_c=1.0 if payload.origin_sequence % 2 else -1.0,
         ),
     )
@@ -441,14 +530,12 @@ def test_schema_valid_unsupported_horizon_has_exact_blocker_without_missing_requ
     assert report.blockers == ("unsupported-horizon-4",)
 
 
-
 def test_missing_horizon_has_exact_blocker() -> None:
     report = _report(
         tuple(
             record
             for record in _qualifying()
-            if not isinstance(record.payload, ForecastOriginEvidence)
-            or record.payload.horizon_steps != 3
+            if not isinstance(record.payload, ForecastOriginEvidence) or record.payload.horizon_steps != 3
         )
     )
 
@@ -457,11 +544,7 @@ def test_missing_horizon_has_exact_blocker() -> None:
 
 def test_no_untouched_future_rows_has_exact_complete_blockers() -> None:
     report = _report(
-        tuple(
-            record
-            for record in _qualifying()
-            if not isinstance(record.payload, ForecastOriginEvidence)
-        )
+        tuple(record for record in _qualifying() if not isinstance(record.payload, ForecastOriginEvidence))
     )
 
     assert report.blockers == (
@@ -518,3 +601,105 @@ def test_cook_effective_weight_monopoly_has_the_same_exact_fail_closed_blockers(
         "relative-bootstrap",
         "cook-effective-weight",
     )
+
+
+@pytest.mark.parametrize("reason", ("evidence-queue-overflow", "recorder-gap"))
+def test_destructive_evidence_gap_is_the_exact_blocker_and_keeps_grey_box_owner(reason: str) -> None:
+    gap = _record(
+        EvidenceKind.RECORDER_GAP,
+        RecorderGapEvidence(lost_record_count=2, reason=reason),
+        timestamp=10_000,
+    )
+
+    report = _report(_qualifying() + (gap,))
+
+    assert report.blockers == (reason,)
+    assert report.active_kind == "grey_box"
+    assert report.status is not ConfidenceStatus.READY_FOR_REVIEW
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_blocker"),
+    (
+        ("schema-invalidation", "schema-integrity"),
+        ("bad-ambient-provenance", "provenance-integrity"),
+        ("rank-deficiency", "identifiability"),
+        ("unsupported-horizon", "unsupported-horizon-4"),
+        ("covariance-failure", "finite-covariance"),
+        ("refresh-timeout", "target-timing"),
+    ),
+)
+def test_acceptance_failure_matrix_has_one_exact_blocker_and_never_changes_ownership(
+    failure: str,
+    expected_blocker: str,
+) -> None:
+    records = list(_qualifying())
+    state = _state()
+    if failure == "schema-invalidation":
+        state["status"] = "schema-invalidated"
+    elif failure == "bad-ambient-provenance":
+        timing = next(record for record in records if isinstance(record.payload, TimingDistributionEvidence))
+        records.append(
+            _rebuild(
+                timing,
+                evidence_id="bad-ambient-provenance",
+                provenance_digest=_OTHER,
+                timestamp_ms=10_000,
+            )
+        )
+    elif failure == "rank-deficiency":
+        index = next(
+            index for index, record in enumerate(records) if isinstance(record.payload, RefreshDiagnosticsEvidence)
+        )
+        refresh = records[index]
+        assert isinstance(refresh.payload, RefreshDiagnosticsEvidence)
+        records[index] = _rebuild(
+            refresh,
+            payload=replace(refresh.payload, accepted=False, reason="rank-deficient", full_rank=False),
+        )
+    elif failure == "unsupported-horizon":
+        source = _forecast_records(tuple(records), 3)[0]
+        assert isinstance(source.payload, ForecastOriginEvidence)
+        records.append(
+            _rebuild(
+                source,
+                evidence_id="failure-matrix-unsupported-horizon",
+                payload=replace(
+                    source.payload,
+                    origin_sequence=999,
+                    origin_time_ms=19_980,
+                    completion_time_ms=20_060,
+                    horizon_steps=4,
+                ),
+            )
+        )
+    elif failure == "covariance-failure":
+        index = next(
+            index for index, record in enumerate(records) if isinstance(record.payload, RefreshDiagnosticsEvidence)
+        )
+        refresh = records[index]
+        assert isinstance(refresh.payload, RefreshDiagnosticsEvidence)
+        records[index] = _rebuild(refresh, payload=replace(refresh.payload, covariance_finite=False))
+    elif failure == "refresh-timeout":
+        index = next(
+            index for index, record in enumerate(records) if isinstance(record.payload, TimingDistributionEvidence)
+        )
+        timing = records[index]
+        assert isinstance(timing.payload, TimingDistributionEvidence)
+        records[index] = _rebuild(
+            timing,
+            payload=replace(timing.payload, p50_ms=100.0, p95_ms=200.0, p99_ms=251.0),
+        )
+    else:  # pragma: no cover - the parameter list is the closed failure vocabulary
+        raise AssertionError(f"unknown failure injection: {failure}")
+
+    report = evaluate_confidence(
+        tuple(records),
+        activation_state=state,
+        target_timing=None,
+        config=ConfidenceConfig(bootstrap_seed=7),
+    )
+
+    assert report.blockers == (expected_blocker,)
+    assert report.active_kind == "grey_box"
+    assert report.status is not ConfidenceStatus.READY_FOR_REVIEW

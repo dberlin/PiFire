@@ -1,5 +1,9 @@
 import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import type {
+  ModelEvidenceReport,
+  ModelEvidenceStatus,
+} from "../../src/helpers/modelEvidence/types";
 
 // 800x480 -- the grill's own screen.
 //
@@ -21,6 +25,108 @@ import { expect, test } from "@playwright/test";
 // mutates, and demoDashAt pins the content.
 
 const ARTIFACTS = "tests/e2e/artifacts";
+
+const STALE_DIGEST = "a".repeat(64);
+const EXACT_DIGEST = "b".repeat(64);
+const STALE_DECISION = "review-stale";
+const EXACT_DECISION = "review-exact";
+
+function evidenceReport(
+  status: ModelEvidenceStatus,
+  digest: string,
+  decisionId: string,
+): ModelEvidenceReport {
+  const complete = status !== "collecting";
+  const active = status === "active";
+  return {
+    schema_version: 1,
+    status,
+    decision_id: decisionId,
+    active_model: {
+      kind: active ? "innovation-state-space" : "grey-box",
+      digest: active ? digest : "c".repeat(64),
+    },
+    default_model: { kind: "grey-box", digest: "c".repeat(64) },
+    candidate: { kind: "innovation-state-space", generation: 4, digest },
+    calibration: {
+      status: complete ? "accepted" : "inactive",
+      stage: complete ? "coast" : null,
+      current_probe: null,
+      completed_stages: complete ? ["low", "middle", "high", "coast"] : [],
+      missing_stages: complete ? [] : ["low", "middle", "high", "coast"],
+      eligible_count: complete ? 120 : 0,
+      ineligible_count: 0,
+      ineligible_reasons: [],
+      timed_out: false,
+      incomplete: false,
+      revision: complete ? 2 : 0,
+    },
+    identifiability: {
+      available: complete,
+      accepted: complete,
+      reason: complete ? null : "insufficient-excitation",
+      full_rank: complete,
+      finite_diagnostics: complete,
+      pole_magnitude: complete ? 0.9 : null,
+      gain: complete ? 1.0 : null,
+      delay_steps: complete ? 3 : null,
+      covariance_finite: complete,
+      alignment_error_c: complete ? 1.0 : null,
+      snapshot_round_trip: complete,
+      sequential_wins: complete ? 2 : 0,
+      generation_continuity: complete,
+      atomic_persistence: complete,
+      production_prospective: complete,
+      braking_error_c: complete ? 1.0 : null,
+      incumbent_braking_error_c: complete ? 2.0 : null,
+    },
+    scores: complete
+      ? [
+          {
+            horizon_steps: 3,
+            temperature_band: "middle",
+            phase: "heating",
+            ambient_source: "configured",
+            generation: 4,
+            challenger_rmse_c: 0.5,
+            incumbent_rmse_c: 1,
+            challenger_bias_c: 0,
+            incumbent_bias_c: 0,
+            challenger_band_error_c: 0.5,
+            incumbent_band_error_c: 1,
+            bootstrap: {
+              available: true,
+              method: "hierarchical-cook-block",
+              replicate_count: 10_000,
+              rmse_ratio_upper_bound: 0.75,
+            },
+          },
+        ]
+      : [],
+    gates: complete ? [{ name: "all", passed: true, reason: null }] : [],
+    missing_gates: complete ? [] : ["calibration-completeness", "target-timing"],
+    blockers: complete ? [] : ["calibration-completeness", "target-timing"],
+    target_timing: {
+      available: complete,
+      sample_count: complete ? 50 : 0,
+      p50_ms: complete ? 10 : null,
+      p95_ms: complete ? 20 : null,
+      p99_ms: complete ? 200 : null,
+      hardware_provenance: complete ? "target-hardware" : null,
+      gate_passed: complete,
+    },
+    history: [],
+    ambient_provenance_limitation: "Ambient uses configured provenance; it is not measured.",
+    artifact_metadata: {
+      schema_version: 1,
+      provenance_digest: "c".repeat(64),
+      bootstrap_seed: 7,
+      bootstrap_replicates: 10_000,
+      decision_id: decisionId,
+      evidence_ids: ["calibration", "ordinary-a", "ordinary-b"],
+    },
+  };
+}
 
 test.beforeEach(async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
@@ -252,4 +358,167 @@ test("an over-tall dialog stays on screen and every item stays reachable", async
   expect(before.cancelOnScreen).toBe(true);
 
   await page.evaluate((sel) => document.querySelector(sel)?.remove(), scrimSel);
+});
+
+test("MPC Hold exposes calibration, exact activation, framed outputs, and fallback", async ({
+  page,
+}) => {
+  let report = evidenceReport("collecting", STALE_DIGEST, STALE_DECISION);
+  const calibrationActions: string[] = [];
+  const activationBodies: Array<{ candidate_digest: string; decision_id: string }> = [];
+
+  await page.route("**/api/settings", (route) =>
+    route.fulfill({
+      json: {
+        settings: {
+          controller: { selected: "mpc", config: { mpc: { T_amb: 20 } } },
+          safety: { maxtemp: 600 },
+        },
+      },
+    }),
+  );
+  await page.route("**/api/model-evidence/report", (route) => route.fulfill({ json: report }));
+  await page.route("**/api/set_mpc_calibration", async (route) => {
+    const body = route.request().postDataJSON() as {
+      action: string;
+      revision: number;
+      maximum_temperature_c: number;
+      empty_grill_confirmed: boolean;
+      pellets_confirmed: boolean;
+    };
+    calibrationActions.push(body.action);
+    if (body.action === "start") {
+      expect(body).toMatchObject({
+        revision: 1,
+        empty_grill_confirmed: true,
+        pellets_confirmed: true,
+      });
+      report = {
+        ...report,
+        calibration: {
+          ...report.calibration,
+          status: "active",
+          stage: "low",
+          current_probe: 0.025,
+          eligible_count: 1,
+          revision: 1,
+        },
+      };
+    } else {
+      expect(body).toMatchObject({ action: "stop", revision: 2 });
+      report = evidenceReport("ready-for-review", STALE_DIGEST, STALE_DECISION);
+    }
+    await route.fulfill({
+      json: {
+        result: "OK",
+        message: "accepted",
+        data: { mpc_calibration: body },
+      },
+    });
+  });
+  await page.route("**/api/model-evidence/activate", async (route) => {
+    const body = route.request().postDataJSON() as {
+      candidate_digest: string;
+      decision_id: string;
+    };
+    activationBodies.push(body);
+    if (activationBodies.length === 1) {
+      report = evidenceReport("ready-for-review", EXACT_DIGEST, EXACT_DECISION);
+      await route.fulfill({
+        status: 409,
+        json: { detail: "stale-confidence-decision" },
+      });
+      return;
+    }
+    expect(body).toEqual({
+      candidate_digest: EXACT_DIGEST,
+      decision_id: EXACT_DECISION,
+    });
+    report = evidenceReport("active", EXACT_DIGEST, EXACT_DECISION);
+    await route.fulfill({
+      json: {
+        accepted: true,
+        active_kind: "innovation-state-space",
+        candidate_digest: EXACT_DIGEST,
+        decision_id: EXACT_DECISION,
+        role_generation: 5,
+      },
+    });
+  });
+  await page.route("**/api/model-evidence/rollback", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ reason: "active-solve-failed" });
+    report = {
+      ...evidenceReport("fallback", EXACT_DIGEST, EXACT_DECISION),
+      history: [
+        {
+          evidence_id: "fallback-5",
+          timestamp_ms: 5,
+          event: "fallback",
+          decision_id: EXACT_DECISION,
+          reason: "active-solve-failed",
+          failed_digest: EXACT_DIGEST,
+          failed_generation: 5,
+          last_safe_command: 0.37,
+          fallback_kind: "grey-box",
+        },
+      ],
+    };
+    await route.fulfill({
+      json: {
+        accepted: true,
+        active_kind: "grey-box",
+        decision_id: EXACT_DECISION,
+        role_generation: 6,
+      },
+    });
+  });
+
+  await page.reload();
+  await expect(page.locator(".pf-dash-gauge-mode")).toHaveText("HOLD");
+  const system = page.locator('[data-pf="system"]');
+  await expect(system.locator(".pf-dash-statusrow").filter({ hasText: "FAN" })).toContainText(
+    "RUNNING",
+  );
+  await expect(system.locator(".pf-dash-statusrow").filter({ hasText: "AUGER" })).toContainText(
+    "FEEDING",
+  );
+
+  await page.getByRole("button", { name: "MPC learning: collecting" }).click();
+  await page.getByLabel("The grill is empty, with normal grates and drip tray installed.").check();
+  await page.getByLabel("Sufficient pellets are loaded for the calibration run.").check();
+  await page.getByRole("button", { name: "Start calibration" }).click();
+  await expect(page.getByText("Current probe: +0.025 q")).toBeVisible();
+  await page.getByRole("button", { name: "Stop calibration" }).click();
+
+  await expect(page.getByText("Ready for review", { exact: true })).toBeVisible();
+  await expect(page.getByText("Completed stages: low, middle, high, coast")).toBeVisible();
+  await expect(page.getByText("Missing gates: none")).toBeVisible();
+  await expect(page.getByText("target-hardware")).toBeVisible();
+  await expect(page.getByText(STALE_DIGEST, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(STALE_DECISION, { exact: true }).first()).toBeVisible();
+
+  await page.getByLabel("Type the exact candidate digest").fill(STALE_DIGEST);
+  await page.getByLabel("Type the exact confidence decision ID").fill(STALE_DECISION);
+  await page.getByRole("button", { name: "Activate exact model" }).click();
+  await expect(page.getByRole("alert")).toContainText("stale-confidence-decision");
+  await expect(page.getByText(EXACT_DIGEST, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(EXACT_DECISION, { exact: true }).first()).toBeVisible();
+
+  await page.getByLabel("Type the exact candidate digest").fill(EXACT_DIGEST);
+  await page.getByLabel("Type the exact confidence decision ID").fill(EXACT_DECISION);
+  await page.getByRole("button", { name: "Activate exact model" }).click();
+  await expect(page.getByText("Active", { exact: true })).toBeVisible();
+  await expect(page.getByText("Active model: innovation-state-space")).toBeVisible();
+
+  await page.getByLabel("Required rollback reason").fill("active-solve-failed");
+  await page.getByRole("button", { name: "Roll back to last safe model" }).click();
+  await expect(page.getByText("Fallback", { exact: true })).toBeVisible();
+  await expect(page.getByText("Active model: grey-box")).toBeVisible();
+  await expect(page.getByText("Latest model decision: active-solve-failed")).toBeVisible();
+
+  expect(calibrationActions).toEqual(["start", "stop"]);
+  expect(activationBodies).toEqual([
+    { candidate_digest: STALE_DIGEST, decision_id: STALE_DECISION },
+    { candidate_digest: EXACT_DIGEST, decision_id: EXACT_DECISION },
+  ]);
 });

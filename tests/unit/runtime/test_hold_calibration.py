@@ -1,5 +1,9 @@
+from dataclasses import replace
+
+import pytest
+
 from common.controller_model_state import CheckpointSaveOutcome
-from common.control_trace import TraceEventKind
+from common.control_trace import ResultStaleState, TraceEventKind
 from common.model_evidence import EvidenceKind
 from controller.linear_mpc.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_allocator import allocate
@@ -78,7 +82,6 @@ def test_hold_cancels_active_probe_without_reserving_an_operator_revision(hold_c
     assert runner.calibration_requests == []
 
 
-
 def test_hold_records_baseline_and_probe_on_framed_observation(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
@@ -126,7 +129,6 @@ def test_hold_stamps_latched_probe_frame_before_lid_reset(hold_cycle):
     assert cancelled.cancellation_command_revision == 0
 
 
-
 def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
@@ -154,7 +156,6 @@ def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial
     assert terminal[1].ratio == cancelled.realized_auger_duty
 
 
-
 def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and_partial(hold_cycle, monkeypatch):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
@@ -178,15 +179,14 @@ def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and
     assert terminal[1].ratio == terminal[2].ratio == 1.0
     assert terminal[3].ratio == 1.0
     applied = [payload for kind, payload in traces if kind is TraceEventKind.APPLIED_OUTPUT]
-    assert [
-        (item.interval_start_ms, item.interval_end_ms, item.realized_auger_duty)
-        for item in applied
-    ] == [
+    assert [(item.interval_start_ms, item.interval_end_ms, item.realized_auger_duty) for item in applied] == [
         (2_000, 22_000, 12.0 / 20.0),
         (22_000, 42_000, 1.0),
         (42_000, 62_000, 1.0),
         (62_000, 63_000, 1.0),
     ]
+
+
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
@@ -223,6 +223,62 @@ def test_hold_does_not_carry_cancelled_frame_status_into_later_baseline(hold_cyc
     assert baseline.cancellation_command_action == "none"
 
 
+@pytest.mark.parametrize(
+    ("intervention", "expected_reason"),
+    (
+        ("lid-opening", "lid_open"),
+        ("manual-takeover", "manual_override"),
+        ("stale-result", "stale_result"),
+        ("scheduler-reset", "reset"),
+    ),
+)
+def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
+    hold_cycle,
+    intervention: str,
+    expected_reason: str,
+) -> None:
+    active = _result(probe=0.1)
+    following = _result(2, probe=0.1)
+    if intervention == "stale-result":
+        following = replace(
+            following,
+            stale_state=ResultStaleState.STALE,
+            result_age_seconds=1.0,
+        )
+    runner = FakeControllerRunner(period=1.0).script([active, following])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+
+    if intervention == "lid-opening":
+        hold.state.lid.open_detected = True
+    elif intervention == "manual-takeover":
+        hold.state.manual_override["auger"] = 10.0
+    elif intervention == "scheduler-reset":
+        hold.control["controller_update"] = True
+
+    hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+
+    cancelled = runner.observations[-1]
+    assert cancelled.calibration_status == "cancelled"
+    assert cancelled.calibration_cancellation_reason == expected_reason
+    assert cancelled.probe_q == pytest.approx(0.1)
+    assert runner.calibration_cancellations == [expected_reason]
+    assert hold.state.controller.pulse_requested_duty == pytest.approx(following.baseline_allocation.auger_duty)
+
+
+def test_scheduler_reset_does_not_notify_inactive_calibration_owner(hold_cycle) -> None:
+    runner = FakeControllerRunner(period=1.0).script([_result(), _result(2)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+
+    hold.control["controller_update"] = True
+    hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+
+    assert runner.calibration_cancellations == []
+
+
 def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cycle, monkeypatch):
     import controller.runtime.modes.hold as hold_module
 
@@ -240,9 +296,9 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
             pass
 
     class Store:
-
         def load(self, _name):
             return None
+
         def save_outcome(self, _name, _snapshot):
             return CheckpointSaveOutcome.SAVED
 
@@ -325,15 +381,18 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     class CapturingWorker(real_worker):
         def __init__(self, store, logger):
             super().__init__(store, logger, append_evidence=persisted.extend)
+
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: Recorder(warning=warning))
     monkeypatch.setattr(hold_module, "ModelPersistenceWorker", CapturingWorker)
-    runner = FakeControllerRunner(period=1.0).script([
-        _result(
-            stage="coast",
-            completed_stages=("low", "middle", "high"),
-            active=True,
-        ),
-    ])
+    runner = FakeControllerRunner(period=1.0).script(
+        [
+            _result(
+                stage="coast",
+                completed_stages=("low", "middle", "high"),
+                active=True,
+            ),
+        ]
+    )
     runner.observation_outcome = {
         "role_generation": 0,
         "eligible": False,
@@ -355,9 +414,7 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     assert runner.observations
     assert runner.observations[-1].calibration_stage == "coast"
     assert runner.observations[-1].calibration_command_revision == 1
-    direct = hold._calibration_frame_evidence(
-        runner.observations[-1], hold._trace_session_id, hold._trace_cook_id
-    )
+    direct = hold._calibration_frame_evidence(runner.observations[-1], hold._trace_session_id, hold._trace_cook_id)
     assert direct is not None
     assert hold._persistence_worker.submit_evidence_batch((direct,)).accepted
     assert hold._persistence_worker.flush_and_stop(timeout=1.0)

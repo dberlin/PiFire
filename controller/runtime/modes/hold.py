@@ -1978,6 +1978,20 @@ class HoldMode(ControlMode):
                 return f"operator_{action}"
         return None
 
+    @staticmethod
+    def _without_calibration_probe(result):
+        """Return the same completed result with its exact baseline allocation."""
+        baseline = result.baseline_allocation
+        if baseline is None or result.calibration is None:
+            return result
+        return replace(
+            result,
+            cycle_ratio=baseline.auger_duty,
+            fan=None if baseline.fan_duty is None else {"duty": baseline.fan_duty},
+            allocation=baseline,
+            calibration=replace(result.calibration, active=False, probe_q=0.0),
+        )
+
     def _cancel_calibration_probe(
         self, result, reason: str, now: float, ptemp: float, *, notify_runner: bool
     ) -> object:
@@ -2008,16 +2022,7 @@ class HoldMode(ControlMode):
         )
         if notify_runner:
             self._runner.cancel_calibration(reason)
-        baseline = result.baseline_allocation
-        if baseline is None:
-            return result
-        return replace(
-            result,
-            cycle_ratio=baseline.auger_duty,
-            fan=None if baseline.fan_duty is None else {"duty": baseline.fan_duty},
-            allocation=baseline,
-            calibration=replace(result.calibration, active=False, probe_q=0.0),
-        )
+        return self._without_calibration_probe(result)
 
     def _trace_calibration_result(self, result, now: float) -> None:
         decision = result.calibration
@@ -2061,8 +2066,19 @@ class HoldMode(ControlMode):
         self._ensure_trace_session(now)
         self._reconcile_activation_state()
         self._drain_activation_events()
+        active_calibration_reset = False
 
         if control["controller_update"]:
+            controller = self.state.controller
+            latched_probe = getattr(controller, "pulse_frame_calibration_probe_load", 0.0)
+            if (
+                getattr(controller, "pulse_frame_calibration_status", "inactive") == "active"
+                and isinstance(latched_probe, (int, float))
+                and not isinstance(latched_probe, bool)
+                and latched_probe != 0.0
+            ):
+                active_calibration_reset = True
+                self._runner.cancel_calibration("reset")
             control["controller_update"] = False
             ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
             self.settings = ctx.store.read_settings()
@@ -2106,15 +2122,19 @@ class HoldMode(ControlMode):
         if (now - self.state.controller.cycle_start) > controller_interval:
             result = self._runner.latest()
             self._drain_activation_events()
-            cancellation_reason = self._calibration_cancellation_reason(result, now)
-            if cancellation_reason is not None:
-                result = self._cancel_calibration_probe(
-                    result,
-                    cancellation_reason,
-                    now,
-                    ptemp,
-                    notify_runner=not cancellation_reason.startswith("operator_"),
-                )
+            cancellation_reason = None
+            if active_calibration_reset:
+                result = self._without_calibration_probe(result)
+            else:
+                cancellation_reason = self._calibration_cancellation_reason(result, now)
+                if cancellation_reason is not None:
+                    result = self._cancel_calibration_probe(
+                        result,
+                        cancellation_reason,
+                        now,
+                        ptemp,
+                        notify_runner=not cancellation_reason.startswith("operator_"),
+                    )
             if isinstance(result.diagnostics, MpcTraceDiagnostics):
                 self._observe_reachability_advisory(result.diagnostics)
             controller = self.state.controller

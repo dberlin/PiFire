@@ -15,6 +15,7 @@ from common.model_evidence import (
     CalibrationSummaryEvidence,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
+    RecorderGapEvidence,
     RefreshDiagnosticsEvidence,
     TimingDistributionEvidence,
 )
@@ -268,6 +269,10 @@ def evaluate_confidence(
         and not schema_invalidated,
         "schema-integrity",
     )
+    for reason in dict.fromkeys(
+        record.payload.reason for record in selected if isinstance(record.payload, RecorderGapEvidence)
+    ):
+        _gate(gates, f"evidence-continuity:{reason}", False, reason)
     _gate(gates, "untouched-future-rows", bool(origins), "untouched-future-rows")
 
     intervals = _bootstrap_intervals(origins, config)

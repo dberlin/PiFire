@@ -8,6 +8,7 @@ from math import isfinite
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import docs.superpowers.experiments.state_space_refresh_diagnostics as diagnostics
 
@@ -267,3 +268,36 @@ def test_production_attempt_contract_keeps_all_observed_candidate_values() -> No
         "rejection_reasons",
         "elapsed_ms",
     } <= names
+
+
+def test_rejected_active_refresh_records_exact_reason_without_mutating_incumbent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from controller.linear_mpc.state_space import (
+        InnovationStateSpace,
+        RefreshDiagnostics,
+        RefreshRejectionReason,
+    )
+    from tests.unit.mpc.test_innovation_state_space import _config, _frames
+
+    frames = _frames(order=1)
+    model = InnovationStateSpace(_config(orders=(1,), delays=(1,)))
+    assert model.fit(frames).accepted
+    incumbent = model.snapshot()
+    rejected = RefreshDiagnostics(
+        accepted=False,
+        terminal_reason=RefreshRejectionReason.RANK_DEFICIENT,
+        attempts=(),
+    )
+    monkeypatch.setattr(model, "_identify", lambda _frames: (rejected, None, None))
+
+    observed = model.refresh(frames)
+
+    assert observed is rejected
+    assert model.diagnostics is rejected
+    assert model.diagnostics.terminal_reason is RefreshRejectionReason.RANK_DEFICIENT
+    refreshed_snapshot = model.snapshot()
+    assert refreshed_snapshot["diagnostics"] != incumbent["diagnostics"]
+    assert {key: value for key, value in refreshed_snapshot.items() if key != "diagnostics"} == {
+        key: value for key, value in incumbent.items() if key != "diagnostics"
+    }

@@ -274,6 +274,7 @@ class InnovationStateSpace:
         frames = _bounded_frames(_frames(observations), self._config.max_buffer_samples)
         diagnostics, candidate, bounds = self._identify(frames)
         if candidate is None:
+            self._last_diagnostics = diagnostics
             return diagnostics
         state = _state_from_frames(frames, candidate)
         covariance = candidate.process_covariance.copy()
@@ -302,7 +303,9 @@ class InnovationStateSpace:
                     else attempt
                     for attempt in diagnostics.attempts
                 )
-                return RefreshDiagnostics(False, RefreshRejectionReason.ALIGNMENT_FAILED, attempts)
+                diagnostics = RefreshDiagnostics(False, RefreshRejectionReason.ALIGNMENT_FAILED, attempts)
+                self._last_diagnostics = diagnostics
+                return diagnostics
             candidate, state, covariance, output_error_c = alignment
             attempts = tuple(
                 replace(attempt, alignment_error_c=output_error_c)
