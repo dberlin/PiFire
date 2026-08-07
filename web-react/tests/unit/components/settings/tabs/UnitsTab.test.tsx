@@ -58,9 +58,14 @@ describe("UnitsTab", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "C" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    // Wait for the confirm to resolve and the displayed unit to switch.
-    await waitFor(() => expect(setUnitsMock).toHaveBeenCalledWith("C"));
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("C");
+    // Wait on the RENDER, not the call. setUnits is invoked synchronously from
+    // the click handler, so a waitFor on the mock can be satisfied on its first
+    // check -- before the promise continuation that sets the new unit has run.
+    // Waiting on the displayed value covers both.
+    await waitFor(() =>
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("C"),
+    );
+    expect(setUnitsMock).toHaveBeenCalledWith("C");
     expect(screen.queryByText(/Switch to/)).not.toBeInTheDocument(); // modal closed
   });
 
@@ -72,9 +77,11 @@ describe("UnitsTab", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "C" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    // Wait for the confirm to resolve and the error to display.
-    await waitFor(() => expect(setUnitsMock).toHaveBeenCalledWith("C"));
-    expect(screen.getByText("grill is busy")).toBeInTheDocument();
+    // Same as above: wait on the error the continuation renders, not on the
+    // synchronous call, or this asserts one render too early. Observed failing
+    // intermittently under full-suite load before the change.
+    await waitFor(() => expect(screen.getByText("grill is busy")).toBeInTheDocument());
+    expect(setUnitsMock).toHaveBeenCalledWith("C");
     // displayed unit must NOT have switched to C on failure
     expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("F");
   });
