@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { fetchMetrics, metricsExportUrl } from "../../helpers/metrics/metricsApi";
-import type { MetricsPayload } from "../../helpers/metrics/metricsTypes";
+import { queryKeys } from "../../helpers/query/keys";
+import { unwrap } from "../../helpers/query/unwrap";
 import { MetricCard } from "./MetricCard";
 import "./metrics.css";
 
@@ -22,28 +23,18 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
  * about order would make the two impossible to line up.
  */
 export function MetricsPage() {
-  const [payload, setPayload] = useState<MetricsPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: payload,
+    isPending,
+    error,
+  } = useQuery({
+    queryKey: queryKeys.metrics,
+    //  fetchMetrics RESOLVES its failures (metricsTypes.ts documents why), so
+    //  it needs unwrap() to reject before useQuery can tell the two apart.
+    queryFn: () => unwrap(fetchMetrics(BASE_URL)),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchMetrics(BASE_URL).then((result) => {
-      if (cancelled) return;
-      if (result.ok && result.data) {
-        setPayload(result.data);
-        setError(null);
-      } else {
-        setError(result.message);
-      }
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (loading) {
+  if (isPending) {
     return (
       <div className="pf-metrics">
         <p>Loading metrics…</p>
@@ -55,7 +46,7 @@ export function MetricsPage() {
     return (
       <div className="pf-metrics">
         <p className="pf-settings-error-text" role="alert">
-          {error ?? "The server did not answer."}
+          {error?.message ?? "The server did not answer."}
         </p>
       </div>
     );

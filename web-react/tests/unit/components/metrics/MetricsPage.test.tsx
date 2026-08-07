@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import * as actualMetricsApi from "../../../../src/helpers/metrics/metricsApi" with {
   rstest: "importActual",
 };
 import type { MetricsPayload, MetricsResult } from "../../../../src/helpers/metrics/metricsTypes";
+import { renderWithQuery } from "../../test-utils";
 
 // The API module is mocked, not `fetch` -- the idiom AdminPage.test.tsx
 // established. Stubbed through a lazy wrapper so the hoisted mock factory never
@@ -62,7 +63,7 @@ describe("MetricsPage", () => {
     fetchMetricsMock.mockResolvedValue(
       ok(payload([RECORD, { ...RECORD, id: "m2", mode: "Hold" }])),
     );
-    render(<MetricsPage />);
+    renderWithQuery(<MetricsPage />);
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Smoke Mode" })).toBeVisible());
     expect(screen.getByRole("heading", { name: "Hold Mode" })).toBeVisible();
@@ -70,7 +71,7 @@ describe("MetricsPage", () => {
 
   it("offers the CSV as a download link, not a button", async () => {
     fetchMetricsMock.mockResolvedValue(ok(payload([RECORD])));
-    render(<MetricsPage />);
+    renderWithQuery(<MetricsPage />);
 
     const link = await screen.findByRole("link", { name: "Download CSV Data" });
     expect(link).toHaveAttribute("href", "/api/metrics/export");
@@ -78,13 +79,13 @@ describe("MetricsPage", () => {
 
   it("states the auger rate the estimates assume", async () => {
     fetchMetricsMock.mockResolvedValue(ok(payload([RECORD], 0.45)));
-    render(<MetricsPage />);
+    renderWithQuery(<MetricsPage />);
     expect(await screen.findByText("Auger rate: 0.45 g/s")).toBeVisible();
   });
 
   it("shows Flask's empty state and no CSV link when nothing is recorded", async () => {
     fetchMetricsMock.mockResolvedValue(ok(payload([])));
-    render(<MetricsPage />);
+    renderWithQuery(<MetricsPage />);
 
     expect(await screen.findByRole("heading", { name: "No Data" })).toBeVisible();
     expect(screen.getByText("Start the grill to begin populating metrics.")).toBeVisible();
@@ -95,21 +96,32 @@ describe("MetricsPage", () => {
 
   it("reports a failed read in place", async () => {
     fetchMetricsMock.mockResolvedValue({ ok: false, status: 500, message: "boom", data: null });
-    render(<MetricsPage />);
+    renderWithQuery(<MetricsPage />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+  });
+
+  it("renders the server's message when the envelope reports failure", async () => {
+    fetchMetricsMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      message: "no metrics db",
+      data: null,
+    });
+    renderWithQuery(<MetricsPage />);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("no metrics db"));
   });
 
   it("shows a loading note before the first response", () => {
     //  A promise that never settles, so this asserts the loading branch rather
     //  than racing a resolved one to the first paint.
     fetchMetricsMock.mockReturnValue(new Promise(() => {}));
-    render(<MetricsPage />);
+    renderWithQuery(<MetricsPage />);
     expect(screen.getByText("Loading metrics…")).toBeVisible();
   });
 
   it("reads once on mount and not on a timer", async () => {
     fetchMetricsMock.mockResolvedValue(ok(payload([RECORD])));
-    render(<MetricsPage />);
+    renderWithQuery(<MetricsPage />);
     await screen.findByRole("heading", { name: "Smoke Mode" });
     expect(fetchMetricsMock).toHaveBeenCalledTimes(1);
   });
