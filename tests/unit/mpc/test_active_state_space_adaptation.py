@@ -391,10 +391,12 @@ def test_activation_manager_reuses_exact_two_phase_transaction_for_parameters(fi
         SimpleNamespace(objective=0.0, kkt_residual=0.0),
     )
 
+    drifted_confidence = reports["current"]
+    assert isinstance(drifted_confidence, ConfidenceReport)
     assert controller.commit_active_parameter_promotion(
         manager,
         online_decision.decision_id,
-        _complete_report(online),
+        drifted_confidence,
     )
     assert OnlineAdaptation.model_digest(controller._online.incumbent) == manager.state.active_digest
     assert controller._online.active_generation == manager.state.role_generation
@@ -403,7 +405,7 @@ def test_activation_manager_reuses_exact_two_phase_transaction_for_parameters(fi
     assert not controller.commit_active_parameter_promotion(
         manager,
         online_decision.decision_id,
-        _complete_report(controller._online),
+        drifted_confidence,
     )
     assert controller._online_promotion_count == 1
 

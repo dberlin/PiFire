@@ -1173,32 +1173,38 @@ class Controller(ControllerBase):
         self._online._begin_role_generation()
 
     def commit_active_parameter_promotion(self, manager, decision_id, confidence):
-        """Publish a parameter challenger only after ActivationManager's durable commit."""
+        """Publish the exact durable activation without re-adjudicating its confidence."""
         if not isinstance(manager, ActivationManager):
             raise TypeError("manager must be ActivationManager")
         pending = self._online_pending_parameter_promotion
+        if self._online is None or pending is None or pending[0] != decision_id:
+            return False
+        state = manager.state
+        active_snapshot = manager.active_snapshot
+        if not isinstance(active_snapshot, Mapping):
+            return False
+        try:
+            prospective = self._online.prospective_model(decision_id)
+            committed_digest = OnlineAdaptation.model_digest(InnovationStateSpace.from_snapshot(active_snapshot))
+        except KeyError, TypeError, ValueError, RuntimeError:
+            return False
         if (
-            self._online is None
-            or pending is None
-            or pending[0] != decision_id
-            or manager.state.active_kind != STATE_SPACE_KIND
-            or manager.state.decision_id != decision_id
-            or manager.state.active_digest != self._online.challenger_digest
-            or manager.state.role_generation <= self._online.role_generation
+            state.active_kind != STATE_SPACE_KIND
+            or state.decision_id != decision_id
+            or state.active_digest != committed_digest
+            or committed_digest != OnlineAdaptation.model_digest(prospective)
+            or state.role_generation <= self._online.role_generation
+            or state.role_generation in state.failed_generations
         ):
             return False
-        solve = pending[1]
-        committed = self._online.commit_promotion(
-            decision_id,
-            solve,
-            confidence=confidence,
-            persistence_committed=True,
-        )
-        self._online_pending_parameter_promotion = None
-        if not committed:
-            return False
+
+        # ActivationManager's durable CAS is the sole post-persistence authority.
+        # Reconstructing from it consumes the old online pending decision by
+        # replacing that role pair; a later caller-supplied confidence view must
+        # not reverse ownership that the durable ledger already committed.
         self._activation_manager = manager
         self._synchronize_active_adaptation()
+        self._online_pending_parameter_promotion = None
         self._online_promotion_count += 1
         self._model_revision += 1
         self._online_last_lifecycle_reason = "parameter-promotion"
