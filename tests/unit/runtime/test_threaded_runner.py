@@ -1475,3 +1475,37 @@ def test_threaded_runner_forwards_safety_cancellation_in_submission_order():
     assert core.cancelled.wait(1.0)
     runner.stop()
     assert core.calibration_calls == [("command", "operator-command"), ("cancel", "lid-open")]
+
+
+def test_threaded_reconfigure_transfers_fifo_calibration_operations_to_replacement():
+    class CalibrationCore(FakeCore):
+        def __init__(self, name):
+            super().__init__(period=0.001)
+            self.name = name
+            self.calibration_calls = []
+
+        def request_calibration(self, command):
+            self.calibration_calls.append(("command", command))
+
+        def cancel_calibration(self, reason):
+            self.calibration_calls.append(("cancel", reason))
+
+    barrier = _ObservationBarrier()
+    old = CalibrationCore("old")
+    new = CalibrationCore("new")
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        with runner._lock:
+            runner._pending_core = new
+            runner._pending_controller_type = None
+        runner.request_calibration("start")
+        runner.request_calibration("pause")
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert _wait_for(lambda: new.calibration_calls == [("command", "start"), ("command", "pause")])
+        assert old.calibration_calls == []
+    finally:
+        barrier.release.set()
+        runner.stop()

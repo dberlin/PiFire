@@ -769,6 +769,7 @@ class CalibrationCommand:
     ambient_source: str
     empty_grill_confirmed: bool
     pellets_confirmed: bool
+    safety_ceiling_c: float
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -778,7 +779,7 @@ class CalibrationCommand:
             raise ValueError("calibration command revision must be positive")
         if not all(
             isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-            for value in (self.maximum_temperature_c, self.ambient_c)
+            for value in (self.maximum_temperature_c, self.ambient_c, self.safety_ceiling_c)
         ):
             raise ValueError("calibration temperatures must be finite")
         if self.ambient_source not in {"measured", "manual", "weather", "configured"}:
@@ -846,8 +847,9 @@ class Controller(ControllerBase):
         self._calibration_operations: collections.deque[tuple[str, object]] = collections.deque()
         self._calibration_last_revision = 0
         self._calibration_ambient_c = float(cfg["T_amb"])
-        self._calibration_frame_results: collections.deque[tuple[float, CalibrationDecision]] = collections.deque()
-        self._calibration_feedback: collections.deque[tuple[float, float, bool, bool]] = collections.deque()
+        self._calibration_safety_ceiling_c = 0.0
+        self._calibration_frame_results: dict[int, tuple[float, CalibrationDecision]] = {}
+        self._calibration_feedback: collections.deque[tuple[float, float, bool, bool, int, bool]] = collections.deque()
         self._calibration_last_feedback_timestamp: float | None = None
         self._trace_calibration = CalibrationDecision(False, 0.0, None, CalibrationProgress())
         self._trace_baseline_allocation: AllocationResult | None = None
@@ -2010,7 +2012,7 @@ class Controller(ControllerBase):
             target_c=self._set_point_c,
             baseline_q=baseline_q,
             realized_q=self._applied_combustion_load if realized_q is None else realized_q,
-            safety_ceiling_c=500.0,
+            safety_ceiling_c=self._calibration_safety_ceiling_c,
             allocator_headroom=1.0,
             error_rate_headroom=1.0,
             capability_headroom=1.0,
@@ -2034,27 +2036,37 @@ class Controller(ControllerBase):
     def _advance_calibration(self, baseline_q: float, temperature_c: float) -> CalibrationDecision:
         decision: CalibrationDecision | None = None
         while self._calibration_feedback:
-            feedback_baseline_q, realized_q, continuous, actuation_known = self._calibration_feedback.popleft()
-            if self._trace_calibration.active:
-                decision = self._calibration.advance(
-                    self._calibration_runtime(
-                        feedback_baseline_q,
-                        temperature_c,
-                        realized_q=realized_q,
-                        continuous=continuous,
-                        actuation_known=actuation_known,
-                    )
+            feedback_baseline_q, realized_q, continuous, actuation_known, revision, frame_complete = self._calibration_feedback.popleft()
+            if not self._trace_calibration.active:
+                continue
+            if not frame_complete:
+                decision = self._calibration.cancel_probe("incomplete_frame")
+            else:
+                provenance = self._trace_calibration
+                decision = replace(
+                    self._calibration.advance(
+                        self._calibration_runtime(
+                            feedback_baseline_q,
+                            temperature_c,
+                            realized_q=realized_q,
+                            continuous=continuous,
+                            actuation_known=actuation_known,
+                        )
+                    ),
+                    command_revision=provenance.command_revision,
+                    command_action=provenance.command_action,
                 )
-                self._trace_calibration = decision
-        runtime = self._calibration_runtime(baseline_q, temperature_c)
+            self._trace_calibration = decision
         while self._calibration_operations:
             operation, payload = self._calibration_operations.popleft()
             if operation == "cancel":
-                decision = self._calibration.cancel_probe(payload, runtime)
+                decision = self._calibration.cancel_probe(payload)
             else:
                 command = payload
                 assert isinstance(command, CalibrationCommand)
                 self._calibration_ambient_c = command.ambient_c
+                self._calibration_safety_ceiling_c = command.safety_ceiling_c
+                runtime = self._calibration_runtime(baseline_q, temperature_c)
                 if command.action == "start":
                     decision = self._calibration.start(
                         _CoordinatorCalibrationCommand(
@@ -2076,23 +2088,44 @@ class Controller(ControllerBase):
             decision = replace(
                 self._trace_calibration,
                 events=(),
-                command_revision=0,
-                command_action="none",
             )
         self._trace_calibration = decision
         return decision
 
+    def register_calibration_result(self, result) -> None:
+        """Associate a completed runner result with the frame that may latch it."""
+        calibration = result.calibration
+        baseline = result.baseline_allocation
+        if calibration is None or baseline is None or result.revision <= 0:
+            return
+        self._calibration_frame_results[result.revision] = (
+            baseline.normalized_combustion_load,
+            calibration,
+        )
+
     def set_output(self, applied):
-        """Recover delivered load and queue one completed-frame calibration feedback."""
+        """Recover completed framed feedback only from its producing result revision."""
         realized_q = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
-        if self._calibration_frame_results:
-            baseline_q, produced = self._calibration_frame_results.popleft()
-            if produced.active:
+        revision = applied.producing_result_revision
+        produced = self._calibration_frame_results.pop(revision, None) if revision > 0 else None
+        if produced is not None:
+            for stale_revision in tuple(self._calibration_frame_results):
+                if stale_revision < revision:
+                    del self._calibration_frame_results[stale_revision]
+            baseline_q, decision = produced
+            if decision.active:
                 previous = self._calibration_last_feedback_timestamp
                 continuous = previous is None or applied.timestamp > previous
                 self._calibration_last_feedback_timestamp = applied.timestamp
                 self._calibration_feedback.append(
-                    (baseline_q, realized_q, continuous, applied.controller_commanded)
+                    (
+                        baseline_q,
+                        realized_q,
+                        continuous,
+                        applied.controller_commanded,
+                        revision,
+                        applied.frame_complete and applied.sample_complete,
+                    )
                 )
         self._applied_combustion_load = realized_q
 
@@ -2226,9 +2259,8 @@ class Controller(ControllerBase):
         auger = allocation.auger_duty
         self._trace_baseline_allocation = baseline_allocation
         self._trace_allocation = allocation
-        self._calibration_frame_results.append(
-            (baseline_allocation.normalized_combustion_load, calibration)
-        )
+        # The runner registers this immutable trace under its own completion
+        # revision after it atomically captures the result.
         fan_duty = allocation.fan_duty
         self._trace_diagnostics = MpcTraceDiagnostics(
             state_names=state_names,

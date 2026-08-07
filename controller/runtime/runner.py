@@ -344,7 +344,7 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
     allocation = getattr(core, "trace_allocation", lambda: None)()
     baseline_allocation = getattr(core, "trace_baseline_allocation", lambda: None)()
     calibration = getattr(core, "trace_calibration", lambda: None)()
-    return ControllerUpdateResult(
+    result = ControllerUpdateResult(
         cycle_ratio=cycle_ratio,
         fan=fan,
         input_temperature=float(temp),
@@ -359,6 +359,10 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
         solve_duration_seconds=solve_end - solve_start,
         completed_wall_time=wall_clock(),
     )
+    register = getattr(core, "register_calibration_result", None)
+    if callable(register):
+        register(result)
+    return result
 
 
 class ControllerRunner(ABC):
@@ -767,11 +771,6 @@ class ThreadedControllerRunner(ControllerRunner):
             if ordered_outputs:
                 with self._lock:
                     self._latest_delivered_output = ordered_outputs[-1]
-            for operation, payload in pending_calibrations:
-                if operation == "command":
-                    self._core.request_calibration(payload)
-                else:
-                    self._core.cancel_calibration(payload)
             # Learner calls must never hold _lock. Drain until a lock-protected
             # empty observation queue commits this iteration's temperature
             # update; an observation that wins the lock before that commit is
@@ -852,11 +851,21 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._configuration_revision += 1
                     handoff_output = self._latest_delivered_output
             if new_core is not None:
-                # Seed the replacement from the latest physical output before
-                # its reserved observations and first solve.
+                # The replacement owns every operation that raced with its
+                # installation, before its first physical handoff and solve.
+                for operation, payload in pending_calibrations:
+                    if operation == "command":
+                        new_core.request_calibration(payload)
+                    else:
+                        new_core.cancel_calibration(payload)
                 if handoff_output is not None:
                     new_core.set_output(handoff_output)
                 continue
+            for operation, payload in pending_calibrations:
+                if operation == "command":
+                    self._core.request_calibration(payload)
+                else:
+                    self._core.cancel_calibration(payload)
             if update_temp is not _UNSET and update_temp is not None:
                 result = _capture_completed_result(
                     self._core,

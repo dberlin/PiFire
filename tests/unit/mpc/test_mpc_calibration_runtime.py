@@ -41,6 +41,7 @@ def _start(revision=1):
         ambient_source="configured",
         empty_grill_confirmed=True,
         pellets_confirmed=True,
+        safety_ceiling_c=260.0,
     )
 
 
@@ -123,15 +124,22 @@ def test_calibration_advances_once_per_delivered_output_not_per_solve(monkeypatc
     skipped = runner.latest_from(100.0)
 
     controller.set_output(
-        AppliedOutput(active.allocation.auger_duty, OutputSource.CONTROLLER, 1.0)
+        AppliedOutput(
+            active.allocation.auger_duty,
+            OutputSource.CONTROLLER,
+            1.0,
+            producing_result_revision=active.revision,
+            frame_complete=True,
+            sample_complete=True,
+        )
     )
     feedback = runner.latest_from(100.0)
 
     assert skipped.calibration.progress.eligible_observations == 0
     assert feedback.calibration.progress.eligible_observations == 1
     assert feedback.calibration.progress.positive_observations == 1
-    assert feedback.calibration.command_revision == 0
-    assert feedback.calibration.command_action == "none"
+    assert feedback.calibration.command_revision == 1
+    assert feedback.calibration.command_action == "start"
 
 
 def test_delivered_frames_realize_both_probe_polarities_in_fifo_order(monkeypatch):
@@ -142,7 +150,14 @@ def test_delivered_frames_realize_both_probe_polarities_in_fifo_order(monkeypatc
 
     for frame in range(3):
         controller.set_output(
-            AppliedOutput(result.allocation.auger_duty, OutputSource.CONTROLLER, frame + 1.0)
+            AppliedOutput(
+                result.allocation.auger_duty,
+                OutputSource.CONTROLLER,
+                frame + 1.0,
+                producing_result_revision=result.revision,
+                frame_complete=True,
+                sample_complete=True,
+            )
         )
         result = runner.latest_from(100.0)
 
@@ -166,3 +181,36 @@ def test_safety_cancellation_uses_no_operator_revision_and_later_command_is_cons
     assert cancelled.calibration.command_action == "safety-cancel"
     assert restarted.calibration.command_revision == 2
     assert restarted.calibration.command_action == "start"
+
+
+def test_partial_frame_feedback_cancels_without_counting_an_observation(monkeypatch):
+    controller = _controller(monkeypatch)
+    runner = SyncControllerRunner(controller)
+    runner.request_calibration(_start())
+    active = runner.latest_from(100.0)
+
+    controller.set_output(
+        AppliedOutput(
+            active.allocation.auger_duty,
+            OutputSource.CONTROLLER,
+            1.0,
+            producing_result_revision=active.revision,
+            frame_complete=False,
+            sample_complete=True,
+        )
+    )
+    cancelled = runner.latest_from(100.0)
+
+    assert cancelled.calibration.progress.eligible_observations == 0
+    assert cancelled.calibration.command_action == "safety-cancel"
+
+
+def test_runtime_uses_current_command_safety_ceiling_not_a_fixed_limit(monkeypatch):
+    controller = _controller(monkeypatch)
+    runner = SyncControllerRunner(controller)
+    runner.request_calibration(replace(_start(), safety_ceiling_c=120.0))
+
+    rejected = runner.latest_from(100.0)
+
+    assert not rejected.calibration.active
+    assert "safety_ceiling" in rejected.calibration.events[-1].reasons

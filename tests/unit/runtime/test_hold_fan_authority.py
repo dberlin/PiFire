@@ -22,7 +22,7 @@ def test_ownership_is_granted_when_the_command_can_reach_the_fan(hold_cycle):
     assert hold.state.controller.controls_fan is True
 
     runner.request_calibration(
-        CalibrationCommand("start", 1, 130.0, 20.0, "configured", True, True)
+        CalibrationCommand("start", 1, 130.0, 20.0, "configured", True, True, 260.0)
     )
     assert hold.state.controller.controls_fan is True
 

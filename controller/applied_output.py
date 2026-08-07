@@ -46,6 +46,9 @@ class AppliedOutput:
     source: OutputSource
     timestamp: float
     requested: float | None = None
+    producing_result_revision: int = 0
+    frame_complete: bool = False
+    sample_complete: bool = False
 
     @property
     def controller_commanded(self):

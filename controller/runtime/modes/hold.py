@@ -874,6 +874,7 @@ class HoldMode(ControlMode):
                     completed_revision=previous_frame_revision,
                     completed_request=completed_request,
                     completed_maximum_duty=completed_maximum_duty,
+                    frame_complete=True,
                 )
         if apply_transition and decision.transition is not None:
             if decision.transition.command_on:
@@ -934,6 +935,7 @@ class HoldMode(ControlMode):
         completed_revision: int | None = None,
         completed_request: float | None = None,
         completed_maximum_duty: float | None = None,
+        frame_complete: bool = False,
     ) -> None:
         controller = self.state.controller
         start = controller.pulse_feedback_start_s
@@ -974,6 +976,7 @@ class HoldMode(ControlMode):
             now,
             producing_revision=revision,
             sample_complete=sample_complete,
+            frame_complete=frame_complete,
         )
         if measured_source:
             controller.trace_prior_combustion_load = inverse_combustion_load
@@ -1439,6 +1442,7 @@ class HoldMode(ControlMode):
         *,
         producing_revision: int | None = None,
         sample_complete: bool = False,
+        frame_complete: bool = False,
     ) -> None:
         controller = self.state.controller
         coalesce_seed = (
@@ -1452,15 +1456,22 @@ class HoldMode(ControlMode):
                 sample_complete=sample_complete,
                 realized_combustion_load=None,
             )
+        revision = (
+            max(0, producing_revision)
+            if producing_revision is not None
+            else max(0, controller.pulse_frame_result_revision)
+        )
+        applied = replace(
+            applied,
+            producing_result_revision=revision,
+            sample_complete=sample_complete,
+            frame_complete=frame_complete,
+        )
         self._runner.set_output(applied)
         if coalesce_seed:
             return
         controller.trace_interval_start_ms = int(now * 1_000)
-        controller.trace_interval_result_revision = (
-            max(0, producing_revision)
-            if producing_revision is not None
-            else (max(0, controller.pulse_frame_result_revision))
-        )
+        controller.trace_interval_result_revision = revision
         controller.trace_prior_requested_auger_duty = (
             applied.requested if applied.requested is not None else applied.ratio
         )
@@ -1649,6 +1660,16 @@ class HoldMode(ControlMode):
             return
         controller = self.state.controller
         try:
+            configured_ceiling = self.settings["safety"]["maxtemp"]
+            units = self.settings["globals"]["units"]
+            if isinstance(configured_ceiling, bool) or not isinstance(configured_ceiling, (int, float)) or not isfinite(configured_ceiling):
+                raise ValueError("MPC calibration safety maximum is not finite")
+            if units == "F":
+                safety_ceiling_c = (float(configured_ceiling) - 32.0) * 5.0 / 9.0
+            elif units == "C":
+                safety_ceiling_c = float(configured_ceiling)
+            else:
+                raise ValueError("MPC calibration safety units must be Celsius or Fahrenheit")
             command = CalibrationCommand(
                 action=raw["action"],
                 command_revision=revision,
@@ -1657,6 +1678,7 @@ class HoldMode(ControlMode):
                 ambient_source=raw["ambient_source"],
                 empty_grill_confirmed=raw["empty_grill_confirmed"],
                 pellets_confirmed=raw["pellets_confirmed"],
+                safety_ceiling_c=safety_ceiling_c,
             )
             self._runner.request_calibration(command)
         except (KeyError, NotImplementedError, TypeError, ValueError) as error:

@@ -48,6 +48,23 @@ def test_requested_defaults_to_none():
     assert AppliedOutput(0.9, OutputSource.CONTROLLER, 1.0, requested=1.4).requested == 1.4
 
 
+def test_completed_frame_feedback_carries_immutable_producing_result_identity():
+    applied = AppliedOutput(
+        0.4,
+        OutputSource.CONTROLLER,
+        20.0,
+        producing_result_revision=7,
+        frame_complete=True,
+        sample_complete=True,
+    )
+
+    assert applied.producing_result_revision == 7
+    assert applied.frame_complete is True
+    assert applied.sample_complete is True
+    with pytest.raises(Exception):
+        applied.frame_complete = False
+
+
 def test_seed_output_is_seed_when_nothing_else_applies():
     applied = seed_output(0.15, 100.0, lid_open=False, manual_override_active=False, auger_output=True)
     assert applied.source is OutputSource.SEED
