@@ -1578,14 +1578,19 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
 
         monkeypatch.setattr(runner_module, "_build_core", lambda *_args, **_kwargs: (_CanonicalEvidenceCore(), "Active"))
         assert runner.reconfigure({}, {}) == "Active"
+        pre_adoption_frame = replace(first_frame, nominal_start_s=40.0, nominal_end_s=60.0, ended_at_s=60.0)
+        mode._observe_completed_pulse_frame(pre_adoption_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
         gate.advance()
         assert runner.configuration_revision() == 1
 
         old_session_id = session_id
+        mode._reconcile_model_observation_outcomes(now=41.0)
+        assert [len(submission) for submission in worker.batches] == [1, 1]
+        assert runner.drain_observation_outcomes().envelopes == ()
         mode._adopt_runner_configuration(42.0, mode.grill.get_output_status())
         new_session_id = mode._trace_session_id
         assert new_session_id is not None and new_session_id != old_session_id
-        assert [len(submission) for submission in worker.batches] == [1, 1]
+        assert [len(submission) for submission in worker.batches] == [1, 1, 1]
         boundary_record = worker.batches[1][0]
         boundary_raw = [
             trace
@@ -1604,6 +1609,19 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             f"{old_session_id}:{boundary_raw.payload.decision_id}:2:3:40000",
         )
         assert boundary_record.payload.completion_time_ms == boundary_raw.payload.completed_origins[0].completion_time_ms
+        pre_adoption_record = worker.batches[2][0]
+        pre_adoption_raw = [
+            trace
+            for trace in recorder.records
+            if trace.event_kind is TraceEventKind.MODEL_EVALUATION and trace.session_id == new_session_id
+        ]
+        assert len(pre_adoption_raw) == 1
+        assert (
+            pre_adoption_record.session_id,
+            pre_adoption_record.cook_id,
+            pre_adoption_record.role_generation,
+            pre_adoption_record.payload.completion_time_ms,
+        ) == (new_session_id, cook_id, pre_adoption_raw[0].payload.role_generation, 60_000)
         assert mode._pending_model_observations == {}
 
         controller = mode.state.controller
@@ -1612,20 +1630,20 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
         controller.pulse_frame_requested_auger_duty = 0.3
         controller.pulse_frame_maximum_duty = 0.5
         mode._pulse_frame_role_generation = 7
-        late_frame = replace(first_frame, nominal_start_s=40.0, nominal_end_s=60.0, ended_at_s=60.0)
+        late_frame = replace(first_frame, nominal_start_s=60.0, nominal_end_s=80.0, ended_at_s=80.0)
         mode._observe_completed_pulse_frame(late_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
         mode.teardown(212.0)
         stopped = True
 
         assert gate._closed.is_set()
         assert runner._stop_event.is_set()
-        assert (runner._evidence_session_id, runner._evidence_cook_id) == (None, None)
+        assert runner._evidence_contexts == {}
         assert worker.stopped is True
-        assert [len(submission) for submission in worker.batches] == [1, 1, 1]
+        assert [len(submission) for submission in worker.batches] == [1, 1, 1, 1]
         evaluations = [trace for trace in recorder.records if trace.event_kind is TraceEventKind.MODEL_EVALUATION]
-        assert len(evaluations) == 3
-        late_record = worker.batches[2][0]
-        late_raw = [trace for trace in evaluations if trace.session_id == new_session_id][0].payload
+        assert len(evaluations) == 4
+        late_record = worker.batches[3][0]
+        late_raw = [trace for trace in evaluations if trace.session_id == new_session_id][-1].payload
         late_origin = late_raw.completed_origins[0]
         assert (
             late_record.session_id,
@@ -1636,7 +1654,8 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             new_session_id,
             cook_id,
             late_raw.role_generation,
-            f"{new_session_id}:{late_raw.decision_id}:1:3:60000",
+            f"{new_session_id}:{late_raw.decision_id}:{late_raw.completed_origins[0].observation_sequence}:3:"
+            f"{late_raw.completed_origins[0].completion_time_ms}",
         )
         assert (
             late_record.payload.origin_sequence,
@@ -1657,11 +1676,143 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             late_origin.challenger_digest,
             late_origin.temperature_band,
         )
-        assert len({record.evidence_id for submission in worker.batches for record in submission}) == 3
+        assert len({record.evidence_id for submission in worker.batches for record in submission}) == 4
         assert runner.drain_observation_outcomes().envelopes == ()
     finally:
         if not stopped:
             mode.teardown(212.0)
+
+
+def test_threaded_stop_timeout_records_one_gap_and_fences_late_observation_outcome(hold_cycle, monkeypatch):
+    class _WorkerGate:
+        def __init__(self):
+            self.waiting = threading.Event()
+            self.release = threading.Event()
+
+        def __call__(self, _period_s):
+            self.waiting.set()
+            self.release.wait()
+
+        def close(self):
+            self.release.set()
+
+    class _BlockingObservationCore:
+        def __init__(self):
+            self.observation_started = threading.Event()
+            self.release_observation = threading.Event()
+
+        def get_control_period(self):
+            return 1.0
+
+        def commands_fan(self):
+            return False
+
+        def wants_async(self):
+            return True
+
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
+        def get_status(self):
+            return None
+
+        def get_model_snapshot(self):
+            return None
+
+        def restore_model(self, _snapshot):
+            return True
+
+        def set_output(self, _applied):
+            return None
+
+        def set_target(self, _target):
+            return None
+
+        def update(self, _temperature):
+            return {"cycle_ratio": 0.0, "fan": None}
+
+        def observe_frame(self, observation):
+            self.observation_started.set()
+            self.release_observation.wait()
+            return _model_observation_outcome(frame_end_ms=int(observation.frame_end_s * 1_000))
+
+    class _EvidenceWorker:
+        evidence_blocked = False
+
+        def __init__(self):
+            self.batches = []
+            self.stopped = False
+
+        def submit_evidence_batch(self, records):
+            self.batches.append(records)
+            return EvidenceSubmission(accepted=True)
+
+        def flush_and_stop(self):
+            self.stopped = True
+
+    from controller.runtime.logic.pulse import PulseFrameResult
+
+    recorder = _install_recorder(monkeypatch)
+    gate = _WorkerGate()
+    core = _BlockingObservationCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=gate)
+    worker = _EvidenceWorker()
+    monkeypatch.setattr("controller.runtime.modes.hold.ModelPersistenceWorker", lambda *_args: worker)
+    mode = hold_cycle(runner, controller="mpc")
+    try:
+        assert gate.waiting.wait(1.0)
+        mode.setup()
+        mode.state.metrics = {"id": "runner-stop-timeout"}
+        mode._ensure_trace_session(0.0)
+        controller = mode.state.controller
+        controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
+        controller.pulse_frame_combustion_load = 0.3
+        controller.pulse_frame_requested_auger_duty = 0.3
+        controller.pulse_frame_maximum_duty = 0.5
+        mode._pulse_frame_role_generation = 0
+        mode._observe_completed_pulse_frame(
+            PulseFrameResult(
+                nominal_start_s=0.0,
+                nominal_end_s=20.0,
+                ended_at_s=20.0,
+                complete=True,
+                skipped=False,
+                latched_request=0.3,
+                credit_before_s=0.0,
+                credit_after_s=0.0,
+                scheduled_on_s=6.0,
+                delivered_on_s=6.0,
+                observed_transition_count=2,
+                actual_start_on=False,
+                actual_end_on=False,
+                reset_reason=None,
+            ),
+            ptemp=212.0,
+            inhibit=InhibitReason.NONE,
+        )
+        gate.release.set()
+        assert core.observation_started.wait(1.0)
+
+        mode.teardown(212.0)
+
+        gaps = [
+            record.payload
+            for record in recorder.records
+            if record.event_kind is TraceEventKind.RECORDER_GAP
+            and isinstance(record.payload, RecorderGapPayload)
+            and record.payload.reason == "runner-stop-timeout"
+        ]
+        assert len(gaps) == 1
+        assert gaps[0].observation_sequence == 1
+        assert worker.batches == []
+        core.release_observation.set()
+        assert runner._thread.join(1.0) is None
+        assert not runner._thread.is_alive()
+        assert runner.drain_observation_outcomes().envelopes == ()
+        assert worker.batches == []
+    finally:
+        core.release_observation.set()
+        runner.stop()
 
 
 def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_cycle, monkeypatch):
@@ -1953,6 +2104,8 @@ def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_sess
     mode.setup()
     mode._ensure_trace_session(0.0)
     mode._pending_model_observations = {1: (None, mode._trace_session_id, 0, object())}
+    assert runner.reconfigure({}, {}) == "Active"
+
 
     mode._adopt_runner_configuration(1.0, mode.grill.get_output_status())
 
@@ -2088,6 +2241,7 @@ def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
     mode.setup()
     mode.state.metrics = {"id": "failed-outcome-evidence"}
     mode._ensure_trace_session(0.0)
+    runner.bind_evidence_context(1, mode._trace_session_id, mode._trace_cook_id)
     first, second = _learning_observation(0.0), _learning_observation(20.0)
     mode._pending_model_observations = {
         1: (first, mode._trace_session_id, 0, None),

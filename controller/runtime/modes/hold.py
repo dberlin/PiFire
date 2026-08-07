@@ -517,11 +517,18 @@ class HoldMode(ControlMode):
         if drain is None:
             return
         batch = drain()
-        dropped_sequences = getattr(batch, "dropped_sequences", ())
-        if isinstance(dropped_sequences, tuple):
-            for sequence in dropped_sequences:
-                if isinstance(sequence, int) and not isinstance(sequence, bool):
-                    self._queue_rejected_model_observation(sequence, "observation-outcome-dropped")
+        terminal_drops = getattr(batch, "terminal_drops", ())
+        if isinstance(terminal_drops, tuple):
+            for drop in terminal_drops:
+                sequence = getattr(drop, "submission_sequence", None)
+                reason = getattr(drop, "reason", None)
+                if (
+                    isinstance(sequence, int)
+                    and not isinstance(sequence, bool)
+                    and isinstance(reason, str)
+                    and reason
+                ):
+                    self._retire_pending_model_observation(sequence, reason)
         envelopes = getattr(batch, "envelopes", batch)
         for envelope in envelopes:
             sequence = getattr(envelope, "submission_sequence", None)
@@ -923,10 +930,15 @@ class HoldMode(ControlMode):
         if worker is None or not worker.submit_checkpoint(self._controller_name, snapshot):
             self._learning_evidence_available = False
 
-    def _clear_runner_evidence_context(self) -> None:
-        configure_evidence = getattr(getattr(self, "_runner", None), "set_evidence_context", None)
-        if callable(configure_evidence):
-            configure_evidence(None, None)
+    def _bind_runner_evidence_context(self, generation: int) -> None:
+        bind = getattr(getattr(self, "_runner", None), "bind_evidence_context", None)
+        if callable(bind) and self._trace_session_id is not None:
+            bind(generation, self._trace_session_id, self._trace_cook_id)
+
+    def _retire_runner_evidence_context(self, generation: int) -> None:
+        retire = getattr(getattr(self, "_runner", None), "retire_evidence_context", None)
+        if callable(retire):
+            retire(generation)
 
     def _ensure_trace_session(self, now: float) -> None:
         if self._trace_session_id is not None:
@@ -975,11 +987,8 @@ class HoldMode(ControlMode):
         if not self._trace_record(TraceEventKind.SESSION, payload, int(now * 1_000)):
             self._trace_session_id = None
             self._trace_cook_id = None
-            self._clear_runner_evidence_context()
             return
-        configure_evidence = getattr(self._runner, "set_evidence_context", None)
-        if callable(configure_evidence):
-            configure_evidence(self._trace_session_id, self._trace_cook_id)
+        self._bind_runner_evidence_context(self._runner_configuration_revision)
         self._flush_pending_model_events()
 
     def _trace_safety(
@@ -1292,7 +1301,6 @@ class HoldMode(ControlMode):
         self._trace_recorder = None
         self._trace_session_id = None
         self._trace_cook_id = None
-        self._clear_runner_evidence_context()
         self._trace_closed = False
         self._trace_warning_active = False
         self._learning_evidence_available = True
@@ -1392,6 +1400,7 @@ class HoldMode(ControlMode):
         """Adopt one actually installed runner generation exactly once."""
         import control as _control
 
+        retiring_generation = self._runner_configuration_revision
         self._trace_safety(
             SafetyEventType.CONTROLLER_RECONFIGURE,
             now,
@@ -1402,11 +1411,17 @@ class HoldMode(ControlMode):
         self._reset_framed_pulse(PulseResetReason.MODE_CHANGE, now, InhibitReason.SAFETY)
         _control.eventLogger.info("Controller reinitialized with updated settings")
         self._reconcile_model_observation_outcomes(now)
+        installed_generation = getattr(self._runner, "configuration_revision", lambda: retiring_generation)()
+        retained = {
+            sequence: pending
+            for sequence, pending in self._pending_model_observations.items()
+            if pending[2] == installed_generation
+        }
+        self._retire_runner_evidence_context(retiring_generation)
         controller_state = self.state.controller
         self._trace_session_id = None
         self._trace_cook_id = None
-        self._clear_runner_evidence_context()
-        self._pending_model_observations = {}
+        self._pending_model_observations = retained
         self._pulse_observation_last_frame_key = None
         self._clear_trace_session_model_authority()
         controller_state.trace_result_revision = -1
@@ -1427,7 +1442,13 @@ class HoldMode(ControlMode):
         self._trace_runner_snapshot_fallback_safe = not self._runner.runs_async()
         self._restore_model()
         self._configure_fan_authority()
+        self._runner_configuration_revision = installed_generation
         self._ensure_trace_session(now)
+        self._pending_model_observations = {
+            sequence: (observation, self._trace_session_id, generation, records)
+            for sequence, (observation, _session, generation, records) in self._pending_model_observations.items()
+        }
+        self._reconcile_model_observation_outcomes(now)
         self._set_output(
             seed_output(
                 self.state.cycle.ratio,
@@ -1438,7 +1459,7 @@ class HoldMode(ControlMode):
             ),
             now,
         )
-        self._runner_configuration_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
+        self._runner_configuration_revision = installed_generation
 
     def on_tick(self, now, ptemp, current_output_status):
         import control as _control
@@ -1845,10 +1866,9 @@ class HoldMode(ControlMode):
                 self._runner.stop()
                 if getattr(self, "ctx", None) is not None:
                     self._reconcile_model_observation_outcomes(self.ctx.clock.now())
-                    self._reconcile_model_observation_outcomes(self.ctx.clock.now())
                 self._refit_model_once()
         finally:
-            self._clear_runner_evidence_context()
+            self._retire_runner_evidence_context(self._runner_configuration_revision)
             worker = self._persistence_worker
             if worker is not None:
                 worker.flush_and_stop()

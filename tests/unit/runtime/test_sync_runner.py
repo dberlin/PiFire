@@ -375,6 +375,7 @@ def test_sync_runner_drains_the_exact_observation_outcome_once():
             return outcome
 
     runner = SyncControllerRunner(ObservingCore())
+    runner.bind_evidence_context(0, "session", "cook")
     observation = _frame(0)
 
     sequence = runner.observe_frame(observation)
@@ -388,6 +389,7 @@ def test_sync_runner_drains_the_exact_observation_outcome_once():
 
 def test_fake_runner_bounds_outcomes_and_reports_exact_evictions():
     runner = FakeControllerRunner()
+    runner.bind_evidence_context(0, "session", "cook")
     runner.observation_outcome = {"role_generation": 0, "eligible": False}
     for index in range(31):
         runner.observe_frame(_frame(index))
@@ -407,6 +409,7 @@ def test_sync_runner_reports_exact_outcome_evictions():
             return outcome
 
     runner = SyncControllerRunner(ObservingCore())
+    runner.bind_evidence_context(0, "session", "cook")
     for index in range(31):
         runner.observe_frame(_frame(index))
 

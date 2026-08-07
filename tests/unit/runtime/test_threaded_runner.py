@@ -130,19 +130,20 @@ class CloseAwarePeriodWait:
 
 
 
-def test_runner_stop_clears_evidence_context_without_default_sleep() -> None:
+def test_runner_retires_generation_bound_evidence_context_without_default_sleep() -> None:
     sync = SyncControllerRunner(FakeCore())
-    sync.set_evidence_context("session-sync", "cook-sync")
-    sync.stop()
-    assert (sync._evidence_session_id, sync._evidence_cook_id) == (None, None)
+    sync.bind_evidence_context(0, "session-sync", "cook-sync")
+    sync.retire_evidence_context(0)
+    assert sync._evidence_contexts == {}
 
     gate = CloseAwarePeriodWait()
     threaded = ThreadedControllerRunner(FakeCore(), wait_for_period=gate)
-    threaded.set_evidence_context("session-threaded", "cook-threaded")
+    threaded.bind_evidence_context(0, "session-threaded", "cook-threaded")
     assert gate.waiting.wait(1.0)
     threaded.stop()
+    threaded.retire_evidence_context(0)
     assert gate.closed.is_set()
-    assert (threaded._evidence_session_id, threaded._evidence_cook_id) == (None, None)
+    assert threaded._evidence_contexts == {}
 def test_threaded_runner_solves_submitted_temp():
     core = FakeCore()
     r = ThreadedControllerRunner(core)
@@ -909,6 +910,7 @@ def test_threaded_runner_drains_outcomes_for_exact_delivered_observations():
     core = OutcomeCore()
     runner = ThreadedControllerRunner(core, wait_for_period=barrier)
     core.runner = runner
+    runner.bind_evidence_context(0, "session", "cook")
     try:
         assert barrier.first_waiting.wait(2.0)
         later = _frame(1)
@@ -926,6 +928,35 @@ def test_threaded_runner_drains_outcomes_for_exact_delivered_observations():
             (later_sequence.submission_sequence, later),
         ]
         assert runner.drain_observation_outcomes().envelopes == ()
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
+def test_threaded_runner_withholds_completed_unbound_generation_until_bound():
+    barrier = _ObservationBarrier()
+
+    class OutcomeCore(_ObservationRecordingCore):
+        def observe_frame(self, observation):
+            super().observe_frame(observation)
+            return {"role_generation": observation.role_generation, "eligible": False}
+
+    core = OutcomeCore()
+    runner = ThreadedControllerRunner(core, wait_for_period=barrier)
+    core.runner = runner
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        submission = runner.observe_frame(_frame(0))
+        barrier.release.set()
+        assert _wait_for(lambda: len(core.observations) == 1)
+
+        assert runner.drain_observation_outcomes().envelopes == ()
+
+        runner.bind_evidence_context(0, "generation-zero", "cook")
+        drained = runner.drain_observation_outcomes()
+        assert [(item.submission_sequence, item.configuration_generation, item.observation) for item in drained] == [
+            (submission.submission_sequence, 0, _frame(0))
+        ]
     finally:
         barrier.release.set()
         runner.stop()
@@ -958,6 +989,7 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
     core = RaisingCore()
     runner = ThreadedControllerRunner(core, wait_for_period=barrier)
     core.runner = runner
+    runner.bind_evidence_context(0, "session", "cook")
     try:
         assert barrier.first_waiting.wait(2.0)
         first = _frame(0)
@@ -1029,6 +1061,7 @@ def test_threaded_runner_stop_flushes_accepted_observation_outcome():
     core = OutcomeCore()
     runner = ThreadedControllerRunner(core, wait_for_period=barrier)
     core.runner = runner
+    runner.bind_evidence_context(0, "session", "cook")
     assert barrier.first_waiting.wait(2.0)
     submission = runner.observe_frame(_frame(0))
     errors = []
@@ -1070,6 +1103,8 @@ def test_threaded_runner_swap_delivers_pre_swap_observation_to_old_core():
             runner._pending_core = new
             runner._pending_controller_type = None
         later = runner.observe_frame(_frame(1))
+        runner.bind_evidence_context(0, "old-session", "cook")
+        runner.bind_evidence_context(1, "new-session", "cook")
         barrier.release.set()
         assert _wait_for(lambda: len(old.observations) == 1 and len(new.observations) == 1)
         envelopes = {item.submission_sequence: item for item in runner.drain_observation_outcomes()}
@@ -1166,6 +1201,8 @@ def test_threaded_stop_drains_reserved_swap_generation():
         runner._pending_core = new
         runner._pending_controller_type = None
     runner.observe_frame(_frame(1))
+    runner.bind_evidence_context(0, "old-session", "cook")
+    runner.bind_evidence_context(1, "new-session", "cook")
     stopper = threading.Thread(target=runner.stop)
     stopper.start()
     barrier.release.set()

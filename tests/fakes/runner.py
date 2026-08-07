@@ -4,7 +4,11 @@ from typing import Any
 
 from common.control_trace import ActuationMode, ControllerType
 from controller.linear_mpc.contracts import FrameObservation
-from controller.runtime.runner import ObservationOutcomeDrain, ObservationOutcomeEnvelope, ObservationSubmission
+from controller.runtime.runner import (
+    ObservationOutcomeDrain,
+    ObservationOutcomeEnvelope,
+    ObservationSubmission,
+)
 
 
 class FakeControllerRunner:
@@ -32,12 +36,14 @@ class FakeControllerRunner:
         self.observations = []
         self._observation_sequence = 0
         self._observation_outcomes = []
+        self._terminal_drops_since_drain = deque(maxlen=60)
         self.observation_outcome = None
         # A single ordered log across restore_model()/set_output() calls, since
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
         self._outcome_drops_since_drain = 0
         self._outcome_dropped_sequences = deque(maxlen=60)
+        self._evidence_contexts = {}
         self.calls = []
         self.refits = 0
         self.refit_raises = None
@@ -84,6 +90,12 @@ class FakeControllerRunner:
     def runs_async(self):
         return self._wants_async
 
+    def bind_evidence_context(self, generation, session_id, cook_id):
+        self._evidence_contexts[generation] = (session_id, cook_id)
+
+    def retire_evidence_context(self, generation):
+        self._evidence_contexts.pop(generation, None)
+
     def stop(self):
         self.stops += 1
 
@@ -108,12 +120,21 @@ class FakeControllerRunner:
         return ObservationSubmission(self._observation_sequence, self._configuration_revision)
 
     def drain_observation_outcomes(self):
+        envelopes = []
+        withheld = []
+        for envelope in self._observation_outcomes:
+            if envelope.configuration_generation in self._evidence_contexts:
+                envelopes.append(envelope)
+            else:
+                withheld.append(envelope)
+        self._observation_outcomes = withheld
         drain = ObservationOutcomeDrain(
-            tuple(self._observation_outcomes),
+            tuple(envelopes),
+            tuple(self._terminal_drops_since_drain),
             self._outcome_drops_since_drain,
             tuple(self._outcome_dropped_sequences),
         )
-        self._observation_outcomes.clear()
+        self._terminal_drops_since_drain.clear()
         self._outcome_drops_since_drain = 0
         self._outcome_dropped_sequences.clear()
         return drain
