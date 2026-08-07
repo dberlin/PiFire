@@ -16,6 +16,7 @@ Description: The queued-control-write payload that states a writer's INTENT
 """
 
 import copy
+import math
 import logging
 from collections.abc import Mapping
 
@@ -33,6 +34,9 @@ _ALLOWED_MEMBERS = frozenset({CONTROL_DELTA_KEY, "origin", "set", "delete", "ops
 #: both are expressible only as ops, which is what lets the drain stop guessing.
 _SET_FORBIDDEN = frozenset({"timer", "notify_data"})
 
+_CALIBRATION_ACTIONS = frozenset(("start", "pause", "resume", "stop", "reset-progress"))
+_AMBIENT_SOURCES = frozenset(("measured", "manual", "weather", "configured"))
+
 _OP_FIELDS = {
     "timer.clear": (),
     "timer.pause": ("at",),
@@ -41,14 +45,55 @@ _OP_FIELDS = {
     "notify.set": ("label", "type", "fields"),
     "notify.delete": ("label", "type"),
     "notify.replace": ("entries",),
+    "mpc_calibration.set": ("command",),
 }
 CONTROL_DELTA_OPS = frozenset(_OP_FIELDS)
 
 
 class ControlDeltaError(ValueError):
-    """A malformed envelope. Raised at PUSH time, in the writing process, so the
-    traceback points at the writer rather than at a control-loop drain in
-    another process minutes later."""
+    """A malformed envelope raised while constructing a control delta."""
+
+def validated_mpc_calibration_command(value):
+    """Return a canonical, JSON-safe MPC calibration command or raise ControlDeltaError."""
+    if not isinstance(value, Mapping):
+        raise ControlDeltaError("MPC calibration command must be an object")
+    required = {
+        "action",
+        "revision",
+        "maximum_temperature_c",
+        "ambient_c",
+        "ambient_source",
+        "empty_grill_confirmed",
+        "pellets_confirmed",
+    }
+    if set(value) != required:
+        raise ControlDeltaError("MPC calibration command has invalid fields")
+    action = value["action"]
+    revision = value["revision"]
+    maximum = value["maximum_temperature_c"]
+    ambient = value["ambient_c"]
+    ambient_source = value["ambient_source"]
+    if action not in _CALIBRATION_ACTIONS:
+        raise ControlDeltaError("MPC calibration action is not recognized")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise ControlDeltaError("MPC calibration revision must be a positive integer")
+    if isinstance(maximum, bool) or not isinstance(maximum, (int, float)) or not math.isfinite(maximum):
+        raise ControlDeltaError("MPC calibration maximum temperature must be finite Celsius")
+    if isinstance(ambient, bool) or not isinstance(ambient, (int, float)) or not math.isfinite(ambient):
+        raise ControlDeltaError("MPC calibration ambient temperature must be finite Celsius")
+    if ambient_source not in _AMBIENT_SOURCES:
+        raise ControlDeltaError("MPC calibration ambient source is not recognized")
+    if value["empty_grill_confirmed"] is not True or value["pellets_confirmed"] is not True:
+        raise ControlDeltaError("MPC calibration requires empty-grill and pellet confirmations")
+    return {
+        "action": action,
+        "revision": revision,
+        "maximum_temperature_c": float(maximum),
+        "ambient_c": float(ambient),
+        "ambient_source": ambient_source,
+        "empty_grill_confirmed": True,
+        "pellets_confirmed": True,
+    }
 
 
 def control_delta(set_values=None, delete_paths=None, ops=None):
@@ -146,6 +191,8 @@ def _validate_op_types(ops):
             isinstance(op["seconds"], int) and not isinstance(op["seconds"], bool) and op["seconds"] > 0
         ):
             raise ControlDeltaError("timer.start_with_options 'seconds' must be an int greater than zero")
+        if name == "mpc_calibration.set":
+            validated_mpc_calibration_command(op["command"])
 
 
 #: The two keys a CLIENT-POSTED control patch may carry notify intent under.
@@ -236,6 +283,25 @@ def _deep_assign(target, values):
         else:
             target[key] = value
     return target
+
+
+def _op_mpc_calibration_set(control, op, log):
+    command = validated_mpc_calibration_command(op["command"])
+    previous = control.get("mpc_calibration")
+    if previous is None:
+        control["mpc_calibration"] = copy.deepcopy(command)
+        return
+    if not isinstance(previous, Mapping):
+        log.error("apply_control_delta: dropping MPC calibration command against invalid live state")
+        return
+    revision = previous.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int):
+        log.error("apply_control_delta: dropping MPC calibration command against unrevisioned live state")
+        return
+    if command["revision"] > revision:
+        control["mpc_calibration"] = copy.deepcopy(command)
+    elif command["revision"] == revision and dict(previous) != command:
+        log.error("apply_control_delta: dropping conflicting MPC calibration command revision %s", revision)
 
 
 def _delete_path(target, path):
@@ -355,4 +421,5 @@ _OP_APPLIERS = {
     "notify.set": _op_notify_set,
     "notify.delete": _op_notify_delete,
     "notify.replace": _op_notify_replace,
+    "mpc_calibration.set": _op_mpc_calibration_set,
 }

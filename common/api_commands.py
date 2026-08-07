@@ -26,7 +26,7 @@ from common.common import (
     notify_target_conversion_ops,
     write_log,
 )
-from common.control_delta import control_delta
+from common.control_delta import ControlDeltaError, control_delta, validated_mpc_calibration_command
 from common.modes import Mode
 from common.datastore_accessors import (
     read_control,
@@ -661,54 +661,20 @@ def _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind):
     control["tuning_mode"] = arglist[1] == "true"
     _write_control_delta(control, control_delta(set_values={"tuning_mode": control["tuning_mode"]}), kind, origin)
 
-_CALIBRATION_ACTIONS = frozenset(("start", "pause", "resume", "stop", "reset-progress"))
-_AMBIENT_SOURCES = frozenset(("measured", "manual", "weather", "configured"))
-
-def _validated_mpc_calibration_command(value):
-    """Return a self-contained, JSON-safe calibration command or raise ValueError."""
-    if not isinstance(value, dict):
-        raise ValueError("MPC calibration command must be an object")
-    required = {
-        "action",
-        "revision",
-        "maximum_temperature_c",
-        "ambient_c",
-        "ambient_source",
-        "empty_grill_confirmed",
-        "pellets_confirmed",
-    }
-    if set(value) != required:
-        raise ValueError("MPC calibration command has invalid fields")
-    action = value["action"]
-    revision = value["revision"]
-    maximum = value["maximum_temperature_c"]
-    ambient = value["ambient_c"]
-    ambient_source = value["ambient_source"]
-    if action not in _CALIBRATION_ACTIONS:
-        raise ValueError("MPC calibration action is not recognized")
-    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
-        raise ValueError("MPC calibration revision must be a positive integer")
-    if (
-        isinstance(maximum, bool)
-        or not isinstance(maximum, (int, float))
-        or not math.isfinite(maximum)
-    ):
-        raise ValueError("MPC calibration maximum temperature must be finite Celsius")
-    if isinstance(ambient, bool) or not isinstance(ambient, (int, float)) or not math.isfinite(ambient):
-        raise ValueError("MPC calibration ambient temperature must be finite Celsius")
-    if ambient_source not in _AMBIENT_SOURCES:
-        raise ValueError("MPC calibration ambient source is not recognized")
-    if value["empty_grill_confirmed"] is not True or value["pellets_confirmed"] is not True:
-        raise ValueError("MPC calibration requires empty-grill and pellet confirmations")
-    return {
-        "action": action,
-        "revision": revision,
-        "maximum_temperature_c": float(maximum),
-        "ambient_c": float(ambient),
-        "ambient_source": ambient_source,
-        "empty_grill_confirmed": True,
-        "pellets_confirmed": True,
-    }
+def _mpc_calibration_safety_ceiling_c(settings):
+    """Convert the configured absolute safety maximum to the command's Celsius unit."""
+    try:
+        units = settings["globals"]["units"]
+        maximum = settings["safety"]["maxtemp"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("MPC calibration safety maximum is not configured") from error
+    if isinstance(maximum, bool) or not isinstance(maximum, (int, float)) or not math.isfinite(maximum):
+        raise ValueError("MPC calibration safety maximum is not finite")
+    if units == "C":
+        return float(maximum)
+    if units == "F":
+        return (float(maximum) - 32.0) * 5.0 / 9.0
+    raise ValueError("MPC calibration safety units must be Celsius or Fahrenheit")
 
 
 def _mpc_grey_box_active(settings):
@@ -721,38 +687,27 @@ def _mpc_grey_box_active(settings):
 
 
 def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
-    """Accept one revisioned, guarded calibration command for Hold to consume."""
+    """Validate and queue one revisioned calibration intent for the live drain."""
     try:
-        command = _validated_mpc_calibration_command(arglist[1])
-    except ValueError as error:
+        command = validated_mpc_calibration_command(arglist[1])
+        safety_ceiling_c = _mpc_calibration_safety_ceiling_c(settings)
+    except (ControlDeltaError, ValueError) as error:
         data["result"] = "ERROR"
         data["message"] = str(error)
         return
-    previous = control.get("mpc_calibration")
-    if isinstance(previous, dict):
-        previous_revision = previous.get("revision", 0)
-        if command["revision"] == previous_revision:
-            if command == previous:
-                data["data"]["mpc_calibration"] = command
-                data["data"]["idempotent"] = True
-                return
-            data["result"] = "ERROR"
-            data["message"] = "MPC calibration revision must be monotonic"
-            return
-        if not isinstance(previous_revision, int) or command["revision"] < previous_revision:
-            data["result"] = "ERROR"
-            data["message"] = "MPC calibration revision must be monotonic"
-            return
     if command["action"] == "start" and (
         control.get("mode") != Mode.HOLD or not _mpc_grey_box_active(settings)
     ):
         data["result"] = "ERROR"
         data["message"] = "MPC calibration start requires MPC Hold with grey-box control"
         return
-    control["mpc_calibration"] = command
+    if command["maximum_temperature_c"] >= safety_ceiling_c:
+        data["result"] = "ERROR"
+        data["message"] = "MPC calibration maximum temperature must be below the configured safety ceiling"
+        return
     _write_control_delta(
         control,
-        control_delta(set_values={"mpc_calibration": command}),
+        control_delta(ops=[{"op": "mpc_calibration.set", "command": command}]),
         kind,
         origin,
     )

@@ -484,6 +484,12 @@ def _api_post_dismiss_warnings(settings, request_json):
     return jsonify(api_response("OK", "Warnings dismissed.")), 200
 
 
+def _api_post_mpc_calibration(settings, request_json):
+    """Dispatch the body-only calibration command through the standard command guard."""
+    data = process_command("set", ["mpc_calibration", request_json], origin="api")
+    return jsonify(data), 201 if data["result"] == "OK" else 400
+
+
 _API_POST_ACTIONS = {
     "settings": _api_post_settings,
     "settings_update": _api_post_settings_update,
@@ -493,6 +499,7 @@ _API_POST_ACTIONS = {
     "wled_push_profiles": _api_post_wled_push_profiles,
     "wled_test_profile": _api_post_wled_test_profile,
     "dismiss_warnings": _api_post_dismiss_warnings,
+    "set_mpc_calibration": _api_post_mpc_calibration,
 }
 
 
@@ -515,6 +522,9 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
     #  polls it over GET, and narrowing `set`/`sys` is a separate decision.
     if action == "cmd" and request.method != "POST":
         return jsonify({"Error": "Method Not Allowed. /api/cmd/* requires POST."}), 405
+
+    if action == "set" and arg0 == "mpc_calibration":
+        return jsonify(api_response("ERROR", "Use POST /api/set_mpc_calibration with a JSON command body.")), 400
 
     if action in ["get", "set", "cmd", "sys"]:
         # print(f'action={action}\narg0={arg0}\narg1={arg1}\narg2={arg2}\narg3={arg3}')
