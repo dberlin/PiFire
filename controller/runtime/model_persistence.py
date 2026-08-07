@@ -247,10 +247,14 @@ class ModelPersistenceWorker:
     @staticmethod
     def _durable_evidence_batch(payload: object) -> tuple[ModelEvidenceRecord, ...]:
         """Stamp atomicity only on the immutable tuple handed to one transaction."""
-        if not isinstance(payload, tuple) or not all(isinstance(record, ModelEvidenceRecord) for record in payload):
+        if not isinstance(payload, tuple) or not all(
+            isinstance(record, ModelEvidenceRecord) for record in payload
+        ):
             raise TypeError("evidence work must contain one immutable record batch")
         return tuple(
-            replace(record, payload=replace(record.payload, atomic_persistence=True))
+            record.model_copy(
+                update={"payload": replace(record.payload, atomic_persistence=True)}
+            )
             if isinstance(record.payload, RefreshDiagnosticsEvidence)
             else record
             for record in payload

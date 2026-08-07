@@ -153,6 +153,12 @@ def evaluate_confidence(
     _gate(gates, "positive-gain", refresh is not None and refresh.gain is not None and refresh.gain > 0.0 and isfinite(refresh.gain), "positive-gain")
     _gate(gates, "delay-limit", refresh is not None and refresh.delay_steps is not None and refresh.delay_steps <= config.maximum_delay_steps, "delay-limit")
     _gate(gates, "finite-covariance", refresh is not None and refresh.covariance_finite, "finite-covariance")
+    _gate(
+        gates,
+        "calibration-schema-integrity",
+        _calibration_schema_current(records),
+        "calibration-schema-integrity",
+    )
     _gate(gates, "state-alignment", refresh is not None and refresh.alignment_error_c is not None and refresh.alignment_error_c <= config.maximum_alignment_error_c, "state-alignment")
     _gate(gates, "snapshot-round-trip", refresh is not None and refresh.snapshot_round_trip, "snapshot-round-trip")
     _gate(gates, "sequential-wins", refresh is not None and refresh.sequential_wins >= config.required_sequential_wins, "sequential-wins")
@@ -237,12 +243,24 @@ def _newest_payload(records: Sequence[ModelEvidenceRecord], payload_type: type[R
 def _calibration_complete(records: Sequence[ModelEvidenceRecord]) -> bool:
     stages: set[str] = set()
     for record in records:
-        if isinstance(record.payload, CalibrationSummaryEvidence) and record.payload.accepted and record.payload.continuous:
+        if (
+            record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+            and isinstance(record.payload, CalibrationSummaryEvidence)
+            and record.payload.accepted
+            and record.payload.continuous
+        ):
             if record.payload.stage is not None:
                 stages.add(record.payload.stage)
             stages.update(record.payload.completed_stages)
     return _REQUIRED_STAGES <= stages
 
+
+def _calibration_schema_current(records: Sequence[ModelEvidenceRecord]) -> bool:
+    return all(
+        record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+        for record in records
+        if isinstance(record.payload, CalibrationSummaryEvidence)
+    )
 
 def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -> tuple[BootstrapInterval, ...]:
     grouped: dict[tuple[int, str, str, str, int], list[_Origin]] = defaultdict(list)
@@ -252,20 +270,44 @@ def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -
     for stratum in sorted(grouped):
         horizon, band, phase, ambient, generation = stratum
         group = grouped[stratum]
-        by_cook: dict[tuple[str, str], list[_Origin]] = defaultdict(list)
+        by_cook: dict[str, list[_Origin]] = defaultdict(list)
         for origin in group:
             by_cook[origin.cook].append(origin)
         for values in by_cook.values():
-            values.sort(key=lambda origin: (origin.payload.origin_sequence, origin.payload.origin_time_ms, origin.record.evidence_id))
+            values.sort(
+                key=lambda origin: (
+                    origin.record.session_id,
+                    origin.payload.origin_sequence,
+                    origin.payload.origin_time_ms,
+                    origin.record.evidence_id,
+                )
+            )
         ratios = _hierarchical_ratios(by_cook, horizon, config.bootstrap_seed)
         challenger = _rmse(origin.payload.challenger_error_c for origin in group)
         incumbent = _rmse(origin.payload.incumbent_error_c for origin in group)
-        upper = None if len(ratios) != 10_000 else float(np.quantile(np.asarray(ratios), 0.95, method="higher"))
-        intervals.append(BootstrapInterval(horizon, band, phase, ambient, generation, challenger, incumbent, upper, upper is not None, len(ratios)))
+        upper = None if len(ratios) != 10_000 else float(
+            np.quantile(np.asarray(ratios), 0.95, method="higher")
+        )
+        intervals.append(
+            BootstrapInterval(
+                horizon,
+                band,
+                phase,
+                ambient,
+                generation,
+                challenger,
+                incumbent,
+                upper,
+                upper is not None,
+                len(ratios),
+            )
+        )
     return tuple(intervals)
 
 
-def _hierarchical_ratios(by_cook: Mapping[tuple[str, str], Sequence[_Origin]], horizon: int, seed: int) -> tuple[float, ...]:
+def _hierarchical_ratios(
+    by_cook: Mapping[str, Sequence[_Origin]], horizon: int, seed: int
+) -> tuple[float, ...]:
     cooks = tuple(sorted(by_cook))
     starts = {cook: _block_starts(by_cook[cook], horizon) for cook in cooks}
     if len(cooks) < 2 or any(not starts[cook] for cook in cooks):
@@ -277,7 +319,8 @@ def _hierarchical_ratios(by_cook: Mapping[tuple[str, str], Sequence[_Origin]], h
         for index in selected:
             cook = cooks[int(index)]
             sample.extend(_sample_blocks(by_cook[cook], horizon, starts[cook], rng))
-        challenger, incumbent = _rmse(origin.payload.challenger_error_c for origin in sample), _rmse(origin.payload.incumbent_error_c for origin in sample)
+        challenger = _rmse(origin.payload.challenger_error_c for origin in sample)
+        incumbent = _rmse(origin.payload.incumbent_error_c for origin in sample)
         if challenger is None or incumbent is None or incumbent == 0.0:
             return ()
         ratio = challenger / incumbent

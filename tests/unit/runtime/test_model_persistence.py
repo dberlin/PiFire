@@ -9,7 +9,13 @@ from common.controller_model_state import (
     ControllerModelStore,
 )
 from common.control_trace import AmbientSource
-from common.model_evidence import ActivationEvidence, EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord
+from common.model_evidence import (
+    ActivationEvidence,
+    EvidenceKind,
+    ForecastOriginEvidence,
+    ModelEvidenceRecord,
+    RefreshDiagnosticsEvidence,
+)
 from controller.runtime.model_persistence import EvidenceSubmission, ModelPersistenceWorker
 
 _DIGEST = "a" * 64
@@ -64,6 +70,36 @@ def _evidence(evidence_id: str) -> ModelEvidenceRecord:
             phase="coasting",
             ambient_source=AmbientSource.CONFIGURED,
             calibration_fit=False,
+        ),
+    )
+
+
+def _refresh(evidence_id: str) -> ModelEvidenceRecord:
+    return ModelEvidenceRecord(
+        evidence_id=evidence_id,
+        kind=EvidenceKind.REFRESH_DIAGNOSTICS,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=250,
+        role_generation=1,
+        model_digest=_OTHER_DIGEST,
+        provenance_digest=_DIGEST,
+        payload=RefreshDiagnosticsEvidence(
+            accepted=True,
+            full_rank=True,
+            finite_diagnostics=True,
+            pole_magnitude=0.9,
+            gain=1.0,
+            delay_steps=3,
+            covariance_finite=True,
+            alignment_error_c=0.1,
+            snapshot_round_trip=True,
+            sequential_wins=2,
+            generation_continuity=True,
+            atomic_persistence=False,
+            production_prospective=True,
+            braking_error_c=1.0,
+            incumbent_braking_error_c=2.0,
         ),
     )
 
@@ -271,7 +307,6 @@ def test_evidence_batch_overflow_preserves_queued_fifo_and_records_every_omitted
         assert worker.submit_evidence(_evidence("first")).accepted
 
         rejected = worker.submit_evidence_batch((_evidence("second"), _evidence("third")))
-
         assert not rejected.accepted
         assert rejected.recorder_gap is not None
         assert rejected.recorder_gap.payload.lost_record_count == 2
@@ -296,7 +331,7 @@ def test_worker_commits_each_accepted_evidence_batch_once_and_never_partially() 
         written.append(tuple(records))
 
     worker = ModelPersistenceWorker(_Store(), _Logger(), append_evidence=append)
-    batch = (_evidence("first"), _evidence("second"))
+    batch = (_evidence("first"), _refresh("refresh"), _evidence("second"))
     try:
         assert worker.submit_evidence_batch(batch).accepted
         assert started.wait(timeout=1.0)
@@ -307,4 +342,6 @@ def test_worker_commits_each_accepted_evidence_batch_once_and_never_partially() 
         release.set()
         worker.flush_and_stop(timeout=1.0)
 
-    assert written == [batch]
+    assert written[0][0] == batch[0]
+    assert written[0][2] == batch[2]
+    assert written[0][1].payload.atomic_persistence is True

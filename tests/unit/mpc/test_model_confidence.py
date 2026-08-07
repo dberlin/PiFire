@@ -195,10 +195,42 @@ def test_discontinuous_coast_is_the_only_calibration_blocker() -> None:
     assert report.blockers == ("calibration-completeness",)
 
 
+def test_legacy_calibration_row_is_readable_but_cannot_qualify_current_candidate() -> None:
+    records = list(_qualifying())
+    records[3] = records[3].model_copy(update={"schema_version": 1})
+
+    report = _report(tuple(records))
+
+    assert report.blockers == (
+        "calibration-completeness",
+        "calibration-schema-integrity",
+        "schema-integrity",
+    )
+
+
 def test_one_cook_and_duplicate_rows_cannot_create_cross_session_confidence() -> None:
     evidence = tuple(record for record in _qualifying() if record.cook_id != "cook-b")
     report = _report(evidence + evidence)
     assert report.status is ConfidenceStatus.EVALUATING
+    assert "bootstrap-unavailable" in report.blockers
+    assert "cook-effective-weight" in report.blockers
+
+
+def test_one_cook_across_sessions_remains_one_bootstrap_unit() -> None:
+    one_cook = tuple(record for record in _qualifying() if record.cook_id == "cook-a")
+    restarted = tuple(
+        record.model_copy(
+            update={
+                "evidence_id": f"restart:{record.evidence_id}",
+                "session_id": "session-restarted",
+            }
+        )
+        for record in one_cook
+        if record.kind is EvidenceKind.FORECAST_ORIGIN
+    )
+
+    report = _report(one_cook + restarted)
+
     assert "bootstrap-unavailable" in report.blockers
     assert "cook-effective-weight" in report.blockers
 
