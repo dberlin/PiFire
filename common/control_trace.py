@@ -512,7 +512,7 @@ class ModelObservationPayload:
     challenger_innovation_c: FiniteFloat | None
     effective_updates: NonNegativeInt
     role_generation: NonNegativeInt
-    model_digest: Digest
+    model_digest: Digest | None
     requested_fan_duty: BoundedLoad | None = None
     actual_fan_duty: BoundedLoad | None = None
     output_source: OutputSource | None = None
@@ -539,12 +539,17 @@ class ModelObservationPayload:
             raise ValueError("requested combustion load must equal clipped baseline plus probe")
         if self.result_revision < 1:
             raise ValueError("model observation requires a producing result revision")
+        if not self.probe_valid:
+            if self.eligible or self.rejection_reasons != ("invalid-probe",):
+                raise ValueError("invalid probe must be ineligible with the invalid-probe reason")
         if self.ambient_source is AmbientSource.MEASURED and self.probe_source is None:
             raise ValueError("measured ambient requires a source identifier")
         if self.calibration_fit and self.calibration_stage is None:
             raise ValueError("calibration fit observation requires a calibration stage")
         if self.eligible != (not self.rejection_reasons):
             raise ValueError("model observation eligibility must match rejection reasons")
+        if self.eligible and self.model_digest is None:
+            raise ValueError("eligible model observation requires a model digest")
         if self.eligible and (self.incumbent_innovation_c is None or self.challenger_innovation_c is None):
             raise ValueError("eligible model observation requires innovation scores")
         return self
@@ -562,11 +567,11 @@ class CompletedOriginPayload:
     incumbent_error_c: FiniteFloat
     challenger_error_c: FiniteFloat
     braking: bool
-    observation_sequence: NonNegativeInt | None = None
-    incumbent_digest: Digest | None = None
-    challenger_digest: Digest | None = None
-    incumbent_prediction_c: FiniteFloat | None = None
-    challenger_prediction_c: FiniteFloat | None = None
+    observation_sequence: NonNegativeInt
+    incumbent_digest: Digest
+    challenger_digest: Digest
+    incumbent_prediction_c: FiniteFloat
+    challenger_prediction_c: FiniteFloat
 
     @model_validator(mode="after")
     def validate_origin_interval(self) -> CompletedOriginPayload:

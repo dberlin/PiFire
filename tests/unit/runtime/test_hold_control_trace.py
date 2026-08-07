@@ -1097,6 +1097,11 @@ def _promotion_outcome(*, frame_end_ms):
             "incumbent_error_c": 2.0,
             "challenger_error_c": 1.0,
             "braking": index % 2 == 0,
+            "observation_sequence": index + 1,
+            "incumbent_digest": "a" * 64,
+            "challenger_digest": "b" * 64,
+            "incumbent_prediction_c": 223.0,
+            "challenger_prediction_c": 224.0,
         }
         for index in range(12)
     )

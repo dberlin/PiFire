@@ -398,6 +398,11 @@ class HoldMode(ControlMode):
                         "incumbent_error_c": origin["incumbent_error_c"],
                         "challenger_error_c": origin["challenger_error_c"],
                         "braking": origin["braking"],
+                        "observation_sequence": origin["observation_sequence"],
+                        "incumbent_digest": origin["incumbent_digest"],
+                        "challenger_digest": origin["challenger_digest"],
+                        "incumbent_prediction_c": origin["incumbent_prediction_c"],
+                        "challenger_prediction_c": origin["challenger_prediction_c"],
                     }
                     for origin in completed_origins
                 ),

@@ -18,6 +18,7 @@ from common.control_trace import (
     CalibrationEventType,
     CalibrationTracePayload,
     ControlTraceDbRow,
+    CompletedOriginPayload,
     ControlTraceRecord,
     ControllerBranch,
     MpcFailureState,
@@ -388,6 +389,11 @@ def _payload_cases():
                         "incumbent_error_c": 2.0,
                         "challenger_error_c": 1.0,
                         "braking": True,
+                        "observation_sequence": 1,
+                        "incumbent_digest": "b" * 64,
+                        "challenger_digest": "c" * 64,
+                        "incumbent_prediction_c": 108.0,
+                        "challenger_prediction_c": 109.0,
                     },
                     {
                         "origin_time_ms": 40_000,
@@ -398,6 +404,11 @@ def _payload_cases():
                         "incumbent_error_c": -3.0,
                         "challenger_error_c": -4.0,
                         "braking": False,
+                        "observation_sequence": 2,
+                        "incumbent_digest": "b" * 64,
+                        "challenger_digest": "c" * 64,
+                        "incumbent_prediction_c": 118.0,
+                        "challenger_prediction_c": 119.0,
                     },
                 ),
                 horizon_scores=(
@@ -557,11 +568,11 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "incumbent_error_c": 2.0,
                 "challenger_error_c": 1.0,
                 "braking": True,
-                "observation_sequence": None,
-                "incumbent_digest": None,
-                "challenger_digest": None,
-                "incumbent_prediction_c": None,
-                "challenger_prediction_c": None,
+                "observation_sequence": 1,
+                "incumbent_digest": "b" * 64,
+                "challenger_digest": "c" * 64,
+                "incumbent_prediction_c": 108.0,
+                "challenger_prediction_c": 109.0,
             },
             {
                 "origin_time_ms": 40_000,
@@ -572,11 +583,11 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "incumbent_error_c": -3.0,
                 "challenger_error_c": -4.0,
                 "braking": False,
-                "observation_sequence": None,
-                "incumbent_digest": None,
-                "challenger_digest": None,
-                "incumbent_prediction_c": None,
-                "challenger_prediction_c": None,
+                "observation_sequence": 2,
+                "incumbent_digest": "b" * 64,
+                "challenger_digest": "c" * 64,
+                "incumbent_prediction_c": 118.0,
+                "challenger_prediction_c": 119.0,
             },
         ],
         "horizon_scores": [
@@ -1401,6 +1412,7 @@ def test_schema_four_round_trips_distinct_canonical_observation_evidence() -> No
         {"requested_combustion_load": 0.42},
         {"allocator_revision": None},
         {"ambient_source": AmbientSource.MEASURED, "probe_source": None},
+        {"probe_valid": False},
         {"eligible": True, "rejection_reasons": ("stale",)},
     ),
 )
@@ -1433,3 +1445,17 @@ def test_calibration_trace_payload_round_trips_and_rejects_incoherent_reasons() 
     assert ControlTraceRecord.model_validate_json(record.model_dump_json()).payload == payload
     with pytest.raises(ValidationError):
         replace(payload, event=CalibrationEventType.START_REJECTED)
+
+
+def test_completed_origins_require_precommitted_prediction_provenance() -> None:
+    with pytest.raises(ValidationError):
+        CompletedOriginPayload(
+            origin_time_ms=20_000,
+            completion_time_ms=80_000,
+            horizon_steps=3,
+            generation=0,
+            observed_temperature_c=110.0,
+            incumbent_error_c=2.0,
+            challenger_error_c=1.0,
+            braking=False,
+        )

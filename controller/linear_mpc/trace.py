@@ -55,7 +55,12 @@ def learning_observations(records: Iterable[ControlTraceRecord]) -> tuple[FrameO
     session = _validate_session(trace)
     exact = tuple(record.payload for record in trace if isinstance(record.payload, ModelObservationPayload))
     if exact:
-        return _exact_observations(exact)
+        allocations = {
+            payload.result_revision: payload
+            for record in trace
+            if isinstance(payload := record.payload, AllocationPayload)
+        }
+        return _exact_observations(exact, allocations)
     return _fallback_observations(trace, session)
 
 
@@ -80,7 +85,10 @@ def _validate_session(records: tuple[ControlTraceRecord, ...]) -> SessionPayload
     return sessions[0]
 
 
-def _exact_observations(payloads: tuple[ModelObservationPayload, ...]) -> tuple[FrameObservation, ...]:
+def _exact_observations(
+    payloads: tuple[ModelObservationPayload, ...],
+    allocations: dict[int, AllocationPayload],
+) -> tuple[FrameObservation, ...]:
     frames: list[FrameObservation] = []
     previous_end_ms = -1
     previous_sequence = -1
@@ -89,6 +97,18 @@ def _exact_observations(payloads: tuple[ModelObservationPayload, ...]) -> tuple[
             raise TraceSelectionError("model observation intervals are not contiguous")
         if payload.observation_sequence <= previous_sequence:
             raise TraceSelectionError("model observation sequences are not ordered")
+        allocation = allocations.get(payload.result_revision)
+        if allocation is not None:
+            expected_duty = payload.delivered_on_seconds / 20.0
+            expected_load = normalized_load_from_auger_duty(payload.realized_auger_duty, u_max=allocation.u_max)
+            if (
+                allocation.allocator_revision != payload.allocator_revision
+                or not math.isclose(payload.allocated_combustion_load, allocation.normalized_combustion_load, rel_tol=0, abs_tol=1e-9)
+                or not math.isclose(payload.requested_auger_duty, allocation.requested_auger_duty, rel_tol=0, abs_tol=1e-9)
+                or not math.isclose(payload.realized_auger_duty, expected_duty, rel_tol=0, abs_tol=1e-9)
+                or not math.isclose(payload.realized_combustion_load, expected_load, rel_tol=0, abs_tol=1e-9)
+            ):
+                raise TraceSelectionError("model observation allocation evidence does not match completed delivery")
         required = (
             payload.result_revision,
             payload.requested_auger_duty,
@@ -242,7 +262,7 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
     ):
         raise TraceSelectionError("exact learning evidence is not eligible controller-owned continuous input")
     if exact:
-        frames = _exact_observations(exact)
+        frames = _exact_observations(exact, {})
         start_s = frames[0].frame_end_s if frames else 0.0
         return tuple(
             CalibrationSample(

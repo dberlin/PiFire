@@ -214,6 +214,11 @@ class _Origin:
     challenger: AffinePrediction
     duty: np.ndarray
     braking: bool
+    observation_sequence: int
+    incumbent_digest: str
+    challenger_digest: str
+    incumbent_prediction_c: float
+    challenger_prediction_c: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +231,11 @@ class CompletedOrigin:
     incumbent_error_c: float
     challenger_error_c: float
     braking: bool
+    observation_sequence: int
+    incumbent_digest: str
+    challenger_digest: str
+    incumbent_prediction_c: float
+    challenger_prediction_c: float
 
 
 @dataclass(slots=True)
@@ -806,7 +816,13 @@ class OnlineAdaptation:
             except RuntimeError:
                 continue
             duty = np.empty(horizon, dtype=np.float64)
+            duty.fill(0.0)
             duty.setflags(write=False)
+            incumbent_prediction = float(incumbent.free_output_c[-1] + incumbent.input_response_c[-1] @ duty)
+            challenger_prediction = float(challenger.free_output_c[-1] + challenger.input_response_c[-1] @ duty)
+            if not all(isfinite(value) for value in (incumbent_prediction, challenger_prediction)):
+                self._scores.continuous = False
+                continue
             self._origins.append(
                 _Origin(
                     observation.frame_end_s,
@@ -817,6 +833,11 @@ class OnlineAdaptation:
                     challenger,
                     duty,
                     braking,
+                    observation.observation_sequence,
+                    self.model_digest(self.incumbent),
+                    self.model_digest(self.challenger),
+                    incumbent_prediction,
+                    challenger_prediction,
                 )
             )
             if len(self._origins) > 2 * max(_HORIZONS):
@@ -883,6 +904,11 @@ class OnlineAdaptation:
                     incumbent_error,
                     challenger_error,
                     origin.braking,
+                    origin.observation_sequence,
+                    origin.incumbent_digest,
+                    origin.challenger_digest,
+                    origin.incumbent_prediction_c,
+                    origin.challenger_prediction_c,
                 )
             )
         self._origins = live
