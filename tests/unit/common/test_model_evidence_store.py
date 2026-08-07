@@ -37,8 +37,8 @@ def _forecast(evidence_id: str, timestamp_ms: int, *, sequence: int = 1) -> Mode
         cook_id="cook-a",
         timestamp_ms=timestamp_ms,
         role_generation=2,
-        model_digest=_DIGEST,
-        provenance_digest=_OTHER_DIGEST,
+        model_digest=_OTHER_DIGEST,
+        provenance_digest=_DIGEST,
         payload=ForecastOriginEvidence(
             origin_sequence=sequence,
             origin_time_ms=timestamp_ms - 1,
@@ -76,6 +76,22 @@ def _activation(evidence_id: str = "activation-a") -> ModelEvidenceRecord:
             controller_configuration_digest=_OTHER_DIGEST,
         ),
     )
+
+
+def test_forecast_envelope_must_match_precommitted_payload_digests() -> None:
+    record = _forecast("mismatched", 100)
+    with pytest.raises(ValidationError, match="forecast envelope digests"):
+        ModelEvidenceRecord(
+            evidence_id=record.evidence_id,
+            kind=record.kind,
+            session_id=record.session_id,
+            cook_id=record.cook_id,
+            timestamp_ms=record.timestamp_ms,
+            role_generation=record.role_generation,
+            model_digest=_DIGEST,
+            provenance_digest=record.provenance_digest,
+            payload=record.payload,
+        )
 
 def test_calibration_summary_requires_matching_completed_frame_allocations() -> None:
     baseline = AllocationEvidence(0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)

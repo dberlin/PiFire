@@ -90,7 +90,7 @@ def _freeze_evidence(
     outcome: object, session_id: str | None, cook_id: str | None
 ) -> tuple[ModelEvidenceRecord, ...]:
     """Own only typed MPC compact evidence; never reconstruct predictions."""
-    if session_id is None or not isinstance(outcome, Mapping):
+    if session_id is None or cook_id is None or not isinstance(outcome, Mapping):
         return ()
     evaluation = outcome.get("evaluation_payload")
     values = outcome.get("forecast_origin_evidence")

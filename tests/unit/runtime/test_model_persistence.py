@@ -46,8 +46,8 @@ def _evidence(evidence_id: str) -> ModelEvidenceRecord:
         cook_id="cook-a",
         timestamp_ms=200,
         role_generation=1,
-        model_digest=_DIGEST,
-        provenance_digest=_OTHER_DIGEST,
+        model_digest=_OTHER_DIGEST,
+        provenance_digest=_DIGEST,
         payload=ForecastOriginEvidence(
             origin_sequence=1,
             origin_time_ms=100,

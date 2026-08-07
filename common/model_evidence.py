@@ -92,6 +92,14 @@ class CalibrationSummaryEvidence:
     cancellation_command_revision: NonNegativeInt = 0
     cancellation_command_action: Literal["none", "pause", "stop", "reset-progress", "safety-cancel"] = "none"
     payload_type: Literal["calibration_summary"] = "calibration_summary"
+    stage: Literal["low", "middle", "high", "coast"] | None = None
+    completed_stages: tuple[Literal["low", "middle", "high", "coast"], ...] = ()
+    eligible_observations: NonNegativeInt = 0
+    realized_levels: NonNegativeInt = 0
+    realized_variance: NonNegativeFloat = 0.0
+    rank_progress: NonNegativeFloat = 0.0
+    coverage_progress: NonNegativeFloat = 0.0
+    continuous: bool = True
 
     @model_validator(mode="after")
     def validate_completed_frame(self) -> CalibrationSummaryEvidence:
@@ -142,6 +150,10 @@ class CalibrationSummaryEvidence:
                 or self.cancellation_command_action == "none"
             ):
                 raise ValueError("cancelled calibration evidence must retain cancellation attribution")
+        if len(set(self.completed_stages)) != len(self.completed_stages):
+            raise ValueError("completed calibration stages must be unique")
+        if self.stage == "coast" and not {"low", "middle", "high"} <= set(self.completed_stages):
+            raise ValueError("coast calibration evidence requires completed heating stages")
         return self
 
 
@@ -177,7 +189,27 @@ class ForecastOriginEvidence:
 class RefreshDiagnosticsEvidence:
     accepted: bool
     reason: NonBlankString | None = None
+    full_rank: bool = False
+    finite_diagnostics: bool = False
+    pole_magnitude: NonNegativeFloat | None = None
+    gain: FiniteFloat | None = None
+    delay_steps: NonNegativeInt | None = None
+    covariance_finite: bool = False
+    alignment_error_c: NonNegativeFloat | None = None
+    snapshot_round_trip: bool = False
+    sequential_wins: NonNegativeInt = 0
+    generation_continuity: bool = False
+    atomic_persistence: bool = False
+    production_prospective: bool = False
+    braking_error_c: NonNegativeFloat | None = None
+    incumbent_braking_error_c: NonNegativeFloat | None = None
     payload_type: Literal["refresh_diagnostics"] = "refresh_diagnostics"
+
+    @model_validator(mode="after")
+    def validate_braking_pair(self) -> RefreshDiagnosticsEvidence:
+        if (self.braking_error_c is None) != (self.incumbent_braking_error_c is None):
+            raise ValueError("braking diagnostics must include challenger and incumbent errors")
+        return self
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -185,12 +217,14 @@ class TimingDistributionEvidence:
     sample_count: NonNegativeInt
     p50_ms: NonNegativeFloat
     p95_ms: NonNegativeFloat
+    p99_ms: NonNegativeFloat
+    hardware_provenance: Literal["target-hardware", "workstation"]
     payload_type: Literal["timing_distribution"] = "timing_distribution"
 
     @model_validator(mode="after")
     def validate_percentiles(self) -> TimingDistributionEvidence:
-        if self.p50_ms > self.p95_ms:
-            raise ValueError("timing p50 must not exceed p95")
+        if self.p50_ms > self.p95_ms or self.p95_ms > self.p99_ms:
+            raise ValueError("timing percentiles must be ordered")
         return self
 
 
@@ -305,6 +339,14 @@ class ModelEvidenceRecord(BaseModel):
         expected = EvidenceKind(self.payload.payload_type)
         if self.kind is not expected:
             raise ValueError("evidence kind does not match payload_type")
+        if isinstance(self.payload, ForecastOriginEvidence):
+            if self.cook_id is None:
+                raise ValueError("forecast evidence requires cook identity")
+            if (
+                self.model_digest != self.payload.challenger_digest
+                or self.provenance_digest != self.payload.incumbent_digest
+            ):
+                raise ValueError("forecast envelope digests must match precommitted payload digests")
         return self
 
     def to_db_row(self) -> ModelEvidenceDbRow:

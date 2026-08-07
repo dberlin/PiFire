@@ -1,210 +1,141 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from hashlib import sha256
 
 import pytest
 
-from controller.linear_mpc.confidence import (
-    ConfidenceConfig,
-    ConfidenceStatus,
-    evaluate_confidence,
+from common.control_trace import AmbientSource
+from common.model_evidence import (
+    CalibrationSummaryEvidence,
+    EvidenceKind,
+    ForecastOriginEvidence,
+    ModelEvidenceRecord,
+    RefreshDiagnosticsEvidence,
+    TimingDistributionEvidence,
 )
+from controller.linear_mpc.confidence import ConfidenceConfig, ConfidenceStatus, evaluate_confidence
 
 
-_DIGEST = sha256(b"challenger").hexdigest()
+_CANDIDATE = sha256(b"candidate").hexdigest()
 _INCUMBENT = sha256(b"incumbent").hexdigest()
-_PROVENANCE = sha256(b"provenance").hexdigest()
 
 
-def _record(kind: str, payload: dict[str, object], *, cook: str = "cook-a", generation: int = 1) -> dict[str, object]:
-    return {
-        "evidence_id": f"{kind}-{cook}-{generation}-{len(payload)}",
-        "kind": kind,
-        "session_id": f"session-{cook}",
-        "cook_id": cook,
-        "timestamp_ms": 1,
-        "role_generation": generation,
-        "model_digest": _DIGEST,
-        "provenance_digest": _PROVENANCE,
-        "schema_version": 1,
-        "payload": payload,
-    }
-
-
-def qualifying_evidence() -> list[dict[str, object]]:
-    records = [
-        _record("calibration_summary", {"accepted": True, "stage": stage, "full_rank": True})
-        for stage in ("low", "middle", "high", "coast")
-    ]
-    records.append(
-        _record(
-            "refresh_diagnostics",
-            {
-                "accepted": True,
-                "full_rank": True,
-                "finite_diagnostics": True,
-                "pole_magnitude": 0.9,
-                "gain": 1.0,
-                "delay_steps": 3,
-                "covariance_finite": True,
-                "alignment_error_c": 1.0,
-                "snapshot_round_trip": True,
-                "sequential_wins": 2,
-                "generation_continuity": True,
-                "atomic_persistence": True,
-                "model_integrity": True,
-                "provenance_integrity": True,
-                "schema_integrity": True,
-                "untouched_future_rows": True,
-                "production_prospective": True,
-            },
-        )
+def _record(kind: EvidenceKind, payload: object, *, cook: str = "cook-a", timestamp: int = 1) -> ModelEvidenceRecord:
+    return ModelEvidenceRecord(
+        evidence_id=f"{kind.value}:{cook}:{timestamp}", kind=kind, session_id=f"session-{cook}", cook_id=cook,
+        timestamp_ms=timestamp, role_generation=4, model_digest=_CANDIDATE, provenance_digest=_INCUMBENT, payload=payload
     )
+
+
+def _qualifying() -> tuple[ModelEvidenceRecord, ...]:
+    records: list[ModelEvidenceRecord] = [
+        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="low", continuous=True), timestamp=1),
+        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="middle", continuous=True), timestamp=2),
+        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="high", continuous=True), timestamp=3),
+        _record(EvidenceKind.CALIBRATION_SUMMARY, CalibrationSummaryEvidence(accepted=True, probe_count=0, stage="coast", completed_stages=("low", "middle", "high"), continuous=True), timestamp=4),
+        _record(EvidenceKind.REFRESH_DIAGNOSTICS, RefreshDiagnosticsEvidence(accepted=True, full_rank=True, finite_diagnostics=True, pole_magnitude=0.9, gain=1.0, delay_steps=3, covariance_finite=True, alignment_error_c=1.0, snapshot_round_trip=True, sequential_wins=2, generation_continuity=True, atomic_persistence=True, production_prospective=True, braking_error_c=1.0, incumbent_braking_error_c=2.0), timestamp=5),
+        _record(EvidenceKind.TIMING_DISTRIBUTION, TimingDistributionEvidence(sample_count=50, p50_ms=10.0, p95_ms=20.0, p99_ms=200.0, hardware_provenance="target-hardware"), timestamp=6),
+    ]
+    timestamp = 7
     for cook in ("cook-a", "cook-b"):
         for horizon in (3, 15, 45, 90, 180):
-            for phase in ("heating", "coasting"):
-                for sequence in range(horizon):
-                    sign = -1.0 if sequence % 2 else 1.0
-                    records.append(
-                        _record(
-                            "forecast_origin",
-                            {
-                                "origin_sequence": sequence,
-                                "horizon_steps": horizon,
-                                "incumbent_error_c": 2.0 * sign,
-                                "challenger_error_c": 1.0 * sign,
-                                "temperature_band": "middle",
-                                "phase": phase,
-                                "ambient_source": "configured",
-                                "calibration_fit": False,
-                                "untouched_future": True,
-                            },
-                            cook=cook,
-                        )
-                    )
-    return records
-def _timing() -> dict[str, object]:
-    return {"p99_ms": 249.0, "hardware_provenance": "target-hardware"}
+            for sequence in range(horizon):
+                error = (-1.0, 1.0, 0.0)[sequence % 3]
+                payload = ForecastOriginEvidence(
+                    origin_sequence=sequence, origin_time_ms=sequence * 20, completion_time_ms=(sequence + horizon) * 20,
+                    horizon_steps=horizon, incumbent_digest=_INCUMBENT, challenger_digest=_CANDIDATE,
+                    incumbent_prediction_c=100.0, challenger_prediction_c=100.0, observed_temperature_c=100.0 + error,
+                    incumbent_error_c=2.0 * error, challenger_error_c=error, temperature_band="middle",
+                    phase="heating", ambient_source=AmbientSource.CONFIGURED, calibration_fit=False,
+                )
+                records.append(_record(EvidenceKind.FORECAST_ORIGIN, payload, cook=cook, timestamp=timestamp))
+                timestamp += 1
+    return tuple(records)
 
 
-def _config() -> ConfidenceConfig:
-    return ConfidenceConfig(bootstrap_replicates=19, bootstrap_seed=7)
+def _state() -> dict[str, object]:
+    return {"status": "collecting", "active_kind": "grey_box", "candidate_digest": _CANDIDATE, "candidate_generation": 4}
 
 
-def test_qualifying_ledger_is_ready_for_review_without_ownership_change() -> None:
-    report = evaluate_confidence(
-        qualifying_evidence(),
-        activation_state={"status": "collecting", "active_kind": "grey_box"},
-        target_timing=_timing(),
-        config=_config(),
-    )
+def _report(records: tuple[ModelEvidenceRecord, ...]):
+    return evaluate_confidence(records, activation_state=_state(), target_timing=None, config=ConfidenceConfig(bootstrap_seed=7))
 
+
+def test_typed_qualifying_ledger_is_ready_without_ownership_change() -> None:
+    report = _report(_qualifying())
     assert report.status is ConfidenceStatus.READY_FOR_REVIEW
     assert report.active_kind == "grey_box"
     assert report.blockers == ()
-    assert all(gate.passed for gate in report.gates)
+    assert all(interval.replicate_count == 10_000 for interval in report.bootstrap_intervals)
 
 
 @pytest.mark.parametrize(
-    ("mutate", "reason"),
+    ("replacement", "expected"),
     [
-        (lambda rows: rows.__setitem__(0, _record("calibration_summary", {"accepted": True, "stage": "missing"})), "calibration-completeness"),
-        (lambda rows: rows[4]["payload"].__setitem__("full_rank", False), "identifiability"),
-        (lambda rows: rows[4]["payload"].__setitem__("pole_magnitude", 1.0), "pole-magnitude"),
-        (lambda rows: rows[4]["payload"].__setitem__("gain", 0.0), "positive-gain"),
-        (lambda rows: rows[4]["payload"].__setitem__("delay_steps", 16), "delay-limit"),
-        (lambda rows: rows[4]["payload"].__setitem__("covariance_finite", False), "finite-covariance"),
-        (lambda rows: rows[4]["payload"].__setitem__("alignment_error_c", 2.1), "state-alignment"),
-        (lambda rows: rows[4]["payload"].__setitem__("snapshot_round_trip", False), "snapshot-round-trip"),
         (
-            lambda rows: [
-                row["payload"].__setitem__("challenger_error_c", 3.0)
-                for row in rows
-                if row["kind"] == "forecast_origin" and row["payload"]["horizon_steps"] == 3
-            ],
-            "absolute-rmse-3",
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, full_rank=False)}
+            ),
+            ("identifiability",),
         ),
         (
-            lambda rows: [
-                row["payload"].__setitem__("challenger_error_c", 1.0)
-                for row in rows
-                if row["kind"] == "forecast_origin"
-            ],
-            "signed-bias",
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, pole_magnitude=0.999)}
+            ),
+            ("pole-magnitude",),
         ),
         (
-            lambda rows: [
-                row["payload"].__setitem__("temperature_band", "")
-                for row in rows
-                if row["kind"] == "forecast_origin"
-            ],
-            "temperature-band-error",
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, braking_error_c=3.0)}
+            ),
+            ("braking-error",),
         ),
         (
-            lambda rows: [
-                row["payload"].__setitem__("challenger_error_c", 3.0)
-                for row in rows
-                if row["kind"] == "forecast_origin" and row["payload"]["phase"] == "coasting"
-            ],
-            "braking-error",
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, atomic_persistence=False)}
+            ),
+            ("atomic-persistence",),
         ),
         (
-            lambda rows: [
-                row["payload"].__setitem__("challenger_error_c", 2.0)
-                for row in rows
-                if row["kind"] == "forecast_origin"
-            ],
-            "relative-rmse",
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, production_prospective=False)}
+            ),
+            ("production-prospective-construction",),
         ),
-        (lambda rows: rows.__setitem__(-1, rows[-1] | {"cook_id": "cook-a", "session_id": "session-cook-a"}), "bootstrap-unavailable"),
-        (lambda rows: rows[4]["payload"].__setitem__("sequential_wins", 1), "sequential-wins"),
-        (lambda rows: rows[4]["payload"].__setitem__("generation_continuity", False), "generation-continuity"),
-        (lambda rows: rows[4]["payload"].__setitem__("atomic_persistence", False), "atomic-persistence"),
-        (lambda rows: rows[4]["payload"].__setitem__("provenance_integrity", False), "provenance-integrity"),
-        (lambda rows: rows[4]["payload"].__setitem__("model_integrity", False), "model-integrity"),
-        (lambda rows: rows[4]["payload"].__setitem__("schema_integrity", False), "schema-integrity"),
-        (
-            lambda rows: rows[5]["payload"].__setitem__("untouched_future", False),
-            "untouched-future-rows",
-        ),
-        (lambda rows: rows[4]["payload"].__setitem__("production_prospective", False), "production-prospective-construction"),
     ],
 )
-def test_each_independent_gate_fails_closed(mutate, reason: str) -> None:
-    evidence = qualifying_evidence()
-    mutate(evidence)
-    report = evaluate_confidence(evidence, activation_state={"status": "collecting"}, target_timing=_timing(), config=_config())
-
-    assert reason in report.blockers
+def test_each_refresh_gate_has_only_its_expected_blocker(replacement, expected: tuple[str, ...]) -> None:
+    records = list(_qualifying())
+    records[4] = replacement(records[4])
+    report = _report(tuple(records))
+    assert report.blockers == expected
     assert report.status is not ConfidenceStatus.READY_FOR_REVIEW
 
 
-def test_target_hardware_p99_requires_target_provenance() -> None:
-    report = evaluate_confidence(
-        qualifying_evidence(), activation_state={"status": "collecting"}, target_timing={"p99_ms": 251.0, "hardware_provenance": "workstation"}, config=_config()
-    )
-
-    assert "target-timing" in report.blockers
-
-
-def test_duplicate_rows_and_one_cook_cannot_manufacture_confidence() -> None:
-    evidence = [row for row in qualifying_evidence() if row["cook_id"] == "cook-a"]
-    evidence.extend(evidence)
-    report = evaluate_confidence(evidence, activation_state={"status": "collecting"}, target_timing=_timing(), config=_config())
-
+def test_one_cook_and_duplicate_rows_cannot_create_cross_session_confidence() -> None:
+    evidence = tuple(record for record in _qualifying() if record.cook_id != "cook-b")
+    report = _report(evidence + evidence)
+    assert report.status is ConfidenceStatus.EVALUATING
     assert "bootstrap-unavailable" in report.blockers
     assert "cook-effective-weight" in report.blockers
 
 
-def test_authoritative_active_fallback_and_schema_states_are_preserved() -> None:
-    evidence = qualifying_evidence()
-    assert evaluate_confidence(evidence, activation_state={"status": "active"}, target_timing=_timing(), config=_config()).status is ConfidenceStatus.ACTIVE
-    assert evaluate_confidence(evidence, activation_state={"status": "fallback"}, target_timing=_timing(), config=_config()).status is ConfidenceStatus.FALLBACK
-    assert evaluate_confidence(evidence, activation_state={"status": "schema-invalidated"}, target_timing=_timing(), config=_config()).status is ConfidenceStatus.SCHEMA_INVALIDATED
+def test_only_typed_model_evidence_records_are_authority() -> None:
+    report = evaluate_confidence(({"kind": "forecast_origin"},), activation_state=_state(), target_timing=None, config=ConfidenceConfig())
+    assert report.status is ConfidenceStatus.COLLECTING
+    assert report.blockers[0] == "ledger-integrity"
 
 
-def test_confidence_values_are_frozen_and_slotted() -> None:
-    config = _config()
+def test_active_fallback_and_schema_states_remain_authoritative() -> None:
+    records = _qualifying()
+    for status, expected in (("active", ConfidenceStatus.ACTIVE), ("fallback", ConfidenceStatus.FALLBACK), ("schema-invalidated", ConfidenceStatus.SCHEMA_INVALIDATED)):
+        assert evaluate_confidence(records, activation_state=_state() | {"status": status}, target_timing=None, config=ConfidenceConfig()).status is expected
+
+
+def test_config_is_frozen_and_replicates_are_fixed() -> None:
+    config = ConfidenceConfig()
     with pytest.raises(FrozenInstanceError):
-        config.bootstrap_seed = 4  # type: ignore[misc]
+        config.bootstrap_seed = 8  # type: ignore[misc]
+    with pytest.raises(ValueError, match="exactly 10,000"):
+        ConfidenceConfig(bootstrap_replicates=9)
