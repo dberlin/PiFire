@@ -8,6 +8,8 @@ import pytest
 
 from common.control_trace import (
     ActuationMode,
+    AmbientSource,
+    AmbientUncertainty,
     AppliedOutputPayload,
     ControlTraceRecord,
     ControllerType,
@@ -151,9 +153,25 @@ def _observation(*, temp_c: float = 100.0, ambient_c: float = 20.0) -> ControlTr
             temp_c=temp_c,
             setpoint_c=120.0,
             ambient_c=ambient_c,
+            observation_sequence=1,
+            probe_valid=True,
+            probe_source=None,
+            ambient_source=AmbientSource.CONFIGURED,
+            ambient_uncertainty=AmbientUncertainty.UNMEASURED,
+            baseline_combustion_load=0.4,
+            calibration_probe_load=0.0,
             requested_combustion_load=0.4,
+            allocated_combustion_load=0.4,
             realized_combustion_load=0.35,
+            requested_auger_duty=0.4,
+            scheduled_on_seconds=8.0,
             delivered_on_seconds=7.0,
+            realized_auger_duty=0.35,
+            allocator_revision=0,
+            allocation_clamp_reasons=(),
+            calibration_stage=None,
+            calibration_fit=False,
+            result_revision=1,
             eligible=True,
             rejection_reasons=(),
             input_variance=0.01,
@@ -163,8 +181,6 @@ def _observation(*, temp_c: float = 100.0, ambient_c: float = 20.0) -> ControlTr
             effective_updates=21,
             role_generation=0,
             model_digest="a" * 64,
-            result_revision=1,
-            requested_auger_duty=0.4,
             output_source=OutputSource.CONTROLLER,
             lid_open=False,
             safety_inhibited=False,
@@ -209,10 +225,14 @@ def test_fallback_normalizes_legacy_framed_delivery_to_canonical_q() -> None:
         update={
             "payload": replace(
                 _observation().payload,
+                baseline_combustion_load=0.4,
                 requested_combustion_load=0.4,
+                allocated_combustion_load=0.4,
                 realized_combustion_load=0.2,
+                scheduled_on_seconds=3.6,
                 delivered_on_seconds=3.6,
                 requested_auger_duty=0.36,
+                realized_auger_duty=0.2,
             )
         }
     )
@@ -264,10 +284,14 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
         update={
             "payload": replace(
                 _observation().payload,
+                baseline_combustion_load=0.4,
                 requested_combustion_load=0.4,
+                allocated_combustion_load=0.4,
                 realized_combustion_load=0.2,
+                scheduled_on_seconds=3.6,
                 delivered_on_seconds=3.6,
                 requested_auger_duty=0.36,
+                realized_auger_duty=0.2,
             )
         }
     )
@@ -278,11 +302,16 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
                 _observation().payload,
                 frame_start_ms=20_000,
                 frame_end_ms=40_000,
+                baseline_combustion_load=0.0,
                 requested_combustion_load=0.0,
+                allocated_combustion_load=0.0,
                 realized_combustion_load=0.1,
+                scheduled_on_seconds=1.8,
                 delivered_on_seconds=1.8,
                 requested_auger_duty=0.0,
+                realized_auger_duty=0.1,
                 result_revision=2,
+                observation_sequence=2,
             ),
         }
     )
@@ -311,9 +340,12 @@ def test_fallback_clamps_legacy_measured_delivery_above_latched_u_max() -> None:
             "payload": replace(
                 _observation().payload,
                 requested_combustion_load=0.4,
+                allocated_combustion_load=0.4,
                 realized_combustion_load=1.0,
+                scheduled_on_seconds=18.000_002,
                 delivered_on_seconds=18.000_002,
                 requested_auger_duty=0.36,
+                realized_auger_duty=1.0,
             )
         }
     )
@@ -368,10 +400,14 @@ def test_fallback_preserves_zero_requested_and_delivered_input() -> None:
         update={
             "payload": replace(
                 _observation().payload,
+                baseline_combustion_load=0.0,
                 requested_combustion_load=0.0,
+                allocated_combustion_load=0.0,
                 realized_combustion_load=0.0,
+                scheduled_on_seconds=0.0,
                 delivered_on_seconds=0.0,
                 requested_auger_duty=0.0,
+                realized_auger_duty=0.0,
             )
         }
     )
@@ -507,3 +543,24 @@ def test_learning_replay_preserves_rejected_exact_observations() -> None:
     frames = learning_observations((_session(), record))
     assert len(frames) == 1
     assert frames[0].stale is True
+
+
+def test_exact_observation_rejects_out_of_order_observation_sequence() -> None:
+    first = _observation().model_copy(
+        update={"payload": replace(_observation().payload, observation_sequence=1)}
+    )
+    second = _observation().model_copy(
+        update={
+            "ts_ms": 40_000,
+            "payload": replace(
+                _observation().payload,
+                frame_start_ms=20_000,
+                frame_end_ms=40_000,
+                result_revision=2,
+                observation_sequence=0,
+            ),
+        }
+    )
+
+    with pytest.raises(TraceSelectionError, match="sequence"):
+        learning_observations((_session(), first, second))

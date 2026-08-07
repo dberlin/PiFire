@@ -62,8 +62,8 @@ def learning_observations(records: Iterable[ControlTraceRecord]) -> tuple[FrameO
 def _validate_session(records: tuple[ControlTraceRecord, ...]) -> SessionPayload:
     if not records:
         raise TraceSelectionError("selected control trace contains no records")
-    if any(record.schema_version not in (2, TRACE_SCHEMA_VERSION) for record in records):
-        raise TraceSelectionError("selected control trace has an incompatible schema version")
+    if any(record.schema_version != TRACE_SCHEMA_VERSION for record in records):
+        raise TraceSelectionError("selected control trace has an evidence-incompatible schema version")
     if any(record.controller is not ControllerType.MPC for record in records):
         raise TraceSelectionError("selected control trace mixes controller types")
     if any(isinstance(record.payload, RecorderGapPayload) for record in records):
@@ -83,9 +83,12 @@ def _validate_session(records: tuple[ControlTraceRecord, ...]) -> SessionPayload
 def _exact_observations(payloads: tuple[ModelObservationPayload, ...]) -> tuple[FrameObservation, ...]:
     frames: list[FrameObservation] = []
     previous_end_ms = -1
+    previous_sequence = -1
     for payload in payloads:
         if previous_end_ms >= 0 and payload.frame_start_ms != previous_end_ms:
             raise TraceSelectionError("model observation intervals are not contiguous")
+        if payload.observation_sequence <= previous_sequence:
+            raise TraceSelectionError("model observation sequences are not ordered")
         required = (
             payload.result_revision,
             payload.requested_auger_duty,
@@ -121,11 +124,26 @@ def _exact_observations(payloads: tuple[ModelObservationPayload, ...]) -> tuple[
                 stale=payload.stale,
                 skipped=payload.skipped,
                 reset=payload.reset,
-                continuous=payload.continuous,
                 role_generation=payload.role_generation,
+                continuous=payload.continuous,
+                observation_sequence=payload.observation_sequence,
+                probe_valid=payload.probe_valid,
+                probe_source=payload.probe_source,
+                ambient_source=payload.ambient_source,
+                ambient_uncertainty=payload.ambient_uncertainty,
+                baseline_q=payload.baseline_combustion_load,
+                probe_q=payload.calibration_probe_load,
+                allocated_q=payload.allocated_combustion_load,
+                scheduled_on_s=payload.scheduled_on_seconds,
+                realized_auger_duty=payload.realized_auger_duty,
+                allocator_revision=payload.allocator_revision,
+                allocation_clamp_reasons=payload.allocation_clamp_reasons,
+                calibration_stage=payload.calibration_stage,
+                calibration_fit=payload.calibration_fit,
             )
         )
         previous_end_ms = payload.frame_end_ms
+        previous_sequence = payload.observation_sequence
     return tuple(frames)
 
 
@@ -211,6 +229,7 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
     exact = tuple(record.payload for record in trace if isinstance(record.payload, ModelObservationPayload))
     if exact and any(
         not payload.eligible
+        or payload.calibration_fit
         or payload.output_source is not OutputSource.CONTROLLER
         or payload.lid_open is not False
         or payload.safety_inhibited is not False
@@ -578,6 +597,7 @@ def _fallback_observations(
                 reset=frame.reset_reason is not None,
                 continuous=not frame.stale_command,
                 role_generation=0,
+                observation_sequence=len(observations) + 1,
             )
         )
         previous_end_ms = frame.frame_end_ms

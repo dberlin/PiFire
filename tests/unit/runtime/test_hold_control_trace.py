@@ -8,6 +8,8 @@ import pytest
 
 from common.control_trace import (
     ActuationMode,
+    AmbientSource,
+    AmbientUncertainty,
     ControllerBranch,
     ControllerType,
     InhibitReason,
@@ -1293,6 +1295,9 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     assert (payload.frame_start_ms, payload.frame_end_ms, payload.role_generation) == (0, 20_000, 0)
     assert payload.eligible is False
     assert payload.rejection_reasons == ("insufficient_excitation",)
+    assert payload.calibration_probe_load == 0.0
+    assert payload.ambient_source is AmbientSource.CONFIGURED
+    assert payload.ambient_uncertainty is AmbientUncertainty.UNMEASURED
     learning_event_kinds = [
         record.event_kind
         for record in recorder.records

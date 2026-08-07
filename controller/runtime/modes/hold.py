@@ -10,7 +10,10 @@ from common.controller_model_state import ControllerModelStore
 from common.modes import Mode
 from common.control_trace import (
     ActuationMode,
+    AllocationClampReason,
     AllocationPayload,
+    AmbientSource,
+    AmbientUncertainty,
     AppliedOutputPayload,
     ControlTraceRecord,
     ControllerType,
@@ -108,6 +111,7 @@ class HoldMode(ControlMode):
         dict[int, tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None]] | None
     ) = None
     _pulse_observation_last_frame_key: tuple[int, int] | None = None
+    _pulse_observation_sequence: int = 0
     _last_ptemp: float | None = None
     _checkpoint_worker: ModelCheckpointWorker | None = None
     _final_refit_done: bool = False
@@ -157,6 +161,11 @@ class HoldMode(ControlMode):
         controller.pulse_frame_applied_fan_duty = None
         controller.pulse_frame_maximum_duty = 1.0
         controller.pulse_frame_stale_command = False
+        controller.pulse_allocator_revision = 0
+        controller.pulse_allocation_clamp_reasons = ()
+        controller.pulse_frame_allocator_revision = 0
+        controller.pulse_frame_allocation_clamp_reasons = ()
+        self._pulse_observation_sequence = 0
         controller.pulse_feedback_start_s = self.ctx.clock.now()
         controller.pulse_feedback_delivered_on_s = 0.0
         controller.pulse_metrics_delivered_on_s = 0.0
@@ -172,6 +181,8 @@ class HoldMode(ControlMode):
         controller.pulse_frame_maximum_duty = controller.pulse_maximum_duty
         controller.pulse_frame_applied_fan_duty = controller.fan_duty if controller.controls_fan else None
         controller.pulse_frame_stale_command = controller.pulse_stale_command
+        controller.pulse_frame_allocator_revision = controller.pulse_allocator_revision
+        controller.pulse_frame_allocation_clamp_reasons = controller.pulse_allocation_clamp_reasons
         self._pulse_frame_role_generation = self._model_role_generation(self._runner_status())
 
     def _runner_status(self) -> Mapping[str, object]:
@@ -241,6 +252,9 @@ class HoldMode(ControlMode):
             or frame.ended_at_s < sample_at_s
         )
         role_generation = self._pulse_frame_role_generation
+        self._pulse_observation_sequence += 1
+        baseline_q = max(0.0, min(1.0, controller.pulse_frame_combustion_load or 0.0))
+        realized_auger_duty = frame.delivered_on_s / duration_s
         observation = FrameObservation(
             frame_start_s=frame.nominal_start_s,
             frame_end_s=frame.ended_at_s,
@@ -249,9 +263,9 @@ class HoldMode(ControlMode):
             ambient_c=float(
                 self.settings["controller"].get("config", {}).get(self._controller_name, {}).get("T_amb", 0.0)
             ),
-            requested_q=max(0.0, min(1.0, controller.pulse_frame_combustion_load or 0.0)),
+            requested_q=baseline_q,
             realized_q=normalized_load_from_auger_duty(
-                frame.delivered_on_s / duration_s, u_max=controller.pulse_frame_maximum_duty
+                realized_auger_duty, u_max=controller.pulse_frame_maximum_duty
             ),
             requested_auger_duty=frame.latched_request,
             delivered_on_s=frame.delivered_on_s,
@@ -267,6 +281,20 @@ class HoldMode(ControlMode):
             reset=reset,
             continuous=continuous,
             role_generation=role_generation,
+            observation_sequence=self._pulse_observation_sequence,
+            probe_valid=True,
+            probe_source="chamber",
+            ambient_source=AmbientSource.CONFIGURED,
+            ambient_uncertainty=AmbientUncertainty.UNMEASURED,
+            baseline_q=baseline_q,
+            probe_q=0.0,
+            allocated_q=baseline_q,
+            scheduled_on_s=frame.scheduled_on_s,
+            realized_auger_duty=realized_auger_duty,
+            allocator_revision=controller.pulse_frame_allocator_revision,
+            allocation_clamp_reasons=controller.pulse_frame_allocation_clamp_reasons,
+            calibration_stage=None,
+            calibration_fit=False,
         )
         return frame_key, observation
 
@@ -490,9 +518,25 @@ class HoldMode(ControlMode):
                     temp_c=observation.temp_c,
                     setpoint_c=observation.setpoint_c,
                     ambient_c=observation.ambient_c,
+                    observation_sequence=observation.observation_sequence,
+                    probe_valid=observation.probe_valid,
+                    probe_source=observation.probe_source,
+                    ambient_source=observation.ambient_source,
+                    ambient_uncertainty=observation.ambient_uncertainty,
+                    baseline_combustion_load=observation.baseline_q,
+                    calibration_probe_load=observation.probe_q,
                     requested_combustion_load=observation.requested_q,
+                    allocated_combustion_load=observation.allocated_q,
                     realized_combustion_load=observation.realized_q,
+                    requested_auger_duty=observation.requested_auger_duty,
+                    scheduled_on_seconds=observation.scheduled_on_s,
                     delivered_on_seconds=observation.delivered_on_s,
+                    realized_auger_duty=observation.realized_auger_duty,
+                    allocator_revision=observation.allocator_revision,
+                    allocation_clamp_reasons=observation.allocation_clamp_reasons,
+                    calibration_stage=observation.calibration_stage,
+                    calibration_fit=observation.calibration_fit,
+                    result_revision=observation.result_revision,
                     eligible=outcome["eligible"],
                     rejection_reasons=tuple(outcome["rejection_reasons"]),
                     input_variance=outcome["input_variance"],
@@ -502,8 +546,6 @@ class HoldMode(ControlMode):
                     effective_updates=outcome["effective_updates"],
                     role_generation=role_generation,
                     model_digest=outcome["model_digest"],
-                    result_revision=observation.result_revision,
-                    requested_auger_duty=observation.requested_auger_duty,
                     requested_fan_duty=observation.requested_fan_duty,
                     actual_fan_duty=observation.actual_fan_duty,
                     output_source=output_source,
@@ -1384,6 +1426,18 @@ class HoldMode(ControlMode):
                     result.allocation.normalized_combustion_load if result.allocation is not None else None
                 )
                 controller.pulse_maximum_duty = result.allocation.u_max if result.allocation is not None else 1.0
+                controller.pulse_allocator_revision = (
+                    result.allocation.allocator_revision if result.allocation is not None else 0
+                )
+                controller.pulse_allocation_clamp_reasons = (
+                    tuple(
+                        reason
+                        for reason in (result.allocation.auger_clamp_reason, result.allocation.fan_clamp_reason)
+                        if reason is not AllocationClampReason.NONE
+                    )
+                    if result.allocation is not None
+                    else ()
+                )
                 controller.pulse_requested_fan_duty = result.fan["duty"] if result.fan is not None else None
                 if result.fan is not None and controller_fan_authority(settings, control):
                     controller.fan_duty = result.fan["duty"]

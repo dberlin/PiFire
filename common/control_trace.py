@@ -28,12 +28,13 @@ from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
 
-TRACE_SCHEMA_VERSION = 3
+TRACE_SCHEMA_VERSION = 4
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
 PositiveFloat: TypeAlias = Annotated[FiniteFloat, Field(gt=0)]
 BoundedLoad: TypeAlias = Annotated[FiniteFloat, Field(ge=0, le=1)]
+BoundedSignedLoad: TypeAlias = Annotated[FiniteFloat, Field(ge=-1, le=1)]
 NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
 PositiveInt: TypeAlias = Annotated[int, Field(gt=0, strict=True)]
 NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
@@ -57,6 +58,7 @@ class TraceEventKind(StrEnum):
     MODEL_OBSERVATION = "model_observation"
     MODEL_EVALUATION = "model_evaluation"
     RECORDER_GAP = "recorder_gap"
+    CALIBRATION = "calibration"
 
 
 class ActuationMode(StrEnum):
@@ -118,6 +120,35 @@ class AllocationClampReason(StrEnum):
     AUGER_MAX = "auger_max"
     FAN_MIN = "fan_min"
     FAN_MAX = "fan_max"
+
+
+class AmbientSource(StrEnum):
+    MEASURED = "measured"
+    MANUAL = "manual"
+    WEATHER = "weather"
+    CONFIGURED = "configured"
+
+
+class AmbientUncertainty(StrEnum):
+    MEASURED = "measured"
+    ESTIMATED = "estimated"
+    UNMEASURED = "unmeasured"
+
+
+class CalibrationEventType(StrEnum):
+    START_REQUESTED = "start_requested"
+    START_ACCEPTED = "start_accepted"
+    START_REJECTED = "start_rejected"
+    STAGE_STARTED = "stage_started"
+    STAGE_COMPLETED = "stage_completed"
+    STAGE_TIMEOUT = "stage_timeout"
+    PROBE_CHANGED = "probe_changed"
+    PAUSED = "paused"
+    RESUMED = "resumed"
+    STOPPED = "stopped"
+    SAFETY_ABORTED = "safety_aborted"
+    COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
 
 
 _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
@@ -407,6 +438,45 @@ class ModelEventPayload:
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class CalibrationTracePayload:
+    """An immutable audit event for explicit calibration mode."""
+
+    event: CalibrationEventType
+    command_revision: NonNegativeInt
+    stage: NonBlankString | None
+    intended_probe_load: BoundedSignedLoad
+    bounded_probe_load: BoundedSignedLoad
+    cumulative_probe_load: FiniteFloat
+    eligible_observations: NonNegativeInt
+    positive_observations: NonNegativeInt
+    negative_observations: NonNegativeInt
+    reasons: Annotated[tuple[NonBlankString, ...], Field(max_length=32)]
+    payload_type: Literal["calibration"] = "calibration"
+
+    @model_validator(mode="after")
+    def validate_event_evidence(self) -> CalibrationTracePayload:
+        terminal_rejections = {
+            CalibrationEventType.START_REJECTED,
+            CalibrationEventType.STAGE_TIMEOUT,
+            CalibrationEventType.SAFETY_ABORTED,
+            CalibrationEventType.INCOMPLETE,
+        }
+        stage_events = {
+            CalibrationEventType.STAGE_STARTED,
+            CalibrationEventType.STAGE_COMPLETED,
+            CalibrationEventType.STAGE_TIMEOUT,
+            CalibrationEventType.PROBE_CHANGED,
+        }
+        if (self.event in terminal_rejections) != bool(self.reasons):
+            raise ValueError("calibration event reasons do not match event type")
+        if self.event in stage_events and self.stage is None:
+            raise ValueError("calibration stage event requires a stage")
+        if self.positive_observations + self.negative_observations > self.eligible_observations:
+            raise ValueError("calibration polarity counts exceed eligible observations")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class ModelObservationPayload:
     """One immutable, unit-normalized online-learning observation."""
 
@@ -415,9 +485,25 @@ class ModelObservationPayload:
     temp_c: FiniteFloat
     setpoint_c: FiniteFloat
     ambient_c: FiniteFloat
+    observation_sequence: NonNegativeInt
+    probe_valid: bool
+    probe_source: NonBlankString | None
+    ambient_source: AmbientSource
+    ambient_uncertainty: AmbientUncertainty
+    baseline_combustion_load: BoundedLoad
+    calibration_probe_load: BoundedSignedLoad
     requested_combustion_load: BoundedLoad
+    allocated_combustion_load: BoundedLoad
     realized_combustion_load: BoundedLoad
+    requested_auger_duty: BoundedLoad
+    scheduled_on_seconds: NonNegativeFloat
     delivered_on_seconds: NonNegativeFloat
+    realized_auger_duty: BoundedLoad
+    allocator_revision: NonNegativeInt
+    allocation_clamp_reasons: Annotated[tuple[AllocationClampReason, ...], Field(max_length=8)]
+    calibration_stage: NonBlankString | None
+    calibration_fit: bool
+    result_revision: NonNegativeInt
     eligible: bool
     rejection_reasons: Annotated[tuple[NonBlankString, ...], Field(max_length=32)]
     input_variance: NonNegativeFloat
@@ -427,8 +513,6 @@ class ModelObservationPayload:
     effective_updates: NonNegativeInt
     role_generation: NonNegativeInt
     model_digest: Digest
-    result_revision: NonNegativeInt | None = None
-    requested_auger_duty: BoundedLoad | None = None
     requested_fan_duty: BoundedLoad | None = None
     actual_fan_duty: BoundedLoad | None = None
     output_source: OutputSource | None = None
@@ -445,8 +529,20 @@ class ModelObservationPayload:
     def validate_observation(self) -> ModelObservationPayload:
         if self.frame_start_ms >= self.frame_end_ms:
             raise ValueError("model observation frame interval must be positive")
-        if self.delivered_on_seconds > (self.frame_end_ms - self.frame_start_ms) / 1000:
+        duration_s = (self.frame_end_ms - self.frame_start_ms) / 1000
+        if not math.isclose(duration_s, 20.0, rel_tol=0, abs_tol=1e-9):
+            raise ValueError("model observation frame must be twenty seconds")
+        if self.scheduled_on_seconds > duration_s or self.delivered_on_seconds > duration_s:
             raise ValueError("model observation delivery must not exceed frame duration")
+        requested = min(1.0, max(0.0, self.baseline_combustion_load + self.calibration_probe_load))
+        if not math.isclose(self.requested_combustion_load, requested, rel_tol=0, abs_tol=1e-9):
+            raise ValueError("requested combustion load must equal clipped baseline plus probe")
+        if self.result_revision < 1:
+            raise ValueError("model observation requires a producing result revision")
+        if self.ambient_source is AmbientSource.MEASURED and self.probe_source is None:
+            raise ValueError("measured ambient requires a source identifier")
+        if self.calibration_fit and self.calibration_stage is None:
+            raise ValueError("calibration fit observation requires a calibration stage")
         if self.eligible != (not self.rejection_reasons):
             raise ValueError("model observation eligibility must match rejection reasons")
         if self.eligible and (self.incumbent_innovation_c is None or self.challenger_innovation_c is None):
@@ -460,12 +556,17 @@ class CompletedOriginPayload:
 
     origin_time_ms: NonNegativeInt
     completion_time_ms: NonNegativeInt
-    horizon_steps: Literal[3, 15]
+    horizon_steps: Literal[3, 15, 45, 90, 180]
     generation: NonNegativeInt
     observed_temperature_c: FiniteFloat
     incumbent_error_c: FiniteFloat
     challenger_error_c: FiniteFloat
     braking: bool
+    observation_sequence: NonNegativeInt | None = None
+    incumbent_digest: Digest | None = None
+    challenger_digest: Digest | None = None
+    incumbent_prediction_c: FiniteFloat | None = None
+    challenger_prediction_c: FiniteFloat | None = None
 
     @model_validator(mode="after")
     def validate_origin_interval(self) -> CompletedOriginPayload:
@@ -478,7 +579,7 @@ class CompletedOriginPayload:
 class HorizonScorePayload:
     """Immutable per-horizon incumbent/challenger RMSE evidence."""
 
-    horizon_steps: Literal[3, 15]
+    horizon_steps: Literal[3, 15, 45, 90, 180]
     incumbent_rmse_c: NonNegativeFloat | None
     challenger_rmse_c: NonNegativeFloat | None
     sample_count: NonNegativeInt
@@ -714,7 +815,7 @@ class ModelEvaluationPayload:
     incumbent_digest: Digest
     challenger_digest: Digest
     completed_origins: Annotated[tuple[CompletedOriginEvidence, ...], Field(max_length=30)]
-    horizon_scores: Annotated[tuple[HorizonScoreEvidence, ...], Field(min_length=2, max_length=2)]
+    horizon_scores: Annotated[tuple[HorizonScoreEvidence, ...], Field(min_length=2, max_length=5)]
     evaluation_duration_ms: NonNegativeFloat
     payload_type: Literal["model_evaluation"] = "model_evaluation"
 
@@ -734,8 +835,8 @@ class ModelEvaluationPayload:
             raise ValueError("promoted model evaluation must not have rejection reasons")
         if (self.prospective_digest is not None) != self.promoted:
             raise ValueError("model evaluation prospective digest must match promotion")
-        if {score.horizon_steps for score in self.horizon_scores} != {3, 15}:
-            raise ValueError("evaluation horizon scores must contain exactly 3 and 15 steps")
+        if len({score.horizon_steps for score in self.horizon_scores}) != len(self.horizon_scores):
+            raise ValueError("evaluation horizon scores must not duplicate horizons")
         if self.sample_count != len(self.completed_origins):
             raise ValueError("evaluation sample count must match completed origins")
         if self.completed_origins:
@@ -747,7 +848,9 @@ class ModelEvaluationPayload:
             raise ValueError("empty evaluation window must coincide with evaluation time")
         if self.evaluated_at_ms < self.window_end_ms:
             raise ValueError("evaluation cannot precede its evidence window")
-        errors_by_horizon: dict[int, tuple[list[float], list[float]]] = {3: ([], []), 15: ([], [])}
+        errors_by_horizon: dict[int, tuple[list[float], list[float]]] = {
+            score.horizon_steps: ([], []) for score in self.horizon_scores
+        }
         for origin in self.completed_origins:
             if origin.generation != self.role_generation:
                 raise ValueError("completed origin generation must match evaluation role")
@@ -755,6 +858,8 @@ class ModelEvaluationPayload:
                 raise ValueError("completed origin begins before evaluation window")
             if not origin.completion_time_ms <= self.window_end_ms:
                 raise ValueError("completed origin completes after evaluation window")
+            if origin.horizon_steps not in errors_by_horizon:
+                raise ValueError("completed origin horizon has no score")
             incumbent_errors, challenger_errors = errors_by_horizon[origin.horizon_steps]
             incumbent_errors.append(origin.incumbent_error_c)
             challenger_errors.append(origin.challenger_error_c)
@@ -795,6 +900,7 @@ ControlTracePayload: TypeAlias = Annotated[
     | AppliedOutputPayload
     | SafetyEventPayload
     | ModelEventPayload
+    | CalibrationTracePayload
     | ModelObservationPayload
     | ModelEvaluationPayload
     | RecorderGapPayload,
@@ -827,7 +933,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2, 3] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3, 4] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -835,8 +941,10 @@ class ControlTraceRecord(BaseModel):
         expected_event = _payload_event_kind(self.payload)
         if self.event_kind is not expected_event:
             raise ValueError("event_kind does not match payload_type")
-        if self.schema_version == 2 and isinstance(self.payload, (ModelObservationPayload, ModelEvaluationPayload)):
-            raise ValueError("trace schema version 2 cannot contain learning payloads")
+        if self.schema_version < TRACE_SCHEMA_VERSION and isinstance(
+            self.payload, (CalibrationTracePayload, ModelObservationPayload, ModelEvaluationPayload)
+        ):
+            raise ValueError(f"trace schema version {self.schema_version} cannot contain canonical learning evidence")
         if (
             self.schema_version == 2
             and isinstance(self.payload, ModelEventPayload)
@@ -865,7 +973,7 @@ class ControlTraceRecord(BaseModel):
         if isinstance(self.payload, AllocationPayload) and self.controller is not ControllerType.MPC:
             raise ValueError("allocation records are MPC-only")
         if (
-            isinstance(self.payload, (ModelObservationPayload, ModelEvaluationPayload))
+            isinstance(self.payload, (CalibrationTracePayload, ModelObservationPayload, ModelEvaluationPayload))
             and self.controller is not ControllerType.MPC
         ):
             raise ValueError("model learning records are MPC-only")
@@ -956,6 +1064,8 @@ def _payload_event_kind(payload: ControlTracePayload) -> TraceEventKind:
         return TraceEventKind.SAFETY_EVENT
     if isinstance(payload, ModelEventPayload):
         return TraceEventKind.MODEL_EVENT
+    if isinstance(payload, CalibrationTracePayload):
+        return TraceEventKind.CALIBRATION
     if isinstance(payload, ModelObservationPayload):
         return TraceEventKind.MODEL_OBSERVATION
     if isinstance(payload, ModelEvaluationPayload):

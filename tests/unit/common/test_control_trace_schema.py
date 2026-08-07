@@ -12,7 +12,11 @@ from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
     AllocationPayload,
+    AmbientSource,
+    AmbientUncertainty,
     AppliedOutputPayload,
+    CalibrationEventType,
+    CalibrationTracePayload,
     ControlTraceDbRow,
     ControlTraceRecord,
     ControllerBranch,
@@ -51,6 +55,7 @@ def test_trace_enums_have_exact_members():
         TraceEventKind.MODEL_EVENT,
         TraceEventKind.MODEL_OBSERVATION,
         TraceEventKind.MODEL_EVALUATION,
+        TraceEventKind.CALIBRATION,
         TraceEventKind.RECORDER_GAP,
     }
     assert set(ActuationMode) == {ActuationMode.FRAMED_PULSE}
@@ -322,9 +327,25 @@ def _payload_cases():
                 temp_c=110.0,
                 setpoint_c=120.0,
                 ambient_c=20.0,
+                observation_sequence=1,
+                probe_valid=True,
+                probe_source="chamber-probe-1",
+                ambient_source=AmbientSource.CONFIGURED,
+                ambient_uncertainty=AmbientUncertainty.UNMEASURED,
+                baseline_combustion_load=0.4,
+                calibration_probe_load=0.0,
                 requested_combustion_load=0.4,
+                allocated_combustion_load=0.4,
                 realized_combustion_load=0.35,
+                requested_auger_duty=0.4,
+                scheduled_on_seconds=8.0,
                 delivered_on_seconds=7.0,
+                realized_auger_duty=0.35,
+                allocator_revision=1,
+                allocation_clamp_reasons=(),
+                calibration_stage=None,
+                calibration_fit=False,
+                result_revision=2,
                 eligible=True,
                 rejection_reasons=(),
                 input_variance=0.01,
@@ -536,6 +557,11 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "incumbent_error_c": 2.0,
                 "challenger_error_c": 1.0,
                 "braking": True,
+                "observation_sequence": None,
+                "incumbent_digest": None,
+                "challenger_digest": None,
+                "incumbent_prediction_c": None,
+                "challenger_prediction_c": None,
             },
             {
                 "origin_time_ms": 40_000,
@@ -546,6 +572,11 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "incumbent_error_c": -3.0,
                 "challenger_error_c": -4.0,
                 "braking": False,
+                "observation_sequence": None,
+                "incumbent_digest": None,
+                "challenger_digest": None,
+                "incumbent_prediction_c": None,
+                "challenger_prediction_c": None,
             },
         ],
         "horizon_scores": [
@@ -956,8 +987,8 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
     assert ControlTraceRecord.from_db_row(row) == record
 
 
-def test_schema_three_has_one_framed_trace_contract():
-    assert TRACE_SCHEMA_VERSION == 3
+def test_schema_four_has_one_canonical_model_evidence_contract():
+    assert TRACE_SCHEMA_VERSION == 4
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
     assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
     assert "FAN_ASSIST" not in OutputSource.__members__
@@ -1287,3 +1318,118 @@ def test_state_space_refresh_trace_rejects_invalid_or_contradictory_diagnostics(
         refresh()
     with pytest.raises(ValidationError):
         _state_space_refresh(accepted=True, refresh_duration_ms=3.99)
+
+
+def _canonical_observation_payload(*, calibration: bool) -> ModelObservationPayload:
+    return ModelObservationPayload(
+        frame_start_ms=0,
+        frame_end_ms=20_000,
+        temp_c=110.0,
+        setpoint_c=120.0,
+        ambient_c=20.0,
+        baseline_combustion_load=0.35 if calibration else 0.40,
+        calibration_probe_load=0.05 if calibration else 0.0,
+        requested_combustion_load=0.40,
+        allocated_combustion_load=0.38 if calibration else 0.40,
+        realized_combustion_load=0.30 if calibration else 0.40,
+        requested_auger_duty=0.19 if calibration else 0.20,
+        scheduled_on_seconds=4.0 if calibration else 8.0,
+        delivered_on_seconds=3.0 if calibration else 8.0,
+        realized_auger_duty=0.15 if calibration else 0.20,
+        allocator_revision=9,
+        allocation_clamp_reasons=(AllocationClampReason.AUGER_MAX,) if calibration else (),
+        observation_sequence=1,
+        probe_valid=True,
+        probe_source="chamber-probe-1",
+        ambient_source=AmbientSource.CONFIGURED,
+        ambient_uncertainty=AmbientUncertainty.UNMEASURED,
+        calibration_stage="low" if calibration else None,
+        calibration_fit=calibration,
+        eligible=True,
+        rejection_reasons=(),
+        input_variance=0.01,
+        input_levels=3,
+        incumbent_innovation_c=1.0,
+        challenger_innovation_c=0.5,
+        effective_updates=21,
+        role_generation=0,
+        model_digest="a" * 64,
+        result_revision=7,
+        output_source=OutputSource.CONTROLLER,
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+    )
+
+
+def test_schema_four_round_trips_distinct_canonical_observation_evidence() -> None:
+    ordinary = _canonical_observation_payload(calibration=False)
+    calibration = _canonical_observation_payload(calibration=True)
+    record = ControlTraceRecord(
+        ts_ms=20_000,
+        session_id="session-1",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_OBSERVATION,
+        payload=calibration,
+    )
+
+    restored = ControlTraceRecord.model_validate_json(record.model_dump_json())
+
+    assert ordinary.calibration_probe_load == 0.0
+    assert restored.payload == calibration
+    assert calibration.baseline_combustion_load == 0.35
+    assert calibration.calibration_probe_load == 0.05
+    assert calibration.requested_combustion_load == 0.40
+    assert calibration.allocated_combustion_load == 0.38
+    assert calibration.realized_combustion_load == 0.30
+    assert calibration.requested_auger_duty == 0.19
+    assert calibration.scheduled_on_seconds == 4.0
+    assert calibration.delivered_on_seconds == 3.0
+    assert calibration.realized_auger_duty == 0.15
+    assert calibration.ambient_source is AmbientSource.CONFIGURED
+    assert calibration.ambient_uncertainty is AmbientUncertainty.UNMEASURED
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        {"baseline_combustion_load": inf},
+        {"requested_combustion_load": 0.42},
+        {"allocator_revision": None},
+        {"ambient_source": AmbientSource.MEASURED, "probe_source": None},
+        {"eligible": True, "rejection_reasons": ("stale",)},
+    ),
+)
+def test_schema_four_rejects_incoherent_canonical_observation_evidence(replacement) -> None:
+    with pytest.raises(ValidationError):
+        replace(_canonical_observation_payload(calibration=True), **replacement)
+
+
+def test_calibration_trace_payload_round_trips_and_rejects_incoherent_reasons() -> None:
+    payload = CalibrationTracePayload(
+        event=CalibrationEventType.STAGE_STARTED,
+        command_revision=7,
+        stage="low",
+        intended_probe_load=0.05,
+        bounded_probe_load=0.05,
+        cumulative_probe_load=0.05,
+        eligible_observations=1,
+        positive_observations=1,
+        negative_observations=0,
+        reasons=(),
+    )
+    record = ControlTraceRecord(
+        ts_ms=20_000,
+        session_id="session-1",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.CALIBRATION,
+        payload=payload,
+    )
+
+    assert ControlTraceRecord.model_validate_json(record.model_dump_json()).payload == payload
+    with pytest.raises(ValidationError):
+        replace(payload, event=CalibrationEventType.START_REJECTED)

@@ -8,6 +8,8 @@ from numbers import Integral, Real
 import numpy as np
 import numpy.typing as npt
 
+from common.control_trace import AllocationClampReason, AmbientSource, AmbientUncertainty
+
 FloatArray = npt.NDArray[np.float64]
 
 
@@ -67,6 +69,20 @@ class FrameObservation:
     reset: bool
     continuous: bool
     role_generation: int
+    observation_sequence: int = 0
+    probe_valid: bool = True
+    probe_source: str | None = None
+    ambient_source: AmbientSource = AmbientSource.CONFIGURED
+    ambient_uncertainty: AmbientUncertainty = AmbientUncertainty.UNMEASURED
+    baseline_q: float | None = None
+    probe_q: float = 0.0
+    allocated_q: float | None = None
+    scheduled_on_s: float | None = None
+    realized_auger_duty: float | None = None
+    allocator_revision: int | None = None
+    allocation_clamp_reasons: tuple[AllocationClampReason, ...] = ()
+    calibration_stage: str | None = None
+    calibration_fit: bool = False
 
     def __post_init__(self) -> None:
         start = _finite_float(self.frame_start_s, "frame_start_s")
@@ -90,6 +106,55 @@ class FrameObservation:
                 object.__setattr__(self, name, _bounded_duty(value, name))
         object.__setattr__(self, "result_revision", _nonnegative_int(self.result_revision, "result_revision"))
         object.__setattr__(self, "role_generation", _nonnegative_int(self.role_generation, "role_generation"))
+        observation_sequence = _nonnegative_int(self.observation_sequence, "observation_sequence")
+        object.__setattr__(self, "observation_sequence", observation_sequence)
+        if not isinstance(self.probe_valid, bool):
+            raise ValueError("probe_valid must be a bool")
+        if self.probe_source is not None and (not isinstance(self.probe_source, str) or not self.probe_source.strip()):
+            raise ValueError("probe_source must be a non-empty string when present")
+        if not isinstance(self.ambient_source, AmbientSource):
+            raise ValueError("ambient_source must be an AmbientSource")
+        if not isinstance(self.ambient_uncertainty, AmbientUncertainty):
+            raise ValueError("ambient_uncertainty must be an AmbientUncertainty")
+        baseline_q = self.requested_q if self.baseline_q is None else _bounded_duty(self.baseline_q, "baseline_q")
+        probe_q = _finite_float(self.probe_q, "probe_q")
+        if not -1.0 <= probe_q <= 1.0:
+            raise ValueError("probe_q must be in [-1, 1]")
+        requested_q = min(1.0, max(0.0, baseline_q + probe_q))
+        if not np.isclose(self.requested_q, requested_q, rtol=0.0, atol=1e-12):
+            raise ValueError("requested_q must equal clipped baseline_q plus probe_q")
+        object.__setattr__(self, "baseline_q", baseline_q)
+        object.__setattr__(self, "probe_q", probe_q)
+        allocated_q = self.requested_q if self.allocated_q is None else _bounded_duty(self.allocated_q, "allocated_q")
+        object.__setattr__(self, "allocated_q", allocated_q)
+        scheduled_on_s = self.delivered_on_s if self.scheduled_on_s is None else _finite_float(
+            self.scheduled_on_s, "scheduled_on_s"
+        )
+        if scheduled_on_s < 0.0:
+            raise ValueError("scheduled_on_s must be non-negative")
+        object.__setattr__(self, "scheduled_on_s", scheduled_on_s)
+        realized_auger_duty = (
+            self.realized_q
+            if self.realized_auger_duty is None
+            else _bounded_duty(self.realized_auger_duty, "realized_auger_duty")
+        )
+        object.__setattr__(self, "realized_auger_duty", realized_auger_duty)
+        allocator_revision = 0 if self.allocator_revision is None else _nonnegative_int(
+            self.allocator_revision, "allocator_revision"
+        )
+        object.__setattr__(self, "allocator_revision", allocator_revision)
+        clamp_reasons = tuple(self.allocation_clamp_reasons)
+        if not all(isinstance(reason, AllocationClampReason) for reason in clamp_reasons):
+            raise ValueError("allocation_clamp_reasons must contain AllocationClampReason values")
+        object.__setattr__(self, "allocation_clamp_reasons", clamp_reasons)
+        if self.calibration_stage is not None and (
+            not isinstance(self.calibration_stage, str) or not self.calibration_stage.strip()
+        ):
+            raise ValueError("calibration_stage must be a non-empty string when present")
+        if not isinstance(self.calibration_fit, bool):
+            raise ValueError("calibration_fit must be a bool")
+        if self.calibration_fit and self.calibration_stage is None:
+            raise ValueError("calibration_fit requires calibration_stage")
         if not isinstance(self.output_source, str) or not self.output_source:
             raise ValueError("output_source must be a non-empty string")
         for name in (
