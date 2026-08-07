@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
-  type CookFileDetail,
   type CookFileError,
   CookFileRequestError,
   fetchCookFileDetail,
   recoverCookFile,
 } from "../../helpers/files/cookfileApi";
+import { queryKeys } from "../../helpers/query/keys";
 import { CommentList } from "./CommentList";
 import { CookFileChart } from "./CookFileChart";
 import { CookFileMeta } from "./CookFileMeta";
@@ -23,11 +24,6 @@ import { MediaPanel } from "./MediaPanel";
 // calls its endpoint and then asks the page to refetch, so a title edit does
 // not blow away an open comment editor.
 
-interface Outcome {
-  id: number;
-  problem: CookFileError | null;
-}
-
 function toDetail(err: unknown): CookFileError {
   if (err instanceof CookFileRequestError) return err.detail;
   return {
@@ -39,43 +35,40 @@ function toDetail(err: unknown): CookFileError {
 
 export function CookFilePage() {
   const { filename = "" } = useParams<{ filename: string }>();
-  const [requestId, setRequestId] = useState(0);
-  const [detail, setDetail] = useState<CookFileDetail | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [recovering, setRecovering] = useState(false);
+  // A failed Attempt Repair/Conversion reports its OWN error (e.g. "Repair
+  // failed."), not the stale one that sent the user to the button in the
+  // first place. Cleared at the start of every attempt.
+  const [recoverError, setRecoverError] = useState<CookFileError | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const id = requestId;
-    fetchCookFileDetail(filename)
-      .then((fresh) => {
-        if (cancelled) return;
-        setDetail(fresh);
-        setOutcome({ id, problem: null });
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        //  A failed reload must not keep showing a stale cook: the archive may
-        //  have just been repaired into a different shape, or deleted.
-        setDetail(null);
-        setOutcome({ id, problem: toDetail(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filename, requestId]);
+  const { data, isPending, error } = useQuery({
+    queryKey: queryKeys.cookfileDetail(filename),
+    //  helpers/files/apiEnvelope.ts throws FileRequestError already, so this
+    //  needs no unwrap(): `error` below IS the FileRequestError, and its
+    //  `.detail.errortype` is what the repair prompt branches on.
+    queryFn: () => fetchCookFileDetail(filename),
+  });
 
-  // Plain render-time computation from state -- no effect, no mirrored state.
-  const loading = outcome === null || outcome.id !== requestId;
-  const problem = loading ? null : outcome.problem;
+  const queryClient = useQueryClient();
+  const reload = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.cookfileRoot(filename) }),
+    [queryClient, filename],
+  );
 
-  const reload = () => setRequestId((n) => n + 1);
+  const loading = isPending;
+  //  A failed reload must not keep showing a stale cook: the archive may have
+  //  just been repaired into a different shape, or deleted. react-query keeps
+  //  the last successful `data` around through a background error, so it is
+  //  dropped here rather than trusted once `error` is set.
+  const detail = error ? null : (data ?? null);
+  const problem = recoverError ?? (error ? toDetail(error) : null);
 
   const recover = (action: "upgrade" | "repair") => {
     setRecovering(true);
+    setRecoverError(null);
     recoverCookFile(filename, action)
       .then(reload)
-      .catch((err: unknown) => setOutcome({ id: requestId, problem: toDetail(err) }))
+      .catch((err: unknown) => setRecoverError(toDetail(err)))
       .finally(() => setRecovering(false));
   };
 

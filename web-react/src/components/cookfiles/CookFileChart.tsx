@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
-import {
-  type CookFileChartData,
-  cookFileExportUrl,
-  fetchCookFileChart,
-} from "../../helpers/files/cookfileApi";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { cookFileExportUrl, fetchCookFileChart } from "../../helpers/files/cookfileApi";
+import { queryKeys } from "../../helpers/query/keys";
 import { HistoryChart } from "../history/HistoryChart";
 import { hasNumericTimes, toChartAnnotations, toCookChartInput } from "./cookfileAdapter";
 
@@ -22,47 +20,25 @@ import { hasNumericTimes, toChartAnnotations, toCookChartInput } from "./cookfil
 // would mean a second chart implementation.
 
 export function CookFileChart({ filename }: { filename: string }) {
-  const [data, setData] = useState<CookFileChartData | null>(null);
-  // How the latest request finished, tagged with its id. Same idiom as
-  // HistoryPage/CookFileList: "loading" is derived in render, not a second
-  // state written from inside the effect (which the React Compiler rejects,
-  // and which would flash the wrong state for a frame anyway).
-  const [outcome, setOutcome] = useState<{ id: number; failed: boolean } | null>(null);
-  const [requestId, setRequestId] = useState(0);
-  const [fileForRequestId, setFileForRequestId] = useState(filename);
-  if (filename !== fileForRequestId) {
-    setFileForRequestId(filename);
-    setRequestId((n) => n + 1);
-  }
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [resetNonce, setResetNonce] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    const id = requestId;
-    fetchCookFileChart(filename)
-      .then((fresh) => {
-        if (cancelled) return;
-        setData(fresh);
-        setOutcome({ id, failed: false });
-      })
-      .catch(() => {
-        if (!cancelled) setOutcome({ id, failed: true });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filename, requestId]);
+  const { data, isPending, error } = useQuery({
+    queryKey: queryKeys.cookfileChart(filename),
+    //  apiEnvelope.ts throws FileRequestError already -- no unwrap() needed,
+    //  same reasoning as CookFilePage.
+    queryFn: () => fetchCookFileChart(filename),
+  });
 
-  const loading = outcome === null || outcome.id !== requestId;
-  const failed = !loading && outcome.failed;
+  const loading = isPending;
+  const failed = !loading && error != null;
 
   const chart = data ? toCookChartInput(data) : null;
   const annotations = data && showAnnotations ? toChartAnnotations(data.annotations) : undefined;
   //  A payload with string time labels is a pre-v1.5 archive, not an empty one,
   //  and the fix is Attempt Repair -- so the two are never reported alike.
   const legacyTimes =
-    data !== null && data.time_labels.length > 0 && !hasNumericTimes(data.time_labels);
+    data !== undefined && data.time_labels.length > 0 && !hasNumericTimes(data.time_labels);
 
   return (
     <>

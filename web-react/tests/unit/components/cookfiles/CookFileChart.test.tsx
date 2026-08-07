@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
@@ -6,6 +7,7 @@ import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" w
   rstest: "importActual",
 };
 import type { CookFileChartData } from "../../../../src/helpers/files/cookfileApi";
+import { testQueryClient } from "../../test-utils";
 
 const fetchCookFileChartMock = rs.fn();
 rs.mock("../../../../src/helpers/files/cookfileApi", () => ({
@@ -65,6 +67,14 @@ const PAYLOAD: CookFileChartData = {
   },
 };
 
+function renderChart(filename: string) {
+  return render(
+    <QueryClientProvider client={testQueryClient()}>
+      <CookFileChart filename={filename} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("CookFileChart", () => {
   beforeEach(() => {
     fetchCookFileChartMock.mockReset();
@@ -74,19 +84,19 @@ describe("CookFileChart", () => {
   afterEach(cleanup);
 
   it("fetches the chart separately from the detail payload", async () => {
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     await screen.findByTestId("chart");
     expect(fetchCookFileChartMock).toHaveBeenCalledWith("Sunday.pifire");
   });
 
   it("shows a loading hint until the payload lands", () => {
     fetchCookFileChartMock.mockReturnValue(new Promise(() => {}));
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     expect(screen.getByText(/Loading graph/)).toBeInTheDocument();
   });
 
   it("hands the chart epoch SECONDS, not the payload's milliseconds", async () => {
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     expect(await screen.findByTestId("chart")).toHaveAttribute(
       "data-times",
       "1784942370.612,1784942373.612",
@@ -95,7 +105,7 @@ describe("CookFileChart", () => {
 
   it("passes annotations by default and withholds them when toggled off", async () => {
     const user = userEvent.setup();
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     expect(await screen.findByTestId("chart")).toHaveAttribute(
       "data-annotations",
       "1784942370.612",
@@ -109,7 +119,7 @@ describe("CookFileChart", () => {
 
   it("Reset zoom remounts the chart", async () => {
     const user = userEvent.setup();
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     const before = (await screen.findByTestId("chart")).getAttribute("data-instance");
 
     await user.click(screen.getByRole("button", { name: "Reset zoom" }));
@@ -120,7 +130,7 @@ describe("CookFileChart", () => {
   });
 
   it("offers the raw-data CSV beside the chart, as the Flask card does", async () => {
-    render(<CookFileChart filename="Sunday Brisket.pifire" />);
+    renderChart("Sunday Brisket.pifire");
     await screen.findByTestId("chart");
     expect(screen.getByRole("link", { name: "Download CSV file" })).toHaveAttribute(
       "href",
@@ -130,7 +140,7 @@ describe("CookFileChart", () => {
 
   it("says the file has no chart data when the payload is empty", async () => {
     fetchCookFileChartMock.mockResolvedValue({ ...PAYLOAD, time_labels: [], chart_data: [] });
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     expect(await screen.findByText(/no chart data/)).toBeInTheDocument();
     expect(screen.queryByTestId("chart")).not.toBeInTheDocument();
   });
@@ -140,14 +150,14 @@ describe("CookFileChart", () => {
       ...PAYLOAD,
       time_labels: ["12:00:00", "12:05:00"],
     });
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     expect(await screen.findByText(/older format/)).toBeInTheDocument();
     expect(screen.getByText(/Attempt Repair/)).toBeInTheDocument();
   });
 
   it("reports a failed chart fetch without hiding the rest of the page", async () => {
     fetchCookFileChartMock.mockRejectedValue(new Error("HTTP 500"));
-    render(<CookFileChart filename="Sunday.pifire" />);
+    renderChart("Sunday.pifire");
     expect(await screen.findByText(/Couldn't load this cook's chart data/)).toBeInTheDocument();
   });
 });
