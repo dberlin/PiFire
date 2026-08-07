@@ -1,3 +1,5 @@
+import { queryKeys } from "../query/keys";
+import { queryClient } from "../query/queryClient";
 import type { AccentName } from "../types";
 import { setPath } from "./delta";
 import type { SettingsPath } from "./paths";
@@ -50,6 +52,11 @@ export async function saveAccent(baseUrl: string, accent: AccentName): Promise<b
       setPath({}, path as SettingsPath, storedAccentName(accent)),
       [],
     );
+    // The dashboard swatch has already applied the accent locally, but every
+    // other reader of the settings entry (AppPrefsProvider, /settings' loader,
+    // the General tab) is still holding the old one. Only on success: a
+    // refused write changed nothing to tell them about.
+    if (result.ok) await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
     return result.ok;
   } catch {
     return false;

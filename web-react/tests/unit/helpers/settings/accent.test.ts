@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { queryClient } from "../../../../src/helpers/query/queryClient";
 import {
   accentPath,
   readAccent,
@@ -16,6 +18,10 @@ const withDisplay = (accent?: string) =>
     modules: { display: "qtquick_flex" },
     display: { config: { qtquick_flex: accent === undefined ? {} : { accent_theme: accent } } },
   });
+
+beforeEach(() => {
+  queryClient.clear();
+});
 
 afterEach(() => {
   rs.restoreAllMocks();
@@ -94,5 +100,34 @@ describe("saveAccent", () => {
     rs.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
 
     expect(await saveAccent("", "ice")).toBe(false);
+  });
+
+  it("invalidates the shared settings entry so other readers see the new accent", async () => {
+    queryClient.setQueryData(queryKeys.settings, { modules: { display: "ili9341" } });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (_url: string, init?: RequestInit) => {
+      const payload = init?.method === "POST" ? { result: "success" } : withDisplay("Ember");
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch);
+
+    expect(await saveAccent("", "crimson")).toBe(true);
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(true);
+  });
+
+  it("leaves the cache alone when the write is refused", async () => {
+    queryClient.setQueryData(queryKeys.settings, { modules: { display: "ili9341" } });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (_url: string, init?: RequestInit) => {
+      const payload =
+        init?.method === "POST" ? { result: "error", message: "no" } : withDisplay("Ember");
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch);
+
+    expect(await saveAccent("", "crimson")).toBe(false);
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(false);
   });
 });
