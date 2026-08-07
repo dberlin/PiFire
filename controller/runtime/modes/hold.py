@@ -166,6 +166,10 @@ class HoldMode(ControlMode):
         controller.pulse_allocation_clamp_reasons = ()
         controller.pulse_frame_allocator_revision = 0
         controller.pulse_frame_allocation_clamp_reasons = ()
+        controller.pulse_allocation_evidence_checked = False
+        controller.pulse_allocation_result_revision = None
+        controller.pulse_frame_allocation_evidence_checked = False
+        controller.pulse_frame_allocation_result_revision = None
         self._pulse_observation_sequence = 0
         controller.pulse_feedback_start_s = self.ctx.clock.now()
         controller.pulse_feedback_delivered_on_s = 0.0
@@ -184,6 +188,8 @@ class HoldMode(ControlMode):
         controller.pulse_frame_stale_command = controller.pulse_stale_command
         controller.pulse_frame_allocator_revision = controller.pulse_allocator_revision
         controller.pulse_frame_allocation_clamp_reasons = controller.pulse_allocation_clamp_reasons
+        controller.pulse_frame_allocation_evidence_checked = controller.pulse_allocation_evidence_checked
+        controller.pulse_frame_allocation_result_revision = controller.pulse_allocation_result_revision
         self._pulse_frame_role_generation = self._model_role_generation(self._runner_status())
 
     def _runner_status(self) -> Mapping[str, object]:
@@ -296,6 +302,19 @@ class HoldMode(ControlMode):
             allocation_clamp_reasons=controller.pulse_frame_allocation_clamp_reasons,
             calibration_stage=None,
             calibration_fit=False,
+            allocation_join_reason=(
+                None
+                if not controller.pulse_frame_allocation_evidence_checked
+                else (
+                    "missing-allocation"
+                    if controller.pulse_frame_allocation_result_revision is None
+                    else (
+                        None
+                        if controller.pulse_frame_allocation_result_revision == controller.pulse_frame_result_revision
+                        else "allocation-revision-mismatch"
+                    )
+                )
+            ),
         )
         return frame_key, observation
 
@@ -560,6 +579,9 @@ class HoldMode(ControlMode):
                 continue
             observation = delivered
             try:
+                if observation.allocation_join_reason is not None:
+                    self._queue_rejected_model_observation(sequence, observation.allocation_join_reason)
+                    continue
                 role_generation = outcome["role_generation"]
                 if role_generation != observation.role_generation:
                     self._queue_rejected_model_observation(sequence, "observation-role-generation-mismatch")
@@ -1504,6 +1526,10 @@ class HoldMode(ControlMode):
                     )
                     if result.allocation is not None
                     else ()
+                )
+                controller.pulse_allocation_evidence_checked = True
+                controller.pulse_allocation_result_revision = (
+                    result.revision if result.allocation is not None else None
                 )
                 controller.pulse_requested_fan_duty = result.fan["duty"] if result.fan is not None else None
                 if result.fan is not None and controller_fan_authority(settings, control):

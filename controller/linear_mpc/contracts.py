@@ -83,6 +83,7 @@ class FrameObservation:
     allocation_clamp_reasons: tuple[AllocationClampReason, ...] = ()
     calibration_stage: str | None = None
     calibration_fit: bool = False
+    allocation_join_reason: str | None = None
 
     def __post_init__(self) -> None:
         start = _finite_float(self.frame_start_s, "frame_start_s")
@@ -155,6 +156,10 @@ class FrameObservation:
             raise ValueError("calibration_fit must be a bool")
         if self.calibration_fit and self.calibration_stage is None:
             raise ValueError("calibration_fit requires calibration_stage")
+        if self.allocation_join_reason is not None and (
+            not isinstance(self.allocation_join_reason, str) or not self.allocation_join_reason.strip()
+        ):
+            raise ValueError("allocation_join_reason must be a non-empty string when present")
         if not isinstance(self.output_source, str) or not self.output_source:
             raise ValueError("output_source must be a non-empty string")
         for name in (

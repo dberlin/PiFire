@@ -10,6 +10,8 @@ from common.control_trace import (
     ActuationMode,
     AmbientSource,
     AmbientUncertainty,
+    AllocationClampReason,
+    AllocationPayload,
     AppliedOutputPayload,
     ControlTraceRecord,
     ControllerType,
@@ -193,8 +195,47 @@ def _observation(*, temp_c: float = 100.0, ambient_c: float = 20.0) -> ControlTr
     )
 
 
+
+def _allocation_record(observation: ControlTraceRecord) -> ControlTraceRecord:
+    payload = observation.payload
+    assert isinstance(payload, ModelObservationPayload)
+    return ControlTraceRecord(
+        ts_ms=payload.frame_end_ms,
+        session_id=_SESSION_ID,
+        cook_id="cook",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.ALLOCATION,
+        payload=AllocationPayload(
+            result_revision=payload.result_revision,
+            u_max=(
+                payload.delivered_on_seconds / 20.0 / payload.realized_combustion_load
+                if payload.realized_combustion_load > 0.0
+                else 1.0
+            ),
+            normalized_combustion_load=payload.allocated_combustion_load,
+            requested_auger_duty=payload.requested_auger_duty,
+            requested_fan_duty=payload.requested_fan_duty,
+            fan_min_pct=0.0,
+            fan_max_pct=1.0,
+            fan_enabled=False,
+            mpc_has_fan_authority=False,
+            auger_clamp_reason=AllocationClampReason.NONE,
+            fan_clamp_reason=AllocationClampReason.NONE,
+            allocator_revision=payload.allocator_revision,
+        ),
+    )
+
+
+def test_exact_observation_requires_one_same_result_allocation() -> None:
+    observation = _observation()
+
+    with pytest.raises(TraceSelectionError, match="missing-allocation"):
+        learning_observations((_session(), observation))
+    with pytest.raises(TraceSelectionError, match="ambiguous-allocation"):
+        learning_observations((_session(), _allocation_record(observation), _allocation_record(observation), observation))
+
 def test_exact_observation_is_canonical_over_fallback_records() -> None:
-    frames = learning_observations((_session("F"), _frame(), _update(), _observation()))
+    frames = learning_observations((_session("F"), _frame(), _update(), _allocation_record(_observation()), _observation()))
 
     assert len(frames) == 1
     assert frames[0].temp_c == pytest.approx(100.0)
@@ -232,13 +273,13 @@ def test_fallback_normalizes_legacy_framed_delivery_to_canonical_q() -> None:
                 scheduled_on_seconds=3.6,
                 delivered_on_seconds=3.6,
                 requested_auger_duty=0.36,
-                realized_auger_duty=0.2,
+                realized_auger_duty=0.18,
             )
         }
     )
 
     replayed = learning_observations((_session("F"), legacy_frame, _update()))
-    canonical = learning_observations((_session("F"), canonical_observation))
+    canonical = learning_observations((_session("F"), _allocation_record(canonical_observation), canonical_observation))
 
     assert replayed == canonical
     assert replayed[0].realized_q == pytest.approx(0.2)
@@ -291,7 +332,7 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
                 scheduled_on_seconds=3.6,
                 delivered_on_seconds=3.6,
                 requested_auger_duty=0.36,
-                realized_auger_duty=0.2,
+                realized_auger_duty=0.18,
             )
         }
     )
@@ -309,7 +350,7 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
                 scheduled_on_seconds=1.8,
                 delivered_on_seconds=1.8,
                 requested_auger_duty=0.0,
-                realized_auger_duty=0.1,
+                realized_auger_duty=0.09,
                 result_revision=2,
                 observation_sequence=2,
             ),
@@ -317,7 +358,9 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
     )
 
     replayed = learning_observations((_session("F"), identified_frame, _update(), zero_requested_frame, second_update))
-    canonical = learning_observations((_session("F"), canonical_first, canonical_second))
+    canonical = learning_observations(
+        (_session("F"), canonical_first, _allocation_record(canonical_first), canonical_second, _allocation_record(canonical_second))
+    )
 
     assert replayed == canonical
     assert replayed[1].realized_q == pytest.approx(0.1)
@@ -345,13 +388,13 @@ def test_fallback_clamps_legacy_measured_delivery_above_latched_u_max() -> None:
                 scheduled_on_seconds=18.000_002,
                 delivered_on_seconds=18.000_002,
                 requested_auger_duty=0.36,
-                realized_auger_duty=1.0,
+                realized_auger_duty=0.9000001,
             )
         }
     )
 
     replayed = learning_observations((_session("F"), overdelivered_frame, _update()))
-    canonical = learning_observations((_session("F"), canonical_observation))
+    canonical = learning_observations((_session("F"), _allocation_record(canonical_observation), canonical_observation))
 
     assert replayed == canonical
     assert replayed[0].realized_q == 1.0
@@ -413,7 +456,7 @@ def test_fallback_preserves_zero_requested_and_delivered_input() -> None:
     )
 
     replayed = learning_observations((_session("F"), legacy_frame, _update()))
-    canonical = learning_observations((_session("F"), canonical_observation))
+    canonical = learning_observations((_session("F"), _allocation_record(canonical_observation), canonical_observation))
 
     assert replayed == canonical
 
@@ -495,7 +538,7 @@ def test_fallback_rejects_ambiguous_or_incomplete_evidence(records) -> None:
 def test_exact_observation_rejects_omitted_gate_or_actuation_evidence() -> None:
     record = _observation().model_copy(update={"payload": replace(_observation().payload, output_source=None)})
     with pytest.raises(TraceSelectionError, match="omits required"):
-        learning_observations((_session(), record))
+        learning_observations((_session(), _allocation_record(record), record))
 
 
 @pytest.mark.parametrize("start_ms", (10_000, 40_000))
@@ -513,7 +556,7 @@ def test_exact_observation_sequences_reject_overlap_and_gaps(start_ms: int) -> N
         }
     )
     with pytest.raises(TraceSelectionError, match="not contiguous"):
-        learning_observations((_session(), first, second))
+        learning_observations((_session(), first, _allocation_record(first), second, _allocation_record(second)))
 
 
 @pytest.mark.parametrize(
@@ -540,7 +583,7 @@ def test_learning_replay_preserves_rejected_exact_observations() -> None:
     record = _observation().model_copy(
         update={"payload": replace(_observation().payload, eligible=False, rejection_reasons=("stale",), stale=True)}
     )
-    frames = learning_observations((_session(), record))
+    frames = learning_observations((_session(), _allocation_record(record), record))
     assert len(frames) == 1
     assert frames[0].stale is True
 
@@ -563,4 +606,4 @@ def test_exact_observation_rejects_out_of_order_observation_sequence() -> None:
     )
 
     with pytest.raises(TraceSelectionError, match="sequence"):
-        learning_observations((_session(), first, second))
+        learning_observations((_session(), first, _allocation_record(first), second, _allocation_record(second)))

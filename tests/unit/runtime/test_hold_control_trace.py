@@ -1715,3 +1715,25 @@ def test_missing_completed_frame_temperature_emits_sequence_linked_trace_gap(hol
         20_000,
         1,
     )
+
+
+@pytest.mark.parametrize("reason", ("missing-allocation", "allocation-revision-mismatch"))
+def test_allocation_join_failure_persists_an_ineligible_completed_observation(hold_cycle, monkeypatch, reason):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "allocation-join-evidence"}
+    mode._ensure_trace_session(0.0)
+    observation = replace(_learning_observation(0.0), allocation_join_reason=reason)
+    mode._pending_model_observations = {1: (observation, mode._trace_session_id, 0, None)}
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(1, 0, observation, _model_observation_outcome(frame_end_ms=20_000))
+    )
+
+    mode._reconcile_model_observation_outcomes(now=21.0)
+
+    payload = next(record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload))
+    assert (payload.frame_start_ms, payload.frame_end_ms, payload.result_revision) == (0, 20_000, 1)
+    assert payload.eligible is False
+    assert payload.rejection_reasons == (reason,)
