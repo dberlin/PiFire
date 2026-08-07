@@ -47,6 +47,7 @@
 
 import json
 from copy import deepcopy
+from enum import Enum
 import logging
 import threading
 
@@ -61,18 +62,17 @@ SCHEMA_VERSION = 1
 # that drives a fire should stay readable in the datastore.
 MAX_SNAPSHOT_BYTES = 65536
 
-_logger = logging.getLogger("control")
-_BACKEND_STATES_LOCK = threading.Lock()
-_BACKEND_STATES = []
+
+class CheckpointSaveOutcome(Enum):
+    """The durable outcome of one controller-model checkpoint attempt."""
+
+    SAVED = "saved"
+    NONADVANCING = "nonadvancing"
+    FAILED = "failed"
 
 
 def _valid(snapshot):
-    """Envelope validation only: bounded, JSON-safe, carrying a revision.
-
-    Deliberately says nothing about model field names or physics. The store owns
-    "is this a bounded, JSON-safe record"; the controller owns "do these numbers
-    describe a possible grill" and re-checks in restore_model.
-    """
+    """Whether a snapshot satisfies the store's exact persistence boundary."""
     if not isinstance(snapshot, dict) or not snapshot:
         return False
     revision = snapshot.get("revision")
@@ -80,9 +80,22 @@ def _valid(snapshot):
         return False
     try:
         encoded = json.dumps(snapshot, allow_nan=False)
-    except ValueError, TypeError:
+    except (TypeError, ValueError):
         return False
     return len(encoded.encode("utf-8")) <= MAX_SNAPSHOT_BYTES
+
+
+def copy_valid_snapshot(snapshot):
+    """Own a snapshot that has passed the store's exact persistence boundary."""
+    try:
+        owned_snapshot = deepcopy(snapshot)
+    except Exception:
+        return None
+    return owned_snapshot if _valid(owned_snapshot) else None
+
+_logger = logging.getLogger("control")
+_BACKEND_STATES_LOCK = threading.Lock()
+_BACKEND_STATES = []
 
 
 class _BackendState:
@@ -133,14 +146,15 @@ class ControllerModelStore:
         return snapshot
 
     def save(self, name, snapshot):
-        if not _valid(snapshot):
+        """Persist a strictly newer snapshot using the legacy boolean contract."""
+        return self.save_outcome(name, snapshot) is CheckpointSaveOutcome.SAVED
+
+    def save_outcome(self, name, snapshot):
+        """Persist once and report whether it saved, coalesced, or failed."""
+        owned_snapshot = copy_valid_snapshot(snapshot)
+        if owned_snapshot is None:
             _logger.warning("controller_model_state: rejecting a malformed or oversized snapshot for %r", name)
-            return False
-        try:
-            owned_snapshot = deepcopy(snapshot)
-        except Exception:
-            _logger.warning("controller_model_state: could not own a snapshot for %r", name, exc_info=True)
-            return False
+            return CheckpointSaveOutcome.FAILED
         revision = owned_snapshot["revision"]
         if self._conditional_writer is not None:
             try:
@@ -151,12 +165,20 @@ class ControllerModelStore:
                     name,
                     exc_info=True,
                 )
-                return False
-            if not written:
-                return False
-            self._revisions[name] = revision
-            self._remember_owned(name, owned_snapshot, committed=True)
-            return True
+                return CheckpointSaveOutcome.FAILED
+            if written:
+                self._revisions[name] = revision
+                self._remember_owned(name, owned_snapshot, committed=True)
+                return CheckpointSaveOutcome.SAVED
+            models, safe = self._read_state()
+            if not safe:
+                return CheckpointSaveOutcome.FAILED
+            existing = models.get(name)
+            if existing is not None and revision <= existing["revision"]:
+                self._remember_owned(name, existing, committed=True)
+                self._log_non_advancing(name, revision, existing["revision"])
+                return CheckpointSaveOutcome.NONADVANCING
+            return CheckpointSaveOutcome.FAILED
 
         # Workers can outlive a Hold teardown. Serialize the complete
         # read-check-write transaction across store instances so an older
@@ -165,7 +187,7 @@ class ControllerModelStore:
             latest = self._latest_owned(name)
             if latest is not None and revision < latest["revision"]:
                 self._log_non_advancing(name, revision, latest["revision"])
-                return False
+                return CheckpointSaveOutcome.NONADVANCING
 
             # Cheap path: this process already knows the last revision it
             # persisted for this controller, so a same-or-older revision is
@@ -174,7 +196,7 @@ class ControllerModelStore:
             cached = self._revisions.get(name)
             if cached is not None and revision <= cached:
                 self._log_non_advancing(name, revision, cached)
-                return False
+                return CheckpointSaveOutcome.NONADVANCING
 
             models, safe = self._read_state()
             if not safe:
@@ -184,7 +206,7 @@ class ControllerModelStore:
                     name,
                     revision,
                 )
-                return False
+                return CheckpointSaveOutcome.FAILED
 
             # The persisted revision remains authoritative after a cache miss:
             # another store instance may have advanced it while this instance
@@ -194,7 +216,7 @@ class ControllerModelStore:
                 self._remember_owned(name, existing, committed=True)
                 if revision <= existing["revision"]:
                     self._log_non_advancing(name, revision, existing["revision"])
-                    return False
+                    return CheckpointSaveOutcome.NONADVANCING
 
             models[name] = owned_snapshot
             try:
@@ -205,10 +227,10 @@ class ControllerModelStore:
                     name,
                     exc_info=True,
                 )
-                return False
+                return CheckpointSaveOutcome.FAILED
             self._revisions[name] = revision
             self._remember_owned(name, owned_snapshot, committed=True)
-            return True
+            return CheckpointSaveOutcome.SAVED
 
     def stage_owned(self, name, snapshot):
         """Publish a worker-owned snapshot before potentially blocking I/O."""

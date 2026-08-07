@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Sequence
-import json
-from copy import deepcopy
 from dataclasses import dataclass
 from threading import Condition, Thread
 from typing import Protocol
 
+from common.controller_model_state import CheckpointSaveOutcome, copy_valid_snapshot
 from common.datastore_accessors import append_model_evidence, commit_model_activation
 from common.model_evidence import EvidenceKind, ModelEvidenceRecord, RecorderGapEvidence
 
@@ -69,16 +68,14 @@ class ModelPersistenceWorker:
         """Copy a checkpoint and replace only its not-yet-written predecessor."""
         if not isinstance(name, str) or not name.strip():
             raise ValueError("checkpoint name must be non-blank")
-        try:
-            owned_snapshot = deepcopy(snapshot)
-            if self._revision(owned_snapshot) is None:
-                raise ValueError("checkpoint revision must be a nonnegative integer")
-            if len(json.dumps(owned_snapshot, allow_nan=False, separators=(",", ":")).encode()) > 65_536:
-                raise ValueError("checkpoint exceeds 65536-byte persistence limit")
-        except Exception as error:
-            self._logger.error(f"Could not own {name} model checkpoint: {error}")
+        owned_snapshot = copy_valid_snapshot(snapshot)
+        if owned_snapshot is None:
+            self._logger.error(f"Could not own {name} model checkpoint: invalid persistence snapshot")
             return False
         with self._condition:
+            if self._failed:
+                self._logger.error(f"Could not checkpoint {name} model after persistence failed")
+                return False
             if self._stopping:
                 self._logger.error(f"Could not checkpoint {name} model after teardown began")
                 return False
@@ -136,6 +133,9 @@ class ModelPersistenceWorker:
         if owned_decision.kind is not EvidenceKind.ACTIVATION:
             raise ValueError("activation worker requires activation evidence")
         with self._condition:
+            if self._failed:
+                self._logger.error("Could not commit model activation after persistence failed")
+                return False
             if self._stopping:
                 self._logger.error("Could not commit model activation after teardown began")
                 return False
@@ -143,6 +143,12 @@ class ModelPersistenceWorker:
             self._start_locked()
             self._condition.notify()
         return True
+
+    def _save_checkpoint(self, name: str, snapshot: dict[str, object]) -> CheckpointSaveOutcome:
+        save_outcome = getattr(self._store, "save_outcome", None)
+        if callable(save_outcome):
+            return save_outcome(name, snapshot)
+        return CheckpointSaveOutcome.SAVED if self._store.save(name, snapshot) else CheckpointSaveOutcome.NONADVANCING
 
     def flush_and_stop(self, *, timeout: float = 0.1) -> bool:
         """Flush accepted work once while keeping Hold teardown bounded."""
@@ -222,7 +228,11 @@ class ModelPersistenceWorker:
             try:
                 if kind == "checkpoint":
                     name, snapshot = payload
-                    _ = self._store.save(name, snapshot)
+                    outcome = self._save_checkpoint(name, snapshot)
+                    if outcome is CheckpointSaveOutcome.FAILED:
+                        raise RuntimeError("checkpoint store failed")
+                    if outcome is not CheckpointSaveOutcome.SAVED and outcome is not CheckpointSaveOutcome.NONADVANCING:
+                        raise RuntimeError(f"unknown checkpoint store outcome: {outcome!r}")
                 elif kind == "evidence":
                     self._append_evidence((payload,))
                 else:
@@ -230,8 +240,7 @@ class ModelPersistenceWorker:
             except Exception as error:
                 with self._condition:
                     self._failed = True
-                    if kind == "evidence":
-                        self._evidence_blocked = True
+                    self._evidence_blocked = True
                 self._logger.error(f"Could not persist model {kind}: {error}")
             finally:
                 with self._condition:

@@ -1,7 +1,13 @@
 """Behavioral contracts for off-path model persistence."""
 
+import json
 import threading
 
+from common.controller_model_state import (
+    MAX_SNAPSHOT_BYTES,
+    CheckpointSaveOutcome,
+    ControllerModelStore,
+)
 from common.control_trace import AmbientSource
 from common.model_evidence import ActivationEvidence, EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord
 from controller.runtime.model_persistence import EvidenceSubmission, ModelPersistenceWorker
@@ -148,6 +154,24 @@ def test_evidence_submission_rejects_after_async_write_failure():
         worker.flush_and_stop(timeout=1.0)
 
 
+def test_checkpoint_uses_the_store_default_json_byte_boundary_before_enqueue():
+    logger = _Logger()
+    store = _Store()
+    store.release_first_save.set()
+    worker = ModelPersistenceWorker(store, logger)
+    snapshot = {"revision": 1, "blob": ""}
+    snapshot["blob"] = "x" * (MAX_SNAPSHOT_BYTES - len(json.dumps(snapshot, allow_nan=False).encode("utf-8")))
+    oversized = dict(snapshot, revision=2, blob=snapshot["blob"] + "x")
+    try:
+        assert len(json.dumps(snapshot, allow_nan=False).encode("utf-8")) == MAX_SNAPSHOT_BYTES
+        assert worker.submit_checkpoint("mpc", snapshot)
+        assert not worker.submit_checkpoint("mpc", oversized)
+        assert worker.flush_and_stop(timeout=1.0)
+    finally:
+        store.release_first_save.set()
+        worker.flush_and_stop(timeout=1.0)
+
+
 def test_checkpoint_rejects_malformed_nonfinite_and_oversized_snapshots_synchronously():
     logger = _Logger()
     worker = ModelPersistenceWorker(_Store(), logger)
@@ -160,16 +184,38 @@ def test_checkpoint_rejects_malformed_nonfinite_and_oversized_snapshots_synchron
         worker.flush_and_stop(timeout=1.0)
 
 
-def test_equal_checkpoint_store_result_is_a_coalesced_noop_not_worker_failure():
-    class EqualStore:
-        def save(self, _name, _snapshot):
-            return False
-
-    worker = ModelPersistenceWorker(EqualStore(), _Logger())
+def test_equal_checkpoint_revision_is_an_explicit_healthy_nonadvancing_outcome():
+    state = {"version": 1, "models": {"mpc": {"revision": 1}}}
+    store = ControllerModelStore(
+        reader=lambda _key: state,
+        writer=lambda _key, _value: None,
+        conditional_writer=lambda _name, _snapshot: False,
+    )
+    worker = ModelPersistenceWorker(store, _Logger())
     try:
         assert worker.submit_checkpoint("mpc", {"revision": 1})
         assert worker.flush_and_stop(timeout=1.0)
+        assert store.save_outcome("mpc", {"revision": 1}) is CheckpointSaveOutcome.NONADVANCING
         assert not worker.evidence_blocked
+    finally:
+        worker.flush_and_stop(timeout=1.0)
+
+
+def test_conditional_checkpoint_writer_failure_blocks_later_submissions():
+    state = {"version": 1, "models": {}}
+    store = ControllerModelStore(
+        reader=lambda _key: state,
+        writer=lambda _key, _value: None,
+        conditional_writer=lambda _name, _snapshot: False,
+    )
+    worker = ModelPersistenceWorker(store, _Logger())
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 1})
+        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.evidence_blocked
+        assert not worker.submit_checkpoint("mpc", {"revision": 2})
+        assert not worker.submit_evidence(_evidence("later")).accepted
+        assert not worker.commit_activation(_activation("later"))
     finally:
         worker.flush_and_stop(timeout=1.0)
 

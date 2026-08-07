@@ -93,6 +93,27 @@ def test_per_tick_saves_the_controller_snapshot(hold_cycle):
     assert store.saves == [("pid_sp", {"revision": 1, "K": 700.0})]
 
 
+def test_checkpoint_persistence_failure_disables_hold_learning(hold_cycle):
+    state = {"version": 1, "models": {}}
+    store = ControllerModelStore(
+        reader=lambda _key: state,
+        writer=lambda _key, _value: None,
+        conditional_writer=lambda _name, _snapshot: False,
+    )
+    hold = hold_cycle(FakeControllerRunner(period=0.01), model_store=store, controller="pid_sp")
+    hold.setup()
+    worker = hold._persistence_worker
+    assert worker is not None
+    try:
+        hold._checkpoint_model({"revision": 1})
+        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.evidence_blocked
+        hold._checkpoint_model({"revision": 2})
+        assert not hold._learning_evidence_available
+    finally:
+        hold.ctx.clock.advance(400.0)
+        hold.teardown(200.0)
+
 def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_snapshot(hold_cycle):
     """Checkpoint I/O remains owned after nonblocking Hold teardown."""
 

@@ -1045,8 +1045,8 @@ class HoldMode(ControlMode):
 
     def _checkpoint_model(self, snapshot: dict[str, object]) -> None:
         worker = self._persistence_worker
-        if worker is not None:
-            _ = worker.submit_checkpoint(self._controller_name, snapshot)
+        if worker is None or not worker.submit_checkpoint(self._controller_name, snapshot):
+            self._learning_evidence_available = False
 
     def _ensure_trace_session(self, now: float) -> None:
         if self._trace_session_id is not None:
