@@ -87,6 +87,48 @@ def test_typed_qualifying_ledger_is_ready_without_ownership_change() -> None:
         ),
         (
             lambda record: record.model_copy(
+                update={"payload": replace(record.payload, gain=-1.0)}
+            ),
+            ("positive-gain",),
+        ),
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, delay_steps=16)}
+            ),
+            ("delay-limit",),
+        ),
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, covariance_finite=False)}
+            ),
+            ("finite-covariance",),
+        ),
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, alignment_error_c=2.1)}
+            ),
+            ("state-alignment",),
+        ),
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, snapshot_round_trip=False)}
+            ),
+            ("snapshot-round-trip",),
+        ),
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, sequential_wins=1)}
+            ),
+            ("sequential-wins",),
+        ),
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, generation_continuity=False)}
+            ),
+            ("generation-continuity",),
+        ),
+        (
+            lambda record: record.model_copy(
                 update={"payload": replace(record.payload, braking_error_c=3.0)}
             ),
             ("braking-error",),
@@ -111,6 +153,46 @@ def test_each_refresh_gate_has_only_its_expected_blocker(replacement, expected: 
     report = _report(tuple(records))
     assert report.blockers == expected
     assert report.status is not ConfidenceStatus.READY_FOR_REVIEW
+
+
+@pytest.mark.parametrize(
+    ("replacement", "expected"),
+    [
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, p99_ms=251.0)}
+            ),
+            ("target-timing",),
+        ),
+        (
+            lambda record: record.model_copy(
+                update={"payload": replace(record.payload, hardware_provenance="workstation")}
+            ),
+            ("target-timing",),
+        ),
+        (
+            lambda record: record.model_copy(update={"schema_version": 1}),
+            ("schema-integrity",),
+        ),
+    ],
+)
+def test_each_timing_and_schema_gate_has_only_its_expected_blocker(replacement, expected: tuple[str, ...]) -> None:
+    records = list(_qualifying())
+    records[5] = replacement(records[5])
+    report = _report(tuple(records))
+    assert report.blockers == expected
+    assert report.status is not ConfidenceStatus.READY_FOR_REVIEW
+
+
+def test_discontinuous_coast_is_the_only_calibration_blocker() -> None:
+    records = list(_qualifying())
+    records[3] = records[3].model_copy(
+        update={"payload": replace(records[3].payload, continuous=False)}
+    )
+
+    report = _report(tuple(records))
+
+    assert report.blockers == ("calibration-completeness",)
 
 
 def test_one_cook_and_duplicate_rows_cannot_create_cross_session_confidence() -> None:

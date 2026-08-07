@@ -9,7 +9,17 @@ from controller.applied_output import FrameFeedbackDisposition, OutputSource
 from tests.fakes.runner import FakeControllerRunner
 
 
-def _result(revision=1, *, baseline=0.3, probe=0.0, command_revision=1, command_action="start"):
+def _result(
+    revision=1,
+    *,
+    baseline=0.3,
+    probe=0.0,
+    command_revision=1,
+    command_action="start",
+    stage: str | None = None,
+    completed_stages: tuple[str, ...] = (),
+    active: bool | None = None,
+):
     baseline_allocation = allocate(baseline, u_max=0.9, fan_min_pct=0.0, fan_max_pct=100.0, enable_fan=False)
     allocation = allocate(baseline + probe, u_max=0.9, fan_min_pct=0.0, fan_max_pct=100.0, enable_fan=False)
     return ControllerUpdateResult(
@@ -19,12 +29,13 @@ def _result(revision=1, *, baseline=0.3, probe=0.0, command_revision=1, command_
         allocation=allocation,
         baseline_allocation=baseline_allocation,
         calibration=CalibrationDecision(
-            probe != 0.0,
+            probe != 0.0 if active is None else active,
             probe,
-            "low" if probe else None,
+            stage if stage is not None else "low" if probe else None,
             CalibrationProgress(),
             command_revision=command_revision,
             command_action=command_action,
+            completed_stages=completed_stages,
         ),
         revision=revision,
         solve_start_monotonic=0.0,
@@ -283,3 +294,77 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     assert compact[1].probe_count == 0
     assert compact[0].stage == "low"
     assert len(persisted) == 2
+
+
+def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, monkeypatch):
+    import controller.runtime.modes.hold as hold_module
+
+    class Recorder:
+        def __init__(self, *, warning):
+            self.records = []
+
+        def record(self, record):
+            self.records.append(record)
+
+        def flush_due(self, _now_ms):
+            pass
+
+        def close(self):
+            pass
+
+    class Store:
+        def load(self, _name):
+            return None
+
+        def save_outcome(self, _name, _snapshot):
+            return CheckpointSaveOutcome.SAVED
+
+    persisted = []
+    real_worker = hold_module.ModelPersistenceWorker
+
+    class CapturingWorker(real_worker):
+        def __init__(self, store, logger):
+            super().__init__(store, logger, append_evidence=persisted.extend)
+    monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: Recorder(warning=warning))
+    monkeypatch.setattr(hold_module, "ModelPersistenceWorker", CapturingWorker)
+    runner = FakeControllerRunner(period=1.0).script([
+        _result(
+            stage="coast",
+            completed_stages=("low", "middle", "high"),
+            active=True,
+        ),
+    ])
+    runner.observation_outcome = {
+        "role_generation": 0,
+        "eligible": False,
+        "rejection_reasons": (),
+        "input_variance": 0.0,
+        "input_levels": 0,
+        "incumbent_innovation_c": None,
+        "challenger_innovation_c": None,
+        "effective_updates": 0,
+        "model_digest": None,
+    }
+    hold = hold_cycle(runner, model_store=Store(), controller="mpc")
+    hold.setup()
+    hold.state.metrics = {"id": "cook-calibration"}
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
+    assert runner.observations
+    assert runner.observations[-1].calibration_stage == "coast"
+    assert runner.observations[-1].calibration_command_revision == 1
+    direct = hold._calibration_frame_evidence(
+        runner.observations[-1], hold._trace_session_id, hold._trace_cook_id
+    )
+    assert direct is not None
+    assert hold._persistence_worker.submit_evidence_batch((direct,)).accepted
+    assert hold._persistence_worker.flush_and_stop(timeout=1.0)
+
+    coast = [
+        record.payload
+        for record in persisted
+        if record.kind is EvidenceKind.CALIBRATION_SUMMARY and record.payload.stage == "coast"
+    ]
+    assert coast and coast[-1].completed_stages == ("low", "middle", "high")

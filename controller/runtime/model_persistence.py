@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Condition, Thread
 from typing import Protocol
 
 from common.controller_model_state import CheckpointSaveOutcome, copy_valid_snapshot
 from common.datastore_accessors import append_model_evidence, commit_model_activation
-from common.model_evidence import EvidenceKind, ModelEvidenceRecord, RecorderGapEvidence
+from common.model_evidence import EvidenceKind, ModelEvidenceRecord, RecorderGapEvidence, RefreshDiagnosticsEvidence
 
 
 class _ModelStore(Protocol):
@@ -50,7 +50,7 @@ class ModelPersistenceWorker:
         self._evidence_capacity = evidence_capacity
         self._condition = Condition()
         self._pending_checkpoints: dict[str, dict[str, object]] = {}
-        self._pending_evidence: deque[ModelEvidenceRecord] = deque()
+        self._pending_evidence: deque[tuple[ModelEvidenceRecord, ...]] = deque()
         self._pending_recorder_gaps: deque[ModelEvidenceRecord] = deque()
         self._pending_activations: deque[ModelEvidenceRecord] = deque()
         self._stopping = False
@@ -118,9 +118,9 @@ class ModelPersistenceWorker:
                 return self._reject_evidence_locked(owned_records, "persistence-failed")
             if self._stopping:
                 return self._reject_evidence_locked(owned_records, "persistence-stopped")
-            if len(self._pending_evidence) + len(owned_records) > self._evidence_capacity:
+            if sum(len(batch) for batch in self._pending_evidence) + len(owned_records) > self._evidence_capacity:
                 return self._reject_evidence_locked(owned_records, "evidence-queue-overflow")
-            self._pending_evidence.extend(owned_records)
+            self._pending_evidence.append(owned_records)
             self._start_locked()
             self._condition.notify()
         return EvidenceSubmission(accepted=True)
@@ -208,7 +208,7 @@ class ModelPersistenceWorker:
         if self._pending_evidence:
             return "evidence", self._pending_evidence.popleft()
         if self._pending_recorder_gaps:
-            return "evidence", self._pending_recorder_gaps.popleft()
+            return "evidence", (self._pending_recorder_gaps.popleft(),)
         if self._pending_checkpoints:
             name = next(iter(self._pending_checkpoints))
             return "checkpoint", (name, self._pending_checkpoints.pop(name))
@@ -231,7 +231,7 @@ class ModelPersistenceWorker:
                     if outcome is not CheckpointSaveOutcome.SAVED and outcome is not CheckpointSaveOutcome.NONADVANCING:
                         raise RuntimeError(f"unknown checkpoint store outcome: {outcome!r}")
                 elif kind == "evidence":
-                    self._append_evidence((payload,))
+                    self._append_evidence(self._durable_evidence_batch(payload))
                 else:
                     self._commit_activation(payload)
             except Exception as error:
@@ -242,3 +242,16 @@ class ModelPersistenceWorker:
             finally:
                 with self._condition:
                     self._condition.notify_all()
+
+
+    @staticmethod
+    def _durable_evidence_batch(payload: object) -> tuple[ModelEvidenceRecord, ...]:
+        """Stamp atomicity only on the immutable tuple handed to one transaction."""
+        if not isinstance(payload, tuple) or not all(isinstance(record, ModelEvidenceRecord) for record in payload):
+            raise TypeError("evidence work must contain one immutable record batch")
+        return tuple(
+            replace(record, payload=replace(record.payload, atomic_persistence=True))
+            if isinstance(record.payload, RefreshDiagnosticsEvidence)
+            else record
+            for record in payload
+        )

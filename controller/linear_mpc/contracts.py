@@ -94,6 +94,7 @@ class FrameObservation:
     calibration_status: str = "inactive"
     cancellation_command_revision: int = 0
     cancellation_command_action: str = "none"
+    completed_calibration_stages: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         start = _finite_float(self.frame_start_s, "frame_start_s")
@@ -202,6 +203,13 @@ class FrameObservation:
             not isinstance(self.calibration_stage, str) or not self.calibration_stage.strip()
         ):
             raise ValueError("calibration_stage must be a non-empty string when present")
+        completed_stages = tuple(self.completed_calibration_stages)
+        if (
+            len(set(completed_stages)) != len(completed_stages)
+            or any(stage not in {"low", "middle", "high"} for stage in completed_stages)
+        ):
+            raise ValueError("completed_calibration_stages must be unique known heating stages")
+        object.__setattr__(self, "completed_calibration_stages", completed_stages)
         if not isinstance(self.calibration_fit, bool):
             raise ValueError("calibration_fit must be a bool")
         if self.calibration_fit and self.calibration_stage is None:

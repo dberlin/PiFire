@@ -96,15 +96,15 @@ def _freeze_evidence(
     values = outcome.get("forecast_origin_evidence")
     refresh = outcome.get("refresh_diagnostics_evidence")
     decision_id = getattr(evaluation, "decision_id", None)
+    evaluated_at_ms = getattr(evaluation, "evaluated_at_ms", None)
     role_generation = getattr(evaluation, "role_generation", None)
     challenger_digest = getattr(evaluation, "challenger_digest", None)
-    incumbent_digest = getattr(evaluation, "incumbent_digest", None)
     if (
         not isinstance(decision_id, str)
+        or not isinstance(evaluated_at_ms, int)
+        or isinstance(evaluated_at_ms, bool)
+        or evaluated_at_ms < 0
         or not isinstance(role_generation, int)
-        or isinstance(role_generation, bool)
-        or not isinstance(challenger_digest, str)
-        or not isinstance(incumbent_digest, str)
         or not isinstance(values, tuple)
         or not all(isinstance(value, ForecastOriginEvidence) for value in values)
     ):
@@ -131,7 +131,7 @@ def _freeze_evidence(
             kind=EvidenceKind.REFRESH_DIAGNOSTICS,
             session_id=session_id,
             cook_id=cook_id,
-            timestamp_ms=max((value.completion_time_ms for value in values), default=0),
+            timestamp_ms=evaluated_at_ms,
             role_generation=role_generation,
             model_digest=challenger_digest,
             provenance_digest=incumbent_digest,

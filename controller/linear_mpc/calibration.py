@@ -1,7 +1,7 @@
 """Pure guarded online-calibration state machine."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from types import MappingProxyType
 from typing import Callable, Mapping
@@ -168,8 +168,14 @@ class CalibrationDecision:
     command_revision: int = 0
     command_action: str = "none"
     command_generation: int = 0
+    completed_stages: tuple[str, ...] = ()
+
 
     def __post_init__(self) -> None:
+        if any(stage not in _STAGES for stage in self.completed_stages):
+            raise ValueError("completed stages must be known heating stages")
+        if len(set(self.completed_stages)) != len(self.completed_stages):
+            raise ValueError("completed stages must be unique")
         if isinstance(self.command_revision, bool) or not isinstance(self.command_revision, int) or self.command_revision < 0:
             raise ValueError("command_revision must be a non-negative integer")
         if self.command_action not in {"none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"}:
@@ -488,8 +494,9 @@ class CalibrationCoordinator:
         return CalibrationEvent(kind, stage, intended, bounded, state.realized_probe_sum, reasons)
 
     def _remember(self, decision: CalibrationDecision) -> CalibrationDecision:
-        self._last = decision
-        return decision
+        measured_stages = _STAGES[: len(self._completed_history)]
+        self._last = replace(decision, completed_stages=measured_stages)
+        return self._last
 
     @staticmethod
     def _signed_dwell_plan(seed: int) -> tuple[int, ...]:

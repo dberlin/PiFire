@@ -283,3 +283,28 @@ def test_evidence_batch_overflow_preserves_queued_fifo_and_records_every_omitted
         worker.flush_and_stop(timeout=1.0)
 
     assert written == [_evidence("first"), rejected.recorder_gap]
+
+
+def test_worker_commits_each_accepted_evidence_batch_once_and_never_partially() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    written = []
+
+    def append(records):
+        started.set()
+        release.wait(timeout=1.0)
+        written.append(tuple(records))
+
+    worker = ModelPersistenceWorker(_Store(), _Logger(), append_evidence=append)
+    batch = (_evidence("first"), _evidence("second"))
+    try:
+        assert worker.submit_evidence_batch(batch).accepted
+        assert started.wait(timeout=1.0)
+        assert written == []
+        release.set()
+        assert worker.flush_and_stop(timeout=1.0)
+    finally:
+        release.set()
+        worker.flush_and_stop(timeout=1.0)
+
+    assert written == [batch]

@@ -202,6 +202,7 @@ class HoldMode(ControlMode):
         controller.pulse_combined_allocation = None
         controller.pulse_calibration_probe_load = 0.0
         controller.pulse_calibration_stage = None
+        controller.pulse_calibration_completed_stages = ()
         self.grill.auger_off()
 
     def _latch_pulse_frame(self) -> None:
@@ -235,6 +236,7 @@ class HoldMode(ControlMode):
         controller.pulse_frame_combined_allocation = controller.pulse_combined_allocation
         controller.pulse_frame_calibration_probe_load = controller.pulse_calibration_probe_load
         controller.pulse_frame_calibration_stage = controller.pulse_calibration_stage
+        controller.pulse_frame_calibration_completed_stages = controller.pulse_calibration_completed_stages
         self._pulse_frame_role_generation = self._model_role_generation(self._runner_status())
 
     def _runner_status(self) -> Mapping[str, object]:
@@ -368,6 +370,9 @@ class HoldMode(ControlMode):
             cancellation_command_action=getattr(controller, "pulse_frame_cancellation_command_action", "none"),
             combined_allocation=getattr(controller, "pulse_frame_combined_allocation", None),
             calibration_stage=getattr(controller, "pulse_frame_calibration_stage", None),
+            completed_calibration_stages=getattr(
+                controller, "pulse_frame_calibration_completed_stages", ()
+            ),
             calibration_fit=getattr(controller, "pulse_frame_calibration_stage", None) is not None,
             allocation_join_reason=(
                 None
@@ -467,6 +472,7 @@ class HoldMode(ControlMode):
             actual_fan_duty=observation.actual_fan_duty,
             cancellation_reason=observation.calibration_cancellation_reason,
             stage=observation.calibration_stage,
+            completed_stages=observation.completed_calibration_stages,
             continuous=observation.continuous,
         )
         return ModelEvidenceRecord(
@@ -2099,6 +2105,9 @@ class HoldMode(ControlMode):
                     result.calibration.stage
                     if result.calibration is not None and result.calibration.active
                     else None
+                )
+                controller.pulse_calibration_completed_stages = (
+                    result.calibration.completed_stages if result.calibration is not None else ()
                 )
                 controller.pulse_maximum_duty = result.allocation.u_max if result.allocation is not None else 1.0
                 controller.pulse_allocator_revision = (

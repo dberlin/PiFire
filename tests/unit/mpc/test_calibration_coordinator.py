@@ -122,6 +122,14 @@ def test_start_begins_low_stage_and_emits_audit_events():
     assert abs(decision.probe_q) <= 0.05
 
 
+def test_decision_carries_measured_completed_stage_names() -> None:
+    coordinator, decision = start()
+
+    coast = advance_stage(coordinator, decision)
+
+    assert coast.stage == "coast"
+    assert coast.completed_stages == ("low",)
+
 def test_start_fails_closed_when_no_active_grey_box_prediction_is_available():
     decision = CalibrationCoordinator().start(command(), context())
     assert not decision.active

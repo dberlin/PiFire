@@ -23,7 +23,9 @@ from common.model_evidence import (
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
+    TimingDistributionEvidence,
 )
+from common.model_evidence import MODEL_EVIDENCE_SCHEMA_VERSION
 
 _DIGEST = "a" * 64
 _OTHER_DIGEST = "b" * 64
@@ -204,6 +206,38 @@ def test_corrupt_payload_and_calibration_fit_forecast_are_rejected(ds):
     )
     with pytest.raises(ValueError, match="invalid payload"):
         read_model_evidence(session_id="session-a")
+
+
+def test_v1_timing_row_reads_with_unavailable_new_measurements(ds) -> None:
+    conn = ds.connection()
+    conn.execute(
+        """
+        INSERT INTO model_evidence(
+            evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+            model_digest, provenance_digest, schema_version, payload
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "v1-timing",
+            "session-a",
+            "cook-a",
+            100,
+            "timing_distribution",
+            2,
+            _OTHER_DIGEST,
+            _DIGEST,
+            1,
+            '{"sample_count": 50, "p50_ms": 10.0, "p95_ms": 20.0, "payload_type": "timing_distribution"}',
+        ),
+    )
+
+    record = read_model_evidence(session_id="session-a")[0]
+
+    assert MODEL_EVIDENCE_SCHEMA_VERSION == 2
+    assert record.schema_version == 1
+    assert isinstance(record.payload, TimingDistributionEvidence)
+    assert record.payload.p99_ms is None
+    assert record.payload.hardware_provenance is None
 
 def test_activation_commit_replaces_singleton_and_rolls_back_with_evidence(ds, tmp_path):
     db_path = tmp_path / "activation.db"

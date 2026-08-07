@@ -11,6 +11,7 @@ from math import isfinite, sqrt
 import numpy as np
 
 from common.model_evidence import (
+    MODEL_EVIDENCE_SCHEMA_VERSION,
     CalibrationSummaryEvidence,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
@@ -159,10 +160,25 @@ def evaluate_confidence(
     _gate(gates, "atomic-persistence", refresh is not None and refresh.atomic_persistence, "atomic-persistence")
     _gate(gates, "production-prospective-construction", refresh is not None and refresh.production_prospective, "production-prospective-construction")
     _gate(gates, "braking-error", _braking_ok(refresh, config.braking_tolerance_c), "braking-error")
-    _gate(gates, "target-timing", timing is not None and timing.hardware_provenance == "target-hardware" and timing.p99_ms <= config.maximum_refresh_p99_ms, "target-timing")
+    _gate(
+        gates,
+        "target-timing",
+        isinstance(timing, TimingDistributionEvidence)
+        and timing.hardware_provenance == "target-hardware"
+        and timing.p99_ms is not None
+        and timing.p99_ms <= config.maximum_refresh_p99_ms,
+        "target-timing",
+    )
     _gate(gates, "model-integrity", bool(selected) and all(record.model_digest == digest for record in selected), "model-integrity")
     _gate(gates, "provenance-integrity", _one_provenance(selected), "provenance-integrity")
-    _gate(gates, "schema-integrity", bool(selected) and all(record.schema_version == 1 for record in selected) and not schema_invalidated, "schema-integrity")
+    _gate(
+        gates,
+        "schema-integrity",
+        bool(selected)
+        and all(record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION for record in selected)
+        and not schema_invalidated,
+        "schema-integrity",
+    )
     _gate(gates, "untouched-future-rows", bool(origins), "untouched-future-rows")
 
     intervals = _bootstrap_intervals(origins, config)

@@ -12,7 +12,7 @@ from pydantic.dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason, AmbientSource
 
-MODEL_EVIDENCE_SCHEMA_VERSION = 1
+MODEL_EVIDENCE_SCHEMA_VERSION = 2
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
@@ -134,7 +134,10 @@ class CalibrationSummaryEvidence:
             if self.delivered_on_seconds > self.scheduled_on_seconds:
                 raise ValueError("delivered calibration on-time must not exceed scheduled on-time")
         if self.status == "active":
-            if not self.accepted or self.probe_count != 1 or self.probe_q in (None, 0.0):
+            if self.stage == "coast":
+                if not self.accepted or self.probe_count != 0 or self.probe_q != 0.0:
+                    raise ValueError("active coast calibration evidence must not claim a probe")
+            elif not self.accepted or self.probe_count != 1 or self.probe_q in (None, 0.0):
                 raise ValueError("active calibration evidence requires one accepted completed probe")
         elif self.status == "accepted":
             if not self.accepted or self.probe_count != 0 or self.probe_q != 0.0:
@@ -210,20 +213,18 @@ class RefreshDiagnosticsEvidence:
         if (self.braking_error_c is None) != (self.incumbent_braking_error_c is None):
             raise ValueError("braking diagnostics must include challenger and incumbent errors")
         return self
-
-
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class TimingDistributionEvidence:
     sample_count: NonNegativeInt
     p50_ms: NonNegativeFloat
     p95_ms: NonNegativeFloat
-    p99_ms: NonNegativeFloat
-    hardware_provenance: Literal["target-hardware", "workstation"]
+    p99_ms: NonNegativeFloat | None = None
+    hardware_provenance: Literal["target-hardware", "workstation"] | None = None
     payload_type: Literal["timing_distribution"] = "timing_distribution"
 
     @model_validator(mode="after")
     def validate_percentiles(self) -> TimingDistributionEvidence:
-        if self.p50_ms > self.p95_ms or self.p95_ms > self.p99_ms:
+        if self.p99_ms is not None and (self.p50_ms > self.p95_ms or self.p95_ms > self.p99_ms):
             raise ValueError("timing percentiles must be ordered")
         return self
 
@@ -331,7 +332,7 @@ class ModelEvidenceRecord(BaseModel):
     role_generation: NonNegativeInt
     model_digest: Digest | None
     provenance_digest: Digest | None
-    schema_version: Literal[1] = MODEL_EVIDENCE_SCHEMA_VERSION
+    schema_version: Literal[1, 2] = MODEL_EVIDENCE_SCHEMA_VERSION
     payload: ModelEvidencePayload
 
     @model_validator(mode="after")
@@ -347,6 +348,12 @@ class ModelEvidenceRecord(BaseModel):
                 or self.provenance_digest != self.payload.incumbent_digest
             ):
                 raise ValueError("forecast envelope digests must match precommitted payload digests")
+        if (
+            self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+            and isinstance(self.payload, TimingDistributionEvidence)
+            and (self.payload.p99_ms is None or self.payload.hardware_provenance is None)
+        ):
+            raise ValueError("current timing evidence requires p99 and hardware provenance")
         return self
 
     def to_db_row(self) -> ModelEvidenceDbRow:
@@ -371,6 +378,12 @@ class ModelEvidenceRecord(BaseModel):
             payload = _JSON_VALUE_ADAPTER.validate_json(row.payload)
         except ValidationError as exc:
             raise ValueError("model evidence payload column is invalid JSON") from exc
+        if row.schema_version == 1 and isinstance(payload, dict) and payload.get("payload_type") == "timing_distribution":
+            payload = {
+                **payload,
+                "p99_ms": payload.get("p99_ms"),
+                "hardware_provenance": payload.get("hardware_provenance"),
+            }
         try:
             return cls.model_validate_json(
                 json.dumps(

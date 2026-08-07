@@ -1137,7 +1137,7 @@ class Controller(ControllerBase):
         )
         return evidence
 
-    def _compact_refresh_evidence(self, decision):
+    def _compact_refresh_evidence(self, decision, *, production_prospective: bool = False):
         """Freeze selected state-space diagnostics for the compact ledger."""
         if self._online is None or not self._is_state_space_model(self._online.challenger):
             return None
@@ -1183,8 +1183,8 @@ class Controller(ControllerBase):
             snapshot_round_trip=round_trip,
             sequential_wins=decision.consecutive_wins,
             generation_continuity=not any(reason.value in {"continuity", "stale-generation"} for reason in decision.reasons),
-            atomic_persistence=True,
-            production_prospective=decision.prospective_digest is not None,
+            atomic_persistence=False,
+            production_prospective=production_prospective,
             braking_error_c=braking,
             incumbent_braking_error_c=incumbent_braking,
         )
@@ -1403,7 +1403,9 @@ class Controller(ControllerBase):
             self._evaluation_payloads(decision) if isinstance(decision, EvaluationDecision) else (None, ())
         )
         refresh_diagnostics_evidence = (
-            self._compact_refresh_evidence(decision) if isinstance(decision, EvaluationDecision) else None
+            self._compact_refresh_evidence(decision, production_prospective=False)
+            if isinstance(decision, EvaluationDecision)
+            else None
         )
         self._model_revision += 1
         if not decision.promoted:
@@ -1446,6 +1448,9 @@ class Controller(ControllerBase):
             certificate_rejection = self._linear_certificate_rejection(solve, self._linear_config)
             if certificate_rejection is not None:
                 raise ValueError(certificate_rejection)
+            refresh_diagnostics_evidence = self._compact_refresh_evidence(
+                decision, production_prospective=True
+            )
         except Exception as error:
             detail = str(error)
             self._online.reject_prospective(decision.decision_id, detail)
