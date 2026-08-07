@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+import pytest
+from docs.superpowers.experiments.linear_mpc_bakeoff import runner as runner_module
 
 from controller.linear_mpc.contracts import AffinePrediction  # pyright: ignore[reportImplicitRelativeImport]
 from docs.superpowers.experiments.linear_mpc_bakeoff.contracts import SignalRecord
@@ -13,6 +15,8 @@ from docs.superpowers.experiments.linear_mpc_bakeoff.runner import (
     _adaptation_settings,
     _coast_braking_masks,
     _common_validation_horizon,
+    _real_mak_evidence,
+    _split_evidence,
     _validation_origins,
     _window_free_run_scores,
 )
@@ -63,34 +67,88 @@ def test_quick_matrix_contract_includes_calibrated_and_wrong_initializations() -
     assert config.initializations == ("correct", "wrong-gain", "wrong-pole", "wrong-delay")
 
 
-def test_quick_artifact_persists_one_horizon_and_real_mak_provenance() -> None:
+def test_quick_artifact_persists_one_validation_selected_horizon() -> None:
     from docs.superpowers.experiments.linear_mpc_bakeoff.runner import run_experiment
 
     artifact = run_experiment(ExperimentConfig.quick())
 
-    selected = artifact.config["horizon_selection"]["selected_horizon_s"]
-    assert {row.mpc_horizon_s for row in artifact.scenarios} == {selected}
-    for arm in artifact.arms:
-        real = artifact.horizon_evidence[arm.name]["real"]
-        assert real["provenance"] == "requested-input-reconstruction"
-        assert set(real["diagnostics_c"]) == {"60", "300", "900", "1800", "3600"}
-        if arm.name == "state-space":
-            assert all(value is None for value in real["diagnostics_c"].values())
-            assert isinstance(real.get("failure"), str) and real["failure"]
-        else:
-            assert real["diagnostics_c"]["60"] is not None
-            assert real["diagnostics_c"]["300"] is not None
-            assert real["diagnostics_c"]["900"] is None
-            assert real["diagnostics_c"]["1800"] is None
-            assert real["diagnostics_c"]["3600"] is None
-    real_split = artifact.splits["real-MAK"]
-    assert real_split["fit"][1] <= real_split["validation"][0] <= real_split["validation"][1]
-    assert real_split["validation"][1] <= real_split["test"][0]
+    selection = artifact.config["horizon_selection"]
+    assert selection["selected_horizon_s"] == 600
+    assert len(selection["origins"]) == 24
+    assert {row.mpc_horizon_s for row in artifact.scenarios} == {600}
     assert all(
         key.count(":") == 2 and key.split(":", 1)[0] in {"online", "frozen"}
         for arm in artifact.arms
         for key in arm.domain_median_scores
     )
+
+
+def _record(samples: int, provenance: str) -> SignalRecord:
+    return SignalRecord(
+        time_s=np.arange(samples, dtype=np.float64) * 20.0,
+        temp_c=np.full(samples, 100.0),
+        q=np.full(samples, 0.5),
+        ambient_c=np.full(samples, 20.0),
+        provenance=provenance,
+    )
+
+
+def test_split_evidence_uses_source_chronology_and_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        runner_module,
+        "_calibration_record",
+        lambda plant, seed: _record(400 if plant == "MAKGrillSim" else 100, f"{plant}:{seed}"),
+    )
+    monkeypatch.setattr(runner_module, "_real_mak_record", lambda: _record(40, "requested-input-reconstruction"))
+
+    splits = _split_evidence(ExperimentConfig(quick_mode=True, seeds=(2,)))
+
+    assert splits["GrillSim:2"] == {
+        "fit": [0, 35],
+        "validation": [35, 75],
+        "test": [75, 100],
+        "provenance": "GrillSim:2",
+    }
+    assert splits["MAKGrillSim:2"] == {
+        "fit": [0, 147],
+        "validation": [147, 315],
+        "test": [315, 400],
+        "provenance": "MAKGrillSim:2",
+    }
+    assert splits["real-MAK"]["fit"][1] <= splits["real-MAK"]["validation"][0]
+    assert splits["real-MAK"]["validation"][1] <= splits["real-MAK"]["test"][0]
+    assert splits["real-MAK"]["provenance"] == "requested-input-reconstruction"
+
+
+def test_real_mak_evidence_maps_validation_and_test_horizons(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = _ConstantPrediction(100.0)
+    monkeypatch.setattr(runner_module, "_real_mak_record", lambda: _record(40, "requested-input-reconstruction"))
+    monkeypatch.setattr(runner_module, "_model_for_initialization", lambda arm, initialization: model)
+    monkeypatch.setattr(runner_module, "_fit_model", lambda candidate, record: None)
+    monkeypatch.setattr(
+        runner_module,
+        "_horizon_residuals",
+        lambda candidate, record, *, starts, horizons_s: {
+            horizon: ((2.0,) if horizon == 300 and len(horizons_s) == 2 else (1.0,) if horizon in {60, 300} else ())
+            for horizon in horizons_s
+        },
+    )
+    monkeypatch.setattr(runner_module, "_bakeoff_snapshot", lambda candidate: {"steady_gain": 1.0})
+    _real_mak_evidence.cache_clear()
+    try:
+        evidence = _real_mak_evidence("scheduled-arx")
+    finally:
+        _real_mak_evidence.cache_clear()
+
+    assert evidence["provenance"] == "requested-input-reconstruction"
+    assert evidence["validation_candidate_scores"] == [2.0]
+    assert evidence["diagnostics_c"] == {
+        "60": 1.0,
+        "300": 1.0,
+        "900": None,
+        "1800": None,
+        "3600": None,
+    }
 
 
 def test_quick_simulator_diagnostics_cover_all_horizons_without_unmasked_coast_leakage() -> None:

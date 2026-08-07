@@ -44,6 +44,25 @@ class _CellExecution:
     elapsed_s: float
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedOrigin:
+    arm: str
+    initialization: str
+    plant: str
+    seed: int
+
+    @property
+    def before_residuals(self) -> dict[int, tuple[float, ...]]:
+        return {600: (1.0,), 800: (1.1,), 1000: (1.2,)}
+
+
+def _unit_origins(
+    origins: Iterable[tuple[str, str, str, int]],
+    **_: object,
+) -> dict[tuple[str, str, str, int], _PreparedOrigin]:
+    return {origin: _PreparedOrigin(origin[0], origin[1], origin[2], origin[3]) for origin in origins}
+
+
 def _canonical_bytes(document: dict[str, object]) -> bytes:
     return (json.dumps(document, allow_nan=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -146,11 +165,7 @@ def _complete_futures(
 def _fast_matrix_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace only whole-matrix scientific work with deterministic evidence."""
 
-    monkeypatch.setattr(
-        runner_module,
-        "_prepare_origins",
-        lambda origins, **_: {origin: object() for origin in origins},
-    )
+    monkeypatch.setattr(runner_module, "_prepare_origins", _unit_origins)
     monkeypatch.setattr(runner_module, "_run_prepared_cell", _unit_cell)
     monkeypatch.setattr(runner_module, "ProcessPoolExecutor", _Executor)
     monkeypatch.setattr(runner_module, "wait", _complete_futures)
@@ -161,16 +176,6 @@ def _fast_matrix_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda documents: (
             aggregate_diagnostics(documents) if documents else ({"by_domain": {}, "aggregate": {}}, False)
         ),
-    )
-    monkeypatch.setattr(
-        runner_module,
-        "_horizon_selection_document",
-        lambda config, **_: {
-            "selected_horizon_s": 600,
-            "pooled_validation_scores": {"600": 1.0, "800": 1.1, "1000": 1.2},
-            "tie_rationale": "shortest horizon within 1% of pooled validation best",
-            "origins": {},
-        },
     )
     monkeypatch.setattr(
         runner_module,
