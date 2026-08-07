@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { MemoryRouter } from "react-router";
 import type { HistoryChartData } from "../../../../src/helpers/history/historyApi";
+import { testQueryClient } from "../../test-utils";
 
 // Counts chart INSTANCES (mounts), not renders -- see the stub below.
 let chartInstances = 0;
@@ -94,9 +97,11 @@ function chartEl(): HTMLElement {
 // and none of them navigates.
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <HistoryPage />
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter>
+        <HistoryPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -165,6 +170,21 @@ describe("HistoryPage", () => {
     await waitFor(() => expect(fetchHistoryChartMock).toHaveBeenCalledWith(expect.anything(), 120));
   });
 
+  it("refetches when the window changes, driven by the query key, not a hand-rolled counter", async () => {
+    // Pins that `minutes` alone determines the request: typing a new window
+    // (character by character, via userEvent) ends with exactly that window
+    // as the last call, with no BASE_URL surprises from the new queryFn
+    // wiring -- the exact regression a stray requestId-vs-queryKey mismatch
+    // would produce.
+    await renderLoaded();
+    fetchHistoryChartMock.mockClear();
+
+    await userEvent.clear(screen.getByLabelText(/minutes/i));
+    await userEvent.type(screen.getByLabelText(/minutes/i), "120");
+
+    await waitFor(() => expect(fetchHistoryChartMock).toHaveBeenLastCalledWith("", 120));
+  });
+
   it("remounts the chart on a window change so the x-scale is reset", async () => {
     // shouldResetScales compares the current scale against the data the plot
     // already holds, so it cannot distinguish a data tick from a window
@@ -192,13 +212,24 @@ describe("HistoryPage", () => {
     // changing the window doesn't blank the page. It also means the remount
     // above is caused by the window key alone -- not by the chart being
     // unmounted while a request is in flight.
+    //
+    // placeholderData is what makes this true now: the outgoing request never
+    // settles below, so the page never drops into the "Loading history…"
+    // branch at all -- the previous window's chart stays up, unmounted and
+    // remounted, as react-query's placeholder for the new key the whole time
+    // its own fetch is outstanding. Synchronizing on "Loading history…" (as
+    // this test did against the old requestId-driven effect, which showed
+    // that text AND the stale chart at once) would hang forever now, so this
+    // waits on the mock call instead.
     await renderLoaded();
+    fetchHistoryChartMock.mockClear();
     fetchHistoryChartMock.mockReturnValue(new Promise(() => {}));
 
     fireEvent.change(screen.getByLabelText(/minutes/i), { target: { value: "120" } });
 
-    await waitFor(() => expect(screen.getByText(/loading history/i)).toBeInTheDocument());
+    await waitFor(() => expect(fetchHistoryChartMock).toHaveBeenCalledWith(expect.anything(), 120));
     expect(chartEl()).toBeInTheDocument();
+    expect(screen.queryByText(/loading history/i)).not.toBeInTheDocument();
   });
 
   it("renders an empty state, and no chart, when there is no history", async () => {
@@ -242,16 +273,22 @@ describe("HistoryPage", () => {
   }
 
   it("does not read a stale same-window outcome as settled after 120 -> 60 -> 120", async () => {
-    // Pins the exact collision the forMinutes-only tag used to miss: request
+    // Pins the exact collision a window-value-only tag used to miss: request
     // A (minutes=120) settles and is shown. The window flips to 60 (request
     // B, never resolved here) and back to 120 (request C) *before* B settles.
     // C is a brand new request -- distinct from A -- but it asks for the same
     // window A already answered. A window-value-only tag can't tell "the
     // outcome on file is for this window and is current" from "the outcome on
     // file happens to carry this window's number, but a newer request for it
-    // is still in flight": both compare equal. The page must show loading
-    // (not A's older snapshot) until C -- not A -- resolves, and then render
-    // C's payload.
+    // is still in flight": both compare equal.
+    //
+    // react-query sidesteps the whole class of bug by keying its cache on
+    // `minutes` itself and tracking each key's own fetch generation, so C
+    // resolving after A can never be mistaken for A resolving late. While C is
+    // in flight the query key (120) already has cached data -- A's -- so the
+    // page shows A's snapshot (not a loading state: this is exactly what
+    // placeholderData/cached-data-while-refetching means) and MUST NOT swap
+    // to any other payload until C -- not A -- actually resolves.
     const reqs: { minutes: number | undefined; d: Deferred }[] = [];
     fetchHistoryChartMock.mockReset();
     fetchHistoryChartMock.mockImplementation((_base: string, minutes: number | undefined) => {
@@ -270,7 +307,10 @@ describe("HistoryPage", () => {
     fireEvent.change(input, { target: { value: "120" } }); // request A
     await waitFor(() => expect(reqs.length).toBe(2));
     reqs[1].d.resolve({ ...PAYLOAD, minutes: 120, time_labels: [111] }); // A settles: an older 120 snapshot
-    await waitFor(() => expect(screen.queryByText(/loading history/i)).not.toBeInTheDocument());
+    // Wait on the payload itself, not on "no loading text": that text is
+    // already absent the whole time thanks to placeholderData, so it would
+    // never force this await to actually wait for A's resolution to land.
+    await waitFor(() => expect(chartEl().getAttribute("data-times")).toBe("0.111"));
 
     fireEvent.change(input, { target: { value: "60" } }); // request B
     await waitFor(() => expect(reqs.length).toBe(3));
@@ -278,14 +318,18 @@ describe("HistoryPage", () => {
     fireEvent.change(input, { target: { value: "120" } }); // request C
     await waitFor(() => expect(reqs.length).toBe(4));
 
-    // C is still in flight. The only Outcome on file is A's (also tagged
-    // 120), which a window-value-only comparison would read as "settled".
-    expect(screen.queryByText(/loading history/i)).toBeInTheDocument();
+    // C is still in flight. The only cached data on file for key 120 is A's;
+    // the page shows it (no loading text -- there IS current data for this
+    // key) rather than either blanking or, worse, showing something neither A
+    // nor C ever returned.
+    expect(screen.queryByText(/loading history/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("chart").getAttribute("data-times")).toBe("0.111"); // still A's payload
 
     reqs[3].d.resolve({ ...PAYLOAD, minutes: 120, time_labels: [222] }); // C settles: the current snapshot
-    await waitFor(() => expect(screen.queryByText(/loading history/i)).not.toBeInTheDocument());
-    expect(screen.getByTestId("chart").getAttribute("data-times")).toBe("0.222");
+    // Same reasoning as above: wait on C's payload actually landing, not on
+    // an absence that was already true before C ever resolved.
+    await waitFor(() => expect(chartEl().getAttribute("data-times")).toBe("0.222"));
+    expect(screen.queryByText(/loading history/i)).not.toBeInTheDocument();
   });
 
   it("links Export CSV at the legacy CSV route", async () => {
@@ -357,6 +401,16 @@ describe("HistoryPage — auto refresh", () => {
     // A poll is NOT a window change: it must ride the ordinary data-update
     // path (same chartKey -> re-render, uPlot setData, shouldResetScales
     // preserving the zoom) rather than the remount a window change forces.
+    //
+    // Two ticks, not one: react-query's notifyManager flushes a query
+    // observer's result through a real setTimeout(0), and under fake timers
+    // a setTimeout(0) scheduled while advanceTimersByTimeAsync(REFRESH_MS)
+    // is already processing its final due timer doesn't fire until the NEXT
+    // call that advances the clock -- confirmed by instrumenting
+    // notifyManager's scheduler directly. A single tick's assertion would
+    // pass even against a broken chartKey (e.g. one that folds dataUpdatedAt
+    // in) purely because the render that would expose the break hasn't
+    // landed yet; a second tick forces it through.
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
     rs.useFakeTimers();
 
@@ -365,8 +419,9 @@ describe("HistoryPage — auto refresh", () => {
     const before = chartEl().getAttribute("data-instance");
 
     await tick(REFRESH_MS);
+    await tick(REFRESH_MS);
 
-    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(2);
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(3);
     expect(chartEl().getAttribute("data-instance")).toBe(before);
   });
 
@@ -380,6 +435,37 @@ describe("HistoryPage — auto refresh", () => {
 
     await tick(REFRESH_MS * 4);
 
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls on the auto-refresh cadence when the setting is on (refetchInterval gated by the setting)", async () => {
+    // Distinct from "refetches on the interval while autorefresh is on"
+    // above: this one drives the tick with a bare `act(() =>
+    // advanceTimersByTime(...))`, the pattern the task brief calls out --
+    // proof that gating refetchInterval on `autoRefresh` (rather than, say,
+    // always polling) is what makes this tick produce a second fetch.
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
+    rs.useFakeTimers();
+
+    renderPage();
+    await settle();
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+
+    await act(() => rs.advanceTimersByTime(REFRESH_MS));
+    await settle();
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not poll when the setting is off (refetchInterval must be false, not merely unset)", async () => {
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "off" } });
+    rs.useFakeTimers();
+
+    renderPage();
+    await settle();
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+
+    await act(() => rs.advanceTimersByTime(REFRESH_MS * 3));
+    await settle();
     expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
   });
 
