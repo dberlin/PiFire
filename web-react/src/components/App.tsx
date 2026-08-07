@@ -1,5 +1,7 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
+import { queryClient } from "../helpers/query/queryClient";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
 import { useWebUiBuild } from "../helpers/useWebUiBuild";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
@@ -156,8 +158,10 @@ export default function App() {
   // AppShell.
   useWebUiBuild();
   return (
-    <AppPrefsProvider>
-      <RouterProvider router={router} />
-    </AppPrefsProvider>
+    <QueryClientProvider client={queryClient}>
+      <AppPrefsProvider>
+        <RouterProvider router={router} />
+      </AppPrefsProvider>
+    </QueryClientProvider>
   );
 }

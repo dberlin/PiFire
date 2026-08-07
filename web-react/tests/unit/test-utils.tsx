@@ -1,8 +1,28 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import { AppPrefsProvider } from "../../src/components/AppPrefs";
 import { useSettingsDraftStore } from "../../src/helpers/settings/settingsDrafts";
+
+/**
+ * A fresh client per render.
+ *
+ * Sharing one across tests leaks a resolved settings entry into the next test,
+ * which then never calls its own mock and asserts against the previous test's
+ * fixture. gcTime: 0 so nothing survives the unmount either, and staleTime: 0
+ * so a test that expects a refetch gets one.
+ */
+export function testQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: 0 } },
+  });
+}
+
+/** For a component that uses queries but needs no router. */
+export function renderWithQuery(ui: ReactElement) {
+  return render(<QueryClientProvider client={testQueryClient()}>{ui}</QueryClientProvider>);
+}
 
 // Settings tabs (and other routed components) read their data via
 // `useOutletContext()`. To exercise them in isolation we build a tiny memory
@@ -37,8 +57,10 @@ export function renderRoute(ui: ReactElement, context: unknown, overrides?: obje
   // App.tsx wraps every route in this, and a tab that reads a preference (the
   // accent on General) needs it present to render at all.
   return render(
-    <AppPrefsProvider>
-      <RouterProvider router={router} />
-    </AppPrefsProvider>,
+    <QueryClientProvider client={testQueryClient()}>
+      <AppPrefsProvider>
+        <RouterProvider router={router} />
+      </AppPrefsProvider>
+    </QueryClientProvider>,
   );
 }
