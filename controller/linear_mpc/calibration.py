@@ -165,6 +165,15 @@ class CalibrationDecision:
     events: tuple[CalibrationEvent, ...] = ()
     target_c: float | None = None
     activation_ready: bool = False
+    command_revision: int = 0
+    command_action: str = "none"
+
+    def __post_init__(self) -> None:
+        if isinstance(self.command_revision, bool) or not isinstance(self.command_revision, int) or self.command_revision < 0:
+            raise ValueError("command_revision must be a non-negative integer")
+        if self.command_action not in {"none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"}:
+            raise ValueError("invalid calibration command action")
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,49 +219,83 @@ class CalibrationCoordinator:
         if command.maximum_temperature_c >= runtime.safety_ceiling_c:
             reasons += ("safety_ceiling",)
         if reasons:
-            return self._terminal("start_rejected", None, reasons)
+            return self._with_provenance(self._terminal("start_rejected", None, reasons), command.command_revision, "start")
         if self._predict_max_c is None:
-            return self._terminal("start_rejected", None, ("prediction_unavailable",))
+            return self._with_provenance(
+                self._terminal("start_rejected", None, ("prediction_unavailable",)),
+                command.command_revision,
+                "start",
+            )
         plan = self._signed_dwell_plan(command.seed)
         schedule = tuple(sign * self._config.max_probe_q for sign in self._expand(plan))
         state = _State(command, 0, runtime.now_s, 0, plan, schedule)
         self._state = state
         probe, reasons = self._bound_probe(schedule[0], runtime)
         if reasons:
-            return self._terminal("start_rejected", "low", reasons)
+            return self._with_provenance(
+                self._terminal("start_rejected", "low", reasons),
+                command.command_revision,
+                "start",
+            )
         self._completed_history = ()
         self._state = self._with_probe(state, probe)
-        return self._remember(CalibrationDecision(True, probe, "low", self._progress(self._state), (
+        return self._with_provenance(self._remember(CalibrationDecision(True, probe, "low", self._progress(self._state), (
             self._event("start_accepted", "low", schedule[0], probe, self._state),
             self._event("stage_started", "low", schedule[0], probe, self._state),
-        ), self._config.band_centers_c[0]))
+        ), self._config.band_centers_c[0])), command.command_revision, "start")
 
     def stop(self, runtime: CalibrationRuntimeContext | None = None) -> CalibrationDecision:
-        return self._terminal("stopped", self._actual_stage, ("operator_stop",)) if self._state else self._last or self._terminal("stopped", None, ("not_active",))
+        decision = self._terminal("stopped", self._actual_stage, ("operator_stop",)) if self._state else self._last or self._terminal("stopped", None, ("not_active",))
+        return self._with_provenance(decision, 0, "stop")
+
+    def reset_progress(self, runtime: CalibrationRuntimeContext | None = None) -> CalibrationDecision:
+        stage = self._actual_stage
+        self._state, self._paused, self._completed_history = None, False, ()
+        return self._with_provenance(
+            self._remember(
+                CalibrationDecision(
+                    False,
+                    0.0,
+                    stage,
+                    CalibrationProgress(),
+                    (CalibrationEvent("progress_reset", stage, 0.0, 0.0, 0.0, ("operator_reset",)),),
+                )
+            ),
+            0,
+            "reset-progress",
+        )
 
     def cancel_probe(self, reason: str, runtime: CalibrationRuntimeContext | None = None) -> CalibrationDecision:
         if not isinstance(reason, str) or not reason:
             raise ValueError("reason must be a non-empty string")
-        return self._terminal("safety_aborted", self._actual_stage, (reason,))
+        return self._with_provenance(self._terminal("safety_aborted", self._actual_stage, (reason,)), 0, "safety-cancel")
 
     def pause(self) -> CalibrationDecision:
         if self._state is None:
-            return self._last or self._terminal("paused", None, ("not_active",))
+            return self._with_provenance(self._last or self._terminal("paused", None, ("not_active",)), 0, "pause")
         self._paused = True
-        return self._remember(self._decision(True, 0.0, self._stage, self._state, (self._event("paused", self._actual_stage, self._state.current_probe_q, 0.0, self._state),)))
+        return self._with_provenance(
+            self._remember(self._decision(True, 0.0, self._stage, self._state, (self._event("paused", self._actual_stage, self._state.current_probe_q, 0.0, self._state),))),
+            0,
+            "pause",
+        )
 
     def resume(self, runtime: CalibrationRuntimeContext) -> CalibrationDecision:
         if self._state is None:
-            return self._last or self._terminal("incomplete", None, ("not_started",))
+            return self._with_provenance(self._last or self._terminal("incomplete", None, ("not_started",)), 0, "resume")
         reasons = self._guard_reasons(runtime)
         if reasons:
-            return self._terminal("safety_aborted", self._actual_stage, reasons)
+            return self._with_provenance(self._terminal("safety_aborted", self._actual_stage, reasons), 0, "resume")
         probe, reasons = self._bound_probe(self._state.current_probe_q, runtime)
         if reasons:
-            return self._terminal("safety_aborted", self._actual_stage, reasons)
+            return self._with_provenance(self._terminal("safety_aborted", self._actual_stage, reasons), 0, "resume")
         self._paused = False
         self._state = self._with_probe(self._state, probe)
-        return self._remember(self._decision(True, probe, self._stage, self._state, (self._event("resumed", self._actual_stage, probe, probe, self._state),)))
+        return self._with_provenance(
+            self._remember(self._decision(True, probe, self._stage, self._state, (self._event("resumed", self._actual_stage, probe, probe, self._state),))),
+            0,
+            "resume",
+        )
 
     def advance(self, runtime: CalibrationRuntimeContext) -> CalibrationDecision:
         if self._state is None:
@@ -414,6 +457,23 @@ class CalibrationCoordinator:
 
     def _decision(self, active: bool, probe: float, stage: str | None, state: _State, events: tuple[CalibrationEvent, ...] = ()) -> CalibrationDecision:
         return CalibrationDecision(active, probe, stage, self._progress(state), events, self._config.band_centers_c[state.stage_index])
+
+    def _with_provenance(
+        self, decision: CalibrationDecision, command_revision: int, command_action: str
+    ) -> CalibrationDecision:
+        return self._remember(
+            CalibrationDecision(
+                decision.active,
+                decision.probe_q,
+                decision.stage,
+                decision.progress,
+                decision.events,
+                decision.target_c,
+                decision.activation_ready,
+                command_revision,
+                command_action,
+            )
+        )
 
     def _terminal(self, kind: str, stage: str | None, reasons: tuple[str, ...], prefix: tuple[CalibrationEvent, ...] = ()) -> CalibrationDecision:
         state = self._state

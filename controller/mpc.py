@@ -842,12 +842,13 @@ class Controller(ControllerBase):
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
         self._trace_diagnostics = None
-        self._calibration = CalibrationCoordinator(
-            predict_max_c=lambda baseline_q, probe_q, runtime: max(runtime.temp_c, runtime.target_c)
-            + max(0.0, probe_q) * 5.0
-        )
-        self._calibration_pending: CalibrationCommand | None = None
+        self._calibration = CalibrationCoordinator(predict_max_c=self._predict_calibration_max)
+        self._calibration_operations: collections.deque[tuple[str, object]] = collections.deque()
         self._calibration_last_revision = 0
+        self._calibration_ambient_c = float(cfg["T_amb"])
+        self._calibration_frame_results: collections.deque[tuple[float, CalibrationDecision]] = collections.deque()
+        self._calibration_feedback: collections.deque[tuple[float, float, bool, bool]] = collections.deque()
+        self._calibration_last_feedback_timestamp: float | None = None
         self._trace_calibration = CalibrationDecision(False, 0.0, None, CalibrationProgress())
         self._trace_baseline_allocation: AllocationResult | None = None
         self._trace_allocation: AllocationResult | None = None
@@ -1963,23 +1964,52 @@ class Controller(ControllerBase):
         return self._online_teardown_checkpoint(verdict)
 
     def request_calibration(self, command: CalibrationCommand) -> None:
-        """Accept one monotonic command; update() consumes it exactly once."""
+        """Queue each strictly newer operator command for ordered consumption."""
         if not isinstance(command, CalibrationCommand):
             raise TypeError("command must be CalibrationCommand")
         if command.command_revision < self._calibration_last_revision:
             raise ValueError("calibration command revision must be monotonic")
         if command.command_revision == self._calibration_last_revision:
             return
-        self._calibration_pending = command
+        self._calibration_operations.append(("command", command))
         self._calibration_last_revision = command.command_revision
 
-    def _calibration_runtime(self, baseline_q: float, temperature_c: float) -> CalibrationRuntimeContext:
+    def cancel_calibration(self, reason: str) -> None:
+        """Queue a safety abort without consuming an operator revision."""
+        if not isinstance(reason, str) or not reason:
+            raise ValueError("calibration cancellation reason must be a non-empty string")
+        self._calibration_operations.append(("cancel", reason))
+
+    def _predict_calibration_max(
+        self, baseline_q: float, probe_q: float, runtime: CalibrationRuntimeContext
+    ) -> float:
+        """Forecast the incumbent grey-box horizon for one requested probe."""
+        horizon = max(1, int(self.cfg["n_horizon"]))
+        requested_q = float(np.clip(baseline_q + probe_q, 0.0, 1.0))
+        adapter = GreyBoxPredictionAdapter.from_controller(self)
+        forecast = adapter.forecast(
+            np.full(horizon, requested_q, dtype=np.float64),
+            np.full(horizon, self._calibration_ambient_c, dtype=np.float64),
+        )
+        if forecast.size != horizon or not np.isfinite(forecast).all():
+            raise FloatingPointError("grey-box calibration forecast is non-finite")
+        return float(np.max(forecast))
+
+    def _calibration_runtime(
+        self,
+        baseline_q: float,
+        temperature_c: float,
+        *,
+        realized_q: float | None = None,
+        continuous: bool = True,
+        actuation_known: bool = True,
+    ) -> CalibrationRuntimeContext:
         return CalibrationRuntimeContext(
             now_s=time.monotonic(),
             temp_c=temperature_c,
             target_c=self._set_point_c,
             baseline_q=baseline_q,
-            realized_q=self._applied_combustion_load,
+            realized_q=self._applied_combustion_load if realized_q is None else realized_q,
             safety_ceiling_c=500.0,
             allocator_headroom=1.0,
             error_rate_headroom=1.0,
@@ -1987,36 +2017,84 @@ class Controller(ControllerBase):
             saturation_headroom=1.0,
             rank_progress=1.0,
             coverage_progress=1.0,
+            continuous=continuous,
+            actuation_known=actuation_known,
+        )
+
+    @staticmethod
+    def _command_decision(
+        decision: CalibrationDecision, command: CalibrationCommand
+    ) -> CalibrationDecision:
+        return replace(
+            decision,
+            command_revision=command.command_revision,
+            command_action=command.action,
         )
 
     def _advance_calibration(self, baseline_q: float, temperature_c: float) -> CalibrationDecision:
-        runtime = self._calibration_runtime(baseline_q, temperature_c)
-        command = self._calibration_pending
-        self._calibration_pending = None
-        if command is not None:
-            if command.action == "start":
-                decision = self._calibration.start(
-                    _CoordinatorCalibrationCommand(
-                        command.command_revision, command.maximum_temperature_c, command.seed
-                    ),
-                    runtime,
+        decision: CalibrationDecision | None = None
+        while self._calibration_feedback:
+            feedback_baseline_q, realized_q, continuous, actuation_known = self._calibration_feedback.popleft()
+            if self._trace_calibration.active:
+                decision = self._calibration.advance(
+                    self._calibration_runtime(
+                        feedback_baseline_q,
+                        temperature_c,
+                        realized_q=realized_q,
+                        continuous=continuous,
+                        actuation_known=actuation_known,
+                    )
                 )
-            elif command.action == "pause":
-                decision = self._calibration.pause()
-            elif command.action == "resume":
-                decision = self._calibration.resume(runtime)
+                self._trace_calibration = decision
+        runtime = self._calibration_runtime(baseline_q, temperature_c)
+        while self._calibration_operations:
+            operation, payload = self._calibration_operations.popleft()
+            if operation == "cancel":
+                decision = self._calibration.cancel_probe(payload, runtime)
             else:
-                decision = self._calibration.stop(runtime)
-        elif self._trace_calibration.active:
-            decision = self._calibration.advance(runtime)
-        else:
-            decision = CalibrationDecision(False, 0.0, None, self._trace_calibration.progress)
+                command = payload
+                assert isinstance(command, CalibrationCommand)
+                self._calibration_ambient_c = command.ambient_c
+                if command.action == "start":
+                    decision = self._calibration.start(
+                        _CoordinatorCalibrationCommand(
+                            command.command_revision, command.maximum_temperature_c, command.seed
+                        ),
+                        runtime,
+                    )
+                elif command.action == "pause":
+                    decision = self._calibration.pause()
+                elif command.action == "resume":
+                    decision = self._calibration.resume(runtime)
+                elif command.action == "stop":
+                    decision = self._calibration.stop(runtime)
+                else:
+                    decision = self._calibration.reset_progress(runtime)
+                decision = self._command_decision(decision, command)
+            self._trace_calibration = decision
+        if decision is None:
+            decision = replace(
+                self._trace_calibration,
+                events=(),
+                command_revision=0,
+                command_action="none",
+            )
         self._trace_calibration = decision
         return decision
 
     def set_output(self, applied):
-        """Recover the normalized applied load from measured mean auger duty."""
-        self._applied_combustion_load = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
+        """Recover delivered load and queue one completed-frame calibration feedback."""
+        realized_q = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
+        if self._calibration_frame_results:
+            baseline_q, produced = self._calibration_frame_results.popleft()
+            if produced.active:
+                previous = self._calibration_last_feedback_timestamp
+                continuous = previous is None or applied.timestamp > previous
+                self._calibration_last_feedback_timestamp = applied.timestamp
+                self._calibration_feedback.append(
+                    (baseline_q, realized_q, continuous, applied.controller_commanded)
+                )
+        self._applied_combustion_load = realized_q
 
     def _equilibrium_load(self, target, disturbance):
         """Private experiment seam for the identified-model equilibrium baseline."""
@@ -2135,7 +2213,6 @@ class Controller(ControllerBase):
         self._last_residual_load = residual_move
         self._last_raw_combustion_load = raw_firing_load
         self._last_combustion_load = combustion_load
-        self._applied_combustion_load = combustion_load
         allocation_kwargs = {
             "u_max": self.u_max,
             "fan_min_pct": self.cfg["fan_min_pct"],
@@ -2149,6 +2226,9 @@ class Controller(ControllerBase):
         auger = allocation.auger_duty
         self._trace_baseline_allocation = baseline_allocation
         self._trace_allocation = allocation
+        self._calibration_frame_results.append(
+            (baseline_allocation.normalized_combustion_load, calibration)
+        )
         fan_duty = allocation.fan_duty
         self._trace_diagnostics = MpcTraceDiagnostics(
             state_names=state_names,

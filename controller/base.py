@@ -155,6 +155,10 @@ class ControllerBase:
     def request_calibration(self, command) -> None:
         """Queue one immutable calibration command, if this core supports it."""
         raise NotImplementedError("controller does not support calibration")
+
+    def cancel_calibration(self, reason: str) -> None:
+        """Abort calibration for a safety boundary without creating an operator revision."""
+        raise NotImplementedError("controller does not support calibration")
     def get_status(self):
         """JSON-safe diagnostics for the MQTT payload, if this core exposes it."""
         if hasattr(self, "set_point"):

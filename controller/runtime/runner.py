@@ -366,6 +366,9 @@ class ControllerRunner(ABC):
     def set_target(self, setpoint): ...
     @abstractmethod
     def request_calibration(self, command: "CalibrationCommand") -> None: ...
+
+    @abstractmethod
+    def cancel_calibration(self, reason: str) -> None: ...
     @abstractmethod
     def submit(self, temp): ...
     @abstractmethod
@@ -440,6 +443,9 @@ class SyncControllerRunner(ControllerRunner):
 
     def request_calibration(self, command: "CalibrationCommand") -> None:
         self._core.request_calibration(command)
+
+    def cancel_calibration(self, reason: str) -> None:
+        self._core.cancel_calibration(reason)
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
         self._evidence_contexts[generation] = (session_id, cook_id)
@@ -664,7 +670,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._latest_delivered_output = None
         self._pending_dropped = 0
         self._pending_restore = None
-        self._pending_calibrations: collections.deque[CalibrationCommand] = collections.deque()
+        self._pending_calibrations: collections.deque[tuple[str, object]] = collections.deque()
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
         self._accepted_observations: dict[int, tuple[int, FrameObservation]] = {}
         self._inflight_observations: set[int] = set()
@@ -761,8 +767,11 @@ class ThreadedControllerRunner(ControllerRunner):
             if ordered_outputs:
                 with self._lock:
                     self._latest_delivered_output = ordered_outputs[-1]
-            for command in pending_calibrations:
-                self._core.request_calibration(command)
+            for operation, payload in pending_calibrations:
+                if operation == "command":
+                    self._core.request_calibration(payload)
+                else:
+                    self._core.cancel_calibration(payload)
             # Learner calls must never hold _lock. Drain until a lock-protected
             # empty observation queue commits this iteration's temperature
             # update; an observation that wins the lock before that commit is
@@ -878,7 +887,12 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def request_calibration(self, command: "CalibrationCommand") -> None:
         with self._lock:
-            self._pending_calibrations.append(command)
+            self._pending_calibrations.append(("command", command))
+
+    def cancel_calibration(self, reason: str) -> None:
+        with self._lock:
+            self._pending_calibrations.append(("cancel", reason))
+
     def submit(self, temp):
         with self._lock:
             self._temp = temp

@@ -27,6 +27,7 @@ class FakeControllerRunner:
         self._period = period
         self.submitted_temps = []
         self.calibration_requests = []
+        self.calibration_cancellations = []
         self._commands_fan = commands_fan
         self._wants_async = wants_async
         self._actuation_mode = actuation_mode
@@ -66,6 +67,9 @@ class FakeControllerRunner:
 
     def request_calibration(self, command):
         self.calibration_requests.append(command)
+
+    def cancel_calibration(self, reason):
+        self.calibration_cancellations.append(reason)
 
     def submit(self, temp):
         self.submitted_temps.append(temp)

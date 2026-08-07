@@ -477,3 +477,21 @@ def test_timeout_and_post_completion_safety_abort_terminal_snapshots_round_trip_
     coordinator.cancel_probe("post_complete_safety")
     safety_snapshot = coordinator.snapshot()
     assert CalibrationCoordinator.from_snapshot(safety_snapshot, safe_prediction).snapshot() == safety_snapshot
+
+
+def test_reset_progress_clears_active_progress_and_history_but_stop_retains_them():
+    coordinator, decision = start()
+    coordinator.advance(context(now_s=1.0, realized_q=0.5 + decision.probe_q))
+    stopped = coordinator.stop()
+
+    assert stopped.command_revision == 0
+    assert stopped.command_action == "stop"
+    assert stopped.progress.eligible_observations == 1
+
+    reset = coordinator.reset_progress()
+
+    assert reset.command_revision == 0
+    assert reset.command_action == "reset-progress"
+    assert reset.progress == type(reset.progress)()
+    assert reset.events[-1].kind == "progress_reset"
+    assert coordinator.snapshot()["completed_stages"] == ()

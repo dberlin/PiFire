@@ -97,6 +97,27 @@ def test_sync_runner_float_output_has_no_fan():
     assert out.cycle_ratio == 0.25 and out.fan is None
 
 
+
+def test_sync_runner_forwards_safety_cancellation_without_an_operator_command():
+    class CalibrationCore(_Core):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def request_calibration(self, command):
+            self.calls.append(("command", command))
+
+        def cancel_calibration(self, reason):
+            self.calls.append(("cancel", reason))
+
+    core = CalibrationCore()
+    runner = SyncControllerRunner(core)
+
+    runner.request_calibration("operator-command")
+    runner.cancel_calibration("lid-open")
+
+    assert core.calls == [("command", "operator-command"), ("cancel", "lid-open")]
+
 def test_sync_runner_preserves_actuation_mode_and_reports_solve_quality():
     class Clock:
         def __init__(self):

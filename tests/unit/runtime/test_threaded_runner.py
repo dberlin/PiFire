@@ -1450,3 +1450,28 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
     finally:
         gate.close()
         runner.stop()
+
+
+
+def test_threaded_runner_forwards_safety_cancellation_in_submission_order():
+    class CancellationCore(FakeCore):
+        def __init__(self):
+            super().__init__(period=0.001)
+            self.calibration_calls = []
+            self.cancelled = threading.Event()
+
+        def request_calibration(self, command):
+            self.calibration_calls.append(("command", command))
+
+        def cancel_calibration(self, reason):
+            self.calibration_calls.append(("cancel", reason))
+            self.cancelled.set()
+
+    core = CancellationCore()
+    runner = ThreadedControllerRunner(core)
+    runner.request_calibration("operator-command")
+    runner.cancel_calibration("lid-open")
+
+    assert core.cancelled.wait(1.0)
+    runner.stop()
+    assert core.calibration_calls == [("command", "operator-command"), ("cancel", "lid-open")]
