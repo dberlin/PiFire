@@ -3,6 +3,7 @@
 from math import isfinite
 from collections.abc import Mapping
 from typing import Any
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -213,13 +214,98 @@ class _ConstantPrediction:
         )
 
 
-def test_override_definition_marks_safety_and_manual_windows() -> None:
+class _RunnerModel(_ConstantPrediction):
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "schema": "unit",
+            "steady_gain": 1.0,
+            "plausibility_bounds": {"max_dc_gain_c_per_q": 10.0},
+        }
+
+
+class _FakeController:
+    def __init__(self, config: object) -> None:
+        del config
+
+    def solve(self, prediction: AffinePrediction, **_: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            sequence_q=np.full(prediction.free_output_c.size, 0.5),
+            objective=0.0,
+            kkt_residual=0.0,
+            iterations=1,
+            hessian_condition=1.0,
+        )
+
+
+class _RecordingOnlineManager:
+    observations: list[object] = []
+
+    def __init__(self, *, incumbent: object, challenger: object, **_: object) -> None:
+        self.incumbent = incumbent
+        self.challenger = challenger
+        self.role_generation = 0
+
+    def observe(self, observation: object, *, braking: bool) -> SimpleNamespace:
+        del braking
+        self.observations.append(observation)
+        reasons = []
+        if observation.safety_inhibited:
+            reasons.append(SimpleNamespace(value="safety"))
+        if observation.manual_override:
+            reasons.append(SimpleNamespace(value="manual"))
+        return SimpleNamespace(gate=SimpleNamespace(permitted=not reasons, reasons=tuple(reasons)))
+
+    def snapshot(self) -> dict[str, object]:
+        return {"policy": {}}
+
+
+def _install_fast_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = _RunnerModel(100.0)
+    calibration = _record(20, "unit-calibration")
+    monkeypatch.setattr(
+        runner_module,
+        "_fitted_model",
+        lambda arm, plant, seed, initialization: (
+            model,
+            0.0,
+            {60: [1.0]},
+            {60: [1.0]},
+            calibration,
+        ),
+    )
+    monkeypatch.setattr(runner_module, "_simulator_prediction_diagnostics", lambda *args: {})
+    monkeypatch.setattr(runner_module, "LinearMPC", _FakeController)
+    monkeypatch.setattr(
+        runner_module,
+        "_independent_box_qp_reference",
+        lambda *args: {"reference_converged": False, "reference_failure": "unit"},
+    )
+
+
+def test_runner_forwards_override_gates_without_updating_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import _run_scenario
+
+    _install_fast_runner(monkeypatch)
+    _RecordingOnlineManager.observations = []
+    monkeypatch.setattr(runner_module, "OnlineAdaptation", _RecordingOnlineManager)
     definition = next(item for item in SCENARIOS if item.name == "override-window")
 
-    assert definition.safety_override_at(80)  # pyright: ignore[reportAttributeAccessIssue]
-    assert not definition.safety_override_at(100)  # pyright: ignore[reportAttributeAccessIssue]
-    assert definition.manual_override_at(100)  # pyright: ignore[reportAttributeAccessIssue]
-    assert not definition.manual_override_at(120)  # pyright: ignore[reportAttributeAccessIssue]
+    row = _run_scenario(
+        definition,
+        plant="GrillSim",
+        seed=2,
+        mode="online",
+        duration_s=140,
+        arm="scheduled-arx",
+        initialization="correct",
+        horizon_s=60,
+    )
+
+    rejections = [item for item in row.promotion_history if item["kind"] == "update-rejection"]
+    assert {"safety", "manual"} <= {reason for item in rejections for reason in item["reasons"]}
+    assert all(not item["incumbent_updated"] and not item["challenger_updated"] for item in rejections)
+    assert any(observation.safety_inhibited for observation in _RecordingOnlineManager.observations)
+    assert any(observation.manual_override for observation in _RecordingOnlineManager.observations)
 
 
 def test_window_scores_use_untouched_multi_horizon_role_predictions() -> None:
