@@ -479,3 +479,89 @@ def test_current_report_caches_confidence_by_immutable_ledger_and_activation(mon
 
     assert first.to_dict() == second.to_dict()
     assert calls == 1
+
+
+def test_active_calibration_stage_is_not_reported_as_completed():
+    terminal = _calibration("low", 1)
+    baseline = terminal.payload.baseline_allocation
+    assert baseline is not None
+    combined = replace(
+        baseline,
+        normalized_combustion_load=0.2,
+        auger_duty=0.1,
+    )
+    active_payload = replace(
+        terminal.payload,
+        status="active",
+        probe_count=1,
+        probe_q=-0.1,
+        combined_q=0.2,
+        combined_allocation=combined,
+    )
+    active = terminal.model_copy(update={"evidence_id": "calibration-active-low", "payload": active_payload})
+
+    payload = build_evidence_report(_confidence((active,)), (active,)).to_dict()
+
+    assert payload["calibration"]["status"] == "active"
+    assert payload["calibration"]["stage"] == "low"
+    assert payload["calibration"]["completed_stages"] == []
+    assert payload["calibration"]["missing_stages"] == [
+        "low",
+        "middle",
+        "high",
+        "coast",
+    ]
+
+
+def test_reset_progress_excludes_prior_stages_reasons_and_counts():
+    old_complete = _calibration(
+        "coast",
+        4,
+        ("low", "middle", "high"),
+    )
+    old_timeout = _record(
+        "old-timeout",
+        CalibrationSummaryEvidence(
+            accepted=False,
+            probe_count=0,
+            reason="stage timeout",
+        ),
+        timestamp_ms=5,
+    )
+    reset = _record(
+        "reset-progress",
+        CalibrationSummaryEvidence(
+            accepted=False,
+            probe_count=0,
+            status="cancelled",
+            cancellation_reason="operator_reset-progress",
+            cancellation_command_revision=8,
+            cancellation_command_action="reset-progress",
+        ),
+        timestamp_ms=6,
+    )
+    terminal = _calibration("low", 7)
+    baseline = terminal.payload.baseline_allocation
+    assert baseline is not None
+    active_payload = replace(
+        terminal.payload,
+        status="active",
+        probe_count=1,
+        probe_q=-0.1,
+        combined_q=0.2,
+        combined_allocation=replace(
+            baseline,
+            normalized_combustion_load=0.2,
+            auger_duty=0.1,
+        ),
+    )
+    active = terminal.model_copy(update={"evidence_id": "new-active-low", "payload": active_payload})
+    records = (old_complete, old_timeout, reset, active)
+
+    payload = build_evidence_report(_confidence(records), records).to_dict()
+
+    assert payload["calibration"]["status"] == "active"
+    assert payload["calibration"]["completed_stages"] == []
+    assert payload["calibration"]["ineligible_reasons"] == []
+    assert payload["calibration"]["timed_out"] is False
+    assert payload["calibration"]["eligible_count"] == 7

@@ -266,26 +266,59 @@ def _referenced_records(
 
 
 def _calibration(records: Sequence[ModelEvidenceRecord]) -> dict[str, object]:
-    calibration = tuple(
+    calibration_records = tuple(
         record
         for record in records
         if record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
         and isinstance(record.payload, CalibrationSummaryEvidence)
     )
+    reset_records = tuple(
+        record
+        for record in calibration_records
+        if cast(CalibrationSummaryEvidence, record.payload).command_action == "reset-progress"
+        or cast(
+            CalibrationSummaryEvidence,
+            record.payload,
+        ).cancellation_command_action
+        == "reset-progress"
+    )
+    reset_record = max(
+        reset_records,
+        key=lambda record: (record.timestamp_ms, record.evidence_id),
+        default=None,
+    )
+    reset_key = (reset_record.timestamp_ms, reset_record.evidence_id) if reset_record is not None else None
+    calibration = tuple(
+        record
+        for record in calibration_records
+        if reset_key is None or (record.timestamp_ms, record.evidence_id) > reset_key
+    )
     summaries = tuple(
         cast(SessionSummaryEvidence, record.payload)
         for record in records
-        if record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(record.payload, SessionSummaryEvidence)
+        if record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+        and isinstance(record.payload, SessionSummaryEvidence)
+        and (reset_key is None or (record.timestamp_ms, record.evidence_id) > reset_key)
     )
     latest = cast(CalibrationSummaryEvidence, calibration[-1].payload) if calibration else None
     completed: set[str] = set()
     reasons: set[str] = set()
     revisions: list[int] = []
+    if reset_record is not None:
+        reset = cast(CalibrationSummaryEvidence, reset_record.payload)
+        revisions.extend(
+            value
+            for value in (
+                reset.command_revision,
+                reset.cancellation_command_revision,
+            )
+            if value is not None
+        )
     for record in calibration:
         payload = cast(CalibrationSummaryEvidence, record.payload)
         if payload.accepted and payload.continuous:
             completed.update(payload.completed_stages)
-            if payload.stage is not None:
+            if payload.status == "accepted" and payload.stage is not None:
                 completed.add(payload.stage)
         if not payload.accepted and payload.reason is not None:
             reasons.add(payload.reason)
@@ -325,7 +358,15 @@ def _calibration(records: Sequence[ModelEvidenceRecord]) -> dict[str, object]:
         "ineligible_count": ineligible_count,
         "ineligible_reasons": sorted(reasons),
         "timed_out": timed_out,
-        "incomplete": bool(missing) or status in {"inactive", "rejected", "active", "paused", "cancelled"},
+        "incomplete": bool(missing)
+        or status
+        in {
+            "inactive",
+            "rejected",
+            "active",
+            "paused",
+            "cancelled",
+        },
         "revision": max(revisions, default=0),
     }
 

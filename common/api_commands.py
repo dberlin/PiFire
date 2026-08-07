@@ -29,8 +29,9 @@ from common.common import (
 from common.control_delta import ControlDeltaError, control_delta, validated_mpc_calibration_command
 from common.modes import Mode
 from common.datastore_accessors import (
+    mpc_calibration_command_revision,
+    queue_mpc_calibration_command,
     read_control,
-    read_pending_control_writes,
     read_current,
     read_current_snapshot,
     read_pellet_db,
@@ -688,46 +689,6 @@ def _mpc_grey_box_active(settings):
     return not isinstance(selected, dict) or selected.get("enable_grey_box") is not False
 
 
-def _mpc_calibration_command_from_delta(delta):
-    if not isinstance(delta, dict):
-        return None
-    for op in delta.get("ops", ()):
-        if not isinstance(op, dict) or op.get("op") != "mpc_calibration.set":
-            continue
-        command = op.get("command")
-        if isinstance(command, dict):
-            return command
-    return None
-
-
-def mpc_calibration_command_state(control=None, pending_writes=None):
-    """Return the highest accepted live-or-queued calibration command."""
-    if control is None:
-        control = read_control()
-    current = control.get("mpc_calibration") if isinstance(control, dict) else None
-    accepted = current if isinstance(current, dict) else None
-    if pending_writes is None:
-        pending_writes = read_pending_control_writes()
-    for delta in pending_writes:
-        command = _mpc_calibration_command_from_delta(delta)
-        if command is None:
-            continue
-        revision = command.get("revision")
-        accepted_revision = accepted.get("revision") if accepted is not None else -1
-        if isinstance(revision, int) and not isinstance(revision, bool) and revision >= accepted_revision:
-            accepted = command
-    return accepted
-
-
-def mpc_calibration_command_revision(control=None, pending_writes=None):
-    """Return the accepted calibration revision high-water mark."""
-    command = mpc_calibration_command_state(control, pending_writes)
-    if command is None:
-        return 0
-    revision = command.get("revision")
-    return revision if isinstance(revision, int) and not isinstance(revision, bool) else 0
-
-
 def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
     """Validate and queue one revisioned calibration intent for the live drain."""
     try:
@@ -735,15 +696,6 @@ def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
     except ControlDeltaError as error:
         data["result"] = "ERROR"
         data["message"] = str(error)
-        return
-    accepted = mpc_calibration_command_state(control)
-    accepted_revision = accepted.get("revision") if accepted is not None else -1
-    if command["revision"] < accepted_revision or (command["revision"] == accepted_revision and command != accepted):
-        data["result"] = "ERROR"
-        data["message"] = f"MPC calibration revision must exceed {accepted_revision}"
-        return
-    if command == accepted:
-        data["data"]["mpc_calibration"] = command
         return
     if command["action"] == "start":
         if control.get("mode") != Mode.HOLD or not _mpc_grey_box_active(settings):
@@ -760,12 +712,16 @@ def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
             data["result"] = "ERROR"
             data["message"] = "MPC calibration maximum temperature must be below the configured safety ceiling"
             return
-    _write_control_delta(
-        control,
-        control_delta(ops=[{"op": "mpc_calibration.set", "command": command}]),
-        kind,
-        origin,
-    )
+    delta = control_delta(ops=[{"op": "mpc_calibration.set", "command": command}])
+    if kind is not WriteKind.OVERWRITE:
+        try:
+            queue_mpc_calibration_command(delta, command, origin)
+        except ControlDeltaError as error:
+            data["result"] = "ERROR"
+            data["message"] = str(error)
+            return
+    else:
+        _write_control_delta(control, delta, kind, origin)
     data["data"]["mpc_calibration"] = command
 
 

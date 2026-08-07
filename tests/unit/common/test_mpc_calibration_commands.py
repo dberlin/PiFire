@@ -1,8 +1,16 @@
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from threading import Barrier
 
 import pytest
 
 from common import api_commands
+from common.control_delta import ControlDeltaError, control_delta
+from common.datastore_accessors import (
+    mpc_calibration_command_state,
+    queue_mpc_calibration_command,
+    read_pending_control_writes,
+)
 from common.modes import Mode
 
 
@@ -36,7 +44,12 @@ def _invoke(monkeypatch, control, settings, command):
     writes = []
     monkeypatch.setattr(api_commands, "read_control", lambda: deepcopy(control))
     monkeypatch.setattr(api_commands, "read_settings", lambda: deepcopy(settings))
-    monkeypatch.setattr(api_commands, "write_control", lambda *args, **kwargs: writes.append((args, kwargs)))
+
+    def queue(delta, _command, origin):
+        writes.append(((delta,), {"origin": origin}))
+        return True
+
+    monkeypatch.setattr(api_commands, "queue_mpc_calibration_command", queue)
     result = api_commands.process_command("set", ["mpc_calibration", command])
     return result, writes
 
@@ -66,43 +79,74 @@ def test_invalid_or_non_monotonic_start_leaves_control_unchanged(monkeypatch, co
     assert writes == []
 
 
-def test_pending_revision_conflict_is_rejected_before_queueing(monkeypatch):
-    pending = api_commands.control_delta(ops=[{"op": "mpc_calibration.set", "command": _command(revision=4)}])
-    monkeypatch.setattr(api_commands, "read_pending_control_writes", lambda: (pending,))
-    result, writes = _invoke(
-        monkeypatch,
-        _control(),
-        _settings(),
-        _command(revision=4, action="stop"),
+def test_pending_revision_conflict_is_rejected_before_queueing(ds):
+    start = _command(revision=4)
+    stop = _command(revision=4, action="stop")
+
+    assert queue_mpc_calibration_command(
+        control_delta(ops=[{"op": "mpc_calibration.set", "command": start}]),
+        start,
+        "test",
     )
-    assert result["result"] == "ERROR"
-    assert "revision must exceed 4" in result["message"]
-    assert writes == []
+    with pytest.raises(ControlDeltaError, match="revision must exceed 4"):
+        queue_mpc_calibration_command(
+            control_delta(ops=[{"op": "mpc_calibration.set", "command": stop}]),
+            stop,
+            "test",
+        )
+
+    pending = read_pending_control_writes()
+    assert len(pending) == 1
+    assert mpc_calibration_command_state({}, pending) == start
 
 
-def test_exact_pending_command_retry_is_idempotent(monkeypatch):
+def test_exact_pending_command_retry_is_idempotent(ds):
     command = _command(revision=4)
-    pending = api_commands.control_delta(ops=[{"op": "mpc_calibration.set", "command": command}])
-    monkeypatch.setattr(api_commands, "read_pending_control_writes", lambda: (pending,))
+    delta = control_delta(ops=[{"op": "mpc_calibration.set", "command": command}])
 
-    result, writes = _invoke(monkeypatch, _control(), _settings(), command)
-
-    assert result["result"] == "OK"
-    assert result["data"]["mpc_calibration"] == command
-    assert writes == []
+    assert queue_mpc_calibration_command(delta, command, "test")
+    assert queue_mpc_calibration_command(delta, command, "test") is False
+    assert len(read_pending_control_writes()) == 1
 
 
-def test_revision_above_pending_high_water_queues_safety_command(monkeypatch):
-    pending = api_commands.control_delta(ops=[{"op": "mpc_calibration.set", "command": _command(revision=4)}])
-    monkeypatch.setattr(api_commands, "read_pending_control_writes", lambda: (pending,))
-    result, writes = _invoke(
-        monkeypatch,
-        _control(),
-        _settings(),
-        _command(revision=5, action="stop"),
+def test_revision_above_pending_high_water_queues_safety_command(ds):
+    start = _command(revision=4)
+    stop = _command(revision=5, action="stop")
+
+    assert queue_mpc_calibration_command(
+        control_delta(ops=[{"op": "mpc_calibration.set", "command": start}]),
+        start,
+        "test",
     )
-    assert result["result"] == "OK"
-    assert writes[0][0][0]["ops"][0]["command"]["revision"] == 5
+    assert queue_mpc_calibration_command(
+        control_delta(ops=[{"op": "mpc_calibration.set", "command": stop}]),
+        stop,
+        "test",
+    )
+
+    assert mpc_calibration_command_state({}, read_pending_control_writes()) == stop
+
+
+def test_concurrent_equal_revisions_admit_exactly_one_fifo_command(ds):
+    barrier = Barrier(2)
+
+    def admit(action):
+        command = _command(revision=4, action=action)
+        delta = control_delta(ops=[{"op": "mpc_calibration.set", "command": command}])
+        barrier.wait()
+        try:
+            queue_mpc_calibration_command(delta, command, f"test-{action}")
+        except ControlDeltaError:
+            return "rejected"
+        return "accepted"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = tuple(executor.map(admit, ("start", "stop")))
+
+    pending = read_pending_control_writes()
+    assert sorted(outcomes) == ["accepted", "rejected"]
+    assert len(pending) == 1
+    assert mpc_calibration_command_state({}, pending) == pending[0]["ops"][0]["command"]
 
 
 @pytest.mark.parametrize(
