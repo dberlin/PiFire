@@ -405,6 +405,7 @@ class CalibrationCoordinator:
         if progress.positive_observations < self._config.min_positive_observations: reasons.append("insufficient_positive")
         if progress.negative_observations < self._config.min_negative_observations: reasons.append("insufficient_negative")
         if progress.rank_progress < 1.0 or progress.coverage_progress < 1.0: reasons.append("rank_coverage")
+        if not progress.continuous: reasons.append("discontinuity")
         if abs(progress.realized_probe_sum) > self._config.max_probe_q: reasons.append("nonzero_mean")
         return tuple(reasons)
 
