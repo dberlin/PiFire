@@ -4,6 +4,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import type { CommandClient, CommandResult } from "../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
+import { queryKeys } from "../../../src/helpers/query/keys";
+import type { Settings } from "../../../src/helpers/settings/settingsApi";
 import type { ShellContext } from "../../../src/helpers/shellContext";
 import { testQueryClient } from "../test-utils";
 
@@ -20,13 +22,14 @@ afterEach(cleanup);
 
 beforeEach(() => {
   getSettingsMock.mockReset();
-  getSettingsMock.mockResolvedValue({ globals: { first_time_setup: false } });
+  getSettingsMock.mockResolvedValue(OK);
 });
 
-const OK: CommandResult = { ok: true, message: "" };
+const OK: Partial<Settings> = { globals: { first_time_setup: false } };
+const COMMAND_OK: CommandResult = { ok: true, message: "" };
 
 function stubCommand(): CommandClient {
-  const ok = async () => OK;
+  const ok = async () => COMMAND_OK;
   return {
     setMode: rs.fn(ok),
     hold: rs.fn(ok),
@@ -77,13 +80,20 @@ function renderDashboardRoute(over: Partial<ShellContext> = {}) {
     ],
     { initialEntries: ["/"] },
   );
-  return render(
-    <QueryClientProvider client={testQueryClient()}>
+  // Returned alongside the render result so a test can inspect the query's
+  // settled status directly (client.getQueryState) instead of only knowing
+  // the mock was invoked -- "called" and "the promise it returned has
+  // resolved/rejected" are different moments, and a test asserting on the
+  // gate's post-settle behaviour needs the latter.
+  const client = testQueryClient();
+  const renderResult = render(
+    <QueryClientProvider client={client}>
       <AppPrefsProvider>
         <RouterProvider router={router} />
       </AppPrefsProvider>
     </QueryClientProvider>,
   );
+  return { client, ...renderResult };
 }
 
 const wizardShowing = () => screen.queryByText("wizard stand-in") !== null;
@@ -124,10 +134,25 @@ describe("DashboardRoute", () => {
   it("still renders the dashboard when the check fails (advisory only)", async () => {
     getSettingsMock.mockRejectedValue(new Error("offline"));
 
-    renderDashboardRoute();
+    const { client } = renderDashboardRoute();
 
-    await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
+    // "getSettingsMock was called" proves the request was issued, not that it
+    // has finished -- the rejection is still a pending microtask at that
+    // point, so waiting on it alone can't tell "the read failed" apart from
+    // "the read hasn't settled yet". Waiting on the query's own status
+    // instead proves the rejection actually landed in the cache before the
+    // assertions below run.
+    await waitFor(() => expect(client.getQueryState(queryKeys.settings)?.status).toBe("error"));
     expect(wizardShowing()).toBe(false);
     expect(screen.getByText("LIVE")).toBeInTheDocument();
+  });
+
+  it("issues no settings request of its own when the cache is already warm", async () => {
+    // AppPrefsProvider and /settings' loader read the same entry. The gate must
+    // ride that entry, not add a fourth GET to every dashboard paint.
+    getSettingsMock.mockResolvedValue(OK);
+    renderDashboardRoute();
+    await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
+    expect(getSettingsMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
-import { readAccent } from "../helpers/settings/accent";
-import { getSettings } from "../helpers/settings/settingsApi";
+import { useSettings } from "../helpers/settings/useSettings";
 import { useShellState } from "../helpers/shellContext";
 import { useAppPrefs } from "./AppPrefs";
 import { ConnectionStatus } from "./ConnectionStatus";
@@ -20,27 +19,19 @@ export function DashboardRoute() {
   // Non-blocking first_time_setup gate. "/" deliberately has NO route loader
   // (see App.tsx): React Router defers rendering until a loader resolves --
   // even a synchronous one resolves on a microtask -- so a loader here would
-  // turn the dashboard's first paint into an async gap. Instead we check once
-  // after mount and redirect a fresh install to the wizard. A brief dashboard
-  // flash before the redirect is the accepted tradeoff; a failed check is
-  // advisory and must never block the dashboard.
-  // The same fetch also carries the stored accent, which is what the app should
-  // be wearing from the first paint rather than the provider's ember default.
+  // turn the dashboard's first paint into an async gap. A brief dashboard
+  // flash before the redirect is the accepted tradeoff.
+  //
+  // The read behind this is now the app's shared settings entry
+  // (helpers/settings/useSettings.ts), which AppPrefsProvider has usually
+  // already primed, so the gate costs no request of its own. A failed read
+  // leaves `data` undefined and the gate simply does not fire -- the same
+  // advisory, fail-quiet behaviour it always had.
+  const { data: settings } = useSettings();
+  const firstTime = settings?.globals?.first_time_setup === true;
   useEffect(() => {
-    let cancelled = false;
-    getSettings(BASE_URL)
-      .then((s) => {
-        if (cancelled) return;
-        setAccent(readAccent(s));
-        if (s.globals?.first_time_setup) navigate("/wizard");
-      })
-      .catch(() => {
-        /* advisory only -- never block the dashboard on this check */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [navigate, setAccent]);
+    if (firstTime) navigate("/wizard");
+  }, [firstTime, navigate]);
 
   if (phase !== "live" && phase !== "demo") {
     return (

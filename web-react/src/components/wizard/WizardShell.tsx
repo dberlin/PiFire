@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
 import { systemAction } from "../../helpers/admin/adminApi";
+import { queryKeys } from "../../helpers/query/keys";
+import { queryClient } from "../../helpers/query/queryClient";
 import { cancelWizard, finishWizard, saveDraft } from "../../helpers/wizard/wizardApi";
 import { BASE_URL } from "../../helpers/wizard/wizardRoutes";
 import { initialWorking } from "../../helpers/wizard/wizardState";
@@ -112,8 +114,8 @@ export function WizardShell() {
       console.warn("Wizard: failed to save draft on exit", err);
     }
     const ok = await cancelWizard(BASE_URL);
-    setExiting(false);
     if (!ok) {
+      setExiting(false);
       // globals.first_time_setup is still set, so DashboardRoute would bounce
       // us right back here -- staying put with a visible error is the only
       // honest outcome.
@@ -121,9 +123,33 @@ export function WizardShell() {
       return;
     }
     setExitError(null);
-    // /api/wizard/cancel has cleared globals.first_time_setup, so
-    // DashboardRoute's post-mount check (DashboardRoute.tsx:26-38) will NOT
-    // send us straight back. Navigating without that clear would loop.
+    try {
+      // /api/wizard/cancel has cleared globals.first_time_setup server-side,
+      // but AppPrefsProvider has held an active settings observer since app
+      // boot -- while first_time_setup was still true -- and that cached
+      // entry is still fresh (queryClient.ts's 30s staleTime), so it will NOT
+      // refetch on its own. Without invalidating it here, DashboardRoute's
+      // gate (which reads that same shared entry) would mount reading the
+      // stale `true` and bounce us right back to the wizard we just left.
+      // Awaited so the fresh value is in the cache before DashboardRoute's
+      // first render, not merely requested.
+      //
+      // `exiting` deliberately stays true for this whole await (see the
+      // `finally` below): re-enabling "Exit Setup" the moment cancelWizard
+      // resolves would show an idle, clickable button while the app is still
+      // sitting on the wizard waiting on this refetch -- inviting a second
+      // click that re-runs saveDraft + cancelWizard -- and getSettings has
+      // neither a timeout nor an AbortSignal (settingsApi.ts), so that wait
+      // has no bounded failure path to fall back on.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
+    } catch (err) {
+      // Advisory only, like the gate itself: a failed refetch just leaves the
+      // cache stale (DashboardRoute may bounce us back once more), but must
+      // never strand someone who already left successfully server-side.
+      console.warn("Wizard: failed to refresh the settings cache on exit", err);
+    } finally {
+      setExiting(false);
+    }
     navigate("/");
   }
 

@@ -56,9 +56,11 @@ export function HydrateFallback() {
 // would turn the dashboard's first paint into an async gap, breaking the
 // existing synchronous assertions in App.test.tsx / DashboardRoute.test.tsx
 // and adding an extra network round trip to every dashboard load. The gate is
-// instead a non-blocking post-mount check inside DashboardRoute: it fetches
-// settings once after mount and navigates to /wizard only on a fresh install,
-// so "/" keeps its synchronous first paint and a failed check stays advisory.
+// instead a non-blocking post-mount check inside DashboardRoute: it reads the
+// shared settings cache (usually already primed by AppPrefsProvider, so this
+// costs no request of its own) and navigates to /wizard only on a fresh
+// install, so "/" keeps its synchronous first paint and a failed check stays
+// advisory.
 export const routes = [
   // Pathless layout route: AppShell renders the navbar, the timer strip and the
   // global alert strip around whichever page below it matched, and owns the

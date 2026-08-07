@@ -4,17 +4,24 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import type { CommandClient, CommandResult } from "../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
+// The module-singleton client, NOT testQueryClient(): WizardShell's exit
+// handler invalidates settingsRoot on that exact singleton (the same one
+// useSaveSettings.ts writes through -- see useSaveSettings.test.tsx for the
+// precedent), so a render wrapped in a throwaway client would invalidate a
+// cache DashboardRoute never reads from, silently hiding the bug this file
+// exists to pin.
+import { queryClient } from "../../../src/helpers/query/queryClient";
 import type { ShellContext } from "../../../src/helpers/shellContext";
 import type { WizardState } from "../../../src/helpers/wizard/wizardTypes";
-import { testQueryClient } from "../test-utils";
 
 // One fake PiFire settings store, shared by BOTH mocked API clients, because
 // the defect this file pins lives in the seam BETWEEN them: WizardShell's exit
-// calls /api/wizard/cancel, and DashboardRoute independently re-reads
-// globals.first_time_setup after mount and navigates back to /wizard while it
-// is still set (DashboardRoute.tsx:26-38). Leaving the wizard therefore only
-// works if the cancel actually clears the flag -- otherwise the user is
-// bounced straight back into the wizard they just left, forever.
+// calls /api/wizard/cancel, and DashboardRoute reads globals.first_time_setup
+// off the shared settings cache (useSettings.ts) and navigates back to
+// /wizard while it is still true. Leaving the wizard therefore only works if
+// the cancel both clears the flag on the server AND invalidates that cache
+// entry -- otherwise the user is bounced straight back into the wizard they
+// just left, forever.
 //
 // `cancelWizard` clearing this object mirrors what the real route does, which
 // tests/web/test_api_wizard.py::test_cancel_clears_first_time_setup pins on
@@ -43,7 +50,12 @@ const { WizardShell } = await import("../../../src/components/wizard/WizardShell
 const { DashboardRoute } = await import("../../../src/components/DashboardRoute");
 const { AppPrefsProvider } = await import("../../../src/components/AppPrefs");
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // Leaking a cached settings entry into the next test would let that test's
+  // DashboardRoute observer read this file's data instead of its own mock.
+  queryClient.clear();
+});
 
 beforeEach(() => {
   backend.first_time_setup = true;
@@ -124,7 +136,7 @@ function renderApp() {
     { initialEntries: ["/wizard"] },
   );
   return render(
-    <QueryClientProvider client={testQueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <AppPrefsProvider>
         <RouterProvider router={router} />
       </AppPrefsProvider>
@@ -144,13 +156,57 @@ describe("wizard exit round trip", () => {
     expect(await screen.findByText("LIVE")).toBeInTheDocument();
     expect(backend.first_time_setup).toBe(false);
 
-    // The trap: DashboardRoute re-checks the flag after mount. Wait for that
-    // check to have actually run before concluding we stayed -- asserting
-    // straight after the navigation would pass even against a version that
-    // bounces a beat later.
-    await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
+    // The trap: DashboardRoute reads the SHARED settings cache rather than
+    // fetching its own copy, so `getSettingsMock` having been called at all
+    // proves nothing -- AppPrefsProvider already called it once at boot,
+    // before Exit Setup was even clicked. The call that actually matters is
+    // the SECOND one: the refetch WizardShell's exit handler triggers by
+    // invalidating the cache. Waiting for exactly 2 calls (boot + that
+    // invalidation-triggered refetch) is what proves the fresh, cleared value
+    // actually landed before concluding we stayed -- asserting on "called at
+    // all" would pass even against a version that bounces a beat later.
+    await waitFor(() => expect(getSettingsMock).toHaveBeenCalledTimes(2));
     expect(onWizard()).toBe(false);
     expect(screen.getByText("LIVE")).toBeInTheDocument();
+  });
+
+  it('keeps Exit Setup disabled ("Leaving…") until the post-cancel settings refetch settles', async () => {
+    // Pins WizardShell.tsx's handleExit ordering: `exiting` must stay true for
+    // the WHOLE awaited invalidateQueries call, not just through cancelWizard.
+    // Clearing it early re-enables a button that looks idle while the app is
+    // still sitting on the wizard -- inviting a double-click that re-runs
+    // saveDraft + cancelWizard, with no bounded failure path underneath
+    // (getSettings has neither a timeout nor an AbortSignal, and retry is off).
+    let releaseRefetch: () => void = () => {};
+    let callCount = 0;
+    getSettingsMock.mockReset().mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        // The boot-time read AppPrefsProvider issues -- must resolve normally
+        // so the wizard actually renders.
+        return Promise.resolve({ globals: { first_time_setup: backend.first_time_setup } });
+      }
+      // The invalidation-triggered refetch: held open until the test releases
+      // it, so the in-flight window is observable rather than raced.
+      return new Promise((resolve) => {
+        releaseRefetch = () => resolve({ globals: { first_time_setup: backend.first_time_setup } });
+      });
+    });
+
+    renderApp();
+    await screen.findByRole("heading", { name: "Welcome" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Exit Setup" }));
+
+    await waitFor(() => expect(getSettingsMock).toHaveBeenCalledTimes(2));
+    // Still mid-refetch, still on the wizard: the button must not have gone
+    // back to an idle, clickable "Exit Setup".
+    expect(onWizard()).toBe(true);
+    expect(screen.getByRole("button", { name: "Leaving…" })).toBeDisabled();
+
+    releaseRefetch();
+
+    expect(await screen.findByText("LIVE")).toBeInTheDocument();
   });
 
   it("a cancel that leaves first_time_setup set bounces the user right back", async () => {
