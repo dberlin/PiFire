@@ -17,6 +17,7 @@ MODEL_EVIDENCE_SCHEMA_VERSION = 2
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
 NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
+PositiveInt: TypeAlias = Annotated[int, Field(gt=0, strict=True)]
 NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 Digest: TypeAlias = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
@@ -165,7 +166,7 @@ class ForecastOriginEvidence:
     origin_sequence: NonNegativeInt
     origin_time_ms: NonNegativeInt
     completion_time_ms: NonNegativeInt
-    horizon_steps: Literal[3, 15, 45, 90, 180]
+    horizon_steps: PositiveInt
     incumbent_digest: Digest
     challenger_digest: Digest
     incumbent_prediction_c: FiniteFloat

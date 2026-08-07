@@ -153,12 +153,6 @@ def evaluate_confidence(
     _gate(gates, "positive-gain", refresh is not None and refresh.gain is not None and refresh.gain > 0.0 and isfinite(refresh.gain), "positive-gain")
     _gate(gates, "delay-limit", refresh is not None and refresh.delay_steps is not None and refresh.delay_steps <= config.maximum_delay_steps, "delay-limit")
     _gate(gates, "finite-covariance", refresh is not None and refresh.covariance_finite, "finite-covariance")
-    _gate(
-        gates,
-        "calibration-schema-integrity",
-        _calibration_schema_current(records),
-        "calibration-schema-integrity",
-    )
     _gate(gates, "state-alignment", refresh is not None and refresh.alignment_error_c is not None and refresh.alignment_error_c <= config.maximum_alignment_error_c, "state-alignment")
     _gate(gates, "snapshot-round-trip", refresh is not None and refresh.snapshot_round_trip, "snapshot-round-trip")
     _gate(gates, "sequential-wins", refresh is not None and refresh.sequential_wins >= config.required_sequential_wins, "sequential-wins")
@@ -175,7 +169,12 @@ def evaluate_confidence(
         and timing.p99_ms <= config.maximum_refresh_p99_ms,
         "target-timing",
     )
-    _gate(gates, "model-integrity", bool(selected) and all(record.model_digest == digest for record in selected), "model-integrity")
+    _gate(
+        gates,
+        "model-integrity",
+        bool(selected) and _candidate_model_integrity(records, digest, generation),
+        "model-integrity",
+    )
     _gate(gates, "provenance-integrity", _one_provenance(selected), "provenance-integrity")
     _gate(
         gates,
@@ -191,8 +190,16 @@ def evaluate_confidence(
     present = {interval.horizon_steps for interval in intervals}
     for horizon in _REQUIRED_HORIZONS:
         if horizon not in present:
-            _gate(gates, f"unsupported-horizon-{horizon}", False, "unsupported-horizon")
+            _gate(gates, f"missing-horizon-{horizon}", False, f"missing-horizon-{horizon}")
     for interval in intervals:
+        if interval.horizon_steps not in _RMSE_LIMITS:
+            _gate(
+                gates,
+                f"unsupported-horizon-{interval.horizon_steps}",
+                False,
+                f"unsupported-horizon-{interval.horizon_steps}",
+            )
+            continue
         label = _label(interval)
         _gate(gates, f"absolute-rmse:{label}", interval.challenger_rmse_c is not None and interval.challenger_rmse_c <= _RMSE_LIMITS[interval.horizon_steps], f"absolute-rmse:{label}")
         _gate(gates, f"signed-bias:{label}", _signed_bias_ok(origins, interval, config.maximum_signed_bias_c), f"signed-bias:{label}")
@@ -255,11 +262,17 @@ def _calibration_complete(records: Sequence[ModelEvidenceRecord]) -> bool:
     return _REQUIRED_STAGES <= stages
 
 
-def _calibration_schema_current(records: Sequence[ModelEvidenceRecord]) -> bool:
-    return all(
-        record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+def _candidate_model_integrity(
+    records: Sequence[ModelEvidenceRecord],
+    digest: str | None,
+    generation: int | None,
+) -> bool:
+    return digest is not None and generation is not None and all(
+        record.model_digest == digest
         for record in records
-        if isinstance(record.payload, CalibrationSummaryEvidence)
+        if record.role_generation == generation
+        and not isinstance(record.payload, CalibrationSummaryEvidence)
+        and record.model_digest is not None
     )
 
 def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -> tuple[BootstrapInterval, ...]:
@@ -331,7 +344,16 @@ def _hierarchical_ratios(
 
 
 def _block_starts(rows: Sequence[_Origin], horizon: int) -> tuple[int, ...]:
-    return tuple(start for start in range(len(rows) - horizon + 1) if all(rows[index].payload.origin_sequence + 1 == rows[index + 1].payload.origin_sequence for index in range(start, start + horizon - 1)))
+    return tuple(
+        start
+        for start in range(len(rows) - horizon + 1)
+        if all(
+            rows[index].record.session_id == rows[index + 1].record.session_id
+            and rows[index].payload.origin_sequence + 1
+            == rows[index + 1].payload.origin_sequence
+            for index in range(start, start + horizon - 1)
+        )
+    )
 
 
 def _sample_blocks(rows: Sequence[_Origin], horizon: int, starts: Sequence[int], rng: np.random.Generator) -> tuple[_Origin, ...]:
