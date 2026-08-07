@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getSettings } from "../../helpers/settings/settingsApi";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSettings } from "../../helpers/settings/useSettings";
 import {
   computeCoefficients,
   fetchAutoStatus,
@@ -54,7 +54,6 @@ function probeLabels(settings: unknown): string[] {
  */
 export function TunerPage() {
   const [mode, setMode] = useState<TuneMode>("manual");
-  const [probes, setProbes] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
   const [reference, setReference] = useState("");
   const [reading, setReading] = useState<TrReading | null>(null);
@@ -70,22 +69,25 @@ export function TunerPage() {
   const session = useTunerSession(BASE_URL);
   const open = session.status === "open";
 
-  //  Read the probe list once on mount. No session, no control write -- just
-  //  the map the operator picks from. Reference defaults to the first probe
-  //  that is not the tune target -- auto tuning reads a DIFFERENT, trusted probe.
-  useEffect(() => {
-    let cancelled = false;
-    getSettings(BASE_URL).then((settings) => {
-      if (cancelled) return;
-      const labels = probeLabels(settings);
-      setProbes(labels);
-      setSelected((current) => current || labels[0] || "");
-      setReference((current) => current || labels.find((l) => l !== labels[0]) || labels[0] || "");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  //  The probe list the operator picks from. No session, no control write --
+  //  just a read, and now the app's shared settings entry rather than a fourth
+  //  independent GET of the same blob.
+  const { data: settings } = useSettings();
+  const probes = useMemo(() => (settings ? probeLabels(settings) : []), [settings]);
+
+  //  Reference defaults to the first probe that is NOT the tune target -- auto
+  //  tuning reads a DIFFERENT, trusted probe.
+  //
+  //  Render-phase seeding rather than a useEffect (see AppPrefs.tsx for the
+  //  same idiom and the reason): these are this component's own state, and the
+  //  seed must happen once, on the first list to arrive, so a later refetch
+  //  cannot yank the operator's selection out from under them mid-session.
+  const [seeded, setSeeded] = useState(false);
+  if (probes.length > 0 && !seeded) {
+    setSeeded(true);
+    setSelected((current) => current || probes[0] || "");
+    setReference((current) => current || probes.find((l) => l !== probes[0]) || probes[0] || "");
+  }
 
   //  Poll while the session is open. The timer is armed only after a read
   //  settles (see inFlight), so a slow response cannot queue polls behind

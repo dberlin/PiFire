@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { queryKeys } from "../../../../src/helpers/query/keys";
 import * as actualTunerApi from "../../../../src/helpers/tuner/tunerApi" with {
   rstest: "importActual",
 };
+import { renderWithQuery, testQueryClient } from "../../test-utils";
 
 const openMock = rs.fn();
 const closeMock = rs.fn();
@@ -91,21 +94,68 @@ async function recordAllSegments() {
 }
 
 describe("TunerPage", () => {
+  it("takes the probe list from the shared settings entry", async () => {
+    getSettingsMock.mockResolvedValue(SETTINGS);
+    renderWithQuery(<TunerPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: /probe/i })).toHaveValue("Grill"),
+    );
+    expect(getSettingsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not overwrite the operator's probe selection when settings refetch", async () => {
+    // A settings save invalidates the settings key, so a refetch WILL happen
+    // while the operator is sitting on their own selection. Seeding is a
+    // first-list-only event for exactly this reason (see AppPrefs.test.tsx for
+    // the same case on the accent seed).
+    getSettingsMock.mockResolvedValue(SETTINGS);
+    const client = testQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <TunerPage />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: /probe/i })).toHaveValue("Grill"),
+    );
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /probe/i }), "Probe1");
+    expect(screen.getByRole("combobox", { name: /probe/i })).toHaveValue("Probe1");
+
+    // The refetch's FIRST probe ("Ambient") is deliberately NOT the operator's
+    // current selection ("Probe1"): an unguarded seed would overwrite it with
+    // "Ambient", so this is the payload that actually discriminates a working
+    // seed-once from a broken one. (Reusing SETTINGS unchanged, or reordering
+    // it so "Probe1" landed first, would have let an unguarded seed produce
+    // the SAME value as the guarded one -- which is exactly the mistake the
+    // first version of this test made.)
+    getSettingsMock.mockResolvedValue({
+      probe_settings: {
+        probe_map: {
+          probe_info: [{ label: "Ambient" }, { label: "Grill" }, { label: "Probe1" }],
+        },
+      },
+    });
+    await act(() => client.invalidateQueries({ queryKey: queryKeys.settings }));
+
+    expect(screen.getByRole("combobox", { name: /probe/i })).toHaveValue("Probe1");
+  });
+
   it("renders the three segments in High, Medium, Low order", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(titles).toEqual(["High", "Medium", "Low"]);
   });
 
   it("does not open a session on mount", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     expect(openMock).not.toHaveBeenCalled();
   });
 
   it("Start opens the session and begins polling the selected probe", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await startTuning();
     await waitFor(() => expect(fetchTrMock).toHaveBeenCalled());
     expect(fetchTrMock.mock.calls[0][0]).toBe("Grill");
@@ -119,7 +169,7 @@ describe("TunerPage", () => {
       data: null,
       mode: "Hold",
     });
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     await userEvent.click(screen.getByRole("button", { name: "Start tuning" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Hold");
@@ -127,7 +177,7 @@ describe("TunerPage", () => {
   });
 
   it("Finish is disabled until all three segments are recorded", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await startTuning();
     await waitFor(() => expect(screen.getAllByText("51234 Ω")).toHaveLength(3));
 
@@ -140,7 +190,7 @@ describe("TunerPage", () => {
     computeMock.mockResolvedValue(
       OK({ a: 1, b: 2, c: 3, chart: [{ x: 0, y: 9 }], chart_ok: true }),
     );
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await startTuning();
     await recordAllSegments();
     await userEvent.click(screen.getByRole("button", { name: "Finish" }));
@@ -158,7 +208,7 @@ describe("TunerPage", () => {
       message: "uncomputable",
       data: null,
     });
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await startTuning();
     await recordAllSegments();
     await userEvent.click(screen.getByRole("button", { name: "Finish" }));
@@ -170,10 +220,15 @@ describe("TunerPage", () => {
   it("polls once per second while open and stops when the session closes", async () => {
     installFakeClock();
     try {
-      render(<TunerPage />);
-      // Let the mount settings fetch resolve under fake timers.
+      renderWithQuery(<TunerPage />);
+      // Let the mount settings fetch resolve under fake timers. react-query
+      // notifies observers via a real setTimeout(0) (notifyManager), which
+      // fake timers intercept same as the poll's own setInterval, so it needs
+      // an explicit tick alongside the promise flush.
       await act(async () => {
         await Promise.resolve();
+        await Promise.resolve();
+        rs.advanceTimersByTime(0);
         await Promise.resolve();
       });
       // Open the session directly through the button's handler path.
@@ -207,7 +262,7 @@ describe("TunerPage", () => {
   });
 
   it("closes the session when the page is left", async () => {
-    const view = render(<TunerPage />);
+    const view = renderWithQuery(<TunerPage />);
     await startTuning();
     view.unmount();
     await waitFor(() => expect(closeMock).toHaveBeenCalled());
@@ -220,14 +275,14 @@ describe("TunerPage — auto mode", () => {
   }
 
   it("defaults to Manual with the three segment cards shown", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     expect(screen.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("switching to Auto shows the reference selector and hides the segments", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     await switchToAuto();
     expect(screen.getByRole("combobox", { name: /reference/i })).toBeVisible();
@@ -235,7 +290,7 @@ describe("TunerPage — auto mode", () => {
   });
 
   it("disables the toggle while a session is open", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     await switchToAuto();
     await startTuning();
@@ -244,7 +299,7 @@ describe("TunerPage — auto mode", () => {
   });
 
   it("Auto Start opens the session and polls auto-status with the tune and reference probes", async () => {
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     await switchToAuto();
     await startTuning();
@@ -259,7 +314,7 @@ describe("TunerPage — auto mode", () => {
 
   it("Auto Finish is disabled until the status is ready", async () => {
     fetchAutoStatusMock.mockResolvedValue(autoStatus({ ready: false }));
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     await switchToAuto();
     await startTuning();
@@ -283,7 +338,7 @@ describe("TunerPage — auto mode", () => {
     computeMock.mockResolvedValue(
       OK({ a: 1, b: 2, c: 3, chart: [{ x: 0, y: 9 }], chart_ok: true }),
     );
-    render(<TunerPage />);
+    renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     await switchToAuto();
     await startTuning();
@@ -302,7 +357,7 @@ describe("TunerPage — auto mode", () => {
   });
 
   it("closes the session when the page is left in auto mode", async () => {
-    const view = render(<TunerPage />);
+    const view = renderWithQuery(<TunerPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
     await switchToAuto();
     await startTuning();
