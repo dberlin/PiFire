@@ -245,6 +245,11 @@ class CompletedOrigin:
     temperature_band: str
     ambient_source: AmbientSource
 
+    @property
+    def phase(self) -> str:
+        """Freeze confidence phase classification with the completed origin."""
+        return "coasting" if self.braking else "heating"
+
 # Public causal-evidence names.  The mutable origin owns only its evolving
 # realized-duty window; its forecasts, snapshots, and provenance never change.
 ForecastOrigin = _Origin

@@ -266,6 +266,7 @@ def test_matured_origin_retains_braking_status_from_forecast_window() -> None:
     )
     assert completed.completion_time_s == 80.0
     assert completed.braking is True
+    assert completed.phase == "coasting"
 
 
 def test_completed_origin_keeps_classification_from_its_forecast_frame() -> None:
