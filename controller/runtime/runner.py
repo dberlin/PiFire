@@ -951,12 +951,13 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._stop_event.set()
             self._accept_observations = False
-            self._evidence_session_id = None
-            self._evidence_cook_id = None
         close_wait = getattr(self._wait_for_period, "close", None)
         if callable(close_wait):
             close_wait()
         self._thread.join(timeout=2.0)
+        with self._lock:
+            self._evidence_session_id = None
+            self._evidence_cook_id = None
 
 
 FALLBACK_CONTROLLER = "pid"

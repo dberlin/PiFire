@@ -1401,6 +1401,7 @@ class HoldMode(ControlMode):
         self._trace_complete_applied_interval(now, sample_complete=False, realized_combustion_load=None)
         self._reset_framed_pulse(PulseResetReason.MODE_CHANGE, now, InhibitReason.SAFETY)
         _control.eventLogger.info("Controller reinitialized with updated settings")
+        self._reconcile_model_observation_outcomes(now)
         controller_state = self.state.controller
         self._trace_session_id = None
         self._trace_cook_id = None

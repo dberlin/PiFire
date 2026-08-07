@@ -1335,6 +1335,7 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             self.policy = SimpleNamespace(evaluation_interval_s=1.0)
             self.effective_updates = 1
             self._decision = decision
+            self._evaluation_count = 0
 
         def observe(self, _observation, **_kwargs):
             return ObservationOutcome(
@@ -1344,8 +1345,20 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
                 self.effective_updates,
             )
 
-        def evaluate_due(self, _now_s):
-            return self._decision
+        def evaluate_due(self, now_s):
+            self._evaluation_count += 1
+            origin = replace(
+                self._decision.completed_origins[0],
+                completion_time_s=now_s,
+                observation_sequence=self._evaluation_count,
+            )
+            return replace(
+                self._decision,
+                decision_id=f"generation-7-evaluation-{self._evaluation_count}",
+                evaluated_at_s=now_s,
+                window_end_s=now_s,
+                completed_origins=(origin,),
+            )
 
     class _CanonicalEvidenceCore(Controller):
         """Uses Controller.observe_frame; only the unrelated solve seam is minimal."""
@@ -1559,7 +1572,47 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
         assert worker.batches == [batch]
         assert runner.drain_observation_outcomes().envelopes == ()
 
-        late_frame = replace(first_frame, nominal_start_s=20.0, nominal_end_s=40.0, ended_at_s=40.0)
+        boundary_frame = replace(first_frame, nominal_start_s=20.0, nominal_end_s=40.0, ended_at_s=40.0)
+        mode._observe_completed_pulse_frame(boundary_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
+        import controller.runtime.runner as runner_module
+
+        monkeypatch.setattr(runner_module, "_build_core", lambda *_args, **_kwargs: (_CanonicalEvidenceCore(), "Active"))
+        assert runner.reconfigure({}, {}) == "Active"
+        gate.advance()
+        assert runner.configuration_revision() == 1
+
+        old_session_id = session_id
+        mode._adopt_runner_configuration(42.0, mode.grill.get_output_status())
+        new_session_id = mode._trace_session_id
+        assert new_session_id is not None and new_session_id != old_session_id
+        assert [len(submission) for submission in worker.batches] == [1, 1]
+        boundary_record = worker.batches[1][0]
+        boundary_raw = [
+            trace
+            for trace in recorder.records
+            if trace.event_kind is TraceEventKind.MODEL_EVALUATION and trace.session_id == old_session_id
+        ][1]
+        assert (
+            boundary_record.session_id,
+            boundary_record.cook_id,
+            boundary_record.role_generation,
+            boundary_record.evidence_id,
+        ) == (
+            old_session_id,
+            cook_id,
+            boundary_raw.payload.role_generation,
+            f"{old_session_id}:{boundary_raw.payload.decision_id}:2:3:40000",
+        )
+        assert boundary_record.payload.completion_time_ms == boundary_raw.payload.completed_origins[0].completion_time_ms
+        assert mode._pending_model_observations == {}
+
+        controller = mode.state.controller
+        controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
+        controller.pulse_frame_combustion_load = 0.3
+        controller.pulse_frame_requested_auger_duty = 0.3
+        controller.pulse_frame_maximum_duty = 0.5
+        mode._pulse_frame_role_generation = 7
+        late_frame = replace(first_frame, nominal_start_s=40.0, nominal_end_s=60.0, ended_at_s=60.0)
         mode._observe_completed_pulse_frame(late_frame, ptemp=212.0, inhibit=InhibitReason.NONE)
         mode.teardown(212.0)
         stopped = True
@@ -1568,10 +1621,43 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
         assert runner._stop_event.is_set()
         assert (runner._evidence_session_id, runner._evidence_cook_id) == (None, None)
         assert worker.stopped is True
-        assert worker.batches == [batch]
-        assert len(
-            [record for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVALUATION]
-        ) == 2
+        assert [len(submission) for submission in worker.batches] == [1, 1, 1]
+        evaluations = [trace for trace in recorder.records if trace.event_kind is TraceEventKind.MODEL_EVALUATION]
+        assert len(evaluations) == 3
+        late_record = worker.batches[2][0]
+        late_raw = [trace for trace in evaluations if trace.session_id == new_session_id][0].payload
+        late_origin = late_raw.completed_origins[0]
+        assert (
+            late_record.session_id,
+            late_record.cook_id,
+            late_record.role_generation,
+            late_record.evidence_id,
+        ) == (
+            new_session_id,
+            cook_id,
+            late_raw.role_generation,
+            f"{new_session_id}:{late_raw.decision_id}:1:3:60000",
+        )
+        assert (
+            late_record.payload.origin_sequence,
+            late_record.payload.completion_time_ms,
+            late_record.payload.horizon_steps,
+            late_record.payload.incumbent_prediction_c,
+            late_record.payload.challenger_prediction_c,
+            late_record.payload.incumbent_digest,
+            late_record.payload.challenger_digest,
+            late_record.payload.temperature_band,
+        ) == (
+            late_origin.observation_sequence,
+            late_origin.completion_time_ms,
+            late_origin.horizon_steps,
+            late_origin.incumbent_prediction_c,
+            late_origin.challenger_prediction_c,
+            late_origin.incumbent_digest,
+            late_origin.challenger_digest,
+            late_origin.temperature_band,
+        )
+        assert len({record.evidence_id for submission in worker.batches for record in submission}) == 3
         assert runner.drain_observation_outcomes().envelopes == ()
     finally:
         if not stopped:
