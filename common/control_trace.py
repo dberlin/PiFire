@@ -886,12 +886,23 @@ class RecorderGapPayload:
     lost_record_count: NonNegativeInt
     gap_start_ms: NonNegativeInt
     gap_end_ms: NonNegativeInt
+    reason: NonBlankString | None = None
+    frame_start_ms: NonNegativeInt | None = None
+    frame_end_ms: NonNegativeInt | None = None
+    result_revision: NonNegativeInt | None = None
+    observation_sequence: NonNegativeInt | None = None
     payload_type: Literal["recorder_gap"] = "recorder_gap"
 
     @model_validator(mode="after")
     def validate_gap_interval(self) -> RecorderGapPayload:
         if self.gap_start_ms > self.gap_end_ms:
             raise ValueError("gap_start_ms must not exceed gap_end_ms")
+        if (self.frame_start_ms is None) != (self.frame_end_ms is None):
+            raise ValueError("recorder gap frame identity must be complete")
+        if self.frame_start_ms is not None and self.frame_start_ms >= self.frame_end_ms:
+            raise ValueError("recorder gap frame interval must be positive")
+        if self.reason is not None and self.observation_sequence is None:
+            raise ValueError("reasoned recorder gap requires an observation sequence")
         return self
 
 

@@ -22,6 +22,7 @@ from common.control_trace import (
     ModelEventPayload,
     ModelEvaluationPayload,
     ModelEventType,
+    RecorderGapPayload,
     MpcUpdatePayload,
     ModelObservationPayload,
     ResultStaleState,
@@ -323,6 +324,29 @@ class HoldMode(ControlMode):
         while len(self._pending_model_observations) > 60:
             del self._pending_model_observations[next(iter(self._pending_model_observations))]
 
+    def _trace_missing_frame_observation(self, frame: PulseFrameResult, reason: str) -> None:
+        if frame.ended_at_s <= frame.nominal_start_s:
+            return
+        self._pulse_observation_sequence += 1
+        self._trace_record(
+            TraceEventKind.RECORDER_GAP,
+            RecorderGapPayload(
+                lost_record_count=1,
+                gap_start_ms=int(frame.nominal_start_s * 1_000),
+                gap_end_ms=int(frame.ended_at_s * 1_000),
+                reason=reason,
+                frame_start_ms=int(frame.nominal_start_s * 1_000),
+                frame_end_ms=int(frame.ended_at_s * 1_000),
+                result_revision=(
+                    self.state.controller.pulse_frame_result_revision
+                    if self.state.controller.pulse_frame_result_revision > 0
+                    else None
+                ),
+                observation_sequence=self._pulse_observation_sequence,
+            ),
+            int(frame.ended_at_s * 1_000),
+        )
+
     def _observe_completed_pulse_frame(
         self, frame: PulseFrameResult, *, ptemp: float | None, inhibit: InhibitReason, sample_at_s: float | None = None
     ) -> None:
@@ -331,6 +355,10 @@ class HoldMode(ControlMode):
         )
         if captured is not None:
             self._deliver_completed_pulse_observation(*captured)
+        elif ptemp is None:
+            self._trace_missing_frame_observation(frame, "missing-temperature")
+        elif self.state.controller.pulse_frame_result_revision < 0:
+            self._trace_missing_frame_observation(frame, "missing-result-revision")
 
     @staticmethod
     def _model_evaluation_payload(value: object) -> ModelEvaluationPayload | None:
@@ -450,6 +478,40 @@ class HoldMode(ControlMode):
         except KeyError, TypeError, ValueError:
             return None
 
+    @staticmethod
+    def _rejected_model_observation(observation: FrameObservation, reason: str) -> ModelObservationPayload:
+        output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
+        return ModelObservationPayload(
+            frame_start_ms=int(observation.frame_start_s * 1_000), frame_end_ms=int(observation.frame_end_s * 1_000),
+            temp_c=observation.temp_c, setpoint_c=observation.setpoint_c, ambient_c=observation.ambient_c,
+            observation_sequence=observation.observation_sequence, probe_valid=observation.probe_valid,
+            probe_source=observation.probe_source, ambient_source=observation.ambient_source,
+            ambient_uncertainty=observation.ambient_uncertainty, baseline_combustion_load=observation.baseline_q,
+            calibration_probe_load=observation.probe_q, requested_combustion_load=observation.requested_q,
+            allocated_combustion_load=observation.allocated_q, realized_combustion_load=observation.realized_q,
+            requested_auger_duty=observation.requested_auger_duty, scheduled_on_seconds=observation.scheduled_on_s,
+            delivered_on_seconds=observation.delivered_on_s, realized_auger_duty=observation.realized_auger_duty,
+            allocator_revision=observation.allocator_revision, allocation_clamp_reasons=observation.allocation_clamp_reasons,
+            calibration_stage=observation.calibration_stage, calibration_fit=observation.calibration_fit,
+            result_revision=observation.result_revision, eligible=False, rejection_reasons=(reason,),
+            input_variance=0.0, input_levels=0, incumbent_innovation_c=None, challenger_innovation_c=None,
+            effective_updates=0, role_generation=observation.role_generation, model_digest=None,
+            requested_fan_duty=observation.requested_fan_duty, actual_fan_duty=observation.actual_fan_duty,
+            output_source=output_source, lid_open=observation.lid_open, safety_inhibited=observation.safety_inhibited,
+            manual_override=observation.manual_override, stale=observation.stale, skipped=observation.skipped,
+            reset=observation.reset, continuous=observation.continuous,
+        )
+
+    def _queue_rejected_model_observation(self, sequence: int, reason: str) -> None:
+        pending = self._pending_model_observations.get(sequence)
+        if pending is None or not isinstance(pending[0], FrameObservation):
+            self._pending_model_observations.pop(sequence, None)
+            return
+        self._pending_model_observations[sequence] = (
+            *pending[:3],
+            ((TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(pending[0], reason)),),
+        )
+
     def _flush_pending_model_trace(
         self,
         sequence: int,
@@ -480,7 +542,7 @@ class HoldMode(ControlMode):
         if isinstance(dropped_sequences, tuple):
             for sequence in dropped_sequences:
                 if isinstance(sequence, int) and not isinstance(sequence, bool):
-                    self._pending_model_observations.pop(sequence, None)
+                    self._queue_rejected_model_observation(sequence, "observation-outcome-dropped")
         envelopes = getattr(batch, "envelopes", batch)
         for envelope in envelopes:
             sequence = getattr(envelope, "submission_sequence", None)
@@ -491,16 +553,16 @@ class HoldMode(ControlMode):
             if pending is None:
                 continue
             if generation != pending[2] or pending[1] != self._trace_session_id:
-                self._pending_model_observations.pop(sequence, None)
+                self._queue_rejected_model_observation(sequence, "observation-configuration-mismatch")
                 continue
             if not isinstance(delivered, FrameObservation) or not isinstance(outcome, Mapping):
-                self._pending_model_observations.pop(sequence, None)
+                self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
                 continue
             observation = delivered
             try:
                 role_generation = outcome["role_generation"]
                 if role_generation != observation.role_generation:
-                    self._pending_model_observations.pop(sequence, None)
+                    self._queue_rejected_model_observation(sequence, "observation-role-generation-mismatch")
                     continue
                 if outcome.get("eligible") is True and (
                     observation.output_source != OutputSource.CONTROLLER.value
@@ -512,7 +574,7 @@ class HoldMode(ControlMode):
                     or observation.reset
                     or not observation.continuous
                 ):
-                    self._pending_model_observations.pop(sequence, None)
+                    self._queue_rejected_model_observation(sequence, "observation-gate-mismatch")
                     continue
                 output_source = (
                     OutputSource(observation.output_source) if observation.output_source != "unknown" else None

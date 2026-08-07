@@ -1650,3 +1650,68 @@ def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_
     payloads = [record.payload for record in persisted[1:]]
     assert all(isinstance(payload, ModelObservationPayload) for payload in payloads)
     assert [payload.frame_end_ms for payload in payloads] == [20_000, 40_000, 60_000]
+
+
+@pytest.mark.parametrize(
+    ("generation", "outcome", "reason"),
+    (
+        (1, _model_observation_outcome(frame_end_ms=20_000), "observation-configuration-mismatch"),
+        (0, object(), "observation-outcome-malformed"),
+    ),
+)
+def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
+    hold_cycle, monkeypatch, generation, outcome, reason
+):
+    """Regression: outcome drops must not silently erase a completed frame."""
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "failed-outcome-evidence"}
+    mode._ensure_trace_session(0.0)
+    first, second = _learning_observation(0.0), _learning_observation(20.0)
+    mode._pending_model_observations = {
+        1: (first, mode._trace_session_id, 0, None),
+        2: (second, mode._trace_session_id, 0, None),
+    }
+    runner._observation_outcomes.extend(
+        (
+            ObservationOutcomeEnvelope(1, generation, first, outcome),
+            ObservationOutcomeEnvelope(2, 0, second, _model_observation_outcome(frame_end_ms=40_000)),
+        )
+    )
+
+    mode._reconcile_model_observation_outcomes(now=41.0)
+
+    payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
+    assert [(payload.frame_end_ms, payload.eligible, payload.rejection_reasons) for payload in payloads] == [
+        (20_000, False, (reason,)),
+        (40_000, False, ("insufficient_excitation",)),
+    ]
+
+
+def test_missing_completed_frame_temperature_emits_sequence_linked_trace_gap(hold_cycle, monkeypatch):
+    """Regression: a completed frame without a temperature must remain auditable."""
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "missing-temperature-evidence"}
+    mode._ensure_trace_session(0.0)
+    controller = mode.state.controller
+    controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
+    controller.pulse_frame_combustion_load = 0.3
+    controller.pulse_frame_requested_auger_duty = 0.3
+    controller.pulse_frame_maximum_duty = 0.5
+    from controller.runtime.logic.pulse import PulseFrameResult
+
+    frame = PulseFrameResult(0.0, 20.0, 20.0, True, False, 0.3, 0.0, 0.0, 6, 6.0, 2, False, False, None)
+    mode._observe_completed_pulse_frame(frame, ptemp=None, inhibit=InhibitReason.NONE)
+
+    gap = next(record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload))
+    assert (gap.reason, gap.frame_start_ms, gap.frame_end_ms, gap.result_revision) == (
+        "missing-temperature",
+        0,
+        20_000,
+        1,
+    )
