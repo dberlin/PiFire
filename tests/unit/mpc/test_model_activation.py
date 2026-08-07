@@ -10,6 +10,7 @@ from common.model_evidence import (
     ConfidenceDecisionEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
+    RollbackEvidence,
     RefreshDiagnosticsEvidence,
 )
 from controller.linear_mpc.activation import (
@@ -18,6 +19,7 @@ from controller.linear_mpc.activation import (
     GREY_BOX_KIND,
     STATE_SPACE_KIND,
     canonical_snapshot_digest,
+    matching_activation_lifecycle,
 )
 from controller.linear_mpc.state_space import InnovationStateSpace
 from tests.unit.mpc.test_innovation_state_space import _config, _frames
@@ -45,7 +47,7 @@ def _record(evidence_id, payload, *, digest, provenance, generation=7, timestamp
     )
 
 
-def _fixture(snapshot, *, persistence=True, prospective=lambda _candidate: 0.37):
+def _fixture(snapshot, *, persistence=True, prospective=lambda _candidate, _configuration: 0.37):
     candidate = deepcopy(snapshot)
     digest = canonical_snapshot_digest(candidate)
     rollback = {"schema": "grey-box-adapter/v1", "gain": 1.0}
@@ -165,7 +167,7 @@ def test_prepare_rejects_candidate_reconstruction_failure(state_space_snapshot):
 
 
 def test_prepare_rejects_prospective_solve_failure(state_space_snapshot):
-    def fail(_candidate):
+    def fail(_candidate, _configuration):
         raise RuntimeError("prospective-solve-failed")
 
     manager, request, *_ = _fixture(state_space_snapshot, prospective=fail)
@@ -254,7 +256,7 @@ def test_restart_restores_exact_active_and_rollback_generation(state_space_snaps
         candidate_snapshot={},
         rollback_snapshot={},
         controller_configuration=config,
-        prospective_solve=lambda _candidate: 0.37,
+        prospective_solve=lambda _candidate, _configuration: 0.37,
     )
 
     decision = restored.restore(persisted)
@@ -315,7 +317,7 @@ def test_restart_preserves_prior_state_space_as_the_last_safe_generation(state_s
         candidate_snapshot={},
         rollback_snapshot={},
         controller_configuration=config,
-        prospective_solve=lambda _candidate: 0.37,
+        prospective_solve=lambda _candidate, _configuration: 0.37,
     )
 
     assert restored.restore(persisted).accepted
@@ -325,3 +327,136 @@ def test_restart_preserves_prior_state_space_as_the_last_safe_generation(state_s
     fallback = restored.fallback("active-solve-failed")
     assert fallback.active_kind == STATE_SPACE_KIND
     assert fallback.active_digest == first_request.candidate_digest
+
+
+def test_commit_reloads_latest_decision_instead_of_frozen_prepare_records(state_space_snapshot):
+    manager, request, records, writes, *_ = _fixture(state_space_snapshot)
+    prepared = manager.prepare(request)
+    records.append(
+        _record(
+            "decision-raced",
+            ConfidenceDecisionEvidence(decision_id="decision-raced", blocked=False),
+            digest=request.candidate_digest,
+            provenance=records[0].provenance_digest,
+            timestamp=2_000,
+        )
+    )
+
+    decision = manager.commit(prepared)
+
+    assert decision.accepted is False
+    assert decision.reason == "stale-confidence-decision"
+    assert writes == []
+
+
+def test_restore_ignores_newer_lifecycle_for_an_unrelated_activation(state_space_snapshot):
+    manager, request, records, writes, *_ = _fixture(state_space_snapshot)
+    assert manager.commit(manager.prepare(request)).accepted
+    activation = writes[-1]
+    persisted = ModelActivationState(
+        active_snapshot_json=activation.payload.active_snapshot_json,
+        rollback_snapshot_json=activation.payload.rollback_snapshot_json,
+        evidence_decision_id=activation.payload.decision_id,
+        controller_configuration_digest=activation.payload.controller_configuration_digest,
+        role_generation=activation.role_generation,
+    )
+    unrelated = _record(
+        "rollback-b",
+        RollbackEvidence(decision_id="decision-b", reason="unrelated rollback"),
+        digest="f" * 64,
+        provenance="e" * 64,
+        generation=100,
+        timestamp=9_999,
+    )
+    records.append(unrelated)
+    assert matching_activation_lifecycle(records, activation) is None
+    restored = ActivationManager(
+        lambda: tuple(records),
+        candidate_snapshot={},
+        rollback_snapshot={},
+        controller_configuration=lambda: manager._configuration(),
+        prospective_solve=lambda _candidate, _configuration: 0.37,
+    )
+
+    assert restored.restore(persisted).accepted
+    assert restored.active_kind == STATE_SPACE_KIND
+
+
+def test_configured_prospective_policy_rejection_blocks_prepare(state_space_snapshot):
+    seen = []
+
+    def configured_rejection(_candidate, configuration):
+        seen.append(configuration)
+        raise ValueError("invalid-kkt-certificate")
+
+    manager, request, *_ = _fixture(state_space_snapshot, prospective=configured_rejection)
+
+    decision = manager.prepare(request)
+
+    assert decision.accepted is False
+    assert decision.reason == "invalid-kkt-certificate"
+    assert seen[0]["config"]["n_horizon"] == 24
+    assert manager.active_kind == GREY_BOX_KIND
+
+
+def test_activate_a_then_b_rollback_b_and_restart_retains_a(state_space_snapshot):
+    manager, first_request, records, writes, _invalidations, config, _rollback = _fixture(state_space_snapshot)
+    manager._append_evidence = records.append
+    assert manager.commit(manager.prepare(first_request)).accepted
+    second_model = InnovationStateSpace(_config(orders=(2,), delays=(1,)))
+    assert second_model.fit(_frames(order=2)).accepted
+    second_snapshot = second_model.snapshot()
+    second_digest = canonical_snapshot_digest(second_snapshot)
+    records.extend(
+        (
+            _record(
+                "refresh-b",
+                RefreshDiagnosticsEvidence(
+                    accepted=True,
+                    full_rank=True,
+                    finite_diagnostics=True,
+                    snapshot_round_trip=True,
+                    production_prospective=True,
+                ),
+                digest=second_digest,
+                provenance=first_request.candidate_digest,
+                generation=8,
+                timestamp=2_100,
+            ),
+            _record(
+                "decision-b",
+                ConfidenceDecisionEvidence(decision_id="decision-b", blocked=False),
+                digest=second_digest,
+                provenance=first_request.candidate_digest,
+                generation=8,
+                timestamp=2_101,
+            ),
+        )
+    )
+    manager._candidate_source = lambda digest, _generation: (
+        second_snapshot if digest == second_digest else state_space_snapshot
+    )
+    assert manager.commit(manager.prepare(ActivationRequest(second_digest, "decision-b"))).accepted
+    activation_b = writes[-1]
+    manager.rollback("operator rollback b")
+    persisted_b = ModelActivationState(
+        active_snapshot_json=activation_b.payload.active_snapshot_json,
+        rollback_snapshot_json=activation_b.payload.rollback_snapshot_json,
+        evidence_decision_id=activation_b.payload.decision_id,
+        controller_configuration_digest=activation_b.payload.controller_configuration_digest,
+        role_generation=activation_b.role_generation,
+    )
+    restored = ActivationManager(
+        lambda: tuple(records),
+        candidate_snapshot={},
+        rollback_snapshot={},
+        controller_configuration=config,
+        prospective_solve=lambda _candidate, _configuration: 0.37,
+    )
+
+    decision = restored.restore(persisted_b)
+
+    assert decision.accepted is False
+    assert decision.reason == "restore-generation-already-failed"
+    assert restored.active_kind == STATE_SPACE_KIND
+    assert restored.state.active_digest == first_request.candidate_digest

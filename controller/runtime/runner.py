@@ -1011,6 +1011,7 @@ class ThreadedControllerRunner(ControllerRunner):
                     monotonic_clock=self._monotonic_clock,
                     wall_clock=self._wall_clock,
                 )
+                self._capture_activation_events()
                 model = _owned_model_snapshot(self._core.get_model_snapshot())
                 with self._lock:
                     result, transition = self._quality.completed(result)

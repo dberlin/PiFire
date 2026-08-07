@@ -4,13 +4,24 @@ import pytest
 
 from app import app as flask_app
 from blueprints.api import routes
-from common.datastore_accessors import append_model_evidence, read_model_activation
+from common.datastore_accessors import (
+    append_model_evidence,
+    commit_model_activation,
+    read_model_activation,
+    read_model_evidence,
+)
 from common.model_evidence import (
+    ActivationEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
     RefreshDiagnosticsEvidence,
+    RollbackEvidence,
 )
+from controller.linear_mpc.activation import canonical_snapshot_digest
+from tests.unit.mpc.test_innovation_state_space import _config, _frames
+from tests.unit.mpc.test_model_activation import _fixture
+from controller.linear_mpc.state_space import InnovationStateSpace
 
 
 _CANDIDATE = "c" * 64
@@ -154,3 +165,110 @@ def test_report_route_exposes_the_accepted_calibration_command_high_water(client
 
     assert response.status_code == 200
     assert response.get_json()["calibration"]["revision"] == 7
+
+
+def test_rollback_is_atomic_truthful_and_idempotent_for_the_exact_activation(client):
+    active_snapshot = {"schema": "innovation-state-space/v2", "generation": "b"}
+    rollback_snapshot = {"schema": "innovation-state-space/v2", "generation": "a"}
+    active_json = json.dumps(active_snapshot, sort_keys=True, separators=(",", ":"))
+    rollback_json = json.dumps(rollback_snapshot, sort_keys=True, separators=(",", ":"))
+    activation = ModelEvidenceRecord(
+        evidence_id="activation-b",
+        kind=EvidenceKind.ACTIVATION,
+        session_id="session-api",
+        cook_id=None,
+        timestamp_ms=1_000,
+        role_generation=8,
+        model_digest=canonical_snapshot_digest(active_snapshot),
+        provenance_digest=canonical_snapshot_digest(rollback_snapshot),
+        payload=ActivationEvidence(
+            decision_id="decision-b",
+            active_snapshot_json=active_json,
+            rollback_snapshot_json=rollback_json,
+            controller_configuration_digest="d" * 64,
+        ),
+    )
+    commit_model_activation(activation)
+
+    first = client.post("/api/model-evidence/rollback", json={"reason": "operator rollback b"})
+    duplicate = client.post("/api/model-evidence/rollback", json={"reason": "different retry text"})
+
+    assert first.status_code == 200
+    assert duplicate.status_code == 200
+    assert (
+        first.get_json()
+        == duplicate.get_json()
+        == {
+            "accepted": True,
+            "active_kind": "innovation-state-space",
+            "decision_id": "decision-b",
+            "reason": "operator rollback b",
+            "role_generation": 9,
+        }
+    )
+    rollbacks = [record for record in read_model_evidence() if isinstance(record.payload, RollbackEvidence)]
+    assert len(rollbacks) == 1
+
+
+def test_activate_route_reloads_live_authorities_at_commit(client, monkeypatch):
+    model = InnovationStateSpace(_config(orders=(1,), delays=(1,)))
+    assert model.fit(_frames(order=1)).accepted
+    snapshot = model.snapshot()
+    _manager, activation_request, records, _writes, _invalidations, _config_tree, rollback = _fixture(snapshot)
+
+    class ReadyReport:
+        def to_dict(self):
+            return {
+                "status": "ready-for-review",
+                "candidate": {"digest": activation_request.candidate_digest},
+                "decision_id": activation_request.decision_id,
+            }
+
+    settings = {
+        "controller": {"selected": "mpc", "config": {"mpc": {"n_horizon": 24}}},
+        "cycle_data": {},
+        "globals": {"units": "F"},
+    }
+    settings_reads = 0
+
+    def read_live_settings():
+        nonlocal settings_reads
+        settings_reads += 1
+        if settings_reads == 2:
+            records.append(
+                ModelEvidenceRecord(
+                    evidence_id="decision-raced",
+                    kind=EvidenceKind.CONFIDENCE_DECISION,
+                    session_id="session-api",
+                    cook_id=None,
+                    timestamp_ms=9_999,
+                    role_generation=7,
+                    model_digest=activation_request.candidate_digest,
+                    provenance_digest=records[0].provenance_digest,
+                    payload=ConfidenceDecisionEvidence(decision_id="decision-raced", blocked=False),
+                )
+            )
+        return settings
+
+    monkeypatch.setattr(routes, "_model_evidence_projection", lambda: (ReadyReport(), tuple(records)))
+    monkeypatch.setattr(routes, "read_model_evidence", lambda: list(records))
+    monkeypatch.setattr(routes, "read_model_activation", lambda: None)
+    monkeypatch.setattr(routes, "read_settings", read_live_settings)
+    monkeypatch.setattr(
+        routes,
+        "_activation_checkpoint",
+        lambda: {"online_adaptation": {"challenger": snapshot, "incumbent": rollback}},
+    )
+    monkeypatch.setattr(routes, "_configured_activation_prospective_solve", lambda _candidate, _configuration: 0.3)
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": activation_request.candidate_digest,
+            "decision_id": activation_request.decision_id,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["detail"] == "stale-confidence-decision"
+    assert read_model_activation() is None

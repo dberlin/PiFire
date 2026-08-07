@@ -1,14 +1,16 @@
 """Hold restores a controller's model at setup and saves it as it changes."""
 
 from copy import deepcopy
+import json
 
 import threading
 
 from common.control_trace import ActuationMode
 from common.controller_model_state import CheckpointSaveOutcome, ControllerModelStore
 from common.datastore_accessors import ModelActivationState
-from common.model_evidence import ActivationEvidence, EvidenceKind, ModelEvidenceRecord
+from common.model_evidence import ActivationEvidence, EvidenceKind, ModelEvidenceRecord, RollbackEvidence
 
+from controller.linear_mpc.activation import canonical_snapshot_digest
 from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.runner import ControllerUpdateResult
@@ -100,7 +102,7 @@ def test_setup_restores_durable_activation_before_control_ownership(hold_cycle, 
         cook_id=None,
         timestamp_ms=1_000,
         role_generation=8,
-        model_digest="b" * 64,
+        model_digest=canonical_snapshot_digest(json.loads(active_json)),
         provenance_digest="c" * 64,
         payload=ActivationEvidence(
             decision_id="decision-7",
@@ -124,6 +126,59 @@ def test_setup_restores_durable_activation_before_control_ownership(hold_cycle, 
         active_json,
         rollback_json,
     )
+
+
+def test_setup_consumes_restored_rollback_without_applying_it_twice(hold_cycle, monkeypatch):
+    from controller.runtime.modes import hold as hold_module
+
+    active_json = '{"schema":"innovation-state-space/v2","model":{}}'
+    rollback_json = '{"schema":"grey-box-adapter/v1"}'
+    active_digest = canonical_snapshot_digest(json.loads(active_json))
+    persisted = ModelActivationState(
+        active_snapshot_json=active_json,
+        rollback_snapshot_json=rollback_json,
+        evidence_decision_id="decision-7",
+        controller_configuration_digest="a" * 64,
+        role_generation=8,
+    )
+    activation = ModelEvidenceRecord(
+        evidence_id="activation-8",
+        kind=EvidenceKind.ACTIVATION,
+        session_id="session-8",
+        cook_id=None,
+        timestamp_ms=1_000,
+        role_generation=8,
+        model_digest=active_digest,
+        provenance_digest="c" * 64,
+        payload=ActivationEvidence(
+            decision_id="decision-7",
+            active_snapshot_json=active_json,
+            rollback_snapshot_json=rollback_json,
+            controller_configuration_digest="a" * 64,
+        ),
+    )
+    rollback = ModelEvidenceRecord(
+        evidence_id="rollback-8",
+        kind=EvidenceKind.ROLLBACK,
+        session_id="session-8",
+        cook_id=None,
+        timestamp_ms=1_001,
+        role_generation=9,
+        model_digest=active_digest,
+        provenance_digest="c" * 64,
+        payload=RollbackEvidence(decision_id="decision-7", reason="operator rollback"),
+    )
+    monkeypatch.setattr(hold_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: [activation, rollback])
+    runner = FakeControllerRunner(period=0.01)
+    hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
+
+    hold.setup()
+    hold._reconcile_activation_state()
+
+    assert runner.activation_restores == [(persisted, (activation, rollback))]
+    assert runner.activation_rollbacks == []
+    assert hold._activation_lifecycle_evidence_id == "rollback-8"
 
 
 def test_per_tick_saves_the_controller_snapshot(hold_cycle):

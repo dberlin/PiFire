@@ -8,7 +8,7 @@ from dataclasses import replace
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.linear_mpc.contracts import FrameObservation
 from common.control_trace import ActuationMode, ModelObservationPayload, ResultStaleState, TraceEventKind
-from common.model_evidence import SessionSummaryEvidence
+from common.model_evidence import EvidenceKind, FallbackEvidence, ModelEvidenceRecord, SessionSummaryEvidence
 from controller.runtime.runner import (
     SyncControllerRunner,
     ThreadedControllerRunner,
@@ -127,6 +127,52 @@ class FakeCore:
 
     def restore_model(self, snapshot):
         return True
+
+
+def test_threaded_runner_captures_fallback_evidence_from_an_ordinary_compute():
+    fallback = ModelEvidenceRecord(
+        evidence_id="fallback:7:1000:digest",
+        kind=EvidenceKind.FALLBACK,
+        session_id="runtime",
+        cook_id=None,
+        timestamp_ms=1_000,
+        role_generation=8,
+        model_digest="d" * 64,
+        provenance_digest=None,
+        payload=FallbackEvidence(
+            reason="non-finite-forecast",
+            failed_digest="d" * 64,
+            failed_generation=7,
+            last_safe_command=0.4,
+            fallback_kind="grey-box",
+        ),
+    )
+
+    class FallbackCore(FakeCore):
+        def __init__(self):
+            super().__init__()
+            self.events = []
+            self.drained = threading.Event()
+
+        def update(self, temp):
+            self.events.append(fallback)
+            return super().update(temp)
+
+        def drain_activation_events(self):
+            events = tuple(self.events)
+            self.events.clear()
+            self.drained.set()
+            return events
+
+    core = FallbackCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(100.0)
+        assert core.drained.wait(2.0)
+        assert runner.drain_activation_events() == (fallback,)
+        assert runner.drain_activation_events() == ()
+    finally:
+        runner.stop()
 
 
 class BlockingCore(FakeCore):

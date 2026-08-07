@@ -17,6 +17,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
+from controller.linear_mpc.activation import activation_record_for_state, matching_activation_lifecycle
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
@@ -2441,23 +2442,17 @@ class HoldMode(ControlMode):
             self._trace_warning(f"Model activation state unavailable: {error}")
             return
         identity = self._activation_identity(state)
+        activation = None if state is None else activation_record_for_state(records, state)
+        if state is not None and activation is None:
+            self._learning_evidence_available = False
+            self._trace_warning("Model activation lineage is unavailable")
+            return
+        lifecycle = None if activation is None else matching_activation_lifecycle(records, activation)
         if state is not None and identity != self._activation_state_identity:
             self._runner.restore_activation(state, records)
             self._activation_state_identity = identity
-        lifecycle = max(
-            (
-                record
-                for record in records
-                if record.kind
-                in {
-                    EvidenceKind.ACTIVATION,
-                    EvidenceKind.ROLLBACK,
-                    EvidenceKind.FALLBACK,
-                }
-            ),
-            key=lambda record: (record.timestamp_ms, record.evidence_id),
-            default=None,
-        )
+            self._activation_lifecycle_evidence_id = None if lifecycle is None else lifecycle.evidence_id
+            return
         if lifecycle is None or lifecycle.evidence_id == self._activation_lifecycle_evidence_id:
             return
         self._activation_lifecycle_evidence_id = lifecycle.evidence_id

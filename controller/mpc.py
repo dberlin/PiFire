@@ -1128,7 +1128,7 @@ class Controller(ControllerBase):
             candidate_snapshot={},
             rollback_snapshot={},
             controller_configuration=self._activation_configuration,
-            prospective_solve=self._activation_prospective_solve,
+            prospective_solve=lambda candidate, _configuration: self._activation_prospective_solve(candidate),
             persist_activation=lambda _record: False,
             append_evidence=self._activation_events.append,
             session_id="mpc-runtime-activation",
@@ -1137,7 +1137,8 @@ class Controller(ControllerBase):
         self._activation_manager = manager
         self._activation_expected_temperature_c = None
         self._activation_residual_failures = 0
-        if not decision.accepted:
+        restored_fallback = decision.reason == "restore-generation-already-failed"
+        if not decision.accepted and not restored_fallback:
             return False
         if self._online is not None:
             self._online._invalidate_origins()

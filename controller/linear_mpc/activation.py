@@ -11,7 +11,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 
-import numpy as np
 
 from common.model_evidence import (
     ActivationEvidence,
@@ -21,7 +20,6 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
-from .policy import LinearMPC, LinearMPCConfig
 from .state_space import InnovationStateSpace
 
 STATE_SPACE_KIND = "innovation-state-space"
@@ -101,8 +99,8 @@ class ActivationManager:
         *,
         candidate_snapshot: Mapping[str, object] | Callable[[str, int], Mapping[str, object] | None],
         rollback_snapshot: Mapping[str, object] | Callable[[], Mapping[str, object]],
-        controller_configuration: str | Mapping[str, object] | Callable[[], str | Mapping[str, object]],
-        prospective_solve: Callable[[InnovationStateSpace], float | None] | None = None,
+        controller_configuration: Mapping[str, object] | Callable[[], Mapping[str, object]],
+        prospective_solve: Callable[[InnovationStateSpace, Mapping[str, object]], float | None],
         persist_activation: Callable[..., object] | None = None,
         invalidate_pending_origins: Callable[[int, str], None] | None = None,
         append_evidence: Callable[[ModelEvidenceRecord], object] | None = None,
@@ -114,7 +112,7 @@ class ActivationManager:
         self._candidate_source = candidate_snapshot
         self._rollback_source = rollback_snapshot
         self._configuration_source = controller_configuration
-        self._prospective_solve = prospective_solve or _production_prospective_solve
+        self._prospective_solve = prospective_solve
         self._persist_activation = persist_activation
         self._invalidate_pending_origins = invalidate_pending_origins
         self._append_evidence = append_evidence
@@ -163,10 +161,11 @@ class ActivationManager:
             if generation in self._state.failed_generations:
                 return self._reject(request, "failed-generation-cannot-be-reenabled")
             candidate = InnovationStateSpace.from_snapshot(inputs.candidate_snapshot)
-            last_safe_command = self._prospective_solve(candidate)
+            configuration = self._configuration()
+            last_safe_command = self._prospective_solve(candidate, configuration)
             if last_safe_command is not None:
                 last_safe_command = _duty(last_safe_command, "prospective command")
-            config_digest = self._configuration_digest()
+            config_digest = canonical_configuration_digest(configuration)
             active_json = _canonical_json(inputs.candidate_snapshot)
             rollback_json = _canonical_json(inputs.rollback_snapshot)
             activation_generation = max(self._state.role_generation, generation) + 1
@@ -350,17 +349,7 @@ class ActivationManager:
         if config_digest != self._configuration_digest():
             return self._reject(request, "restore-controller-configuration-changed")
         records = self._ledger()
-        activation = next(
-            (
-                record
-                for record in reversed(records)
-                if isinstance(record.payload, ActivationEvidence)
-                and record.payload.decision_id == decision_id
-                and record.role_generation == generation
-                and record.model_digest == candidate_digest
-            ),
-            None,
-        )
+        activation = activation_record_for_state(records, persisted)
         if activation is None:
             return self._reject(request, "restore-activation-decision-missing")
         rollback_digest = canonical_snapshot_digest(_rollback_provenance_snapshot(rollback_snapshot))
@@ -371,16 +360,8 @@ class ActivationManager:
             if rollback_snapshot.get("schema") == _STATE_SPACE_SCHEMA
             else None
         )
-        latest_lifecycle = max(
-            (
-                record
-                for record in records
-                if isinstance(record.payload, (ActivationEvidence, RollbackEvidence, FallbackEvidence))
-            ),
-            key=lambda record: (record.timestamp_ms, record.evidence_id),
-            default=None,
-        )
-        if latest_lifecycle is not None and not isinstance(latest_lifecycle.payload, ActivationEvidence):
+        latest_lifecycle = matching_activation_lifecycle(records, activation)
+        if latest_lifecycle is not None:
             lifecycle_payload = cast(RollbackEvidence | FallbackEvidence, latest_lifecycle.payload)
             fallback_kind = STATE_SPACE_KIND if rollback_model is not None else GREY_BOX_KIND
             self._active_model = rollback_model
@@ -403,7 +384,8 @@ class ActivationManager:
             return self._reject(request, "restore-generation-already-failed")
         try:
             candidate = InnovationStateSpace.from_snapshot(active_snapshot)
-            last_safe = self._prospective_solve(candidate)
+            configuration = self._configuration()
+            last_safe = self._prospective_solve(candidate, configuration)
             if last_safe is not None:
                 last_safe = _duty(last_safe, "prospective command")
         except Exception as error:
@@ -509,10 +491,13 @@ class ActivationManager:
         value = source() if callable(source) else source
         return _owned_mapping(value, "rollback snapshot")
 
-    def _configuration_digest(self) -> str:
+    def _configuration(self) -> dict[str, object]:
         source = self._configuration_source
         value = source() if callable(source) else source
-        return value if isinstance(value, str) else canonical_configuration_digest(value)
+        return _owned_mapping(value, "controller configuration")
+
+    def _configuration_digest(self) -> str:
+        return canonical_configuration_digest(self._configuration())
 
     def _record_fallback(self, reason: str) -> None:
         if self._append_evidence is None:
@@ -553,6 +538,70 @@ def canonical_configuration_digest(configuration: Mapping[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def activation_record_for_state(
+    records: Sequence[ModelEvidenceRecord],
+    persisted: object,
+) -> ModelEvidenceRecord | None:
+    """Return only the activation that exactly created one singleton state."""
+    try:
+        active_json = getattr(persisted, "active_snapshot_json")
+        rollback_json = getattr(persisted, "rollback_snapshot_json")
+        decision_id = getattr(persisted, "evidence_decision_id")
+        configuration_digest = getattr(persisted, "controller_configuration_digest")
+        generation = getattr(persisted, "role_generation")
+        active_digest = canonical_snapshot_digest(_json_object(active_json, "active snapshot"))
+    except AttributeError, TypeError, ValueError:
+        return None
+    matches = (
+        record
+        for record in records
+        if isinstance(record.payload, ActivationEvidence)
+        and record.payload.decision_id == decision_id
+        and record.payload.active_snapshot_json == active_json
+        and record.payload.rollback_snapshot_json == rollback_json
+        and record.payload.controller_configuration_digest == configuration_digest
+        and record.role_generation == generation
+        and record.model_digest == active_digest
+    )
+    return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id), default=None)
+
+
+def matching_activation_lifecycle(
+    records: Sequence[ModelEvidenceRecord],
+    activation: ModelEvidenceRecord,
+) -> ModelEvidenceRecord | None:
+    """Return the latest rollback/fallback bound to one exact activation."""
+    if not isinstance(activation.payload, ActivationEvidence) or activation.model_digest is None:
+        raise ValueError("activation record is required")
+    generation = activation.role_generation
+    digest = activation.model_digest
+    decision_id = activation.payload.decision_id
+    matches = (
+        record
+        for record in records
+        if (
+            isinstance(record.payload, RollbackEvidence)
+            and record.payload.decision_id == decision_id
+            and record.role_generation == generation + 1
+            and record.model_digest == digest
+        )
+        or (
+            isinstance(record.payload, FallbackEvidence)
+            and record.payload.failed_generation == generation
+            and record.payload.failed_digest == digest
+            and record.role_generation == generation + 1
+            and record.model_digest == digest
+        )
+    )
+    return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id), default=None)
+
+
+def rollback_kind_for_state(persisted: object) -> Literal["grey-box", "innovation-state-space"]:
+    """Project the exact durable rollback snapshot owner."""
+    rollback = _json_object(getattr(persisted, "rollback_snapshot_json"), "rollback snapshot")
+    return STATE_SPACE_KIND if rollback.get("schema") == _STATE_SPACE_SCHEMA else GREY_BOX_KIND
+
+
 def extract_state_space_candidate(checkpoint: Mapping[str, object]) -> dict[str, object]:
     """Extract the production checkpoint's state-space challenger snapshot."""
     root = _owned_mapping(checkpoint, "controller checkpoint")
@@ -566,36 +615,6 @@ def extract_state_space_candidate(checkpoint: Mapping[str, object]) -> dict[str,
     if len(state_spaces) != 1:
         raise ValueError("candidate-snapshot-not-found")
     return _owned_mapping(state_spaces[0], "candidate snapshot")
-
-
-def _production_prospective_solve(candidate: InnovationStateSpace) -> float:
-    snapshot = candidate.snapshot()
-    record = snapshot.get("record")
-    lag = record.get("lag") if isinstance(record, Mapping) else None
-    inputs = lag.get("realized_q") if isinstance(lag, Mapping) else None
-    ambients = lag.get("ambient_c") if isinstance(lag, Mapping) else None
-    if not isinstance(inputs, Sequence) or not inputs or not isinstance(ambients, Sequence) or not ambients:
-        raise ValueError("prospective-state-unavailable")
-    previous = _duty(inputs[-1], "prospective previous command")
-    ambient_value = ambients[-1]
-    if isinstance(ambient_value, bool) or not isinstance(ambient_value, (int, float)):
-        raise ValueError("prospective ambient is not numeric")
-    ambient = float(ambient_value)
-    if not math.isfinite(ambient):
-        raise ValueError("prospective ambient is not finite")
-    config = LinearMPCConfig(horizon_steps=1)
-    prediction = candidate.affine_prediction(1, previous, np.asarray([ambient], dtype=np.float64))
-    setpoint = float(prediction.free_output_c[0])
-    solve = LinearMPC(config).solve(
-        prediction,
-        setpoint_c=setpoint,
-        q_previous=previous,
-        equilibrium_q=previous,
-    )
-    command = float(solve.sequence_q[0])
-    if not math.isfinite(command):
-        raise ValueError("prospective solve is non-finite")
-    return _duty(command, "prospective command")
 
 
 def _call_activation_persistence(callback: Callable[..., object], record: ModelEvidenceRecord) -> bool:

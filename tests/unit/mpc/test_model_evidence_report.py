@@ -1,4 +1,5 @@
 from dataclasses import replace
+import hashlib
 
 import json
 
@@ -26,8 +27,10 @@ from controller.linear_mpc.confidence import ConfidenceStatus
 from controller.linear_mpc.report import build_evidence_artifact, build_evidence_report
 
 
-_CANDIDATE = "c" * 64
-_INCUMBENT = "a" * 64
+_ACTIVE_JSON = '{"schema":"innovation-state-space/v2"}'
+_ROLLBACK_JSON = '{"schema":"grey-box-adapter/v1"}'
+_CANDIDATE = hashlib.sha256(_ACTIVE_JSON.encode()).hexdigest()
+_INCUMBENT = hashlib.sha256(_ROLLBACK_JSON.encode()).hexdigest()
 _CONTROLLER_CONFIG = "d" * 64
 
 
@@ -207,8 +210,8 @@ def _records():
         "activation",
         ActivationEvidence(
             decision_id="decision-6",
-            active_snapshot_json='{"schema":"innovation-state-space/v2"}',
-            rollback_snapshot_json='{"schema":"scheduled-arx/v2"}',
+            active_snapshot_json=_ACTIVE_JSON,
+            rollback_snapshot_json=_ROLLBACK_JSON,
             controller_configuration_digest=_CONTROLLER_CONFIG,
         ),
         timestamp_ms=70,
@@ -441,8 +444,8 @@ def test_activation_identity_remains_bound_when_a_later_challenger_arrives():
         generation=5,
     )
     activation = ModelActivationState(
-        active_snapshot_json='{"schema":"innovation-state-space/v2"}',
-        rollback_snapshot_json='{"schema":"grey-box-adapter/v1"}',
+        active_snapshot_json=_ACTIVE_JSON,
+        rollback_snapshot_json=_ROLLBACK_JSON,
         evidence_decision_id="decision-6",
         controller_configuration_digest=_CONTROLLER_CONFIG,
         role_generation=4,
@@ -465,6 +468,57 @@ def test_activation_identity_remains_bound_when_a_later_challenger_arrives():
         "digest": "b" * 64,
     }
     assert payload["artifact_metadata"]["provenance_digest"] == _INCUMBENT
+
+
+def test_fallback_report_projects_prior_state_space_as_the_exact_active_owner():
+    rollback_json = '{"generation":"a","schema":"innovation-state-space/v2"}'
+    rollback_digest = hashlib.sha256(rollback_json.encode()).hexdigest()
+    records = tuple(
+        record for record in _records() if not isinstance(record.payload, (ActivationEvidence, RollbackEvidence))
+    )
+    activation_record = _record(
+        "activation-b",
+        ActivationEvidence(
+            decision_id="decision-b",
+            active_snapshot_json=_ACTIVE_JSON,
+            rollback_snapshot_json=rollback_json,
+            controller_configuration_digest=_CONTROLLER_CONFIG,
+        ),
+        timestamp_ms=200,
+        generation=8,
+        model_digest=_CANDIDATE,
+        provenance_digest=rollback_digest,
+    )
+    rollback_record = _record(
+        "rollback-b",
+        RollbackEvidence(decision_id="decision-b", reason="operator rollback b"),
+        timestamp_ms=201,
+        generation=9,
+        model_digest=_CANDIDATE,
+        provenance_digest=rollback_digest,
+    )
+    records += (activation_record, rollback_record)
+    activation = ModelActivationState(
+        active_snapshot_json=_ACTIVE_JSON,
+        rollback_snapshot_json=rollback_json,
+        evidence_decision_id="decision-b",
+        controller_configuration_digest=_CONTROLLER_CONFIG,
+        role_generation=8,
+    )
+    state = report_module._confidence_state(records, activation)
+    confidence = replace(
+        _confidence(records),
+        status=ConfidenceStatus.FALLBACK,
+        active_kind=state["active_kind"],
+    )
+
+    payload = build_evidence_report(confidence, records, activation_state=activation).to_dict()
+
+    assert payload["status"] == "fallback"
+    assert payload["active_model"] == {
+        "kind": "innovation-state-space",
+        "digest": rollback_digest,
+    }
 
 
 def test_current_report_caches_confidence_by_immutable_ledger_and_activation(monkeypatch):

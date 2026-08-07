@@ -16,6 +16,7 @@ Description: Read/write accessors for the SQLite-backed datastore -- the
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+import hashlib
 import json
 import logging
 import math
@@ -58,8 +59,10 @@ from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationEvidence,
     EvidenceKind,
+    FallbackEvidence,
     ModelEvidenceDbRow,
     ModelEvidenceRecord,
+    RollbackEvidence,
 )
 
 
@@ -694,6 +697,14 @@ class ModelActivationState:
     role_generation: int
 
 
+@dataclass(frozen=True, slots=True)
+class ModelRollbackCommitOutcome:
+    """One atomic rollback insert or the exact lifecycle already committed."""
+
+    record: ModelEvidenceRecord
+    inserted: bool
+
+
 @contextmanager
 def _model_evidence_connection(database_path: str | os.PathLike[str] | None) -> Iterator[sqlite3.Connection]:
     """Yield the normal store or an explicitly selected ledger database."""
@@ -839,6 +850,108 @@ def commit_model_activation(
                     validated.role_generation,
                 ),
             )
+
+
+def commit_model_rollback(
+    decision: ModelEvidenceRecord,
+    *,
+    expected_activation: ModelActivationState,
+    database_path: str | os.PathLike[str] | None = None,
+) -> ModelRollbackCommitOutcome:
+    """Atomically append one rollback only while its exact activation is current."""
+    validated = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
+    if validated.kind is not EvidenceKind.ROLLBACK or not isinstance(validated.payload, RollbackEvidence):
+        raise ValueError("rollback commit requires rollback evidence")
+    row = _validated_model_evidence_rows((validated,))[0]
+    with _model_evidence_connection(database_path) as connection:
+        with datastore.transaction(connection) as conn:
+            state_row = conn.execute(
+                """
+                SELECT active_snapshot_json, rollback_snapshot_json, evidence_decision_id,
+                       controller_configuration_digest, role_generation
+                FROM model_activation_state WHERE singleton=1
+                """
+            ).fetchone()
+            current = None if state_row is None else ModelActivationState(*state_row)
+            if current != expected_activation:
+                raise ValueError("activation-state-changed")
+            active = json.loads(expected_activation.active_snapshot_json)
+            active_digest = hashlib.sha256(
+                json.dumps(active, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+            ).hexdigest()
+            stored_rows = conn.execute(
+                """
+                SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+                       model_digest, provenance_digest, schema_version, payload
+                FROM model_evidence WHERE schema_version IN (?, ?) ORDER BY id
+                """,
+                (1, MODEL_EVIDENCE_SCHEMA_VERSION),
+            ).fetchall()
+            records = tuple(
+                ModelEvidenceRecord.from_db_row(ModelEvidenceDbRow(*stored_row)) for stored_row in stored_rows
+            )
+            activation = max(
+                (
+                    record
+                    for record in records
+                    if isinstance(record.payload, ActivationEvidence)
+                    and record.payload.decision_id == expected_activation.evidence_decision_id
+                    and record.payload.active_snapshot_json == expected_activation.active_snapshot_json
+                    and record.payload.rollback_snapshot_json == expected_activation.rollback_snapshot_json
+                    and record.payload.controller_configuration_digest
+                    == expected_activation.controller_configuration_digest
+                    and record.role_generation == expected_activation.role_generation
+                    and record.model_digest == active_digest
+                ),
+                key=lambda record: (record.timestamp_ms, record.evidence_id),
+                default=None,
+            )
+            if activation is None:
+                raise ValueError("activation-lineage-missing")
+            existing = max(
+                (
+                    record
+                    for record in records
+                    if (
+                        isinstance(record.payload, RollbackEvidence)
+                        and record.payload.decision_id == expected_activation.evidence_decision_id
+                        and record.role_generation == expected_activation.role_generation + 1
+                        and record.model_digest == active_digest
+                    )
+                    or (
+                        isinstance(record.payload, FallbackEvidence)
+                        and record.payload.failed_generation == expected_activation.role_generation
+                        and record.payload.failed_digest == active_digest
+                        and record.role_generation == expected_activation.role_generation + 1
+                        and record.model_digest == active_digest
+                    )
+                ),
+                key=lambda record: (record.timestamp_ms, record.evidence_id),
+                default=None,
+            )
+            if existing is not None:
+                return ModelRollbackCommitOutcome(existing, False)
+            conn.execute(
+                """
+                INSERT INTO model_evidence(
+                    evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+                    model_digest, provenance_digest, schema_version, payload
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row.evidence_id,
+                    row.session_id,
+                    row.cook_id,
+                    row.timestamp_ms,
+                    row.kind,
+                    row.role_generation,
+                    row.model_digest,
+                    row.provenance_digest,
+                    row.schema_version,
+                    row.payload,
+                ),
+            )
+            return ModelRollbackCommitOutcome(validated, True)
 
 
 def read_model_activation(*, database_path: str | os.PathLike[str] | None = None) -> ModelActivationState | None:

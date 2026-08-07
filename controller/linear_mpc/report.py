@@ -28,6 +28,11 @@ from common.model_evidence import (
     TimingDistributionEvidence,
 )
 from controller.linear_mpc.confidence import ConfidenceConfig, ConfidenceReport, ConfidenceStatus, evaluate_confidence
+from controller.linear_mpc.activation import (
+    activation_record_for_state,
+    matching_activation_lifecycle,
+    rollback_kind_for_state,
+)
 
 REPORT_SCHEMA_VERSION = 1
 ARTIFACT_SCHEMA = "pifire-model-evidence/v1"
@@ -120,8 +125,14 @@ def build_evidence_report(
     )
     active_kind = report.active_kind or _DEFAULT_MODEL_KIND
     active_digest = default_digest
-    if active_kind != _DEFAULT_MODEL_KIND:
-        active_digest = activation_record.model_digest if activation_record is not None else report.candidate_digest
+    if activation_record is not None:
+        lifecycle = matching_activation_lifecycle(validated, activation_record)
+        if lifecycle is not None and active_kind == _CANDIDATE_MODEL_KIND:
+            active_digest = activation_record.provenance_digest
+        elif active_kind != _DEFAULT_MODEL_KIND:
+            active_digest = activation_record.model_digest
+    elif active_kind != _DEFAULT_MODEL_KIND:
+        active_digest = report.candidate_digest
     payload: dict[str, object] = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "status": report.status.value,
@@ -542,17 +553,10 @@ def _activation_identity_record(
     records: Sequence[ModelEvidenceRecord],
     activation_state: object,
 ) -> ModelEvidenceRecord | None:
-    decision_id = getattr(activation_state, "evidence_decision_id", None)
-    matches = tuple(
-        record
-        for record in records
-        if isinstance(record.payload, ActivationEvidence)
-        and (decision_id is None or cast(ActivationEvidence, record.payload).decision_id == decision_id)
-    )
-    if decision_id is not None:
-        return _latest_payload(matches, ActivationEvidence)
+    if activation_state is not None:
+        return activation_record_for_state(records, activation_state)
     if report.active_kind != _DEFAULT_MODEL_KIND:
-        return _latest_payload(matches, ActivationEvidence)
+        return _latest_payload(records, ActivationEvidence)
     return None
 
 
@@ -630,25 +634,27 @@ def _confidence_state(records: Sequence[ModelEvidenceRecord], activation_state: 
     if latest is not None:
         state["candidate_digest"] = latest.model_digest
         state["candidate_generation"] = latest.role_generation
-    lifecycle = max(
-        (
-            record
-            for record in records
-            if isinstance(
-                record.payload,
-                (ActivationEvidence, RollbackEvidence, FallbackEvidence, SchemaInvalidationEvidence),
-            )
-        ),
+    activation = None if activation_state is None else activation_record_for_state(records, activation_state)
+    lifecycle = None if activation is None else matching_activation_lifecycle(records, activation)
+    schema_invalidation = max(
+        (record for record in records if isinstance(record.payload, SchemaInvalidationEvidence)),
         key=lambda record: (record.timestamp_ms, record.evidence_id),
         default=None,
     )
-    if lifecycle is not None:
-        if isinstance(lifecycle.payload, ActivationEvidence):
-            state["status"] = ConfidenceStatus.ACTIVE.value
-            state["active_kind"] = _CANDIDATE_MODEL_KIND
-        elif isinstance(lifecycle.payload, (RollbackEvidence, FallbackEvidence)):
-            state["status"] = ConfidenceStatus.FALLBACK.value
-            state["active_kind"] = _DEFAULT_MODEL_KIND
-        elif isinstance(lifecycle.payload, SchemaInvalidationEvidence):
-            state["status"] = ConfidenceStatus.SCHEMA_INVALIDATED.value
+    authority = lifecycle or activation
+    if schema_invalidation is not None and (
+        authority is None
+        or (schema_invalidation.timestamp_ms, schema_invalidation.evidence_id)
+        > (authority.timestamp_ms, authority.evidence_id)
+    ):
+        state["status"] = ConfidenceStatus.SCHEMA_INVALIDATED.value
+    elif lifecycle is not None:
+        state["status"] = ConfidenceStatus.FALLBACK.value
+        if isinstance(lifecycle.payload, FallbackEvidence):
+            state["active_kind"] = lifecycle.payload.fallback_kind or _DEFAULT_MODEL_KIND
+        else:
+            state["active_kind"] = rollback_kind_for_state(activation_state)
+    elif activation is not None:
+        state["status"] = ConfidenceStatus.ACTIVE.value
+        state["active_kind"] = _CANDIDATE_MODEL_KIND
     return state
