@@ -54,7 +54,7 @@ from controller.mpc_model import (
 )
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
-from common.model_evidence import ForecastOriginEvidence
+from common.model_evidence import ForecastOriginEvidence, RefreshDiagnosticsEvidence
 from controller.linear_mpc.adaptation import AdaptationPolicy, EvaluationDecision, OnlineAdaptation
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
 from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
@@ -1137,6 +1137,58 @@ class Controller(ControllerBase):
         )
         return evidence
 
+    def _compact_refresh_evidence(self, decision):
+        """Freeze selected state-space diagnostics for the compact ledger."""
+        if self._online is None or not self._is_state_space_model(self._online.challenger):
+            return None
+        model = self._online.challenger
+        refresh = self._state_space_refresh_evidence(model)
+        snapshot = model.snapshot()
+        model_data = snapshot.get("model")
+        if not isinstance(refresh, Mapping) or not isinstance(model_data, Mapping):
+            return None
+        poles = np.asarray(model_data.get("poles"), dtype=float)
+        covariance = np.asarray(model_data.get("process_covariance"), dtype=float)
+        gain = model_data.get("steady_gain")
+        delay = refresh.get("delay")
+        alignment = refresh.get("alignment_error_c")
+        order = refresh.get("order")
+        finite = (
+            poles.size > 0
+            and covariance.size > 0
+            and np.isfinite(poles).all()
+            and np.isfinite(covariance).all()
+            and isinstance(gain, (int, float))
+            and math.isfinite(float(gain))
+        )
+        round_trip = False
+        if isinstance(model, InnovationStateSpace):
+            try:
+                restored = InnovationStateSpace.from_snapshot(snapshot)
+                round_trip = restored.snapshot() == snapshot
+            except (ValueError, FloatingPointError, RuntimeError):
+                round_trip = False
+        braking = decision.candidate_braking_score
+        incumbent_braking = decision.incumbent_braking_score
+        return RefreshDiagnosticsEvidence(
+            accepted=refresh.get("accepted") is True,
+            reason=refresh.get("terminal_reason") if isinstance(refresh.get("terminal_reason"), str) else None,
+            full_rank=isinstance(order, int) and refresh.get("effective_rank") == order,
+            finite_diagnostics=finite,
+            pole_magnitude=float(np.max(poles)) if finite else None,
+            gain=float(gain) if isinstance(gain, (int, float)) else None,
+            delay_steps=delay if isinstance(delay, int) else None,
+            covariance_finite=finite,
+            alignment_error_c=float(alignment) if isinstance(alignment, (int, float)) else None,
+            snapshot_round_trip=round_trip,
+            sequential_wins=decision.consecutive_wins,
+            generation_continuity=not any(reason.value in {"continuity", "stale-generation"} for reason in decision.reasons),
+            atomic_persistence=True,
+            production_prospective=decision.prospective_digest is not None,
+            braking_error_c=braking,
+            incumbent_braking_error_c=incumbent_braking,
+        )
+
     def _online_status(self):
         coordinator = self._online
         if coordinator is None:
@@ -1350,12 +1402,16 @@ class Controller(ControllerBase):
         evaluation_payload, forecast_origin_evidence = (
             self._evaluation_payloads(decision) if isinstance(decision, EvaluationDecision) else (None, ())
         )
+        refresh_diagnostics_evidence = (
+            self._compact_refresh_evidence(decision) if isinstance(decision, EvaluationDecision) else None
+        )
         self._model_revision += 1
         if not decision.promoted:
             return {
                 "evaluation": self._online_last_evaluation,
                 "evaluation_payload": evaluation_payload,
                 "forecast_origin_evidence": forecast_origin_evidence,
+                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
             }
         if self._is_state_space_model(self._online.challenger) and not self._online_experiment_active:
             self._online.reject_prospective(decision.decision_id, "experiment-activation-gate")
@@ -1364,6 +1420,7 @@ class Controller(ControllerBase):
                 "evaluation": self._online_last_evaluation,
                 "evaluation_payload": evaluation_payload,
                 "forecast_origin_evidence": forecast_origin_evidence,
+                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
             }
         try:
             candidate = self._online.prospective_model(decision.decision_id)
@@ -1400,6 +1457,7 @@ class Controller(ControllerBase):
                 "evaluation": self._online_last_evaluation,
                 "evaluation_payload": evaluation_payload,
                 "forecast_origin_evidence": forecast_origin_evidence,
+                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
                 "lifecycle": lifecycle,
             }
         if not self._online.commit_promotion(decision.decision_id, solve):
@@ -1407,6 +1465,7 @@ class Controller(ControllerBase):
                 "evaluation": self._online_last_evaluation,
                 "evaluation_payload": evaluation_payload,
                 "forecast_origin_evidence": forecast_origin_evidence,
+                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
             }
         self._online_promotion_count += 1
         self._online_last_lifecycle_reason = "promotion"
@@ -1419,6 +1478,7 @@ class Controller(ControllerBase):
             "evaluation": self._online_last_evaluation,
             "evaluation_payload": evaluation_payload,
             "forecast_origin_evidence": forecast_origin_evidence,
+            "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
             "lifecycle": lifecycle,
         }
 

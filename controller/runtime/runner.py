@@ -32,7 +32,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeAlias
 
 from common.control_trace import ActuationMode, ControllerType, ResultStaleState
-from common.model_evidence import EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord
+from common.model_evidence import EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord, RefreshDiagnosticsEvidence
 
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
@@ -94,17 +94,22 @@ def _freeze_evidence(
         return ()
     evaluation = outcome.get("evaluation_payload")
     values = outcome.get("forecast_origin_evidence")
+    refresh = outcome.get("refresh_diagnostics_evidence")
     decision_id = getattr(evaluation, "decision_id", None)
     role_generation = getattr(evaluation, "role_generation", None)
+    challenger_digest = getattr(evaluation, "challenger_digest", None)
+    incumbent_digest = getattr(evaluation, "incumbent_digest", None)
     if (
         not isinstance(decision_id, str)
         or not isinstance(role_generation, int)
         or isinstance(role_generation, bool)
+        or not isinstance(challenger_digest, str)
+        or not isinstance(incumbent_digest, str)
         or not isinstance(values, tuple)
         or not all(isinstance(value, ForecastOriginEvidence) for value in values)
     ):
         return ()
-    return tuple(
+    records = tuple(
         ModelEvidenceRecord(
             evidence_id=f"{session_id}:{decision_id}:{value.origin_sequence}:{value.horizon_steps}:{value.completion_time_ms}",
             kind=EvidenceKind.FORECAST_ORIGIN,
@@ -117,6 +122,21 @@ def _freeze_evidence(
             payload=value,
         )
         for value in values
+    )
+    if not isinstance(refresh, RefreshDiagnosticsEvidence):
+        return records
+    return records + (
+        ModelEvidenceRecord(
+            evidence_id=f"{session_id}:{decision_id}:refresh:{role_generation}",
+            kind=EvidenceKind.REFRESH_DIAGNOSTICS,
+            session_id=session_id,
+            cook_id=cook_id,
+            timestamp_ms=max((value.completion_time_ms for value in values), default=0),
+            role_generation=role_generation,
+            model_digest=challenger_digest,
+            provenance_digest=incumbent_digest,
+            payload=refresh,
+        ),
     )
 
 
