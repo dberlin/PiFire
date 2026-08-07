@@ -6,6 +6,8 @@ import {
   readLiveProfiles,
 } from "../../../helpers/probes/probeMapApi";
 import type { ProbeModuleCatalog } from "../../../helpers/probes/probeMapTypes";
+import { queryKeys } from "../../../helpers/query/keys";
+import { queryClient } from "../../../helpers/query/queryClient";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { ProbeMap } from "../../../helpers/wizard/probeTypes";
@@ -81,6 +83,11 @@ export function ProbesTab() {
     if (r.ok) {
       setSaved(true);
       markSaved(); // the draft is spent; the next loader result supersedes it
+      // Same reason as useSaveSettings.ts: settingsLoader now primes itself
+      // through fetchQuery, which serves a fresh cache entry unchanged, so
+      // without invalidating first, revalidate() would re-run settingsLoader
+      // AND probeModulesLoader but put the PRE-save probe map back on screen.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
       revalidator.revalidate(); // re-runs settingsLoader AND probeModulesLoader
     } else {
       // Deliberately keeps `working` -- the store is untouched on every

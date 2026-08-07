@@ -1,4 +1,6 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { queryClient } from "../../../../src/helpers/query/queryClient";
 
 const getSettingsMock = rs.fn();
 const getModeMock = rs.fn();
@@ -12,6 +14,17 @@ rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
 
 // Imported after the mock so settingsRoutes picks up the mocked module.
 const { settingsLoader } = await import("../../../../src/helpers/settings/settingsRoutes");
+
+// settingsLoader primes the module-singleton queryClient (it has to: it runs
+// outside React, before any provider exists). That cache persists across
+// tests in this file, so without clearing it here, a later test's
+// fetchQuery would find a fresh, un-invalidated entry from an earlier test
+// and serve it straight from cache -- the freshly configured mock would
+// never even be called. (This is not just test hygiene: it is the same
+// warm-cache short-circuit "propagates a getSettings rejection on a warm,
+// invalidated cache too" below exercises deliberately, on purpose, on a
+// single cache entry instead of across tests.)
+beforeEach(() => queryClient.clear());
 
 describe("settingsLoader", () => {
   it("resolves {settings, mode, controllerMeta} from getSettings + getMode + getControllerMetadata", async () => {
@@ -29,6 +42,27 @@ describe("settingsLoader", () => {
   });
 
   it("propagates a getSettings rejection so the route error element renders", async () => {
+    getSettingsMock.mockRejectedValueOnce(new Error("boom"));
+    getModeMock.mockResolvedValueOnce("Stop");
+    getControllerMetadataMock.mockResolvedValueOnce(null);
+
+    await expect(settingsLoader()).rejects.toThrow("boom");
+  });
+
+  it("propagates a getSettings rejection on a WARM but invalidated cache too", async () => {
+    // A cold cache always calls the fetcher, so the test above alone can't
+    // tell an ensureQueryData-shaped bug from a correct fetchQuery: with
+    // ensureQueryData, once ANY data is cached the fetcher is never called
+    // again -- a later rejection would be silently swallowed and the stale
+    // blob from the first load served forever, and SettingsError would never
+    // render on a second failed navigation. Prime the cache with a real
+    // successful load first, invalidate it (as a save does), THEN fail.
+    getSettingsMock.mockResolvedValueOnce({ globals: { grill_name: "Test Grill" } });
+    getModeMock.mockResolvedValueOnce("Stop");
+    getControllerMetadataMock.mockResolvedValueOnce(null);
+    await settingsLoader(); // warms the cache
+
+    await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
     getSettingsMock.mockRejectedValueOnce(new Error("boom"));
     getModeMock.mockResolvedValueOnce("Stop");
     getControllerMetadataMock.mockResolvedValueOnce(null);

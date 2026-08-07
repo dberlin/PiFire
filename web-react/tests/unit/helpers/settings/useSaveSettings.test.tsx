@@ -1,12 +1,25 @@
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { createMemoryRouter, RouterProvider, useLoaderData } from "react-router";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { queryClient } from "../../../../src/helpers/query/queryClient";
 
 const mockApplySettings = rs.fn();
+// getSettings/getMode/getControllerMetadata are needed too: the rewritten
+// invalidation test below drives the REAL settingsLoader (not just
+// useSaveSettings) to check the observable outcome of a save, so
+// settingsRoutes's dependencies on this module have to resolve to something.
+const getSettingsMock = rs.fn();
+const getModeMock = rs.fn();
+const getControllerMetadataMock = rs.fn();
 
 rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
   applySettings: mockApplySettings,
+  getSettings: getSettingsMock,
+  getMode: getModeMock,
+  getControllerMetadata: getControllerMetadataMock,
 }));
 
 // Imported after the mock is registered so useSaveSettings resolves its
@@ -14,10 +27,21 @@ rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
 const { useSaveSettings, normalizeSaveError } = await import(
   "../../../../src/helpers/settings/useSaveSettings"
 );
+const { settingsLoader } = await import("../../../../src/helpers/settings/settingsRoutes");
+
+beforeEach(() => {
+  // useSaveSettings invalidates the module-singleton queryClient on a
+  // successful save, so cache state (and isInvalidated flags) would
+  // otherwise leak from one test into the next.
+  queryClient.clear();
+});
 
 afterEach(() => {
   cleanup();
   mockApplySettings.mockReset();
+  getSettingsMock.mockReset();
+  getModeMock.mockReset();
+  getControllerMetadataMock.mockReset();
 });
 
 // A probe route component: subscribing to `useLoaderData` makes this route
@@ -47,7 +71,7 @@ function Probe() {
   );
 }
 
-function renderWithLoader(loader: () => unknown) {
+function renderWithLoader(loader: () => unknown = () => ({})) {
   const router = createMemoryRouter([{ path: "/", element: <Probe />, loader }], {
     initialEntries: ["/"],
   });
@@ -95,6 +119,32 @@ describe("useSaveSettings", () => {
     // Give any stray revalidation a tick to land, then confirm it never did.
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes settingsLoader return the post-save settings, not the pre-save cache", async () => {
+    // Deliberately asserts the OBSERVABLE outcome (what settingsLoader
+    // actually returns on the next navigation) rather than an internal cache
+    // flag like isInvalidated -- a flag can be set correctly and still be
+    // ignored by whatever reads the cache next. ensureQueryData is exactly
+    // that: it returns cached data whenever any exists, never consulting
+    // isInvalidated, so this test fails against it even though isInvalidated
+    // would report true. It only passes against fetchQuery, which treats an
+    // invalidated entry as stale and actually refetches.
+    queryClient.setQueryData(queryKeys.settings, { globals: { grill_name: "before" } });
+    getSettingsMock.mockResolvedValue({ globals: { grill_name: "after" } });
+    getModeMock.mockResolvedValue("Stop");
+    getControllerMetadataMock.mockResolvedValue(null);
+    mockApplySettings.mockResolvedValue({ ok: true, message: "", errors: [] });
+
+    // `renderWithLoader` and `Probe` are this file's existing harness -- Probe
+    // calls useSaveSettings() and exposes a button that invokes save().
+    renderWithLoader();
+    await userEvent.click(await screen.findByRole("button", { name: /save/i }));
+    await waitFor(() => expect(screen.getByTestId("result").textContent).toBe("true"));
+
+    await expect(settingsLoader()).resolves.toMatchObject({
+      settings: { globals: { grill_name: "after" } },
+    });
   });
 });
 

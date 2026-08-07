@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
+import { queryKeys } from "../query/keys";
+import { queryClient } from "../query/queryClient";
 import { applySettings, type SaveFieldError, type SettingsFlag } from "./settingsApi";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
@@ -37,7 +39,19 @@ export function useSaveSettings() {
       setStatus(
         r.ok ? { kind: "saved" } : { kind: "error", message: normalizeSaveError(r.message) },
       );
-      if (r.ok) revalidator.revalidate(); // re-run the loader → fresh settings
+      if (r.ok) {
+        // Mark the shared entry invalidated BEFORE re-running the loader. The
+        // loader primes itself through fetchQuery, which serves a cache entry
+        // unchanged as long as it is neither stale-by-time NOR invalidated --
+        // so without this, revalidate() would put the PRE-save values back on
+        // screen (staleTime is 30s, easily long enough to still be "fresh").
+        //
+        // settingsRoot is the prefix of all three loader keys (settings, mode,
+        // controller metadata), which preserves exactly what revalidate() did
+        // before this cache existed: refetch all three.
+        await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
+        revalidator.revalidate(); // re-run the loader → fresh settings
+      }
       return r.ok;
     },
     [revalidator],
