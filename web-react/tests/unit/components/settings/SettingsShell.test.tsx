@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { AppPrefsProvider } from "../../../../src/components/AppPrefs";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";
+import { testQueryClient } from "../../test-utils";
 
 // SettingsShell reads its data via `useLoaderData()`, not outlet context, so
 // (unlike a plain tab) it needs a real data router with a loader — the
@@ -28,9 +30,11 @@ function renderShell(dcFan = true) {
     { initialEntries: ["/settings"] },
   );
   return render(
-    <AppPrefsProvider>
-      <RouterProvider router={router} />
-    </AppPrefsProvider>,
+    <QueryClientProvider client={testQueryClient()}>
+      <AppPrefsProvider>
+        <RouterProvider router={router} />
+      </AppPrefsProvider>
+    </QueryClientProvider>,
   );
 }
 

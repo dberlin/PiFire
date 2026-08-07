@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { AppPrefsProvider } from "../../../../src/components/AppPrefs";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";
 import { PwmTab } from "../../../../src/components/settings/tabs/PwmTab";
 import { SafetyTab } from "../../../../src/components/settings/tabs/SafetyTab";
+import { testQueryClient } from "../../test-utils";
 
 // Ruling 3, 2026-07-26 (docs/superpowers/backlogs/react-migration-backlog.md): a
 // settings edit must survive a tab switch. Flask persisted every field the
@@ -69,9 +71,11 @@ function renderSettings() {
     { initialEntries: ["/settings/pwm"] },
   );
   render(
-    <AppPrefsProvider>
-      <RouterProvider router={router} />
-    </AppPrefsProvider>,
+    <QueryClientProvider client={testQueryClient()}>
+      <AppPrefsProvider>
+        <RouterProvider router={router} />
+      </AppPrefsProvider>
+    </QueryClientProvider>,
   );
   return { router, loaderCalls: () => loaderCalls };
 }

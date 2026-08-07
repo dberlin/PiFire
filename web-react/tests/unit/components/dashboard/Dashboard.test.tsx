@@ -2,12 +2,27 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { Dashboard } from "../../../../src/components/dashboard/Dashboard";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import type { NotifyUpdate } from "../../../../src/helpers/notify/notifyApi";
+import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
+  rstest: "importActual",
+};
 import type { LiveState } from "../../../../src/helpers/types";
-import { renderRoute } from "../../test-utils";
+
+// renderRoute() mounts AppPrefsProvider, which now reads settings itself
+// (AppPrefs.tsx) -- unmocked, that call would land on the same global `fetch`
+// stub the notify tests below install and inflate their addressed-POST call
+// counts. Stubbed through a lazy wrapper so the hoisted mock factory never
+// captures an uninitialised binding, same idiom MetricsPage.test.tsx uses.
+const getSettingsMock = rs.fn().mockResolvedValue({});
+rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
+  ...actualSettingsApi,
+  getSettings: (...a: unknown[]) => getSettingsMock(...a),
+}));
+
+const { Dashboard } = await import("../../../../src/components/dashboard/Dashboard");
+const { renderRoute } = await import("../../test-utils");
 
 afterEach(cleanup);
 
