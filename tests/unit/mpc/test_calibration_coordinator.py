@@ -377,3 +377,43 @@ def test_final_high_completion_and_terminal_snapshot_preserve_every_completed_st
     snapshot = coordinator.snapshot()
     assert len(snapshot["completed_stages"]) == 3
     assert CalibrationCoordinator.from_snapshot(snapshot, safe_prediction).snapshot()["completed_stages"] == snapshot["completed_stages"]
+
+
+def test_rejected_restart_preserves_completed_history_until_an_accepted_start():
+    fail = False
+
+    def predictor(baseline_q, probe_q, runtime):
+        if fail:
+            raise RuntimeError("unavailable")
+        return runtime.temp_c + 1.0
+
+    coordinator, decision = start(CalibrationCoordinator(predict_max_c=predictor))
+    advance_stage(coordinator, decision)
+    history = coordinator.snapshot()["completed_stages"]
+    fail = True
+    rejected = coordinator.start(command(command_revision=8), context())
+    assert not rejected.active and rejected.probe_q == 0.0
+    assert coordinator.snapshot()["completed_stages"] == history
+
+
+def test_coast_predictor_exception_and_timeout_preserve_history_and_restore_terminal_snapshot():
+    fail = False
+
+    def predictor(baseline_q, probe_q, runtime):
+        if fail:
+            raise RuntimeError("unavailable")
+        return runtime.temp_c + 1.0
+
+    coordinator, decision = start(CalibrationCoordinator(predict_max_c=predictor))
+    advance_stage(coordinator, decision)
+    history = coordinator.snapshot()["completed_stages"]
+    fail = True
+    aborted = coordinator.advance(context(now_s=45.0, temp_c=CENTERS[1], target_c=CENTERS[1]))
+    assert not aborted.active and aborted.probe_q == 0.0
+    snapshot = coordinator.snapshot()
+    assert CalibrationCoordinator.from_snapshot(snapshot, predictor).snapshot()["completed_stages"] == history
+
+    coordinator, decision = start()
+    advance_stage(coordinator, decision)
+    timed_out = coordinator.advance(context(now_s=3644.0))
+    assert not timed_out.active and coordinator.snapshot()["completed_stages"]

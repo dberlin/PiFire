@@ -214,13 +214,13 @@ class CalibrationCoordinator:
         if self._predict_max_c is None:
             return self._terminal("start_rejected", None, ("prediction_unavailable",))
         plan = self._signed_dwell_plan(command.seed)
-        self._completed_history = ()
         schedule = tuple(sign * self._config.max_probe_q for sign in self._expand(plan))
         state = _State(command, 0, runtime.now_s, 0, plan, schedule)
         self._state = state
         probe, reasons = self._bound_probe(schedule[0], runtime)
         if reasons:
             return self._terminal("start_rejected", "low", reasons)
+        self._completed_history = ()
         self._state = self._with_probe(state, probe)
         return self._remember(CalibrationDecision(True, probe, "low", self._progress(self._state), (
             self._event("start_accepted", "low", schedule[0], probe, self._state),
