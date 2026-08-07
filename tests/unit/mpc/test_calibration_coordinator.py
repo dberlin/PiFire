@@ -41,8 +41,12 @@ def command(**changes):
     return CalibrationCommand(**values)
 
 
+def safe_prediction(baseline_q, probe_q, runtime):
+    return runtime.temp_c + 1.0
+
+
 def start(coordinator=None, **changes):
-    coordinator = coordinator or CalibrationCoordinator()
+    coordinator = coordinator or CalibrationCoordinator(predict_max_c=safe_prediction)
     decision = coordinator.start(command(), context(**changes))
     assert decision.active
     return coordinator, decision
@@ -50,7 +54,7 @@ def start(coordinator=None, **changes):
 
 def advance_stage(coordinator, decision, *, stage_context=None):
     current = decision
-    for frame in range(38):
+    for frame in range(44):
         runtime = (
             context(now_s=frame + 1.0, realized_q=0.50 + current.probe_q)
             if stage_context is None
@@ -118,10 +122,17 @@ def test_start_begins_low_stage_and_emits_audit_events():
     assert abs(decision.probe_q) <= 0.05
 
 
+def test_start_fails_closed_when_no_active_grey_box_prediction_is_available():
+    decision = CalibrationCoordinator().start(command(), context())
+    assert not decision.active
+    assert decision.probe_q == 0.0
+    assert decision.events[-1].reasons == ("prediction_unavailable",)
+
+
 def test_seed_changes_only_pair_order_and_initial_sign_not_zero_sum_dwell_multiset():
-    first = CalibrationCoordinator()
+    first = CalibrationCoordinator(predict_max_c=safe_prediction)
     one = first.start(command(seed=1), context())
-    second = CalibrationCoordinator()
+    second = CalibrationCoordinator(predict_max_c=safe_prediction)
     two = second.start(command(seed=2), context())
     assert one.probe_q != 0.0 and two.probe_q != 0.0
     assert first.snapshot()["dwell_counts"] == second.snapshot()["dwell_counts"] == (2, 3, 5, 4, 3, 2)
@@ -207,31 +218,39 @@ def test_clipped_realization_requests_safe_compensation_and_tracks_realized_sign
     assert clipped.events[-1].kind == "probe_changed"
 
 
-def test_stage_needs_all_evidence_gates_before_transitioning_upward():
+def test_stage_completion_coasts_to_each_upward_band_before_starting_the_next_excitation():
     coordinator, decision = start()
-    insufficient = advance_stage(
+    coast = advance_stage(coordinator, decision)
+    assert coast.active and coast.stage == "coast"
+    assert coast.probe_q == 0.0
+    assert coast.target_c == pytest.approx(CENTERS[1])
+    assert coast.progress.eligible_observations == 0
+    assert coast.events[-1].kind == "stage_completed"
+
+    waiting = coordinator.advance(context(now_s=45.0))
+    assert waiting.active and waiting.stage == "coast"
+    assert waiting.probe_q == 0.0
+    assert all(event.kind != "stage_started" for event in waiting.events)
+
+    middle = coordinator.advance(context(now_s=46.0, temp_c=CENTERS[1], target_c=CENTERS[1]))
+    assert middle.active and middle.stage == "middle"
+    assert middle.probe_q != 0.0
+    assert middle.events[-1].kind == "stage_started"
+
+    coast = advance_stage(
         coordinator,
-        decision,
-        stage_context=context(now_s=1.0, realized_q=0.5, rank_progress=0.0, coverage_progress=0.0),
+        middle,
+        stage_context=context(now_s=47.0, temp_c=CENTERS[1], target_c=CENTERS[1]),
     )
-    assert insufficient.active and insufficient.stage == "low"
-    assert insufficient.events[-1].kind == "incomplete"
+    assert coast.active and coast.stage == "coast" and coast.target_c == pytest.approx(CENTERS[2])
 
-    coordinator, decision = start()
-    low_done = advance_stage(coordinator, decision)
-    assert low_done.active and low_done.stage == "middle"
-    assert low_done.events[-2].kind == "stage_completed"
-    assert low_done.events[-1].kind == "stage_started"
-    middle_done = advance_stage(coordinator, low_done, stage_context=context(now_s=100.0))
-    assert middle_done.active and middle_done.stage == "high"
-    all_done = advance_stage(coordinator, middle_done, stage_context=context(now_s=200.0))
-    assert not all_done.active and all_done.events[-1].kind == "completed"
-
+    high = coordinator.advance(context(now_s=100.0, temp_c=CENTERS[2], target_c=CENTERS[2]))
+    assert high.active and high.stage == "high" and high.probe_q != 0.0
 
 def test_progress_requires_30_observations_three_levels_variance_signs_rank_coverage_continuity_and_zero_mean():
     coordinator, decision = start()
     current = decision
-    for index in range(38):
+    for index in range(44):
         probe = current.probe_q
         current = coordinator.advance(
             context(
@@ -241,7 +260,7 @@ def test_progress_requires_30_observations_three_levels_variance_signs_rank_cove
                 coverage_progress=1.0,
             )
         )
-    progress = current.progress
+    progress = coordinator.snapshot()["completed_stages"][-1]
     assert progress.eligible_observations >= 30
     assert progress.realized_levels >= 3
     assert progress.realized_variance >= 0.001
@@ -256,7 +275,7 @@ def test_snapshot_restore_is_deterministic_and_immutable():
     coordinator, _ = start()
     coordinator.advance(context(now_s=1.0))
     snapshot = coordinator.snapshot()
-    restored = CalibrationCoordinator.from_snapshot(snapshot)
+    restored = CalibrationCoordinator.from_snapshot(snapshot, safe_prediction)
     next_context = context(now_s=2.0)
     assert restored.advance(next_context) == coordinator.advance(next_context)
     with pytest.raises(TypeError):
