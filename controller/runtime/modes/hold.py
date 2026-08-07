@@ -366,7 +366,9 @@ class HoldMode(ControlMode):
             )
             self._bound_pending_model_observations()
             return
-        if not self._learning_evidence_available:
+        worker = self._persistence_worker
+        if not self._learning_evidence_available or (worker is not None and worker.evidence_blocked):
+            self._learning_evidence_available = False
             self._record_pending_observation_gap(observation, "model-persistence-unavailable")
             return
         if self._runner is None:

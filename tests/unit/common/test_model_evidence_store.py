@@ -175,3 +175,15 @@ def test_activation_commit_replaces_singleton_and_rolls_back_with_evidence(ds, t
         assert read_model_evidence(kind="activation") == []
     finally:
         datastore._reset_for_tests(None)
+
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_activation_snapshot_rejects_nonstandard_json_constants(constant):
+    with pytest.raises(ValidationError, match="valid JSON"):
+        ActivationEvidence(
+            decision_id="decision-a",
+            active_snapshot_json=f'{{"gain": {constant}}}',
+            rollback_snapshot_json='{"revision": 1}',
+            controller_configuration_digest=_OTHER_DIGEST,
+        )

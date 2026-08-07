@@ -127,3 +127,48 @@ def test_bounded_evidence_overflow_returns_a_typed_gap_and_never_drops_activatio
 
     assert written == [_evidence("first")]
     assert activations == [_activation("activation")]
+
+
+def test_evidence_submission_rejects_after_async_write_failure():
+    failed = threading.Event()
+
+    def fail_append(_records):
+        failed.set()
+        raise RuntimeError("disk unavailable")
+
+    worker = ModelPersistenceWorker(_Store(), _Logger(), append_evidence=fail_append)
+    try:
+        assert worker.submit_evidence(_evidence("first")).accepted
+        assert failed.wait(timeout=1.0)
+        rejected = worker.submit_evidence(_evidence("second"))
+        assert not rejected.accepted
+        assert rejected.recorder_gap is not None
+        assert rejected.recorder_gap.payload.reason == "persistence-failed"
+    finally:
+        worker.flush_and_stop(timeout=1.0)
+
+
+def test_checkpoint_rejects_malformed_nonfinite_and_oversized_snapshots_synchronously():
+    logger = _Logger()
+    worker = ModelPersistenceWorker(_Store(), logger)
+    try:
+        assert not worker.submit_checkpoint("mpc", {"revision": -1})
+        assert not worker.submit_checkpoint("mpc", {"revision": 1, "gain": float("nan")})
+        assert not worker.submit_checkpoint("mpc", {"revision": 1, "blob": "x" * 65_537})
+        assert logger.errors
+    finally:
+        worker.flush_and_stop(timeout=1.0)
+
+
+def test_equal_checkpoint_store_result_is_a_coalesced_noop_not_worker_failure():
+    class EqualStore:
+        def save(self, _name, _snapshot):
+            return False
+
+    worker = ModelPersistenceWorker(EqualStore(), _Logger())
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 1})
+        assert worker.flush_and_stop(timeout=1.0)
+        assert not worker.evidence_blocked
+    finally:
+        worker.flush_and_stop(timeout=1.0)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Sequence
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from threading import Condition, Thread
@@ -69,6 +70,10 @@ class ModelPersistenceWorker:
             raise ValueError("checkpoint name must be non-blank")
         try:
             owned_snapshot = deepcopy(snapshot)
+            if self._revision(owned_snapshot) is None:
+                raise ValueError("checkpoint revision must be a nonnegative integer")
+            if len(json.dumps(owned_snapshot, allow_nan=False, separators=(",", ":")).encode()) > 65_536:
+                raise ValueError("checkpoint exceeds 65536-byte persistence limit")
         except Exception as error:
             self._logger.error(f"Could not own {name} model checkpoint: {error}")
             return False
@@ -102,6 +107,8 @@ class ModelPersistenceWorker:
             raise TypeError("record must be ModelEvidenceRecord")
         owned_record = ModelEvidenceRecord.model_validate_json(record.model_dump_json())
         with self._condition:
+            if self._failed:
+                return self._reject_evidence_locked(owned_record, "persistence-failed")
             if self._stopping:
                 return self._reject_evidence_locked(owned_record, "persistence-stopped")
             if len(self._pending_evidence) >= self._evidence_capacity:
@@ -192,8 +199,7 @@ class ModelPersistenceWorker:
             try:
                 if kind == "checkpoint":
                     name, snapshot = payload
-                    if not self._store.save(name, snapshot):
-                        raise RuntimeError("model store rejected checkpoint")
+                    _ = self._store.save(name, snapshot)
                 elif kind == "evidence":
                     self._append_evidence((payload,))
                 else:

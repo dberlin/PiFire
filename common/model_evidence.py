@@ -121,8 +121,11 @@ class ActivationEvidence:
     @classmethod
     def validate_snapshot_json(cls, value: str) -> str:
         try:
-            decoded = json.loads(value)
-        except (TypeError, json.JSONDecodeError) as exc:
+            decoded = json.loads(
+                value,
+                parse_constant=lambda constant: (_ for _ in ()).throw(ValueError(f"invalid JSON constant {constant}")),
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("activation snapshot must be valid JSON") from exc
         if not isinstance(decoded, dict):
             raise ValueError("activation snapshot must be a JSON object")
