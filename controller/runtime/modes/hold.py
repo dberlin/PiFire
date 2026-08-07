@@ -34,7 +34,6 @@ from common.control_trace import (
     TraceEventKind,
     TraceSetting,
 )
-from common.model_evidence import EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord
 from controller.applied_output import AppliedOutput, OutputSource, classify_output_source, seed_output
 from controller.linear_mpc.contracts import FrameObservation
 from controller.mpc_allocator import normalized_load_from_auger_duty
@@ -431,136 +430,6 @@ class HoldMode(ControlMode):
             self._trace_missing_frame_observation(frame, "missing-result-revision")
 
     @staticmethod
-    def _model_evaluation_payload(value: object) -> ModelEvaluationPayload | None:
-        if not isinstance(value, Mapping):
-            return None
-        try:
-
-            def milliseconds(seconds: object) -> int:
-                if isinstance(seconds, bool) or not isinstance(seconds, int | float) or not isfinite(seconds):
-                    raise ValueError("evaluation time must be finite")
-                return int(seconds * 1_000)
-
-            def finite_float(number: object) -> float:
-                if isinstance(number, bool) or not isinstance(number, int | float) or not isfinite(number):
-                    raise ValueError("evaluation number must be finite")
-                return float(number)
-
-            missing = object()
-
-            def aliased_value(internal_key: str, trace_key: str) -> object:
-                internal = value.get(internal_key, missing)
-                trace = value.get(trace_key, missing)
-                if internal is missing and trace is missing:
-                    raise KeyError(trace_key)
-                if internal is not missing and trace is not missing and internal != trace:
-                    raise ValueError(f"evaluation {internal_key} and {trace_key} disagree")
-                return trace if internal is missing else internal
-
-            rejection_reasons = aliased_value("reasons", "rejection_reasons")
-            completed_origins = value["completed_origins"]
-            horizon_scores = value["horizon_scores"]
-            if (
-                not isinstance(rejection_reasons, tuple | list)
-                or not isinstance(completed_origins, tuple | list)
-                or not isinstance(horizon_scores, tuple | list)
-                or not all(isinstance(origin, Mapping) for origin in completed_origins)
-                or not all(isinstance(score, Mapping) for score in horizon_scores)
-            ):
-                return None
-            return ModelEvaluationPayload(
-                decision_id=value["decision_id"],
-                evaluated_at_ms=milliseconds(value["evaluated_at_s"]),
-                role_generation=aliased_value("generation", "role_generation"),
-                promoted=value["promoted"],
-                committed=value["committed"],
-                consecutive_wins=value["consecutive_wins"],
-                rejection_reasons=tuple(rejection_reasons),
-                incumbent_prediction_score=value["incumbent_prediction_score"],
-                challenger_prediction_score=aliased_value("candidate_prediction_score", "challenger_prediction_score"),
-                incumbent_braking_score=value["incumbent_braking_score"],
-                challenger_braking_score=aliased_value("candidate_braking_score", "challenger_braking_score"),
-                sample_count=value["sample_count"],
-                prospective_digest=value["prospective_digest"],
-                window_start_ms=milliseconds(value["window_start_s"]),
-                window_end_ms=milliseconds(value["window_end_s"]),
-                incumbent_digest=value["incumbent_digest"],
-                challenger_digest=value["challenger_digest"],
-                completed_origins=tuple(
-                    {
-                        "origin_time_ms": milliseconds(origin["origin_time_s"]),
-                        "completion_time_ms": milliseconds(origin["completion_time_s"]),
-                        "horizon_steps": origin["horizon_steps"],
-                        "generation": origin["generation"],
-                        "observed_temperature_c": origin["observed_temperature_c"],
-                        "incumbent_error_c": origin["incumbent_error_c"],
-                        "challenger_error_c": origin["challenger_error_c"],
-                        "braking": origin["braking"],
-                        "observation_sequence": origin["observation_sequence"],
-                        "incumbent_digest": origin["incumbent_digest"],
-                        "challenger_digest": origin["challenger_digest"],
-                        "incumbent_prediction_c": origin["incumbent_prediction_c"],
-                        "challenger_prediction_c": origin["challenger_prediction_c"],
-                        "temperature_band": origin["temperature_band"],
-                        "ambient_source": AmbientSource(origin["ambient_source"]),
-                    }
-                    for origin in completed_origins
-                ),
-                horizon_scores=tuple(
-                    {
-                        "horizon_steps": score["horizon_steps"],
-                        "incumbent_rmse_c": score["incumbent_rmse_c"],
-                        "challenger_rmse_c": score["challenger_rmse_c"],
-                        "sample_count": score["sample_count"],
-                    }
-                    for score in horizon_scores
-                ),
-                evaluation_duration_ms=finite_float(value["evaluation_duration_ms"]),
-                challenger_model_kind=value.get("challenger_model_kind", "scheduled-arx"),
-                state_space_refresh=value.get("state_space_refresh"),
-            )
-        except KeyError, OverflowError, TypeError, ValueError:
-            return None
-
-    def _submit_completed_origin_evidence(self, evaluation: ModelEvaluationPayload, timestamp_ms: int) -> None:
-        """Queue immutable completed origins only after their runner outcome exists."""
-        worker = self._persistence_worker
-        if worker is None or self._trace_session_id is None:
-            return
-        records = tuple(
-            ModelEvidenceRecord(
-                evidence_id=f"{evaluation.decision_id}:{origin.observation_sequence}:{origin.horizon_steps}",
-                kind=EvidenceKind.FORECAST_ORIGIN,
-                session_id=self._trace_session_id,
-                cook_id=self._trace_cook_id,
-                timestamp_ms=timestamp_ms,
-                role_generation=evaluation.role_generation,
-                model_digest=origin.challenger_digest,
-                provenance_digest=origin.incumbent_digest,
-                payload=ForecastOriginEvidence(
-                    origin_sequence=origin.observation_sequence,
-                    origin_time_ms=origin.origin_time_ms,
-                    completion_time_ms=origin.completion_time_ms,
-                    horizon_steps=origin.horizon_steps,
-                    incumbent_digest=origin.incumbent_digest,
-                    challenger_digest=origin.challenger_digest,
-                    incumbent_prediction_c=origin.incumbent_prediction_c,
-                    challenger_prediction_c=origin.challenger_prediction_c,
-                    observed_temperature_c=origin.observed_temperature_c,
-                    incumbent_error_c=origin.incumbent_error_c,
-                    challenger_error_c=origin.challenger_error_c,
-                    temperature_band=origin.temperature_band,
-                    phase="coasting" if origin.braking else "heating",
-                    ambient_source=origin.ambient_source,
-                    calibration_fit=False,
-                ),
-            )
-            for origin in evaluation.completed_origins
-        )
-        if records and not worker.submit_evidence_batch(records).accepted:
-            self._learning_evidence_available = False
-
-    @staticmethod
     def _model_lifecycle_payload(value: object) -> ModelEventPayload | None:
         if not isinstance(value, Mapping):
             return None
@@ -746,9 +615,7 @@ class HoldMode(ControlMode):
                 continue
             records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
             evaluation_payload = outcome.get("evaluation_payload")
-            if not isinstance(evaluation_payload, ModelEvaluationPayload):
-                evaluation_payload = self._model_evaluation_payload(outcome.get("evaluation"))
-            if evaluation_payload is not None:
+            if isinstance(evaluation_payload, ModelEvaluationPayload):
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation_payload))
             lifecycle_payload = self._model_lifecycle_payload(outcome.get("lifecycle"))
             if lifecycle_payload is not None:
@@ -1056,6 +923,11 @@ class HoldMode(ControlMode):
         if worker is None or not worker.submit_checkpoint(self._controller_name, snapshot):
             self._learning_evidence_available = False
 
+    def _clear_runner_evidence_context(self) -> None:
+        configure_evidence = getattr(getattr(self, "_runner", None), "set_evidence_context", None)
+        if callable(configure_evidence):
+            configure_evidence(None, None)
+
     def _ensure_trace_session(self, now: float) -> None:
         if self._trace_session_id is not None:
             self._flush_pending_model_events()
@@ -1103,6 +975,7 @@ class HoldMode(ControlMode):
         if not self._trace_record(TraceEventKind.SESSION, payload, int(now * 1_000)):
             self._trace_session_id = None
             self._trace_cook_id = None
+            self._clear_runner_evidence_context()
             return
         configure_evidence = getattr(self._runner, "set_evidence_context", None)
         if callable(configure_evidence):
@@ -1419,6 +1292,7 @@ class HoldMode(ControlMode):
         self._trace_recorder = None
         self._trace_session_id = None
         self._trace_cook_id = None
+        self._clear_runner_evidence_context()
         self._trace_closed = False
         self._trace_warning_active = False
         self._learning_evidence_available = True
@@ -1530,6 +1404,7 @@ class HoldMode(ControlMode):
         controller_state = self.state.controller
         self._trace_session_id = None
         self._trace_cook_id = None
+        self._clear_runner_evidence_context()
         self._pending_model_observations = {}
         self._pulse_observation_last_frame_key = None
         self._clear_trace_session_model_authority()

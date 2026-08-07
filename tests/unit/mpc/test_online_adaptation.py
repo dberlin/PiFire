@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from types import SimpleNamespace
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
-from common.control_trace import AmbientSource, ControlTraceRecord, ControllerType, TraceEventKind
-from controller.runtime.modes.hold import HoldMode
+from common.control_trace import AmbientSource
 from controller.linear_mpc.adaptation import (
     AdaptationPolicy,
     EvaluationRejectionReason,
@@ -337,61 +336,6 @@ def _populate_one_window(manager: OnlineAdaptation, start_index: int = 0) -> Non
         )
 
 
-def test_evaluation_payload_round_trips_exact_coordinator_audit_evidence() -> None:
-    manager = _winning_manager()
-    _populate_one_window(manager)
-    decision = manager.evaluate_due(at_s=320.0)
-
-    payload = HoldMode._model_evaluation_payload(asdict(decision))
-
-    assert payload is not None
-    record = ControlTraceRecord(
-        ts_ms=320_000,
-        session_id="adaptation-evidence",
-        controller=ControllerType.MPC,
-        event_kind=TraceEventKind.MODEL_EVALUATION,
-        payload=payload,
-    )
-    restored = ControlTraceRecord.model_validate_json(record.model_dump_json()).payload
-
-    assert restored.completed_origins == payload.completed_origins
-    assert [
-        (
-            origin.origin_time_ms,
-            origin.completion_time_ms,
-            origin.horizon_steps,
-            origin.generation,
-            origin.observed_temperature_c,
-            origin.incumbent_error_c,
-            origin.challenger_error_c,
-            origin.braking,
-        )
-        for origin in restored.completed_origins
-    ] == [
-        (
-            int(origin.origin_time_s * 1_000),
-            int(origin.completion_time_s * 1_000),
-            origin.horizon_steps,
-            origin.generation,
-            origin.observed_temperature_c,
-            origin.incumbent_error_c,
-            origin.challenger_error_c,
-            origin.braking,
-        )
-        for origin in decision.completed_origins
-    ]
-    assert restored.window_start_ms == min(origin.origin_time_s * 1_000 for origin in decision.completed_origins)
-    assert restored.window_end_ms == max(origin.completion_time_s * 1_000 for origin in decision.completed_origins)
-    assert restored.sample_count == len(restored.completed_origins) == decision.sample_count
-    assert restored.incumbent_digest == decision.incumbent_digest == manager.model_digest(manager.incumbent)
-    assert restored.challenger_digest == decision.challenger_digest == manager.model_digest(manager.challenger)
-    assert restored.evaluation_duration_ms == decision.evaluation_duration_ms
-    assert {score.horizon_steps: score.sample_count for score in restored.horizon_scores} == {
-        score.horizon_steps: sum(
-            origin.horizon_steps == score.horizon_steps for origin in decision.completed_origins
-        )
-        for score in decision.horizon_scores
-    }
 
 
 def test_promotion_requires_two_wins_and_prospective_commit() -> None:

@@ -12,8 +12,9 @@ from controller.linear_mpc.contracts import AffinePrediction, FrameObservation, 
 
 
 class _AffineModel:
-    def __init__(self, *, marker: str) -> None:
+    def __init__(self, *, marker: str, schema: str = "causal-origin-test/v1") -> None:
         self.marker = marker
+        self.schema = schema
 
     def observe(self, observation: FrameObservation) -> ModelUpdate:
         return ModelUpdate(observation.temp_c, observation.temp_c, 0.0, True)
@@ -29,7 +30,7 @@ class _AffineModel:
 
     def snapshot(self) -> dict[str, object]:
         return {
-            "schema": "causal-origin-test/v1",
+            "schema": self.schema,
             "marker": self.marker,
             "status": {"regions": [{"effective_samples": 30}], "steady_gain": 1.0},
             "active_delay": 2,
@@ -97,6 +98,15 @@ def test_refresh_keeps_precommitted_forecast_and_digest_immutable() -> None:
 
     assert origin.challenger_prediction_c == old_prediction
     assert origin.challenger_digest != manager.challenger_digest
+
+
+def test_incompatible_challenger_refresh_expires_pending_origins() -> None:
+    manager = OnlineAdaptation(_AffineModel(marker="incumbent"), _AffineModel(marker="old"))
+    manager.observe(_frame(0))
+
+    manager.refresh_challenger(_AffineModel(marker="new", schema="other-model/v1"))
+
+    assert not manager.pending_origins
 
 
 def test_destructive_or_calibration_frame_cannot_complete_prior_validation_origin() -> None:

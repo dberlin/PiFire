@@ -333,6 +333,10 @@ class OnlineAdaptation:
 
     def refresh_challenger(self, challenger: AdaptiveModel) -> None:
         """Install a compatible challenger without rewriting captured futures."""
+        current_schema = self.challenger.snapshot().get("schema")
+        replacement_schema = challenger.snapshot().get("schema")
+        if current_schema != replacement_schema:
+            self._invalidate_origins()
         self.challenger = challenger
 
     def reset_continuity(self) -> None:
