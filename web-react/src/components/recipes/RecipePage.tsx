@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 import { Link, useParams } from "react-router";
 import { FileRequestError } from "../../helpers/files/apiEnvelope";
 import { fetchRecipeDetail } from "../../helpers/files/recipeApi";
-import type { RecipeDetail } from "../../helpers/files/recipeTypes";
+import { queryKeys } from "../../helpers/query/keys";
 import { deriveRunView } from "../../helpers/recipes/runStatus";
 import { useShellState } from "../../helpers/shellContext";
 import { IngredientsEditor } from "./IngredientsEditor";
@@ -13,10 +14,10 @@ import { RecipeRunStatus } from "./RecipeRunStatus";
 import { RecipeView } from "./RecipeView";
 import { StepsEditor } from "./StepsEditor";
 
-// Built on the same shell as CookFilePage.tsx: useParams, a requestId/reload
-// pair standing in for the single fetch effect, and a loading/error branch
-// derived from render state (not a second mirrored flag). Loading/error live
-// in this component while the read-only detail itself is RecipeView's job.
+// Built on the same shell as CookFilePage.tsx: useParams, a single useQuery
+// keyed on the filename, and a loading/error branch derived from render
+// state (not a second mirrored flag). Loading/error live in this component
+// while the read-only detail itself is RecipeView's job.
 //
 // Unlike CookFileDetail's 422, a `.pfrecipe` that fails to parse has no
 // repair/upgrade path -- there is no upgrade_cookfile equivalent for
@@ -35,12 +36,6 @@ interface Problem {
   message: string;
 }
 
-interface Outcome {
-  filename: string;
-  id: number;
-  problem: Problem | null;
-}
-
 function toProblem(err: unknown): Problem {
   if (err instanceof FileRequestError) {
     return { status: err.detail.status, message: err.detail.message };
@@ -51,39 +46,27 @@ function toProblem(err: unknown): Problem {
 export function RecipePage() {
   const { filename = "" } = useParams<{ filename: string }>();
   const { live } = useShellState();
-  const [requestId, setRequestId] = useState(0);
-  const [detail, setDetail] = useState<RecipeDetail | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const id = requestId;
-    fetchRecipeDetail(filename)
-      .then((fresh) => {
-        if (cancelled) return;
-        setDetail(fresh);
-        setOutcome({ filename, id, problem: null });
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        // A failed reload must not keep showing a stale recipe -- an edit
-        // that just landed may have changed what is even valid to show.
-        setDetail(null);
-        setOutcome({ filename, id, problem: toProblem(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filename, requestId]);
+  const { data, isPending, error } = useQuery({
+    queryKey: queryKeys.recipe(filename),
+    //  helpers/files/apiEnvelope.ts throws FileRequestError already, so this
+    //  needs no unwrap(): `error` below IS the FileRequestError.
+    queryFn: () => fetchRecipeDetail(filename),
+  });
 
-  const reload = () => setRequestId((n) => n + 1);
+  const queryClient = useQueryClient();
+  const reload = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.recipe(filename) }),
+    [queryClient, filename],
+  );
 
-  // Plain render-time computation from state -- no effect, no mirrored state.
-  // Comparing BOTH filename and id: filename guards a route change, id guards
-  // reload() firing again for the SAME filename (a save just landed), same
-  // idiom as CookFilePage.tsx.
-  const loading = outcome === null || outcome.filename !== filename || outcome.id !== requestId;
-  const problem = loading ? null : outcome.problem;
+  const loading = isPending;
+  // A failed reload must not keep showing a stale recipe -- an edit that
+  // just landed may have changed what is even valid to show. react-query
+  // keeps the last successful `data` around through a background error, so
+  // it is dropped here rather than trusted once `error` is set.
+  const detail = error ? null : (data ?? null);
+  const problem = error ? toProblem(error) : null;
 
   const runView = deriveRunView(live.recipeStatus, filename);
 

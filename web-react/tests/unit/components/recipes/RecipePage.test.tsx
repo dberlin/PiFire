@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -6,6 +7,7 @@ import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 import type { RecipeDetail } from "../../../../src/helpers/files/recipeTypes";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import type { LiveState } from "../../../../src/helpers/types";
+import { testQueryClient } from "../../test-utils";
 
 const fetchRecipeDetailMock = rs.fn();
 // SAFETY: runRecipe starts a real cook, so it is stubbed here too --
@@ -71,14 +73,20 @@ const DETAIL: RecipeDetail = {
   assets: [],
 };
 
-function mount(filename: string, live: LiveState = FIXTURE_DASH) {
+function mount(
+  filename: string,
+  live: LiveState = FIXTURE_DASH,
+  queryClient: QueryClient = testQueryClient(),
+) {
   useShellStateMock.mockReturnValue({ live });
   render(
-    <MemoryRouter initialEntries={[`/recipes/${filename}`]}>
-      <Routes>
-        <Route path="/recipes/:filename" element={<RecipePage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[`/recipes/${filename}`]}>
+        <Routes>
+          <Route path="/recipes/:filename" element={<RecipePage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -183,5 +191,69 @@ describe("RecipePage", () => {
     await waitFor(() => expect(fetchRecipeDetailMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryAllByText("Salt")).toHaveLength(0));
     expect(screen.getAllByText("Sea Salt").length).toBeGreaterThan(0);
+  });
+
+  // Task 11 (brief step 2): the requestId counter is gone -- an editor save
+  // must now invalidate the recipe's query key rather than bump a counter.
+  it("re-reads the recipe after an editor saves", async () => {
+    const withIngredient: RecipeDetail = {
+      ...DETAIL,
+      recipe: {
+        ingredients: [{ name: "Pork", quantity: "1 slab", assets: [] }],
+        instructions: [],
+        steps: [],
+      },
+    };
+    const afterSave: RecipeDetail = {
+      ...withIngredient,
+      recipe: {
+        ...withIngredient.recipe,
+        ingredients: [{ name: "brisket", quantity: "1", assets: [] }],
+      },
+    };
+    fetchRecipeDetailMock.mockResolvedValueOnce(withIngredient).mockResolvedValue(afterSave);
+    updateIngredientMock.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    mount("brisket.pfrecipe");
+    await waitFor(() => expect(screen.getByText("Pork")).toBeVisible());
+    expect(fetchRecipeDetailMock).toHaveBeenCalledTimes(1);
+
+    // The save button starts disabled (nothing is dirty yet) -- an edit is
+    // required before the button is even clickable.
+    const nameField = screen.getByLabelText("Name for ingredient 1");
+    await user.clear(nameField);
+    await user.type(nameField, "brisket");
+    await user.click(screen.getByRole("button", { name: "Save ingredient 1" }));
+    await waitFor(() => expect(screen.getByText("brisket")).toBeVisible());
+  });
+
+  // Deliberate-break coverage (task instructions #2): a query key that
+  // dropped `filename` would let two different recipes' data collide in the
+  // same QueryClient. Both instances stay mounted (no cleanup between) so a
+  // shared cache entry would flip BOTH headings to whichever fetch resolves
+  // last, not just the second one.
+  it("keeps two different recipes' data separate in the same query cache", async () => {
+    const queryClient = testQueryClient();
+    const other: RecipeDetail = {
+      ...DETAIL,
+      filename: "other.pfrecipe",
+      metadata: { ...DETAIL.metadata, title: "Other Recipe" },
+    };
+    fetchRecipeDetailMock.mockImplementation((filename: string) =>
+      Promise.resolve(filename === "brisket.pfrecipe" ? DETAIL : other),
+    );
+
+    mount("brisket.pfrecipe", FIXTURE_DASH, queryClient);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Sunday Brisket" })).toBeInTheDocument(),
+    );
+
+    mount("other.pfrecipe", FIXTURE_DASH, queryClient);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Other Recipe" })).toBeInTheDocument(),
+    );
+    // Still there -- proves the two recipes occupy separate cache entries
+    // rather than one clobbering the other.
+    expect(screen.getByRole("heading", { name: "Sunday Brisket" })).toBeInTheDocument();
   });
 });
