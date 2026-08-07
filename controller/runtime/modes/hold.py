@@ -319,6 +319,14 @@ class HoldMode(ControlMode):
         return frame_key, observation
 
     def _deliver_completed_pulse_observation(self, frame_key: tuple[int, int], observation: FrameObservation) -> None:
+        if not observation.probe_valid:
+            self._pulse_observation_last_frame_key = frame_key
+            self._trace_record(
+                TraceEventKind.MODEL_OBSERVATION,
+                self._rejected_model_observation(observation, "invalid-probe"),
+                int(observation.frame_end_s * 1_000),
+            )
+            return
         if self._runner is None:
             return
         submission = self._runner.observe_frame(observation)
@@ -582,6 +590,9 @@ class HoldMode(ControlMode):
                 if observation.allocation_join_reason is not None:
                     self._queue_rejected_model_observation(sequence, observation.allocation_join_reason)
                     continue
+                if not observation.probe_valid:
+                    self._queue_rejected_model_observation(sequence, "invalid-probe")
+                    continue
                 role_generation = outcome["role_generation"]
                 if role_generation != observation.role_generation:
                     self._queue_rejected_model_observation(sequence, "observation-role-generation-mismatch")
@@ -646,8 +657,8 @@ class HoldMode(ControlMode):
                     reset=observation.reset,
                     continuous=observation.continuous,
                 )
-            except KeyError, TypeError, ValueError:
-                self._pending_model_observations.pop(sequence, None)
+            except (KeyError, TypeError, ValueError):
+                self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
                 continue
             records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
             evaluation_payload = self._model_evaluation_payload(outcome.get("evaluation"))

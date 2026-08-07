@@ -55,13 +55,17 @@ def learning_observations(records: Iterable[ControlTraceRecord]) -> tuple[FrameO
     session = _validate_session(trace)
     exact = tuple(record.payload for record in trace if isinstance(record.payload, ModelObservationPayload))
     if exact:
-        allocations: dict[int, list[AllocationPayload]] = {}
-        for record in trace:
-            if isinstance(payload := record.payload, AllocationPayload):
-                allocations.setdefault(payload.result_revision, []).append(payload)
-        return _exact_observations(exact, allocations)
+        return _exact_observations(exact, _allocation_payloads(trace))
     return _fallback_observations(trace, session)
 
+
+
+def _allocation_payloads(trace: tuple[ControlTraceRecord, ...]) -> dict[int, list[AllocationPayload]]:
+    allocations: dict[int, list[AllocationPayload]] = {}
+    for record in trace:
+        if isinstance(payload := record.payload, AllocationPayload):
+            allocations.setdefault(payload.result_revision, []).append(payload)
+    return allocations
 
 def _validate_session(records: tuple[ControlTraceRecord, ...]) -> SessionPayload:
     if not records:
@@ -265,7 +269,7 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
     ):
         raise TraceSelectionError("exact learning evidence is not eligible controller-owned continuous input")
     if exact:
-        frames = _exact_observations(exact, {})
+        frames = _exact_observations(exact, _allocation_payloads(trace))
         start_s = frames[0].frame_end_s if frames else 0.0
         return tuple(
             CalibrationSample(

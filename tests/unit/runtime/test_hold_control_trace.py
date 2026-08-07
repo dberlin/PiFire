@@ -1657,6 +1657,7 @@ def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_
     (
         (1, _model_observation_outcome(frame_end_ms=20_000), "observation-configuration-mismatch"),
         (0, object(), "observation-outcome-malformed"),
+        (0, {}, "observation-outcome-malformed"),
     ),
 )
 def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
@@ -1737,3 +1738,23 @@ def test_allocation_join_failure_persists_an_ineligible_completed_observation(ho
     assert (payload.frame_start_ms, payload.frame_end_ms, payload.result_revision) == (0, 20_000, 1)
     assert payload.eligible is False
     assert payload.rejection_reasons == (reason,)
+
+
+def test_invalid_probe_is_persisted_without_submitting_to_the_learner(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "invalid-probe-evidence"}
+    mode._ensure_trace_session(0.0)
+    observation = replace(_learning_observation(0.0), probe_valid=False, probe_source=None)
+
+    mode._deliver_completed_pulse_observation((0, 20_000), observation)
+
+    assert runner.observations == []
+    payload = next(record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload))
+    assert (payload.probe_valid, payload.eligible, payload.rejection_reasons) == (
+        False,
+        False,
+        ("invalid-probe",),
+    )

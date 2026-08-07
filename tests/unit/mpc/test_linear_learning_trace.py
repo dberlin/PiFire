@@ -234,6 +234,19 @@ def test_exact_observation_requires_one_same_result_allocation() -> None:
     with pytest.raises(TraceSelectionError, match="ambiguous-allocation"):
         learning_observations((_session(), _allocation_record(observation), _allocation_record(observation), observation))
 
+
+def test_calibration_replay_requires_one_same_result_allocation() -> None:
+    observation = _observation()
+    allocation = _allocation_record(observation)
+
+    samples = calibration_samples((_session(), observation, allocation))
+
+    assert samples[0].combustion_load == pytest.approx(0.35)
+    with pytest.raises(TraceSelectionError, match="missing-allocation"):
+        calibration_samples((_session(), observation))
+    with pytest.raises(TraceSelectionError, match="ambiguous-allocation"):
+        calibration_samples((_session(), observation, allocation, allocation))
+
 def test_exact_observation_is_canonical_over_fallback_records() -> None:
     frames = learning_observations((_session("F"), _frame(), _update(), _allocation_record(_observation()), _observation()))
 
