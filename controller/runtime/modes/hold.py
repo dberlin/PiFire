@@ -321,10 +321,16 @@ class HoldMode(ControlMode):
     def _deliver_completed_pulse_observation(self, frame_key: tuple[int, int], observation: FrameObservation) -> None:
         if not observation.probe_valid:
             self._pulse_observation_last_frame_key = frame_key
-            self._trace_record(
-                TraceEventKind.MODEL_OBSERVATION,
-                self._rejected_model_observation(observation, "invalid-probe"),
-                int(observation.frame_end_s * 1_000),
+            if self._pending_model_observations is None:
+                self._pending_model_observations = {}
+            sequence = -1
+            while sequence in self._pending_model_observations:
+                sequence -= 1
+            self._pending_model_observations[sequence] = (
+                observation,
+                self._trace_session_id,
+                -1,
+                ((TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(observation, "invalid-probe")),),
             )
             return
         if self._runner is None:

@@ -1750,6 +1750,7 @@ def test_invalid_probe_is_persisted_without_submitting_to_the_learner(hold_cycle
     observation = replace(_learning_observation(0.0), probe_valid=False, probe_source=None)
 
     mode._deliver_completed_pulse_observation((0, 20_000), observation)
+    mode._reconcile_model_observation_outcomes(now=21.0)
 
     assert runner.observations == []
     payload = next(record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload))
@@ -1758,3 +1759,33 @@ def test_invalid_probe_is_persisted_without_submitting_to_the_learner(hold_cycle
         False,
         ("invalid-probe",),
     )
+
+
+def test_invalid_probe_waits_for_an_earlier_learner_outcome_before_trace_publication(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "ordered-invalid-probe-evidence"}
+    mode._ensure_trace_session(0.0)
+    first = replace(_learning_observation(0.0), observation_sequence=1)
+    second = replace(_learning_observation(20.0), observation_sequence=2, probe_valid=False, probe_source=None)
+
+    mode._deliver_completed_pulse_observation((0, 20_000), first)
+    mode._deliver_completed_pulse_observation((20_000, 40_000), second)
+
+    assert runner.observations == [first]
+    assert not [record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
+    runner._observation_outcomes.append(
+        ObservationOutcomeEnvelope(1, 0, first, _model_observation_outcome(frame_end_ms=20_000))
+    )
+    mode._reconcile_model_observation_outcomes(now=41.0)
+
+    payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
+    assert [
+        (payload.observation_sequence, payload.eligible, payload.rejection_reasons)
+        for payload in payloads
+    ] == [
+        (1, False, ("insufficient_excitation",)),
+        (2, False, ("invalid-probe",)),
+    ]
