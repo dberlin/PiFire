@@ -219,9 +219,12 @@ class ActivationManager:
         """Prepare an automatic parameter-only successor through manual activation's transaction."""
         if self._state.active_kind != STATE_SPACE_KIND or self._active_snapshot is None:
             return self._reject(request, "state-space-not-active")
-        reason = self._parameter_promotion_rejection(request)
+        candidate_generation = self._parameter_promotion_generation(request)
+        reason = self._parameter_promotion_rejection(request, candidate_generation)
         if reason is not None:
-            return self._reject_durably(request, reason)
+            if candidate_generation is None:
+                return self._reject(request, reason)
+            return self._reject_durably(request, reason, candidate_generation)
         prepared = self.prepare(request)
         return replace(prepared, parameter_promotion=True) if prepared.accepted else prepared
 
@@ -243,11 +246,15 @@ class ActivationManager:
         if prepared.activation_generation in self._state.failed_generations:
             return replace(prepared, accepted=False, reason="failed-generation-cannot-be-reenabled")
         if prepared.candidate_generation in self._state.failed_generations:
-            return self._reject_durably(prepared.request, "failed-generation-cannot-be-reenabled")
+            return self._reject_durably(
+                prepared.request,
+                "failed-generation-cannot-be-reenabled",
+                prepared.candidate_generation,
+            )
         if prepared.parameter_promotion:
             reason = self._parameter_promotion_rejection(prepared.request, prepared.candidate_generation)
             if reason is not None:
-                return self._reject_durably(prepared.request, reason)
+                return self._reject_durably(prepared.request, reason, prepared.candidate_generation)
         if self._configuration_digest() != prepared.controller_configuration_digest:
             return replace(prepared, accepted=False, reason="controller-configuration-changed")
         try:
@@ -265,21 +272,11 @@ class ActivationManager:
         except Exception:
             persisted = False
         if not persisted:
-            return self._reject_durably(prepared.request, "activation-persistence-failed")
-        if self._configuration_digest() != prepared.controller_configuration_digest:
-            return replace(prepared, accepted=False, reason="controller-configuration-changed")
-        try:
-            committed = self._prepare_inputs(prepared.request)
-        except Exception as error:
-            return replace(prepared, accepted=False, reason=_rejection_reason(error))
-        if _canonical_json(committed.candidate_snapshot) != prepared.active_snapshot_json:
-            return replace(prepared, accepted=False, reason="candidate-digest-changed")
-        if _canonical_json(committed.rollback_snapshot) != prepared.rollback_snapshot_json:
-            return replace(prepared, accepted=False, reason="rollback-snapshot-changed")
-        if prepared.parameter_promotion:
-            reason = self._parameter_promotion_rejection(prepared.request, prepared.candidate_generation)
-            if reason is not None:
-                return self._reject_durably(prepared.request, reason)
+            return self._reject_durably(
+                prepared.request,
+                "activation-persistence-failed",
+                prepared.candidate_generation,
+            )
 
         # The durable transaction is authoritative before either operation below.
         # Pending origins are invalidated before the new owner can emit a command.
@@ -548,6 +545,22 @@ class ActivationManager:
     def _configuration_digest(self) -> str:
         return canonical_configuration_digest(self._configuration())
 
+    def _parameter_promotion_generation(self, request: ActivationRequest) -> int | None:
+        """Resolve the exact decision lineage without conflating equal model digests."""
+        matches = [
+            record
+            for record in self._ledger()
+            if isinstance(record.payload, ConfidenceDecisionEvidence)
+            and record.payload.decision_id == request.decision_id
+            and record.model_digest == request.candidate_digest
+        ]
+        if not matches:
+            return None
+        return max(
+            matches,
+            key=lambda record: (record.timestamp_ms, record.evidence_id),
+        ).role_generation
+
     def _parameter_promotion_rejection(
         self,
         request: ActivationRequest,
@@ -556,19 +569,9 @@ class ActivationManager:
         if self._confidence_source is None:
             return "confidence-evidence-unavailable"
         if candidate_generation is None:
-            matches = [
-                record
-                for record in self._ledger()
-                if isinstance(record.payload, ConfidenceDecisionEvidence)
-                and record.payload.decision_id == request.decision_id
-                and record.model_digest == request.candidate_digest
-            ]
-            if not matches:
+            candidate_generation = self._parameter_promotion_generation(request)
+            if candidate_generation is None:
                 return "confidence-decision-not-found"
-            candidate_generation = max(
-                matches,
-                key=lambda record: (record.timestamp_ms, record.evidence_id),
-            ).role_generation
         report = self._confidence_source()
         blockers = parameter_promotion_blockers(
             report,
@@ -585,15 +588,24 @@ class ActivationManager:
             return "structure-change-requires-manual-activation"
         return None
 
-    def _reject_durably(self, request: ActivationRequest, reason: str) -> ActivationDecision:
+    def _reject_durably(
+        self,
+        request: ActivationRequest,
+        reason: str,
+        candidate_generation: int,
+    ) -> ActivationDecision:
+        candidate_generation = _generation(candidate_generation)
         if self._append_evidence is not None:
+            timestamp_ms = self._clock_ms()
             record = ModelEvidenceRecord(
-                evidence_id=f"parameter-promotion-rejection:{request.decision_id}:{self._clock_ms()}",
+                evidence_id=(
+                    f"parameter-promotion-rejection:{request.decision_id}:{candidate_generation}:{timestamp_ms}"
+                ),
                 kind=EvidenceKind.CONFIDENCE_DECISION,
                 session_id=self._session_id,
                 cook_id=self._cook_id,
-                timestamp_ms=self._clock_ms(),
-                role_generation=self._state.role_generation,
+                timestamp_ms=timestamp_ms,
+                role_generation=candidate_generation,
                 model_digest=request.candidate_digest,
                 provenance_digest=self._state.active_digest,
                 payload=ConfidenceDecisionEvidence(

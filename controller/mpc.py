@@ -1140,6 +1140,11 @@ class Controller(ControllerBase):
                 self._online = self._new_online_adaptation(incumbent, challenger)
                 self._online._active_generation = state.role_generation
                 self._online._challenger_generation = state.role_generation + 1
+            self._online._active_generation = state.role_generation
+            self._online._challenger_generation = max(
+                self._online._challenger_generation,
+                state.role_generation + 1,
+            )
             rollback_snapshot = manager.rollback_snapshot
             if rollback_snapshot is not None:
                 rollback_model_snapshot = rollback_snapshot
@@ -1177,8 +1182,9 @@ class Controller(ControllerBase):
             or pending is None
             or pending[0] != decision_id
             or manager.state.active_kind != STATE_SPACE_KIND
+            or manager.state.decision_id != decision_id
             or manager.state.active_digest != self._online.challenger_digest
-            or manager.state.role_generation != self._online.role_generation + 1
+            or manager.state.role_generation <= self._online.role_generation
         ):
             return False
         solve = pending[1]

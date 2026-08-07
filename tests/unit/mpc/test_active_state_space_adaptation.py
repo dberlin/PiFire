@@ -18,7 +18,7 @@ from controller.linear_mpc.activation import (
     STATE_SPACE_KIND,
     canonical_snapshot_digest,
 )
-from controller.linear_mpc.adaptation import AdaptationPolicy, OnlineAdaptation
+from controller.linear_mpc.adaptation import AdaptationPolicy, OnlineAdaptation, _PendingDecision
 from controller.linear_mpc.confidence import (
     ConfidenceReport,
     ConfidenceStatus,
@@ -28,6 +28,7 @@ from controller.linear_mpc.confidence import (
 from controller.linear_mpc.state_space import InnovationStateSpace
 from tests.unit.mpc.test_innovation_state_space import _config, _frames
 from tests.unit.mpc.test_online_adaptation import StateSpaceAffineModel, _populate_one_window, frame
+from tests.unit.mpc.test_mpc_model_snapshot import _c
 
 
 class ParameterStateSpace(StateSpaceAffineModel):
@@ -262,6 +263,14 @@ def test_activation_manager_reuses_exact_two_phase_transaction_for_parameters(fi
 
     def persist(record):
         records.append(record)
+        if getattr(record.payload, "decision_id", None) == "decision-2":
+            current = reports["current"]
+            assert isinstance(current, ConfidenceReport)
+            reports["current"] = replace(
+                current,
+                gates=(GateResult("confidence-drift", False, "confidence-drift"),),
+                blockers=("confidence-drift",),
+            )
         return True
 
     def candidate(_digest, _generation):
@@ -346,9 +355,163 @@ def test_activation_manager_reuses_exact_two_phase_transaction_for_parameters(fi
     committed = manager.commit(prepared)
 
     assert committed.accepted and committed.parameter_promotion
+    assert reports["current"].blockers == ("confidence-drift",)
     assert manager.active_snapshot == second
     assert manager.rollback_snapshot == first_active
     assert manager.state.active_digest == second_digest
     assert manager.state.decision_id == "decision-2"
     assert manager.state.role_generation > generation
     assert appended == []
+
+    online = OnlineAdaptation(
+        InnovationStateSpace.from_snapshot(first_active),
+        InnovationStateSpace.from_snapshot(second),
+        AdaptationPolicy(min_effective_updates=1, required_consecutive_wins=1),
+    )
+    online._role_generation = generation - 1
+    online._active_generation = generation - 1
+    online._challenger_generation = generation
+    template = _winning_decision(_manager())
+    online_decision = replace(
+        template,
+        decision_id="decision-2",
+        generation=generation,
+        prospective_digest=second_digest,
+        incumbent_digest=first_digest,
+        challenger_digest=second_digest,
+    )
+    online._pending[online_decision.decision_id] = _PendingDecision(
+        online_decision,
+        online.role_generation,
+    )
+    controller = _c(enable_online_adaptation=True)
+    controller._online = online
+    controller._online_pending_parameter_promotion = (
+        online_decision.decision_id,
+        SimpleNamespace(objective=0.0, kkt_residual=0.0),
+    )
+
+    assert controller.commit_active_parameter_promotion(
+        manager,
+        online_decision.decision_id,
+        _complete_report(online),
+    )
+    assert OnlineAdaptation.model_digest(controller._online.incumbent) == manager.state.active_digest
+    assert controller._online.active_generation == manager.state.role_generation
+    assert controller._online.role_generation == manager.state.role_generation
+    assert controller._online_promotion_count == 1
+    assert not controller.commit_active_parameter_promotion(
+        manager,
+        online_decision.decision_id,
+        _complete_report(controller._online),
+    )
+    assert controller._online_promotion_count == 1
+
+
+def test_parameter_rejections_preserve_exact_same_digest_challenger_generations(
+    fitted_snapshot,
+) -> None:
+    digest = canonical_snapshot_digest(fitted_snapshot)
+    grey = {"schema": "grey-box-adapter/v1", "gain": 1.0}
+    grey_digest = canonical_snapshot_digest(grey)
+    records = [
+        _record(
+            "refresh-1",
+            RefreshDiagnosticsEvidence(accepted=True),
+            digest=digest,
+            provenance=grey_digest,
+            generation=1,
+            timestamp=1,
+        ),
+        _record(
+            "decision-1-record",
+            ConfidenceDecisionEvidence(decision_id="decision-1", blocked=False),
+            digest=digest,
+            provenance=grey_digest,
+            generation=1,
+            timestamp=2,
+        ),
+    ]
+    appended = []
+    reports = {"current": None}
+    manager = ActivationManager(
+        lambda: tuple(records),
+        candidate_snapshot=fitted_snapshot,
+        rollback_snapshot=grey,
+        controller_configuration={"controller": "mpc"},
+        prospective_solve=lambda _candidate, _configuration: 0.3,
+        confidence_report=lambda: reports["current"],
+        persist_activation=lambda record: records.append(record) or True,
+        append_evidence=appended.append,
+        clock_ms=lambda: 1_000,
+    )
+    assert manager.commit(manager.prepare(ActivationRequest(digest, "decision-1"))).accepted
+
+    for generation, decision_id, timestamp in (
+        (2, "prepare-reject", 3),
+        (3, "commit-reject", 5),
+    ):
+        records.extend(
+            (
+                _record(
+                    f"refresh-{generation}",
+                    RefreshDiagnosticsEvidence(accepted=True),
+                    digest=digest,
+                    provenance=digest,
+                    generation=generation,
+                    timestamp=timestamp,
+                ),
+                _record(
+                    f"{decision_id}-record",
+                    ConfidenceDecisionEvidence(decision_id=decision_id, blocked=False),
+                    digest=digest,
+                    provenance=digest,
+                    generation=generation,
+                    timestamp=timestamp + 1,
+                ),
+            )
+        )
+
+    reports["current"] = ConfidenceReport(
+        ConfidenceStatus.ACTIVE,
+        STATE_SPACE_KIND,
+        digest,
+        2,
+        (GateResult("candidate-confidence", False, "prepare-confidence-blocked"),),
+        (),
+        ("prepare-confidence-blocked",),
+        0,
+        10_000,
+    )
+    rejected = manager.prepare_parameter_promotion(ActivationRequest(digest, "prepare-reject"))
+    assert not rejected.accepted
+    assert rejected.reason == "prepare-confidence-blocked"
+
+    reports["current"] = ConfidenceReport(
+        ConfidenceStatus.ACTIVE,
+        STATE_SPACE_KIND,
+        digest,
+        3,
+        (GateResult("candidate-confidence", True),),
+        (),
+        (),
+        0,
+        10_000,
+    )
+    prepared = manager.prepare_parameter_promotion(ActivationRequest(digest, "commit-reject"))
+    assert prepared.accepted
+    reports["current"] = replace(
+        reports["current"],
+        gates=(GateResult("candidate-confidence", False, "commit-confidence-blocked"),),
+        blockers=("commit-confidence-blocked",),
+    )
+    rejected = manager.commit(prepared)
+    assert not rejected.accepted
+    assert rejected.reason == "commit-confidence-blocked"
+
+    assert [record.role_generation for record in appended] == [2, 3]
+    assert [record.model_digest for record in appended] == [digest, digest]
+    assert [record.payload.decision_id for record in appended] == [
+        "prepare-reject",
+        "commit-reject",
+    ]
