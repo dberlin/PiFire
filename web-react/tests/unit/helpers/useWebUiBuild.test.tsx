@@ -1,6 +1,9 @@
 /** @jest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { createQueryClient } from "../../../src/helpers/query/queryClient";
 import { useWebUiBuild } from "../../../src/helpers/useWebUiBuild";
 
 const fetchMock = rs.fn();
@@ -12,6 +15,44 @@ function Probe({ reload }: { reload: () => void }) {
 
 function serves(build: string | null) {
   return Promise.resolve({ ok: true, json: () => Promise.resolve({ build }) });
+}
+
+// This hook overrides refetchOnWindowFocus and staleTime on its own query
+// (useWebUiBuild.ts) and several tests below exist specifically to exercise
+// those overrides. test-utils.tsx's testQueryClient() sets staleTime: 0
+// CLIENT-WIDE, which makes queryObserver's shouldFetchOn (query-core) refetch
+// on focus even for an UNSET refetchOnWindowFocus -- so against that client
+// either override could be deleted from the hook and every test here would
+// still pass. Render through the production client (queryClient.ts) instead,
+// so it is genuinely the hook's own overrides making these tests pass, not
+// the test harness's defaults standing in for them.
+function renderProbe(ui: ReactElement) {
+  return render(<QueryClientProvider client={createQueryClient()}>{ui}</QueryClientProvider>);
+}
+
+// react-query settles a refetch in two hops: the fetch promise resolves (a
+// microtask), then notifyManager re-renders observers via a REAL setTimeout(0)
+// (see node_modules/@tanstack/query-core's notifyManager.js, so React can
+// batch the update. advanceTimersByTimeAsync stopping exactly on the poll
+// boundary flushes the first hop but leaves that second one still pending --
+// nothing downstream of `data` (this hook's useEffect, and so `reload`) has
+// run yet. waitFor can't be used to paper over this either: it polls on a
+// timer that fake timers freeze (see HistoryPage.test.tsx's auto-refresh
+// describe block).
+async function tick(ms: number) {
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(ms);
+  });
+}
+
+// Ticking one more virtual millisecond past a settle is what lets notifyManager's
+// setTimeout(0) hop fire. Kept separate from tick() so a call site's intent --
+// "advance the poll clock by exactly this much" vs. "let the pending render
+// flush" -- reads correctly instead of being hidden inside an off-by-one.
+async function settle() {
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(1);
+  });
 }
 
 beforeEach(() => {
@@ -34,13 +75,11 @@ describe("useWebUiBuild", () => {
     fetchMock.mockImplementation(() => serves("aaaa"));
     const reload = rs.fn();
 
-    render(<Probe reload={reload} />);
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(180_000);
-    });
+    renderProbe(<Probe reload={reload} />);
+    await tick(0);
+    await settle();
+    await tick(180_000);
+    await settle();
 
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     expect(reload).not.toHaveBeenCalled();
@@ -50,15 +89,13 @@ describe("useWebUiBuild", () => {
     fetchMock.mockImplementationOnce(() => serves("aaaa")).mockImplementation(() => serves("bbbb"));
     const reload = rs.fn();
 
-    render(<Probe reload={reload} />);
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
+    renderProbe(<Probe reload={reload} />);
+    await tick(0);
+    await settle();
     expect(reload).not.toHaveBeenCalled();
 
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(60_000);
-    });
+    await tick(60_000);
+    await settle();
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
@@ -70,13 +107,11 @@ describe("useWebUiBuild", () => {
       .mockImplementation(() => Promise.reject(new Error("down")));
     const reload = rs.fn();
 
-    render(<Probe reload={reload} />);
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(180_000);
-    });
+    renderProbe(<Probe reload={reload} />);
+    await tick(0);
+    await settle();
+    await tick(180_000);
+    await settle();
 
     expect(reload).not.toHaveBeenCalled();
   });
@@ -85,13 +120,11 @@ describe("useWebUiBuild", () => {
     fetchMock.mockImplementationOnce(() => serves("aaaa")).mockImplementation(() => serves(null));
     const reload = rs.fn();
 
-    render(<Probe reload={reload} />);
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(180_000);
-    });
+    renderProbe(<Probe reload={reload} />);
+    await tick(0);
+    await settle();
+    await tick(180_000);
+    await settle();
 
     expect(reload).not.toHaveBeenCalled();
   });
@@ -105,50 +138,64 @@ describe("useWebUiBuild", () => {
       .mockImplementation(() => serves("bbbb"));
     const reload = rs.fn();
 
-    render(<Probe reload={reload} />);
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(60_000);
-    });
+    renderProbe(<Probe reload={reload} />);
+    await tick(0);
+    await settle();
+    await tick(60_000);
+    await settle();
     expect(reload).not.toHaveBeenCalled();
 
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(60_000);
-    });
+    await tick(60_000);
+    await settle();
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it("checks again when a suspended tab becomes visible", async () => {
     fetchMock.mockImplementation(() => serves("aaaa"));
-    render(<Probe reload={rs.fn()} />);
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
+    renderProbe(<Probe reload={rs.fn()} />);
+    await tick(0);
+    await settle();
     const before = fetchMock.mock.calls.length;
 
+    // react-query's focusManager listens on `window`, not `document` (see
+    // node_modules/@tanstack/query-core's focusManager.js) -- this is what
+    // refetchOnWindowFocus: true (useWebUiBuild.ts) actually subscribes to.
     await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("visibilitychange"));
       await Promise.resolve();
     });
+    await tick(0);
+    await settle();
 
     expect(fetchMock.mock.calls.length).toBe(before + 1);
   });
 
   it("stops polling on unmount", async () => {
     fetchMock.mockImplementation(() => serves("aaaa"));
-    const { unmount } = render(<Probe reload={rs.fn()} />);
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
+    const { unmount } = renderProbe(<Probe reload={rs.fn()} />);
+    await tick(0);
+    await settle();
 
     unmount();
     fetchMock.mockClear();
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(300_000);
-    });
+    await tick(300_000);
+    await settle();
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("re-reads on the poll cadence without a hand-rolled interval", async () => {
+    const reload = rs.fn();
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ build: "abc" }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ build: "def" }) });
+    renderProbe(<Probe reload={reload} />);
+    await tick(0);
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await tick(60_000);
+    await settle();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });

@@ -56,7 +56,11 @@ rs.mock("../../../src/helpers/wizard/wizardApi", () => ({
 const { AppPrefsProvider } = await import("../../../src/components/AppPrefs");
 const { default: App, routes } = await import("../../../src/components/App");
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // biome-ignore lint/suspicious/noExplicitAny: undo the stub above.
+  (globalThis as any).fetch = undefined;
+});
 
 const command = {
   setMode: rs.fn(),
@@ -74,6 +78,17 @@ const command = {
   setUnits: rs.fn(),
 };
 
+// BuildWatcher (App.tsx) calls useWebUiBuild() unconditionally, which polls
+// /api/webui through the real `queryClient` singleton -- every route mounted
+// via the default `<App />` export (not just renderApp's routes-only render)
+// makes this call. There is no global fetch stub in test-setup.ts, so without
+// this the test hits a real, unmocked network request whose outcome depends
+// on whatever is listening on localhost. Resolved so fetchBuildId always gets
+// a stable answer and never has cause to reload.
+const fetchMock = rs
+  .fn()
+  .mockResolvedValue({ ok: true, json: () => Promise.resolve({ build: "test-build" }) });
+
 beforeEach(() => {
   useLiveStateMock.mockReset();
   useLiveStateMock.mockReturnValue({
@@ -83,6 +98,9 @@ beforeEach(() => {
     targetUrl: "http://pifire.local:5000",
     command,
   });
+  fetchMock.mockClear();
+  // biome-ignore lint/suspicious/noExplicitAny: stubbing the global fetch.
+  (globalThis as any).fetch = fetchMock;
 });
 
 function renderApp(initialEntry: string) {

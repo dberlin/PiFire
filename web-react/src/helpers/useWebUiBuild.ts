@@ -1,4 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import { queryKeys } from "./query/keys";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -38,32 +40,32 @@ export function useWebUiBuild(baseUrl = BASE_URL, reload = () => window.location
   // rather than baked into the bundle, so it needs no build-time plumbing.
   const runningRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const check = async () => {
-      const serving = await fetchBuildId(baseUrl);
-      if (cancelled || serving === null) return;
-      if (runningRef.current === null) {
-        runningRef.current = serving;
-        return;
-      }
-      if (serving !== runningRef.current) reload();
-    };
-
-    void check();
-    const id = window.setInterval(() => void check(), POLL_MS);
+  const { data: serving } = useQuery({
+    queryKey: queryKeys.webUiBuild,
+    queryFn: () => fetchBuildId(baseUrl),
+    refetchInterval: POLL_MS,
     // A tab left open on a phone is suspended, not polling; coming back to it
     // is the moment a stale bundle is most likely and most worth catching.
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void check();
-    };
-    document.addEventListener("visibilitychange", onVisible);
+    // This overrides the client default, which is off for the rest of the app.
+    refetchOnWindowFocus: true,
+    // fetchBuildId swallows its own failures and answers null, so there is
+    // nothing here that can go stale in a way a retry would fix.
+    staleTime: 0,
+  });
 
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [baseUrl, reload]);
+  useEffect(() => {
+    // A null -- backend down, mid-restart, no bundle built -- is never a
+    // change, so a grill that briefly loses its backend does not reload itself
+    // in a loop. Only a CHANGED id reloads.
+    if (serving == null) return;
+    if (runningRef.current === null) {
+      runningRef.current = serving;
+      return;
+    }
+    // Deliberately not updated to `serving` here: `reload()` navigates away,
+    // and until it does this effect only runs again if `serving` itself
+    // changes (it's the sole dependency besides `reload`), which a constant
+    // `data` never does. So there is no second call to guard against.
+    if (serving !== runningRef.current) reload();
+  }, [serving, reload]);
 }
