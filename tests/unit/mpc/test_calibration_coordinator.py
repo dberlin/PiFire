@@ -348,7 +348,7 @@ def test_each_numeric_ready_gate_below_its_threshold_keeps_the_stage_incomplete(
     assert result.events[-1].kind == "incomplete"
 
 
-def test_continuity_gate_aborts_and_zero_sum_gate_prevents_completion_until_compensated():
+def test_continuity_gate_aborts_and_zero_sum_debt_is_safely_compensated_before_completion():
     coordinator, decision = start()
     discontinuous = coordinator.advance(context(now_s=1.0, continuous=False))
     assert not discontinuous.active and discontinuous.probe_q == 0.0
@@ -356,10 +356,13 @@ def test_continuity_gate_aborts_and_zero_sum_gate_prevents_completion_until_comp
     coordinator, decision = start()
     current = decision
     for index in range(44):
-        realized_q = 0.5 + current.probe_q + (0.02 if index == 43 else 0.0)
+        realized_q = 0.5 + current.probe_q + (0.06 if index == 43 else 0.0)
         current = coordinator.advance(context(now_s=index + 1.0, realized_q=realized_q))
     assert current.active and current.stage == "low"
-    assert current.probe_q != 0.0
+    assert current.probe_q == pytest.approx(-0.05)
+    settled = coordinator.advance(context(now_s=45.0, realized_q=0.5 + current.probe_q))
+    assert settled.active and settled.stage == "coast"
+    assert abs(settled.events[-1].realized_probe_sum) <= 0.05
 
 
 def test_final_high_completion_and_terminal_snapshot_preserve_every_completed_stage():

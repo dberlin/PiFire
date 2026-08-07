@@ -278,8 +278,8 @@ class CalibrationCoordinator:
         )
         self._state = state
         if state.schedule_position >= len(state.schedule):
-            if abs(state.clipping_error) > 1e-12:
-                return self._issue_probe(-state.clipping_error, runtime, state)
+            if abs(state.realized_probe_sum) > self._config.max_probe_q:
+                return self._issue_probe(-state.realized_probe_sum, runtime, state)
             if self._ready(state):
                 return self._complete_stage(runtime)
             return self._remember(self._decision(True, 0.0, self._stage, state, (self._event("incomplete", self._actual_stage, 0.0, 0.0, state, self._incomplete_reasons(state)),)))
