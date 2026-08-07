@@ -289,3 +289,91 @@ def test_invalid_command_and_runtime_values_are_rejected():
         context(now_s=math.nan)
     with pytest.raises(ValueError):
         context(baseline_q=1.1)
+
+
+def test_later_predictor_exception_aborts_active_probe_without_leaking_its_prior_value():
+    calls = 0
+
+    def failing_after_start(baseline_q, probe_q, runtime):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("grey box failed")
+        return runtime.temp_c + 1.0
+
+    coordinator, decision = start(CalibrationCoordinator(predict_max_c=failing_after_start))
+    assert decision.probe_q != 0.0
+    aborted = coordinator.advance(context(now_s=1.0, realized_q=0.5 + decision.probe_q))
+    assert not aborted.active and aborted.probe_q == 0.0
+    assert aborted.events[-1].kind == "safety_aborted"
+    assert aborted.events[-1].reasons == ("prediction_invalid",)
+
+
+def test_completed_history_survives_terminal_coast_stop_and_snapshot_restore():
+    coordinator, decision = start()
+    coast = advance_stage(coordinator, decision)
+    completed = coordinator.snapshot()["completed_stages"]
+    assert len(completed) == 1
+    stopped = coordinator.stop()
+    assert stopped.probe_q == 0.0
+    snapshot = coordinator.snapshot()
+    restored = CalibrationCoordinator.from_snapshot(snapshot, safe_prediction)
+    assert restored.snapshot()["completed_stages"] == completed
+
+
+@pytest.mark.parametrize(
+    ("gate", "config_changes", "runtime_changes"),
+    [
+        ("observations", {"min_stage_observations": 45}, {}),
+        ("levels", {"min_realized_levels": 4}, {}),
+        ("variance", {"min_realized_variance": 0.01}, {}),
+        ("positive", {"min_positive_observations": 100}, {}),
+        ("negative", {"min_negative_observations": 100}, {}),
+        ("rank", {}, {"rank_progress": 0.0}),
+        ("coverage", {}, {"coverage_progress": 0.0}),
+    ],
+)
+def test_each_numeric_ready_gate_below_its_threshold_keeps_the_stage_incomplete(
+    gate, config_changes, runtime_changes
+):
+    coordinator, decision = start(
+        CalibrationCoordinator(CalibrationConfig(**config_changes), safe_prediction)
+    )
+    result = advance_stage(
+        coordinator,
+        decision,
+        stage_context=context(now_s=1.0, **runtime_changes),
+    )
+    assert result.active and result.stage == "low", gate
+    assert result.events[-1].kind == "incomplete"
+
+
+def test_continuity_gate_aborts_and_zero_sum_gate_prevents_completion_until_compensated():
+    coordinator, decision = start()
+    discontinuous = coordinator.advance(context(now_s=1.0, continuous=False))
+    assert not discontinuous.active and discontinuous.probe_q == 0.0
+
+    coordinator, decision = start()
+    current = decision
+    for index in range(44):
+        realized_q = 0.5 + current.probe_q + (0.02 if index == 43 else 0.0)
+        current = coordinator.advance(context(now_s=index + 1.0, realized_q=realized_q))
+    assert current.active and current.stage == "low"
+    assert current.probe_q != 0.0
+
+
+def test_final_high_completion_and_terminal_snapshot_preserve_every_completed_stage():
+    coordinator, decision = start()
+    coast = advance_stage(coordinator, decision)
+    middle = coordinator.advance(context(now_s=45.0, temp_c=CENTERS[1], target_c=CENTERS[1]))
+    coast = advance_stage(
+        coordinator, middle, stage_context=context(now_s=46.0, temp_c=CENTERS[1], target_c=CENTERS[1])
+    )
+    high = coordinator.advance(context(now_s=100.0, temp_c=CENTERS[2], target_c=CENTERS[2]))
+    final = advance_stage(
+        coordinator, high, stage_context=context(now_s=101.0, temp_c=CENTERS[2], target_c=CENTERS[2])
+    )
+    assert not final.active and final.events[-1].kind == "completed"
+    snapshot = coordinator.snapshot()
+    assert len(snapshot["completed_stages"]) == 3
+    assert CalibrationCoordinator.from_snapshot(snapshot, safe_prediction).snapshot()["completed_stages"] == snapshot["completed_stages"]

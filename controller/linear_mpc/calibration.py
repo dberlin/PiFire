@@ -199,6 +199,7 @@ class CalibrationCoordinator:
         self._state: _State | None = None
         self._last: CalibrationDecision | None = None
         self._paused = False
+        self._completed_history: tuple[CalibrationProgress, ...] = ()
 
     @property
     def config(self) -> CalibrationConfig:
@@ -213,6 +214,7 @@ class CalibrationCoordinator:
         if self._predict_max_c is None:
             return self._terminal("start_rejected", None, ("prediction_unavailable",))
         plan = self._signed_dwell_plan(command.seed)
+        self._completed_history = ()
         schedule = tuple(sign * self._config.max_probe_q for sign in self._expand(plan))
         state = _State(command, 0, runtime.now_s, 0, plan, schedule)
         self._state = state
@@ -284,15 +286,31 @@ class CalibrationCoordinator:
         return self._issue_probe(state.schedule[state.schedule_position], runtime, state)
 
     def snapshot(self) -> Mapping[str, object]:
-        return MappingProxyType({"config": self._config, "state": self._state, "last": self._last, "paused": self._paused, "dwell_counts": _DWELL_COUNTS, "signed_dwell_plan": () if self._state is None else self._state.signed_dwell_plan, "completed_stages": () if self._state is None else self._state.completion_history})
+        return MappingProxyType({
+            "config": self._config,
+            "state": self._state,
+            "last": self._last,
+            "paused": self._paused,
+            "dwell_counts": _DWELL_COUNTS,
+            "signed_dwell_plan": () if self._state is None else self._state.signed_dwell_plan,
+            "completed_stages": self._completed_history,
+        })
 
     @classmethod
     def from_snapshot(cls, snapshot: Mapping[str, object], predict_max_c: Predictor | None = None) -> CalibrationCoordinator:
         config, state, last, paused = snapshot.get("config"), snapshot.get("state"), snapshot.get("last"), snapshot.get("paused", False)
-        if not isinstance(config, CalibrationConfig) or (state is not None and not isinstance(state, _State)) or (last is not None and not isinstance(last, CalibrationDecision)) or not isinstance(paused, bool):
+        history = tuple(snapshot.get("completed_stages", ()))
+        if (
+            not isinstance(config, CalibrationConfig)
+            or (state is not None and not isinstance(state, _State))
+            or (last is not None and not isinstance(last, CalibrationDecision))
+            or not isinstance(paused, bool)
+            or not all(isinstance(progress, CalibrationProgress) for progress in history)
+        ):
             raise ValueError("invalid calibration snapshot")
         coordinator = cls(config, predict_max_c)
         coordinator._state, coordinator._last, coordinator._paused = state, last, paused
+        coordinator._completed_history = history
         return coordinator
 
     @property
@@ -327,9 +345,19 @@ class CalibrationCoordinator:
         assert self._state is not None
         completed, stage, progress = self._state, self._actual_stage, self._progress(self._state)
         event = self._event("stage_completed", stage, 0.0, 0.0, completed)
+        self._completed_history += (progress,)
         if completed.stage_index == len(_STAGES) - 1:
             return self._terminal("completed", stage, (), (event,))
-        state = _State(completed.command, completed.stage_index + 1, runtime.now_s, 0, completed.signed_dwell_plan, completed.schedule, completion_history=completed.completion_history + (progress,), coasting=True)
+        state = _State(
+            completed.command,
+            completed.stage_index + 1,
+            runtime.now_s,
+            0,
+            completed.signed_dwell_plan,
+            completed.schedule,
+            completion_history=self._completed_history,
+            coasting=True,
+        )
         self._state = state
         return self._remember(self._decision(True, 0.0, _COAST, state, (event,)))
 
@@ -342,7 +370,7 @@ class CalibrationCoordinator:
         bounded = max(-magnitude, min(magnitude, intended))
         try:
             predicted = _finite(self._predict_max_c(runtime.baseline_q, bounded, runtime), "predicted_max_c")
-        except (TypeError, ValueError, ArithmeticError):
+        except Exception:
             return 0.0, ("prediction_invalid",)
         assert self._state is not None
         if predicted >= self._state.command.maximum_temperature_c or predicted >= runtime.safety_ceiling_c:
