@@ -365,10 +365,10 @@ class InnovationStateSpace:
         self, horizon_steps: int, q_previous: float, ambient_future: npt.ArrayLike
     ) -> AffinePrediction:
         """Return the finite lower-triangular open-loop input response."""
-        model = self._require_model()
         horizon = _integer(horizon_steps, "horizon_steps", minimum=0)
         if horizon > _MAX_AFFINE_PREDICTION_HORIZON:
             raise ValueError(f"horizon_steps must not exceed {_MAX_AFFINE_PREDICTION_HORIZON}")
+        model = self._require_model()
         previous = _finite(q_previous, "q_previous")
         if not 0.0 <= previous <= 1.0:
             raise ValueError("q_previous must be in [0, 1]")

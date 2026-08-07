@@ -15,11 +15,13 @@ from common.control_trace import AmbientSource
 from .arx import ScheduledARX
 from .contracts import AffinePrediction, FrameObservation, ModelUpdate
 from .state_space import InnovationStateSpace
+from .confidence import ConfidenceReport, parameter_promotion_blockers
 
-_SCHEMA = "online-adaptation/v2"
-_LEGACY_SCHEMA = "online-adaptation/v1"
+_SCHEMA = "online-adaptation/v3"
+_LEGACY_SCHEMAS = frozenset(("online-adaptation/v1", "online-adaptation/v2"))
 _HORIZONS = (3, 15, 45, 90, 180)
 _MAX_PENDING_ORIGINS = 2 * max(_HORIZONS) * len(_HORIZONS)
+_MAX_PROMOTION_REJECTIONS = 64
 _SNAPSHOT_FIELDS = frozenset(
     (
         "schema",
@@ -40,6 +42,12 @@ _SNAPSHOT_FIELDS = frozenset(
         "last_evaluation_s",
         "score_aggregate",
         "partial_origins",
+        "active_generation",
+        "challenger_generation",
+        "rollback_generation",
+        "last_decision_id",
+        "failed_generations",
+        "promotion_rejections",
     )
 )
 
@@ -80,6 +88,17 @@ class EvaluationRejectionReason(StrEnum):
     STALE_GENERATION = "stale-generation"
     PROSPECTIVE = "prospective"
     STATE_ALIGNMENT = "state-alignment"
+    STRUCTURE = "structure-change-requires-manual-activation"
+
+
+@dataclass(frozen=True, slots=True)
+class PromotionRejection:
+    """Durable exact reason a parameter-generation transaction did not commit."""
+
+    decision_id: str
+    challenger_generation: int
+    challenger_digest: str
+    reason: str
 
 
 class AlignmentEvidence(StrEnum):
@@ -250,6 +269,7 @@ class CompletedOrigin:
         """Freeze confidence phase classification with the completed origin."""
         return "coasting" if self.braking else "heating"
 
+
 # Public causal-evidence names.  The mutable origin owns only its evolving
 # realized-duty window; its forecasts, snapshots, and provenance never change.
 ForecastOrigin = _Origin
@@ -259,6 +279,7 @@ CompletedForecastOrigin = CompletedOrigin
 @dataclass(slots=True)
 class _PendingDecision:
     decision: EvaluationDecision
+    role_generation: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,6 +330,12 @@ class OnlineAdaptation:
         self._decision_sequence = 0
         self._last_duty: float | None = None
         self._latest_cross_arm_prediction: _CrossArmPrediction | None = None
+        self._active_generation = 0
+        self._challenger_generation = 0
+        self._rollback_generation: int | None = None
+        self._last_decision_id: str | None = None
+        self._failed_generations: set[int] = set()
+        self._promotion_rejections: deque[PromotionRejection] = deque(maxlen=_MAX_PROMOTION_REJECTIONS)
 
     @property
     def role_generation(self) -> int:
@@ -328,6 +355,30 @@ class OnlineAdaptation:
         return self._lag_warmup_remaining
 
     @property
+    def active_generation(self) -> int:
+        return self._active_generation
+
+    @property
+    def challenger_generation(self) -> int:
+        return self._challenger_generation
+
+    @property
+    def rollback_generation(self) -> int | None:
+        return self._rollback_generation
+
+    @property
+    def last_decision_id(self) -> str | None:
+        return self._last_decision_id
+
+    @property
+    def failed_generations(self) -> tuple[int, ...]:
+        return tuple(sorted(self._failed_generations))
+
+    @property
+    def promotion_rejections(self) -> tuple[PromotionRejection, ...]:
+        return tuple(self._promotion_rejections)
+
+    @property
     def pending_origins(self) -> tuple[ForecastOrigin, ...]:
         """Frozen view of futures whose targets have not arrived."""
         return tuple(self._origins)
@@ -336,13 +387,36 @@ class OnlineAdaptation:
     def challenger_digest(self) -> str:
         return self.model_digest(self.challenger)
 
-    def refresh_challenger(self, challenger: AdaptiveModel) -> None:
-        """Install a compatible challenger without rewriting captured futures."""
-        current_schema = self.challenger.snapshot().get("schema")
-        replacement_schema = challenger.snapshot().get("schema")
-        if current_schema != replacement_schema:
-            self._invalidate_origins()
+    def refresh_challenger(self, challenger: AdaptiveModel) -> bool:
+        """Install one new parameter generation and discard all prior evidence."""
+        incumbent_snapshot = self.incumbent.snapshot()
+        replacement_snapshot = challenger.snapshot()
+        if _is_state_space_snapshot(incumbent_snapshot) and (
+            not _is_state_space_snapshot(replacement_snapshot)
+            or state_space_structure_digest(incumbent_snapshot) != state_space_structure_digest(replacement_snapshot)
+        ):
+            self._record_promotion_rejection(
+                "refresh",
+                "structure-change-requires-manual-activation",
+                challenger=challenger,
+            )
+            return False
         self.challenger = challenger
+        self._challenger_generation += 1
+        self._effective_updates = 0
+        self._begin_role_generation()
+        return True
+
+    def fence_active_generation(self, reason: str) -> None:
+        """Fence the failed active parameter generation and retain its evidence."""
+        if not reason:
+            raise ValueError("reason must not be empty")
+        self._record_promotion_rejection(
+            "active-generation-failed",
+            reason,
+            challenger=self.incumbent,
+            generation=self._active_generation,
+        )
 
     def reset_continuity(self) -> None:
         """Discard continuity after an in-session rejected frame."""
@@ -436,11 +510,13 @@ class OnlineAdaptation:
             self.challenger.observe(observation) if self._parameter_learning else self.challenger.track(observation)
         )
         refreshed_challenger = challenger_refresh_generation != _state_space_refresh_generation(self.challenger)
-        if challenger_outcome.updated:
-            self._effective_updates += 1
         if refreshed_challenger:
+            self._challenger_generation += 1
+            self._effective_updates = 0
             self._begin_role_generation()
-        else:
+        elif challenger_outcome.updated:
+            self._effective_updates += 1
+        if not refreshed_challenger:
             self._retain_cross_arm_prediction(observation, incumbent_outcome, challenger_outcome)
         self._capture_origins(observation, ambient_future, braking)
         self._last_duty = observation.realized_q
@@ -499,7 +575,8 @@ class OnlineAdaptation:
             self._consecutive_wins = 0
         eligible = win and self._consecutive_wins >= self.policy.required_consecutive_wins
         self._decision_sequence += 1
-        decision_id = f"generation-{self._role_generation}-evaluation-{self._decision_sequence}"
+        decision_id = f"generation-{self._challenger_generation}-evaluation-{self._decision_sequence}"
+        self._last_decision_id = decision_id
         if completed:
             window_start_s = min(origin.origin_time_s for origin in completed)
             window_end_s = max(origin.completion_time_s for origin in completed)
@@ -510,7 +587,7 @@ class OnlineAdaptation:
         decision = EvaluationDecision(
             decision_id,
             at_s,
-            self._role_generation,
+            self._challenger_generation,
             eligible,
             False,
             self._consecutive_wins,
@@ -534,7 +611,7 @@ class OnlineAdaptation:
         )
         if eligible:
             self._pending.clear()
-            self._pending[decision_id] = _PendingDecision(decision)
+            self._pending[decision_id] = _PendingDecision(decision, self._role_generation)
         self._completed_window = completed
         self._completed.clear()
         self._scores.clear()
@@ -542,33 +619,84 @@ class OnlineAdaptation:
 
     def prospective_model(self, decision_id: str) -> AdaptiveModel:
         pending = self._pending.get(decision_id)
-        if pending is None or pending.decision.generation != self._role_generation:
+        if (
+            pending is None
+            or pending.decision.generation != self._challenger_generation
+            or pending.role_generation != self._role_generation
+        ):
             raise ValueError("decision is not a current prospective promotion")
         return self.challenger
 
-    def commit_promotion(self, decision_id: str, prospective_solve: object) -> bool:
-        """Commit only a current challenger backed by a finite external solve."""
+    def commit_promotion(
+        self,
+        decision_id: str,
+        prospective_solve: object,
+        *,
+        confidence: ConfidenceReport | None = None,
+        persistence_committed: bool = False,
+    ) -> bool:
+        """Commit a current challenger only after every applicable authority."""
         pending = self._pending.pop(decision_id, None)
+        challenger_digest = self.model_digest(self.challenger)
+        reason: str | None = None
+        state_space_parameters = _is_state_space_snapshot(self.incumbent.snapshot()) and _is_state_space_snapshot(
+            self.challenger.snapshot()
+        )
         if (
             pending is None
-            or pending.decision.generation != self._role_generation
-            or pending.decision.prospective_digest != self.model_digest(self.challenger)
-            or not _valid_prospective_solve(prospective_solve)
+            or pending.decision.generation != self._challenger_generation
+            or pending.role_generation != self._role_generation
         ):
+            reason = "stale-candidate-generation"
+        elif pending.decision.prospective_digest != challenger_digest:
+            reason = "candidate-digest-changed"
+        elif not _valid_prospective_solve(prospective_solve):
+            reason = "prospective-construction"
+        elif self._challenger_generation in self._failed_generations:
+            reason = "failed-generation-cannot-be-reenabled"
+        elif state_space_parameters:
+            if state_space_structure_digest(self.incumbent.snapshot()) != state_space_structure_digest(
+                self.challenger.snapshot()
+            ):
+                reason = "structure-change-requires-manual-activation"
+            elif confidence is None:
+                reason = "confidence-evidence-missing"
+            else:
+                blockers = parameter_promotion_blockers(
+                    confidence,
+                    candidate_digest=challenger_digest,
+                    candidate_generation=self._challenger_generation,
+                    failed_generations=self.failed_generations,
+                )
+                if blockers:
+                    reason = blockers[0]
+                elif not persistence_committed:
+                    reason = "atomic-persistence"
+        if reason is not None:
             self._consecutive_wins = 0
+            self._record_promotion_rejection(decision_id, reason)
             return False
         previous_incumbent = self.incumbent
+        previous_generation = self._active_generation
         self._previous_incumbent = previous_incumbent
         self._previous_incumbent_snapshot = cast(Mapping[str, object], _owned_json(previous_incumbent.snapshot()))
         self._previous_incumbent_digest = self.model_digest(previous_incumbent)
+        self._rollback_generation = previous_generation
         self.incumbent = self.challenger
+        self._active_generation = self._challenger_generation
         if isinstance(self.incumbent, ScheduledARX):
             self.challenger = ScheduledARX.from_snapshot(
+                _mapping(_owned_json(self.incumbent.snapshot()), "promoted challenger")
+            )
+        elif isinstance(self.incumbent, InnovationStateSpace):
+            self.challenger = InnovationStateSpace.from_snapshot(
                 _mapping(_owned_json(self.incumbent.snapshot()), "promoted challenger")
             )
         else:
             self.challenger = previous_incumbent
         self._role_generation += 1
+        self._challenger_generation = max(self._challenger_generation + 1, self._role_generation)
+        self._effective_updates = 0
         self._consecutive_wins = 0
         self._begin_role_generation()
         return True
@@ -579,6 +707,7 @@ class OnlineAdaptation:
         if self._pending.pop(decision_id, None) is None:
             return False
         self._consecutive_wins = 0
+        self._record_promotion_rejection(decision_id, reason)
         return True
 
     def rollback(self) -> bool:
@@ -587,16 +716,24 @@ class OnlineAdaptation:
             return False
         snapshot = self._previous_incumbent_snapshot
         current_incumbent = self.incumbent
+        current_generation = self._active_generation
         if isinstance(snapshot, Mapping) and snapshot.get("schema") == "scheduled-arx/v2":
             self.incumbent = ScheduledARX.from_snapshot(snapshot)
+        elif isinstance(snapshot, Mapping) and snapshot.get("schema") == "innovation-state-space/v2":
+            self.incumbent = InnovationStateSpace.from_snapshot(snapshot)
         else:
             self.incumbent = self._previous_incumbent
         self.challenger = current_incumbent
+        self._active_generation = self._rollback_generation if self._rollback_generation is not None else 0
+        self._challenger_generation = max(current_generation, self._active_generation + 1)
+        self._failed_generations.add(current_generation)
         self._previous_incumbent = None
         self._previous_incumbent_snapshot = None
         self._last_rollback_digest = self._previous_incumbent_digest
         self._previous_incumbent_digest = None
+        self._rollback_generation = None
         self._role_generation += 1
+        self._effective_updates = 0
         self._consecutive_wins = 0
         self._begin_role_generation()
         if callable(getattr(self.incumbent, "reset_lag_history", None)):
@@ -619,6 +756,12 @@ class OnlineAdaptation:
             "previous_incumbent": self._previous_incumbent_snapshot,
             "previous_incumbent_digest": self._previous_incumbent_digest,
             "last_rollback_digest": self._last_rollback_digest,
+            "active_generation": self._active_generation,
+            "challenger_generation": self._challenger_generation,
+            "rollback_generation": self._rollback_generation,
+            "last_decision_id": self._last_decision_id,
+            "failed_generations": sorted(self._failed_generations),
+            "promotion_rejections": [asdict(rejection) for rejection in self._promotion_rejections],
             "role_generation": self._role_generation,
             "effective_updates": self._effective_updates,
             "consecutive_wins": self._consecutive_wins,
@@ -638,9 +781,10 @@ class OnlineAdaptation:
         model_loader: Callable[[Mapping[str, object]], AdaptiveModel] | None = None,
     ) -> OnlineAdaptation:
         schema = snapshot.get("schema")
-        if schema not in (_SCHEMA, _LEGACY_SCHEMA):
-            raise ValueError(f"snapshot schema must be {_SCHEMA!r} or {_LEGACY_SCHEMA!r}")
-        legacy = schema == _LEGACY_SCHEMA
+        ownership_legacy = schema == "online-adaptation/v1"
+        if schema != _SCHEMA and schema not in _LEGACY_SCHEMAS:
+            raise ValueError(f"snapshot schema must be {_SCHEMA!r} or a supported legacy schema")
+        legacy = schema in _LEGACY_SCHEMAS
         loader = model_loader or _scheduled_arx_loader
         if not legacy and not _SNAPSHOT_FIELDS.issubset(snapshot):
             raise ValueError("snapshot fields are invalid")
@@ -684,7 +828,7 @@ class OnlineAdaptation:
         previous = None if previous_payload is None else loader(_mapping(previous_payload, "previous_incumbent"))
         if previous is not None and cls.model_digest(previous) != previous_digest:
             raise ValueError("previous incumbent digest does not match model")
-        if legacy and isinstance(incumbent, ScheduledARX) and not isinstance(challenger, ScheduledARX):
+        if ownership_legacy and isinstance(incumbent, ScheduledARX) and not isinstance(challenger, ScheduledARX):
             # Before role ownership was explicit, an active ARX kept its
             # grey-box fallback in the challenger slot. Give the active ARX
             # an independently learnable clone and retain that fallback as the
@@ -708,6 +852,43 @@ class OnlineAdaptation:
         )
         manager._previous_incumbent_digest = previous_digest
         manager._last_rollback_digest = last_rollback_digest
+        if schema == _SCHEMA:
+            manager._active_generation = _nonnegative(snapshot.get("active_generation"), "active_generation")
+            manager._challenger_generation = _nonnegative(
+                snapshot.get("challenger_generation"), "challenger_generation"
+            )
+            rollback_generation = snapshot.get("rollback_generation")
+            manager._rollback_generation = (
+                None if rollback_generation is None else _nonnegative(rollback_generation, "rollback_generation")
+            )
+            manager._last_decision_id = _optional_string(snapshot.get("last_decision_id"), "last_decision_id")
+            failed_generations = tuple(
+                _nonnegative(value, "failed generation")
+                for value in _sequence(snapshot.get("failed_generations"), "failed_generations")
+            )
+            if len(failed_generations) != len(set(failed_generations)):
+                raise ValueError("failed_generations must be unique")
+            manager._failed_generations = set(failed_generations)
+            rejection_values = tuple(_sequence(snapshot.get("promotion_rejections"), "promotion_rejections"))
+            if len(rejection_values) > _MAX_PROMOTION_REJECTIONS:
+                raise ValueError("promotion_rejections exceeds durable bound")
+            rejections: deque[PromotionRejection] = deque(maxlen=_MAX_PROMOTION_REJECTIONS)
+            for value in rejection_values:
+                payload = _mapping(value, "promotion rejection")
+                if set(payload) != {"decision_id", "challenger_generation", "challenger_digest", "reason"}:
+                    raise ValueError("promotion rejection fields are invalid")
+                rejections.append(
+                    PromotionRejection(
+                        _optional_string(payload["decision_id"], "decision_id") or "",
+                        _nonnegative(payload["challenger_generation"], "challenger_generation"),
+                        _optional_string(payload["challenger_digest"], "challenger_digest") or "",
+                        _optional_string(payload["reason"], "reason") or "",
+                    )
+                )
+            manager._promotion_rejections = rejections
+        else:
+            manager._active_generation = _nonnegative(snapshot.get("role_generation"), "role_generation")
+            manager._challenger_generation = manager._active_generation
         manager._role_generation = _nonnegative(
             snapshot.get("role_generation"),
             "role_generation",
@@ -819,8 +1000,25 @@ class OnlineAdaptation:
         self._completed_window = ()
         self._scores.clear()
         self._consecutive_wins = 0
-
         self._latest_cross_arm_prediction = None
+
+    def _record_promotion_rejection(
+        self,
+        decision_id: str,
+        reason: str,
+        *,
+        challenger: AdaptiveModel | None = None,
+        generation: int | None = None,
+    ) -> None:
+        model = self.challenger if challenger is None else challenger
+        self._promotion_rejections.append(
+            PromotionRejection(
+                decision_id=decision_id,
+                challenger_generation=self._challenger_generation if generation is None else generation,
+                challenger_digest=self.model_digest(model),
+                reason=reason,
+            )
+        )
 
     def _capture_origins(
         self,
@@ -865,7 +1063,7 @@ class OnlineAdaptation:
             self._origins.append(
                 _Origin(
                     observation.frame_end_s,
-                    self._role_generation,
+                    self._challenger_generation,
                     observation.frame_end_s - observation.frame_start_s,
                     horizon,
                     incumbent,
@@ -895,7 +1093,7 @@ class OnlineAdaptation:
         live: list[_Origin] = []
         interval_s = observation.frame_end_s - observation.frame_start_s
         for origin in self._origins:
-            if origin.generation != self._role_generation or abs(interval_s - origin.interval_s) > 1e-6:
+            if origin.generation != self._challenger_generation or abs(interval_s - origin.interval_s) > 1e-6:
                 self._scores.continuous = False
                 continue
             step = round((observation.frame_end_s - origin.origin_time_s) / origin.interval_s)
@@ -1146,6 +1344,30 @@ def _canonical_state_space_model(snapshot: Mapping[str, object]) -> Mapping[str,
         return None
     model = snapshot.get("model")
     return model if isinstance(model, Mapping) else None
+
+
+def state_space_structure_digest(snapshot: Mapping[str, object]) -> str | None:
+    """Return the immutable realization/schema identity, excluding parameters."""
+    if not _is_state_space_snapshot(snapshot):
+        return None
+    config = snapshot.get("config")
+    model = snapshot.get("model")
+    diagnostics = snapshot.get("diagnostics")
+    if not isinstance(config, Mapping) or not isinstance(model, Mapping) or not isinstance(diagnostics, Mapping):
+        return None
+    structure = {
+        "schema": snapshot.get("schema"),
+        "orders": config.get("orders"),
+        "delays": config.get("delays"),
+        "selected_order": diagnostics.get("selected_order"),
+        "selected_delay": diagnostics.get("selected_delay"),
+        "state_shape": np.asarray(model.get("A")).shape,
+        "input_shape": np.asarray(model.get("B")).shape,
+        "output_shape": np.asarray(model.get("C")).shape,
+    }
+    return hashlib.sha256(
+        json.dumps(_owned_json(structure), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
 
 
 def _stable(snapshot: Mapping[str, object], maximum: float) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from dataclasses import FrozenInstanceError, replace
 
@@ -133,6 +134,7 @@ def test_fitted_model_preserves_the_learned_input_operating_point() -> None:
                 frame,
                 temp_c=20.0 + state + 0.02 * float(np.sin(index * 0.71)),
                 requested_q=q,
+                baseline_q=q,
                 realized_q=q,
                 requested_auger_duty=q,
                 delivered_on_s=q * 20.0,
@@ -186,6 +188,7 @@ def test_constant_refresh_is_typed_and_transactional() -> None:
             frame,
             temp_c=20.0,
             requested_q=0.4,
+            baseline_q=0.4,
             realized_q=0.4,
             requested_auger_duty=0.4,
             delivered_on_s=8.0,
@@ -237,8 +240,8 @@ def test_state_space_rejects_oversized_affine_horizon_before_response_allocation
         lambda *_args, **_kwargs: pytest.fail("oversized horizon allocated a response workspace"),
     )
 
-    with pytest.raises(ValueError, match="horizon_steps must not exceed 50"):
-        model.affine_prediction(51, 0.4, np.full(51, 20.0))
+    with pytest.raises(ValueError, match="horizon_steps must not exceed 180"):
+        model.affine_prediction(181, 0.4, np.full(181, 20.0))
 
 
 def test_state_space_rejects_oversized_buffer_in_construction_and_restore() -> None:
@@ -560,6 +563,7 @@ def _alignment_frames(*, count: int = 96, change_at: int | None = None) -> tuple
                 frame,
                 temp_c=20.0 + temperatures[index],
                 requested_q=q,
+                baseline_q=q,
                 realized_q=q,
                 requested_auger_duty=q,
                 delivered_on_s=q * 20.0,
@@ -686,6 +690,24 @@ def test_snapshot_round_trip_preserves_full_filter_state_and_next_update() -> No
         rtol=1e-12,
     )
     assert restored_update.updated is source_update.updated
+
+
+def test_active_snapshot_and_refreshed_challenger_have_independent_parameter_ownership() -> None:
+    """Post-activation tracking must not let challenger refresh mutate the incumbent."""
+    frames = _alignment_frames(count=98)
+    fitted = InnovationStateSpace(_config(orders=(2,), delays=(1,)))
+    assert fitted.fit(frames[:96]).accepted
+    snapshot = fitted.snapshot()
+    incumbent = InnovationStateSpace.from_snapshot(snapshot)
+    challenger = InnovationStateSpace.from_snapshot(snapshot)
+    incumbent_parameters = deepcopy(incumbent.snapshot()["model"])
+
+    incumbent.track(frames[96])
+    challenger.observe(frames[96])
+    challenger.observe(frames[97])
+
+    assert incumbent is not challenger
+    assert incumbent.snapshot()["model"] == incumbent_parameters
 
 
 @pytest.mark.parametrize("corruption", ("dimension", "covariance", "pole", "gain", "state"))

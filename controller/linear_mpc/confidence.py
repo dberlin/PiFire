@@ -60,8 +60,10 @@ class ConfidenceConfig:
             self.braking_tolerance_c,
             self.maximum_refresh_p99_ms,
         )
-        if self.maximum_delay_steps < 1 or self.required_sequential_wins < 1 or not all(
-            isfinite(value) and value >= 0.0 for value in values
+        if (
+            self.maximum_delay_steps < 1
+            or self.required_sequential_wins < 1
+            or not all(isfinite(value) and value >= 0.0 for value in values)
         ):
             raise ValueError("confidence thresholds must be finite and non-negative")
 
@@ -99,6 +101,40 @@ class ConfidenceReport:
     blockers: tuple[str, ...]
     bootstrap_seed: int
     bootstrap_replicates: int
+
+
+def parameter_promotion_blockers(
+    report: ConfidenceReport,
+    *,
+    candidate_digest: str,
+    candidate_generation: int,
+    failed_generations: Sequence[int] = (),
+) -> tuple[str, ...]:
+    """Return fail-closed blockers for an already-active parameter challenger.
+
+    ``status`` is deliberately not an authority here: an active controller is
+    projected as ``active`` even while its next challenger is incomplete.
+    Automatic promotion therefore requires every individual gate from the
+    exact challenger generation to pass.
+    """
+    if not isinstance(report, ConfidenceReport):
+        raise TypeError("report must be ConfidenceReport")
+    blockers: list[str] = []
+    if report.active_kind != "innovation-state-space":
+        blockers.append("state-space-not-active")
+    if report.candidate_digest != candidate_digest:
+        blockers.append("candidate-digest-changed")
+    if report.generation != candidate_generation:
+        blockers.append("stale-candidate-generation")
+    if candidate_generation in failed_generations:
+        blockers.append("failed-generation-cannot-be-reenabled")
+    blockers.extend(report.blockers)
+    blockers.extend(
+        gate.reason or gate.name
+        for gate in report.gates
+        if not gate.passed and (gate.reason or gate.name) not in blockers
+    )
+    return tuple(dict.fromkeys(blockers))
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,19 +184,65 @@ def evaluate_confidence(
 
     gates: list[GateResult] = []
     _gate(gates, "ledger-integrity", ledger_valid and not duplicate_conflict, "ledger-integrity")
-    _gate(gates, "candidate-lineage", digest is not None and generation is not None and bool(selected), "candidate-lineage")
+    _gate(
+        gates,
+        "candidate-lineage",
+        digest is not None and generation is not None and bool(selected),
+        "candidate-lineage",
+    )
     _gate(gates, "calibration-completeness", _calibration_complete(records), "calibration-completeness")
-    _gate(gates, "identifiability", refresh is not None and refresh.accepted and refresh.full_rank and refresh.finite_diagnostics, "identifiability")
-    _gate(gates, "pole-magnitude", refresh is not None and refresh.pole_magnitude is not None and refresh.pole_magnitude < config.maximum_pole_magnitude, "pole-magnitude")
-    _gate(gates, "positive-gain", refresh is not None and refresh.gain is not None and refresh.gain > 0.0 and isfinite(refresh.gain), "positive-gain")
-    _gate(gates, "delay-limit", refresh is not None and refresh.delay_steps is not None and refresh.delay_steps <= config.maximum_delay_steps, "delay-limit")
+    _gate(
+        gates,
+        "identifiability",
+        refresh is not None and refresh.accepted and refresh.full_rank and refresh.finite_diagnostics,
+        "identifiability",
+    )
+    _gate(
+        gates,
+        "pole-magnitude",
+        refresh is not None
+        and refresh.pole_magnitude is not None
+        and refresh.pole_magnitude < config.maximum_pole_magnitude,
+        "pole-magnitude",
+    )
+    _gate(
+        gates,
+        "positive-gain",
+        refresh is not None and refresh.gain is not None and refresh.gain > 0.0 and isfinite(refresh.gain),
+        "positive-gain",
+    )
+    _gate(
+        gates,
+        "delay-limit",
+        refresh is not None and refresh.delay_steps is not None and refresh.delay_steps <= config.maximum_delay_steps,
+        "delay-limit",
+    )
     _gate(gates, "finite-covariance", refresh is not None and refresh.covariance_finite, "finite-covariance")
-    _gate(gates, "state-alignment", refresh is not None and refresh.alignment_error_c is not None and refresh.alignment_error_c <= config.maximum_alignment_error_c, "state-alignment")
+    _gate(
+        gates,
+        "state-alignment",
+        refresh is not None
+        and refresh.alignment_error_c is not None
+        and refresh.alignment_error_c <= config.maximum_alignment_error_c,
+        "state-alignment",
+    )
     _gate(gates, "snapshot-round-trip", refresh is not None and refresh.snapshot_round_trip, "snapshot-round-trip")
-    _gate(gates, "sequential-wins", refresh is not None and refresh.sequential_wins >= config.required_sequential_wins, "sequential-wins")
-    _gate(gates, "generation-continuity", refresh is not None and refresh.generation_continuity, "generation-continuity")
+    _gate(
+        gates,
+        "sequential-wins",
+        refresh is not None and refresh.sequential_wins >= config.required_sequential_wins,
+        "sequential-wins",
+    )
+    _gate(
+        gates, "generation-continuity", refresh is not None and refresh.generation_continuity, "generation-continuity"
+    )
     _gate(gates, "atomic-persistence", refresh is not None and refresh.atomic_persistence, "atomic-persistence")
-    _gate(gates, "production-prospective-construction", refresh is not None and refresh.production_prospective, "production-prospective-construction")
+    _gate(
+        gates,
+        "production-prospective-construction",
+        refresh is not None and refresh.production_prospective,
+        "production-prospective-construction",
+    )
     _gate(gates, "braking-error", _braking_ok(refresh, config.braking_tolerance_c), "braking-error")
     _gate(
         gates,
@@ -203,12 +285,33 @@ def evaluate_confidence(
             )
             continue
         label = _label(interval)
-        _gate(gates, f"absolute-rmse:{label}", interval.challenger_rmse_c is not None and interval.challenger_rmse_c <= _RMSE_LIMITS[interval.horizon_steps], f"absolute-rmse:{label}")
-        _gate(gates, f"signed-bias:{label}", _signed_bias_ok(origins, interval, config.maximum_signed_bias_c), f"signed-bias:{label}")
-        _gate(gates, f"band-error:{label}", _band_error_ok(origins, interval, config.maximum_band_bias_c), f"band-error:{label}")
+        _gate(
+            gates,
+            f"absolute-rmse:{label}",
+            interval.challenger_rmse_c is not None
+            and interval.challenger_rmse_c <= _RMSE_LIMITS[interval.horizon_steps],
+            f"absolute-rmse:{label}",
+        )
+        _gate(
+            gates,
+            f"signed-bias:{label}",
+            _signed_bias_ok(origins, interval, config.maximum_signed_bias_c),
+            f"signed-bias:{label}",
+        )
+        _gate(
+            gates,
+            f"band-error:{label}",
+            _band_error_ok(origins, interval, config.maximum_band_bias_c),
+            f"band-error:{label}",
+        )
         _gate(gates, f"bootstrap:{label}", interval.available, "bootstrap-unavailable")
         _gate(gates, f"relative-rmse:{label}", _relative_rmse_ok(interval), f"relative-rmse:{label}")
-        _gate(gates, f"relative-bootstrap:{label}", interval.upper_bound is not None and interval.upper_bound < 1.0, "relative-bootstrap")
+        _gate(
+            gates,
+            f"relative-bootstrap:{label}",
+            interval.upper_bound is not None and interval.upper_bound < 1.0,
+            "relative-bootstrap",
+        )
         _gate(gates, f"cook-weight:{label}", _cook_weight_ok(origins, interval), "cook-effective-weight")
 
     blockers = tuple(gate.reason for gate in gates if not gate.passed and gate.reason is not None)
@@ -243,18 +346,31 @@ def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...
         if record.model_digest != payload.challenger_digest or record.provenance_digest != payload.incumbent_digest:
             conflict = True
             continue
-        identity = (record.cook_id, record.role_generation, payload.horizon_steps, payload.origin_sequence, payload.completion_time_ms)
+        identity = (
+            record.cook_id,
+            record.role_generation,
+            payload.horizon_steps,
+            payload.origin_sequence,
+            payload.completion_time_ms,
+        )
         origin = _Origin(record, payload)
         prior = unique.get(identity)
         if prior is not None:
-            if prior.payload != payload or prior.record.model_digest != record.model_digest or prior.record.provenance_digest != record.provenance_digest:
+            if (
+                prior.payload != payload
+                or prior.record.model_digest != record.model_digest
+                or prior.record.provenance_digest != record.provenance_digest
+            ):
                 conflict = True
             continue
         unique[identity] = origin
     return tuple(unique[key] for key in sorted(unique)), conflict
 
 
-def _newest_payload(records: Sequence[ModelEvidenceRecord], payload_type: type[RefreshDiagnosticsEvidence] | type[TimingDistributionEvidence]) -> RefreshDiagnosticsEvidence | TimingDistributionEvidence | None:
+def _newest_payload(
+    records: Sequence[ModelEvidenceRecord],
+    payload_type: type[RefreshDiagnosticsEvidence] | type[TimingDistributionEvidence],
+) -> RefreshDiagnosticsEvidence | TimingDistributionEvidence | None:
     matches = [record for record in records if isinstance(record.payload, payload_type)]
     return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id)).payload if matches else None
 
@@ -279,13 +395,18 @@ def _candidate_model_integrity(
     digest: str | None,
     generation: int | None,
 ) -> bool:
-    return digest is not None and generation is not None and all(
-        record.model_digest == digest
-        for record in records
-        if record.role_generation == generation
-        and not isinstance(record.payload, CalibrationSummaryEvidence)
-        and record.model_digest is not None
+    return (
+        digest is not None
+        and generation is not None
+        and all(
+            record.model_digest == digest
+            for record in records
+            if record.role_generation == generation
+            and not isinstance(record.payload, CalibrationSummaryEvidence)
+            and record.model_digest is not None
+        )
     )
+
 
 def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -> tuple[BootstrapInterval, ...]:
     grouped: dict[tuple[int, str, str, str, int], list[_Origin]] = defaultdict(list)
@@ -310,9 +431,7 @@ def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -
         ratios = _hierarchical_ratios(by_cook, horizon, config.bootstrap_seed)
         challenger = _rmse(origin.payload.challenger_error_c for origin in group)
         incumbent = _rmse(origin.payload.incumbent_error_c for origin in group)
-        upper = None if len(ratios) != 10_000 else float(
-            np.quantile(np.asarray(ratios), 0.95, method="higher")
-        )
+        upper = None if len(ratios) != 10_000 else float(np.quantile(np.asarray(ratios), 0.95, method="higher"))
         intervals.append(
             BootstrapInterval(
                 horizon,
@@ -330,9 +449,7 @@ def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -
     return tuple(intervals)
 
 
-def _hierarchical_ratios(
-    by_cook: Mapping[str, Sequence[_Origin]], horizon: int, seed: int
-) -> tuple[float, ...]:
+def _hierarchical_ratios(by_cook: Mapping[str, Sequence[_Origin]], horizon: int, seed: int) -> tuple[float, ...]:
     cooks = tuple(sorted(by_cook))
     starts = {cook: _block_starts(by_cook[cook], horizon) for cook in cooks}
     if len(cooks) < 2 or any(not starts[cook] for cook in cooks):
@@ -361,14 +478,15 @@ def _block_starts(rows: Sequence[_Origin], horizon: int) -> tuple[int, ...]:
         for start in range(len(rows) - horizon + 1)
         if all(
             rows[index].record.session_id == rows[index + 1].record.session_id
-            and rows[index].payload.origin_sequence + 1
-            == rows[index + 1].payload.origin_sequence
+            and rows[index].payload.origin_sequence + 1 == rows[index + 1].payload.origin_sequence
             for index in range(start, start + horizon - 1)
         )
     )
 
 
-def _sample_blocks(rows: Sequence[_Origin], horizon: int, starts: Sequence[int], rng: np.random.Generator) -> tuple[_Origin, ...]:
+def _sample_blocks(
+    rows: Sequence[_Origin], horizon: int, starts: Sequence[int], rng: np.random.Generator
+) -> tuple[_Origin, ...]:
     sampled: list[_Origin] = []
     while len(sampled) < len(rows):
         start = starts[int(rng.integers(0, len(starts)))]
@@ -378,11 +496,21 @@ def _sample_blocks(rows: Sequence[_Origin], horizon: int, starts: Sequence[int],
 
 def _rmse(values: Sequence[float] | object) -> float | None:
     errors = tuple(values)  # type: ignore[arg-type]
-    return sqrt(sum(value * value for value in errors) / len(errors)) if errors and all(isfinite(value) for value in errors) else None
+    return (
+        sqrt(sum(value * value for value in errors) / len(errors))
+        if errors and all(isfinite(value) for value in errors)
+        else None
+    )
 
 
 def _stratum_rows(origins: Sequence[_Origin], interval: BootstrapInterval) -> tuple[_Origin, ...]:
-    key = (interval.horizon_steps, interval.temperature_band, interval.phase, interval.ambient_source, interval.generation)
+    key = (
+        interval.horizon_steps,
+        interval.temperature_band,
+        interval.phase,
+        interval.ambient_source,
+        interval.generation,
+    )
     return tuple(origin for origin in origins if origin.stratum == key)
 
 
@@ -401,11 +529,20 @@ def _cook_weight_ok(origins: Sequence[_Origin], interval: BootstrapInterval) -> 
 
 
 def _relative_rmse_ok(interval: BootstrapInterval) -> bool:
-    return interval.challenger_rmse_c is not None and interval.incumbent_rmse_c is not None and interval.challenger_rmse_c < interval.incumbent_rmse_c
+    return (
+        interval.challenger_rmse_c is not None
+        and interval.incumbent_rmse_c is not None
+        and interval.challenger_rmse_c < interval.incumbent_rmse_c
+    )
 
 
 def _braking_ok(refresh: RefreshDiagnosticsEvidence | TimingDistributionEvidence | None, tolerance: float) -> bool:
-    return isinstance(refresh, RefreshDiagnosticsEvidence) and refresh.braking_error_c is not None and refresh.incumbent_braking_error_c is not None and refresh.braking_error_c <= refresh.incumbent_braking_error_c + tolerance
+    return (
+        isinstance(refresh, RefreshDiagnosticsEvidence)
+        and refresh.braking_error_c is not None
+        and refresh.incumbent_braking_error_c is not None
+        and refresh.braking_error_c <= refresh.incumbent_braking_error_c + tolerance
+    )
 
 
 def _one_provenance(records: Sequence[ModelEvidenceRecord]) -> bool:
@@ -417,7 +554,13 @@ def _gate(gates: list[GateResult], name: str, passed: bool, reason: str) -> None
     gates.append(GateResult(name, passed, None if passed else reason))
 
 
-def _status(authoritative: ConfidenceStatus | None, invalidated: bool, records: Sequence[ModelEvidenceRecord], refresh: RefreshDiagnosticsEvidence | TimingDistributionEvidence | None, blockers: Sequence[str]) -> ConfidenceStatus:
+def _status(
+    authoritative: ConfidenceStatus | None,
+    invalidated: bool,
+    records: Sequence[ModelEvidenceRecord],
+    refresh: RefreshDiagnosticsEvidence | TimingDistributionEvidence | None,
+    blockers: Sequence[str],
+) -> ConfidenceStatus:
     if authoritative is not None:
         return authoritative
     if invalidated:

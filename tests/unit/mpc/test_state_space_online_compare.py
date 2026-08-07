@@ -78,6 +78,7 @@ def _challenger_pairing(*, state_space: bool, evaluations: int = 1) -> dict[str,
         "alignment_digests": [digest],
         "timing_digests": {"update": [digest], "refresh": [digest], "solve": [digest]},
         "adaptation_digests": [digest] * evaluations,
+        "adaptation_generations": [0] * evaluations,
     }
 
 
@@ -121,6 +122,7 @@ def _row(*, plant: str, mismatch: str, seed: int, arm: str) -> dict[str, Any]:
                     "state_space_digest": "b" * 64 if state_space else None,
                     "challenger_instance_digest": "c" * 64 if state_space else None,
                     "role_generation": 0 if state_space else None,
+                    "challenger_generation": 0 if state_space else None,
                 }
             ],
             "safety_inhibits": 0,
@@ -250,6 +252,14 @@ def test_contract_rejects_state_space_evidence_paired_to_another_challenger_inst
     artifact = _complete_artifact()
     state_row = next(row for row in artifact["rows"] if row["arm"] == "innovation-state-space")
     state_row["challenger_pairing"]["prediction_digests"] = ["d" * 64]
+
+    assert "challenger evidence pairing" in compare.artifact_contract_errors(artifact)
+
+
+def test_contract_rejects_evaluation_bound_to_another_challenger_generation() -> None:
+    artifact = _complete_artifact()
+    state_row = next(row for row in artifact["rows"] if row["arm"] == "innovation-state-space")
+    state_row["adaptation"]["evaluations"][0]["challenger_generation"] = 1
 
     assert "challenger evidence pairing" in compare.artifact_contract_errors(artifact)
 

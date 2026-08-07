@@ -22,7 +22,9 @@ class _AffineModel:
     def track(self, observation: FrameObservation) -> ModelUpdate:
         return ModelUpdate(observation.temp_c, observation.temp_c, 0.0, False)
 
-    def affine_prediction(self, horizon_steps: int, _q_previous: float, _ambient_future: np.ndarray) -> AffinePrediction:
+    def affine_prediction(
+        self, horizon_steps: int, _q_previous: float, _ambient_future: np.ndarray
+    ) -> AffinePrediction:
         return AffinePrediction(
             np.full(horizon_steps, float(len(self.marker))),
             np.zeros((horizon_steps, horizon_steps)),
@@ -88,16 +90,18 @@ def test_origins_precommit_all_five_horizons_before_targets_and_complete_once() 
     assert len(manager.completed_origins) == count
 
 
-def test_refresh_keeps_precommitted_forecast_and_digest_immutable() -> None:
+def test_refresh_expires_precommitted_forecasts_before_new_generation() -> None:
     manager = OnlineAdaptation(_AffineModel(marker="incumbent"), _AffineModel(marker="old"))
     manager.observe(_frame(0))
     origin = manager.pending_origins[0]
     old_prediction = origin.challenger_prediction_c
+    old_generation = manager.challenger_generation
 
     manager.refresh_challenger(_AffineModel(marker="new challenger"))
 
     assert origin.challenger_prediction_c == old_prediction
-    assert origin.challenger_digest != manager.challenger_digest
+    assert manager.pending_origins == ()
+    assert manager.challenger_generation == old_generation + 1
 
 
 def test_incompatible_challenger_refresh_expires_pending_origins() -> None:

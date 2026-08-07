@@ -878,6 +878,7 @@ class Controller(ControllerBase):
         self._activation_expected_temperature_c: float | None = None
         self._activation_residual_failures = 0
 
+        self._online_pending_parameter_promotion = None
         self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
         if self._online_enabled:
             self._initialize_online_adaptation()
@@ -1121,6 +1122,83 @@ class Controller(ControllerBase):
             raise ValueError(rejection)
         return float(solve.sequence_q[0])
 
+    def _synchronize_active_adaptation(self):
+        """Mirror exact activation ownership into an isolated incumbent/challenger pair."""
+        manager = self._activation_manager
+        if self._online is None or manager is None:
+            return
+        state = manager.state
+        if state.active_kind == STATE_SPACE_KIND and manager.active_snapshot is not None:
+            active_snapshot = manager.active_snapshot
+            active_digest = OnlineAdaptation.model_digest(InnovationStateSpace.from_snapshot(active_snapshot))
+            if not (
+                isinstance(self._online.incumbent, InnovationStateSpace)
+                and OnlineAdaptation.model_digest(self._online.incumbent) == active_digest
+            ):
+                incumbent = InnovationStateSpace.from_snapshot(active_snapshot)
+                challenger = InnovationStateSpace.from_snapshot(active_snapshot)
+                self._online = self._new_online_adaptation(incumbent, challenger)
+                self._online._active_generation = state.role_generation
+                self._online._challenger_generation = state.role_generation + 1
+            rollback_snapshot = manager.rollback_snapshot
+            if rollback_snapshot is not None:
+                rollback_model_snapshot = rollback_snapshot
+                online = rollback_snapshot.get("online_adaptation")
+                if isinstance(online, Mapping) and isinstance(online.get("incumbent"), Mapping):
+                    rollback_model_snapshot = online["incumbent"]
+                if rollback_model_snapshot.get("schema") == "innovation-state-space/v2":
+                    rollback = InnovationStateSpace.from_snapshot(rollback_model_snapshot)
+                elif rollback_model_snapshot.get("schema") == _GreyBoxAdaptiveModel._SCHEMA:
+                    rollback = _GreyBoxAdaptiveModel.from_snapshot(rollback_model_snapshot)
+                else:
+                    rollback = None
+                if rollback is not None:
+                    self._online._previous_incumbent = rollback
+                    self._online._previous_incumbent_snapshot = copy.deepcopy(dict(rollback_model_snapshot))
+                    self._online._previous_incumbent_digest = OnlineAdaptation.model_digest(rollback)
+                    if self._online._rollback_generation is None:
+                        self._online._rollback_generation = max(0, state.role_generation - 1)
+        else:
+            challenger = self._new_state_space_challenger()
+            self._online = self._new_online_adaptation(self._new_grey_box_model(), challenger)
+            self._online._active_generation = state.role_generation
+            self._online._challenger_generation = state.role_generation + 1
+        self._online._role_generation = state.role_generation
+        self._online._failed_generations.update(state.failed_generations)
+        self._online._begin_role_generation()
+
+    def commit_active_parameter_promotion(self, manager, decision_id, confidence):
+        """Publish a parameter challenger only after ActivationManager's durable commit."""
+        if not isinstance(manager, ActivationManager):
+            raise TypeError("manager must be ActivationManager")
+        pending = self._online_pending_parameter_promotion
+        if (
+            self._online is None
+            or pending is None
+            or pending[0] != decision_id
+            or manager.state.active_kind != STATE_SPACE_KIND
+            or manager.state.active_digest != self._online.challenger_digest
+            or manager.state.role_generation != self._online.role_generation + 1
+        ):
+            return False
+        solve = pending[1]
+        committed = self._online.commit_promotion(
+            decision_id,
+            solve,
+            confidence=confidence,
+            persistence_committed=True,
+        )
+        self._online_pending_parameter_promotion = None
+        if not committed:
+            return False
+        self._activation_manager = manager
+        self._synchronize_active_adaptation()
+        self._online_promotion_count += 1
+        self._model_revision += 1
+        self._online_last_lifecycle_reason = "parameter-promotion"
+        self._online_last_lifecycle = self._online_lifecycle("adopt", "parameter-promotion")
+        return True
+
     def restore_activation(self, persisted, records):
         """Restore one durable activation without bypassing its exact lineage."""
         manager = ActivationManager(
@@ -1140,9 +1218,8 @@ class Controller(ControllerBase):
         restored_fallback = decision.reason == "restore-generation-already-failed"
         if not decision.accepted and not restored_fallback:
             return False
+        self._synchronize_active_adaptation()
         if self._online is not None:
-            self._online._invalidate_origins()
-            self._online._role_generation = manager.state.role_generation
             self._online.reset_continuity()
         self._model_revision += 1
         return True
@@ -1161,8 +1238,8 @@ class Controller(ControllerBase):
         self._activation_expected_temperature_c = None
         self._activation_residual_failures = 0
         if self._online is not None:
-            self._online._invalidate_origins()
-            self._online._role_generation = manager.state.role_generation
+            self._online.fence_active_generation(reason.strip())
+            self._synchronize_active_adaptation()
             self._online.reset_continuity()
         self._model_revision += 1
         self._online_pending_lifecycle = {
@@ -1186,8 +1263,8 @@ class Controller(ControllerBase):
         self._activation_expected_temperature_c = None
         self._activation_residual_failures = 0
         if self._online is not None:
-            self._online._invalidate_origins()
-            self._online._role_generation = manager.state.role_generation
+            self._online.fence_active_generation(reason)
+            self._synchronize_active_adaptation()
             self._online.reset_continuity()
         self._model_revision += 1
         return True
@@ -1335,9 +1412,16 @@ class Controller(ControllerBase):
                 "linear_solve_duration_seconds": None,
             }
         incumbent = coordinator.incumbent
+        active_kind = (
+            "innovation-state-space"
+            if isinstance(incumbent, InnovationStateSpace)
+            else "scheduled-arx"
+            if isinstance(incumbent, ScheduledARX)
+            else "grey-box"
+        )
         return {
             "enabled": True,
-            "active_model_kind": "scheduled-arx" if isinstance(incumbent, ScheduledARX) else "grey-box",
+            "active_model_kind": active_kind,
             "role_generation": coordinator.role_generation,
             "eligible_updates": self._online_eligible_updates,
             "rejected_updates": self._online_rejected_updates,
@@ -1538,7 +1622,11 @@ class Controller(ControllerBase):
                 "forecast_origin_evidence": forecast_origin_evidence,
                 "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
             }
-        if self._is_state_space_model(self._online.challenger) and not self._online_experiment_active:
+        if (
+            self._is_state_space_model(self._online.challenger)
+            and not self._online_experiment_active
+            and not self._active_state_space()
+        ):
             self._online.reject_prospective(decision.decision_id, "experiment-activation-gate")
             self._online_last_lifecycle_reason = "experiment-activation-gate"
             return {
@@ -1572,6 +1660,15 @@ class Controller(ControllerBase):
             if certificate_rejection is not None:
                 raise ValueError(certificate_rejection)
             refresh_diagnostics_evidence = self._compact_refresh_evidence(decision, production_prospective=True)
+            if self._active_state_space():
+                self._online_pending_parameter_promotion = (decision.decision_id, solve)
+                self._online_last_lifecycle_reason = "confidence-transaction-required"
+                return {
+                    "evaluation": self._online_last_evaluation,
+                    "evaluation_payload": evaluation_payload,
+                    "forecast_origin_evidence": forecast_origin_evidence,
+                    "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
+                }
         except Exception as error:
             detail = str(error)
             self._online.reject_prospective(decision.decision_id, detail)
@@ -1635,10 +1732,10 @@ class Controller(ControllerBase):
                 "effective_updates": self._online.effective_updates,
                 "model_digest": OnlineAdaptation.model_digest(self._online.challenger),
             }
-        if not self._active_arx():
-            # The incumbent is a frozen origin, not a live estimator reference.
-            # Refresh it only at this frame boundary so its comparison forecast
-            # is contemporaneous while every captured origin stays immutable.
+        if not self._active_arx() and not isinstance(self._online.incumbent, InnovationStateSpace):
+            # Grey-box incumbents are immutable forecast origins. Refresh only
+            # that role at a frame boundary; an active state-space incumbent is
+            # a separately owned filter and must remain immutable in parameters.
             self._online.incumbent = self._new_grey_box_model()
         actuation_known = observation.output_source != "unknown"
         braking = observation.realized_q <= 0.05 or (
@@ -1804,9 +1901,16 @@ class Controller(ControllerBase):
         }
 
     def _online_snapshot(self):
+        active_kind = (
+            "innovation-state-space"
+            if isinstance(self._online.incumbent, InnovationStateSpace)
+            else "scheduled-arx"
+            if self._active_arx()
+            else "grey-box"
+        )
         return {
             **self._online.snapshot(),
-            "active_model_kind": "scheduled-arx" if self._active_arx() else "grey-box",
+            "active_model_kind": active_kind,
             "eligible_updates": self._online_eligible_updates,
             "rejected_updates": self._online_rejected_updates,
             "promotion_count": self._online_promotion_count,
@@ -1984,21 +2088,33 @@ class Controller(ControllerBase):
                     if not required_metadata.issubset(payload):
                         raise ValueError("online snapshot lacks controller metadata")
 
+                    state_space_active = payload.get("active_model_kind") == "innovation-state-space"
+
                     def load_model(model_snapshot):
                         schema = model_snapshot.get("schema")
                         if schema == "scheduled-arx/v2":
                             return ScheduledARX.from_snapshot(model_snapshot)
                         if schema == "innovation-state-space/v2":
-                            return _StateSpaceShadow.from_fitted_snapshot(model_snapshot)
+                            return (
+                                InnovationStateSpace.from_snapshot(model_snapshot)
+                                if state_space_active
+                                else _StateSpaceShadow.from_fitted_snapshot(model_snapshot)
+                            )
                         if schema == _GreyBoxAdaptiveModel._SCHEMA:
                             return _GreyBoxAdaptiveModel.from_snapshot(model_snapshot)
                         raise ValueError("unsupported online model schema")
 
                     restored = OnlineAdaptation.from_snapshot(payload, model_loader=load_model)
-                    if self._is_state_space_model(restored.incumbent):
-                        raise ValueError("state-space model cannot be an incumbent")
+                    if isinstance(restored.incumbent, _StateSpaceShadow):
+                        raise ValueError("state-space snapshot cannot restore as a pre-activation incumbent")
                     active_kind = payload.get("active_model_kind")
-                    actual_kind = "scheduled-arx" if isinstance(restored.incumbent, ScheduledARX) else "grey-box"
+                    actual_kind = (
+                        "innovation-state-space"
+                        if isinstance(restored.incumbent, InnovationStateSpace)
+                        else "scheduled-arx"
+                        if isinstance(restored.incumbent, ScheduledARX)
+                        else "grey-box"
+                    )
                     if active_kind != actual_kind:
                         raise ValueError("online active model kind does not match incumbent")
                     previous = restored._previous_incumbent
@@ -2012,6 +2128,13 @@ class Controller(ControllerBase):
                             or restored.previous_incumbent_digest is None
                         ):
                             raise ValueError("active ARX lacks a valid rollback owner")
+                    elif actual_kind == "innovation-state-space":
+                        if (
+                            not isinstance(restored.challenger, InnovationStateSpace)
+                            or previous is None
+                            or restored.previous_incumbent_digest is None
+                        ):
+                            raise ValueError("active state-space lacks challenger or rollback ownership")
                     elif (
                         not isinstance(restored.challenger, (ScheduledARX, _StateSpaceShadow))
                         or previous is not None

@@ -249,6 +249,7 @@ def _simulator_frames(
             "refresh_digests": [],
             "alignment_digests": [],
             "adaptation_digests": [],
+            "adaptation_generations": [],
         },
     }
     frames = list(calibration_frames)
@@ -355,9 +356,9 @@ def _simulator_frames(
                 if (
                     evaluation_digest != state_digest
                     or not isinstance(evaluation_generation, int)
-                    or evaluation_generation != state_evidence["role_generation"]
+                    or evaluation_generation != online.challenger_generation
                 ):
-                    raise RuntimeError("evaluation evidence is not bound to the active state-space challenger")
+                    raise RuntimeError("evaluation evidence is not bound to the current state-space challenger")
                 promoted = bool(
                     evaluation.get("promoted", False)
                     if isinstance(evaluation, Mapping)
@@ -372,10 +373,12 @@ def _simulator_frames(
                         "experiment_gate_blocked": promoted and not controller._online_experiment_active,
                         "state_space_digest": evaluation_digest,
                         "challenger_instance_digest": state_evidence["instance_digest"],
-                        "role_generation": evaluation_generation,
+                        "role_generation": state_evidence["role_generation"],
+                        "challenger_generation": evaluation_generation,
                     }
                 )
                 state_evidence["adaptation_digests"].append(evaluation_digest)
+                state_evidence["adaptation_generations"].append(evaluation_generation)
             frames.append(observation)
 
             requests.append(request)
@@ -742,6 +745,7 @@ def _runtime_model_row(
             "alignment_digests": list(arm_evidence["alignment_digests"]),
             "timing_digests": timing_digests,
             "adaptation_digests": list(arm_evidence["adaptation_digests"]),
+            "adaptation_generations": list(arm_evidence["adaptation_generations"]),
         }
     else:
         row["challenger_pairing"] = None
@@ -905,6 +909,7 @@ def _model_row(
             ],
             "timing_digests": timing_digests,
             "adaptation_digests": [],
+            "adaptation_generations": [],
         }
     else:
         row["challenger_pairing"] = None
@@ -953,6 +958,8 @@ def _real_mak_rows() -> list[dict[str, Any]]:
             **{
                 **asdict(frame),
                 "requested_q": normalized_load_from_auger_duty(float(record.q[index]), u_max=0.9),
+                "baseline_q": normalized_load_from_auger_duty(float(record.q[index]), u_max=0.9),
+                "probe_q": 0.0,
                 "realized_q": normalized_load_from_auger_duty(float(record.q[index]), u_max=0.9),
                 "output_source": "requested-input-reconstruction",
             }
@@ -1111,6 +1118,8 @@ def artifact_contract_errors(artifact: Mapping[str, Any], *, require_decision: b
                     or any(not _valid_digest(digest) for digest in pairing[name])
                     for name in digest_lists
                 )
+                or not isinstance(pairing.get("adaptation_generations"), list)
+                or any(not _valid_nonnegative_int(generation) for generation in pairing["adaptation_generations"])
                 or not isinstance(pairing.get("prediction_origins"), list)
                 or not isinstance(pairing.get("prediction_events"), list)
                 or not isinstance(pairing.get("timing_digests"), Mapping)
@@ -1160,11 +1169,15 @@ def artifact_contract_errors(artifact: Mapping[str, Any], *, require_decision: b
                     or any(digest not in pairing["observed_digests"] for digest in pairing["adaptation_digests"])
                     or pairing["adaptation_digests"]
                     != [item.get("state_space_digest") for item in evaluation_items if isinstance(item, Mapping)]
+                    or len(pairing["adaptation_generations"]) != len(pairing["adaptation_digests"])
+                    or pairing["adaptation_generations"]
+                    != [item.get("challenger_generation") for item in evaluation_items if isinstance(item, Mapping)]
                     or any(
                         not isinstance(item, Mapping)
                         or not _valid_digest(item.get("state_space_digest"))
                         or item.get("challenger_instance_digest") != pairing["instance_digest"]
                         or item.get("role_generation") != pairing["role_generation"]
+                        or not _valid_nonnegative_int(item.get("challenger_generation"))
                         for item in evaluation_items
                     )
                 )

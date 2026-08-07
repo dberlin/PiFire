@@ -20,6 +20,8 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
+from .adaptation import state_space_structure_digest
+from .confidence import ConfidenceReport, parameter_promotion_blockers
 from .state_space import InnovationStateSpace
 
 STATE_SPACE_KIND = "innovation-state-space"
@@ -55,6 +57,7 @@ class ActivationDecision:
     activation_record: ModelEvidenceRecord | None = None
     candidate: InnovationStateSpace | None = None
     last_safe_command: float | None = None
+    parameter_promotion: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +104,7 @@ class ActivationManager:
         rollback_snapshot: Mapping[str, object] | Callable[[], Mapping[str, object]],
         controller_configuration: Mapping[str, object] | Callable[[], Mapping[str, object]],
         prospective_solve: Callable[[InnovationStateSpace, Mapping[str, object]], float | None],
+        confidence_report: Callable[[], ConfidenceReport] | None = None,
         persist_activation: Callable[..., object] | None = None,
         invalidate_pending_origins: Callable[[int, str], None] | None = None,
         append_evidence: Callable[[ModelEvidenceRecord], object] | None = None,
@@ -113,6 +117,7 @@ class ActivationManager:
         self._rollback_source = rollback_snapshot
         self._configuration_source = controller_configuration
         self._prospective_solve = prospective_solve
+        self._confidence_source = confidence_report
         self._persist_activation = persist_activation
         self._invalidate_pending_origins = invalidate_pending_origins
         self._append_evidence = append_evidence
@@ -140,6 +145,14 @@ class ActivationManager:
     @property
     def active_snapshot(self) -> dict[str, object] | None:
         return None if self._active_snapshot is None else _owned_mapping(self._active_snapshot, "active snapshot")
+
+    @property
+    def rollback_snapshot(self) -> dict[str, object] | None:
+        return (
+            None
+            if self._rollback_snapshot_owned is None
+            else _owned_mapping(self._rollback_snapshot_owned, "rollback snapshot")
+        )
 
     def note_safe_command(self, command: float) -> None:
         """Retain the last certified command for exact fallback evidence."""
@@ -202,6 +215,16 @@ class ActivationManager:
         except Exception as error:
             return self._reject(request, _rejection_reason(error))
 
+    def prepare_parameter_promotion(self, request: ActivationRequest) -> ActivationDecision:
+        """Prepare an automatic parameter-only successor through manual activation's transaction."""
+        if self._state.active_kind != STATE_SPACE_KIND or self._active_snapshot is None:
+            return self._reject(request, "state-space-not-active")
+        reason = self._parameter_promotion_rejection(request)
+        if reason is not None:
+            return self._reject_durably(request, reason)
+        prepared = self.prepare(request)
+        return replace(prepared, parameter_promotion=True) if prepared.accepted else prepared
+
     def commit(self, prepared: ActivationDecision) -> ActivationDecision:
         """Persist a prepared activation before atomically publishing ownership."""
         if not isinstance(prepared, ActivationDecision):
@@ -219,6 +242,12 @@ class ActivationManager:
             return replace(prepared, accepted=False, reason="prepared-activation-incomplete")
         if prepared.activation_generation in self._state.failed_generations:
             return replace(prepared, accepted=False, reason="failed-generation-cannot-be-reenabled")
+        if prepared.candidate_generation in self._state.failed_generations:
+            return self._reject_durably(prepared.request, "failed-generation-cannot-be-reenabled")
+        if prepared.parameter_promotion:
+            reason = self._parameter_promotion_rejection(prepared.request, prepared.candidate_generation)
+            if reason is not None:
+                return self._reject_durably(prepared.request, reason)
         if self._configuration_digest() != prepared.controller_configuration_digest:
             return replace(prepared, accepted=False, reason="controller-configuration-changed")
         try:
@@ -236,7 +265,7 @@ class ActivationManager:
         except Exception:
             persisted = False
         if not persisted:
-            return replace(prepared, accepted=False, reason="activation-persistence-failed")
+            return self._reject_durably(prepared.request, "activation-persistence-failed")
         if self._configuration_digest() != prepared.controller_configuration_digest:
             return replace(prepared, accepted=False, reason="controller-configuration-changed")
         try:
@@ -247,6 +276,10 @@ class ActivationManager:
             return replace(prepared, accepted=False, reason="candidate-digest-changed")
         if _canonical_json(committed.rollback_snapshot) != prepared.rollback_snapshot_json:
             return replace(prepared, accepted=False, reason="rollback-snapshot-changed")
+        if prepared.parameter_promotion:
+            reason = self._parameter_promotion_rejection(prepared.request, prepared.candidate_generation)
+            if reason is not None:
+                return self._reject_durably(prepared.request, reason)
 
         # The durable transaction is authoritative before either operation below.
         # Pending origins are invalidated before the new owner can emit a command.
@@ -371,6 +404,11 @@ class ActivationManager:
             else None
         )
         latest_lifecycle = matching_activation_lifecycle(records, activation)
+        historical_failed = {
+            payload.failed_generation
+            for record in records
+            if isinstance((payload := record.payload), FallbackEvidence) and payload.failed_generation is not None
+        }
         if latest_lifecycle is not None:
             lifecycle_payload = cast(RollbackEvidence | FallbackEvidence, latest_lifecycle.payload)
             fallback_kind = STATE_SPACE_KIND if rollback_model is not None else GREY_BOX_KIND
@@ -389,7 +427,7 @@ class ActivationManager:
                 failed_generation=generation,
                 fallback_kind=fallback_kind,
                 fallback_reason=lifecycle_payload.reason,
-                failed_generations=(generation,),
+                failed_generations=tuple(sorted({*historical_failed, generation})),
             )
             return self._reject(request, "restore-generation-already-failed")
         try:
@@ -416,6 +454,7 @@ class ActivationManager:
             rollback_digest=rollback_digest,
             controller_configuration_digest=config_digest,
             last_safe_command=last_safe,
+            failed_generations=tuple(sorted(historical_failed)),
         )
         return ActivationDecision(
             accepted=True,
@@ -508,6 +547,63 @@ class ActivationManager:
 
     def _configuration_digest(self) -> str:
         return canonical_configuration_digest(self._configuration())
+
+    def _parameter_promotion_rejection(
+        self,
+        request: ActivationRequest,
+        candidate_generation: int | None = None,
+    ) -> str | None:
+        if self._confidence_source is None:
+            return "confidence-evidence-unavailable"
+        if candidate_generation is None:
+            matches = [
+                record
+                for record in self._ledger()
+                if isinstance(record.payload, ConfidenceDecisionEvidence)
+                and record.payload.decision_id == request.decision_id
+                and record.model_digest == request.candidate_digest
+            ]
+            if not matches:
+                return "confidence-decision-not-found"
+            candidate_generation = max(
+                matches,
+                key=lambda record: (record.timestamp_ms, record.evidence_id),
+            ).role_generation
+        report = self._confidence_source()
+        blockers = parameter_promotion_blockers(
+            report,
+            candidate_digest=request.candidate_digest,
+            candidate_generation=candidate_generation,
+            failed_generations=self._state.failed_generations,
+        )
+        if blockers:
+            return blockers[0]
+        snapshot = self._candidate_snapshot(request.candidate_digest, candidate_generation)
+        if self._active_snapshot is None:
+            return "state-space-not-active"
+        if state_space_structure_digest(snapshot) != state_space_structure_digest(self._active_snapshot):
+            return "structure-change-requires-manual-activation"
+        return None
+
+    def _reject_durably(self, request: ActivationRequest, reason: str) -> ActivationDecision:
+        if self._append_evidence is not None:
+            record = ModelEvidenceRecord(
+                evidence_id=f"parameter-promotion-rejection:{request.decision_id}:{self._clock_ms()}",
+                kind=EvidenceKind.CONFIDENCE_DECISION,
+                session_id=self._session_id,
+                cook_id=self._cook_id,
+                timestamp_ms=self._clock_ms(),
+                role_generation=self._state.role_generation,
+                model_digest=request.candidate_digest,
+                provenance_digest=self._state.active_digest,
+                payload=ConfidenceDecisionEvidence(
+                    decision_id=request.decision_id,
+                    blocked=True,
+                    reason=reason,
+                ),
+            )
+            self._append_evidence(record)
+        return self._reject(request, reason)
 
     def _record_fallback(self, reason: str) -> None:
         decision_id = self._state.decision_id

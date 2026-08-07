@@ -499,6 +499,13 @@ def _completed_evaluation():
                 "incumbent_error_c": 2.0,
                 "challenger_error_c": 1.0,
                 "braking": True,
+                "observation_sequence": 0,
+                "incumbent_digest": "a" * 64,
+                "challenger_digest": "b" * 64,
+                "incumbent_prediction_c": 108.0,
+                "challenger_prediction_c": 109.0,
+                "temperature_band": "middle",
+                "ambient_source": "configured",
             },
             {
                 "origin_time_s": 40.0,
@@ -509,6 +516,13 @@ def _completed_evaluation():
                 "incumbent_error_c": -3.0,
                 "challenger_error_c": -4.0,
                 "braking": False,
+                "observation_sequence": 1,
+                "incumbent_digest": "a" * 64,
+                "challenger_digest": "b" * 64,
+                "incumbent_prediction_c": 118.0,
+                "challenger_prediction_c": 119.0,
+                "temperature_band": "middle",
+                "ambient_source": "configured",
             },
         ],
         "horizon_scores": [
@@ -523,6 +537,24 @@ def _completed_evaluation():
                 "incumbent_rmse_c": 3.0,
                 "challenger_rmse_c": 4.0,
                 "sample_count": 1,
+            },
+            {
+                "horizon_steps": 45,
+                "incumbent_rmse_c": None,
+                "challenger_rmse_c": None,
+                "sample_count": 0,
+            },
+            {
+                "horizon_steps": 90,
+                "incumbent_rmse_c": None,
+                "challenger_rmse_c": None,
+                "sample_count": 0,
+            },
+            {
+                "horizon_steps": 180,
+                "incumbent_rmse_c": None,
+                "challenger_rmse_c": None,
+                "sample_count": 0,
             },
         ],
         "evaluation_duration_ms": 7.5,
@@ -813,7 +845,7 @@ def test_enabled_controller_persists_an_independently_owned_online_member():
     source = _adopted_online_controller()
     snapshot = source.get_model_snapshot()
     json.dumps(snapshot, allow_nan=False)
-    assert snapshot["online_adaptation"]["schema"] == "online-adaptation/v2"
+    assert snapshot["online_adaptation"]["schema"] == "online-adaptation/v3"
 
     restored = _c(enable_online_adaptation=True)
     restored.set_target(110.0)
