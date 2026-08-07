@@ -97,6 +97,8 @@ class ConfidenceReport:
     gates: tuple[GateResult, ...]
     bootstrap_intervals: tuple[BootstrapInterval, ...]
     blockers: tuple[str, ...]
+    bootstrap_seed: int
+    bootstrap_replicates: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,7 +213,17 @@ def evaluate_confidence(
 
     blockers = tuple(gate.reason for gate in gates if not gate.passed and gate.reason is not None)
     status = _status(authoritative, schema_invalidated, records, refresh, blockers)
-    return ConfidenceReport(status, active_kind, digest, generation, tuple(gates), intervals, blockers)
+    return ConfidenceReport(
+        status,
+        active_kind,
+        digest,
+        generation,
+        tuple(gates),
+        intervals,
+        blockers,
+        config.bootstrap_seed,
+        config.bootstrap_replicates,
+    )
 
 
 def _records(evidence: Sequence[object]) -> tuple[tuple[ModelEvidenceRecord, ...], bool]:

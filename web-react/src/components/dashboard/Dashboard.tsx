@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
@@ -9,6 +9,7 @@ import { deriveView, type PillView, reading } from "../../helpers/dashboard/deri
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
 import { saveAccent } from "../../helpers/settings/accent";
+import { getSettings } from "../../helpers/settings/settingsApi";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { ActionMenu, type MenuItem } from "./ActionMenu";
@@ -21,6 +22,8 @@ import { ProbeNotifyModal } from "./ProbeNotifyModal";
 import { SystemStatus } from "./SystemStatus";
 
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
+/** controllers.json's nominal T_amb for settings written before that option existed. */
+const DEFAULT_MPC_AMBIENT_C = 20;
 // The picker paints all three at once, so it cannot use --accent (which tracks
 // the CURRENT selection); theme.css keeps the three Theme.accentColor branches
 // as constants for exactly this.
@@ -83,6 +86,33 @@ export function Dashboard({
   const queryClient = useQueryClient();
   const now = useClock();
   const health = useControlHealth(controlAlive, apiBase);
+  const [mpcConfig, setMpcConfig] = useState<{
+    selectedController: string | null;
+    ambientC: number;
+  }>({ selectedController: null, ambientC: DEFAULT_MPC_AMBIENT_C });
+  useEffect(() => {
+    let cancelled = false;
+    setMpcConfig({ selectedController: null, ambientC: DEFAULT_MPC_AMBIENT_C });
+    void getSettings(apiBase)
+      .then((settings) => {
+        if (cancelled) return;
+        const configuredAmbient = settings.controller?.config?.mpc?.T_amb;
+        setMpcConfig({
+          selectedController: settings.controller?.selected ?? null,
+          ambientC:
+            typeof configuredAmbient === "number" && Number.isFinite(configuredAmbient)
+              ? configuredAmbient
+              : DEFAULT_MPC_AMBIENT_C,
+        });
+      })
+      .catch(() => {
+        // Unknown selection fails closed: evidence controls never appear for a
+        // controller we cannot prove is MPC.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase]);
   // Desktop only. Below 1280px this is inert and the breakpoints in
   // dashboard.css do the work; at 1280px and up the board is fixed and scaled,
   // which is what keeps a literal 1280x720 window from clipping the control
@@ -327,6 +357,8 @@ export function Dashboard({
               command={command}
               disabled={!health.alive}
               apiBase={apiBase}
+              selectedController={mpcConfig.selectedController}
+              mpcAmbientC={mpcConfig.ambientC}
             />
           </div>
 

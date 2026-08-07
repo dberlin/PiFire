@@ -17,6 +17,7 @@ def _settings():
         "controller": {"selected": "mpc", "config": {"mpc": {"enable_grey_box": True}}},
     }
 
+
 def _command(revision=3, **overrides):
     value = {
         "action": "start",
@@ -65,29 +66,50 @@ def test_invalid_or_non_monotonic_start_leaves_control_unchanged(monkeypatch, co
     assert writes == []
 
 
-def test_two_requests_are_queued_without_stale_revision_arbitration(monkeypatch):
-    writes = []
-    control = _control()
-    settings = _settings()
-    monkeypatch.setattr(api_commands, "read_control", lambda: deepcopy(control))
-    monkeypatch.setattr(api_commands, "read_settings", lambda: deepcopy(settings))
-    monkeypatch.setattr(api_commands, "write_control", lambda *args, **kwargs: writes.append((args, kwargs)))
+def test_pending_revision_conflict_is_rejected_before_queueing(monkeypatch):
+    pending = api_commands.control_delta(ops=[{"op": "mpc_calibration.set", "command": _command(revision=4)}])
+    monkeypatch.setattr(api_commands, "read_pending_control_writes", lambda: (pending,))
+    result, writes = _invoke(
+        monkeypatch,
+        _control(),
+        _settings(),
+        _command(revision=4, action="stop"),
+    )
+    assert result["result"] == "ERROR"
+    assert "revision must exceed 4" in result["message"]
+    assert writes == []
 
-    four = _command(revision=4)
-    three = _command(revision=3)
-    assert api_commands.process_command("set", ["mpc_calibration", four])["result"] == "OK"
-    assert api_commands.process_command("set", ["mpc_calibration", three])["result"] == "OK"
 
-    assert [write[0][0]["ops"][0]["command"]["revision"] for write in writes] == [4, 3]
+def test_exact_pending_command_retry_is_idempotent(monkeypatch):
+    command = _command(revision=4)
+    pending = api_commands.control_delta(ops=[{"op": "mpc_calibration.set", "command": command}])
+    monkeypatch.setattr(api_commands, "read_pending_control_writes", lambda: (pending,))
+
+    result, writes = _invoke(monkeypatch, _control(), _settings(), command)
+
+    assert result["result"] == "OK"
+    assert result["data"]["mpc_calibration"] == command
+    assert writes == []
+
+
+def test_revision_above_pending_high_water_queues_safety_command(monkeypatch):
+    pending = api_commands.control_delta(ops=[{"op": "mpc_calibration.set", "command": _command(revision=4)}])
+    monkeypatch.setattr(api_commands, "read_pending_control_writes", lambda: (pending,))
+    result, writes = _invoke(
+        monkeypatch,
+        _control(),
+        _settings(),
+        _command(revision=5, action="stop"),
+    )
+    assert result["result"] == "OK"
+    assert writes[0][0][0]["ops"][0]["command"]["revision"] == 5
 
 
 @pytest.mark.parametrize(
     "units,maximum_temperature_c",
     [("F", 260.0), ("C", 260.0)],
 )
-def test_maximum_at_configured_safety_ceiling_is_rejected_before_queueing(
-    monkeypatch, units, maximum_temperature_c
-):
+def test_maximum_at_configured_safety_ceiling_is_rejected_before_queueing(monkeypatch, units, maximum_temperature_c):
     settings = _settings()
     settings["globals"]["units"] = units
     settings["safety"]["maxtemp"] = 500 if units == "F" else 260
@@ -118,7 +140,13 @@ def test_non_start_actions_remain_issuable_after_the_safety_ceiling_is_lowered(m
     [
         ({"mode": Mode.SMOKE}, _settings()),
         (_control(), {"globals": {"units": "F"}, "controller": {"selected": "pid", "config": {}}}),
-        (_control(), {"globals": {"units": "F"}, "controller": {"selected": "mpc", "config": {"mpc": {"enable_grey_box": False}}}}),
+        (
+            _control(),
+            {
+                "globals": {"units": "F"},
+                "controller": {"selected": "mpc", "config": {"mpc": {"enable_grey_box": False}}},
+            },
+        ),
     ],
 )
 def test_start_requires_mpc_hold_with_grey_box(monkeypatch, control, settings):

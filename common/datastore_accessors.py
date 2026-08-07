@@ -118,6 +118,11 @@ def write_control(control, kind, origin="unknown"):
         raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
 
 
+def read_pending_control_writes():
+    """Return an immutable snapshot of queued control deltas in FIFO order."""
+    return tuple(SqliteQueue("queue_control_write").list())
+
+
 def execute_control_writes():
     """
     Execute Control Writes in Queue from SQLite DB.
@@ -750,14 +755,15 @@ def commit_model_activation(
             )
 
 
-def read_model_activation(
-    *, database_path: str | os.PathLike[str] | None = None
-) -> ModelActivationState | None:
+def read_model_activation(*, database_path: str | os.PathLike[str] | None = None) -> ModelActivationState | None:
     """Return the exact active snapshot state, if an activation has committed."""
     with _model_evidence_connection(database_path) as connection:
-        if connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_activation_state'"
-        ).fetchone() is None:
+        if (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_activation_state'"
+            ).fetchone()
+            is None
+        ):
             return None
         row = connection.execute(
             """
@@ -1507,13 +1513,9 @@ def write_controller_model_checkpoint(name, snapshot):
         else:
             try:
                 state = json.loads(row[0])
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return False
-            if (
-                not isinstance(state, dict)
-                or state.get("version") != 1
-                or not isinstance(state.get("models"), dict)
-            ):
+            if not isinstance(state, dict) or state.get("version") != 1 or not isinstance(state.get("models"), dict):
                 return False
             models = state["models"]
         existing = models.get(name)

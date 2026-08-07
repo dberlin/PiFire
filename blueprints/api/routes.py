@@ -1,4 +1,4 @@
-from flask import request, jsonify, abort
+from flask import Response, abort, jsonify, request
 from common.common import WriteKind, write_log, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
@@ -11,8 +11,10 @@ from common.datastore_accessors import (
     read_status,
     read_probe_status,
     clear_warnings_through,
+    read_model_activation,
+    read_model_evidence,
 )
-from common.api_commands import process_command
+from common.api_commands import mpc_calibration_command_revision, process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
 from common.pellets_actions import PELLETS_DISPATCH
 from blueprints.api.probe_map_actions import (
@@ -30,6 +32,7 @@ from common.modes import Mode
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings_pairs
 from common.controller_deps import guard_controller_selection
+from controller.linear_mpc.report import build_evidence_artifact, current_evidence_report
 from . import api_bp
 
 
@@ -156,6 +159,38 @@ def _api_get_probe_modules(settings, server_status):
             },
         )
     ), 200
+
+
+def _model_evidence_projection():
+    records = tuple(read_model_evidence())
+    report = current_evidence_report(records, activation_state=read_model_activation())
+    return report, records
+
+
+@api_bp.get("/model-evidence/report")
+def api_model_evidence_report():
+    """Return the current read-only confidence projection, including empty state."""
+    try:
+        report, _records = _model_evidence_projection()
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": "model-evidence-report-invalid", "detail": str(exc)}), 422
+    payload = report.to_dict()
+    payload["calibration"]["revision"] = max(
+        payload["calibration"]["revision"],
+        mpc_calibration_command_revision(),
+    )
+    return jsonify(payload), 200
+
+
+@api_bp.get("/model-evidence/artifact")
+def api_model_evidence_artifact():
+    """Return canonical evidence bytes without granting model-state authority."""
+    try:
+        report, records = _model_evidence_projection()
+        artifact = build_evidence_artifact(report, records)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": "model-evidence-artifact-invalid", "detail": str(exc)}), 422
+    return Response(artifact, status=200, content_type="application/json; charset=utf-8")
 
 
 _API_GET_ACTIONS = {

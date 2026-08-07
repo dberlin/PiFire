@@ -1,0 +1,129 @@
+import type {
+  ModelEvidenceReport,
+  ModelEvidenceResult,
+  MpcCalibrationCommand,
+  MpcCalibrationRequest,
+} from "./types";
+
+const DEFAULT_BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
+
+const endpoint = (baseUrl: string, path: string) => `${baseUrl}/api/${path}`;
+
+async function responseMessage(response: Response): Promise<string> {
+  const body = (await response.json().catch(() => ({}))) as {
+    message?: string;
+    error?: string;
+    detail?: string;
+  };
+  return body.detail ?? body.message ?? body.error ?? `HTTP ${response.status}`;
+}
+
+/** Read-only confidence projection. An empty ledger is still a successful collecting report. */
+export async function fetchModelEvidenceReport(
+  baseUrl = DEFAULT_BASE_URL,
+): Promise<ModelEvidenceResult<ModelEvidenceReport>> {
+  try {
+    const response = await fetch(endpoint(baseUrl, "model-evidence/report"));
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        message: await responseMessage(response),
+        data: null,
+      };
+    }
+    return {
+      ok: true,
+      status: response.status,
+      message: "",
+      data: (await response.json()) as ModelEvidenceReport,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      message: error instanceof Error ? error.message : "network error",
+      data: null,
+    };
+  }
+}
+
+/** Canonical sorted-key UTF-8 JSON bytes. Kept as bytes so the client cannot reserialize them. */
+export async function fetchModelEvidenceArtifact(
+  baseUrl = DEFAULT_BASE_URL,
+): Promise<ModelEvidenceResult<Uint8Array>> {
+  try {
+    const response = await fetch(endpoint(baseUrl, "model-evidence/artifact"));
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        message: await responseMessage(response),
+        data: null,
+      };
+    }
+    return {
+      ok: true,
+      status: response.status,
+      message: "",
+      data: new Uint8Array(await response.arrayBuffer()),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      message: error instanceof Error ? error.message : "network error",
+      data: null,
+    };
+  }
+}
+
+/**
+ * Send one revisioned calibration intent. The operator edits in the currently
+ * displayed unit; this request boundary is the only place that value becomes Celsius.
+ */
+export async function setMpcCalibration(
+  request: MpcCalibrationRequest,
+  baseUrl = DEFAULT_BASE_URL,
+): Promise<ModelEvidenceResult<MpcCalibrationCommand>> {
+  const maximumTemperatureC =
+    request.temperature_unit === "F"
+      ? ((request.maximum_temperature - 32) * 5) / 9
+      : request.maximum_temperature;
+  const command: MpcCalibrationCommand = {
+    action: request.action,
+    revision: request.revision,
+    maximum_temperature_c: maximumTemperatureC,
+    ambient_c: request.ambient_c,
+    ambient_source: request.ambient_source,
+    empty_grill_confirmed: request.empty_grill_confirmed,
+    pellets_confirmed: request.pellets_confirmed,
+  };
+
+  try {
+    const response = await fetch(endpoint(baseUrl, "set_mpc_calibration"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(command),
+    });
+    const body = (await response.json().catch(() => ({}))) as {
+      result?: string;
+      message?: string;
+      data?: { mpc_calibration?: MpcCalibrationCommand };
+    };
+    const ok = response.ok && body.result?.toUpperCase() === "OK";
+    return {
+      ok,
+      status: response.status,
+      message: body.message ?? `HTTP ${response.status}`,
+      data: ok ? (body.data?.mpc_calibration ?? command) : null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      message: error instanceof Error ? error.message : "network error",
+      data: null,
+    };
+  }
+}
