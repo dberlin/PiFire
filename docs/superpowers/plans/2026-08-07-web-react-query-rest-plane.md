@@ -4,9 +4,59 @@
 
 **Goal:** Put the app's REST reads behind one TanStack Query cache so the settings blob is fetched once instead of five times, and so hand-rolled loading/error/cancellation/refetch machinery is deleted rather than maintained. The socket.io live plane is untouched.
 
-**Architecture:** The app has two data planes. The **push plane** (`src/helpers/useLiveState.ts`) owns one socket.io connection on `AppShell` and distributes dash + pellet data through Outlet context — react-query has nothing to offer a server-push stream and must not be introduced there. The **pull plane** is every `fetch` behind a `src/helpers/**/‌*Api.ts` module, currently re-implemented per component as `useState(data/loading/error)` + `useEffect` + a `cancelled` flag. This plan moves the pull plane onto a single `QueryClient`, keeps react-router's three loaders as the owners of route-blocking data (priming the same cache via `ensureQueryData`), and leaves the API modules' own error conventions alone by converting only at the query boundary.
+**Architecture:** The app has two data planes. The **push plane** (`src/helpers/useLiveState.ts`) owns one socket.io connection on `AppShell` and distributes dash + pellet data through Outlet context — react-query has nothing to offer a server-push stream and must not be introduced there. The **pull plane** is every `fetch` behind a `src/helpers/**/‌*Api.ts` module, currently re-implemented per component as `useState(data/loading/error)` + `useEffect` + a `cancelled` flag. This plan moves the pull plane onto a single `QueryClient`, keeps react-router's three loaders as the owners of route-blocking data (priming the same cache via `fetchQuery`, not `ensureQueryData` — see Testing notes below), and leaves the API modules' own error conventions alone by converting only at the query boundary.
 
 **Tech stack:** React 19.2, TypeScript 5.9 (strict), react-router 8.3, `@tanstack/react-query` 5.101.4, Rsbuild 2.1 with React Compiler, Rstest 0.11, Biome 2.5.5 + ESLint 10, Bun.
+
+## Testing notes
+
+Two timer traps bit this plan's tests during execution. Both are about fake
+timers interacting with react-query, and both produce a test that PASSES
+against a deliberately broken implementation — a false negative, not a false
+positive — which is the worse failure mode for a test to have.
+
+**Trap 1 — the synchronous `advanceTimersByTime` never lets react-query
+re-arm.** `await act(() => rs.advanceTimersByTime(ms))` advances the fake
+clock and flushes React's synchronous work, but it does not await anything,
+so it never yields the microtask queue react-query needs to settle an
+in-flight fetch and re-arm `refetchInterval` for the next tick. A query whose
+interval is genuinely broken (wired to a real cadence instead of `false`, or
+vice versa) can pass this assertion anyway, because the observer never got
+the chance to prove it either way. Use the async form instead:
+`await act(async () => { await rs.advanceTimersByTimeAsync(ms); });`.
+
+**Trap 2 — one `advanceTimersByTimeAsync` call is still not always enough.**
+react-query settles a refetch in two hops, confirmed at the source:
+`node_modules/@tanstack/query-core/build/modern/notifyManager.cjs:29` sets
+`defaultScheduler = systemSetTimeoutZero`, which
+`node_modules/@tanstack/query-core/build/modern/timeoutManager.cjs:89-91`
+defines as literally `setTimeout(callback, 0)` — a real, fake-timer-visible
+MACROTASK between "the query data settles" and "the observer re-renders".
+`advanceTimersByTimeAsync(ms)` stopping exactly on a poll boundary flushes the
+fetch's own microtasks but leaves that `setTimeout(0)` hop still pending, so
+anything downstream of the new data (a `useEffect` reading it, a `reload()`
+it calls) has not run yet. The clock needs one more nudge to drain it. The
+shipped pattern is the `tick()` / `settle()` helper pair in
+`tests/unit/helpers/useWebUiBuild.test.tsx`: `tick(ms)` advances the clock by
+the interval and `settle()` advances it by one more virtual millisecond
+purely to let the pending `setTimeout(0)` fire, kept as a separate call so a
+call site's intent ("advance the poll clock" vs. "let the pending render
+flush") stays readable instead of hiding in an off-by-one.
+
+**Trap 3 (not a timer trap, but adjacent) — `ensureQueryData` is not
+`fetchQuery`.** `ensureQueryData` returns whatever is cached once data
+exists, full stop — it never consults `isInvalidated` or `staleTime`. A
+loader that primes its cache with `ensureQueryData` after an `invalidateQueries`
+call will keep serving the pre-invalidation value. `fetchQuery` calls
+`query.isStaleByTime()`, which does check both, so an invalidated or expired
+entry is actually refetched. See Task 3's `settingsLoader` for the corrected
+call and the comment explaining why.
+
+**A related, separate defect:** `@testing-library/react`'s `waitFor` does not
+work under `rs.useFakeTimers()` — it polls on a real timer that fake timers
+freeze, so it times out at 5000ms rather than observing an update. Any test
+combining fake timers with a poll assertion needs the explicit
+`tick()`/`settle()` pattern above, not `waitFor`.
 
 ## Global constraints
 
@@ -527,24 +577,33 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 // React Router route loader -- runs on navigation into /settings. Throws on
 // failure so the route's errorElement renders.
 //
-// ensureQueryData rather than a bare fetch: this is the same settings entry
+// fetchQuery rather than a bare fetch: this is the same settings entry
 // AppPrefsProvider, the dashboard's first_time_setup gate and the tuner read,
 // so priming it here means those pages cost no request of their own, and a
-// save that invalidates the key is seen by all of them at once. The throwing
-// behaviour is preserved -- ensureQueryData rethrows whatever the fetcher
-// threw, which is what keeps SettingsError reachable.
+// save that invalidates the key is seen by all of them at once.
+//
+// fetchQuery, NOT ensureQueryData: ensureQueryData returns whatever is
+// cached, full stop -- it never consults isInvalidated or staleTime once
+// data exists, so it would keep serving the pre-save blob forever after the
+// first successful load, and would never call the fetcher again to surface
+// a later failure either. fetchQuery calls query.isStaleByTime(), which
+// DOES check isInvalidated (and the 30s staleTime): a fresh, un-invalidated
+// entry is still served from cache with no request, but an invalidated or
+// expired one is refetched, and a refetch failure rethrows exactly like a
+// cold-cache failure does -- which is what keeps SettingsError reachable on
+// every navigation, not only the first.
 export async function settingsLoader(): Promise<{
   settings: Settings;
   mode: string;
   controllerMeta: ControllerMetadata | null;
 }> {
   const [settings, mode, controllerMeta] = await Promise.all([
-    queryClient.ensureQueryData({
+    queryClient.fetchQuery({
       queryKey: queryKeys.settings,
       queryFn: () => getSettings(BASE_URL),
     }),
-    queryClient.ensureQueryData({ queryKey: queryKeys.mode, queryFn: () => getMode(BASE_URL) }),
-    queryClient.ensureQueryData({
+    queryClient.fetchQuery({ queryKey: queryKeys.mode, queryFn: () => getMode(BASE_URL) }),
+    queryClient.fetchQuery({
       queryKey: queryKeys.controllerMetadata,
       queryFn: () => getControllerMetadata(BASE_URL),
     }),
@@ -560,9 +619,10 @@ Add to `web-react/tests/unit/helpers/settings/useSaveSettings.test.tsx`:
 ```tsx
 it("marks the shared settings entry stale before revalidating", async () => {
   // Seed the cache as the loader would, then save. If the save did not
-  // invalidate, the next ensureQueryData would hand back this stale entry
-  // (staleTime is 30s) and the tab would revalidate straight back onto the
-  // pre-save values -- the bug this assertion exists to prevent.
+  // invalidate, the next fetchQuery would see a fresh, un-invalidated entry
+  // (staleTime is 30s) and serve it straight from cache -- the tab would
+  // revalidate right back onto the pre-save values, the bug this assertion
+  // exists to prevent.
   queryClient.setQueryData(queryKeys.settings, { globals: { grill_name: "before" } });
   mockApplySettings.mockResolvedValue({ ok: true, message: "", errors: [] });
 
@@ -594,10 +654,11 @@ import { queryClient } from "../query/queryClient";
 
 ```ts
       if (r.ok) {
-        // Mark the shared entry stale BEFORE re-running the loader. The loader
-        // primes itself through ensureQueryData, which hands back a still-fresh
-        // cache entry unchanged -- so without this, revalidate() would put the
-        // PRE-save values back on screen.
+        // Mark the shared entry invalidated BEFORE re-running the loader. The
+        // loader primes itself through fetchQuery, which serves a cache entry
+        // unchanged as long as it is neither stale-by-time NOR invalidated --
+        // so without this, revalidate() would put the PRE-save values back on
+        // screen (staleTime is 30s, easily long enough to still be "fresh").
         //
         // settingsRoot is the prefix of all three loader keys (settings, mode,
         // controller metadata), which preserves exactly what revalidate() did
@@ -1073,15 +1134,36 @@ it("refetches when the window changes and keeps the previous chart visible", asy
   await waitFor(() => expect(fetchHistoryChartMock).toHaveBeenLastCalledWith("", 120));
 });
 
+// `waitFor` does not work under `rs.useFakeTimers()` -- it polls on a real
+// timer that fake timers freeze, so it times out at 5000ms instead of
+// observing the update. Settle explicitly instead. See "Testing notes" above
+// for why the settle/tick helpers advance the clock TWICE: react-query's
+// notifyManager flushes an observer's result through a real `setTimeout(0)`,
+// which fake timers make a visible macrotask distinct from the query settling.
+async function settle() {
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+  });
+}
+
+async function tick(ms: number) {
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(ms);
+    await Promise.resolve();
+  });
+}
+
 it("polls on the auto-refresh cadence when the setting is on", async () => {
   rs.useFakeTimers();
   getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
   fetchHistoryChartMock.mockResolvedValue(CHART_FIXTURE);
   renderWithQuery(<HistoryPage />);
-  await waitFor(() => expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1));
+  await settle();
+  expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
 
-  await act(() => rs.advanceTimersByTime(REFRESH_MS));
-  await waitFor(() => expect(fetchHistoryChartMock).toHaveBeenCalledTimes(2));
+  await tick(REFRESH_MS);
+  expect(fetchHistoryChartMock).toHaveBeenCalledTimes(2);
   rs.useRealTimers();
 });
 
@@ -1090,9 +1172,10 @@ it("does not poll when the setting is off", async () => {
   getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "off" } });
   fetchHistoryChartMock.mockResolvedValue(CHART_FIXTURE);
   renderWithQuery(<HistoryPage />);
-  await waitFor(() => expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1));
+  await settle();
+  expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
 
-  await act(() => rs.advanceTimersByTime(REFRESH_MS * 3));
+  await tick(REFRESH_MS * 3);
   expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
   rs.useRealTimers();
 });
@@ -1461,9 +1544,23 @@ it("never re-reads on a timer: the read probes hardware and writes to control", 
   rs.useFakeTimers();
   fetchAdminStateMock.mockResolvedValue(ok(STATE));
   renderPage();
-  await waitFor(() => expect(fetchAdminStateMock).toHaveBeenCalledTimes(1));
+  // `waitFor` does not work under `rs.useFakeTimers()` (it polls on a real
+  // timer that fake timers freeze, and times out at 5000ms), and the
+  // SYNCHRONOUS `advanceTimersByTime` never yields the microtask react-query
+  // needs to settle a fetch and re-arm `refetchInterval` -- against a
+  // deliberately broken build with a real interval instead of `false`, that
+  // combination produces a false pass, not a failure. Use the async form and
+  // let it settle explicitly. See "Testing notes" above and the `tick()` /
+  // `settle()` pair in tests/unit/components/history/HistoryPage.test.tsx and
+  // tests/unit/helpers/useWebUiBuild.test.tsx.
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(0);
+  });
+  expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
 
-  await act(() => rs.advanceTimersByTime(300_000));
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(300_000);
+  });
   expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
   rs.useRealTimers();
 });
@@ -1532,6 +1629,29 @@ jj new -m "refactor(web-react): poll the served build id through the query cache
 This file stubs global `fetch` (`fetchMock`) rather than the module, and drives the hook through a local `Probe` component. Keep both; wrap `Probe`'s render in `renderWithQuery` so the hook has a client. The existing assertions (first-read capture, changed-id reload, null-is-not-a-change) must keep passing unchanged — they are the behavioral contract. Add:
 
 ```tsx
+// react-query settles a refetch in two hops: the fetch promise resolves (a
+// microtask), then notifyManager re-renders observers via a REAL setTimeout(0)
+// (see node_modules/@tanstack/query-core's notifyManager.js), so React can
+// batch the update. advanceTimersByTimeAsync stopping exactly on the poll
+// boundary flushes the first hop but leaves that second one still pending --
+// nothing downstream of `data` (this hook's useEffect, and so `reload`) has
+// run yet. `waitFor` can't be used to paper over this either: it polls on a
+// timer that fake timers freeze (see "Testing notes" above and
+// HistoryPage.test.tsx's auto-refresh describe block).
+async function tick(ms: number) {
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(ms);
+  });
+}
+
+// Ticking one more virtual millisecond past a settle is what lets
+// notifyManager's setTimeout(0) hop fire.
+async function settle() {
+  await act(async () => {
+    await rs.advanceTimersByTimeAsync(1);
+  });
+}
+
 it("re-reads on the poll cadence without a hand-rolled interval", async () => {
   rs.useFakeTimers();
   const reload = rs.fn();
@@ -1539,15 +1659,23 @@ it("re-reads on the poll cadence without a hand-rolled interval", async () => {
     .mockResolvedValueOnce({ ok: true, json: async () => ({ build: "abc" }) })
     .mockResolvedValue({ ok: true, json: async () => ({ build: "def" }) });
   renderWithQuery(<Probe reload={reload} />);
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  await tick(0);
+  await settle();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 
-  await act(() => rs.advanceTimersByTime(60_000));
-  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+  await tick(60_000);
+  await settle();
+  expect(reload).toHaveBeenCalledTimes(1);
   rs.useRealTimers();
 });
 ```
 
-- [ ] **Step 3: Run them and watch them fail**
+Note: this assertion is black-box-equivalent to the old hand-rolled
+`setInterval` at 60s -- it passes against BOTH the pre-conversion and the
+post-conversion code, so do not expect it to go red in the next step. Its
+job is regression coverage for the query-cache path, not a TDD failing test.
+
+- [ ] **Step 3: Run them and watch them pass**
 
 ```bash
 cd web-react && bun run test tests/unit/helpers/useWebUiBuild.test.tsx
