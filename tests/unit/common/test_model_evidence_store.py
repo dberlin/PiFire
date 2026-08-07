@@ -20,6 +20,7 @@ from common.model_evidence import (
     ActivationEvidence,
     AllocationEvidence,
     CalibrationSummaryEvidence,
+    ConfidenceDecisionEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
@@ -61,6 +62,25 @@ def _forecast(evidence_id: str, timestamp_ms: int, *, sequence: int = 1) -> Mode
     )
 
 
+def _confidence(
+    evidence_id: str = "confidence-a",
+    *,
+    decision_id: str = "decision-a",
+    timestamp_ms: int = 400,
+) -> ModelEvidenceRecord:
+    return ModelEvidenceRecord(
+        evidence_id=evidence_id,
+        kind=EvidenceKind.CONFIDENCE_DECISION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=timestamp_ms,
+        role_generation=2,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        payload=ConfidenceDecisionEvidence(decision_id=decision_id, blocked=False),
+    )
+
+
 def _activation(evidence_id: str = "activation-a") -> ModelEvidenceRecord:
     return ModelEvidenceRecord(
         evidence_id=evidence_id,
@@ -95,20 +115,33 @@ def test_forecast_envelope_must_match_precommitted_payload_digests() -> None:
             payload=record.payload,
         )
 
+
 def test_calibration_summary_requires_matching_completed_frame_allocations() -> None:
-    baseline = AllocationEvidence(0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
-    combined = AllocationEvidence(0.4, 0.36, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
+    baseline = AllocationEvidence(
+        0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2
+    )
+    combined = AllocationEvidence(
+        0.4, 0.36, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2
+    )
 
     payload = CalibrationSummaryEvidence(
-        accepted=True, probe_count=1, result_revision=3, command_revision=2, command_action="start",
-        baseline_q=0.3, probe_q=0.1, combined_q=0.4, baseline_allocation=baseline,
-        combined_allocation=combined, scheduled_on_seconds=8.0, delivered_on_seconds=7.0,
+        accepted=True,
+        probe_count=1,
+        result_revision=3,
+        command_revision=2,
+        command_action="start",
+        baseline_q=0.3,
+        probe_q=0.1,
+        combined_q=0.4,
+        baseline_allocation=baseline,
+        combined_allocation=combined,
+        scheduled_on_seconds=8.0,
+        delivered_on_seconds=7.0,
     )
 
     assert payload.combined_allocation == combined
     with pytest.raises(ValidationError):
         replace(payload, result_revision=0)
-
 
 
 @pytest.mark.parametrize(
@@ -121,16 +154,31 @@ def test_calibration_summary_requires_matching_completed_frame_allocations() -> 
     ),
 )
 def test_calibration_summary_rejects_status_that_contradicts_completed_frame(replacement) -> None:
-    baseline = AllocationEvidence(0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
-    combined = AllocationEvidence(0.4, 0.36, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2)
+    baseline = AllocationEvidence(
+        0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2
+    )
+    combined = AllocationEvidence(
+        0.4, 0.36, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2
+    )
     payload = CalibrationSummaryEvidence(
-        accepted=True, probe_count=1, result_revision=3, command_revision=2, command_action="start",
-        baseline_q=0.3, probe_q=0.1, combined_q=0.4, baseline_allocation=baseline,
-        combined_allocation=combined, scheduled_on_seconds=8.0, delivered_on_seconds=7.0, status="active",
+        accepted=True,
+        probe_count=1,
+        result_revision=3,
+        command_revision=2,
+        command_action="start",
+        baseline_q=0.3,
+        probe_q=0.1,
+        combined_q=0.4,
+        baseline_allocation=baseline,
+        combined_allocation=combined,
+        scheduled_on_seconds=8.0,
+        delivered_on_seconds=7.0,
+        status="active",
     )
 
     with pytest.raises(ValidationError):
         replace(payload, **replacement)
+
 
 def test_append_only_identity_and_insertion_order(ds):
     later = _forecast("forecast-later", 200, sequence=2)
@@ -239,6 +287,7 @@ def test_v1_timing_row_reads_with_unavailable_new_measurements(ds) -> None:
     assert record.payload.p99_ms is None
     assert record.payload.hardware_provenance is None
 
+
 def test_activation_commit_replaces_singleton_and_rolls_back_with_evidence(ds, tmp_path):
     db_path = tmp_path / "activation.db"
     from common import datastore
@@ -246,6 +295,7 @@ def test_activation_commit_replaces_singleton_and_rolls_back_with_evidence(ds, t
     datastore._reset_for_tests(str(db_path))
     try:
         decision = _activation()
+        append_model_evidence((_confidence(),))
         commit_model_activation(decision)
         active = read_model_activation()
         assert active is not None
@@ -254,6 +304,7 @@ def test_activation_commit_replaces_singleton_and_rolls_back_with_evidence(ds, t
         assert read_model_evidence(kind="activation") == [decision]
 
         reset_model_evidence()
+        append_model_evidence((_confidence(),))
         invalid_decision = decision.model_copy(update={"evidence_id": "activation-invalid"})
         conn = datastore.connection()
         conn.execute("DROP TABLE model_activation_state")
@@ -264,6 +315,20 @@ def test_activation_commit_replaces_singleton_and_rolls_back_with_evidence(ds, t
     finally:
         datastore._reset_for_tests(None)
 
+
+def test_activation_commit_rejects_a_newer_confidence_authority(ds):
+    append_model_evidence(
+        (
+            _confidence(),
+            _confidence("confidence-b", decision_id="decision-b", timestamp_ms=600),
+        )
+    )
+
+    with pytest.raises(ValueError, match="activation-authority-changed"):
+        commit_model_activation(_activation())
+
+    assert read_model_activation() is None
+    assert read_model_evidence(kind="activation") == []
 
 
 @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])

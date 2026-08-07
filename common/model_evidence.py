@@ -282,6 +282,7 @@ class RollbackEvidence:
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class FallbackEvidence:
+    decision_id: NonBlankString
     reason: NonBlankString
     failed_digest: Digest | None = None
     failed_generation: NonNegativeInt | None = None

@@ -237,6 +237,16 @@ class ActivationManager:
             persisted = False
         if not persisted:
             return replace(prepared, accepted=False, reason="activation-persistence-failed")
+        if self._configuration_digest() != prepared.controller_configuration_digest:
+            return replace(prepared, accepted=False, reason="controller-configuration-changed")
+        try:
+            committed = self._prepare_inputs(prepared.request)
+        except Exception as error:
+            return replace(prepared, accepted=False, reason=_rejection_reason(error))
+        if _canonical_json(committed.candidate_snapshot) != prepared.active_snapshot_json:
+            return replace(prepared, accepted=False, reason="candidate-digest-changed")
+        if _canonical_json(committed.rollback_snapshot) != prepared.rollback_snapshot_json:
+            return replace(prepared, accepted=False, reason="rollback-snapshot-changed")
 
         # The durable transaction is authoritative before either operation below.
         # Pending origins are invalidated before the new owner can emit a command.
@@ -500,7 +510,8 @@ class ActivationManager:
         return canonical_configuration_digest(self._configuration())
 
     def _record_fallback(self, reason: str) -> None:
-        if self._append_evidence is None:
+        decision_id = self._state.decision_id
+        if self._append_evidence is None or decision_id is None:
             return
         record = ModelEvidenceRecord(
             evidence_id=f"fallback:{self._state.failed_generation}:{self._clock_ms()}:{self._state.failed_digest}",
@@ -512,6 +523,7 @@ class ActivationManager:
             model_digest=self._state.failed_digest,
             provenance_digest=self._state.active_digest,
             payload=FallbackEvidence(
+                decision_id=decision_id,
                 reason=reason,
                 failed_digest=self._state.failed_digest,
                 failed_generation=self._state.failed_generation,
@@ -587,6 +599,7 @@ def matching_activation_lifecycle(
         )
         or (
             isinstance(record.payload, FallbackEvidence)
+            and record.payload.decision_id == decision_id
             and record.payload.failed_generation == generation
             and record.payload.failed_digest == digest
             and record.role_generation == generation + 1

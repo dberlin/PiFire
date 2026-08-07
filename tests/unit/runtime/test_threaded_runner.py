@@ -140,6 +140,7 @@ def test_threaded_runner_captures_fallback_evidence_from_an_ordinary_compute():
         model_digest="d" * 64,
         provenance_digest=None,
         payload=FallbackEvidence(
+            decision_id="decision-a",
             reason="non-finite-forecast",
             failed_digest="d" * 64,
             failed_generation=7,

@@ -188,6 +188,21 @@ def test_rollback_is_atomic_truthful_and_idempotent_for_the_exact_activation(cli
             controller_configuration_digest="d" * 64,
         ),
     )
+    append_model_evidence(
+        (
+            ModelEvidenceRecord(
+                evidence_id="confidence-b",
+                kind=EvidenceKind.CONFIDENCE_DECISION,
+                session_id="session-api",
+                cook_id=None,
+                timestamp_ms=999,
+                role_generation=7,
+                model_digest=activation.model_digest,
+                provenance_digest=activation.provenance_digest,
+                payload=ConfidenceDecisionEvidence(decision_id="decision-b", blocked=False),
+            ),
+        )
+    )
     commit_model_activation(activation)
 
     first = client.post("/api/model-evidence/rollback", json={"reason": "operator rollback b"})
@@ -272,3 +287,50 @@ def test_activate_route_reloads_live_authorities_at_commit(client, monkeypatch):
     assert response.status_code == 409
     assert response.get_json()["detail"] == "stale-confidence-decision"
     assert read_model_activation() is None
+
+
+def test_activate_route_commits_the_exact_live_authority(client, monkeypatch):
+    model = InnovationStateSpace(_config(orders=(1,), delays=(1,)))
+    assert model.fit(_frames(order=1)).accepted
+    snapshot = model.snapshot()
+    _manager, activation_request, records, _writes, _invalidations, _config_tree, rollback = _fixture(snapshot)
+    append_model_evidence(tuple(records))
+
+    class ReadyReport:
+        def to_dict(self):
+            return {
+                "status": "ready-for-review",
+                "candidate": {"digest": activation_request.candidate_digest},
+                "decision_id": activation_request.decision_id,
+            }
+
+    settings = {
+        "controller": {"selected": "mpc", "config": {"mpc": {"n_horizon": 24}}},
+        "cycle_data": {},
+        "globals": {"units": "F"},
+    }
+    monkeypatch.setattr(routes, "_model_evidence_projection", lambda: (ReadyReport(), tuple(records)))
+    monkeypatch.setattr(routes, "read_settings", lambda: settings)
+    monkeypatch.setattr(
+        routes,
+        "_activation_checkpoint",
+        lambda: {"online_adaptation": {"challenger": snapshot, "incumbent": rollback}},
+    )
+    monkeypatch.setattr(routes, "_configured_activation_prospective_solve", lambda _candidate, _configuration: 0.3)
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": activation_request.candidate_digest,
+            "decision_id": activation_request.decision_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["active_kind"] == "innovation-state-space"
+    active = read_model_activation()
+    assert active is not None
+    assert active.evidence_decision_id == activation_request.decision_id
+    assert active.active_snapshot_json == json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+    activations = [record for record in read_model_evidence() if isinstance(record.payload, ActivationEvidence)]
+    assert len(activations) == 1

@@ -58,6 +58,7 @@ from common.control_trace import TRACE_SCHEMA_VERSION, ControlTraceDbRow, Contro
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationEvidence,
+    ConfidenceDecisionEvidence,
     EvidenceKind,
     FallbackEvidence,
     ModelEvidenceDbRow,
@@ -814,6 +815,41 @@ def commit_model_activation(
     payload = validated.payload
     with _model_evidence_connection(database_path) as connection:
         with datastore.transaction(connection) as conn:
+            authority_row = conn.execute(
+                """
+                SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+                       model_digest, provenance_digest, schema_version, payload
+                FROM model_evidence
+                WHERE kind=?
+                ORDER BY timestamp_ms DESC, evidence_id DESC
+                LIMIT 1
+                """,
+                (EvidenceKind.CONFIDENCE_DECISION.value,),
+            ).fetchone()
+            if authority_row is None:
+                raise ValueError("activation-authority-changed")
+            authority = ModelEvidenceRecord.from_db_row(ModelEvidenceDbRow(*authority_row))
+            authority_payload = authority.payload
+            if (
+                not isinstance(authority_payload, ConfidenceDecisionEvidence)
+                or authority_payload.blocked
+                or authority_payload.reason is not None
+                or authority_payload.decision_id != payload.decision_id
+                or authority.model_digest != validated.model_digest
+                or authority.provenance_digest != validated.provenance_digest
+                or authority.schema_version != validated.schema_version
+            ):
+                raise ValueError("activation-authority-changed")
+            provenance_rows = conn.execute(
+                """
+                SELECT DISTINCT provenance_digest
+                FROM model_evidence
+                WHERE model_digest=? AND role_generation=? AND provenance_digest IS NOT NULL
+                """,
+                (validated.model_digest, authority.role_generation),
+            ).fetchall()
+            if {row[0] for row in provenance_rows} != {validated.provenance_digest}:
+                raise ValueError("activation-authority-changed")
             conn.execute(
                 """
                 INSERT INTO model_evidence(

@@ -9,6 +9,7 @@ from common.model_evidence import (
     ActivationEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
+    FallbackEvidence,
     ModelEvidenceRecord,
     RollbackEvidence,
     RefreshDiagnosticsEvidence,
@@ -380,6 +381,28 @@ def test_restore_ignores_newer_lifecycle_for_an_unrelated_activation(state_space
 
     assert restored.restore(persisted).accepted
     assert restored.active_kind == STATE_SPACE_KIND
+
+
+def test_fallback_lifecycle_requires_the_exact_activation_decision(state_space_snapshot):
+    manager, request, _records, writes, *_ = _fixture(state_space_snapshot)
+    assert manager.commit(manager.prepare(request)).accepted
+    activation = writes[-1]
+    wrong_decision = _record(
+        "fallback-other-decision",
+        FallbackEvidence(
+            decision_id="decision-other",
+            reason="same generation and digest",
+            failed_digest=activation.model_digest,
+            failed_generation=activation.role_generation,
+            fallback_kind="grey-box",
+        ),
+        digest=activation.model_digest,
+        provenance=activation.provenance_digest,
+        generation=activation.role_generation + 1,
+        timestamp=9_999,
+    )
+
+    assert matching_activation_lifecycle((activation, wrong_decision), activation) is None
 
 
 def test_configured_prospective_policy_rejection_blocks_prepare(state_space_snapshot):
