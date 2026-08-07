@@ -78,6 +78,7 @@ def test_the_applier_does_not_alias_the_envelope():
     assert envelope["set"]["manual"]["pwm"] == 50
 
 
+
 def test_apply_control_delta_drops_an_unknown_version_and_logs(caplog):
     """Direction B' of the upgrade analysis: a FUTURE writer, THIS drain."""
     control = _control()
