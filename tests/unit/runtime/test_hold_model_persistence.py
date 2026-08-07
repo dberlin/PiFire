@@ -6,7 +6,7 @@ from common.control_trace import ActuationMode
 from common.controller_model_state import ControllerModelStore
 
 from controller.applied_output import OutputSource
-from controller.runtime.model_checkpoint import ModelCheckpointWorker
+from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.runner import ControllerUpdateResult
 
 from tests.fakes.runner import FakeControllerRunner
@@ -336,10 +336,10 @@ def test_new_store_loads_owned_checkpoint_while_prior_writer_is_blocked():
 
     prior_store = ControllerModelStore(reader=read, writer=write)
     replacement_store = ControllerModelStore(reader=read, writer=write)
-    worker = ModelCheckpointWorker(prior_store, _CheckpointLogger())
+    worker = ModelPersistenceWorker(prior_store, _CheckpointLogger())
     load_thread = threading.Thread(target=lambda: (loaded.append(replacement_store.load("mpc")), load_finished.set()))
     try:
-        assert worker.submit("mpc", {"revision": 2})
+        assert worker.submit_checkpoint("mpc", {"revision": 2})
         assert write_started.wait(1.0)
         load_thread.start()
         assert load_finished.wait(0.2), "replacement Hold blocked behind checkpoint I/O"
@@ -358,7 +358,7 @@ def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
     """A blocked A1 write must not let B1 replace the pending latest A2 write."""
     store = _EventGatedCheckpointStore()
     logger = _CheckpointLogger()
-    worker = ModelCheckpointWorker(store, logger)
+    worker = ModelPersistenceWorker(store, logger)
     pending_submission_finished = threading.Event()
     pending_submission_errors = []
     pending_submission_results = []
@@ -367,8 +367,8 @@ def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
         try:
             pending_submission_results.extend(
                 [
-                    worker.submit("controller_a", {"revision": 2}),
-                    worker.submit("controller_b", {"revision": 1}),
+                    worker.submit_checkpoint("controller_a", {"revision": 2}),
+                    worker.submit_checkpoint("controller_b", {"revision": 1}),
                 ]
             )
         except BaseException as error:
@@ -378,7 +378,7 @@ def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
 
     pending_submission_thread = None
     try:
-        assert worker.submit("controller_a", {"revision": 1})
+        assert worker.submit_checkpoint("controller_a", {"revision": 1})
         assert store.first_write_started.wait(timeout=1.0), "writer never began the active A1 save"
 
         pending_submission_thread = threading.Thread(target=submit_pending_checkpoints)
@@ -412,7 +412,7 @@ def test_checkpoint_worker_coalesces_pending_revisions_per_controller():
     """A3 submitted behind a blocked A1 save must supersede unpicked A2."""
     store = _EventGatedCheckpointStore()
     logger = _CheckpointLogger()
-    worker = ModelCheckpointWorker(store, logger)
+    worker = ModelPersistenceWorker(store, logger)
     pending_submission_finished = threading.Event()
     pending_submission_errors = []
     pending_submission_results = []
@@ -421,8 +421,8 @@ def test_checkpoint_worker_coalesces_pending_revisions_per_controller():
         try:
             pending_submission_results.extend(
                 [
-                    worker.submit("controller_a", {"revision": 2}),
-                    worker.submit("controller_a", {"revision": 3}),
+                    worker.submit_checkpoint("controller_a", {"revision": 2}),
+                    worker.submit_checkpoint("controller_a", {"revision": 3}),
                 ]
             )
         except BaseException as error:
@@ -432,7 +432,7 @@ def test_checkpoint_worker_coalesces_pending_revisions_per_controller():
 
     pending_submission_thread = None
     try:
-        assert worker.submit("controller_a", {"revision": 1})
+        assert worker.submit_checkpoint("controller_a", {"revision": 1})
         assert store.first_write_started.wait(timeout=1.0), "writer never began the active A1 save"
 
         pending_submission_thread = threading.Thread(target=submit_pending_revisions)

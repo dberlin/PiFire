@@ -34,6 +34,7 @@ from common.control_trace import (
     TraceEventKind,
     TraceSetting,
 )
+from common.model_evidence import EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord
 from controller.applied_output import AppliedOutput, OutputSource, classify_output_source, seed_output
 from controller.linear_mpc.contracts import FrameObservation
 from controller.mpc_allocator import normalized_load_from_auger_duty
@@ -46,7 +47,7 @@ from controller.runtime.logic.pulse import (
 )
 
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
-from controller.runtime.model_checkpoint import ModelCheckpointWorker
+from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.model_promotion import ReachabilityState
 from controller.runtime.logic.fan import controller_fan_authority, start_fan
@@ -114,7 +115,8 @@ class HoldMode(ControlMode):
     _pulse_observation_last_frame_key: tuple[int, int] | None = None
     _pulse_observation_sequence: int = 0
     _last_ptemp: float | None = None
-    _checkpoint_worker: ModelCheckpointWorker | None = None
+    _persistence_worker: ModelPersistenceWorker | None = None
+    _learning_evidence_available: bool = True
     _final_refit_done: bool = False
     _PENDING_MODEL_OBSERVATION_CAPACITY = 60
 
@@ -364,6 +366,9 @@ class HoldMode(ControlMode):
             )
             self._bound_pending_model_observations()
             return
+        if not self._learning_evidence_available:
+            self._record_pending_observation_gap(observation, "model-persistence-unavailable")
+            return
         if self._runner is None:
             return
         submission = self._runner.observe_frame(observation)
@@ -512,6 +517,45 @@ class HoldMode(ControlMode):
             )
         except KeyError, OverflowError, TypeError, ValueError:
             return None
+
+    def _submit_completed_origin_evidence(self, evaluation: ModelEvaluationPayload, timestamp_ms: int) -> None:
+        """Queue immutable completed origins only after their runner outcome exists."""
+        worker = self._persistence_worker
+        if worker is None or self._trace_session_id is None:
+            return
+        for origin in evaluation.completed_origins:
+            result = worker.submit_evidence(
+                ModelEvidenceRecord(
+                    evidence_id=f"{evaluation.decision_id}:{origin.observation_sequence}:{origin.horizon_steps}",
+                    kind=EvidenceKind.FORECAST_ORIGIN,
+                    session_id=self._trace_session_id,
+                    cook_id=self._trace_cook_id,
+                    timestamp_ms=timestamp_ms,
+                    role_generation=evaluation.role_generation,
+                    model_digest=origin.challenger_digest,
+                    provenance_digest=origin.incumbent_digest,
+                    payload=ForecastOriginEvidence(
+                        origin_sequence=origin.observation_sequence,
+                        origin_time_ms=origin.origin_time_ms,
+                        completion_time_ms=origin.completion_time_ms,
+                        horizon_steps=origin.horizon_steps,
+                        incumbent_digest=origin.incumbent_digest,
+                        challenger_digest=origin.challenger_digest,
+                        incumbent_prediction_c=origin.incumbent_prediction_c,
+                        challenger_prediction_c=origin.challenger_prediction_c,
+                        observed_temperature_c=origin.observed_temperature_c,
+                        incumbent_error_c=origin.incumbent_error_c,
+                        challenger_error_c=origin.challenger_error_c,
+                        temperature_band="unclassified",
+                        phase="coasting" if origin.braking else "heating",
+                        ambient_source=AmbientSource.CONFIGURED,
+                        calibration_fit=False,
+                    ),
+                )
+            )
+            if not result.accepted:
+                self._learning_evidence_available = False
+                return
 
     @staticmethod
     def _model_lifecycle_payload(value: object) -> ModelEventPayload | None:
@@ -705,6 +749,8 @@ class HoldMode(ControlMode):
                 records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
             queued = (*pending[:3], tuple(records))
             self._pending_model_observations[sequence] = queued
+            if evaluation_payload is not None:
+                self._submit_completed_origin_evidence(evaluation_payload, publication_ms)
         for sequence, pending in tuple(self._pending_model_observations.items()):
             if pending[3] is None or not self._flush_pending_model_trace(sequence, pending, publication_ms):
                 break
@@ -995,9 +1041,9 @@ class HoldMode(ControlMode):
         self._flush_pending_model_events()
 
     def _checkpoint_model(self, snapshot: dict[str, object]) -> None:
-        worker = self._checkpoint_worker
+        worker = self._persistence_worker
         if worker is not None:
-            _ = worker.submit(self._controller_name, snapshot)
+            _ = worker.submit_checkpoint(self._controller_name, snapshot)
 
     def _ensure_trace_session(self, now: float) -> None:
         if self._trace_session_id is not None:
@@ -1361,6 +1407,7 @@ class HoldMode(ControlMode):
         self._trace_cook_id = None
         self._trace_closed = False
         self._trace_warning_active = False
+        self._learning_evidence_available = True
         self._trace_pending_model_events = []
         self._clear_trace_session_model_authority()
         self._trace_runner_snapshot_fallback_safe = True
@@ -1373,6 +1420,7 @@ class HoldMode(ControlMode):
         try:
             self._trace_recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
+            self._learning_evidence_available = False
             self._trace_warning(f"Control trace recorder unavailable: {error}")
 
         start_fan(self.grill, self.settings)
@@ -1388,7 +1436,12 @@ class HoldMode(ControlMode):
         self._model_store = self._model_store or ControllerModelStore(
             reader=self.ctx.store.read_generic_key, writer=self.ctx.store.write_generic_key
         )
-        self._checkpoint_worker = ModelCheckpointWorker(self._model_store, _control.eventLogger)
+        try:
+            self._persistence_worker = ModelPersistenceWorker(self._model_store, _control.eventLogger)
+        except Exception as error:
+            self._learning_evidence_available = False
+            self._persistence_worker = None
+            self._trace_warning(f"Model persistence unavailable: {error}")
         self._controller_name = self.settings["controller"]["selected"]
 
         # Load Controller Module (i.e. PID)
@@ -1904,10 +1957,10 @@ class HoldMode(ControlMode):
                     self._reconcile_model_observation_outcomes(self.ctx.clock.now())
                 self._refit_model_once()
         finally:
-            worker = self._checkpoint_worker
+            worker = self._persistence_worker
             if worker is not None:
                 worker.flush_and_stop()
-                self._checkpoint_worker = None
+                self._persistence_worker = None
             if first_trace_teardown:
                 self._flush_pending_model_events()
                 self._trace_closed = True

@@ -97,6 +97,38 @@ CREATE INDEX IF NOT EXISTS ix_control_trace_cook_id ON control_trace(cook_id, id
 CREATE INDEX IF NOT EXISTS ix_control_trace_ts_ms ON control_trace(ts_ms);
 """
 
+# Durable compact model evidence (schema v6) is deliberately separate from
+# raw control traces: raw retention can never erase replay/activation evidence.
+_MODEL_EVIDENCE_DDL = """
+CREATE TABLE IF NOT EXISTS model_evidence (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    evidence_id       TEXT NOT NULL UNIQUE,
+    session_id        TEXT NOT NULL,
+    cook_id           TEXT,
+    timestamp_ms      INTEGER NOT NULL,
+    kind              TEXT NOT NULL,
+    role_generation   INTEGER NOT NULL,
+    model_digest      TEXT,
+    provenance_digest TEXT,
+    schema_version    INTEGER NOT NULL,
+    payload           TEXT NOT NULL CHECK(json_valid(payload))
+);
+CREATE INDEX IF NOT EXISTS ix_model_evidence_session ON model_evidence(session_id, id);
+CREATE INDEX IF NOT EXISTS ix_model_evidence_cook ON model_evidence(cook_id, id);
+CREATE INDEX IF NOT EXISTS ix_model_evidence_kind ON model_evidence(kind, id);
+CREATE INDEX IF NOT EXISTS ix_model_evidence_generation ON model_evidence(role_generation, id);
+CREATE INDEX IF NOT EXISTS ix_model_evidence_digest ON model_evidence(model_digest, id);
+
+CREATE TABLE IF NOT EXISTS model_activation_state (
+    singleton                        INTEGER PRIMARY KEY CHECK(singleton = 1),
+    active_snapshot_json             TEXT NOT NULL CHECK(json_valid(active_snapshot_json)),
+    rollback_snapshot_json           TEXT NOT NULL CHECK(json_valid(rollback_snapshot_json)),
+    evidence_decision_id             TEXT NOT NULL,
+    controller_configuration_digest  TEXT NOT NULL,
+    role_generation                  INTEGER NOT NULL
+);
+"""
+
 #: The file sink is capped by RotatingFileHandler at 1 MiB x 3 backups, roughly
 #: 4 MiB per logger. Nothing capped the table, so it grew onto the SD card
 #: forever. ~20k rows is the same order of magnitude as those files.
@@ -166,6 +198,7 @@ CREATE TABLE IF NOT EXISTS kv (
     + _HISTORY_DDL
     + _METRICS_DDL
     + _CONTROL_TRACE_DDL
+    + _MODEL_EVIDENCE_DDL
     + """
 CREATE TABLE IF NOT EXISTS logs (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -271,6 +304,10 @@ def _ensure_schema(conn):
         # already created it with IF NOT EXISTS, so an existing database keeps
         # every current row and starts with an empty trace table.
         conn.execute("PRAGMA user_version=5")
+    if version < 6:
+        # Schema v6 adds an independent durable evidence ledger and singleton
+        # activation state. Both are additive and begin empty on upgrade.
+        conn.execute("PRAGMA user_version=6")
 
 
 def connection():

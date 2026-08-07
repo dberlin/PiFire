@@ -15,6 +15,7 @@ Description: Read/write accessors for the SQLite-backed datastore -- the
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 import json
 import logging
 import math
@@ -48,6 +49,13 @@ from common.pellets_schema import validate_pellet_db
 from common.settings_schema import validate_settings_tree
 from common.sqlite_queue import SqliteMembershipList, SqliteQueue
 from common.control_trace import TRACE_SCHEMA_VERSION, ControlTraceDbRow, ControlTraceRecord
+from common.model_evidence import (
+    MODEL_EVIDENCE_SCHEMA_VERSION,
+    ActivationEvidence,
+    EvidenceKind,
+    ModelEvidenceDbRow,
+    ModelEvidenceRecord,
+)
 
 
 def flush_control():
@@ -582,6 +590,196 @@ def delete_control_trace_session(session_id: str) -> int:
     with datastore.transaction() as conn:
         cursor = conn.execute("DELETE FROM control_trace WHERE session_id=?", (session_id,))
     return cursor.rowcount
+
+
+@dataclass(frozen=True, slots=True)
+class ModelActivationState:
+    """The one active/rollback pair selected by an activation decision."""
+
+    active_snapshot_json: str
+    rollback_snapshot_json: str
+    evidence_decision_id: str
+    controller_configuration_digest: str
+    role_generation: int
+
+
+@contextmanager
+def _model_evidence_connection(database_path: str | os.PathLike[str] | None) -> Iterator[sqlite3.Connection]:
+    """Yield the normal store or an explicitly selected ledger database."""
+    if database_path is None:
+        yield datastore.connection()
+        return
+    connection = sqlite3.connect(os.fspath(database_path), timeout=30)
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.isolation_level = None
+    try:
+        datastore._ensure_schema(connection)
+        yield connection
+    finally:
+        connection.close()
+
+
+def _validated_model_evidence_rows(records: Sequence[ModelEvidenceRecord]) -> list[ModelEvidenceDbRow]:
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
+        raise TypeError("records must be a sequence of ModelEvidenceRecord values")
+    rows = []
+    for record in records:
+        if not isinstance(record, ModelEvidenceRecord):
+            raise TypeError("records must contain only ModelEvidenceRecord values")
+        # model_construct() bypasses Pydantic; persist only a full validated copy.
+        validated = ModelEvidenceRecord.model_validate_json(record.model_dump_json())
+        rows.append(validated.to_db_row())
+    return rows
+
+
+def append_model_evidence(
+    records: Sequence[ModelEvidenceRecord], *, database_path: str | os.PathLike[str] | None = None
+) -> None:
+    """Append validated compact evidence in caller order; identities are immutable."""
+    rows = _validated_model_evidence_rows(records)
+    if not rows:
+        return
+    values = [
+        (
+            row.evidence_id,
+            row.session_id,
+            row.cook_id,
+            row.timestamp_ms,
+            row.kind,
+            row.role_generation,
+            row.model_digest,
+            row.provenance_digest,
+            row.schema_version,
+            row.payload,
+        )
+        for row in rows
+    ]
+    with _model_evidence_connection(database_path) as connection:
+        with datastore.transaction(connection) as conn:
+            conn.executemany(
+                """
+                INSERT INTO model_evidence(
+                    evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+                    model_digest, provenance_digest, schema_version, payload
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+
+
+def read_model_evidence(
+    *,
+    session_id: str | None = None,
+    cook_id: str | None = None,
+    kind: EvidenceKind | str | None = None,
+    database_path: str | os.PathLike[str] | None = None,
+) -> list[ModelEvidenceRecord]:
+    """Return current-schema compact evidence in deterministic append order."""
+    clauses = ["schema_version=?"]
+    params: list[object] = [MODEL_EVIDENCE_SCHEMA_VERSION]
+    if session_id is not None:
+        clauses.append("session_id=?")
+        params.append(_require_control_trace_identifier(session_id, "session_id"))
+    if cook_id is not None:
+        clauses.append("cook_id=?")
+        params.append(_require_control_trace_identifier(cook_id, "cook_id"))
+    if kind is not None:
+        try:
+            stored_kind = EvidenceKind(kind).value
+        except ValueError as exc:
+            raise ValueError(f"unknown evidence kind: {kind!r}") from exc
+        clauses.append("kind=?")
+        params.append(stored_kind)
+    with _model_evidence_connection(database_path) as connection:
+        rows = connection.execute(
+            "SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation, "
+            "model_digest, provenance_digest, schema_version, payload FROM model_evidence "
+            f"WHERE {' AND '.join(clauses)} ORDER BY id",
+            params,
+        ).fetchall()
+    return [ModelEvidenceRecord.from_db_row(ModelEvidenceDbRow(*row)) for row in rows]
+
+
+def commit_model_activation(
+    decision: ModelEvidenceRecord, *, database_path: str | os.PathLike[str] | None = None
+) -> None:
+    """Atomically append an activation decision and replace its singleton state."""
+    rows = _validated_model_evidence_rows([decision])
+    validated = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
+    if validated.kind is not EvidenceKind.ACTIVATION or not isinstance(validated.payload, ActivationEvidence):
+        raise ValueError("activation commit requires activation evidence")
+    row = rows[0]
+    payload = validated.payload
+    with _model_evidence_connection(database_path) as connection:
+        with datastore.transaction(connection) as conn:
+            conn.execute(
+                """
+                INSERT INTO model_evidence(
+                    evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+                    model_digest, provenance_digest, schema_version, payload
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row.evidence_id,
+                    row.session_id,
+                    row.cook_id,
+                    row.timestamp_ms,
+                    row.kind,
+                    row.role_generation,
+                    row.model_digest,
+                    row.provenance_digest,
+                    row.schema_version,
+                    row.payload,
+                ),
+            )
+            conn.execute("DELETE FROM model_activation_state WHERE singleton=1")
+            conn.execute(
+                """
+                INSERT INTO model_activation_state(
+                    singleton, active_snapshot_json, rollback_snapshot_json, evidence_decision_id,
+                    controller_configuration_digest, role_generation
+                ) VALUES (1, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload.active_snapshot_json,
+                    payload.rollback_snapshot_json,
+                    payload.decision_id,
+                    payload.controller_configuration_digest,
+                    validated.role_generation,
+                ),
+            )
+
+
+def read_model_activation(
+    *, database_path: str | os.PathLike[str] | None = None
+) -> ModelActivationState | None:
+    """Return the exact active snapshot state, if an activation has committed."""
+    with _model_evidence_connection(database_path) as connection:
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_activation_state'"
+        ).fetchone() is None:
+            return None
+        row = connection.execute(
+            """
+            SELECT active_snapshot_json, rollback_snapshot_json, evidence_decision_id,
+                   controller_configuration_digest, role_generation
+            FROM model_activation_state WHERE singleton=1
+            """
+        ).fetchone()
+    return None if row is None else ModelActivationState(*row)
+
+
+def reset_model_evidence(*, database_path: str | os.PathLike[str] | None = None) -> None:
+    """Explicitly delete every durable evidence row and activation state."""
+    with _model_evidence_connection(database_path) as connection:
+        with datastore.transaction(connection) as conn:
+            conn.execute("DELETE FROM model_activation_state")
+            conn.execute("DELETE FROM model_evidence")
+
+
+def invalidate_model_evidence_schema(*, database_path: str | os.PathLike[str] | None = None) -> None:
+    """Invalidate current evidence explicitly; raw trace retention never calls this."""
+    reset_model_evidence(database_path=database_path)
 
 
 def update_metrics(metrics):
