@@ -223,6 +223,11 @@ class HoldMode(ControlMode):
         controller.pulse_frame_calibration_command_action = controller.pulse_calibration_command_action
         controller.pulse_frame_calibration_command_generation = controller.pulse_calibration_command_generation
         controller.pulse_frame_calibration_cancellation_reason = controller.pulse_calibration_cancellation_reason
+        controller.pulse_frame_output_source = (
+            OutputSource.CONTROLLER
+            if controller.pulse_frame_combustion_load is not None
+            else controller.trace_prior_output_source or OutputSource.SEED
+        )
         controller.pulse_frame_baseline_allocation = controller.pulse_baseline_allocation
         controller.pulse_frame_calibration_status = controller.pulse_calibration_status
         controller.pulse_frame_cancellation_command_revision = controller.pulse_cancellation_command_revision
@@ -967,22 +972,45 @@ class HoldMode(ControlMode):
             result_revision=self.state.controller.pulse_frame_result_revision,
         )
         actual_auger_on = self.grill.get_output_status()["auger"]
+        controller = self.state.controller
+        completed_revision = controller.pulse_frame_result_revision
+        completed_request = controller.pulse_frame_requested_auger_duty
+        completed_maximum_duty = controller.pulse_frame_maximum_duty
+        completed_source = getattr(controller, "pulse_frame_output_source", OutputSource.CONTROLLER)
+        completed_calibration_revision = getattr(controller, "pulse_frame_calibration_command_revision", 0)
+        completed_calibration_action = getattr(controller, "pulse_frame_calibration_command_action", "none")
+        completed_calibration_generation = getattr(controller, "pulse_frame_calibration_command_generation", 0)
         decision = scheduler.advance(self.state.controller.pulse_requested_duty, now, actual_auger_on)
         self._record_pulse_delivery(decision.delivered_on_s)
         observation_temp = self._last_ptemp if ptemp is None else ptemp
         for completed in decision.completed_frames:
             self._trace_pulse_frame(completed, inhibit, self.state.controller.pulse_frame_result_revision)
             self._observe_completed_pulse_frame(completed, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
-        if report_feedback:
+        if report_feedback and decision.completed_frames:
+            completed = decision.completed_frames[0]
+            self._report_framed_feedback(
+                completed.ended_at_s,
+                decision.delivered_on_s - decision.frame_delivered_on_s,
+                ptemp=observation_temp,
+                completed_revision=completed_revision,
+                completed_request=completed_request,
+                completed_maximum_duty=completed_maximum_duty,
+                completed_source=completed_source,
+                completed_calibration_revision=completed_calibration_revision,
+                completed_calibration_action=completed_calibration_action,
+                completed_calibration_generation=completed_calibration_generation,
+                feedback_disposition=(
+                    FrameFeedbackDisposition.COMPLETE
+                    if len(decision.completed_frames) == 1 and not completed.skipped
+                    else FrameFeedbackDisposition.DISCARDED
+                ),
+            )
+        elif report_feedback and cancellation_reason is None:
             self._report_framed_feedback(
                 now,
                 decision.delivered_on_s,
                 ptemp=observation_temp,
-                feedback_disposition=(
-                    FrameFeedbackDisposition.COMPLETE
-                    if len(decision.completed_frames) == 1 and not decision.completed_frames[0].skipped
-                    else FrameFeedbackDisposition.DISCARDED
-                ),
+                feedback_disposition=FrameFeedbackDisposition.PROGRESS,
             )
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._latch_pulse_frame()
@@ -995,6 +1023,22 @@ class HoldMode(ControlMode):
         if frame is not None:
             self._observe_completed_pulse_frame(frame, ptemp=observation_temp, sample_at_s=now, inhibit=inhibit)
             self._trace_pulse_frame(frame, inhibit, self.state.controller.pulse_frame_result_revision)
+            if cancellation_reason is not None and frame.ended_at_s > frame.nominal_start_s:
+                self._set_output(
+                    AppliedOutput(
+                        ratio=frame.delivered_on_s / (frame.ended_at_s - frame.nominal_start_s),
+                        source=classify_output_source(
+                            lid_open=self.state.lid.open_detected,
+                            manual_override_active=self.state.manual_override["auger"] >= frame.ended_at_s,
+                        ),
+                        timestamp=frame.ended_at_s,
+                        requested=frame.latched_request,
+                    ),
+                    frame.ended_at_s,
+                    producing_revision=self.state.controller.pulse_frame_result_revision,
+                    sample_complete=False,
+                    feedback_disposition=FrameFeedbackDisposition.DISCARDED,
+                )
         self._pulse_frame_role_generation = 0
         controller = self.state.controller
         controller.pulse_metrics_delivered_on_s = decision.delivered_on_s
@@ -1011,10 +1055,11 @@ class HoldMode(ControlMode):
         completed_revision: int | None = None,
         completed_request: float | None = None,
         completed_maximum_duty: float | None = None,
-        feedback_disposition: FrameFeedbackDisposition = FrameFeedbackDisposition.PROGRESS,
+        completed_source: OutputSource | None = None,
         completed_calibration_revision: int | None = None,
         completed_calibration_action: str | None = None,
         completed_calibration_generation: int | None = None,
+        feedback_disposition: FrameFeedbackDisposition = FrameFeedbackDisposition.PROGRESS,
     ) -> None:
         controller = self.state.controller
         start = controller.pulse_feedback_start_s
@@ -1031,9 +1076,13 @@ class HoldMode(ControlMode):
         revision = controller.pulse_frame_result_revision if completed_revision is None else completed_revision
         applied = AppliedOutput(
             ratio=realized_duty,
-            source=classify_output_source(
-                lid_open=self.state.lid.open_detected,
-                manual_override_active=self.state.manual_override["auger"] >= now,
+            source=(
+                classify_output_source(
+                    lid_open=self.state.lid.open_detected,
+                    manual_override_active=self.state.manual_override["auger"] >= now,
+                )
+                if completed_source is None
+                else completed_source
             ),
             timestamp=now,
             requested=requested,

@@ -4,6 +4,7 @@ from common.model_evidence import EvidenceKind
 from controller.linear_mpc.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_allocator import allocate
 from controller.runtime.runner import ControllerUpdateResult
+from controller.applied_output import FrameFeedbackDisposition, OutputSource
 
 from tests.fakes.runner import FakeControllerRunner
 
@@ -132,6 +133,14 @@ def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial
     assert cancelled.calibration_status == "cancelled"
     assert cancelled.calibration_cancellation_reason == "lid_open"
     assert cancelled.cancellation_command_action == "safety-cancel"
+    terminal = [item for item in runner.applied if item.feedback_disposition is not FrameFeedbackDisposition.PROGRESS]
+    assert [(item.timestamp, item.feedback_disposition) for item in terminal] == [
+        (22.0, FrameFeedbackDisposition.COMPLETE),
+        (23.0, FrameFeedbackDisposition.DISCARDED),
+    ]
+    assert terminal[0].source is OutputSource.CONTROLLER
+    assert terminal[0].ratio == completed.realized_auger_duty
+    assert terminal[1].ratio == cancelled.realized_auger_duty
 
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
@@ -220,18 +229,22 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.state.lid.open_detected = True
-    hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
-    hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
     assert hold._persistence_worker.flush_and_stop(timeout=1.0)
 
-    raw = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_OBSERVATION)
-    compact = next(record for record in persisted if record.kind is EvidenceKind.CALIBRATION_SUMMARY).payload
-    assert compact.result_revision == raw.result_revision == 1
-    assert compact.command_revision == raw.calibration_command_revision == 1
-    assert compact.command_action == raw.calibration_command_action == "start"
-    assert compact.status == raw.calibration_status == "cancelled"
-    assert compact.cancellation_reason == raw.calibration_cancellation_reason == "lid_open"
-    assert compact.cancellation_command_revision == raw.cancellation_command_revision == 0
-    assert compact.cancellation_command_action == raw.cancellation_command_action == "safety-cancel"
-    assert compact.probe_count == 0
-    assert len(persisted) == 1
+    raw = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_OBSERVATION]
+    compact = [record.payload for record in persisted if record.kind is EvidenceKind.CALIBRATION_SUMMARY]
+    assert [(item.result_revision, item.calibration_status, item.calibration_cancellation_reason) for item in raw] == [
+        (1, "active", None),
+        (1, "cancelled", "lid_open"),
+    ]
+    assert [(item.result_revision, item.status, item.cancellation_reason) for item in compact] == [
+        (1, "active", None),
+        (1, "cancelled", "lid_open"),
+    ]
+    assert all(item.command_revision == 1 and item.command_action == "start" for item in compact)
+    assert compact[1].cancellation_command_revision == 0
+    assert compact[1].cancellation_command_action == "safety-cancel"
+    assert compact[1].probe_count == 0
+    assert len(persisted) == 2
