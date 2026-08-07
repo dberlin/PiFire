@@ -16,20 +16,29 @@ from common.control_trace import (
     ControllerType,
     InhibitReason,
     ModelObservationPayload,
+    ModelEvaluationPayload,
     RecorderGapPayload,
     PidSpUpdatePayload,
     ResultStaleState,
     SafetyEventType,
     TraceEventKind,
 )
+from common.model_evidence import ModelEvidenceRecord
 from common.datastore_accessors import read_control_trace_session
 from common import datastore
 from controller.applied_output import OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.linear_mpc.adaptation import CompletedOrigin, EvaluationDecision, EvaluationRejectionReason, HorizonScore
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.mpc_allocator import allocate
+from controller.mpc import Controller
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
-from controller.runtime.runner import ControllerUpdateResult, ObservationOutcomeEnvelope, SyncControllerRunner
+from controller.runtime.runner import (
+    ControllerUpdateResult,
+    ObservationOutcomeEnvelope,
+    SyncControllerRunner,
+    _freeze_evidence,
+)
 from controller.linear_mpc.contracts import FrameObservation
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
@@ -1110,7 +1119,7 @@ def _promotion_outcome(*, frame_end_ms):
         }
         for index in range(12)
     )
-    return {
+    outcome = {
         **_model_observation_outcome(frame_end_ms=frame_end_ms),
         "evaluation": {
             "decision_id": "generation-0-evaluation-1",
@@ -1159,6 +1168,47 @@ def _promotion_outcome(*, frame_end_ms):
             "parameters": (),
         },
     }
+    evaluation = outcome["evaluation"]
+    outcome["evaluation_payload"] = ModelEvaluationPayload(
+        decision_id=evaluation["decision_id"],
+        evaluated_at_ms=int(evaluation["evaluated_at_s"] * 1_000),
+        role_generation=evaluation["role_generation"],
+        promoted=evaluation["promoted"],
+        committed=evaluation["committed"],
+        consecutive_wins=evaluation["consecutive_wins"],
+        rejection_reasons=evaluation["rejection_reasons"],
+        incumbent_prediction_score=evaluation["incumbent_prediction_score"],
+        challenger_prediction_score=evaluation["challenger_prediction_score"],
+        incumbent_braking_score=evaluation["incumbent_braking_score"],
+        challenger_braking_score=evaluation["challenger_braking_score"],
+        sample_count=evaluation["sample_count"],
+        prospective_digest=evaluation["prospective_digest"],
+        window_start_ms=int(evaluation["window_start_s"] * 1_000),
+        window_end_ms=int(evaluation["window_end_s"] * 1_000),
+        incumbent_digest=evaluation["incumbent_digest"],
+        challenger_digest=evaluation["challenger_digest"],
+        completed_origins=tuple(
+            {
+                **{
+                    key: value
+                    for key, value in origin.items()
+                    if key not in {"origin_time_s", "completion_time_s"}
+                },
+                "origin_time_ms": int(origin["origin_time_s"] * 1_000),
+                "completion_time_ms": int(origin["completion_time_s"] * 1_000),
+            }
+            for origin in evaluation["completed_origins"]
+        ),
+        horizon_scores=(
+            *evaluation["horizon_scores"],
+            *(
+                {"horizon_steps": horizon, "incumbent_rmse_c": None, "challenger_rmse_c": None, "sample_count": 0}
+                for horizon in (45, 90, 180)
+            ),
+        ),
+        evaluation_duration_ms=evaluation["evaluation_duration_ms"],
+    )
+    return outcome
 
 
 def _state_space_evaluation():
@@ -1196,49 +1246,6 @@ def _state_space_evaluation():
     return evaluation
 
 
-def test_hold_evaluation_trace_preserves_typed_state_space_evidence():
-    payload = HoldMode._model_evaluation_payload(_state_space_evaluation())
-
-    assert payload is not None
-    assert payload.challenger_model_kind == "innovation-state-space"
-    assert payload.state_space_refresh is not None
-    assert payload.state_space_refresh.state_space_digest == "d" * 64
-    assert payload.state_space_refresh.attempts[0].alignment_error_c == 0.25
-
-def test_completed_origin_evidence_uses_the_originating_frame_classification():
-    class _EvidenceWorker:
-        def __init__(self):
-            self.batches = []
-
-        def submit_evidence_batch(self, records):
-            self.batches.append(tuple(records))
-            return EvidenceSubmission(accepted=True)
-
-    evaluation = deepcopy(_promotion_outcome(frame_end_ms=20_000)["evaluation"])
-    evaluation["completed_origins"][0].update(
-        temperature_band="below-target",
-        ambient_source=AmbientSource.MEASURED.value,
-    )
-    payload = HoldMode._model_evaluation_payload(evaluation)
-    assert payload is not None
-    mode = object.__new__(HoldMode)
-    worker = _EvidenceWorker()
-    mode._persistence_worker = worker
-    mode._trace_session_id = "session-a"
-    mode._trace_cook_id = "cook-a"
-
-    mode._submit_completed_origin_evidence(payload, timestamp_ms=20_000)
-
-    durable = worker.batches[0][0].payload
-    assert durable.temperature_band == "below-target"
-    assert durable.ambient_source is AmbientSource.MEASURED
-
-
-def test_hold_evaluation_trace_rejects_malformed_state_space_refresh_evidence():
-    evaluation = _state_space_evaluation()
-    evaluation["state_space_refresh"]["max_pole_magnitude"] = 1.0
-
-    assert HoldMode._model_evaluation_payload(evaluation) is None
 
 
 def _learning_observation(frame_start_s):
@@ -1280,6 +1287,73 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
         2: (second, mode._trace_session_id, 0, None),
     }
     return recorder, runner, mode, first, second
+
+
+def test_runner_owned_evidence_batches_exact_completed_origin_once_and_clears_session_context(hold_cycle, monkeypatch):
+    class _EvidenceWorker:
+        def __init__(self):
+            self.batches = []
+
+        def submit_evidence_batch(self, records):
+            self.batches.append(tuple(records))
+            return EvidenceSubmission(accepted=True)
+
+    recorder, runner, mode, first, second = _two_pending_learning_outcomes(hold_cycle, monkeypatch)
+    worker = _EvidenceWorker()
+    mode._persistence_worker = worker
+    contexts = []
+    runner.set_evidence_context = lambda session_id, cook_id: contexts.append((session_id, cook_id))
+    digest = "a" * 64
+    origin = CompletedOrigin(
+        0.0, 20.0, 3, 0, 212.0, 1.0, 0.5, False, 0, digest, digest, 211.0, 211.5, "below-target",
+        AmbientSource.MEASURED,
+    )
+    scores = tuple(
+        HorizonScore(horizon, 1.0 if horizon == 3 else None, 0.5 if horizon == 3 else None, 1 if horizon == 3 else 0)
+        for horizon in (3, 15, 45, 90, 180)
+    )
+    decision = EvaluationDecision(
+        "generation-0-evaluation-1", 20.0, 0, False, False, 0, (EvaluationRejectionReason.PREDICTION,),
+        1.0, 0.5, None, None, 1, None, 0.0, 20.0, digest, digest, (origin,), scores,
+    )
+    controller = object.__new__(Controller)
+    controller._online = SimpleNamespace(challenger=object())
+    raw, compact = controller._evaluation_payloads(decision)
+    outcome = dict(_promotion_outcome(frame_end_ms=20_000))
+    outcome.update(evaluation_payload=raw, forecast_origin_evidence=compact)
+    evidence = _freeze_evidence(outcome, mode._trace_session_id, mode._trace_cook_id)
+    assert len(evidence) == 1 and isinstance(evidence[0], ModelEvidenceRecord)
+    runner._observation_outcomes.append(ObservationOutcomeEnvelope(1, 0, first, outcome, evidence))
+
+    mode._reconcile_model_observation_outcomes(now=22.0)
+    mode._reconcile_model_observation_outcomes(now=23.0)
+
+    assert worker.batches == [evidence]
+    traced = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVALUATION)
+    raw_origin = traced.completed_origins[0]
+    compact_origin = evidence[0].payload
+    assert (raw_origin.origin_time_ms, raw_origin.completion_time_ms, raw_origin.horizon_steps) == (
+        compact_origin.origin_time_ms,
+        compact_origin.completion_time_ms,
+        compact_origin.horizon_steps,
+    )
+    assert (raw_origin.incumbent_digest, raw_origin.challenger_digest, raw_origin.temperature_band) == (
+        compact_origin.incumbent_digest,
+        compact_origin.challenger_digest,
+        compact_origin.temperature_band,
+    )
+    assert evidence[0].session_id == mode._trace_session_id
+    assert evidence[0].role_generation == raw.role_generation
+    mode._reconcile_model_observation_outcomes(now=24.0)
+    assert worker.batches == [evidence]
+
+    mode._trace_session_id = None
+    mode._trace_cook_id = None
+    mode._clear_runner_evidence_context()
+    assert contexts == [(None, None)]
+    runner._observation_outcomes.append(ObservationOutcomeEnvelope(2, 0, second, outcome, _freeze_evidence(outcome, None, None)))
+    mode._reconcile_model_observation_outcomes(now=25.0)
+    assert worker.batches == [evidence]
 
 
 def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_cycle, monkeypatch):
@@ -1434,6 +1508,9 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
     first_outcome = _promotion_outcome(frame_end_ms=20_000)
     second_outcome = _promotion_outcome(frame_end_ms=40_000)
     second_outcome["evaluation"] = {**second_outcome["evaluation"], "decision_id": "generation-0-evaluation-2"}
+    second_outcome["evaluation_payload"] = replace(
+        second_outcome["evaluation_payload"], decision_id="generation-0-evaluation-2"
+    )
     second_outcome["lifecycle"] = {**second_outcome["lifecycle"], "detail": "promotion-2"}
     runner._observation_outcomes.extend(
         [
