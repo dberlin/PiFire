@@ -1683,7 +1683,7 @@ def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_tea
             mode.teardown(212.0)
 
 
-def test_threaded_stop_timeout_records_one_gap_and_fences_late_observation_outcome(hold_cycle, monkeypatch):
+def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_outcomes(hold_cycle, monkeypatch):
     class _WorkerGate:
         def __init__(self):
             self.waiting = threading.Event()
@@ -1792,23 +1792,63 @@ def test_threaded_stop_timeout_records_one_gap_and_fences_late_observation_outco
         )
         gate.release.set()
         assert core.observation_started.wait(1.0)
+        old_session_id = mode._trace_session_id
+        import controller.runtime.runner as runner_module
+
+        next_core = _BlockingObservationCore()
+        monkeypatch.setattr(runner_module, "_build_core", lambda *_args, **_kwargs: (next_core, "Active"))
+        assert runner.reconfigure({}, {}) == "Active"
+        with runner._lock:
+            runner._configuration_revision = 1
+        mode._pulse_frame_role_generation = 1
+        mode._observe_completed_pulse_frame(
+            PulseFrameResult(
+                nominal_start_s=20.0,
+                nominal_end_s=40.0,
+                ended_at_s=40.0,
+                complete=True,
+                skipped=False,
+                latched_request=0.3,
+                credit_before_s=0.0,
+                credit_after_s=0.0,
+                scheduled_on_s=6.0,
+                delivered_on_s=6.0,
+                observed_transition_count=2,
+                actual_start_on=False,
+                actual_end_on=False,
+                reset_reason=None,
+            ),
+            ptemp=212.0,
+            inhibit=InhibitReason.NONE,
+        )
+        with runner._lock:
+            runner._configuration_revision = 0
+
 
         mode.teardown(212.0)
 
         gaps = [
-            record.payload
+            (record.session_id, record.payload)
             for record in recorder.records
             if record.event_kind is TraceEventKind.RECORDER_GAP
             and isinstance(record.payload, RecorderGapPayload)
             and record.payload.reason == "runner-stop-timeout"
         ]
-        assert len(gaps) == 1
-        assert gaps[0].observation_sequence == 1
+        assert [(gap.observation_sequence, gap.reason) for _session_id, gap in gaps] == [
+            (1, "runner-stop-timeout"),
+            (2, "runner-stop-timeout"),
+        ]
+        assert gaps[0][0] == old_session_id
+        assert gaps[1][0] is not None and gaps[1][0] != old_session_id
+        assert mode._pending_model_observations == {}
+        assert runner.drain_observation_outcomes().terminal_drops == ()
         assert worker.batches == []
         core.release_observation.set()
         assert runner._thread.join(1.0) is None
         assert not runner._thread.is_alive()
         assert runner.drain_observation_outcomes().envelopes == ()
+        assert runner.drain_observation_outcomes().terminal_drops == ()
+        assert mode._pending_model_observations == {}
         assert worker.batches == []
     finally:
         core.release_observation.set()
