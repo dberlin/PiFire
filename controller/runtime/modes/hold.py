@@ -12,6 +12,8 @@ from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
     AllocationPayload,
+    CalibrationEventType,
+    CalibrationTracePayload,
     AmbientSource,
     AmbientUncertainty,
     AppliedOutputPayload,
@@ -36,6 +38,7 @@ from common.control_trace import (
 )
 from controller.applied_output import AppliedOutput, OutputSource, classify_output_source, seed_output
 from controller.linear_mpc.contracts import FrameObservation
+from controller.mpc import CalibrationCommand
 from controller.mpc_allocator import normalized_load_from_auger_duty
 from controller.runtime.logic.pulse import (
     PulseDecision,
@@ -177,12 +180,17 @@ class HoldMode(ControlMode):
         controller.pulse_feedback_start_s = self.ctx.clock.now()
         controller.pulse_feedback_delivered_on_s = 0.0
         controller.pulse_metrics_delivered_on_s = 0.0
+        controller.calibration_command_revision = 0
+        controller.pulse_baseline_combustion_load = 0.0
+        controller.pulse_calibration_probe_load = 0.0
+        controller.pulse_calibration_stage = None
         self.grill.auger_off()
 
     def _latch_pulse_frame(self) -> None:
         controller = self.state.controller
         controller.pulse_frame_result_revision = max(0, controller.pulse_result_revision)
         controller.pulse_frame_combustion_load = controller.pulse_combustion_load
+        controller.pulse_frame_baseline_combustion_load = controller.pulse_baseline_combustion_load
         controller.pulse_frame_requested_auger_duty = controller.pulse_requested_duty
         controller.pulse_frame_maximum_duty = controller.pulse_maximum_duty
         controller.pulse_frame_requested_fan_duty = controller.pulse_requested_fan_duty
@@ -193,6 +201,8 @@ class HoldMode(ControlMode):
         controller.pulse_frame_allocation_clamp_reasons = controller.pulse_allocation_clamp_reasons
         controller.pulse_frame_allocation_evidence_checked = controller.pulse_allocation_evidence_checked
         controller.pulse_frame_allocation_result_revision = controller.pulse_allocation_result_revision
+        controller.pulse_frame_calibration_probe_load = controller.pulse_calibration_probe_load
+        controller.pulse_frame_calibration_stage = controller.pulse_calibration_stage
         self._pulse_frame_role_generation = self._model_role_generation(self._runner_status())
 
     def _runner_status(self) -> Mapping[str, object]:
@@ -263,7 +273,19 @@ class HoldMode(ControlMode):
         )
         role_generation = self._pulse_frame_role_generation
         self._pulse_observation_sequence += 1
-        baseline_q = max(0.0, min(1.0, controller.pulse_frame_combustion_load or 0.0))
+        baseline_q = max(
+            0.0,
+            min(
+                1.0,
+                getattr(
+                    controller,
+                    "pulse_frame_baseline_combustion_load",
+                    controller.pulse_frame_combustion_load or 0.0,
+                ),
+            ),
+        )
+        probe_q = getattr(controller, "pulse_frame_calibration_probe_load", 0.0)
+        requested_q = max(0.0, min(1.0, baseline_q + probe_q))
         realized_auger_duty = frame.delivered_on_s / duration_s
         observation = FrameObservation(
             frame_start_s=frame.nominal_start_s,
@@ -273,7 +295,7 @@ class HoldMode(ControlMode):
             ambient_c=float(
                 self.settings["controller"].get("config", {}).get(self._controller_name, {}).get("T_amb", 0.0)
             ),
-            requested_q=baseline_q,
+            requested_q=requested_q,
             realized_q=normalized_load_from_auger_duty(
                 realized_auger_duty, u_max=controller.pulse_frame_maximum_duty
             ),
@@ -297,14 +319,14 @@ class HoldMode(ControlMode):
             ambient_source=AmbientSource.CONFIGURED,
             ambient_uncertainty=AmbientUncertainty.UNMEASURED,
             baseline_q=baseline_q,
-            probe_q=0.0,
-            allocated_q=baseline_q,
+            probe_q=probe_q,
+            allocated_q=requested_q,
             scheduled_on_s=frame.scheduled_on_s,
             realized_auger_duty=realized_auger_duty,
             allocator_revision=controller.pulse_frame_allocator_revision,
             allocation_clamp_reasons=controller.pulse_frame_allocation_clamp_reasons,
-            calibration_stage=None,
-            calibration_fit=False,
+            calibration_stage=getattr(controller, "pulse_frame_calibration_stage", None),
+            calibration_fit=getattr(controller, "pulse_frame_calibration_stage", None) is not None,
             allocation_join_reason=(
                 None
                 if not controller.pulse_frame_allocation_evidence_checked
@@ -1496,6 +1518,124 @@ class HoldMode(ControlMode):
         )
         self._runner_configuration_revision = installed_generation
 
+    def _consume_calibration_command(self, now: float) -> None:
+        """Forward each control-plane revision once before its next controller solve."""
+        raw = self.control.get("mpc_calibration")
+        if not isinstance(raw, dict):
+            return
+        revision = raw.get("revision")
+        controller = self.state.controller
+        if not isinstance(revision, int) or revision <= controller.calibration_command_revision:
+            return
+        try:
+            command = CalibrationCommand(
+                action=raw["action"],
+                command_revision=revision,
+                maximum_temperature_c=raw["maximum_temperature_c"],
+                ambient_c=raw["ambient_c"],
+                ambient_source=raw["ambient_source"],
+                empty_grill_confirmed=raw["empty_grill_confirmed"],
+                pellets_confirmed=raw["pellets_confirmed"],
+            )
+            self._runner.request_calibration(command)
+        except (KeyError, NotImplementedError, TypeError, ValueError) as error:
+            self._trace_safety(
+                SafetyEventType.SCHEDULER_RESET,
+                now,
+                f"invalid calibration command: {error}",
+                InhibitReason.SAFETY,
+            )
+            return
+        controller.calibration_command_revision = revision
+
+    def _calibration_cancellation_reason(self, result, now: float) -> str | None:
+        calibration = result.calibration
+        if calibration is None or not calibration.active or calibration.probe_q == 0.0:
+            return None
+        if self.state.lid.open_detected:
+            return "lid_open"
+        if self.state.manual_override["auger"] >= now:
+            return "manual_override"
+        if result.stale_state is ResultStaleState.STALE:
+            return "stale_result"
+        if self.control.get("controller_update"):
+            return "reset"
+        if self.control.get("mode") != Mode.HOLD:
+            return "safety"
+        return None
+
+    def _cancel_calibration_probe(self, result, reason: str, now: float, ptemp: float) -> object:
+        """Discard current probe credit before latching the supplied baseline."""
+        self._trace_safety(
+            SafetyEventType.SCHEDULER_RESET,
+            now,
+            f"calibration probe cancelled: {reason}",
+            InhibitReason.SAFETY,
+            result_revision=result.revision,
+        )
+        self._reset_framed_pulse(
+            PulseResetReason.SAFETY,
+            now,
+            InhibitReason.SAFETY,
+            ptemp=ptemp,
+            report_feedback=True,
+        )
+        raw = self.control.get("mpc_calibration")
+        if isinstance(raw, dict):
+            try:
+                revision = max(self.state.controller.calibration_command_revision, raw["revision"]) + 1
+                self._runner.request_calibration(
+                    CalibrationCommand(
+                        action="stop",
+                        command_revision=revision,
+                        maximum_temperature_c=raw["maximum_temperature_c"],
+                        ambient_c=raw["ambient_c"],
+                        ambient_source=raw["ambient_source"],
+                        empty_grill_confirmed=True,
+                        pellets_confirmed=True,
+                    )
+                )
+                self.state.controller.calibration_command_revision = revision
+            except (KeyError, TypeError, ValueError):
+                pass
+        baseline = result.baseline_allocation
+        if baseline is None:
+            return result
+        return replace(
+            result,
+            cycle_ratio=baseline.auger_duty,
+            fan=None if baseline.fan_duty is None else {"duty": baseline.fan_duty},
+            allocation=baseline,
+            calibration=replace(result.calibration, active=False, probe_q=0.0),
+        )
+
+    def _trace_calibration_result(self, result, now: float) -> None:
+        decision = result.calibration
+        if decision is None:
+            return
+        revision = self.state.controller.calibration_command_revision
+        for event in decision.events:
+            try:
+                event_type = CalibrationEventType(event.kind)
+            except ValueError:
+                continue
+            self._trace_record(
+                TraceEventKind.CALIBRATION,
+                CalibrationTracePayload(
+                    event=event_type,
+                    command_revision=revision,
+                    stage=event.stage,
+                    intended_probe_load=event.intended_probe_q,
+                    bounded_probe_load=event.bounded_probe_q,
+                    cumulative_probe_load=event.realized_probe_sum,
+                    eligible_observations=decision.progress.eligible_observations,
+                    positive_observations=decision.progress.positive_observations,
+                    negative_observations=decision.progress.negative_observations,
+                    reasons=event.reasons,
+                ),
+                int(now * 1_000),
+            )
+
     def on_tick(self, now, ptemp, current_output_status):
         import control as _control
 
@@ -1535,6 +1675,8 @@ class HoldMode(ControlMode):
                     InhibitReason.SAFETY,
                 )
 
+        self._consume_calibration_command(now)
+
         # Feed the runner every tick so a threaded core always has a fresh temp
         # to solve; for the synchronous runner this just stores the latest temp,
         # so the value read at the gate below is unchanged.
@@ -1550,6 +1692,9 @@ class HoldMode(ControlMode):
         framed_feedback_due = False
         if (now - self.state.controller.cycle_start) > controller_interval:
             result = self._runner.latest()
+            cancellation_reason = self._calibration_cancellation_reason(result, now)
+            if cancellation_reason is not None:
+                result = self._cancel_calibration_probe(result, cancellation_reason, now, ptemp)
             if isinstance(result.diagnostics, MpcTraceDiagnostics):
                 self._observe_reachability_advisory(result.diagnostics)
             controller = self.state.controller
@@ -1560,6 +1705,19 @@ class HoldMode(ControlMode):
                 controller.pulse_requested_duty = max(0.0, min(1.0, result.cycle_ratio))
                 controller.pulse_combustion_load = (
                     result.allocation.normalized_combustion_load if result.allocation is not None else None
+                )
+                controller.pulse_baseline_combustion_load = (
+                    result.baseline_allocation.normalized_combustion_load
+                    if result.baseline_allocation is not None
+                    else controller.pulse_combustion_load or 0.0
+                )
+                controller.pulse_calibration_probe_load = (
+                    result.calibration.probe_q if result.calibration is not None else 0.0
+                )
+                controller.pulse_calibration_stage = (
+                    result.calibration.stage
+                    if result.calibration is not None and result.calibration.active
+                    else None
                 )
                 controller.pulse_maximum_duty = result.allocation.u_max if result.allocation is not None else 1.0
                 controller.pulse_allocator_revision = (
@@ -1594,6 +1752,7 @@ class HoldMode(ControlMode):
             self.state.cycle.ratio = self.state.cycle.raw_ratio = controller.pulse_requested_duty
             self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
             self._trace_update(result, now, controller_interval)
+            self._trace_calibration_result(result, now)
             framed_feedback_due = True
             snapshot = self._runner.get_model_snapshot()
             if isinstance(snapshot, dict):

@@ -38,7 +38,9 @@ from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, nor
 from controller.mpc_allocator import AllocationResult
 
 if TYPE_CHECKING:
+    from controller.linear_mpc.calibration import CalibrationDecision
     from controller.linear_mpc.contracts import FrameObservation
+    from controller.mpc import CalibrationCommand
 
 
 StatusScalar: TypeAlias = None | bool | int | float | str
@@ -259,6 +261,8 @@ class ControllerUpdateResult:
     input_temperature: float
     diagnostics: ControllerTraceDiagnostics | None = None
     allocation: AllocationResult | None = None
+    baseline_allocation: AllocationResult | None = None
+    calibration: CalibrationDecision | None = None
     status: Mapping[str, StatusValue] | None = None
     revision: int = 0
     solve_start_monotonic: float | None = None
@@ -338,12 +342,16 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
     status = getattr(core, "get_status", lambda: None)()
     diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
     allocation = getattr(core, "trace_allocation", lambda: None)()
+    baseline_allocation = getattr(core, "trace_baseline_allocation", lambda: None)()
+    calibration = getattr(core, "trace_calibration", lambda: None)()
     return ControllerUpdateResult(
         cycle_ratio=cycle_ratio,
         fan=fan,
         input_temperature=float(temp),
         diagnostics=diagnostics,
         allocation=allocation,
+        baseline_allocation=baseline_allocation,
+        calibration=calibration,
         status=status,
         revision=revision,
         solve_start_monotonic=solve_start,
@@ -356,6 +364,8 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
 class ControllerRunner(ABC):
     @abstractmethod
     def set_target(self, setpoint): ...
+    @abstractmethod
+    def request_calibration(self, command: "CalibrationCommand") -> None: ...
     @abstractmethod
     def submit(self, temp): ...
     @abstractmethod
@@ -427,6 +437,9 @@ class SyncControllerRunner(ControllerRunner):
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
+
+    def request_calibration(self, command: "CalibrationCommand") -> None:
+        self._core.request_calibration(command)
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
         self._evidence_contexts[generation] = (session_id, cook_id)
@@ -651,6 +664,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._latest_delivered_output = None
         self._pending_dropped = 0
         self._pending_restore = None
+        self._pending_calibrations: collections.deque[CalibrationCommand] = collections.deque()
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
         self._accepted_observations: dict[int, tuple[int, FrameObservation]] = {}
         self._inflight_observations: set[int] = set()
@@ -731,8 +745,9 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_outputs.clear()
                 restore = self._pending_restore
                 self._pending_restore = None
+                pending_calibrations = tuple(self._pending_calibrations)
+                self._pending_calibrations.clear()
             # A pending core is installed only after the old core has drained
-            # every accepted observation.  The lock-held emptiness check keeps
             # the returned generation bound to the consuming core.
             if restore is not None:
                 self._core.restore_model(restore)
@@ -746,6 +761,8 @@ class ThreadedControllerRunner(ControllerRunner):
             if ordered_outputs:
                 with self._lock:
                     self._latest_delivered_output = ordered_outputs[-1]
+            for command in pending_calibrations:
+                self._core.request_calibration(command)
             # Learner calls must never hold _lock. Drain until a lock-protected
             # empty observation queue commits this iteration's temperature
             # update; an observation that wins the lock before that commit is
@@ -858,6 +875,10 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._pending_target = setpoint
 
+
+    def request_calibration(self, command: "CalibrationCommand") -> None:
+        with self._lock:
+            self._pending_calibrations.append(command)
     def submit(self, temp):
         with self._lock:
             self._temp = temp

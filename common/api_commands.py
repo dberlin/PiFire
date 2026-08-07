@@ -12,6 +12,7 @@ Description: The /api command processor -- process_command() and the
 ==============================================================================
 """
 
+import math
 import json
 import time
 
@@ -660,6 +661,103 @@ def _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind):
     control["tuning_mode"] = arglist[1] == "true"
     _write_control_delta(control, control_delta(set_values={"tuning_mode": control["tuning_mode"]}), kind, origin)
 
+_CALIBRATION_ACTIONS = frozenset(("start", "pause", "resume", "stop", "reset-progress"))
+_AMBIENT_SOURCES = frozenset(("measured", "manual", "weather", "configured"))
+
+def _validated_mpc_calibration_command(value):
+    """Return a self-contained, JSON-safe calibration command or raise ValueError."""
+    if not isinstance(value, dict):
+        raise ValueError("MPC calibration command must be an object")
+    required = {
+        "action",
+        "revision",
+        "maximum_temperature_c",
+        "ambient_c",
+        "ambient_source",
+        "empty_grill_confirmed",
+        "pellets_confirmed",
+    }
+    if set(value) != required:
+        raise ValueError("MPC calibration command has invalid fields")
+    action = value["action"]
+    revision = value["revision"]
+    maximum = value["maximum_temperature_c"]
+    ambient = value["ambient_c"]
+    ambient_source = value["ambient_source"]
+    if action not in _CALIBRATION_ACTIONS:
+        raise ValueError("MPC calibration action is not recognized")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise ValueError("MPC calibration revision must be a positive integer")
+    if (
+        isinstance(maximum, bool)
+        or not isinstance(maximum, (int, float))
+        or not math.isfinite(maximum)
+    ):
+        raise ValueError("MPC calibration maximum temperature must be finite Celsius")
+    if isinstance(ambient, bool) or not isinstance(ambient, (int, float)) or not math.isfinite(ambient):
+        raise ValueError("MPC calibration ambient temperature must be finite Celsius")
+    if ambient_source not in _AMBIENT_SOURCES:
+        raise ValueError("MPC calibration ambient source is not recognized")
+    if value["empty_grill_confirmed"] is not True or value["pellets_confirmed"] is not True:
+        raise ValueError("MPC calibration requires empty-grill and pellet confirmations")
+    return {
+        "action": action,
+        "revision": revision,
+        "maximum_temperature_c": float(maximum),
+        "ambient_c": float(ambient),
+        "ambient_source": ambient_source,
+        "empty_grill_confirmed": True,
+        "pellets_confirmed": True,
+    }
+
+
+def _mpc_grey_box_active(settings):
+    controller = settings.get("controller")
+    if not isinstance(controller, dict) or controller.get("selected") != "mpc":
+        return False
+    config = controller.get("config")
+    selected = config.get("mpc") if isinstance(config, dict) else None
+    return not isinstance(selected, dict) or selected.get("enable_grey_box") is not False
+
+
+def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
+    """Accept one revisioned, guarded calibration command for Hold to consume."""
+    try:
+        command = _validated_mpc_calibration_command(arglist[1])
+    except ValueError as error:
+        data["result"] = "ERROR"
+        data["message"] = str(error)
+        return
+    previous = control.get("mpc_calibration")
+    if isinstance(previous, dict):
+        previous_revision = previous.get("revision", 0)
+        if command["revision"] == previous_revision:
+            if command == previous:
+                data["data"]["mpc_calibration"] = command
+                data["data"]["idempotent"] = True
+                return
+            data["result"] = "ERROR"
+            data["message"] = "MPC calibration revision must be monotonic"
+            return
+        if not isinstance(previous_revision, int) or command["revision"] < previous_revision:
+            data["result"] = "ERROR"
+            data["message"] = "MPC calibration revision must be monotonic"
+            return
+    if command["action"] == "start" and (
+        control.get("mode") != Mode.HOLD or not _mpc_grey_box_active(settings)
+    ):
+        data["result"] = "ERROR"
+        data["message"] = "MPC calibration start requires MPC Hold with grey-box control"
+        return
+    control["mpc_calibration"] = command
+    _write_control_delta(
+        control,
+        control_delta(set_values={"mpc_calibration": command}),
+        kind,
+        origin,
+    )
+    data["data"]["mpc_calibration"] = command
+
 
 """ The expiry flags /api/set/timer/start/{seconds}/{options} can name, in the
     order they are emitted back. Both live on the timer's notify_data object. """
@@ -985,6 +1083,7 @@ _COMMAND_DISPATCH = {
     ("set", "pwm"): _cmd_set_pwm,
     ("set", "duty_cycle"): _cmd_set_duty_cycle,
     ("set", "tuning_mode"): _cmd_set_tuning_mode,
+    ("set", "mpc_calibration"): _cmd_set_mpc_calibration,
     ("set", "timer"): _cmd_set_timer,
     ("set", "manual"): _cmd_set_manual,
     ("cmd", "restart"): _cmd_cmd_restart,

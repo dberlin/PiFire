@@ -428,6 +428,9 @@ def _configure_frame_observation(mode, *, revision=1, u_max=0.5, load=0.3):
     controller.pulse_requested_fan_duty = 50.0
     controller.pulse_frame_requested_auger_duty = 0.0 if load is None else load
     controller.pulse_frame_combustion_load = load
+    controller.pulse_frame_baseline_combustion_load = 0.0 if load is None else load
+    controller.pulse_frame_calibration_probe_load = 0.0
+    controller.pulse_frame_calibration_stage = None
     controller.pulse_frame_maximum_duty = u_max
     controller.pulse_frame_applied_fan_duty = 60.0
     controller.pulse_frame_stale_command = False
@@ -494,6 +497,8 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
     runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
+    mode._trace_session_id = f"session-{case}"
+    runner.bind_evidence_context(0, mode._trace_session_id, None)
     mode.state.metrics = {"id": f"ineligible-{case}"}
     _configure_frame_observation(mode, load=None if case == "unknown" else 0.3)
     records = []

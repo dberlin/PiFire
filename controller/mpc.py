@@ -26,7 +26,7 @@ import json
 import math
 import os
 from collections.abc import Mapping
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 import time
 
 import numpy as np
@@ -60,6 +60,13 @@ from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
 from controller.linear_mpc.grey_box import GreyBoxPredictionAdapter
 from controller.linear_mpc.state_space import InnovationStateSpace, StateSpaceConfig
 from controller.linear_mpc.policy import LinearMPC, LinearMPCConfig
+from controller.linear_mpc.calibration import (
+    CalibrationCommand as _CoordinatorCalibrationCommand,
+    CalibrationCoordinator,
+    CalibrationDecision,
+    CalibrationProgress,
+    CalibrationRuntimeContext,
+)
 
 _DEFAULTS = dict(
     # R_dQ (firing-move penalty) kept low: 1.0 was over-damped -> sluggish rise AND
@@ -751,6 +758,35 @@ def requires_modules(config):
     return ("do_mpc",)
 
 
+@dataclass(frozen=True, slots=True)
+class CalibrationCommand:
+    """One revisioned operator calibration request at the runtime boundary."""
+
+    action: str
+    command_revision: int
+    maximum_temperature_c: float
+    ambient_c: float
+    ambient_source: str
+    empty_grill_confirmed: bool
+    pellets_confirmed: bool
+    seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.action not in {"start", "pause", "resume", "stop", "reset-progress"}:
+            raise ValueError("invalid calibration action")
+        if isinstance(self.command_revision, bool) or not isinstance(self.command_revision, int) or self.command_revision < 1:
+            raise ValueError("calibration command revision must be positive")
+        if not all(
+            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            for value in (self.maximum_temperature_c, self.ambient_c)
+        ):
+            raise ValueError("calibration temperatures must be finite")
+        if self.ambient_source not in {"measured", "manual", "weather", "configured"}:
+            raise ValueError("invalid calibration ambient source")
+        if self.empty_grill_confirmed is not True or self.pellets_confirmed is not True:
+            raise ValueError("calibration confirmations are required")
+
+
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data, *, _online_challenger_kind=None):
         if _online_challenger_kind not in (None, "state-space"):
@@ -806,6 +842,14 @@ class Controller(ControllerBase):
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
         self._trace_diagnostics = None
+        self._calibration = CalibrationCoordinator(
+            predict_max_c=lambda baseline_q, probe_q, runtime: max(runtime.temp_c, runtime.target_c)
+            + max(0.0, probe_q) * 5.0
+        )
+        self._calibration_pending: CalibrationCommand | None = None
+        self._calibration_last_revision = 0
+        self._trace_calibration = CalibrationDecision(False, 0.0, None, CalibrationProgress())
+        self._trace_baseline_allocation: AllocationResult | None = None
         self._trace_allocation: AllocationResult | None = None
 
         self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
@@ -1918,6 +1962,58 @@ class Controller(ControllerBase):
             )
         return self._online_teardown_checkpoint(verdict)
 
+    def request_calibration(self, command: CalibrationCommand) -> None:
+        """Accept one monotonic command; update() consumes it exactly once."""
+        if not isinstance(command, CalibrationCommand):
+            raise TypeError("command must be CalibrationCommand")
+        if command.command_revision < self._calibration_last_revision:
+            raise ValueError("calibration command revision must be monotonic")
+        if command.command_revision == self._calibration_last_revision:
+            return
+        self._calibration_pending = command
+        self._calibration_last_revision = command.command_revision
+
+    def _calibration_runtime(self, baseline_q: float, temperature_c: float) -> CalibrationRuntimeContext:
+        return CalibrationRuntimeContext(
+            now_s=time.monotonic(),
+            temp_c=temperature_c,
+            target_c=self._set_point_c,
+            baseline_q=baseline_q,
+            realized_q=self._applied_combustion_load,
+            safety_ceiling_c=500.0,
+            allocator_headroom=1.0,
+            error_rate_headroom=1.0,
+            capability_headroom=1.0,
+            saturation_headroom=1.0,
+            rank_progress=1.0,
+            coverage_progress=1.0,
+        )
+
+    def _advance_calibration(self, baseline_q: float, temperature_c: float) -> CalibrationDecision:
+        runtime = self._calibration_runtime(baseline_q, temperature_c)
+        command = self._calibration_pending
+        self._calibration_pending = None
+        if command is not None:
+            if command.action == "start":
+                decision = self._calibration.start(
+                    _CoordinatorCalibrationCommand(
+                        command.command_revision, command.maximum_temperature_c, command.seed
+                    ),
+                    runtime,
+                )
+            elif command.action == "pause":
+                decision = self._calibration.pause()
+            elif command.action == "resume":
+                decision = self._calibration.resume(runtime)
+            else:
+                decision = self._calibration.stop(runtime)
+        elif self._trace_calibration.active:
+            decision = self._calibration.advance(runtime)
+        else:
+            decision = CalibrationDecision(False, 0.0, None, self._trace_calibration.progress)
+        self._trace_calibration = decision
+        return decision
+
     def set_output(self, applied):
         """Recover the normalized applied load from measured mean auger duty."""
         self._applied_combustion_load = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
@@ -2040,14 +2136,18 @@ class Controller(ControllerBase):
         self._last_raw_combustion_load = raw_firing_load
         self._last_combustion_load = combustion_load
         self._applied_combustion_load = combustion_load
-        allocation = allocate(
-            combustion_load,
-            u_max=self.u_max,
-            fan_min_pct=self.cfg["fan_min_pct"],
-            fan_max_pct=self.cfg["fan_max_pct"],
-            enable_fan=bool(self.cfg["enable_fan_input"]),
-        )
+        allocation_kwargs = {
+            "u_max": self.u_max,
+            "fan_min_pct": self.cfg["fan_min_pct"],
+            "fan_max_pct": self.cfg["fan_max_pct"],
+            "enable_fan": bool(self.cfg["enable_fan_input"]),
+        }
+        baseline_allocation = allocate(combustion_load, **allocation_kwargs)
+        calibration = self._advance_calibration(combustion_load, y)
+        requested_load = float(np.clip(combustion_load + calibration.probe_q, 0.0, 1.0))
+        allocation = allocate(requested_load, **allocation_kwargs)
         auger = allocation.auger_duty
+        self._trace_baseline_allocation = baseline_allocation
         self._trace_allocation = allocation
         fan_duty = allocation.fan_duty
         self._trace_diagnostics = MpcTraceDiagnostics(
@@ -2078,3 +2178,9 @@ class Controller(ControllerBase):
 
     def trace_allocation(self) -> AllocationResult | None:
         return self._trace_allocation
+
+    def trace_baseline_allocation(self) -> AllocationResult | None:
+        return self._trace_baseline_allocation
+
+    def trace_calibration(self) -> CalibrationDecision:
+        return self._trace_calibration
