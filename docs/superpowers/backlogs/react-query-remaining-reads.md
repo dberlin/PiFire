@@ -56,17 +56,30 @@ was otherwise green. Three findings were fixed on the spot (the flushObservers
 race, clear_history's missing invalidation, and the four queryClient-singleton
 violations); these nine were not.
 
-1. **`unwrap()` drops the envelope beyond `message`/`status`.**
-   `helpers/query/unwrap.ts:41` throws `new ApiError(r.message, r.status)` from
-   a `ResultEnvelope<T>` on `!r.ok`. Any other structured field the envelope
-   carried on failure -- the way `AdminResult`/write paths carry a `field` for
-   validation errors -- never reaches the thrown `ApiError`, because `unwrap`
-   is only wired to `ok`/`status`/`message`/`data`. No read path has needed
-   more than that yet, which is why this was not fixed now; it becomes real
-   the first time a `useQuery` fetcher wraps an envelope whose failure a caller
-   needs to branch on by more than the message text.
+Status as of the 2026-08-07 post-review fix round: **1, 3, 6 and 8 are done**
+(1 and 3 in that round, 6 and 8 inline during the review itself). **2, 4, 5, 7
+and 9 remain open.** Each item says which below; nothing here is closed
+without a test that was shown to fail against the unfixed code.
 
-2. **`HistoryPage` gives no in-flight affordance during a manual window
+1. ~~**`unwrap()` drops the envelope beyond `message`/`status`.**~~ **DONE**
+   (post-review fix round). Was: `helpers/query/unwrap.ts` threw
+   `new ApiError(r.message, r.status)` from a `ResultEnvelope<T>` on `!r.ok`,
+   so the `field`/`mode` an `AdminResult` carries on a refusal never reached
+   the thrown error. Turned out to be reachable, not hypothetical:
+   `adminApi.ts`'s `unpack()` lifts both off `data` for EVERY call including
+   the GETs (`adminApi.ts:35-49`), and `adminErrorText()` branches on both, so
+   `AdminPage`'s failed read rendered "...it is currently in another mode."
+   where the envelope had said `Smoke`. Now `ResultEnvelope` declares
+   `field?`/`mode?`, `ApiError` takes an `ApiErrorDetail`
+   (`Omit<ResultEnvelope<unknown>, "ok" | "data">`) so a field added to the
+   envelope reaches the boundary by construction, and `AdminPage`'s
+   `queryErrorText()` puts both back on the `AdminResult` it rebuilds. Proven
+   both directions at each of the two conversions: dropping them in `unwrap`
+   fails `unwrap.test.ts` :: "carries field and mode, the rest of what a
+   refusal envelope says" plus the AdminPage copy assertion; dropping them in
+   `queryErrorText` fails the AdminPage one alone.
+
+2. **OPEN.** **`HistoryPage` gives no in-flight affordance during a manual window
    change.** `historyChart(minutes)` swaps queryKey the instant the Minutes
    control changes, and `placeholderData: (previous) => previous`
    (`HistoryPage.tsx:58-63`) keeps the OLD window's chart on screen while the
@@ -77,17 +90,25 @@ violations); these nine were not.
    indicator without disturbing the placeholder behaviour auto-refresh relies
    on.
 
-3. **`SettingsShell` has a third unguarded accent-seeding site.** FIX 1 fixed
-   the false-green test around `AppPrefs.tsx` and `TunerPage.tsx`'s render-phase
-   seeding idiom, and confirmed by breaking each implementation that both were
-   real bugs, not just suspect. `SettingsShell` seeds an accent the same
-   general shape (settings-derived local state) but was not audited against
-   the same "does a live settings refetch clobber an in-progress user choice"
-   question this branch asked of the other two. Needs the same
-   break-the-implementation treatment before it can be called clean, not an
-   assumption that three call sites sharing a pattern share a bug.
+3. ~~**`SettingsShell` has a third unguarded accent-seeding site.**~~ **DONE**
+   (post-review fix round). It was a real bug, confirmed the same way the
+   other two were: `useEffect(() => setAccent(readAccent(settings)),
+   [settings, setAccent])` re-ran on every `settings` IDENTITY change, and
+   `revalidate()` after saving any other tab hands the shell a fresh object
+   with the same stored accent -- which snapped the display back to the stored
+   theme while GeneralTab's draft still held the theme the user had just
+   picked (`GeneralTab.tsx:68-73` applies a pick live, before save). Now
+   seeded once per mount behind a `useRef` guard; a ref rather than `AppPrefs`'
+   render-phase `seeded` state because that idiom is only legal on a
+   component's OWN state and `setAccent` belongs to the provider above.
+   Proven both directions by `SettingsShell.test.tsx` :: "does not re-seed the
+   accent over a live pick when the loader revalidates", which fails
+   `expected 'ice' to be 'crimson'` with the guard removed. That test needed
+   `flushObservers()` after the second load to be able to fail at all -- the
+   re-seed lands a render later than the loader data it reacts to, so the
+   first version of it passed against the broken source.
 
-4. **Two flaky test files need a real diagnosis, not just a re-run.**
+4. **OPEN.** **Two flaky test files need a real diagnosis, not just a re-run.**
    `useSaveSettings.test.tsx` and `settingsDrafts.test.tsx` were both observed
    flaking independently of this branch's changes (re-run clean before
    investigating further, per this review's own baseline notes) -- FIX 3
@@ -96,9 +117,14 @@ violations); these nine were not.
    was already flaky there (a timing race between the router's loader and the
    query cache, most likely) and raises this from "known pre-existing, not
    mine" to "known pre-existing, now touched by mine, still not diagnosed."
-   Neither file's flake was root-caused this round.
+   Neither file's flake was root-caused this round. Still not root-caused:
+   what the fix round adds is only more evidence of rarity (the full suite,
+   1900 tests, has now gone green on every run since the rebase), plus one
+   SEPARATE flake that was found and fixed -- `UnitsTab.test.tsx` asserted on
+   `setUnits` having been CALLED rather than on the resulting render, which
+   raced react-query's macrotask scheduler. That one is not these two.
 
-5. **`CookFilePage`'s `recoverError`/`recovering` state is not scoped to a
+5. **OPEN.** **`CookFilePage`'s `recoverError`/`recovering` state is not scoped to a
    filename.** A user who opens a broken cook file, starts Attempt Repair,
    then navigates to a DIFFERENT broken cook file before the first repair
    settles would see the second page's repair banner reflect the first
@@ -109,7 +135,8 @@ violations); these nine were not.
    route param changes do not always force a remount) -- that reachability
    question was not run down this round.
 
-6. **`CookFileChart` did not drop stale data on a failed refetch.** ~~Left as a
+6. ~~**`CookFileChart` did not drop stale data on a failed refetch.**~~ **DONE**
+   (inline during the review itself). ~~Left as a
    backlog item~~ Fixed inline during this review, since it turned out to be
    exactly the one-line, cleanly-testable case the task allowed folding into
    FIX 2's revision: `chart = data ? toCookChartInput(data) : null` rendered
@@ -123,7 +150,7 @@ violations); these nine were not.
    `expected element not to be in the document` on the chart test id, and
    passes against the fix.
 
-7. **A third, undocumented error-handling convention: fail-closed sentinels.**
+7. **OPEN.** **A third, undocumented error-handling convention: fail-closed sentinels.**
    The codebase already has two documented shapes -- the `ResultEnvelope`
    write paths resolve rather than throw (`ok`/`status`/`message`/`data`), and
    `unwrap()` converts an envelope into a thrown `ApiError` at the `useQuery`
@@ -141,8 +168,8 @@ violations); these nine were not.
    follows. Worth a name and a shared helper before a third caller invents a
    third opposite default.
 
-8. **`HistoryPage.test.tsx` asserted a deleted mechanism as current fact.**
-   Fixed inline (one line, comment-only, exactly as flagged): the test at
+8. ~~**`HistoryPage.test.tsx` asserted a deleted mechanism as current fact.**~~
+   **DONE** (inline during the review itself). Fixed inline (one line, comment-only, exactly as flagged): the test at
    "does not stack a poll on top of a request that is still in flight" said
    "The in-flight guard is the page's own request id (via `loading`), not a
    second mechanism" -- true of the pre-migration hand-rolled fetch, but
@@ -152,7 +179,7 @@ violations); these nine were not.
    is what now absorbs a `refetchInterval` tick against an outstanding fetch.
    The comment now says that instead of the deleted mechanism.
 
-9. **The fidelity screenshots have never been run.** `tests/e2e/*.spec.ts`
+9. **OPEN.** **The fidelity screenshots have never been run.** `tests/e2e/*.spec.ts`
    (referenced by name in several source comments this branch and prior tasks
    added, e.g. `dashboard-reflow.spec.ts`) assert pixel-level layout claims
    that jsdom-based unit tests explicitly disclaim ("jsdom does no layout, so
@@ -161,3 +188,29 @@ violations); these nine were not.
    evidently any prior task's, actually launched Playwright against a real
    browser to confirm those claims hold. The gate exists in name only until
    someone runs it once and records the result.
+
+## Minors from the re-review
+
+Smaller than the nine above and tracked separately so they do not get lost.
+
+- ~~**The structural prefix tests passed vacuously.**~~ **DONE** (post-review
+  fix round). `key.slice(0, root.length)` equals `root` for ANY key when the
+  root is `[]`, so the three assertions guarding the settings, history and
+  cook-file prefix schemes could not fail on the one mistake that matters
+  most: an emptied root makes `invalidateQueries({ queryKey: root })` match
+  the entire cache instead of one family. `keys.test.ts` now routes all three
+  through an `expectTruePrefix()` helper asserting the length relationship
+  (`root.length > 0`, `key.length > root.length`) before the slice. Proven
+  both directions against a `keys.ts` with all three roots emptied: 6 failures
+  with the helper, 0 with the old slice-only form.
+- **OPEN.** `CookFileList.tsx:96-99` -- the comment claims more than
+  `invalidateQueries` delivers. An inactive query is only marked stale, so
+  back-navigation still renders the deleted file's cached payload for one
+  round-trip before the 404 drops it. `removeQueries` would make the comment
+  true.
+- **OPEN.** `flushObservers()` (`tests/unit/test-utils.tsx`) has no fake-timer
+  warning in its doc; under `useFakeTimers()` it hangs to the runner timeout
+  instead of failing usefully. `TunerPage.test.tsx:222` installs fake timers
+  in the same file.
+- **OPEN.** `MaintenanceCard.tsx:83-84` awaits two invalidations sequentially
+  -- harmless today, needlessly serialized.

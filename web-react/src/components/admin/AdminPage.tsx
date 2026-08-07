@@ -104,19 +104,26 @@ function SystemInfo({ state }: { state: AdminState }) {
 /**
  * Recover adminErrorText's human copy from a failed read's query error.
  *
- * unwrap() (helpers/query/unwrap.ts) only carries `message` and `status`
- * across the query boundary, so a `not_stopped`/`bad_request` refusal loses
- * the `field`/`mode` detail adminErrorText can use for those cases. That
- * detail was never reachable from this read in practice anyway --
+ * Rebuilds the envelope unwrap() took apart: `field` and `mode` ride on the
+ * ApiError (helpers/query/unwrap.ts) precisely so a `not_stopped` /
+ * `bad_request` refusal keeps the detail adminErrorText branches on, instead
+ * of falling back to "...in another mode." / "The server refused that
+ * request." Not reachable from THIS read today --
  * blueprints/api_admin/routes.py's `/state` route is not mode-gated, only the
- * destructive actions are -- so the fallback copy those cases produce without
- * it ("...in another mode.", "The server refused that request.") is the
- * worst case, not the common one.
+ * destructive actions are -- but adminApi.ts's unpack() populates both on
+ * every call, so the day /state grows a gate the copy follows.
  */
 function queryErrorText(error: unknown): string {
   const result: AdminResult<unknown> =
     error instanceof ApiError
-      ? { ok: false, status: error.status, message: error.message, data: null }
+      ? {
+          ok: false,
+          status: error.status,
+          message: error.message,
+          field: error.field,
+          mode: error.mode,
+          data: null,
+        }
       : {
           ok: false,
           status: 0,

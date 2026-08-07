@@ -10,6 +10,24 @@ import { queryKeys } from "../../../../src/helpers/query/keys";
 // onto stale values. Asserting the prefix STRUCTURALLY (by slicing) rather
 // than re-spelling the literal arrays is what actually catches that.
 
+/**
+ * Assert `root` is a TRUE prefix of `key` -- the whole claim, not just the
+ * slice comparison.
+ *
+ * `key.slice(0, root.length)` on its own is vacuous at both ends: an emptied
+ * root passes against every key in existence (`[].slice(0, 0)` equals `[]`),
+ * and a root equal to the key passes too. Both are exactly the mistakes these
+ * tests are here to catch -- an empty root would make
+ * invalidateQueries({ queryKey: root }) match the ENTIRE cache rather than one
+ * family, and a root identical to a leaf would reach only itself. So the
+ * length relationship is asserted first, and the slice second.
+ */
+function expectTruePrefix(root: readonly unknown[], key: readonly unknown[]) {
+  expect(root.length).toBeGreaterThan(0);
+  expect(key.length).toBeGreaterThan(root.length);
+  expect(key.slice(0, root.length)).toEqual(root);
+}
+
 describe("queryKeys settings prefix scheme", () => {
   const settingsEntries: Array<[string, readonly unknown[]]> = [
     ["settings", queryKeys.settings],
@@ -18,7 +36,7 @@ describe("queryKeys settings prefix scheme", () => {
   ];
 
   it.each(settingsEntries)("settingsRoot is a true prefix of %s", (_name, key) => {
-    expect(key.slice(0, queryKeys.settingsRoot.length)).toEqual(queryKeys.settingsRoot);
+    expectTruePrefix(queryKeys.settingsRoot, key);
   });
 
   it("settings, mode and controllerMetadata are pairwise distinct", () => {
@@ -44,8 +62,7 @@ describe("queryKeys.historyChart", () => {
   });
 
   it.each([[60], [undefined]])("historyRoot is a true prefix of historyChart(%s)", (minutes) => {
-    const key = queryKeys.historyChart(minutes);
-    expect(key.slice(0, queryKeys.historyRoot.length)).toEqual(queryKeys.historyRoot);
+    expectTruePrefix(queryKeys.historyRoot, queryKeys.historyChart(minutes));
   });
 });
 
@@ -69,8 +86,8 @@ describe("queryKeys.cookfileDetail / cookfileChart", () => {
   it("cookfileRoot is a true prefix of both cookfileDetail and cookfileChart for the same filename", () => {
     const filename = "cook-1.json";
     const root = queryKeys.cookfileRoot(filename);
-    expect(queryKeys.cookfileDetail(filename).slice(0, root.length)).toEqual(root);
-    expect(queryKeys.cookfileChart(filename).slice(0, root.length)).toEqual(root);
+    expectTruePrefix(root, queryKeys.cookfileDetail(filename));
+    expectTruePrefix(root, queryKeys.cookfileChart(filename));
   });
 });
 

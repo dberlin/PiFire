@@ -222,10 +222,6 @@ describe("AdminPage", () => {
   });
 
   it("translates a refusal through adminErrorText rather than showing the token", async () => {
-    //  No `mode` here: unwrap()'s ApiError carries only status and message
-    //  across the query boundary (helpers/query/unwrap.ts), so a `mode` on
-    //  this envelope would be silently dropped before adminErrorText ever
-    //  saw it -- asserting only the substring below must not hide that.
     fetchAdminStateMock.mockResolvedValue({
       ok: false,
       status: 409,
@@ -235,6 +231,28 @@ describe("AdminPage", () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("must be stopped first");
+    });
+  });
+
+  //  The envelope's `mode` has to survive TWO conversions to get here:
+  //  unwrap() turning it into an ApiError, and queryErrorText() turning that
+  //  back into an AdminResult. Asserting the full sentence rather than a
+  //  substring is what makes the loss visible -- dropping `mode` at either
+  //  step still produces a plausible alert ("...in another mode."), which is
+  //  how it went unnoticed.
+  it("keeps the refused mode in the copy across the query boundary", async () => {
+    fetchAdminStateMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      message: "not_stopped",
+      data: null,
+      mode: "Smoke",
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe(
+        "The grill must be stopped first — it is currently in Smoke mode.",
+      );
     });
   });
 
