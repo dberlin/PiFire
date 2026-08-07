@@ -520,6 +520,9 @@ class ModelObservationPayload:
     calibration_cancellation_reason: NonBlankString | None = None
     baseline_allocation: AllocationPayload | None = None
     combined_allocation: AllocationPayload | None = None
+    calibration_status: Literal["inactive", "accepted", "rejected", "active", "cancelled"] = "inactive"
+    cancellation_command_revision: NonNegativeInt = 0
+    cancellation_command_action: Literal["none", "pause", "stop", "reset-progress", "safety-cancel"] = "none"
     requested_fan_duty: BoundedLoad | None = None
     actual_fan_duty: BoundedLoad | None = None
     output_source: OutputSource | None = None

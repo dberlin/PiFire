@@ -88,6 +88,9 @@ class CalibrationSummaryEvidence:
     requested_fan_duty: NonNegativeFloat | None = None
     actual_fan_duty: NonNegativeFloat | None = None
     cancellation_reason: NonBlankString | None = None
+    status: Literal["inactive", "accepted", "rejected", "active", "cancelled"] = "inactive"
+    cancellation_command_revision: NonNegativeInt = 0
+    cancellation_command_action: Literal["none", "pause", "stop", "reset-progress", "safety-cancel"] = "none"
     payload_type: Literal["calibration_summary"] = "calibration_summary"
 
     @model_validator(mode="after")

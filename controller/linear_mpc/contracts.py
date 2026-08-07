@@ -91,6 +91,9 @@ class FrameObservation:
     calibration_cancellation_reason: str | None = None
     baseline_allocation: AllocationResult | None = None
     combined_allocation: AllocationResult | None = None
+    calibration_status: str = "inactive"
+    cancellation_command_revision: int = 0
+    cancellation_command_action: str = "none"
 
     def __post_init__(self) -> None:
         start = _finite_float(self.frame_start_s, "frame_start_s")
@@ -176,6 +179,13 @@ class FrameObservation:
                 or not np.isclose(allocation.normalized_combustion_load, expected, rtol=0.0, atol=1e-12)
             ):
                 raise ValueError(f"{name} must match its attributed combustion load")
+        if self.calibration_status not in {"inactive", "accepted", "rejected", "active", "cancelled"}:
+            raise ValueError("invalid calibration_status")
+        _nonnegative_int(self.cancellation_command_revision, "cancellation_command_revision")
+        if self.cancellation_command_action not in {
+            "none", "pause", "stop", "reset-progress", "safety-cancel"
+        }:
+            raise ValueError("invalid cancellation_command_action")
         temperature_band = self.temperature_band
         if temperature_band is None:
             temperature_band = (

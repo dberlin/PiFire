@@ -189,6 +189,9 @@ class HoldMode(ControlMode):
         controller.pulse_calibration_command_action = "none"
         controller.pulse_calibration_cancellation_reason = None
         controller.pulse_baseline_allocation = None
+        controller.pulse_calibration_status = "inactive"
+        controller.pulse_cancellation_command_revision = 0
+        controller.pulse_cancellation_command_action = "none"
         controller.pulse_combined_allocation = None
         controller.pulse_calibration_probe_load = 0.0
         controller.pulse_calibration_stage = None
@@ -213,6 +216,9 @@ class HoldMode(ControlMode):
         controller.pulse_frame_calibration_command_action = controller.pulse_calibration_command_action
         controller.pulse_frame_calibration_cancellation_reason = controller.pulse_calibration_cancellation_reason
         controller.pulse_frame_baseline_allocation = controller.pulse_baseline_allocation
+        controller.pulse_frame_calibration_status = controller.pulse_calibration_status
+        controller.pulse_frame_cancellation_command_revision = controller.pulse_cancellation_command_revision
+        controller.pulse_frame_cancellation_command_action = controller.pulse_cancellation_command_action
         controller.pulse_frame_combined_allocation = controller.pulse_combined_allocation
         controller.pulse_frame_calibration_probe_load = controller.pulse_calibration_probe_load
         controller.pulse_frame_calibration_stage = controller.pulse_calibration_stage
@@ -344,6 +350,9 @@ class HoldMode(ControlMode):
                 controller, "pulse_frame_calibration_cancellation_reason", None
             ),
             baseline_allocation=getattr(controller, "pulse_frame_baseline_allocation", None),
+            calibration_status=getattr(controller, "pulse_frame_calibration_status", "inactive"),
+            cancellation_command_revision=getattr(controller, "pulse_frame_cancellation_command_revision", 0),
+            cancellation_command_action=getattr(controller, "pulse_frame_cancellation_command_action", "none"),
             combined_allocation=getattr(controller, "pulse_frame_combined_allocation", None),
             calibration_stage=getattr(controller, "pulse_frame_calibration_stage", None),
             calibration_fit=getattr(controller, "pulse_frame_calibration_stage", None) is not None,
@@ -425,8 +434,8 @@ class HoldMode(ControlMode):
         ):
             return None
         payload = CalibrationSummaryEvidence(
-            accepted=observation.calibration_cancellation_reason is None,
-            probe_count=1,
+            accepted=observation.calibration_status in {"accepted", "active"},
+            probe_count=1 if observation.calibration_status == "active" and observation.probe_q != 0.0 else 0,
             reason=observation.calibration_cancellation_reason,
             result_revision=observation.result_revision,
             command_revision=observation.calibration_command_revision,
@@ -437,7 +446,10 @@ class HoldMode(ControlMode):
             baseline_allocation=self._allocation_evidence(observation.baseline_allocation),
             combined_allocation=self._allocation_evidence(observation.combined_allocation),
             scheduled_on_seconds=observation.scheduled_on_s,
+            cancellation_command_revision=observation.cancellation_command_revision,
+            cancellation_command_action=observation.cancellation_command_action,
             delivered_on_seconds=observation.delivered_on_s,
+            status=observation.calibration_status,
             requested_fan_duty=observation.requested_fan_duty,
             actual_fan_duty=observation.actual_fan_duty,
             cancellation_reason=observation.calibration_cancellation_reason,
@@ -582,9 +594,12 @@ class HoldMode(ControlMode):
         output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
         return ModelObservationPayload(
             frame_start_ms=int(observation.frame_start_s * 1_000), frame_end_ms=int(observation.frame_end_s * 1_000),
+            cancellation_command_revision=observation.cancellation_command_revision,
+            cancellation_command_action=observation.cancellation_command_action,
             calibration_command_revision=observation.calibration_command_revision,
             calibration_command_action=observation.calibration_command_action,
             calibration_cancellation_reason=observation.calibration_cancellation_reason,
+            calibration_status=observation.calibration_status,
             baseline_allocation=HoldMode._trace_allocation_payload(
                 observation.baseline_allocation, observation.result_revision
             ),
@@ -732,9 +747,12 @@ class HoldMode(ControlMode):
                     input_levels=outcome["input_levels"],
                     incumbent_innovation_c=outcome["incumbent_innovation_c"],
                     challenger_innovation_c=outcome["challenger_innovation_c"],
+                    cancellation_command_revision=observation.cancellation_command_revision,
+                    cancellation_command_action=observation.cancellation_command_action,
                     calibration_command_revision=observation.calibration_command_revision,
                     calibration_command_action=observation.calibration_command_action,
                     calibration_cancellation_reason=observation.calibration_cancellation_reason,
+                    calibration_status=observation.calibration_status,
                     baseline_allocation=self._trace_allocation_payload(
                         observation.baseline_allocation, observation.result_revision
                     ),
@@ -1721,7 +1739,7 @@ class HoldMode(ControlMode):
     def _cancel_calibration_probe(
         self, result, reason: str, now: float, ptemp: float, *, notify_runner: bool
     ) -> object:
-        """Discard probe credit and latch the producing result's baseline allocation."""
+        """Attribute the active frame before resetting its remaining probe credit."""
         self._trace_safety(
             SafetyEventType.SCHEDULER_RESET,
             now,
@@ -1729,6 +1747,16 @@ class HoldMode(ControlMode):
             InhibitReason.SAFETY,
             result_revision=result.revision,
         )
+        controller = self.state.controller
+        raw = self.control.get("mpc_calibration")
+        if reason.startswith("operator_") and isinstance(raw, dict) and isinstance(raw.get("revision"), int):
+            controller.pulse_frame_cancellation_command_revision = raw["revision"]
+            controller.pulse_frame_cancellation_command_action = reason.removeprefix("operator_")
+        else:
+            controller.pulse_frame_cancellation_command_revision = 0
+            controller.pulse_frame_cancellation_command_action = "safety-cancel"
+        controller.pulse_frame_calibration_cancellation_reason = reason
+        controller.pulse_frame_calibration_status = "cancelled"
         self._reset_framed_pulse(
             PulseResetReason.SAFETY,
             now,
@@ -1890,6 +1918,21 @@ class HoldMode(ControlMode):
                     result.calibration.command_action if result.calibration is not None else "none"
                 )
                 controller.pulse_calibration_cancellation_reason = cancellation_reason
+                controller.pulse_calibration_status = (
+                    "active"
+                    if result.calibration is not None and result.calibration.active
+                    else (
+                        "rejected"
+                        if result.calibration is not None
+                        and any(event.kind == "start_rejected" for event in result.calibration.events)
+                        else (
+                            "accepted"
+                            if result.calibration is not None
+                            and any(event.kind == "start_accepted" for event in result.calibration.events)
+                            else "inactive"
+                        )
+                    )
+                )
                 controller.pulse_allocation_evidence_checked = True
                 controller.pulse_allocation_result_revision = (
                     result.revision if result.allocation is not None else None
