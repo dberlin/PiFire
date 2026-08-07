@@ -18,7 +18,8 @@ from .state_space import InnovationStateSpace
 
 _SCHEMA = "online-adaptation/v2"
 _LEGACY_SCHEMA = "online-adaptation/v1"
-_HORIZONS = (3, 15)
+_HORIZONS = (3, 15, 45, 90, 180)
+_MAX_PENDING_ORIGINS = 2 * max(_HORIZONS) * len(_HORIZONS)
 _SNAPSHOT_FIELDS = frozenset(
     (
         "schema",
@@ -221,6 +222,8 @@ class _Origin:
     incumbent_prediction_c: float
     challenger_prediction_c: float
     temperature_band: str
+    incumbent_snapshot: Mapping[str, object]
+    challenger_snapshot: Mapping[str, object]
     ambient_source: AmbientSource
 
 
@@ -241,6 +244,11 @@ class CompletedOrigin:
     challenger_prediction_c: float
     temperature_band: str
     ambient_source: AmbientSource
+
+# Public causal-evidence names.  The mutable origin owns only its evolving
+# realized-duty window; its forecasts, snapshots, and provenance never change.
+ForecastOrigin = _Origin
+CompletedForecastOrigin = CompletedOrigin
 
 
 @dataclass(slots=True)
@@ -279,7 +287,7 @@ class OnlineAdaptation:
             raise ValueError("accepted_sources must not be empty")
         self._excitation: deque[float] = deque(maxlen=policy.excitation_window)
         self._origins: list[_Origin] = []
-        self._completed: deque[CompletedOrigin] = deque(maxlen=2 * max(_HORIZONS))
+        self._completed: deque[CompletedOrigin] = deque(maxlen=_MAX_PENDING_ORIGINS)
         self._completed_window: tuple[CompletedOrigin, ...] = ()
         self._scores = _ScoreAggregate()
         self._role_generation = 0
@@ -313,6 +321,19 @@ class OnlineAdaptation:
     @property
     def lag_warmup_remaining(self) -> int:
         return self._lag_warmup_remaining
+
+    @property
+    def pending_origins(self) -> tuple[ForecastOrigin, ...]:
+        """Frozen view of futures whose targets have not arrived."""
+        return tuple(self._origins)
+
+    @property
+    def challenger_digest(self) -> str:
+        return self.model_digest(self.challenger)
+
+    def refresh_challenger(self, challenger: AdaptiveModel) -> None:
+        """Install a compatible challenger without rewriting captured futures."""
+        self.challenger = challenger
 
     def reset_continuity(self) -> None:
         """Discard continuity after an in-session rejected frame."""
@@ -364,6 +385,10 @@ class OnlineAdaptation:
         hard_reason = self._hard_rejection(observation, actuation_known)
         if destructive_gap:
             self._mark_discontinuity()
+        elif observation.calibration_fit:
+            # Fitting may update the challenger but is never a validation target
+            # and cannot bridge an already committed validation future.
+            self._invalidate_origins()
         if hard_reason is not None:
             return ObservationOutcome(
                 UpdateGate(False, (hard_reason,), 0.0, 0),
@@ -461,7 +486,7 @@ class OnlineAdaptation:
         has_complete_horizon_evidence = all(score.sample_count > 0 for score in horizon_scores)
         if win:
             self._consecutive_wins += 1
-        elif has_complete_horizon_evidence:
+        elif self._scores.prediction_count:
             self._consecutive_wins = 0
         eligible = win and self._consecutive_wins >= self.policy.required_consecutive_wins
         self._decision_sequence += 1
@@ -504,7 +529,6 @@ class OnlineAdaptation:
         self._completed_window = completed
         self._completed.clear()
         self._scores.clear()
-        self._origins = [origin for origin in self._origins if origin.origin_time_s >= at_s]
         return decision
 
     def prospective_model(self, decision_id: str) -> AdaptiveModel:
@@ -699,10 +723,7 @@ class OnlineAdaptation:
 
     @staticmethod
     def model_digest(model: AdaptiveModel) -> str:
-        encoded = json.dumps(
-            _owned_json(model.snapshot()), sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
-        return hashlib.sha256(encoded).hexdigest()
+        return _snapshot_digest(model.snapshot())
 
     def _hard_rejection(self, observation: FrameObservation, actuation_known: bool) -> UpdateRejectionReason | None:
         if observation.lid_open:
@@ -798,14 +819,18 @@ class OnlineAdaptation:
         ambient_future: Sequence[float] | None,
         braking: bool,
     ) -> None:
-        if self._lag_warmup_remaining:
+        if self._lag_warmup_remaining or observation.calibration_fit:
             return
         ambient = np.asarray(
             ambient_future if ambient_future is not None else [observation.ambient_c] * max(_HORIZONS),
             dtype=np.float64,
         )
         if ambient.shape != (max(_HORIZONS),) or not np.isfinite(ambient).all():
-            raise ValueError("ambient_future must contain exactly 15 finite values")
+            raise ValueError(f"ambient_future must contain exactly {max(_HORIZONS)} finite values")
+        incumbent_snapshot = _frozen_snapshot(self.incumbent.snapshot())
+        challenger_snapshot = _frozen_snapshot(self.challenger.snapshot())
+        incumbent_digest = _snapshot_digest(incumbent_snapshot)
+        challenger_digest = _snapshot_digest(challenger_snapshot)
         for horizon in _HORIZONS:
             try:
                 incumbent = self.incumbent.affine_prediction(
@@ -839,17 +864,19 @@ class OnlineAdaptation:
                     duty,
                     braking,
                     observation.observation_sequence,
-                    self.model_digest(self.incumbent),
-                    self.model_digest(self.challenger),
+                    incumbent_digest,
+                    challenger_digest,
                     incumbent_prediction,
                     challenger_prediction,
                     observation.temperature_band,
+                    incumbent_snapshot,
+                    challenger_snapshot,
                     observation.ambient_source,
                 )
             )
-            if len(self._origins) > 2 * max(_HORIZONS):
+            if len(self._origins) > _MAX_PENDING_ORIGINS:
                 self._scores.continuous = False
-                del self._origins[: len(self._origins) - 2 * max(_HORIZONS)]
+                del self._origins[: len(self._origins) - _MAX_PENDING_ORIGINS]
 
     def _complete_origins(
         self,
@@ -870,6 +897,9 @@ class OnlineAdaptation:
                 step > origin.horizon_steps
                 or abs(origin.origin_time_s + step * origin.interval_s - observation.frame_end_s) > 1e-6
             ):
+                self._scores.continuous = False
+                continue
+            if observation.observation_sequence != origin.observation_sequence + step:
                 self._scores.continuous = False
                 continue
             duty = np.array(origin.duty, copy=True)
@@ -938,9 +968,12 @@ class OnlineAdaptation:
             or incumbent_prediction is None
             or not candidate_prediction < incumbent_prediction
             or any(
-                score.incumbent_rmse_c is None
-                or score.challenger_rmse_c is None
-                or not score.challenger_rmse_c < score.incumbent_rmse_c
+                score.sample_count > 0
+                and (
+                    score.incumbent_rmse_c is None
+                    or score.challenger_rmse_c is None
+                    or not score.challenger_rmse_c < score.incumbent_rmse_c
+                )
                 for score in horizon_scores
             )
         ):
@@ -1226,6 +1259,25 @@ def _owned_json(value: object) -> object:
     if isinstance(value, np.generic):
         return value.item()
     return value
+
+
+def _frozen_snapshot(snapshot: Mapping[str, object]) -> Mapping[str, object]:
+    value = _freeze_evidence_value(_owned_json(snapshot))
+    assert isinstance(value, Mapping)
+    return value
+
+
+def _freeze_evidence_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze_evidence_value(nested) for key, nested in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_evidence_value(nested) for nested in value)
+    return value
+
+
+def _snapshot_digest(snapshot: Mapping[str, object]) -> str:
+    encoded = json.dumps(_owned_json(snapshot), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:

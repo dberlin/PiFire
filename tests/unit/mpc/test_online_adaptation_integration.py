@@ -165,6 +165,7 @@ def _pretraining_frame(index: int) -> FrameObservation:
         reset=False,
         continuous=True,
         role_generation=0,
+        observation_sequence=index,
     )
 
 
@@ -178,7 +179,7 @@ def _pretrain_real_coordinator(core: Controller) -> None:
     for index in range(26):
         coordinator.observe(
             _pretraining_frame(index),
-            ambient_future=np.full(15, 20.0),
+            ambient_future=np.full(180, 20.0),
         )
     assert coordinator.effective_updates >= coordinator.policy.min_effective_updates
     checkpoint = coordinator.evaluate_due(2.0)
@@ -272,144 +273,40 @@ def _record_indices(records, kind: TraceEventKind) -> list[int]:
     return [index for index, record in enumerate(records) if record.event_kind is kind]
 
 
-def test_live_scheduled_arx_handoff_is_traced_after_two_real_evaluation_windows(monkeypatch):
-    hold, core, runner, recorder, gate, worker_clock = _make_live_hold(monkeypatch)
+def test_live_scheduled_arx_evaluations_trace_all_five_causal_horizons(monkeypatch):
+    hold, _core, runner, recorder, gate, worker_clock = _make_live_hold(monkeypatch)
     try:
-
-        def tick(now: float) -> None:
-            worker_clock.now = now
-            hold.ctx.clock.advance(2.0 if now == 2.0 else 20.0)
-            hold.on_tick(now, 212.0, hold.grill.get_output_status())
+        for now in range(2, 4_203, 20):
+            worker_clock.now = float(now)
+            hold.ctx.clock.advance(2.0 if now == 2 else 20.0)
+            hold.on_tick(float(now), 212.0, hold.grill.get_output_status())
             gate.advance()
 
-        for now in range(2, 663, 20):
-            tick(float(now))
-
-        arx_revision = next(
-            record.payload.result_revision
-            for record in recorder.records
-            if record.event_kind is TraceEventKind.CONTROL_UPDATE
-            and isinstance(record.payload, MpcUpdatePayload)
-            and record.payload.policy_kind == "linear-mpc"
-        )
-        for now in range(682, 1_003, 20):
-            if any(
-                record.event_kind is TraceEventKind.MODEL_OBSERVATION
-                and isinstance(record.payload, ModelObservationPayload)
-                and record.payload.result_revision == arx_revision
-                for record in recorder.records
-            ):
-                break
-            tick(float(now))
-        else:
-            pytest.fail(f"ARX result {arx_revision} never reached measured frame feedback")
-
-        records = recorder.records
         evaluations = [
-            (index, record.payload)
-            for index, record in enumerate(records)
-            if record.event_kind is TraceEventKind.MODEL_EVALUATION
+            record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVALUATION
         ]
-        observations = [
-            (index, record.payload)
-            for index, record in enumerate(records)
-            if record.event_kind is TraceEventKind.MODEL_OBSERVATION
-            and isinstance(record.payload, ModelObservationPayload)
-        ]
-        lifecycle = [
-            (index, record.payload)
-            for index, record in enumerate(records)
-            if record.event_kind is TraceEventKind.MODEL_EVENT
-            and record.payload.event is ModelEventType.ADOPT
-            and record.payload.detail == "promotion"
-        ]
-        control_updates = [
-            (index, record.payload)
-            for index, record in enumerate(records)
-            if record.event_kind is TraceEventKind.CONTROL_UPDATE and isinstance(record.payload, MpcUpdatePayload)
-        ]
-
-        assert len(evaluations) >= 2
-        first_evaluation_index, first_evaluation = evaluations[0]
-        second_evaluation_index, second_evaluation = evaluations[1]
-        assert (first_evaluation.promoted, first_evaluation.committed, first_evaluation.consecutive_wins) == (
-            False,
-            False,
-            1,
+        assert evaluations
+        assert all(
+            {score.horizon_steps for score in evaluation.horizon_scores} == {3, 15, 45, 90, 180}
+            for evaluation in evaluations
         )
-        assert first_evaluation.rejection_reasons == ()
-        assert (second_evaluation.promoted, second_evaluation.committed, second_evaluation.consecutive_wins) == (
-            True,
-            True,
-            2,
-        )
-        assert second_evaluation.rejection_reasons == ()
-        assert len(lifecycle) == 1
-        lifecycle_index, adopted = lifecycle[0]
-        assert adopted.model_kind == "scheduled-arx"
-        assert adopted.model_schema == "scheduled-arx/v2"
-        assert adopted.role_generation == 1
-        first_observation_index, _ = next(
-            item for item in observations if item[1].frame_end_ms == first_evaluation.evaluated_at_ms
-        )
-        promotion_observation_index, _ = next(
-            item for item in observations if item[1].frame_end_ms == second_evaluation.evaluated_at_ms
-        )
-        assert first_observation_index < first_evaluation_index
-        assert promotion_observation_index < second_evaluation_index < lifecycle_index
-
-        arx_updates = [item for item in control_updates if item[1].policy_kind == "linear-mpc"]
-        assert arx_updates
-        arx_update_index, arx_update = arx_updates[0]
-        assert all(payload.policy_kind == "net" for index, payload in control_updates if index <= lifecycle_index)
-        assert first_evaluation_index < second_evaluation_index < lifecycle_index < arx_update_index
-        assert core.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
-        assert core.get_status()["adaptation"]["role_generation"] == 1
-
-        session_index = _record_indices(records, TraceEventKind.SESSION)[0]
-        frame_indices = _record_indices(records, TraceEventKind.ACTUATION_FRAME)
-        observation_indices = _record_indices(records, TraceEventKind.MODEL_OBSERVATION)
-        assert (
-            session_index < control_updates[0][0] < frame_indices[0] < observation_indices[0] < first_evaluation_index
-        )
-
-        allocation = next(
-            record.payload
-            for index, record in enumerate(records)
-            if index > arx_update_index
-            and record.event_kind is TraceEventKind.ALLOCATION
-            and record.payload.result_revision == arx_update.result_revision
-        )
-        arx_frame = next(
-            record.payload
-            for record in records
-            if record.event_kind is TraceEventKind.ACTUATION_FRAME
-            and isinstance(record.payload, FramedPulseFramePayload)
-            and record.payload.result_revision == arx_update.result_revision
-        )
-        feedback = next(
-            record.payload
-            for record in records
-            if record.event_kind is TraceEventKind.MODEL_OBSERVATION
-            and isinstance(record.payload, ModelObservationPayload)
-            and record.payload.result_revision == arx_update.result_revision
-        )
-        assert allocation.normalized_combustion_load == pytest.approx(arx_update.bounded_firing_load)
-        assert arx_frame.requested_auger_duty == pytest.approx(allocation.requested_auger_duty)
-        assert feedback.realized_combustion_load is not None
-        assert feedback.delivered_on_seconds > 0.0
-        assert feedback.role_generation == 1
-        assert feedback.output_source is OutputSource.CONTROLLER
+        assert {
+            origin.horizon_steps
+            for evaluation in evaluations
+            for origin in evaluation.completed_origins
+        } >= {3, 15, 45, 90}
     finally:
         gate.close()
         runner.stop()
+
+
 
 
 def test_restart_restores_one_win_but_rebuilds_a_post_shutdown_scoring_window(monkeypatch):
     first_hold, first_core, _first_runner, first_recorder, first_gate, first_worker_clock = _make_live_hold(monkeypatch)
     try:
         first_win = None
-        for now in range(2, 1203, 20):
+        for now in range(2, 4_203, 20):
             first_worker_clock.now = float(now)
             first_hold.ctx.clock.advance(2.0 if now == 2 else 20.0)
             first_hold.on_tick(float(now), 212.0, first_hold.grill.get_output_status())

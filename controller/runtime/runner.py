@@ -32,6 +32,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeAlias
 
 from common.control_trace import ActuationMode, ControllerType, ResultStaleState
+from common.model_evidence import EvidenceKind, ForecastOriginEvidence, ModelEvidenceRecord
 
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
@@ -52,6 +53,7 @@ class ObservationOutcomeEnvelope:
     configuration_generation: int
     observation: FrameObservation
     outcome: object
+    evidence: tuple[ModelEvidenceRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +71,40 @@ class ObservationOutcomeDrain:
 
     def __iter__(self):
         return iter(self.envelopes)
+
+
+def _freeze_evidence(
+    outcome: object, session_id: str | None, cook_id: str | None
+) -> tuple[ModelEvidenceRecord, ...]:
+    """Own only typed MPC compact evidence; never reconstruct predictions."""
+    if session_id is None or not isinstance(outcome, Mapping):
+        return ()
+    evaluation = outcome.get("evaluation_payload")
+    values = outcome.get("forecast_origin_evidence")
+    decision_id = getattr(evaluation, "decision_id", None)
+    role_generation = getattr(evaluation, "role_generation", None)
+    if (
+        not isinstance(decision_id, str)
+        or not isinstance(role_generation, int)
+        or isinstance(role_generation, bool)
+        or not isinstance(values, tuple)
+        or not all(isinstance(value, ForecastOriginEvidence) for value in values)
+    ):
+        return ()
+    return tuple(
+        ModelEvidenceRecord(
+            evidence_id=f"{session_id}:{decision_id}:{value.origin_sequence}:{value.horizon_steps}:{value.completion_time_ms}",
+            kind=EvidenceKind.FORECAST_ORIGIN,
+            session_id=session_id,
+            cook_id=cook_id,
+            timestamp_ms=value.completion_time_ms,
+            role_generation=role_generation,
+            model_digest=value.challenger_digest,
+            provenance_digest=value.incumbent_digest,
+            payload=value,
+        )
+        for value in values
+    )
 
 
 def _freeze_status_value(value: object) -> StatusValue:
@@ -370,12 +406,18 @@ class SyncControllerRunner(ControllerRunner):
         self._observation_sequence = 0
         self._observation_outcomes = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
         self._dropped_observation_outcomes = 0
+        self._evidence_session_id: str | None = None
+        self._evidence_cook_id: str | None = None
         self._configuration_revision = 0
         period = getattr(core, "get_control_period", lambda: None)()
         self._quality = _ResultQualityTracker(_control_period_seconds(period))
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
+
+    def set_evidence_context(self, session_id: str | None, cook_id: str | None) -> None:
+        self._evidence_session_id = session_id
+        self._evidence_cook_id = cook_id
 
     def submit(self, temp):
         self._temp = temp
@@ -448,7 +490,11 @@ class SyncControllerRunner(ControllerRunner):
                 self._outcome_dropped_sequences.append(dropped.submission_sequence)
             self._observation_outcomes.append(
                 ObservationOutcomeEnvelope(
-                    self._observation_sequence, self._configuration_revision, observation, outcome
+                    self._observation_sequence,
+                    self._configuration_revision,
+                    observation,
+                    outcome,
+                    _freeze_evidence(outcome, self._evidence_session_id, self._evidence_cook_id),
                 )
             )
         return ObservationSubmission(self._observation_sequence, self._configuration_revision)
@@ -572,6 +618,8 @@ class ThreadedControllerRunner(ControllerRunner):
         self._observation_sequence = 0
         self._observation_outcomes = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
         self._dropped_observation_outcomes = 0
+        self._evidence_session_id: str | None = None
+        self._evidence_cook_id: str | None = None
         self._model_snapshot = _owned_model_snapshot(core.get_model_snapshot())
         self._initial_status = _safe_initial_status(core)
         self._control_period = core.get_control_period()
@@ -586,6 +634,11 @@ class ThreadedControllerRunner(ControllerRunner):
         self._wait_for_period = self._stop_event.wait if wait_for_period is None else wait_for_period
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+
+    def set_evidence_context(self, session_id: str | None, cook_id: str | None) -> None:
+        with self._lock:
+            self._evidence_session_id = session_id
+            self._evidence_cook_id = cook_id
 
     def _loop(self):
         while True:
@@ -675,7 +728,15 @@ class ThreadedControllerRunner(ControllerRunner):
                                         self._outcome_drops_since_drain += 1
                                         self._outcome_dropped_sequences.append(dropped.submission_sequence)
                                     self._observation_outcomes.append(
-                                        ObservationOutcomeEnvelope(sequence, generation, observation, outcome)
+                                        ObservationOutcomeEnvelope(
+                                            sequence,
+                                            generation,
+                                            observation,
+                                            outcome,
+                                            _freeze_evidence(
+                                                outcome, self._evidence_session_id, self._evidence_cook_id
+                                            ),
+                                        )
                                     )
                     if handoff_batch:
                         break

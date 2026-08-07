@@ -75,7 +75,7 @@ class HorizonAffineModel(FixedAffineModel):
     def affine_prediction(self, horizon_steps: int, q_previous: float, ambient_future: np.ndarray) -> AffinePrediction:
         del q_previous, ambient_future
         return AffinePrediction(
-            np.full(horizon_steps, self._biases[horizon_steps], dtype=np.float64),
+            np.full(horizon_steps, self._biases.get(horizon_steps, self._biases[3]), dtype=np.float64),
             np.zeros((horizon_steps, horizon_steps), dtype=np.float64),
         )
 
@@ -170,6 +170,7 @@ def frame(index: int, *, temperature: float | None = None) -> FrameObservation:
         reset=False,
         continuous=True,
         role_generation=0,
+        observation_sequence=index,
     )
 
 
@@ -386,8 +387,10 @@ def test_evaluation_payload_round_trips_exact_coordinator_audit_evidence() -> No
     assert restored.challenger_digest == decision.challenger_digest == manager.model_digest(manager.challenger)
     assert restored.evaluation_duration_ms == decision.evaluation_duration_ms
     assert {score.horizon_steps: score.sample_count for score in restored.horizon_scores} == {
-        horizon_steps: sum(origin.horizon_steps == horizon_steps for origin in decision.completed_origins)
-        for horizon_steps in (3, 15)
+        score.horizon_steps: sum(
+            origin.horizon_steps == score.horizon_steps for origin in decision.completed_origins
+        )
+        for score in decision.horizon_scores
     }
 
 

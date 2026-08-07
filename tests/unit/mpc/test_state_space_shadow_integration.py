@@ -62,6 +62,7 @@ def _frame(index: int, *, generation: int = 0, continuous: bool = True) -> Frame
         False,
         continuous,
         generation,
+        observation_sequence=index,
     )
 
 

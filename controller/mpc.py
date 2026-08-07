@@ -33,7 +33,13 @@ import numpy as np
 # do_mpc (CasADi/IPOPT) is imported lazily only when the NLP policy is built; the
 # net policy + EKF path is pure numpy/scipy and never imports it.
 
-from common.control_trace import AmbientSource, StateSpaceRefreshPayload
+from common.control_trace import (
+    AmbientSource,
+    CompletedOriginEvidence,
+    HorizonScoreEvidence,
+    ModelEvaluationPayload,
+    StateSpaceRefreshPayload,
+)
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import feasibility_report
@@ -47,6 +53,7 @@ from controller.mpc_model import (
 )
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
+from common.model_evidence import ForecastOriginEvidence
 from controller.linear_mpc.adaptation import AdaptationPolicy, EvaluationDecision, OnlineAdaptation
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
 from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
@@ -110,6 +117,7 @@ _DEFAULTS = dict(
 # the teardown path is one full history.
 _HISTORY_MAX = 8640
 # The online model is identified on 20 s framed-pulse evidence.  Keep the
+_ONLINE_HORIZONS = (3, 15, 45, 90, 180)
 # independently validated 600 s / 30-frame horizon and bakeoff penalties out
 # of legacy grey-box controller settings.
 _SCHEDULED_ARX_LINEAR_CONFIG = LinearMPCConfig(
@@ -306,8 +314,8 @@ def _online_digest(value, name):
 
 
 def _online_horizon(value, name):
-    if isinstance(value, bool) or not isinstance(value, int) or value not in (3, 15):
-        raise ValueError(f"{name} must be 3 or 15")
+    if isinstance(value, bool) or not isinstance(value, int) or value not in _ONLINE_HORIZONS:
+        raise ValueError(f"{name} must be one of {_ONLINE_HORIZONS}")
     return value
 
 
@@ -359,10 +367,10 @@ def _online_evaluation(value):
     _online_digest(value["incumbent_digest"], "incumbent_digest")
     _online_digest(value["challenger_digest"], "challenger_digest")
     origins = value["completed_origins"]
-    if not isinstance(origins, (list, tuple)) or len(origins) > 30 or sample_count != len(origins):
+    if not isinstance(origins, (list, tuple)) or len(origins) > 1800 or sample_count != len(origins):
         raise ValueError("evaluation completed origins are invalid")
-    actual_horizon_counts = {3: 0, 15: 0}
-    horizon_errors = {3: ([], []), 15: ([], [])}
+    actual_horizon_counts = {horizon: 0 for horizon in _ONLINE_HORIZONS}
+    horizon_errors = {horizon: ([], []) for horizon in _ONLINE_HORIZONS}
     origin_starts = []
     origin_ends = []
     for index, origin in enumerate(origins):
@@ -407,7 +415,7 @@ def _online_evaluation(value):
     elif window_start != window_end or window_end != evaluated:
         raise ValueError("empty evaluation window must coincide with evaluation time")
     scores = value["horizon_scores"]
-    if not isinstance(scores, (list, tuple)) or len(scores) != 2:
+    if not isinstance(scores, (list, tuple)) or len(scores) != len(_ONLINE_HORIZONS):
         raise ValueError("evaluation horizon scores are invalid")
     scored_horizons = set()
     complete_horizon_evidence = True
@@ -433,8 +441,8 @@ def _online_evaluation(value):
             or not _online_matches_completed_rmse(challenger_errors, challenger)
         ):
             raise ValueError("evaluation horizon score is inconsistent")
-    if scored_horizons != {3, 15}:
-        raise ValueError("evaluation horizon scores must contain 3 and 15")
+    if scored_horizons != set(_ONLINE_HORIZONS):
+        raise ValueError(f"evaluation horizon scores must contain {_ONLINE_HORIZONS}")
     if not reasons and consecutive_wins == 0:
         raise ValueError("successful evaluation must advance the win count")
     if reasons and complete_horizon_evidence and consecutive_wins != 0:
@@ -1119,6 +1127,7 @@ class Controller(ControllerBase):
             else self._online_last_evaluation.get("incumbent_prediction_score"),
             "candidate_prediction_score": None
             if self._online_last_evaluation is None
+
             else self._online_last_evaluation.get("challenger_prediction_score"),
             "promotion_count": self._online_promotion_count,
             "rollback_count": self._online_rollback_count,
@@ -1126,6 +1135,91 @@ class Controller(ControllerBase):
             "evaluation_duration_seconds": self._online_evaluation_duration,
             "linear_solve_duration_seconds": self._online_linear_duration,
         }
+    @staticmethod
+    def _completed_origin_payloads(origin) -> tuple[CompletedOriginEvidence, ForecastOriginEvidence]:
+        """Serialize one completed causal event into raw and compact forms."""
+        raw = CompletedOriginEvidence(
+            origin_time_ms=int(origin.origin_time_s * 1_000),
+            completion_time_ms=int(origin.completion_time_s * 1_000),
+            horizon_steps=origin.horizon_steps,
+            generation=origin.generation,
+            observed_temperature_c=origin.observed_temperature_c,
+            incumbent_error_c=origin.incumbent_error_c,
+            challenger_error_c=origin.challenger_error_c,
+            braking=origin.braking,
+            observation_sequence=origin.observation_sequence,
+            incumbent_digest=origin.incumbent_digest,
+            challenger_digest=origin.challenger_digest,
+            incumbent_prediction_c=origin.incumbent_prediction_c,
+            challenger_prediction_c=origin.challenger_prediction_c,
+            temperature_band=origin.temperature_band,
+            ambient_source=origin.ambient_source,
+        )
+        compact = ForecastOriginEvidence(
+            origin_sequence=origin.observation_sequence,
+            origin_time_ms=raw.origin_time_ms,
+            completion_time_ms=raw.completion_time_ms,
+            horizon_steps=raw.horizon_steps,
+            incumbent_digest=raw.incumbent_digest,
+            challenger_digest=raw.challenger_digest,
+            incumbent_prediction_c=raw.incumbent_prediction_c,
+            challenger_prediction_c=raw.challenger_prediction_c,
+            observed_temperature_c=raw.observed_temperature_c,
+            incumbent_error_c=raw.incumbent_error_c,
+            challenger_error_c=raw.challenger_error_c,
+            temperature_band=raw.temperature_band,
+            phase="coasting" if raw.braking else "heating",
+            ambient_source=raw.ambient_source,
+            calibration_fit=False,
+        )
+        return raw, compact
+
+    def _evaluation_payloads(
+        self, decision: EvaluationDecision
+    ) -> tuple[ModelEvaluationPayload, tuple[ForecastOriginEvidence, ...]]:
+        events = tuple(self._completed_origin_payloads(origin) for origin in decision.completed_origins)
+        raw_origins = tuple(event[0] for event in events)
+        return (
+            ModelEvaluationPayload(
+                decision_id=decision.decision_id,
+                evaluated_at_ms=int(decision.evaluated_at_s * 1_000),
+                role_generation=decision.generation,
+                promoted=decision.promoted,
+                committed=decision.committed,
+                consecutive_wins=decision.consecutive_wins,
+                rejection_reasons=tuple(reason.value for reason in decision.reasons),
+                incumbent_prediction_score=decision.incumbent_prediction_score,
+                challenger_prediction_score=decision.candidate_prediction_score,
+                incumbent_braking_score=decision.incumbent_braking_score,
+                challenger_braking_score=decision.candidate_braking_score,
+                sample_count=decision.sample_count,
+                prospective_digest=decision.prospective_digest,
+                window_start_ms=int(decision.window_start_s * 1_000),
+                window_end_ms=int(decision.window_end_s * 1_000),
+                incumbent_digest=decision.incumbent_digest,
+                challenger_digest=decision.challenger_digest,
+                completed_origins=raw_origins,
+                horizon_scores=tuple(
+                    HorizonScoreEvidence(
+                        horizon_steps=score.horizon_steps,
+                        incumbent_rmse_c=score.incumbent_rmse_c,
+                        challenger_rmse_c=score.challenger_rmse_c,
+                        sample_count=score.sample_count,
+                    )
+                    for score in decision.horizon_scores
+                ),
+                evaluation_duration_ms=decision.evaluation_duration_ms,
+                challenger_model_kind=(
+                    "innovation-state-space" if self._is_state_space_model(self._online.challenger) else "scheduled-arx"
+                ),
+                state_space_refresh=(
+                    self._state_space_refresh_evidence(self._online.challenger)
+                    if self._is_state_space_model(self._online.challenger)
+                    else None
+                ),
+            ),
+            tuple(event[1] for event in events),
+        )
 
     def _record_evaluation(self, decision, *, committed=None):
         self._online_last_evaluation = {
@@ -1202,13 +1296,24 @@ class Controller(ControllerBase):
         if isinstance(decision, EvaluationDecision):
             decision = replace(decision, evaluation_duration_ms=self._online_evaluation_duration * 1_000)
         self._record_evaluation(decision)
+        evaluation_payload, forecast_origin_evidence = (
+            self._evaluation_payloads(decision) if isinstance(decision, EvaluationDecision) else (None, ())
+        )
         self._model_revision += 1
         if not decision.promoted:
-            return {"evaluation": self._online_last_evaluation}
+            return {
+                "evaluation": self._online_last_evaluation,
+                "evaluation_payload": evaluation_payload,
+                "forecast_origin_evidence": forecast_origin_evidence,
+            }
         if self._is_state_space_model(self._online.challenger) and not self._online_experiment_active:
             self._online.reject_prospective(decision.decision_id, "experiment-activation-gate")
             self._online_last_lifecycle_reason = "experiment-activation-gate"
-            return {"evaluation": self._online_last_evaluation}
+            return {
+                "evaluation": self._online_last_evaluation,
+                "evaluation_payload": evaluation_payload,
+                "forecast_origin_evidence": forecast_origin_evidence,
+            }
         try:
             candidate = self._online.prospective_model(decision.decision_id)
             try:
@@ -1240,16 +1345,31 @@ class Controller(ControllerBase):
             lifecycle = self._online_lifecycle("reject", detail)
             self._online_last_rejection_reason = detail
             self._online_last_lifecycle = lifecycle
-            return {"evaluation": self._online_last_evaluation, "lifecycle": lifecycle}
+            return {
+                "evaluation": self._online_last_evaluation,
+                "evaluation_payload": evaluation_payload,
+                "forecast_origin_evidence": forecast_origin_evidence,
+                "lifecycle": lifecycle,
+            }
         if not self._online.commit_promotion(decision.decision_id, solve):
-            return {"evaluation": self._online_last_evaluation}
+            return {
+                "evaluation": self._online_last_evaluation,
+                "evaluation_payload": evaluation_payload,
+                "forecast_origin_evidence": forecast_origin_evidence,
+            }
         self._online_promotion_count += 1
         self._online_last_lifecycle_reason = "promotion"
         self._model_revision += 1
         self._record_evaluation(decision, committed=True)
+        evaluation_payload = replace(evaluation_payload, committed=True)
         lifecycle = self._online_lifecycle("adopt", "promotion")
         self._online_last_lifecycle = lifecycle
-        return {"evaluation": self._online_last_evaluation, "lifecycle": lifecycle}
+        return {
+            "evaluation": self._online_last_evaluation,
+            "evaluation_payload": evaluation_payload,
+            "forecast_origin_evidence": forecast_origin_evidence,
+            "lifecycle": lifecycle,
+        }
 
     def observe_frame(self, observation):
         """Consume one completed framed-pulse observation on Hold's worker."""
@@ -1286,7 +1406,7 @@ class Controller(ControllerBase):
         outcome = self._online.observe(
             observation,
             actuation_known=actuation_known,
-            ambient_future=np.full(15, observation.ambient_c),
+            ambient_future=np.full(180, observation.ambient_c),
             braking=braking,
         )
         self._online_previous_setpoint = observation.setpoint_c

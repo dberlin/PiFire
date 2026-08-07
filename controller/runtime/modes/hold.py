@@ -659,6 +659,7 @@ class HoldMode(ControlMode):
             generation = getattr(envelope, "configuration_generation", None)
             delivered = getattr(envelope, "observation", None)
             outcome = getattr(envelope, "outcome", None)
+            evidence = getattr(envelope, "evidence", ())
             pending = self._pending_model_observations.get(sequence)
             if pending is None:
                 continue
@@ -744,7 +745,9 @@ class HoldMode(ControlMode):
                 self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
                 continue
             records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
-            evaluation_payload = self._model_evaluation_payload(outcome.get("evaluation"))
+            evaluation_payload = outcome.get("evaluation_payload")
+            if not isinstance(evaluation_payload, ModelEvaluationPayload):
+                evaluation_payload = self._model_evaluation_payload(outcome.get("evaluation"))
             if evaluation_payload is not None:
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation_payload))
             lifecycle_payload = self._model_lifecycle_payload(outcome.get("lifecycle"))
@@ -752,8 +755,13 @@ class HoldMode(ControlMode):
                 records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
             queued = (*pending[:3], tuple(records))
             self._pending_model_observations[sequence] = queued
-            if evaluation_payload is not None:
-                self._submit_completed_origin_evidence(evaluation_payload, publication_ms)
+            if (
+                isinstance(evidence, tuple)
+                and evidence
+                and self._persistence_worker is not None
+                and not self._persistence_worker.submit_evidence_batch(evidence).accepted
+            ):
+                self._learning_evidence_available = False
         for sequence, pending in tuple(self._pending_model_observations.items()):
             if pending[3] is None or not self._flush_pending_model_trace(sequence, pending, publication_ms):
                 break
@@ -1096,6 +1104,9 @@ class HoldMode(ControlMode):
             self._trace_session_id = None
             self._trace_cook_id = None
             return
+        configure_evidence = getattr(self._runner, "set_evidence_context", None)
+        if callable(configure_evidence):
+            configure_evidence(self._trace_session_id, self._trace_cook_id)
         self._flush_pending_model_events()
 
     def _trace_safety(

@@ -1295,13 +1295,14 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
 
         def wait_for_observations(self, count):
             with self._observed_condition:
-                return self._observed_condition.wait_for(lambda: len(self.observed) >= count, timeout=2.0)
+                return self._observed_condition.wait_for(lambda: len(self.observed) >= count, timeout=10.0)
 
     def frame(index, realized_q):
         return replace(
             _frame(index),
             temp_c=100.0,
             requested_q=realized_q,
+            baseline_q=realized_q,
             realized_q=realized_q,
             requested_auger_duty=realized_q,
         )

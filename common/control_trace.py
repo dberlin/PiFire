@@ -823,7 +823,7 @@ class ModelEvaluationPayload:
     window_end_ms: NonNegativeInt
     incumbent_digest: Digest
     challenger_digest: Digest
-    completed_origins: Annotated[tuple[CompletedOriginEvidence, ...], Field(max_length=30)]
+    completed_origins: Annotated[tuple[CompletedOriginEvidence, ...], Field(max_length=1800)]
     horizon_scores: Annotated[tuple[HorizonScoreEvidence, ...], Field(min_length=2, max_length=5)]
     evaluation_duration_ms: NonNegativeFloat
     payload_type: Literal["model_evaluation"] = "model_evaluation"
