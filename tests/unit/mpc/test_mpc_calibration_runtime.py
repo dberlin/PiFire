@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from controller.applied_output import AppliedOutput, OutputSource
+from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.mpc import CalibrationCommand, Controller
 from controller.runtime.runner import SyncControllerRunner
 
@@ -129,7 +129,10 @@ def test_calibration_advances_once_per_delivered_output_not_per_solve(monkeypatc
             OutputSource.CONTROLLER,
             1.0,
             producing_result_revision=active.revision,
-            frame_complete=True,
+            producing_calibration_revision=active.calibration.command_revision,
+            producing_calibration_action=active.calibration.command_action,
+            producing_calibration_generation=active.calibration.command_generation,
+            feedback_disposition=FrameFeedbackDisposition.COMPLETE,
             sample_complete=True,
         )
     )
@@ -141,6 +144,77 @@ def test_calibration_advances_once_per_delivered_output_not_per_solve(monkeypatc
     assert feedback.calibration.command_revision == 1
     assert feedback.calibration.command_action == "start"
 
+
+
+def test_routine_frame_reports_preserve_the_latched_probe_until_one_completed_frame(monkeypatch):
+    controller = _controller(monkeypatch)
+    runner = SyncControllerRunner(controller)
+    runner.request_calibration(_start())
+    active = runner.latest_from(100.0)
+
+    for timestamp in (1.0, 2.0, 3.0):
+        controller.set_output(
+            AppliedOutput(
+                active.allocation.auger_duty,
+                OutputSource.CONTROLLER,
+                timestamp,
+                producing_result_revision=active.revision,
+                producing_calibration_revision=active.calibration.command_revision,
+                producing_calibration_action=active.calibration.command_action,
+                producing_calibration_generation=1,
+                feedback_disposition=FrameFeedbackDisposition.PROGRESS,
+                sample_complete=True,
+            )
+        )
+        progress = runner.latest_from(100.0)
+        assert progress.calibration.active is True
+        assert progress.calibration.progress.eligible_observations == 0
+
+    controller.set_output(
+        AppliedOutput(
+            active.allocation.auger_duty,
+            OutputSource.CONTROLLER,
+            20.0,
+            producing_result_revision=active.revision,
+            producing_calibration_revision=active.calibration.command_revision,
+            producing_calibration_action=active.calibration.command_action,
+            producing_calibration_generation=1,
+            feedback_disposition=FrameFeedbackDisposition.COMPLETE,
+            sample_complete=True,
+        )
+    )
+    advanced = runner.latest_from(100.0)
+
+    assert advanced.calibration.progress.eligible_observations == 1
+
+
+def test_old_completed_frame_cannot_advance_a_newer_start(monkeypatch):
+    controller = _controller(monkeypatch)
+    runner = SyncControllerRunner(controller)
+    runner.request_calibration(_start(1))
+    old = runner.latest_from(100.0)
+    runner.request_calibration(_start(2))
+    newer = runner.latest_from(100.0)
+
+    controller.set_output(
+        AppliedOutput(
+            old.allocation.auger_duty,
+            OutputSource.CONTROLLER,
+            20.0,
+            producing_result_revision=old.revision,
+            producing_calibration_revision=old.calibration.command_revision,
+            producing_calibration_action=old.calibration.command_action,
+            producing_calibration_generation=1,
+            feedback_disposition=FrameFeedbackDisposition.COMPLETE,
+            sample_complete=True,
+        )
+    )
+    after_old_completion = runner.latest_from(100.0)
+
+    assert newer.calibration.command_revision == 2
+    assert after_old_completion.calibration.command_revision == 2
+    assert after_old_completion.calibration.active is True
+    assert after_old_completion.calibration.progress.eligible_observations == 0
 
 def test_delivered_frames_realize_both_probe_polarities_in_fifo_order(monkeypatch):
     controller = _controller(monkeypatch)
@@ -155,7 +229,10 @@ def test_delivered_frames_realize_both_probe_polarities_in_fifo_order(monkeypatc
                 OutputSource.CONTROLLER,
                 frame + 1.0,
                 producing_result_revision=result.revision,
-                frame_complete=True,
+                producing_calibration_revision=result.calibration.command_revision,
+                producing_calibration_action=result.calibration.command_action,
+                producing_calibration_generation=result.calibration.command_generation,
+                feedback_disposition=FrameFeedbackDisposition.COMPLETE,
                 sample_complete=True,
             )
         )
@@ -188,15 +265,17 @@ def test_partial_frame_feedback_cancels_without_counting_an_observation(monkeypa
     runner = SyncControllerRunner(controller)
     runner.request_calibration(_start())
     active = runner.latest_from(100.0)
-
     controller.set_output(
         AppliedOutput(
             active.allocation.auger_duty,
             OutputSource.CONTROLLER,
             1.0,
             producing_result_revision=active.revision,
-            frame_complete=False,
-            sample_complete=True,
+            producing_calibration_revision=active.calibration.command_revision,
+            producing_calibration_action=active.calibration.command_action,
+            producing_calibration_generation=active.calibration.command_generation,
+            feedback_disposition=FrameFeedbackDisposition.DISCARDED,
+            sample_complete=False,
         )
     )
     cancelled = runner.latest_from(100.0)

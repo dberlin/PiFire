@@ -80,6 +80,22 @@ def test_hold_records_baseline_and_probe_on_framed_observation(hold_cycle):
     assert runner.observations[0].requested_q == 0.4
 
 
+def test_default_five_second_polls_terminalize_only_the_twenty_second_frame(hold_cycle):
+    runner = FakeControllerRunner(period=5.0).script([_result(probe=0.1)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.controller.cycle_start = -6.0
+
+    for now in (0.0, 6.0, 12.0, 18.0, 26.0):
+        hold.on_tick(now, 200.0, hold.grill.get_output_status())
+
+    terminal = [item for item in runner.applied if item.feedback_disposition.value != "progress"]
+    routine = [item for item in runner.applied if item.feedback_disposition.value == "progress"]
+    assert len(routine) >= 3
+    assert [item.feedback_disposition.value for item in terminal] == ["complete"]
+    assert len(runner.observations) == 1
+
+
 def test_hold_stamps_latched_probe_frame_before_lid_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
@@ -97,6 +113,25 @@ def test_hold_stamps_latched_probe_frame_before_lid_reset(hold_cycle):
     assert cancelled.cancellation_command_action == "safety-cancel"
     assert cancelled.cancellation_command_revision == 0
 
+
+
+def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial(hold_cycle):
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.state.lid.open_detected = True
+    hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
+
+    completed, cancelled = runner.observations[-2:]
+    assert completed.result_revision == 1
+    assert completed.calibration_status == "active"
+    assert completed.calibration_cancellation_reason is None
+    assert cancelled.result_revision == 1
+    assert cancelled.calibration_status == "cancelled"
+    assert cancelled.calibration_cancellation_reason == "lid_open"
+    assert cancelled.cancellation_command_action == "safety-cancel"
 
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])

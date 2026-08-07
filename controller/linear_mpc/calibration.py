@@ -167,12 +167,15 @@ class CalibrationDecision:
     activation_ready: bool = False
     command_revision: int = 0
     command_action: str = "none"
+    command_generation: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.command_revision, bool) or not isinstance(self.command_revision, int) or self.command_revision < 0:
             raise ValueError("command_revision must be a non-negative integer")
         if self.command_action not in {"none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"}:
             raise ValueError("invalid calibration command action")
+        if isinstance(self.command_generation, bool) or not isinstance(self.command_generation, int) or self.command_generation < 0:
+            raise ValueError("command_generation must be a non-negative integer")
 
 
 

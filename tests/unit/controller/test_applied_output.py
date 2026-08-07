@@ -5,6 +5,7 @@ import pytest
 
 from controller.applied_output import (
     AppliedOutput,
+    FrameFeedbackDisposition,
     OutputSource,
     classify_output_source,
     seed_output,
@@ -48,21 +49,26 @@ def test_requested_defaults_to_none():
     assert AppliedOutput(0.9, OutputSource.CONTROLLER, 1.0, requested=1.4).requested == 1.4
 
 
-def test_completed_frame_feedback_carries_immutable_producing_result_identity():
+def test_terminal_frame_feedback_carries_immutable_producing_calibration_identity():
     applied = AppliedOutput(
         0.4,
         OutputSource.CONTROLLER,
         20.0,
         producing_result_revision=7,
-        frame_complete=True,
+        producing_calibration_revision=3,
+        producing_calibration_action="start",
+        producing_calibration_generation=1,
+        feedback_disposition=FrameFeedbackDisposition.COMPLETE,
         sample_complete=True,
     )
 
     assert applied.producing_result_revision == 7
-    assert applied.frame_complete is True
-    assert applied.sample_complete is True
+    assert applied.producing_calibration_revision == 3
+    assert applied.producing_calibration_action == "start"
+    assert applied.producing_calibration_generation == 1
+    assert applied.feedback_disposition is FrameFeedbackDisposition.COMPLETE
     with pytest.raises(Exception):
-        applied.frame_complete = False
+        applied.feedback_disposition = FrameFeedbackDisposition.PROGRESS
 
 
 def test_seed_output_is_seed_when_nothing_else_applies():

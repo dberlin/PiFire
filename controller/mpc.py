@@ -41,6 +41,7 @@ from common.control_trace import (
     StateSpaceRefreshPayload,
 )
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
+from controller.applied_output import FrameFeedbackDisposition
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import feasibility_report
 from controller.mpc_model import (
@@ -849,7 +850,10 @@ class Controller(ControllerBase):
         self._calibration_ambient_c = float(cfg["T_amb"])
         self._calibration_safety_ceiling_c = 0.0
         self._calibration_frame_results: dict[int, tuple[float, CalibrationDecision]] = {}
-        self._calibration_feedback: collections.deque[tuple[float, float, bool, bool, int, bool]] = collections.deque()
+        self._calibration_feedback: collections.deque[
+            tuple[float, float, bool, bool, FrameFeedbackDisposition, int, int, str, int]
+        ] = collections.deque()
+        self._calibration_generation = 0
         self._calibration_last_feedback_timestamp: float | None = None
         self._trace_calibration = CalibrationDecision(False, 0.0, None, CalibrationProgress())
         self._trace_baseline_allocation: AllocationResult | None = None
@@ -2025,24 +2029,39 @@ class Controller(ControllerBase):
 
     @staticmethod
     def _command_decision(
-        decision: CalibrationDecision, command: CalibrationCommand
+        decision: CalibrationDecision, command: CalibrationCommand, command_generation: int
     ) -> CalibrationDecision:
         return replace(
             decision,
             command_revision=command.command_revision,
             command_action=command.action,
+            command_generation=command_generation,
         )
 
     def _advance_calibration(self, baseline_q: float, temperature_c: float) -> CalibrationDecision:
         decision: CalibrationDecision | None = None
         while self._calibration_feedback:
-            feedback_baseline_q, realized_q, continuous, actuation_known, revision, frame_complete = self._calibration_feedback.popleft()
-            if not self._trace_calibration.active:
+            (
+                feedback_baseline_q,
+                realized_q,
+                continuous,
+                actuation_known,
+                disposition,
+                _revision,
+                command_revision,
+                command_action,
+                command_generation,
+            ) = self._calibration_feedback.popleft()
+            provenance = self._trace_calibration
+            if not provenance.active or (
+                provenance.command_revision,
+                provenance.command_action,
+                provenance.command_generation,
+            ) != (command_revision, command_action, command_generation):
                 continue
-            if not frame_complete:
-                decision = self._calibration.cancel_probe("incomplete_frame")
-            else:
-                provenance = self._trace_calibration
+            if disposition is FrameFeedbackDisposition.DISCARDED:
+                decision = self._calibration.cancel_probe("discarded_frame")
+            elif disposition is FrameFeedbackDisposition.COMPLETE:
                 decision = replace(
                     self._calibration.advance(
                         self._calibration_runtime(
@@ -2055,7 +2074,10 @@ class Controller(ControllerBase):
                     ),
                     command_revision=provenance.command_revision,
                     command_action=provenance.command_action,
+                    command_generation=provenance.command_generation,
                 )
+            else:
+                continue
             self._trace_calibration = decision
         while self._calibration_operations:
             operation, payload = self._calibration_operations.popleft()
@@ -2067,6 +2089,11 @@ class Controller(ControllerBase):
                 self._calibration_ambient_c = command.ambient_c
                 self._calibration_safety_ceiling_c = command.safety_ceiling_c
                 runtime = self._calibration_runtime(baseline_q, temperature_c)
+                if command.action == "start":
+                    self._calibration_generation += 1
+                    command_generation = self._calibration_generation
+                else:
+                    command_generation = self._trace_calibration.command_generation
                 if command.action == "start":
                     decision = self._calibration.start(
                         _CoordinatorCalibrationCommand(
@@ -2082,7 +2109,7 @@ class Controller(ControllerBase):
                     decision = self._calibration.stop(runtime)
                 else:
                     decision = self._calibration.reset_progress(runtime)
-                decision = self._command_decision(decision, command)
+                decision = self._command_decision(decision, command, command_generation)
             self._trace_calibration = decision
         if decision is None:
             decision = replace(
@@ -2104,30 +2131,48 @@ class Controller(ControllerBase):
         )
 
     def set_output(self, applied):
-        """Recover completed framed feedback only from its producing result revision."""
+        """Record physical output and terminalize only explicit frame feedback."""
         realized_q = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
+        self._applied_combustion_load = realized_q
+        if applied.feedback_disposition is FrameFeedbackDisposition.PROGRESS:
+            return
         revision = applied.producing_result_revision
         produced = self._calibration_frame_results.pop(revision, None) if revision > 0 else None
-        if produced is not None:
-            for stale_revision in tuple(self._calibration_frame_results):
-                if stale_revision < revision:
-                    del self._calibration_frame_results[stale_revision]
-            baseline_q, decision = produced
-            if decision.active:
-                previous = self._calibration_last_feedback_timestamp
-                continuous = previous is None or applied.timestamp > previous
-                self._calibration_last_feedback_timestamp = applied.timestamp
-                self._calibration_feedback.append(
-                    (
-                        baseline_q,
-                        realized_q,
-                        continuous,
-                        applied.controller_commanded,
-                        revision,
-                        applied.frame_complete and applied.sample_complete,
-                    )
-                )
-        self._applied_combustion_load = realized_q
+        if produced is None:
+            return
+        for stale_revision in tuple(self._calibration_frame_results):
+            if stale_revision < revision:
+                del self._calibration_frame_results[stale_revision]
+        baseline_q, decision = produced
+        if not decision.active or (
+            decision.command_revision,
+            decision.command_action,
+            decision.command_generation,
+        ) != (
+            applied.producing_calibration_revision,
+            applied.producing_calibration_action,
+            applied.producing_calibration_generation,
+        ):
+            return
+        previous = self._calibration_last_feedback_timestamp
+        continuous = previous is None or applied.timestamp > previous
+        self._calibration_last_feedback_timestamp = applied.timestamp
+        disposition = applied.feedback_disposition
+        if disposition is FrameFeedbackDisposition.COMPLETE and not applied.sample_complete:
+            disposition = FrameFeedbackDisposition.DISCARDED
+        self._calibration_feedback.append(
+            (
+                baseline_q,
+                realized_q,
+                continuous,
+                applied.controller_commanded,
+                disposition,
+                revision,
+                decision.command_revision,
+                decision.command_action,
+                decision.command_generation,
+            )
+        )
 
     def _equilibrium_load(self, target, disturbance):
         """Private experiment seam for the identified-model equilibrium baseline."""

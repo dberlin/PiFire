@@ -32,6 +32,25 @@ class OutputSource(Enum):
     SEED = "seed"
 
 
+
+class FrameFeedbackDisposition(Enum):
+    """Whether an output report is routine state or terminal frame feedback."""
+
+    PROGRESS = "progress"
+    COMPLETE = "complete"
+    DISCARDED = "discarded"
+
+
+_CALIBRATION_ACTIONS = frozenset(
+    {"none", "start", "pause", "resume", "stop", "reset-progress", "safety-cancel"}
+)
+
+
+def _non_negative_int(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
 @dataclass(frozen=True)
 class AppliedOutput:
     """One report of the duty that reached the auger.
@@ -47,8 +66,22 @@ class AppliedOutput:
     timestamp: float
     requested: float | None = None
     producing_result_revision: int = 0
-    frame_complete: bool = False
+    producing_calibration_revision: int = 0
+    producing_calibration_action: str = "none"
+    producing_calibration_generation: int = 0
+    feedback_disposition: FrameFeedbackDisposition = FrameFeedbackDisposition.PROGRESS
     sample_complete: bool = False
+
+    def __post_init__(self) -> None:
+        _non_negative_int(self.producing_result_revision, "producing_result_revision")
+        _non_negative_int(self.producing_calibration_revision, "producing_calibration_revision")
+        _non_negative_int(self.producing_calibration_generation, "producing_calibration_generation")
+        if self.producing_calibration_action not in _CALIBRATION_ACTIONS:
+            raise ValueError("invalid producing calibration action")
+        if not isinstance(self.feedback_disposition, FrameFeedbackDisposition):
+            raise TypeError("feedback_disposition must be FrameFeedbackDisposition")
+        if not isinstance(self.sample_complete, bool):
+            raise TypeError("sample_complete must be bool")
 
     @property
     def controller_commanded(self):

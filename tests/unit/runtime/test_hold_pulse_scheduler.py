@@ -11,6 +11,7 @@ from common.control_trace import (
     SafetyEventType,
     TraceEventKind,
 )
+from controller.applied_output import FrameFeedbackDisposition
 from controller.runtime.logic.pulse import PulseResetReason
 from controller.runtime.runner import ControllerUpdateResult
 from controller.runtime.logic.pulse import PulseFrameResult
@@ -263,6 +264,8 @@ def test_missed_frames_are_recorded_as_skipped_without_catchup(hold_cycle, monke
 
     skipped = [payload for kind, payload in frames if kind is TraceEventKind.ACTUATION_FRAME and payload.skipped]
     assert skipped and all(payload.scheduled_on_seconds == 0.0 for payload in skipped)
+    terminal_feedback = [item for item in runner.applied if item.feedback_disposition is not FrameFeedbackDisposition.PROGRESS]
+    assert terminal_feedback[-1].feedback_disposition is FrameFeedbackDisposition.DISCARDED
 
 
 def test_auger_and_fan_adopt_together_from_one_result_revision(hold_cycle):
