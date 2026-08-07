@@ -104,9 +104,9 @@ class _Origin:
     payload: ForecastOriginEvidence
 
     @property
-    def cook(self) -> tuple[str, str]:
+    def cook(self) -> str:
         assert self.record.cook_id is not None
-        return self.record.cook_id, self.record.session_id
+        return self.record.cook_id
 
     @property
     def stratum(self) -> tuple[int, str, str, str, int]:
@@ -146,7 +146,7 @@ def evaluate_confidence(
     gates: list[GateResult] = []
     _gate(gates, "ledger-integrity", ledger_valid and not duplicate_conflict, "ledger-integrity")
     _gate(gates, "candidate-lineage", digest is not None and generation is not None and bool(selected), "candidate-lineage")
-    _gate(gates, "calibration-completeness", _calibration_complete(selected), "calibration-completeness")
+    _gate(gates, "calibration-completeness", _calibration_complete(records), "calibration-completeness")
     _gate(gates, "identifiability", refresh is not None and refresh.accepted and refresh.full_rank and refresh.finite_diagnostics, "identifiability")
     _gate(gates, "pole-magnitude", refresh is not None and refresh.pole_magnitude is not None and refresh.pole_magnitude < config.maximum_pole_magnitude, "pole-magnitude")
     _gate(gates, "positive-gain", refresh is not None and refresh.gain is not None and refresh.gain > 0.0 and isfinite(refresh.gain), "positive-gain")
@@ -193,7 +193,7 @@ def _records(evidence: Sequence[object]) -> tuple[tuple[ModelEvidenceRecord, ...
 
 
 def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...], bool]:
-    unique: dict[tuple[str, str, int, int, int, int], _Origin] = {}
+    unique: dict[tuple[str, int, int, int, int], _Origin] = {}
     conflict = False
     for record in records:
         if not isinstance(record.payload, ForecastOriginEvidence) or record.cook_id is None:
@@ -202,7 +202,7 @@ def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...
         if record.model_digest != payload.challenger_digest or record.provenance_digest != payload.incumbent_digest:
             conflict = True
             continue
-        identity = (record.cook_id, record.session_id, record.role_generation, payload.horizon_steps, payload.origin_sequence, payload.origin_time_ms)
+        identity = (record.cook_id, record.role_generation, payload.horizon_steps, payload.origin_sequence, payload.completion_time_ms)
         origin = _Origin(record, payload)
         prior = unique.get(identity)
         if prior is not None:
@@ -299,7 +299,8 @@ def _signed_bias_ok(origins: Sequence[_Origin], interval: BootstrapInterval, max
 
 
 def _band_error_ok(origins: Sequence[_Origin], interval: BootstrapInterval, maximum: float) -> bool:
-    return _signed_bias_ok(origins, interval, maximum)
+    rows = _stratum_rows(origins, interval)
+    return bool(rows) and sum(abs(row.payload.challenger_error_c) for row in rows) / len(rows) <= maximum
 
 
 def _cook_weight_ok(origins: Sequence[_Origin], interval: BootstrapInterval) -> bool:

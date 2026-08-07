@@ -467,6 +467,7 @@ class HoldMode(ControlMode):
             actual_fan_duty=observation.actual_fan_duty,
             cancellation_reason=observation.calibration_cancellation_reason,
             stage=observation.calibration_stage,
+            continuous=observation.continuous,
         )
         return ModelEvidenceRecord(
             evidence_id=(

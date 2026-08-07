@@ -41,7 +41,7 @@ def _qualifying() -> tuple[ModelEvidenceRecord, ...]:
     for cook in ("cook-a", "cook-b"):
         for horizon in (3, 15, 45, 90, 180):
             for sequence in range(horizon):
-                error = (-1.0, 1.0, 0.0)[sequence % 3]
+                error = (-0.5, 0.5, 0.0)[sequence % 3]
                 payload = ForecastOriginEvidence(
                     origin_sequence=sequence, origin_time_ms=sequence * 20, completion_time_ms=(sequence + horizon) * 20,
                     horizon_steps=horizon, incumbent_digest=_INCUMBENT, challenger_digest=_CANDIDATE,
