@@ -1485,6 +1485,172 @@ MSGEOF
 
 ---
 
+## Phase 8 — Deletion semantics (added 2026-08-08, after a live bug)
+
+Background, because it decides the shape of both tasks. `apply_settings_delta` is a
+**deep merge**. Omitting a key asks for nothing; it cannot ask for removal. So a
+settings surface that removes a key from its local object and saves the result
+silently fails — the stored key is merged straight back. Upstream added
+`settings_delta()` / `SETTINGS_DELTA_KEY` and a `delete` channel for exactly this,
+and `ControllerTab` already uses it.
+
+A sweep of every key-removal-before-save in `web-react/` found exactly two: the
+fixed `ControllerTab`, and one broken surface below.
+
+### Task 15: Deleting a OneSignal device actually deletes it
+
+**Files:**
+- Modify: `web-react/src/components/settings/tabs/NotificationsTab.tsx`
+- Test: `web-react/tests/unit/components/settings/tabs/NotificationsTab.test.tsx`
+
+**Interfaces:**
+- Consumes: `settingsDelta(setValues, deletePaths)` from
+  `src/helpers/settings/settingsDelta.ts`; `apply_settings_delta` /
+  `_delete_settings_path` on the backend.
+- Produces: no new exports.
+
+**The bug, reproduced.** `deleteDevice` (`:98`) does `delete devices[deviceId]`, and
+`:73` saves with `save({ notify_services: v.ns }, ["settings_update"])` — a plain
+body. Applied against a stored tree holding `{dev-A, dev-B}`, deleting `dev-B`
+leaves the persisted tree with **both**. `OneSignalService.devices` is
+`dict[str, Any]`, so nothing strips it either.
+
+It presents as success: the delete sits behind a `ConfirmAction` modal naming the
+device, the row leaves the table, and the save reports OK. The device returns on
+next load.
+
+**The wrinkle that a naive fix gets wrong.** The tab deliberately sends the WHOLE
+`notify_services` subtree so unrelated keys survive (see its own comment at `:17`).
+Deletes therefore accumulate: a user may remove several devices before pressing
+Save. The delete paths must carry **every** device removed since the last save, not
+just the most recent. A one-shot port of `ControllerTab`'s pattern fixes single
+deletes and silently misses multiples — which is the same class of half-fix as the
+bug itself.
+
+- [ ] **Step 1: Write the failing tests**
+
+Two, because the multi-delete case is the one a naive fix misses:
+
+```tsx
+it("removes the device from the payload's delete paths", async () => {
+  // ...render with two devices, delete one, save
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      delete: [["notify_services", "onesignal", "devices", "dev-B"]],
+    }),
+    ["settings_update"],
+  );
+});
+
+it("carries every device removed before the save, not just the last", async () => {
+  // ...render with three devices, delete two, save
+  const [payload] = save.mock.calls[0];
+  expect(payload.delete).toEqual(
+    expect.arrayContaining([
+      ["notify_services", "onesignal", "devices", "dev-B"],
+      ["notify_services", "onesignal", "devices", "dev-C"],
+    ]),
+  );
+});
+```
+
+Match the file's existing render/mock helpers rather than inventing new ones.
+
+- [ ] **Step 2: Run them and confirm they fail**
+
+Run: `cd web-react && bun run test tests/unit/components/settings/tabs/NotificationsTab.test.tsx`
+Expected: FAIL — the payload today has no `delete` member at all.
+
+- [ ] **Step 3: Track removals and send them**
+
+Accumulate removed device ids in state alongside `v.ns`, clear them on a successful
+save (mirroring how `ControllerTab` resets `droppedOptions` only when `ok`), and
+send `settingsDelta(body, removedIds.map(id => ["notify_services","onesignal","devices",id]))`.
+
+A device added and then removed before saving must NOT appear in `delete` — it was
+never persisted, and naming it asks the backend to remove something that does not
+exist. Decide that case deliberately and state it in a comment.
+
+- [ ] **Step 4: Run the tests and confirm they pass**
+
+- [ ] **Step 5: Prove it end to end, not just at the payload**
+
+The unit tests assert the payload's shape. That is not the same as the device being
+gone. Add a Python test that runs the real envelope through
+`apply_settings_delta` + `validate_settings_tree` and asserts the device is absent
+and its siblings survive — the seam has two ends and this task must pin both.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+cd web-react && bun run typecheck && bun run test && bun run lint
+```
+
+```bash
+jj st
+jj describe --stdin <<'MSGEOF'
+fix(web-react): deleting a OneSignal device actually deletes it
+MSGEOF
+```
+
+---
+
+### Task 16: A regression net for deletion semantics
+
+**Files:**
+- Create: `web-react/tests/unit/helpers/settings/deletionSemantics.test.ts`
+- Modify: `web-react/src/helpers/settings/settingsDelta.ts` (doc only)
+
+**Interfaces:**
+- Consumes: `settingsDelta`.
+- Produces: no runtime exports.
+
+**Scope this honestly.** A source scanner that flags `delete x[k]` in any component
+whose save path lacks `settingsDelta` would be brittle — it correlates two things
+that are not adjacent in the source, which is the same reason this plan's item 17
+rejected a scanner for the `integer` prop. Do not build that.
+
+Build the behavioural net instead:
+
+- [ ] **Step 1: Pin the merge semantics that make this bug possible**
+
+A test asserting, in one place, that a plain body which omits a key does NOT remove
+it, and that a `settingsDelta` naming that key in `delete` DOES. This is the fact
+every future author needs and that nothing currently states in a test.
+
+- [ ] **Step 2: Cover both real deletion surfaces**
+
+Parameterise over the two known ones — `ControllerTab`'s unknown-option drop and
+`NotificationsTab`'s device delete — asserting each produces a payload whose
+`delete` names the removed path. When a third deletion surface is added, it joins
+this list.
+
+- [ ] **Step 3: Say the rule where it is discoverable**
+
+`settingsDelta.ts` explains what the helper does; add what a caller must know — that
+removing a key from a payload is not a deletion, and any surface that removes one
+must name it in `delete`. State it as the rule, do not narrate this bug.
+
+- [ ] **Step 4: Prove the net catches the real thing**
+
+Revert Task 15's fix, confirm the new tests fail, restore. Paste the output. A net
+that has never caught the bug it was written for is decoration.
+
+- [ ] **Step 5: Gate and commit**
+
+```bash
+cd web-react && bun run typecheck && bun run test && bun run lint
+```
+
+```bash
+jj st
+jj describe --stdin <<'MSGEOF'
+test(web-react): pin settings deletion semantics and both deletion surfaces
+MSGEOF
+```
+
+---
+
 ## Parallelization
 
 Concurrency needs **isolated jj workspaces**, not merely disjoint files — two sessions in one workspace will interleave commits.
