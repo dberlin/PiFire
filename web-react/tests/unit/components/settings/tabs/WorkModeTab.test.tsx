@@ -19,12 +19,10 @@ beforeEach(() => {
   saveMock.mockClear();
 });
 
-// NumberField wraps its input in a <label> whose text also carries the suffix,
-// so getByLabelText(field) does not match. Reach the input via the label span.
+// Field associates its <label> to the control via htmlFor/id, so
+// getByLabelText(field) resolves the input directly.
 function inputFor(label: string): HTMLInputElement {
-  const input = screen.getByText(label).closest("label")?.querySelector("input");
-  if (!input) throw new Error(`no input for field "${label}"`);
-  return input;
+  return screen.getByLabelText(label) as HTMLInputElement;
 }
 
 describe("WorkModeTab", () => {

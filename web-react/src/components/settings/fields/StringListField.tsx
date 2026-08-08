@@ -1,14 +1,21 @@
 import { useState } from "react";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
+import { Field } from "./Field";
 
 export function StringListField({
   label,
   values,
   onChange,
+  hint,
+  error = null,
+  path,
 }: {
   label: string;
   values: string[];
   onChange: (next: string[]) => void;
+  hint?: string;
+  error?: string | null;
+  path?: string;
 }) {
   // Index of the row awaiting confirmation; null when no dialog is open. One
   // <ConfirmAction> per field, not per row.
@@ -35,24 +42,38 @@ export function StringListField({
   };
 
   return (
-    <div className="pf-field pf-field-column">
-      <span className="pf-field-label">{label}</span>
-      {values.map((v, i) => (
-        <div className="pf-stringlist-row" key={i}>
-          <input
-            className="pf-input"
-            type="text"
-            value={v}
-            onChange={(e) => onChange(values.map((x, j) => (j === i ? e.target.value : x)))}
-          />
-          <button type="button" aria-label="Remove" onClick={() => requestRemove(i)}>
-            ✕
-          </button>
-        </div>
-      ))}
-      <button type="button" aria-label="Add" onClick={() => onChange([...values, ""])}>
-        + Add
-      </button>
+    <>
+      <Field label={label} hint={hint} error={error} path={path} className="pf-field-column">
+        {({ id, describedBy, invalid }) => (
+          <>
+            {values.map((v, i) => (
+              <div className="pf-stringlist-row" key={i}>
+                <input
+                  // Field's <label> points at row 0 for the click-to-focus
+                  // affordance; every row (row 0 included) also carries its
+                  // own aria-label because the field's one label can only
+                  // name one row, and rows 1+ would otherwise have no
+                  // accessible name at all.
+                  id={i === 0 ? id : undefined}
+                  className="pf-input"
+                  type="text"
+                  value={v}
+                  aria-label={`${label} row ${i + 1}`}
+                  aria-describedby={describedBy}
+                  aria-invalid={invalid}
+                  onChange={(e) => onChange(values.map((x, j) => (j === i ? e.target.value : x)))}
+                />
+                <button type="button" aria-label="Remove" onClick={() => requestRemove(i)}>
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button type="button" aria-label="Add" onClick={() => onChange([...values, ""])}>
+              + Add
+            </button>
+          </>
+        )}
+      </Field>
       <ConfirmAction
         open={pending !== null}
         title="Row is not empty. Remove it?"
@@ -63,6 +84,6 @@ export function StringListField({
         }}
         onCancel={() => setPending(null)}
       />
-    </div>
+    </>
   );
 }

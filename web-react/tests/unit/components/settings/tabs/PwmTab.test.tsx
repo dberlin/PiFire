@@ -383,14 +383,9 @@ describe("PwmTab", () => {
       expect(delta.startup.pwm_duty_cycle).toBe(55);
     });
 
-    // NumberField wraps its input in a <label> whose text also carries the
-    // suffix, so getByLabelText("Min Duty Cycle") does not match. Reach the
-    // input through the label span instead.
-    const inputFor = (label: string) => {
-      const input = screen.getByText(label).closest("label")?.querySelector("input");
-      if (!input) throw new Error(`no input for field "${label}"`);
-      return input;
-    };
+    // Field associates its <label> to the control via htmlFor/id, so
+    // getByLabelText("Min Duty Cycle") resolves the input directly.
+    const inputFor = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
 
     it("bounds the two duty-cycle inputs at min 1 / max 100 (index.html:735,743)", () => {
       renderRoute(<PwmTab />, boundsFixture(20, 100));
@@ -421,11 +416,7 @@ describe("PwmTab MPC fan interaction", () => {
   // Display values collide across this tab -- update_time 10 is also the third
   // default boundary, and the duty bounds are also profile values -- so reach
   // each input through its own label rather than by value.
-  const fieldInput = (label: string) => {
-    const input = screen.getByText(label).closest("label")?.querySelector("input");
-    if (!input) throw new Error(`no input for field "${label}"`);
-    return input;
-  };
+  const fieldInput = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
 
   it("notes that MPC fan commands are inert while PWM control is off", () => {
     renderRoute(<PwmTab />, { settings: mpcFanSettings(false, true), mode: "Stop" });

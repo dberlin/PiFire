@@ -11,10 +11,20 @@ export interface FieldProps {
    *  fields, absent on wizard fields that write no settings path. Task 2
    *  gives this meaning; here it is accepted and ignored. */
   path?: string;
-  children: (aria: { describedBy: string | undefined; invalid: true | undefined }) => ReactNode;
+  /** Extra class(es) appended to the field's wrapping container, e.g. the
+   *  column layout a multi-row field like StringListField needs. Every
+   *  other field renders with "pf-field" alone. */
+  className?: string;
+  children: (aria: {
+    /** Pass this to the control's `id` -- it is what the sibling <label>'s
+     *  `htmlFor` points at. Without it the label names nothing. */
+    id: string;
+    describedBy: string | undefined;
+    invalid: true | undefined;
+  }) => ReactNode;
 }
 
-export function Field({ label, hint, error = null, path, children }: FieldProps) {
+export function Field({ label, hint, error = null, path, className, children }: FieldProps) {
   const ctx = useSettingsFieldErrors();
   // Claim on MOUNT, not when an error exists: the claimed set has to mean
   // "paths with a slot on screen", which is a fact about rendering, not about
@@ -26,6 +36,7 @@ export function Field({ label, hint, error = null, path, children }: FieldProps)
   }, [path, ctx]);
   const resolvedError =
     error ?? (path && ctx ? (ctx.errors.find((e) => e.path === path)?.message ?? null) : null);
+  const controlId = useId();
   const hintId = useId();
   const errorId = useId();
   // aria-describedby takes a space-separated id list; only reference ids for
@@ -33,20 +44,19 @@ export function Field({ label, hint, error = null, path, children }: FieldProps)
   const describedBy =
     [hint ? hintId : null, resolvedError ? errorId : null].filter(Boolean).join(" ") || undefined;
   return (
-    <>
-      {/* The hint sits outside the <label> on purpose: a <label> wrapping a
-          control folds all of its text content into that control's
-          accessible name, so a hint left inside would double as part of the
-          name instead of staying a separate description. */}
-      {/* biome-ignore lint/a11y/noLabelWithoutControl: the control here comes
-          from the render-prop `children`, so static analysis cannot see it
-          inside the <label>. The FieldProps contract requires children to
-          render exactly one real form control, so the label always wraps
-          one at runtime even though the linter cannot verify that. */}
-      <label className="pf-field">
-        <span className="pf-field-label">{label}</span>
-        {children({ describedBy, invalid: resolvedError ? true : undefined })}
+    <div className={className ? `pf-field ${className}` : "pf-field"}>
+      {/* The label is a SIBLING of the control, associated via htmlFor, not
+          a wrapper around it. A wrapping <label> computes its control's
+          accessible name from ALL of the label's descendant text -- for a
+          field whose render prop returns more than the one control (a
+          reveal button, a row of buttons), that folds their text in too
+          ("MQTT Password" becomes "MQTT Password Show"). htmlFor names
+          exactly the one element it points at and leaves everything else
+          alone. */}
+      <label className="pf-field-label" htmlFor={controlId}>
+        {label}
       </label>
+      {children({ id: controlId, describedBy, invalid: resolvedError ? true : undefined })}
       {hint && (
         <span className="pf-field-hint" id={hintId}>
           {hint}
@@ -57,6 +67,6 @@ export function Field({ label, hint, error = null, path, children }: FieldProps)
           {resolvedError}
         </span>
       )}
-    </>
+    </div>
   );
 }

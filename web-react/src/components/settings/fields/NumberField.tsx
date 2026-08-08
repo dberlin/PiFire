@@ -1,5 +1,5 @@
-import { useId } from "react";
 import { clampToBounds } from "../../../helpers/settings/bounds";
+import { Field } from "./Field";
 
 export function NumberField({
   label,
@@ -13,6 +13,7 @@ export function NumberField({
   disabled,
   integer,
   error = null,
+  path,
 }: {
   label: string;
   value: number;
@@ -26,23 +27,14 @@ export function NumberField({
   integer?: boolean;
   /** The backend's reason for refusing this field on the last save. */
   error?: string | null;
+  path?: string;
 }) {
-  const hintId = useId();
-  const errorId = useId();
-  // aria-describedby takes a space-separated id list; only reference ids for
-  // parts that actually render, or the attribute would point at nothing.
-  const describedBy =
-    [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined;
   return (
-    <>
-      {/* The hint sits outside the <label> on purpose: a <label> wrapping a
-          control folds all of its text content into that control's
-          accessible name, so a hint left inside would double as part of the
-          name instead of staying a separate description. */}
-      <label className="pf-field">
-        <span className="pf-field-label">{label}</span>
+    <Field label={label} hint={hint} error={error} path={path}>
+      {({ id, describedBy, invalid }) => (
         <span className="pf-field-control">
           <input
+            id={id}
             className="pf-input"
             type="number"
             value={value}
@@ -51,7 +43,7 @@ export function NumberField({
             step={step ?? (integer ? 1 : undefined)}
             disabled={disabled}
             aria-describedby={describedBy}
-            aria-invalid={error ? true : undefined}
+            aria-invalid={invalid}
             onChange={(e) => onChange(Number(e.target.value))}
             // Bounds enforcement lives here, not in onChange. There is no <form>
             // anywhere in the settings tree, so the browser never runs constraint
@@ -72,17 +64,7 @@ export function NumberField({
           />
           {suffix && <span className="pf-field-suffix">{suffix}</span>}
         </span>
-      </label>
-      {hint && (
-        <span className="pf-field-hint" id={hintId}>
-          {hint}
-        </span>
       )}
-      {error && (
-        <span className="pf-field-error" id={errorId} role="alert">
-          {error}
-        </span>
-      )}
-    </>
+    </Field>
   );
 }

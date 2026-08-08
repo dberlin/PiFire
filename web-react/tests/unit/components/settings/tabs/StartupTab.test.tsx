@@ -22,13 +22,10 @@ beforeEach(() => {
   });
 });
 
-// NumberField wraps its input in a <label> whose text also carries the suffix,
-// so getByLabelText("Prime on Startup") does not match. Reach the input through
-// the label span instead.
+// Field associates its <label> to the control via htmlFor/id, so
+// getByLabelText("Prime on Startup") resolves the input directly.
 function inputFor(label: string): HTMLInputElement {
-  const input = screen.getByText(label).closest("label")?.querySelector("input");
-  if (!input) throw new Error(`no input for field "${label}"`);
-  return input;
+  return screen.getByLabelText(label) as HTMLInputElement;
 }
 
 describe("StartupTab", () => {

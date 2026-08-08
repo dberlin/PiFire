@@ -83,13 +83,9 @@ function renderSettings() {
 // The dirty marker changes the pill's accessible name, so match on the prefix.
 const tab = (label: string) => screen.getByRole("link", { name: new RegExp(`^${label}`) });
 
-// NumberField wraps its input in a <label> whose text also carries the suffix,
-// so getByLabelText does not match it (same helper as PwmTab.test.tsx).
-const inputFor = (label: string) => {
-  const input = screen.getByText(label).closest("label")?.querySelector("input");
-  if (!input) throw new Error(`no input for field "${label}"`);
-  return input;
-};
+// Field associates its <label> to the control via htmlFor/id, so
+// getByLabelText resolves the input directly (same helper as PwmTab.test.tsx).
+const inputFor = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
 
 beforeEach(() => {
   // Only the last test saves; the rest never reach the network.

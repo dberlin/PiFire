@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { Field } from "./Field";
 
 export function Toggle({
   label,
@@ -6,6 +6,8 @@ export function Toggle({
   onChange,
   disabled,
   hint,
+  error = null,
+  path,
 }: {
   label: string;
   checked: boolean;
@@ -13,32 +15,26 @@ export function Toggle({
   disabled?: boolean;
   /** Why the control is in the state it is — announced with it, not beside it. */
   hint?: string;
+  /** The backend's reason for refusing this field on the last save. */
+  error?: string | null;
+  path?: string;
 }) {
-  const hintId = useId();
   return (
-    <>
-      {/* The hint sits outside the <label> on purpose: a <label> wrapping a
-          control folds all of its text content into that control's
-          accessible name, so a hint left inside would double as part of the
-          name instead of staying a separate description. */}
-      <label className="pf-field">
-        <span className="pf-field-label">{label}</span>
+    <Field label={label} hint={hint} error={error} path={path}>
+      {({ id, describedBy, invalid }) => (
         <button
+          id={id}
           type="button"
           className={`pf-switch ${checked ? "on" : ""}`}
           aria-pressed={checked}
-          aria-describedby={hint ? hintId : undefined}
+          aria-describedby={describedBy}
+          aria-invalid={invalid}
           disabled={disabled}
           onClick={() => !disabled && onChange(!checked)}
         >
           <span className="pf-switch-knob" />
         </button>
-      </label>
-      {hint && (
-        <span className="pf-settings-hint" id={hintId}>
-          {hint}
-        </span>
       )}
-    </>
+    </Field>
   );
 }
