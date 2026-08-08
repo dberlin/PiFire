@@ -483,7 +483,18 @@ test("MPC Hold exposes calibration, exact activation, framed outputs, and fallba
     "FEEDING",
   );
 
-  await page.getByRole("button", { name: "MPC learning: collecting" }).click();
+  const learning = page.getByRole("button", { name: "MPC learning: collecting" });
+  await expect(learning).toBeVisible();
+  await expect(page.locator('[data-pf="rightCol"]')).toContainText("MPC learning: collecting");
+  await expect(page.locator('[data-pf="controls"]')).not.toContainText("MPC learning:");
+  await learning.scrollIntoViewIfNeeded();
+  const learningBox = await learning.boundingBox();
+  expect(learningBox).not.toBeNull();
+  expect(learningBox!.y + learningBox!.height).toBeLessThanOrEqual(
+    page.viewportSize()!.height,
+  );
+  await expect(learning).toHaveClass(/pf-dash-mpc-learning/);
+  await learning.click();
   await page.getByLabel("The grill is empty, with normal grates and drip tray installed.").check();
   await page.getByLabel("Sufficient pellets are loaded for the calibration run.").check();
   await page.getByRole("button", { name: "Start calibration" }).click();

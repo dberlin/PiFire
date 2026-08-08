@@ -10,7 +10,6 @@ import { applySettings } from "../../helpers/settings/settingsApi";
 import type { LiveState } from "../../helpers/types";
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmAction } from "./ConfirmAction";
-import { MpcLearningPanel } from "./MpcLearningPanel";
 import { PwmEntry } from "./PwmEntry";
 import { SetpointEntry } from "./SetpointEntry";
 
@@ -21,8 +20,6 @@ const SAFETY_LABELS = new Set(["Stop", "Shutdown"]);
  *  before the grill is up to temperature. Its ceiling is not its own: both
  *  modals set a Hold setpoint, so both stop at the grill's shutdown limit. */
 const HOLD_PROMPT_MIN: Record<"F" | "C", number> = { F: 125, C: 50 };
-/** controllers.json's persisted nominal when an MPC config predates T_amb. */
-const DEFAULT_MPC_AMBIENT_C = 20;
 
 /** Which variant of Flask's single #startupModal is on screen, if any. */
 type StartupPrompt = "none" | "hold" | "confirm";
@@ -54,8 +51,6 @@ export function ControlButtons({
   command,
   disabled,
   apiBase,
-  selectedController = null,
-  mpcAmbientC = DEFAULT_MPC_AMBIENT_C,
 }: {
   dash: LiveState;
   command: CommandClient;
@@ -64,8 +59,6 @@ export function ControlButtons({
    *  human-readable origin ConnectionStatus displays -- fetching that one sends
    *  the browser cross-origin. */
   apiBase: string;
-  selectedController?: string | null;
-  mpcAmbientC?: number;
 }) {
   const buttons = buttonsForMode(dash);
   const [setpointOpen, setSetpointOpen] = useState(false);
@@ -217,13 +210,6 @@ export function ControlButtons({
           </button>
         );
       })}
-      <MpcLearningPanel
-        apiBase={apiBase}
-        selectedController={selectedController}
-        units={dash.tempUnits}
-        safetyMaxTemp={dash.safetyMaxTemp}
-        ambientC={mpcAmbientC}
-      />
       {commandError !== null && (
         <div role="alert" className="pf-dash-control-error">
           {commandError}

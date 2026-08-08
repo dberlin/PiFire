@@ -8,6 +8,7 @@ import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboar
 import { deriveView, type PillView, reading } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
+import { queryKeys } from "../../helpers/query/keys";
 import { saveAccent } from "../../helpers/settings/accent";
 import { getSettings } from "../../helpers/settings/settingsApi";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
@@ -16,6 +17,7 @@ import { ActionMenu, type MenuItem } from "./ActionMenu";
 import { ControlButtons } from "./ControlButtons";
 import { GrillGauge } from "./GrillGauge";
 import { HopperGauge } from "./HopperGauge";
+import { MpcLearningPanel } from "./MpcLearningPanel";
 import { NotifyBell } from "./NotifyBell";
 import { ProbeCard } from "./ProbeCard";
 import { ProbeNotifyModal } from "./ProbeNotifyModal";
@@ -108,7 +110,8 @@ export function Dashboard({
       : DEFAULT_MPC_CONFIG;
   useEffect(() => {
     let cancelled = false;
-    void getSettings(apiBase)
+    void queryClient
+      .fetchQuery({ queryKey: queryKeys.settings, queryFn: () => getSettings(apiBase) })
       .then((settings) => {
         if (cancelled) return;
         const configuredAmbient = settings.controller?.config?.mpc?.T_amb;
@@ -128,7 +131,7 @@ export function Dashboard({
     return () => {
       cancelled = true;
     };
-  }, [apiBase, mpcConfigRequestIdentity]);
+  }, [apiBase, mpcConfigRequestIdentity, queryClient]);
   // Desktop only. Below 1280px this is inert and the breakpoints in
   // dashboard.css do the work; at 1280px and up the board is fixed and scaled,
   // which is what keeps a literal 1280x720 window from clipping the control
@@ -373,8 +376,6 @@ export function Dashboard({
               command={command}
               disabled={!health.alive}
               apiBase={apiBase}
-              selectedController={mpcConfig.selectedController}
-              mpcAmbientC={mpcConfig.ambientC}
             />
           </div>
 
@@ -409,6 +410,13 @@ export function Dashboard({
                 had zero consumers, so React showed a pellet gauge -- reading a
                 hard-coded level -- on grills with no sensor at all. */}
             {dash.hasDistanceSensor && <HopperGauge h={view.hopper} />}
+            <MpcLearningPanel
+              apiBase={apiBase}
+              selectedController={mpcConfig.selectedController}
+              units={dash.tempUnits}
+              safetyMaxTemp={dash.safetyMaxTemp}
+              ambientC={mpcConfig.ambientC}
+            />
           </div>
         </div>
 

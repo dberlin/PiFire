@@ -100,28 +100,50 @@ function DashboardApiHarness() {
 
 describe("Dashboard MPC settings authority", () => {
   afterEach(() => {
+    getSettingsMock.mockReset();
+    getSettingsMock.mockResolvedValue({});
     rs.unstubAllGlobals();
+  });
+
+  async function renderMpcDashboard(hasDistanceSensor: boolean) {
+    getSettingsMock.mockResolvedValue({
+      controller: { selected: "mpc", config: { mpc: { T_amb: 20 } } },
+    });
+    const pendingReport = new Promise<Response>(() => {});
+    rs.stubGlobal("fetch", rs.fn(() => pendingReport));
+    renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor });
+    return screen.findByRole("button", { name: "MPC learning: loading" });
+  }
+
+  it.each([true, false])(
+    "keeps MPC learning in the right column when hopper sensor is %s",
+    async (hasDistanceSensor) => {
+      const trigger = await renderMpcDashboard(hasDistanceSensor);
+      expect(trigger.closest('[data-pf="rightCol"]')).not.toBeNull();
+      expect(trigger.closest('[data-pf="controls"]')).toBeNull();
+    },
+  );
+
+  it("places MPC learning after Hopper when Hopper exists", async () => {
+    const trigger = await renderMpcDashboard(true);
+    const hopper = screen.getByText("Hopper").closest(".pf-dash-hopper");
+    expect(hopper?.nextElementSibling).toBe(trigger);
   });
 
   it("fails closed when returning to an API base until fresh settings arrive", async () => {
     const user = userEvent.setup();
-    const pending = new Promise<Response>(() => {});
+    const pendingSettings = new Promise<Record<string, never>>(() => {});
     let apiASettingsRequests = 0;
-    const fetchMock = rs.fn((input: RequestInfo | URL) => {
-      if (String(input) === "/a/api/settings" && apiASettingsRequests++ === 0) {
+    getSettingsMock.mockImplementation((baseUrl: string) => {
+      if (baseUrl === "/a" && apiASettingsRequests++ === 0) {
         return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({
-            settings: {
-              controller: { selected: "mpc", config: { mpc: { T_amb: 20 } } },
-            },
-          }),
-        } as Response);
+          controller: { selected: "mpc", config: { mpc: { T_amb: 20 } } },
+        });
       }
-      return pending;
+      return pendingSettings;
     });
-    rs.stubGlobal("fetch", fetchMock);
+    const pendingReport = new Promise<Response>(() => {});
+    rs.stubGlobal("fetch", rs.fn(() => pendingReport));
     renderRoute(<DashboardApiHarness />, undefined);
 
     expect(

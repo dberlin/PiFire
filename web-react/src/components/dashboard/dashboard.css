@@ -1028,6 +1028,20 @@ button.pf-dash-pill {
   @apply text-text;
 }
 
+/* Model learning is dashboard status, not a sixth cook-mode command. It keeps
+   the shared button interaction but owns a compact right-column footprint. */
+.pf-dash-mpc-learning {
+  width: 100%;
+  min-height: 56px;
+  flex: 0 0 56px;
+  padding: 8px 14px;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--inset));
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
 /* ==========================================================================
    Breakpoints.
 

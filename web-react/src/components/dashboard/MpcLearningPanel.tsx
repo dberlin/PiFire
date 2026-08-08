@@ -296,7 +296,7 @@ function ActiveMpcLearningPanel({
     <>
       <button
         ref={triggerButton}
-        className="pf-btn"
+        className="pf-btn pf-dash-mpc-learning"
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
