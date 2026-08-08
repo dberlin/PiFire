@@ -110,7 +110,7 @@ That needs no Python change and does not depend on this item. See
 means deleting a pushed tag, which is not worth doing for a cosmetic
 inconsistency. Kept as a record of why the odd one out exists.
 
-Created 2026-08-02 by a `git tag` that ran outside `updater/tag-release.sh`.
+Created 2026-08-02 by a `git tag` that ran outside `updater/tag_release.py`.
 
 Every other release tag is annotated — the script uses `git tag -a` deliberately,
 because `git describe` prefers annotated tags and ignores lightweight ones unless
@@ -120,14 +120,14 @@ asked. `v1.11.0-dev21` is the lone lightweight one, on both this checkout and
 **Nothing is broken by it.** `updater.py:322` runs
 `git describe --tags --always`, and `--tags` is exactly the flag that makes
 lightweight tags count; the `Remote:` line uses `git tag --sort=v:refname
---merged`, which never cared. `tag-release.sh --check` reports the right values
+--merged`, which never cared. `tag_release.py --check` reports the right values
 either way. This is a consistency wart, not a fault.
 
 **The fix, if it is worth doing,** is to recut it at the same commit:
 
 ```
 git tag -d v1.11.0-dev21 && git push origin :refs/tags/v1.11.0-dev21
-updater/tag-release.sh v1.11.0-dev21 --tag-only
+updater/tag_release.py v1.11.0-dev21 --tag-only
 ```
 
 Deleting a pushed tag is the only reason this is filed rather than done — it
