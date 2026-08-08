@@ -44,6 +44,10 @@ export const FIXTURE_DASH: LiveState = {
   cycleRatio: 0,
   fanDuty: 0,
   manualPwm: 100,
+  // Not part of the original capture -- uiHash was added to the socket frame
+  // after this fixture was recorded. Any fixed value is fine here: what
+  // matters to consumers is that it changes between frames, not its value.
+  uiHash: 0,
   timer: {
     start: 0,
     paused: 0,

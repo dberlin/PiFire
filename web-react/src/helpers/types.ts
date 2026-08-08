@@ -104,6 +104,12 @@ export interface LiveState {
   };
   primaryProbe: ProbeData;
   foodProbes: ProbeData[];
+  /** Hash of the probe map (common/app.py::create_ui_hash). It moves when a
+   *  probe is reconfigured anywhere, including from another client. Note it
+   *  also moves on a server restart, because Python salts hash() for strings
+   *  -- a spurious settings refetch, which is cheap and the reason this drives
+   *  an invalidation rather than Flask's full page reload. */
+  uiHash: number;
   [k: string]: unknown;
 }
 

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router";
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
+import { queryKeys } from "../../../../src/helpers/query/keys";
 import { useShellState } from "../../../../src/helpers/shellContext";
 import type { LiveState } from "../../../../src/helpers/types";
 
@@ -87,7 +89,54 @@ function mountShell(over: Partial<LiveState> = {}) {
     [{ path: "/", element: <AppShell />, children: [{ index: true, element: <ContextProbe /> }] }],
     { initialEntries: ["/"] },
   );
-  return render(<RouterProvider router={router} />);
+  // App.tsx wraps every route in QueryClientProvider; AppShell's own
+  // useQueryClient() call needs one present even in tests that don't care
+  // about the settings cache.
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+}
+
+// A full live-state frame to vary uiHash on, one socket tick at a time --
+// App.tsx wraps every route in QueryClientProvider, so AppShell's
+// useQueryClient() needs one here too.
+const FRAME: LiveState = { ...FIXTURE_DASH, timer: timerBlock() };
+
+function frameRenderer(client: QueryClient) {
+  let utils: ReturnType<typeof render> | null = null;
+  return (frame: LiveState) => {
+    useLiveStateMock.mockReturnValue({
+      live: frame,
+      phase: "live",
+      controlAlive: true,
+      targetUrl: "http://pifire.local:5000",
+      command: stubCommand(),
+      pellets: null,
+    });
+    // A declarative MemoryRouter, not createMemoryRouter/RouterProvider: the
+    // data router memoizes its rendered tree off router state, so a rerender()
+    // that changes only the useLiveState() mock (router state untouched)
+    // never reaches AppShell -- verified by instrumentation, the component
+    // rendered exactly once across two rerenderWithFrame calls.
+    const ui = (
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/" element={<AppShell />}>
+              <Route index element={<ContextProbe />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    if (utils === null) {
+      utils = render(ui);
+    } else {
+      utils.rerender(ui);
+    }
+  };
 }
 
 const stopwatch = () => screen.getByRole("button", { name: /toggle timer bar/i });
@@ -213,5 +262,28 @@ describe("AppShell navbar stopwatch and timer bar", () => {
     fireEvent.click(screen.getByRole("button", { name: /pause timer/i }));
 
     expect(command.timerPause).toHaveBeenCalled();
+  });
+});
+
+describe("AppShell settings invalidation on uiHash change", () => {
+  it("refetches settings when the probe map changes under it", async () => {
+    // A changed uiHash means set_probe_map() ran somewhere else: hidden_cards,
+    // notify_data and probe_config are all stale in cache even though the
+    // readings on screen are live.
+    const client = new QueryClient();
+    const spy = rs.spyOn(client, "invalidateQueries");
+    const rerenderWithFrame = frameRenderer(client);
+    rerenderWithFrame({ ...FRAME, uiHash: 111 });
+    rerenderWithFrame({ ...FRAME, uiHash: 222 });
+    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.settings });
+  });
+
+  it("does not refetch when the hash is unchanged", async () => {
+    const client = new QueryClient();
+    const spy = rs.spyOn(client, "invalidateQueries");
+    const rerenderWithFrame = frameRenderer(client);
+    rerenderWithFrame({ ...FRAME, uiHash: 111 });
+    rerenderWithFrame({ ...FRAME, uiHash: 111 });
+    expect(spy).not.toHaveBeenCalled();
   });
 });

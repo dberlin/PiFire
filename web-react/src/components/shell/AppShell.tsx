@@ -1,4 +1,7 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { Outlet } from "react-router";
+import { queryKeys } from "../../helpers/query/keys";
 import { useTimerVisibility } from "../../helpers/timer/timerVisibility";
 import { useLiveState } from "../../helpers/useLiveState";
 import { Banners } from "./Banners";
@@ -27,6 +30,25 @@ export function AppShell() {
   // Same derivation the bar makes; the navbar only needs the yes/no, so it is
   // computed at render rather than lifted out of deriveTimer's richer result.
   const timerRunning = live.timer.start !== 0 && live.timer.paused === 0;
+
+  // uiHash moves when set_probe_map() runs anywhere -- another client, the
+  // wizard, discovery -- and that rebuilds settings the React app already
+  // cached: probe_config, recipe.probe_map, dashboard hidden_cards and
+  // control.notify_data. The cards themselves stay live off the socket, so
+  // this only needs to drop the stale settings cache, not reload the page.
+  const queryClient = useQueryClient();
+  const seenUiHash = useRef<number | null>(null);
+  useEffect(() => {
+    const next = live.uiHash;
+    if (next === undefined) return;
+    if (seenUiHash.current === null) {
+      seenUiHash.current = next; // first frame seeds; it is not a change
+      return;
+    }
+    if (seenUiHash.current === next) return;
+    seenUiHash.current = next;
+    queryClient.invalidateQueries({ queryKey: queryKeys.settings });
+  }, [live.uiHash, queryClient]);
 
   return (
     <div className="pf-shell">
