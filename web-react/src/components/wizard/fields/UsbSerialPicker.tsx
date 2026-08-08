@@ -63,7 +63,14 @@ export function UsbSerialPicker({ dep, value, onChange, onScan }: UsbSerialPicke
       <button type="button" onClick={handleDiscover} disabled={loading}>
         {loading ? "Scanning…" : "Discover"}
       </button>
-      {result && <DiscoveryPanel result={result} onPick={onChange} />}
+      {result && (
+        <DiscoveryPanel
+          result={result}
+          onPick={onChange}
+          onRefresh={() => void handleDiscover()}
+          onClose={() => setResult(null)}
+        />
+      )}
     </div>
   );
 }

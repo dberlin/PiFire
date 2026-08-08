@@ -157,7 +157,14 @@ export function I2cBusField({ dep, value, onChange, onScan }: I2cBusFieldProps) 
           {loading ? "Scanning…" : "Discover"}
         </button>
       )}
-      {scoped && <DiscoveryPanel result={scoped} onPick={handlePick} />}
+      {scoped && (
+        <DiscoveryPanel
+          result={scoped}
+          onPick={handlePick}
+          onRefresh={() => void handleDiscover()}
+          onClose={() => setResult(null)}
+        />
+      )}
     </div>
   );
 }

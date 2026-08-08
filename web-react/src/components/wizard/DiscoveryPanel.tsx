@@ -3,17 +3,45 @@ import type { ScanResult } from "../../helpers/wizard/wizardTypes";
 export interface DiscoveryPanelProps {
   result: ScanResult;
   onPick: (value: string) => void;
+  onRefresh: () => void;
+  onClose: () => void;
 }
 
-export function DiscoveryPanel({ result, onPick }: DiscoveryPanelProps) {
+function DiscoveryActions({
+  onRefresh,
+  onClose,
+}: Pick<DiscoveryPanelProps, "onRefresh" | "onClose">) {
+  return (
+    <div className="pf-discovery-actions">
+      <button type="button" onClick={onRefresh}>
+        Refresh
+      </button>
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+export function DiscoveryPanel({ result, onPick, onRefresh, onClose }: DiscoveryPanelProps) {
   if (result.error) {
-    return <p role="alert">{result.error}</p>;
+    return (
+      <div className="pf-discovery-panel">
+        <p role="alert">{result.error}</p>
+        <DiscoveryActions onRefresh={onRefresh} onClose={onClose} />
+      </div>
+    );
   }
 
   const groups = result.groups.filter((group) => group.items.length > 0);
 
   if (groups.length === 0) {
-    return <p role="alert">No devices found.</p>;
+    return (
+      <div className="pf-discovery-panel">
+        <p role="alert">No devices found.</p>
+        <DiscoveryActions onRefresh={onRefresh} onClose={onClose} />
+      </div>
+    );
   }
 
   return (
@@ -30,6 +58,7 @@ export function DiscoveryPanel({ result, onPick }: DiscoveryPanelProps) {
           </div>
         </div>
       ))}
+      <DiscoveryActions onRefresh={onRefresh} onClose={onClose} />
     </div>
   );
 }

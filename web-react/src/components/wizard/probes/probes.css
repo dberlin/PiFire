@@ -248,3 +248,8 @@
 .pf-probes-surface .pf-field-column > .pf-discovery-group-items {
   @apply mt-[8px];
 }
+/* Refresh/Close row, present on all three DiscoveryPanel outcomes (error,
+   empty, populated) so a re-scan is always reachable. */
+.pf-discovery-actions {
+  @apply flex justify-end gap-[10px] pt-[4px];
+}
