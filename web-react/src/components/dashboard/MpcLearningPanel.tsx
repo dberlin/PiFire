@@ -11,9 +11,18 @@ import type {
   ModelEvidenceStatus,
   ModelScore,
   MpcCalibrationAction,
+  TemperatureUnit,
 } from "../../helpers/modelEvidence/types";
 
 const REPORT_REFRESH_MS = 5_000;
+
+/** The stage band centres, mirroring CalibrationConfig.band_centers_c. */
+const BAND_CENTERS_F = [225, 325, 425];
+
+function bandCenters(units: TemperatureUnit): string {
+  const values = BAND_CENTERS_F.map((f) => (units === "F" ? f : Math.round(((f - 32) * 5) / 9)));
+  return `${values[0]}, ${values[1]} and ${values[2]} °${units}`;
+}
 
 const STATUS_LABEL: Record<ModelEvidenceStatus, string> = {
   collecting: "Collecting",
@@ -40,6 +49,7 @@ const STATUS_TONE: Record<ModelEvidenceStatus, string> = {
 interface MpcLearningPanelProps {
   apiBase: string;
   selectedController: string | null;
+  units: TemperatureUnit;
   ambientC: number;
 }
 
@@ -92,7 +102,7 @@ export function MpcLearningPanel(props: MpcLearningPanelProps) {
   return props.selectedController === "mpc" ? <ActiveMpcLearningPanel {...props} /> : null;
 }
 
-function ActiveMpcLearningPanel({ apiBase, ambientC }: MpcLearningPanelProps) {
+function ActiveMpcLearningPanel({ apiBase, units, ambientC }: MpcLearningPanelProps) {
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<ModelEvidenceReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -340,7 +350,14 @@ function ActiveMpcLearningPanel({ apiBase, ambientC }: MpcLearningPanelProps) {
               {report !== null && (
                 <>
                   <section className="rounded-card border border-card-border bg-inset p-4">
-                    <div className="grid gap-3">
+                    <p className="text-sm text-probe-label">
+                      Calibration probes around the hold you set; it does not drive the grill to a
+                      temperature of its own. Hold at each of its three bands in turn (
+                      {bandCenters(units)}
+                      ), and it waits at the one it finished until you set the next. Probes stay
+                      under the configured grill maximum.
+                    </p>
+                    <div className="mt-3 grid gap-3">
                       <div className="grid content-start gap-2 text-sm">
                         <label className="flex items-start gap-2">
                           <input

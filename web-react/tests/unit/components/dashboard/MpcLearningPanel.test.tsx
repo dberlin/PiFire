@@ -122,7 +122,9 @@ afterEach(() => {
 });
 
 function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningPanel>> = {}) {
-  return render(<MpcLearningPanel apiBase="" selectedController="mpc" ambientC={20} {...props} />);
+  return render(
+    <MpcLearningPanel apiBase="" selectedController="mpc" units="F" ambientC={20} {...props} />,
+  );
 }
 
 async function openPanel() {
@@ -437,5 +439,22 @@ describe("MpcLearningPanel", () => {
     await openPanel();
 
     expect(screen.getByText(/Calibration: cancelled/i)).toBeInTheDocument();
+  });
+
+  it("says calibration follows the hold rather than driving one, in the operator's unit", async () => {
+    // The removed "maximum calibration temperature" field read like a target.
+    // Nothing drives the grill, so the bands are the operator's job.
+    renderPanel();
+    await openPanel();
+
+    expect(screen.getByText(/does not drive the grill/i)).toBeInTheDocument();
+    expect(screen.getByText(/225, 325 and 425 °F/)).toBeInTheDocument();
+  });
+
+  it("states the bands in Celsius for a Celsius grill", async () => {
+    renderPanel({ units: "C" });
+    await openPanel();
+
+    expect(screen.getByText(/107, 163 and 218 °C/)).toBeInTheDocument();
   });
 });

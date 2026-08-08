@@ -2024,6 +2024,18 @@ class HoldMode(ControlMode):
             )
             self._runner.request_calibration(command)
         except (KeyError, NotImplementedError, TypeError, ValueError) as error:
+            import control as _control
+
+            # Consume the revision anyway. Its content is fixed, so no later
+            # tick can build it, and leaving it unconsumed re-attempted the
+            # same command every tick for the rest of the cook -- calibration
+            # never started, and the only record was a trace event. A operator
+            # is told, because "nothing happened" is what they would otherwise
+            # see. Re-entering Hold reconsiders it, which is what makes a
+            # command rejected for a controller that cannot calibrate usable
+            # again once one that can is configured.
+            self._calibration_command_high_water = revision
+            _control.eventLogger.error(f"Rejected calibration command revision {revision}: {error}")
             self._trace_safety(
                 SafetyEventType.SCHEDULER_RESET,
                 now,

@@ -451,3 +451,32 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     ]
     assert len(coast) == 1
     assert coast[0].completed_stages == ("low", "middle", "high")
+
+
+def test_a_command_that_cannot_be_built_is_rejected_once_and_named(hold_cycle, caplog):
+    """It used to be retried every tick, forever: the revision was never
+    consumed, so calibration silently never started and the only record was a
+    trace event no operator reads."""
+    import logging
+
+    runner = FakeControllerRunner(period=1.0).script([_result(), _result(2), _result(3)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.control["mpc_calibration"] = {
+        "action": "start",
+        "revision": 1,
+        # ambient_c missing entirely -- CalibrationCommand cannot be built.
+        "ambient_source": "configured",
+        "empty_grill_confirmed": True,
+        "pellets_confirmed": True,
+    }
+    hold.setup()
+
+    with caplog.at_level(logging.ERROR, logger="control"):
+        hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+        hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+        hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
+
+    assert runner.calibration_requests == []
+    # Rejected once, not once per tick.
+    assert len([r for r in caplog.records if "calibration command" in r.getMessage()]) == 1
+    assert "ambient_c" in caplog.text

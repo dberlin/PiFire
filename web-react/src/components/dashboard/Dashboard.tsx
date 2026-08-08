@@ -413,6 +413,7 @@ export function Dashboard({
             <MpcLearningPanel
               apiBase={apiBase}
               selectedController={mpcConfig.selectedController}
+              units={dash.tempUnits}
               ambientC={mpcConfig.ambientC}
             />
           </div>
