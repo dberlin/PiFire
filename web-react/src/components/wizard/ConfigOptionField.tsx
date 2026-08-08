@@ -1,4 +1,5 @@
 import type { ConfigOption } from "../../helpers/wizard/wizardTypes";
+import { Field } from "../settings/fields/Field";
 
 export interface ConfigOptionFieldProps {
   option: ConfigOption;
@@ -18,35 +19,43 @@ export function ConfigOptionField({ option, value, onChange }: ConfigOptionField
     const listValues = option.list_values ?? [];
     const listLabels = option.list_labels ?? [];
     return (
-      <label className="pf-field">
-        <span className="pf-field-label">{option.option_friendly_name}</span>
-        <select
-          className="pf-input"
-          value={String(effective)}
-          onChange={(e) => {
-            const chosen = listValues.find((item) => String(item) === e.target.value);
-            onChange(String(chosen ?? e.target.value));
-          }}
-        >
-          {listValues.map((item, i) => (
-            <option key={String(item)} value={String(item)}>
-              {listLabels[i] ?? String(item)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <Field label={option.option_friendly_name} hint={option.option_description}>
+        {({ id, describedBy, invalid }) => (
+          <select
+            id={id}
+            className="pf-input"
+            value={String(effective)}
+            aria-describedby={describedBy}
+            aria-invalid={invalid}
+            onChange={(e) => {
+              const chosen = listValues.find((item) => String(item) === e.target.value);
+              onChange(String(chosen ?? e.target.value));
+            }}
+          >
+            {listValues.map((item, i) => (
+              <option key={String(item)} value={String(item)}>
+                {listLabels[i] ?? String(item)}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
     );
   }
 
   return (
-    <label className="pf-field">
-      <span className="pf-field-label">{option.option_friendly_name}</span>
-      <input
-        className="pf-input"
-        type="text"
-        value={String(effective ?? "")}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </label>
+    <Field label={option.option_friendly_name} hint={option.option_description}>
+      {({ id, describedBy, invalid }) => (
+        <input
+          id={id}
+          className="pf-input"
+          type="text"
+          value={String(effective ?? "")}
+          aria-describedby={describedBy}
+          aria-invalid={invalid}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </Field>
   );
 }

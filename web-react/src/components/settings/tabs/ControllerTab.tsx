@@ -210,6 +210,7 @@ export function ControllerTab() {
                 label={opt.option_friendly_name}
                 checked={!!values[opt.option_name]}
                 onChange={(b) => set(opt.option_name, b)}
+                hint={opt.option_description}
                 path={optionPath}
               />
             );
@@ -224,6 +225,7 @@ export function ControllerTab() {
                 min={opt.option_min ?? undefined}
                 max={opt.option_max ?? undefined}
                 step={opt.option_step ?? undefined}
+                hint={opt.option_description}
                 path={optionPath}
               />
             );
@@ -241,6 +243,7 @@ export function ControllerTab() {
                   label: listLabels[i] ?? String(lv),
                 }))}
                 onChange={(v) => set(opt.option_name, v)}
+                hint={opt.option_description}
                 path={optionPath}
               />
             );
@@ -252,6 +255,7 @@ export function ControllerTab() {
                 label={opt.option_friendly_name}
                 value={String(values[opt.option_name] ?? "")}
                 onChange={(v) => set(opt.option_name, v)}
+                hint={opt.option_description}
                 path={optionPath}
               />
             );

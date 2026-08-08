@@ -11,6 +11,14 @@ import { renderRoute } from "../../../test-utils";
 // without a test noticing on at least one side.
 const LEARNING_FALLBACK_CLAIM = "falls back to the full optimisation until it is retrained";
 const LEARNING_FALLBACK_REGEX = new RegExp(LEARNING_FALLBACK_CLAIM, "i");
+// The "Learn This Grill" field's own option_description now renders
+// unconditionally as its Field hint (Task 5) and happens to share
+// LEARNING_FALLBACK_CLAIM's trailing clause with the *conditional* note
+// ControllerTab prints only while `learning && netPolicy` hold. This
+// wording is unique to that conditional note, so it -- not the always-on
+// hint -- is what the tests below can use to tell "the note is showing"
+// from "the note is not showing".
+const IDENTIFICATION_NOTE_REGEX = /no longer matches the pre-trained neural policy/i;
 
 const saveMock = rs.fn().mockResolvedValue(true);
 
@@ -537,23 +545,31 @@ describe("ControllerTab identification note", () => {
 
   it("explains the fallback when learning is on and the fast path is in use", () => {
     renderRoute(<ControllerTab />, ctx(true));
-    expect(screen.getByText(LEARNING_FALLBACK_REGEX)).toBeInTheDocument();
+    expect(screen.getByText(IDENTIFICATION_NOTE_REGEX)).toBeInTheDocument();
   });
 
   it("says nothing when learning is off", () => {
     renderRoute(<ControllerTab />, ctx(false));
-    expect(screen.queryByText(LEARNING_FALLBACK_REGEX)).toBeNull();
+    expect(screen.queryByText(IDENTIFICATION_NOTE_REGEX)).toBeNull();
   });
 
   it("appears as soon as the toggle is flipped, before saving", () => {
     renderRoute(<ControllerTab />, ctx(false));
     fireEvent.click(screen.getByRole("button", { name: "Learn This Grill" }));
-    expect(screen.getByText(LEARNING_FALLBACK_REGEX)).toBeInTheDocument();
+    expect(screen.getByText(IDENTIFICATION_NOTE_REGEX)).toBeInTheDocument();
   });
 
   it("says nothing when learning is on but the firing-rate policy is NLP (already solves in full)", () => {
     renderRoute(<ControllerTab />, ctx(true, "nlp"));
-    expect(screen.queryByText(LEARNING_FALLBACK_REGEX)).toBeNull();
+    expect(screen.queryByText(IDENTIFICATION_NOTE_REGEX)).toBeNull();
+  });
+
+  it("shows the option's own description as the field hint regardless of identification state", () => {
+    // Task 5: every generated field gets hint={opt.option_description}, so
+    // "Learn This Grill" shows its manifest description whether or not the
+    // conditional note above is also showing.
+    renderRoute(<ControllerTab />, ctx(false));
+    expect(screen.getByText(LEARNING_FALLBACK_REGEX)).toBeInTheDocument();
   });
 
   it("keeps controllers.json's option_description making the same claim as the rendered note", () => {

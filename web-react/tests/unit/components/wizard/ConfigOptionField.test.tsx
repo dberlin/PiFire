@@ -149,6 +149,24 @@ describe("ConfigOptionField", () => {
     expect(screen.getByRole("textbox", { name: "Layout File" })).toHaveValue("");
   });
 
+  it("renders the manifest's description and wires it to the control via aria-describedby", () => {
+    // Text and shape taken from wizard_manifest.json's ili9341e display config,
+    // not invented -- a hand-written fixture only proves it agrees with itself.
+    const rotation: ConfigOption = {
+      option_name: "rotation",
+      option_friendly_name: "Screen Rotation",
+      option_description: "Select the display rotation angle (Usually 0 degrees).",
+      option_type: "list",
+      list_values: [0, 1, 2, 3],
+      list_labels: ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
+      default: 0,
+    };
+    render(<ConfigOptionField option={rotation} value={0} onChange={rs.fn()} />);
+    const control = screen.getByRole("combobox", { name: "Screen Rotation" });
+    const description = screen.getByText("Select the display rotation angle (Usually 0 degrees).");
+    expect(control.getAttribute("aria-describedby")).toBe(description.id);
+  });
+
   it("renders nothing when hidden", () => {
     const hiddenOption: ConfigOption = { ...listOption, hidden: true };
     const { container } = render(
