@@ -1348,7 +1348,45 @@ Then delete the schema field, the default, and the `WorkModeTab` control and typ
 Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/ -q`
 Expected: PASS. Fixtures spelling `HoldCycleTime` in a plain dict are harmless; schema-validating ones need the key removed.
 
-- [ ] **Step 6: Confirm shedding, as in Task 11 Step 6**
+- [ ] **Step 6: Do NOT add a migration, and do NOT bump the schema version**
+
+**Corrected twice. This is the settled version — read the reasoning, because the
+first correction was wrong in the opposite direction.**
+
+This plan originally said no migration was needed. Task 11 then added one and
+bumped `SETTINGS_SCHEMA_VERSION` 7 -> 8; a mid-run correction told this task to
+copy that. Both the migration and that instruction have since been **reverted**.
+The original claim was right.
+
+What settles it, verified empirically rather than read off a comment: a settings
+tree carrying a retired *modeled* field passes `validate_settings_tree()` through
+its extra-key repair path, and the dump that gets persisted has the key stripped.
+Two extra keys at once behave the same. It only raises when a genuinely bad value
+co-occurs -- and then the write is rejected for that other reason, not the extra
+key.
+
+So for `cycle_data.HoldCycleTime`, which is a modeled field like `u_min`:
+
+- **Do not** write a `_remove_retired_*` function or register a `_SHAPE_MIGRATIONS`
+  entry.
+- **Do not** touch `SETTINGS_SCHEMA_VERSION`. The policy comment directly above it
+  says a deleted field does not bump, and upstream is independently at 8 -- a bump
+  here would collide.
+- `tests/unit/common/test_settings_shape_digest.py` asserts only
+  `shape_digest(SettingsSchema) == SETTINGS_SHAPE_DIGEST`; it reads neither the
+  version nor the migration table. Update the recorded digest if removing the
+  field changes it, and nothing else. **Ignore its failure-message prose**, which
+  says unconditionally to bump the version and add a migration step -- that text
+  is advisory, is not what the assert enforces, and has already misled one review.
+- Regenerate `web-react/schema/settings.schema.json` and the two generated TS
+  files, as Task 11 did.
+
+**A different class you may meet and must not confuse with this one:** entries in
+a free-form dict such as `controller.config.<name>` are schema-*valid*, so nothing
+strips them -- `apply_settings_delta` deep-merges and omission cannot express
+deletion, so those keys persist forever. Removing one needs the explicit
+`settings_delta()` `delete` channel, not a migration. That is a separate problem
+from retiring a modeled field, and it is not this task's.
 
 - [ ] **Step 7: Format, gate and commit**
 
