@@ -666,6 +666,30 @@ describe("StartupTab", () => {
       expect(shutdownInput).not.toHaveAttribute("aria-invalid");
     });
 
+    // Regression: StartupTab hands SettingsFieldErrorsProvider the raw
+    // `errors` array, and no field on this tab claims its path through that
+    // context yet (Task 3 wires that up). Without filtering by
+    // CLAIMED_PATHS first, SaveBar's unmatched fallback would repeat every
+    // error a NumberField already renders inline via `error={errorFor(...)}`
+    // below -- distinct wording from "Save failed." so a duplicate is
+    // unambiguous rather than coincidentally matching the summary line.
+    it("does not repeat a claimed field's error in the save bar", () => {
+      useSaveSettingsMock.mockReturnValue({
+        save: saveMock,
+        saving: false,
+        status: { kind: "error", message: "Save failed." },
+        errors: [{ path: "startup.duration", message: "Input should be a valid integer" }],
+        baseUrl: "",
+      });
+
+      renderRoute(<StartupTab />, fixture());
+
+      const alerts = screen.getAllByRole("alert").map((el) => el.textContent);
+      // Exactly the field's own inline message and the bar's summary line --
+      // no third, "startup.duration: ..."-prefixed alert from the fallback.
+      expect(alerts).toEqual(["Input should be a valid integer", "Save failed."]);
+    });
+
     // A cross-section rule can reject a path this tab does not render at
     // all. Dropping it (rather than falling through to unmatchedErrors)
     // would leave a failed save with no visible reason on screen.

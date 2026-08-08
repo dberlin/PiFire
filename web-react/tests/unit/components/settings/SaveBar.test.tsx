@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SaveBar } from "../../../../src/components/settings/SaveBar";
+import { SettingsFieldErrorsProvider } from "../../../../src/helpers/settings/fieldErrorContext";
 
 afterEach(cleanup);
 
@@ -44,5 +45,30 @@ describe("SaveBar", () => {
     render(<SaveBar onSave={onSave} saving={false} status={{ kind: "idle" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  // No field on screen claims any settings path outside a
+  // SettingsFieldErrorsProvider, so every per-field error the context knows
+  // about falls through to the bar. This is the "no provider at all" case;
+  // fieldErrorContext.test.tsx covers claimed-vs-unmatched with real fields.
+  it("renders no field-error alerts without a SettingsFieldErrorsProvider", () => {
+    render(<SaveBar onSave={() => {}} saving={false} status={{ kind: "idle" }} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("names every unclaimed field error inside a SettingsFieldErrorsProvider", () => {
+    const errors = [
+      { path: "safety.maxtemp", message: "Input should be a valid integer" },
+      { path: "startup.duration", message: "Input should be greater than 0" },
+    ];
+    render(
+      <SettingsFieldErrorsProvider errors={errors}>
+        <SaveBar onSave={() => {}} saving={false} status={{ kind: "idle" }} />
+      </SettingsFieldErrorsProvider>,
+    );
+    expect(screen.getAllByRole("alert").map((n) => n.textContent)).toEqual([
+      "safety.maxtemp: Input should be a valid integer",
+      "startup.duration: Input should be greater than 0",
+    ]);
   });
 });

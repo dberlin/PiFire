@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
-import { errorFor } from "../../../helpers/settings/fieldErrors";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
+import { errorFor, unmatchedErrors } from "../../../helpers/settings/fieldErrors";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
@@ -29,9 +30,10 @@ const STARTUP_DEFAULTS = SETTINGS_DEFAULTS.startup;
 // The paths whose widget on this tab can actually display a rejection
 // inline — the NumberFields wired to `error={errorFor(errors, ...)}` below.
 // Toggle, Select and RangeProfileTable have no error slot yet, so their
-// paths must stay OUT of this list: SaveBar treats everything here as
-// claimed and drops it from the fallback, and a path with no error slot that
-// is wrongly listed here would have its rejection shown nowhere at all.
+// paths must stay OUT of this list: a path with no error slot that is
+// wrongly listed here would have its rejection shown nowhere at all.
+// Feeds the transitional unmatchedErrors() filter below, until Task 3's
+// fields claim their own paths through SettingsFieldErrorsProvider directly.
 const CLAIMED_PATHS = [
   "shutdown.shutdown_duration",
   "startup.duration",
@@ -182,7 +184,14 @@ export function StartupTab() {
   ];
 
   return (
-    <>
+    // Transitional: no field on this tab claims its path through the context
+    // yet (Task 3 wires that), so handing the provider the raw `errors` array
+    // would let SaveBar's unmatched fallback repeat every error a NumberField
+    // already renders inline via `error={errorFor(errors, ...)}` below.
+    // Filtering through CLAIMED_PATHS preserves the pre-context behavior:
+    // only errors nothing on this tab can display reach the bar. Drop this
+    // filter (and CLAIMED_PATHS) once Task 3's fields claim their own paths.
+    <SettingsFieldErrorsProvider errors={unmatchedErrors(errors, CLAIMED_PATHS)}>
       <Section title="Shutdown">
         <NumberField
           integer
@@ -318,15 +327,8 @@ export function StartupTab() {
             />
           </>
         )}
-        <SaveBar
-          onSave={onSave}
-          saving={saving}
-          status={status}
-          dirty={dirty}
-          errors={errors}
-          paths={CLAIMED_PATHS}
-        />
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
       </Section>
-    </>
+    </SettingsFieldErrorsProvider>
   );
 }

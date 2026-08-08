@@ -1,4 +1,5 @@
-import { type ReactNode, useId } from "react";
+import { type ReactNode, useEffect, useId } from "react";
+import { useSettingsFieldErrors } from "../../../helpers/settings/fieldErrorContext";
 
 export interface FieldProps {
   label: string;
@@ -13,13 +14,24 @@ export interface FieldProps {
   children: (aria: { describedBy: string | undefined; invalid: true | undefined }) => ReactNode;
 }
 
-export function Field({ label, hint, error = null, children }: FieldProps) {
+export function Field({ label, hint, error = null, path, children }: FieldProps) {
+  const ctx = useSettingsFieldErrors();
+  // Claim on MOUNT, not when an error exists: the claimed set has to mean
+  // "paths with a slot on screen", which is a fact about rendering, not about
+  // this save's outcome. Deriving it from the errors would let a hidden
+  // field's error vanish.
+  useEffect(() => {
+    if (!path || !ctx) return;
+    return ctx.claim(path);
+  }, [path, ctx]);
+  const resolvedError =
+    error ?? (path && ctx ? (ctx.errors.find((e) => e.path === path)?.message ?? null) : null);
   const hintId = useId();
   const errorId = useId();
   // aria-describedby takes a space-separated id list; only reference ids for
   // parts that actually render, or the attribute points at nothing.
   const describedBy =
-    [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined;
+    [hint ? hintId : null, resolvedError ? errorId : null].filter(Boolean).join(" ") || undefined;
   return (
     <>
       {/* The hint sits outside the <label> on purpose: a <label> wrapping a
@@ -33,16 +45,16 @@ export function Field({ label, hint, error = null, children }: FieldProps) {
           one at runtime even though the linter cannot verify that. */}
       <label className="pf-field">
         <span className="pf-field-label">{label}</span>
-        {children({ describedBy, invalid: error ? true : undefined })}
+        {children({ describedBy, invalid: resolvedError ? true : undefined })}
       </label>
       {hint && (
         <span className="pf-field-hint" id={hintId}>
           {hint}
         </span>
       )}
-      {error && (
+      {resolvedError && (
         <span className="pf-field-error" id={errorId} role="alert">
-          {error}
+          {resolvedError}
         </span>
       )}
     </>
