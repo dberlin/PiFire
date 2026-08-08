@@ -10,7 +10,6 @@ export type Pmode = number;
 export type Smokeoffcycletime = number;
 export type Smokeoncycletime = number;
 export type UMax = number;
-export type UMin = number;
 export type Current = string;
 export type Selected1 = string;
 export type SleepTimeout = number;
@@ -256,7 +255,6 @@ export interface CycleData {
   SmokeOffCycleTime?: Smokeoffcycletime;
   SmokeOnCycleTime?: Smokeoncycletime;
   u_max?: UMax;
-  u_min?: UMin;
 }
 export interface Dashboard {
   current?: Current;

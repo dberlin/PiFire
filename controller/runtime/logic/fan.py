@@ -1,9 +1,7 @@
 """Pure fan-timing calculations and the shared start_fan() helper used by the
-mode handlers (controller/runtime/modes/) for fan-assist/smoke-plus timing and
-turning the fan on (AC or duty-cycled DC). No I/O beyond the grill_platform
-call in start_fan()."""
-
-from dataclasses import dataclass
+mode handlers (controller/runtime/modes/) for smoke-plus timing, fan
+ownership, and turning the fan on (AC or duty-cycled DC). No I/O beyond the
+grill_platform call in start_fan()."""
 
 
 def clamp_duty(duty, pwm_settings):
@@ -29,21 +27,6 @@ def smoke_plus_max_ratio(smoke_plus_settings, s_plus):
         total = smoke_plus_settings["on_time"] + smoke_plus_settings["off_time"]
         return smoke_plus_settings["on_time"] / total
     return 1
-
-
-@dataclass
-class FanTimes:
-    on_time: float
-    off_time: float
-    ratio: float = None
-
-
-def fan_assist_times(controller_output, total_fan_cycle, max_fan_ratio, u_min):
-    adjusted = max(0, controller_output / u_min)
-    ratio = adjusted * max_fan_ratio
-    on_time = total_fan_cycle * ratio
-    off_time = total_fan_cycle * (1 - ratio)
-    return FanTimes(on_time=on_time, off_time=off_time, ratio=ratio)
 
 
 def start_fan(grill_platform, settings, duty_cycle=None):

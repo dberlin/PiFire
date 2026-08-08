@@ -38,7 +38,6 @@ describe("WorkModeTab", () => {
           SmokeOnCycleTime: 5,
           SmokeOffCycleTime: 5,
           PMode: 1,
-          u_min: 10.5,
           u_max: 95.5,
           LidOpenDetectEnabled: true,
           LidOpenThreshold: 35,
@@ -71,7 +70,6 @@ describe("WorkModeTab", () => {
     // Check Cycle Data fields
     expect(screen.getByDisplayValue("10")).toBeInTheDocument();
     expect(screen.getByDisplayValue("1")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("10.5")).toBeInTheDocument();
     expect(screen.getByDisplayValue("95.5")).toBeInTheDocument();
     expect(screen.getByDisplayValue("35")).toBeInTheDocument();
     expect(screen.getByDisplayValue("75")).toBeInTheDocument();
@@ -105,7 +103,6 @@ describe("WorkModeTab", () => {
           SmokeOnCycleTime: 5,
           SmokeOffCycleTime: 5,
           PMode: 0,
-          u_min: 0,
           u_max: 100,
           LidOpenDetectEnabled: false,
           LidOpenThreshold: 30,
@@ -172,7 +169,6 @@ describe("WorkModeTab", () => {
           SmokeOnCycleTime: 6,
           SmokeOffCycleTime: 7,
           PMode: 1,
-          u_min: 2,
           u_max: 99,
           LidOpenDetectEnabled: false,
           LidOpenThreshold: 31,
@@ -208,7 +204,6 @@ describe("WorkModeTab", () => {
     change("6", "26");
     change("7", "27");
     change("1", "41");
-    change("2", "42");
     change("99", "43");
     change("31", "44");
     change("61", "45");
@@ -238,7 +233,6 @@ describe("WorkModeTab", () => {
             SmokeOnCycleTime: 26,
             SmokeOffCycleTime: 27,
             PMode: 41,
-            u_min: 42,
             u_max: 43,
             LidOpenDetectEnabled: true,
             LidOpenThreshold: 44,

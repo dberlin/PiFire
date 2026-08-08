@@ -17,7 +17,6 @@ type WorkMode = {
     SmokeOnCycleTime: number;
     SmokeOffCycleTime: number;
     PMode: number;
-    u_min: number;
     u_max: number;
     LidOpenDetectEnabled: boolean;
     LidOpenThreshold: number;
@@ -48,7 +47,6 @@ function readWorkMode(s: Settings): WorkMode {
       SmokeOnCycleTime: cd.SmokeOnCycleTime ?? SETTINGS_DEFAULTS.cycle_data.SmokeOnCycleTime,
       SmokeOffCycleTime: cd.SmokeOffCycleTime ?? SETTINGS_DEFAULTS.cycle_data.SmokeOffCycleTime,
       PMode: cd.PMode ?? SETTINGS_DEFAULTS.cycle_data.PMode,
-      u_min: cd.u_min ?? SETTINGS_DEFAULTS.cycle_data.u_min,
       u_max: cd.u_max ?? SETTINGS_DEFAULTS.cycle_data.u_max,
       LidOpenDetectEnabled: !!cd.LidOpenDetectEnabled,
       LidOpenThreshold: cd.LidOpenThreshold ?? SETTINGS_DEFAULTS.cycle_data.LidOpenThreshold,
@@ -160,13 +158,6 @@ export function WorkModeTab() {
           max={9}
           hint="0–9"
           path="cycle_data.PMode"
-        />
-        <NumberField
-          label="U Min"
-          value={v.cycle_data.u_min}
-          onChange={(n) => setCycleData("u_min", n)}
-          step={0.1}
-          path="cycle_data.u_min"
         />
         <NumberField
           label="U Max"

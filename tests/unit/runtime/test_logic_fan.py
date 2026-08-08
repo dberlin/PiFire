@@ -1,8 +1,6 @@
 from controller.runtime.logic.fan import (
-    FanTimes,
     clamp_duty,
     controller_fan_authority,
-    fan_assist_times,
     smoke_plus_max_ratio,
 )
 
@@ -39,34 +37,6 @@ def test_smoke_plus_max_ratio_s_plus_true_returns_on_over_total():
 def test_smoke_plus_max_ratio_s_plus_false_returns_one():
     smoke_plus_settings = {"on_time": 30, "off_time": 90}
     assert smoke_plus_max_ratio(smoke_plus_settings, False) == 1
-
-
-def test_fan_assist_times_negative_controller_output_floors_to_zero():
-    # controller_output negative -> adjusted floored at 0 -> ratio 0 -> on_time 0
-    result = fan_assist_times(controller_output=-5, total_fan_cycle=60, max_fan_ratio=1, u_min=10)
-    assert result.on_time == 0
-    assert result.off_time == 60
-
-
-def test_fan_assist_times_known_positive_output():
-    # adjusted = 5/10 = 0.5, ratio = 0.5 * 0.8 = 0.4
-    # on_time = 60 * 0.4 = 24.0, off_time = 60 * 0.6 = 36.0
-    result = fan_assist_times(controller_output=5, total_fan_cycle=60, max_fan_ratio=0.8, u_min=10)
-    assert result.on_time == 24.0
-    assert result.off_time == 36.0
-
-
-def test_fan_assist_times_output_equals_u_min_with_full_ratio_is_100_percent_fan():
-    # adjusted = 10/10 = 1, ratio = 1 * 1 = 1
-    # on_time = total_fan_cycle, off_time = 0
-    result = fan_assist_times(controller_output=10, total_fan_cycle=45, max_fan_ratio=1, u_min=10)
-    assert result.on_time == 45
-    assert result.off_time == 0
-
-
-def test_fan_times_is_a_dataclass_instance():
-    result = fan_assist_times(controller_output=10, total_fan_cycle=45, max_fan_ratio=1, u_min=10)
-    assert isinstance(result, FanTimes)
 
 
 def _s(dc_fan):

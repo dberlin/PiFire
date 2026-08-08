@@ -8,7 +8,7 @@
  Description: The duty that actually reached the auger, and why.
 
  A controller's request and the grill's behavior are not the same thing: the
- mode clamps the request to [u_min, u_max], pins the auger off for a lid-open
+ mode clamps the request to a u_max ceiling, pins the auger off for a lid-open
  pause, and hands the auger to a human on a manual override. A controller that
  models the plant has to follow what the grill did, not what it asked for.
 

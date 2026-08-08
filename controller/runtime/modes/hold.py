@@ -99,7 +99,7 @@ class HoldMode(ControlMode):
     request, then runs the Hold-specific controller sub-block (submit the
     fresh per-tick ptemp to the runner, normalize its output into a cycle
     ratio + optional fan command, route an MPC fan command into
-    `control['duty_cycle']` when one arrives, clamp to u_min/u_max), then the
+    `control['duty_cycle']` when one arrives, clamp to u_max), then the
     shared (non-Hold) auger-cycle toggle via `_auger_cycle_tick` (Hold
     overrides `_on_auger_on` to also recompute OnTime/OffTime/CycleTime and
     publish MQTT PID info -- the shared helper itself is untouched). It then

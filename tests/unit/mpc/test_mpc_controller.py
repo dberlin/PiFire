@@ -327,7 +327,10 @@ def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
     ]
     assert cycle_payloads  # the topic __dict__ used to feed must survive get_status()
     cycle_published = json.loads(cycle_payloads[-1])
-    assert cycle_published == CYCLE  # byte-identical to the legacy __dict__-fed payload
+    # u_min is retired from PID_CYCLE_TIME_SENSORS (notify/mqtt_handler.py):
+    # a Home Assistant install no longer gets that sensor. Every other key
+    # in CYCLE is still byte-identical to the legacy __dict__-fed payload.
+    assert cycle_published == {k: v for k, v in CYCLE.items() if k != "u_min"}
 
 
 def test_stop_to_startup_transition_zeroes_only_numeric_pid_sensors(monkeypatch):

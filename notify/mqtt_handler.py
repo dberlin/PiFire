@@ -89,7 +89,6 @@ class MqttNotificationHandler:
                 "PMode",
                 "SmokeCycleTime",
                 "u_max",
-                "u_min",
             ]
             self.PID_SENSORS = [
                 "kp",
@@ -112,11 +111,11 @@ class MqttNotificationHandler:
                 # whatever type it sees first. "policy" (a string) and "x_hat"
                 # (a list) do not belong here for that reason: zeroed to 0 they
                 # register as numeric sensors, then the real string/list value
-                # lands on a sensor HA already believes is numeric. u_min/u_max
-                # are numeric but already published faithfully via cycle_data's
+                # lands on a sensor HA already believes is numeric. u_max is
+                # numeric but already published faithfully via cycle_data's
                 # pid_cycle_data topic, which this zero-loop does not touch --
-                # publishing them here too just gives a second, divergent copy
-                # once this loop zeroes only the "pid" one.
+                # publishing it here too would just give a second, divergent
+                # copy once this loop zeroes only the "pid" one.
                 "set_point",
                 "set_point_c",
                 "last_combustion_load",
@@ -414,7 +413,7 @@ class MqttNotificationHandler:
                             discovery["entity_category"] = "diagnostic"
                             discovery["enabled_by_default"] = False
 
-                        if device in ["u_min", "u_max", "center", "p", "i", "d", "u", "cycle_ratio"]:
+                        if device in ["u_max", "center", "p", "i", "d", "u", "cycle_ratio"]:
                             discovery["unit_of_measurement"] = "%"
                             discovery["enabled_by_default"] = False
                             discovery["value_template"] = f"{{{{ value_json.{device} | round(2)}}}}"

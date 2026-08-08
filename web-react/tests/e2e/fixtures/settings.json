@@ -54,8 +54,7 @@
       "PMode": 2,
       "SmokeOffCycleTime": 45,
       "SmokeOnCycleTime": 15,
-      "u_max": 0.9,
-      "u_min": 0.1
+      "u_max": 0.9
     },
     "dashboard": {
       "current": "Default",

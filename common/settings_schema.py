@@ -95,7 +95,6 @@ class CycleData(_Section):
     SmokeOnCycleTime: int = 15
     SmokeOffCycleTime: int = 45
     PMode: int = 2
-    u_min: float = 0.1
     u_max: float = 0.9
     LidOpenDetectEnabled: bool = False
     LidOpenThreshold: int = 15

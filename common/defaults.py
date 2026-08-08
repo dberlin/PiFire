@@ -128,7 +128,6 @@ def default_settings():
         "SmokeOnCycleTime": 15,  # Smoke/Startup Auger On Time.
         "SmokeOffCycleTime": 45,  # Smoke/Startup Auger Off Time.  Starting value for PMode (10s is added for each PMode setting)
         "PMode": 2,  # http://tipsforbbq.com/Definition/Traeger-P-Setting
-        "u_min": 0.1,
         "u_max": 0.9,
         "LidOpenDetectEnabled": False,  #  Enable Lid Open Detection
         "LidOpenThreshold": 15,  #  Percentage drop in temperature from the hold temp, to trigger lid open event

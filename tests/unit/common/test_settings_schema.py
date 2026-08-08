@@ -78,6 +78,16 @@ def test_current_schema_omits_retired_fan_pid_setting():
     assert "FanPidEnabled" not in SettingsSchema.model_fields["cycle_data"].annotation.model_fields
 
 
+def test_current_schema_omits_retired_u_min_setting():
+    """u_min had no reader: the duty floor is pulse_s/frame_s, from the pulse
+    geometry (AUGER_TIMING in grillplat/actuator_capabilities.py), not from a
+    configured ratio."""
+    settings = default_settings()
+
+    assert "u_min" not in settings["cycle_data"]
+    assert "u_min" not in SettingsSchema.model_fields["cycle_data"].annotation.model_fields
+
+
 def test_the_shape_version_is_not_derived_from_the_release_version():
     """schema_version must never move because a release number moved."""
     from common.settings_schema import SETTINGS_SCHEMA_VERSION

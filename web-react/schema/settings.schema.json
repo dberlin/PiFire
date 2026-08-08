@@ -98,11 +98,6 @@
           "default": 0.9,
           "title": "U Max",
           "type": "number"
-        },
-        "u_min": {
-          "default": 0.1,
-          "title": "U Min",
-          "type": "number"
         }
       },
       "title": "CycleData",
@@ -2153,8 +2148,7 @@
         "PMode": 2,
         "SmokeOffCycleTime": 45,
         "SmokeOnCycleTime": 15,
-        "u_max": 0.9,
-        "u_min": 0.1
+        "u_max": 0.9
       }
     },
     "dashboard": {
