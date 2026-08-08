@@ -65,7 +65,13 @@ from common.system import (
 )
 from common.modes import Mode
 from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
-from common.app import CONTROL_DOWN_ERROR, update_probe_config, save_settings_and_flag_update, api_response
+from common.app import (
+    CONTROL_DOWN_ERROR,
+    create_ui_hash,
+    update_probe_config,
+    save_settings_and_flag_update,
+    api_response,
+)
 from common.settings_schema import SettingsValidationError, apply_settings_delta
 from flask import request
 from werkzeug.utils import secure_filename
@@ -302,6 +308,12 @@ def _get_dash_data(settings, pelletdb):
         # clear exactly the warnings it displayed (blueprints/api dismiss_warnings).
         "warningsMaxId": warnings_snapshot["max_id"],
         "status": control["status"],
+        # The probe-map hash. A client compares it across frames and refetches
+        # the settings blob when it moves: set_probe_map() rebuilds hidden_cards,
+        # notify_data and history_page.probe_config off probe labels, none of
+        # which the socket payload carries. Computed from the settings already
+        # in hand, so the frame costs no extra read.
+        "uiHash": create_ui_hash(settings),
         "criticalError": control["critical_error"],
         "grillName": settings["globals"]["grill_name"],
         "currentMode": control["mode"],

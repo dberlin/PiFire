@@ -56,8 +56,9 @@ def get_supported_cmds():
         return data
 
 
-def create_ui_hash():
-    settings = read_settings()
+def create_ui_hash(settings=None):
+    if settings is None:
+        settings = read_settings()
     return hash(json.dumps(settings["probe_settings"]["probe_map"]["probe_info"]))
 
 
