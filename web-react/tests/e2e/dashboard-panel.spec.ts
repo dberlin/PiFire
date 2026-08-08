@@ -490,10 +490,14 @@ test("MPC Hold exposes calibration, exact activation, framed outputs, and fallba
   await learning.scrollIntoViewIfNeeded();
   const learningBox = await learning.boundingBox();
   expect(learningBox).not.toBeNull();
-  expect(learningBox!.y + learningBox!.height).toBeLessThanOrEqual(
-    page.viewportSize()!.height,
-  );
+  expect(learningBox!.y + learningBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   await expect(learning).toHaveClass(/pf-dash-mpc-learning/);
+  await learning.click();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(page.locator('[data-pf="stage"]')).not.toHaveCSS("transform", "none");
+  await page.getByRole("button", { name: "Close MPC model learning" }).click({ timeout: 2_000 });
+  await expect(page.getByRole("dialog", { name: "MPC model learning" })).toBeHidden();
+  await page.setViewportSize({ width: 800, height: 480 });
   await learning.click();
   await page.getByLabel("The grill is empty, with normal grates and drip tray installed.").check();
   await page.getByLabel("Sufficient pellets are loaded for the calibration run.").check();
