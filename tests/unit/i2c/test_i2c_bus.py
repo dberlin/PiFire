@@ -1,4 +1,5 @@
 import logging
+import threading
 from unittest import mock
 
 import pytest
@@ -126,6 +127,40 @@ def test_easymcp2221_backend_translates_i2c_errors_to_oserror(exc_cls):
         backend.writeto(0x40, b"\x01")
     with pytest.raises(OSError):
         backend.readfrom_into(0x40, bytearray(1))
+
+
+class _FakeGpioDevice:
+    def __init__(self):
+        self.pin_function_calls = []
+        self.write_calls = []
+
+    def set_pin_function(self, **kwargs):
+        self.pin_function_calls.append(kwargs)
+
+    def GPIO_write(self, **kwargs):
+        self.write_calls.append(kwargs)
+
+
+def test_mcp2221_gpio_configures_safe_initial_output_and_writes_one_pin():
+    device = _FakeGpioDevice()
+    gpio = mcp2221.Mcp2221Gpio(device, threading.RLock())
+
+    gpio.setup_output("GP2", initial_high=True)
+    gpio.set("GP2", False)
+
+    assert device.pin_function_calls == [{"gp2": "GPIO_OUT", "out2": True}]
+    assert device.write_calls == [{"gp2": False}]
+
+
+def test_mcp2221_gpio_rejects_unknown_pin_before_touching_hardware():
+    device = _FakeGpioDevice()
+    gpio = mcp2221.Mcp2221Gpio(device, threading.RLock())
+
+    with pytest.raises(ValueError, match="GP0-GP3"):
+        gpio.setup_output("GP4", initial_high=False)
+
+    assert device.pin_function_calls == []
+    assert device.write_calls == []
 
 
 class _FailingHalfI2CDevice:
@@ -333,6 +368,17 @@ def test_open_mcp2221_explicit_serial_and_blank_alias_share_one_bus_reverse_orde
         bus_blank = i2c_bus.open_i2c_bus(MCP2221Bus(serial=""))
     assert bus_blank is bus_serial
     assert len(FakeDevice.catalog) == 1
+
+
+def test_open_mcp2221_gpio_aliases_share_one_helper_and_the_i2c_lock():
+    modules, _ = _fake_easymcp2221_module_with_catalog(first_device_serial="FIRST")
+    with mock.patch.dict("sys.modules", modules):
+        bus = i2c_bus.open_i2c_bus(MCP2221Bus(serial=""))
+        gpio_blank = mcp2221.open_gpio("")
+        gpio_serial = mcp2221.open_gpio("FIRST")
+
+    assert gpio_blank is gpio_serial
+    assert gpio_blank._lock is bus._lock
 
 
 def test_open_mcp2221_non_aliasing_selectors_stay_independent():
@@ -611,10 +657,11 @@ def test_open_i2c_bus_still_refuses_basic_beside_a_usb_hid_bus(monkeypatch):
 
 def test_configured_bus_kinds_reads_the_bus_objects():
     settings = {
+        "modules": {"dist": "vl53l0x"},
         "platform": {
             "devices": {"distance": {"i2c_bus": {"kind": "kernel", "adapter": "CP2112"}}},
-            "fan_controller": {"i2c_bus": {"kind": "basic"}},
-        }
+            "fan_controller": {"chip": "emc2101", "i2c_bus": {"kind": "basic"}},
+        },
     }
     probe_map = {"probe_devices": [{"device": "ADS1115_0", "config": {"i2c_bus": {"kind": "ft232h", "url": ""}}}]}
     assert i2c_bus.configured_bus_kinds(settings, probe_map) == {"kernel", "basic", "ft232h"}

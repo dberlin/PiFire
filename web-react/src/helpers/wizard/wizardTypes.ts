@@ -5,12 +5,11 @@ export type WizardSection = "grillplatform" | "display" | "distance" | "probes";
 export interface SettingsDependency {
   friendly_name: string;
   description?: string;
-  type?: "usb_serial_device" | "i2c_bus";
+  type?: "usb_serial_device" | "mcp2221_serial" | "i2c_bus";
   options?: Record<string, string>;
-  /** Manifest fallback. Blank on every `usb_serial_device` dep -- the device
-   *  is the operator's to pick, and blank already means "the first one
-   *  found". An `i2c_bus` dep's fallback is instead the object
-   *  `{kind: "basic"}`. */
+  /** Manifest fallback. Blank on USB-device dependencies means "the first
+   *  matching device found". An `i2c_bus` dep's fallback is instead a typed
+   *  bus object such as `{kind: "basic"}`. */
   default?: string | I2cBusValue;
   /** USB vendor/product ID to narrow a `usb_serial_device` Discover scan to
    *  one kind of board, written the way the manifest writes them ("0x2a19").

@@ -13,25 +13,22 @@ _WIZARD_DATA = {
                 "settings_dependencies": {
                     "fan_chip": {"settings": ["platform", "fan_controller", "chip"]},
                     "i2c_bus": {"type": "i2c_bus", "settings": ["platform", "fan_controller", "i2c_bus"]},
+                    "device_distance_i2c_bus": {
+                        "type": "i2c_bus",
+                        "settings": ["platform", "devices", "distance", "i2c_bus"],
+                    },
                 }
             }
         },
         "distance": {
-            "vl53": {
-                "settings_dependencies": {
-                    "device_distance_i2c_bus": {
-                        "type": "i2c_bus",
-                        "settings": ["platform", "devices", "distance", "i2c_bus"],
-                    }
-                }
-            },
+            "vl53l0x": {"settings_dependencies": {}},
             "none": {"settings_dependencies": {}},
         },
     }
 }
 
 
-def _install_info(probe_kinds=(), fan_kind=None, distance_kind=None, distance_module="vl53"):
+def _install_info(probe_kinds=(), fan_kind=None, distance_kind=None, distance_module="vl53l0x", fan_chip="emc2101"):
     info = {
         "probe_map": {"probe_devices": [{"config": {"i2c_bus": k}} for k in probe_kinds]},
         "modules": {
@@ -41,8 +38,9 @@ def _install_info(probe_kinds=(), fan_kind=None, distance_kind=None, distance_mo
     }
     if fan_kind is not None:
         info["modules"]["grillplatform"]["settings"]["i2c_bus"] = fan_kind
+        info["modules"]["grillplatform"]["settings"]["fan_chip"] = fan_chip
     if distance_kind is not None:
-        info["modules"]["distance"]["settings"]["device_distance_i2c_bus"] = distance_kind
+        info["modules"]["grillplatform"]["settings"]["device_distance_i2c_bus"] = distance_kind
     return info
 
 
@@ -72,3 +70,29 @@ def test_ignores_non_bus_deps_and_absent_selectors():
     info["modules"]["grillplatform"]["settings"]["fan_chip"] = "emc2101"
     assert wizard_bus_kinds(info, _WIZARD_DATA) == {"ft232h", "mcp2221"}
     validate_bus_kinds(wizard_bus_kinds(info, _WIZARD_DATA))  # workable -> no raise
+
+
+def test_relay_only_fan_with_no_distance_ignores_both_unused_i2c_buses():
+    info = _install_info(
+        fan_kind={"kind": "mcp2221", "serial": ""},
+        distance_kind={"kind": "basic"},
+        distance_module="none",
+        fan_chip="none",
+    )
+
+    kinds = wizard_bus_kinds(info, _WIZARD_DATA)
+    assert kinds == set()
+    validate_bus_kinds(kinds)
+
+
+def test_mcp2221_pwm_with_no_distance_counts_only_the_active_fan_bus():
+    info = _install_info(
+        fan_kind={"kind": "mcp2221", "serial": ""},
+        distance_kind={"kind": "basic"},
+        distance_module="none",
+        fan_chip="EMC2101",
+    )
+
+    kinds = wizard_bus_kinds(info, _WIZARD_DATA)
+    assert kinds == {"mcp2221"}
+    validate_bus_kinds(kinds)

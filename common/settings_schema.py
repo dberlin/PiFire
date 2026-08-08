@@ -252,6 +252,10 @@ class _FT232hConfig(_Section):
     url: str = "1"
 
 
+class _MCP2221Config(_Section):
+    serial: str = ""
+
+
 class Platform(_Section):
     # Mirrors defaults.py settings["platform"].
     devices: _DevicesConfig = _DevicesConfig()
@@ -261,6 +265,7 @@ class Platform(_Section):
     numato: _NumatoConfig = _NumatoConfig()
     fan_controller: _FanControllerConfig = _FanControllerConfig()
     ft232h: _FT232hConfig = _FT232hConfig()
+    mcp2221: _MCP2221Config = _MCP2221Config()
     current: str = "custom"
     dc_fan: bool = False
     triggerlevel: str = "HIGH"
@@ -641,7 +646,7 @@ class Recipe(_Section):
 #: It lives at the top level of the tree rather than beside versions.server /
 #: versions.build, so that nothing suggests the three move together. They do
 #: not: versions is the RELEASE, read from updater/updater_manifest.json.
-SETTINGS_SCHEMA_VERSION = 7
+SETTINGS_SCHEMA_VERSION = 8
 
 
 class SettingsSchema(_Section):

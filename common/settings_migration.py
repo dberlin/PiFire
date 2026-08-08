@@ -341,6 +341,15 @@ def _clear_mpc_identification_choice(settings):
     return mpc.pop("enable_identification", sentinel) is not sentinel
 
 
+def _add_mcp2221_selector(settings):
+    """Seed the USB selector introduced for the MCP2221 relay platform."""
+    platform = settings.get("platform")
+    if not isinstance(platform, MutableMapping) or "mcp2221" in platform:
+        return False
+    platform["mcp2221"] = {"serial": ""}
+    return True
+
+
 #: The shape migrations, in ascending order, as (target_version, migration).
 #: A step's number is the version the tree is AT once that step has run, and
 #: each callable mutates the tree in place and returns True if it changed
@@ -353,6 +362,7 @@ _SHAPE_MIGRATIONS = [
     (5, _remove_mpc_affine_load_bounds),
     (6, _clear_mpc_identification_choice),
     (7, _remove_retired_fan_pid),
+    (8, _add_mcp2221_selector),
 ]
 
 

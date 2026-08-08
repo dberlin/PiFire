@@ -110,7 +110,10 @@ describe("Dashboard MPC settings authority", () => {
       controller: { selected: "mpc", config: { mpc: { T_amb: 20 } } },
     });
     const pendingReport = new Promise<Response>(() => {});
-    rs.stubGlobal("fetch", rs.fn(() => pendingReport));
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(() => pendingReport),
+    );
     renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor });
     return screen.findByRole("button", { name: "MPC learning: loading" });
   }
@@ -143,7 +146,10 @@ describe("Dashboard MPC settings authority", () => {
       return pendingSettings;
     });
     const pendingReport = new Promise<Response>(() => {});
-    rs.stubGlobal("fetch", rs.fn(() => pendingReport));
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(() => pendingReport),
+    );
     renderRoute(<DashboardApiHarness />, undefined);
 
     expect(

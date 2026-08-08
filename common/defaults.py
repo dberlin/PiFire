@@ -111,6 +111,9 @@ def default_settings():
         "ft232h": {  # ft232h_relay platform: FT232H USB GPIO expander selection
             "url": "1"  # '1' = first FT232H; or a pyftdi URL to pick a specific device
         },
+        "mcp2221": {  # mcp2221_relay platform: MCP2221(A) USB GPIO expander selection
+            "serial": ""  # blank selects the first MCP2221(A); otherwise match this USB serial
+        },
         "current": "custom",
         "dc_fan": False,  # True if system has a DC Fan (Does not indicate PWM)
         "triggerlevel": "HIGH",  # Active LOW / Active HIGH for the Relay Outputs

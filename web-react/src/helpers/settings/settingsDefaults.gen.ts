@@ -191,6 +191,9 @@ export const SETTINGS_DEFAULTS = {
       "selector": 17,
       "shutdown": 17
     },
+    "mcp2221": {
+      "serial": ""
+    },
     "numato": {
       "baudrate": 921600,
       "device": "/dev/ttyACM0"
@@ -267,7 +270,7 @@ export const SETTINGS_DEFAULTS = {
     "reigniteretries": 1,
     "startup_check": true
   },
-  "schema_version": 7,
+  "schema_version": 8,
   "shutdown": {
     "auto_power_off": false,
     "shutdown_duration": 240

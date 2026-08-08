@@ -108,8 +108,8 @@ def select_grillplat_module(settings):
     """Map platform.system_type to the grillplat module and set dc_fan.
 
     dc_fan gates all PWM behavior in the control loop, so it is set per platform:
-    always True for x86_numato, and for ft232h_relay only when a PWM fan
-    controller (EMC2101/EMC2301) is selected.
+    always True for x86_numato, and for USB relay platforms only when a PWM
+    fan controller (EMC2101/EMC2301) is selected.
     """
     system_type = settings["platform"]["system_type"]
     settings["modules"]["grillplat"] = "prototype"
@@ -120,6 +120,9 @@ def select_grillplat_module(settings):
         settings["platform"]["dc_fan"] = True
     elif system_type == "ft232h_relay":
         settings["modules"]["grillplat"] = "ft232h_relay"
+        settings["platform"]["dc_fan"] = settings["platform"]["fan_controller"]["chip"] in ("emc2101", "emc2301")
+    elif system_type == "mcp2221_relay":
+        settings["modules"]["grillplat"] = "mcp2221_relay"
         settings["platform"]["dc_fan"] = settings["platform"]["fan_controller"]["chip"] in ("emc2101", "emc2301")
 
 

@@ -145,6 +145,7 @@ export type I2CBus1 = _BasicBus | _KernelBusNumber | _KernelAdapterName | _Kerne
 export type Url2 = string;
 export type Selector = number | null;
 export type Shutdown1 = number | null;
+export type Serial2 = string;
 export type Baudrate = number;
 export type Device1 = string;
 export type Auger = number | string | null;
@@ -444,6 +445,7 @@ export interface Platform {
   fan_controller?: _FanControllerConfig;
   ft232h?: _FT232HConfig;
   inputs?: _InputsConfig;
+  mcp2221?: _MCP2221Config;
   numato?: _NumatoConfig;
   outputs?: _OutputsConfig;
   real_hw?: RealHw;
@@ -508,6 +510,9 @@ export interface _FT232HConfig {
 export interface _InputsConfig {
   selector?: Selector;
   shutdown?: Shutdown1;
+}
+export interface _MCP2221Config {
+  serial?: Serial2;
 }
 export interface _NumatoConfig {
   baudrate?: Baudrate;

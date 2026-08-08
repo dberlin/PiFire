@@ -158,23 +158,45 @@ def wizardInstallInfoExisting(wizardData, settings):
 
 
 def wizard_bus_kinds(wizardInstallInfo, wizardData):
-    """Collect every configured I2C bus kind from an assembled wizardInstallInfo,
-    using the user's in-progress selections: each probe device's config
-    i2c_bus, plus any grillplatform/distance settings-dependency of type
-    i2c_bus (the fan controller and the distance sensor). Used to validate the
-    whole config at wizard finish."""
+    """Collect every active I2C bus kind from an assembled wizardInstallInfo,
+    using the user's in-progress probe, distance-sensor, and EMC fan-controller
+    selections. Used to validate the whole config at wizard finish."""
     kinds = set()
     for device in wizardInstallInfo.get("probe_map", {}).get("probe_devices", []):
         bus = (device.get("config") or {}).get("i2c_bus")
         if bus:
             kinds.add(parse_i2c_bus(bus).kind)
+    distance_selected = (
+        (wizardInstallInfo.get("modules", {}).get("distance", {}).get("profile_selected") or [None])[0] or ""
+    ).lower()
     for module in ("grillplatform", "distance"):
         module_info = wizardInstallInfo.get("modules", {}).get(module, {}) or {}
         selected = (module_info.get("profile_selected") or [None])[0]
         module_settings = module_info.get("settings", {}) or {}
         module_manifest = (wizardData.get("modules", {}).get(module, {}) or {}).get(selected, {}) or {}
-        for dep_name, dep in (module_manifest.get("settings_dependencies", {}) or {}).items():
+        dependencies = module_manifest.get("settings_dependencies", {}) or {}
+        fan_chip = next(
+            (
+                module_settings.get(dep_name)
+                for dep_name, dep in dependencies.items()
+                if dep.get("settings") == ["platform", "fan_controller", "chip"]
+            ),
+            None,
+        )
+        fan_chip = str(fan_chip or "").lower()
+        for dep_name, dep in dependencies.items():
             if dep.get("type") != "i2c_bus":
+                continue
+            if dep.get("settings") == ["platform", "devices", "distance", "i2c_bus"] and distance_selected not in {
+                "vl53l0x",
+                "vl53l4cd",
+                "vl53l1x",
+            }:
+                continue
+            if dep.get("settings") == ["platform", "fan_controller", "i2c_bus"] and fan_chip not in {
+                "emc2101",
+                "emc2301",
+            }:
                 continue
             value = module_settings.get(dep_name)
             if value:

@@ -99,6 +99,11 @@ def test_every_i2c_bus_dep_is_a_composite_with_an_object_default():
                 if dep.endswith("i2c_bus"):
                     found += 1
                     assert spec["type"] == "i2c_bus"
-                    assert spec["default"] == {"kind": "basic"}
+                    expected_default = (
+                        {"kind": "mcp2221", "serial": ""}
+                        if module.get("filename") == "mcp2221_relay" and dep == "fan_i2c_bus"
+                        else {"kind": "basic"}
+                    )
+                    assert spec["default"] == expected_default
                 assert not dep.endswith(("i2c_bus_kind", "i2c_bus_num"))
-    assert found == 8
+    assert found == 10

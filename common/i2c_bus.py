@@ -28,10 +28,13 @@ Description:
   docs/superpowers/specs/2026-07-14-mcp2221-easymcp2221-backend-design.md.
 """
 
+from __future__ import annotations
+
 import glob
 import logging
 import os
 import threading
+from typing import TYPE_CHECKING, cast
 
 from common.i2c_bus_config import (  # noqa: F401  # I2CBusConfigError is public here
     BasicBus,
@@ -42,6 +45,9 @@ from common.i2c_bus_config import (  # noqa: F401  # I2CBusConfigError is public
     MCP2221Bus,
     parse_i2c_bus,
 )
+
+if TYPE_CHECKING:
+    from busio import I2C
 
 # Bus opens are logged here at DEBUG so it is obvious which physical bus/adapter
 # is being resolved and opened when the control process runs in debug mode. The
@@ -206,8 +212,8 @@ def validate_bus_kinds(kinds):
 
 
 def configured_bus_kinds(settings, probe_map):
-    """Every I2C bus kind configured across probe devices, the distance sensor,
-    and the platform fan controller. Used to validate a whole wizard config
+    """Every active I2C bus kind across probe devices, the distance sensor,
+    and an enabled EMC fan controller. Used to validate a whole wizard config
     before it is installed."""
     kinds = set()
     for device in (probe_map or {}).get("probe_devices", []):
@@ -215,12 +221,14 @@ def configured_bus_kinds(settings, probe_map):
         if bus:
             kinds.add(parse_i2c_bus(bus).kind)
     platform = (settings or {}).get("platform", {})
-    for section in (
-        (platform.get("devices", {}) or {}).get("distance", {}) or {},
-        platform.get("fan_controller", {}) or {},
-    ):
-        if section.get("i2c_bus"):
-            kinds.add(parse_i2c_bus(section["i2c_bus"]).kind)
+    distance = (platform.get("devices", {}) or {}).get("distance", {}) or {}
+    distance_module = str(((settings or {}).get("modules", {}) or {}).get("dist", "")).lower()
+    if distance_module in {"vl53l0x", "vl53l4cd", "vl53l1x"} and distance.get("i2c_bus"):
+        kinds.add(parse_i2c_bus(distance["i2c_bus"]).kind)
+    fan_controller = platform.get("fan_controller", {}) or {}
+    fan_chip = str(fan_controller.get("chip", "")).lower()
+    if fan_chip in {"emc2101", "emc2301"} and fan_controller.get("i2c_bus"):
+        kinds.add(parse_i2c_bus(fan_controller["i2c_bus"]).kind)
     return kinds
 
 
@@ -250,9 +258,9 @@ class _LockedI2C:
     but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
     reentrant lock and delegate I/O to the backend."""
 
-    def __init__(self, backend):
+    def __init__(self, backend, lock=None):
         self._backend = backend
-        self._lock = threading.RLock()
+        self._lock = lock if lock is not None else threading.RLock()
 
     def try_lock(self):
         return self._lock.acquire(blocking=False)
@@ -321,7 +329,7 @@ def _construct_bus(bus):
     raise I2CBusConfigError(f"Unknown I2C bus {bus!r}.")
 
 
-def open_i2c_bus(bus):
+def open_i2c_bus(bus: I2CBus | dict[str, object]) -> I2C:
     """Return a busio.I2C-compatible bus for `bus`, opening it if needed.
 
     `bus` is an I2CBus, or the stored mapping parse_i2c_bus accepts. Open buses
@@ -338,4 +346,4 @@ def open_i2c_bus(bus):
             opened = _construct_bus(bus)
             _bus_cache[bus] = opened
             _opened_kinds.add(bus.kind)
-        return opened
+        return cast("I2C", opened)

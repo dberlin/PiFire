@@ -1834,6 +1834,119 @@
             "settings": ["platform", "outputs", "fan"]
           }
         }
+      },
+      "mcp2221_relay": {
+        "friendly_name": "MCP2221A IO-Triggered Relay",
+        "filename": "mcp2221_relay",
+        "description": "Host-agnostic build. PiFire outputs (power/igniter/auger/fan) drive an IO-triggered relay board from MCP2221A GP0-GP3 over USB. The fan can be a plain relay or use an EMC2101/EMC2301 on the same MCP2221A, another USB adapter, or any standard PiFire I2C bus.",
+        "default": false,
+        "image": "custom.png",
+        "py_dependencies": ["easymcp2221>=1.8.4", "adafruit-circuitpython-emc2101"],
+        "apt_dependencies": [],
+        "command_list": [],
+        "settings_dependencies": {
+          "current": {
+            "friendly_name": "Platform Selected",
+            "description": "Selects the current platform.",
+            "options": { "mcp2221_relay": "MCP2221A IO-Triggered Relay" },
+            "settings": ["platform", "current"],
+            "hidden": true
+          },
+          "system_type": {
+            "friendly_name": "System Type",
+            "description": "System core for this platform. Set automatically for the MCP2221A relay build.",
+            "options": { "mcp2221_relay": "MCP2221A IO-Triggered Relay" },
+            "settings": ["platform", "system_type"],
+            "hidden": true
+          },
+          "mcp2221_serial": {
+            "friendly_name": "Relay MCP2221A Device",
+            "description": "MCP2221A driving the relay board. Blank selects the first device; a USB serial selects a specific adapter.",
+            "type": "mcp2221_serial",
+            "default": "",
+            "settings": ["platform", "mcp2221", "serial"]
+          },
+          "fan_mode": {
+            "friendly_name": "Fan Mode",
+            "description": "Relay mode drives the fan on/off. EMC2101/EMC2301 modes add variable fan speed through the separately selected I2C bus.",
+            "options": {
+              "none": "Relay (on/off)",
+              "emc2101": "EMC2101 PWM fan controller",
+              "emc2301": "EMC2301 PWM fan controller"
+            },
+            "settings": ["platform", "fan_controller", "chip"]
+          },
+          "fan_i2c_bus": {
+            "friendly_name": "Fan Controller I2C Bus",
+            "description": "How to reach the EMC fan controller. This may be the relay MCP2221A, a different MCP2221A or FT232H, or a kernel/basic I2C bus.",
+            "type": "i2c_bus",
+            "default": { "kind": "mcp2221", "serial": "" },
+            "settings": ["platform", "fan_controller", "i2c_bus"]
+          },
+          "fan_controller_address": {
+            "friendly_name": "Fan Controller I2C Address",
+            "description": "I2C address of the fan controller when a PWM fan mode is selected. Ignored in Relay mode.",
+            "options": {
+              "0x4c": "0x4C (EMC2101)",
+              "0x2f": "0x2F (EMC2301)"
+            },
+            "settings": ["platform", "fan_controller", "address"]
+          },
+          "device_distance_i2c_bus": {
+            "friendly_name": "Distance Sensor I2C Bus",
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "type": "i2c_bus",
+            "default": { "kind": "basic" },
+            "settings": ["platform", "devices", "distance", "i2c_bus"]
+          },
+          "device_distance_address": {
+            "friendly_name": "Distance Sensor I2C Address",
+            "description": "I2C address of the VL53L0X/VL53L4CD/VL53L1X distance sensor.",
+            "options": {
+              "0x29": "0x29 (default)",
+              "0x2a": "0x2A",
+              "0x2b": "0x2B",
+              "0x2c": "0x2C",
+              "0x2d": "0x2D",
+              "0x2e": "0x2E",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "devices", "distance", "address"]
+          },
+          "triggerlevel": {
+            "friendly_name": "Relay Type",
+            "description": "Select the trigger level for the relays attached to the platform.",
+            "options": {
+              "LOW": "Active Low",
+              "HIGH": "Active High"
+            },
+            "settings": ["platform", "triggerlevel"]
+          },
+          "output_power": {
+            "friendly_name": "Power Output Pin",
+            "description": "MCP2221A GPIO pin driving the power relay.",
+            "options": { "GP0": "GP0", "GP1": "GP1", "GP2": "GP2", "GP3": "GP3" },
+            "settings": ["platform", "outputs", "power"]
+          },
+          "output_igniter": {
+            "friendly_name": "Igniter Output Pin",
+            "description": "MCP2221A GPIO pin driving the igniter relay.",
+            "options": { "GP1": "GP1", "GP0": "GP0", "GP2": "GP2", "GP3": "GP3" },
+            "settings": ["platform", "outputs", "igniter"]
+          },
+          "output_auger": {
+            "friendly_name": "Auger Output Pin",
+            "description": "MCP2221A GPIO pin driving the auger relay.",
+            "options": { "GP2": "GP2", "GP0": "GP0", "GP1": "GP1", "GP3": "GP3" },
+            "settings": ["platform", "outputs", "auger"]
+          },
+          "output_fan": {
+            "friendly_name": "Fan Output Pin",
+            "description": "MCP2221A GPIO pin driving the fan relay (gates fan power in both modes).",
+            "options": { "GP3": "GP3", "GP0": "GP0", "GP1": "GP1", "GP2": "GP2" },
+            "settings": ["platform", "outputs", "fan"]
+          }
+        }
       }
     },
     "probes": {

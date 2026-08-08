@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ModuleCard } from "../../../../src/components/wizard/ModuleCard";
 import type { I2cBusValue } from "../../../../src/helpers/wizard/i2cBusTypes";
+import { scan } from "../../../../src/helpers/wizard/wizardApi";
 import type { WizardModuleData } from "../../../../src/helpers/wizard/wizardTypes";
 
 rs.mock("../../../../src/helpers/wizard/wizardApi", () => ({
@@ -58,6 +59,17 @@ const moduleWithUsbSerial: WizardModuleData = {
   },
 };
 
+const moduleWithMcp2221Serial: WizardModuleData = {
+  friendly_name: "MCP2221 Relay Module",
+  settings_dependencies: {
+    mcp2221_serial: {
+      friendly_name: "Relay MCP2221A Device",
+      type: "mcp2221_serial",
+      settings: ["platform", "mcp2221", "serial"],
+    },
+  },
+};
+
 // wizard_manifest.json stores a BARE filename here; the card has to resolve it
 // against PiFire's own origin or every board photo 404s.
 const moduleWithImage: WizardModuleData = {
@@ -88,6 +100,7 @@ const modules: Record<string, WizardModuleData> = {
   usb_serial: moduleWithUsbSerial,
   imaged: moduleWithImage,
   configurable: moduleWithConfig,
+  mcp2221_serial: moduleWithMcp2221Serial,
 };
 
 function baseProps() {
@@ -225,6 +238,35 @@ describe("ModuleCard", () => {
       vid: "0x2a19",
       pid: "0x0c0c",
     });
+  });
+
+  it("discovers and selects a specific MCP2221 serial for the relay adapter", async () => {
+    rs.mocked(scan).mockResolvedValueOnce({
+      groups: [
+        {
+          title: "MCP2221 Devices",
+          items: [{ value: "RELAY-B", label: "MCP2221 RELAY-B" }],
+        },
+      ],
+      error: null,
+    });
+    const onDepChange = rs.fn();
+
+    render(
+      <ModuleCard
+        {...baseProps()}
+        baseUrl="http://localhost"
+        selectedModule="mcp2221_serial"
+        depValues={{ mcp2221_serial: "" }}
+        onDepChange={onDepChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /discover/i }));
+    expect(scan).toHaveBeenCalledWith("http://localhost", { kind: "mcp2221" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "MCP2221 RELAY-B" }));
+    expect(onDepChange).toHaveBeenCalledWith("mcp2221_serial", "RELAY-B");
   });
 
   it("resolves the manifest's bare image filename against PiFire's static path", () => {

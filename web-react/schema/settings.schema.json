@@ -668,6 +668,12 @@
             "shutdown": 17
           }
         },
+        "mcp2221": {
+          "$ref": "#/$defs/_MCP2221Config",
+          "default": {
+            "serial": ""
+          }
+        },
         "numato": {
           "$ref": "#/$defs/_NumatoConfig",
           "default": {
@@ -1958,6 +1964,18 @@
       "title": "_MCP2221Bus",
       "type": "object"
     },
+    "_MCP2221Config": {
+      "additionalProperties": false,
+      "properties": {
+        "serial": {
+          "default": "",
+          "title": "Serial",
+          "type": "string"
+        }
+      },
+      "title": "_MCP2221Config",
+      "type": "object"
+    },
     "_NumatoConfig": {
       "additionalProperties": false,
       "properties": {
@@ -2342,6 +2360,9 @@
           "selector": 17,
           "shutdown": 17
         },
+        "mcp2221": {
+          "serial": ""
+        },
         "numato": {
           "baudrate": 921600,
           "device": "/dev/ttyACM0"
@@ -2432,7 +2453,7 @@
       }
     },
     "schema_version": {
-      "default": 7,
+      "default": 8,
       "title": "Schema Version",
       "type": "integer"
     },

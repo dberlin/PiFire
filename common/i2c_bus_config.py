@@ -149,7 +149,7 @@ _KERNEL_VARIANTS = {
 }
 
 
-def parse_i2c_bus(data):
+def parse_i2c_bus(data: I2CBus | dict[str, object]) -> I2CBus:
     """Build the I2CBus a stored mapping names.
 
     Raises rather than falling back to BasicBus: a bus we cannot name is a
@@ -183,8 +183,13 @@ def parse_i2c_bus(data):
         value = data[name]
         if name == "bus_num":
             try:
-                bus_num = int(value)
-            except TypeError, ValueError:
+                if isinstance(value, (str, bytes, bytearray)):
+                    bus_num = int(value)
+                elif isinstance(value, (int, float)):
+                    bus_num = int(value)
+                else:
+                    raise I2CBusConfigError(f"A kernel bus_num must be a number, got {value!r}.")
+            except ValueError:
                 raise I2CBusConfigError(f"A kernel bus_num must be a number, got {value!r}.") from None
             if bus_num < 0:
                 raise I2CBusConfigError(f"A kernel bus_num must be zero or greater, got {bus_num!r}.")
@@ -192,7 +197,9 @@ def parse_i2c_bus(data):
         text = str(value).strip()
         if not text:
             raise I2CBusConfigError(f"A kernel I2C bus addressed by {name} needs a value.")
-        return _KERNEL_VARIANTS[name](**{name: text})
+        if name == "adapter":
+            return KernelAdapterName(adapter=text)
+        return KernelSerialMatch(serial=text)
 
     if kind == "ft232h":
         unknown = sorted(fields - {"url"})

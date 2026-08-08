@@ -37,9 +37,9 @@ def test_current_schema_includes_v6_identification_choice_removal():
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 7
+    assert SETTINGS_SCHEMA_VERSION == 8
     assert settings == {
-        "schema_version": 7,
+        "schema_version": 8,
         "controller": {
             "selected": "mpc",
             "config": {

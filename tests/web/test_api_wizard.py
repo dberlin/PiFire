@@ -782,7 +782,7 @@ def test_finish_rejects_a_real_basic_plus_ft232h_conflict(ds, client, monkeypatc
     fired = []
     monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
     payload = {
-        "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "hcsr04"},
+        "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "vl53l0x"},
         "settings_dep_values": {"grillplatform": {"device_distance_i2c_bus": {"kind": "basic"}}},
         "display_config": {},
         "probe_map": {
@@ -803,6 +803,35 @@ def test_finish_rejects_a_real_basic_plus_ft232h_conflict(ds, client, monkeypatc
     assert body["message"] == "bus_conflict"
     assert "process-global" in body["detail"]
     assert fired == []  # installer must NOT fire
+
+
+def test_finish_accepts_mcp2221_pwm_when_distance_is_disabled(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
+    payload = {
+        "selections": {
+            "grillplatform": "mcp2221_relay",
+            "display": "ili9341b",
+            "distance": "none",
+        },
+        "settings_dep_values": {
+            "grillplatform": {
+                "fan_mode": "EMC2101",
+                "fan_i2c_bus": {"kind": "mcp2221", "serial": ""},
+                "device_distance_i2c_bus": {"kind": "basic"},
+            }
+        },
+        "display_config": {},
+        "probe_map": {"probe_devices": [], "probe_info": []},
+    }
+
+    resp = client.post("/api/wizard/finish", data=json.dumps(payload), content_type="application/json")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"result": "success"}
+    assert len(fired) == 1
 
 
 def test_module_values_grillplatform_returns_live_settings(ds, client):
@@ -840,6 +869,34 @@ def test_module_values_grillplatform_imposes_the_selected_platform(ds, client):
     deps = resp.get_json()["settings"]
     assert deps["current"] == "ft232h_relay"
     assert deps["system_type"] == "ft232h_relay"
+
+
+def test_module_values_mcp2221_relay_uses_distinct_pins_and_keeps_serial(ds, client):
+    settings = read_settings()
+    settings["platform"]["mcp2221"]["serial"] = "RELAY-B"
+    settings["platform"]["outputs"] = {
+        "power": 17,
+        "igniter": 27,
+        "auger": 23,
+        "fan": 18,
+    }
+    write_settings_store(settings)
+
+    resp = client.post(
+        "/api/wizard/module-values",
+        data=json.dumps({"section": "grillplatform", "module": "mcp2221_relay"}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    deps = resp.get_json()["settings"]
+    assert deps["mcp2221_serial"] == "RELAY-B"
+    assert {output: deps[f"output_{output}"] for output in ("power", "igniter", "auger", "fan")} == {
+        "power": "GP0",
+        "igniter": "GP1",
+        "auger": "GP2",
+        "fan": "GP3",
+    }
 
 
 def test_module_values_grillplatform_imposes_the_boards_own_pins(ds, client):

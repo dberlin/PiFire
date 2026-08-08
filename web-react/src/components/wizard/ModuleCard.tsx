@@ -64,6 +64,18 @@ export function ModuleCard({
     const value = typeof rawValue === "string" ? rawValue : "";
     const onChange = (v: string) => onDepChange(key, v);
 
+    if (dep.type === "mcp2221_serial") {
+      return (
+        <UsbSerialPicker
+          key={key}
+          dep={dep}
+          value={value}
+          onChange={onChange}
+          onScan={() => scan(baseUrl, { kind: "mcp2221" })}
+        />
+      );
+    }
+
     if (dep.type === "usb_serial_device") {
       return (
         <UsbSerialPicker
