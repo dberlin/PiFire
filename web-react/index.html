@@ -10,6 +10,10 @@
          production and through the dev proxy alike -- no copy in the bundle
          that could drift from it. -->
     <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico" />
+    <!-- Same reasoning as the favicon: icons live under /static/img, which
+         the spa blueprint deliberately does not shadow, so their hrefs
+         resolve in production and through the dev proxy alike. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <!-- Barlow is self-hosted via @fontsource, imported in src/main.tsx and
          bundled at build time -- no external font CDN, so the UI renders the
          right glyphs offline on the Pi. -->

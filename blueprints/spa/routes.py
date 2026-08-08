@@ -57,6 +57,11 @@ def spa_font(filename):
     return _cached(send_from_directory(os.path.join(_STATIC, "font"), filename), _ASSET_CACHE)
 
 
+@spa_bp.route("/manifest.webmanifest")
+def spa_manifest():
+    return _cached(send_from_directory(_DIST, "manifest.webmanifest"), _SHELL_CACHE)
+
+
 def build_id():
     """Identity of the bundle currently on disk, or None when none is built.
 
