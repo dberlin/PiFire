@@ -447,14 +447,18 @@ describe("NotificationsTab", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-      // Wait for the save call, then inspect the delta it carried.
+      // Wait for the save call, then inspect the delta it carried. A delete
+      // is present, so save() receives the settingsDelta() envelope --
+      // notify_services now lives under `.set`, not at the top level.
       await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const calledDelta = saveMock.mock.calls[0][0] as {
-        notify_services: {
-          onesignal: { devices: Record<string, Record<string, unknown>> };
+        set: {
+          notify_services: {
+            onesignal: { devices: Record<string, Record<string, unknown>> };
+          };
         };
       };
-      const savedDevices = calledDelta.notify_services.onesignal.devices;
+      const savedDevices = calledDelta.set.notify_services.onesignal.devices;
       expect(savedDevices["player-xyz"]).toBeUndefined();
       expect(savedDevices["player-abc"]).toEqual(DEVICES["player-abc"]);
     });
@@ -545,11 +549,73 @@ describe("NotificationsTab", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-      // Wait for the save call, then inspect the delta it carried.
+      // Wait for the save call, then inspect the delta it carried. A delete
+      // is present, so save() receives the settingsDelta() envelope --
+      // notify_services now lives under `.set`, not at the top level.
       await waitFor(() => expect(saveMock).toHaveBeenCalled());
-      const [delta] = saveMock.mock.calls[0];
-      expect(delta.notify_services.onesignal.devices["player-1"]).toBeUndefined();
-      expect(delta.notify_services.onesignal.devices["player-2"]).toBeDefined();
+      const [delta] = saveMock.mock.calls[0] as [
+        { set: { notify_services: { onesignal: { devices: Record<string, unknown> } } } },
+        string[],
+      ];
+      expect(delta.set.notify_services.onesignal.devices["player-1"]).toBeUndefined();
+      expect(delta.set.notify_services.onesignal.devices["player-2"]).toBeDefined();
+    });
+
+    // Bug: apply_settings_delta deep-merges, so a plain body's omission of a
+    // key cannot express removal -- the deleted device merges straight back
+    // on the next load. The save must carry an explicit delete path.
+    it("removes the device from the payload's delete paths", async () => {
+      renderRoute(<NotificationsTab />, deviceFixture());
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-2" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(saveMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            delete: [["notify_services", "onesignal", "devices", "player-2"]],
+          }),
+          ["settings_update"],
+        ),
+      );
+    });
+
+    // The multi-delete case a one-shot port of ControllerTab's pattern
+    // misses: a user can remove several devices before pressing Save, and
+    // every one of them must be named, not just the most recent.
+    it("carries every device removed before the save, not just the last", async () => {
+      renderRoute(
+        <NotificationsTab />,
+        contextWithNotifyServices({
+          onesignal: {
+            enabled: true,
+            devices: {
+              "player-1": { friendly_name: "A", device_name: "A", app_version: "1" },
+              "player-2": { friendly_name: "B", device_name: "B", app_version: "1" },
+              "player-3": { friendly_name: "C", device_name: "C", app_version: "1" },
+            },
+          },
+        }),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-1" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-2" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
+      const [payload] = saveMock.mock.calls[0] as [{ delete?: string[][] }, string[]];
+      expect(payload.delete).toEqual(
+        expect.arrayContaining([
+          ["notify_services", "onesignal", "devices", "player-1"],
+          ["notify_services", "onesignal", "devices", "player-2"],
+        ]),
+      );
+      expect(payload.delete).toHaveLength(2);
     });
   });
 });

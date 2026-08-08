@@ -8,6 +8,7 @@ from common.settings_schema import (
     apply_settings_delta,
     settings_delta,
     validate_settings_delta,
+    validate_settings_tree,
 )
 
 
@@ -76,6 +77,43 @@ def test_deleting_a_path_that_is_not_there_is_already_satisfied():
     )
 
     assert result["controller"]["config"]["mpc"] == {"C_c": 300.0}
+
+
+def test_settings_delta_deletes_a_onesignal_device_end_to_end():
+    """Pins both ends of the seam NotificationsTab's delete-device save
+    crosses: web-react's settingsDelta() builds exactly this envelope shape
+    (M15), and a unit test on the payload alone proves the *shape* is right,
+    not that the device is actually gone. This runs the real envelope through
+    apply_settings_delta AND a validate_settings_tree round-trip, and checks
+    the device is absent while its sibling device and the service's own
+    fields survive."""
+    settings = copy.deepcopy(default_settings())
+    settings["notify_services"]["onesignal"] = {
+        "enabled": True,
+        "uuid": "some-uuid-string",
+        "app_id": "app-id-123",
+        "devices": {
+            "player-id-aaa": {"friendly_name": "Kitchen", "device_name": "Pixel", "app_version": "1.0"},
+            "player-id-bbb": {"friendly_name": "Garage", "device_name": "iPhone", "app_version": "1.1"},
+        },
+    }
+
+    result = apply_settings_delta(
+        settings,
+        settings_delta(delete_paths=[["notify_services", "onesignal", "devices", "player-id-aaa"]]),
+    )
+    validated = validate_settings_tree(result, persisted=False)
+
+    onesignal = validated["notify_services"]["onesignal"]
+    assert "player-id-aaa" not in onesignal["devices"]
+    assert onesignal["devices"]["player-id-bbb"] == {
+        "friendly_name": "Garage",
+        "device_name": "iPhone",
+        "app_version": "1.1",
+    }
+    assert onesignal["enabled"] is True
+    assert onesignal["uuid"] == "some-uuid-string"
+    assert onesignal["app_id"] == "app-id-123"
 
 
 @pytest.mark.parametrize(

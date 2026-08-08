@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { settingsDelta } from "../../../helpers/settings/settingsDelta";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
@@ -19,9 +20,15 @@ import { WledCard } from "./notifications/WledCard";
 type NotifyService = Record<string, unknown>;
 type NotifyServicesState = Record<string, NotifyService>;
 
-function readNotify(s: Settings): { ns: NotifyServicesState } {
+// removedDeviceIds rides alongside ns in the SAME draft (not a plain
+// useState) because each settings tab is a distinct route: switching away
+// from Notifications and back unmounts and remounts this component, and only
+// state held in the draft store survives that trip. A plain useState here
+// would forget a queued delete exactly the way the bug this fixes forgot it.
+function readNotify(s: Settings): { ns: NotifyServicesState; removedDeviceIds: string[] } {
   return {
     ns: structuredClone(s.notify_services ?? {}) as unknown as NotifyServicesState,
+    removedDeviceIds: [],
   };
 }
 
@@ -66,11 +73,30 @@ export function NotificationsTab() {
 
   const setField = (name: string, key: string, val: unknown) =>
     setV((s) => ({
+      ...s,
       ns: { ...s.ns, [name]: { ...(s.ns[name] ?? {}), [key]: val } },
     }));
 
   const onSave = async () => {
-    if (await save({ notify_services: v.ns }, ["settings_update"])) markSaved();
+    // notify_services is saved as a full-subtree merge (see the comment at
+    // the top of this file), so a device dropped from v.ns is silence, not a
+    // removal instruction -- apply_settings_delta deep-merges and the device
+    // reappears on the next load. removedDeviceIds names every device
+    // deleted since the last save explicitly, as delete paths.
+    const ok = await save(
+      settingsDelta(
+        { notify_services: v.ns },
+        v.removedDeviceIds.map((id) => ["notify_services", "onesignal", "devices", id]),
+      ),
+      ["settings_update"],
+    );
+    if (ok) {
+      // Clear first, then markSaved: setV always marks the draft dirty
+      // (saved: false), so markSaved has to be the last word to leave the
+      // post-save draft clean.
+      setV((s) => ({ ...s, removedDeviceIds: [] }));
+      markSaved();
+    }
   };
 
   const setDeviceField = (deviceId: string, key: keyof OneSignalDevice, val: string) =>
@@ -78,6 +104,7 @@ export function NotificationsTab() {
       const onesignalSvc = (s.ns.onesignal ?? {}) as NotifyService;
       const devices = devicesOf(onesignalSvc);
       return {
+        ...s,
         ns: {
           ...s.ns,
           onesignal: {
@@ -97,7 +124,15 @@ export function NotificationsTab() {
       const devices = { ...devicesOf(onesignalSvc) };
       delete devices[deviceId];
       return {
+        ...s,
         ns: { ...s.ns, onesignal: { ...onesignalSvc, devices } },
+        // This tab has no add-device action -- OneSignal devices only ever
+        // arrive via mobile-app self-registration -- so every deviceId that
+        // reaches here (a delete button only renders for a row already in
+        // devicesOf(...)) was necessarily part of the persisted tree, never
+        // one added and removed again within this same draft. Nothing here
+        // needs to distinguish that case; there is no path that creates it.
+        removedDeviceIds: [...s.removedDeviceIds, deviceId],
       };
     });
 
@@ -336,7 +371,10 @@ export function NotificationsTab() {
         />
       </Section>
 
-      <WledCard wled={wled} onChange={(next) => setV((s) => ({ ns: { ...s.ns, wled: next } }))} />
+      <WledCard
+        wled={wled}
+        onChange={(next) => setV((s) => ({ ...s, ns: { ...s.ns, wled: next } }))}
+      />
 
       <ConfirmAction
         open={pendingDevice !== null}
