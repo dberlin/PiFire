@@ -18,6 +18,8 @@ Description: The queued-control-write payload that states a writer's INTENT
 import copy
 import math
 import logging
+
+from common.modes import Mode
 from collections.abc import Mapping
 
 CONTROL_DELTA_KEY = "__control_delta__"
@@ -46,6 +48,7 @@ _OP_FIELDS = {
     "notify.delete": ("label", "type"),
     "notify.replace": ("entries",),
     "mpc_calibration.set": ("command",),
+    "hold.set_setpoint": ("setpoint",),
 }
 CONTROL_DELTA_OPS = frozenset(_OP_FIELDS)
 
@@ -61,7 +64,6 @@ def validated_mpc_calibration_command(value):
     required = {
         "action",
         "revision",
-        "maximum_temperature_c",
         "ambient_c",
         "ambient_source",
         "empty_grill_confirmed",
@@ -71,15 +73,12 @@ def validated_mpc_calibration_command(value):
         raise ControlDeltaError("MPC calibration command has invalid fields")
     action = value["action"]
     revision = value["revision"]
-    maximum = value["maximum_temperature_c"]
     ambient = value["ambient_c"]
     ambient_source = value["ambient_source"]
     if action not in _CALIBRATION_ACTIONS:
         raise ControlDeltaError("MPC calibration action is not recognized")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         raise ControlDeltaError("MPC calibration revision must be a positive integer")
-    if isinstance(maximum, bool) or not isinstance(maximum, (int, float)) or not math.isfinite(maximum):
-        raise ControlDeltaError("MPC calibration maximum temperature must be finite Celsius")
     if isinstance(ambient, bool) or not isinstance(ambient, (int, float)) or not math.isfinite(ambient):
         raise ControlDeltaError("MPC calibration ambient temperature must be finite Celsius")
     if ambient_source not in _AMBIENT_SOURCES:
@@ -89,7 +88,6 @@ def validated_mpc_calibration_command(value):
     return {
         "action": action,
         "revision": revision,
-        "maximum_temperature_c": float(maximum),
         "ambient_c": float(ambient),
         "ambient_source": ambient_source,
         "empty_grill_confirmed": True,
@@ -194,6 +192,12 @@ def _validate_op_types(ops):
             raise ControlDeltaError("timer.start_with_options 'seconds' must be an int greater than zero")
         if name == "mpc_calibration.set":
             validated_mpc_calibration_command(op["command"])
+        if name == "hold.set_setpoint" and (
+            isinstance(op["setpoint"], bool)
+            or not isinstance(op["setpoint"], (int, float))
+            or not math.isfinite(op["setpoint"])
+        ):
+            raise ControlDeltaError("hold.set_setpoint 'setpoint' must be a finite number")
 
 
 #: The two keys a CLIENT-POSTED control patch may carry notify intent under.
@@ -284,6 +288,26 @@ def _deep_assign(target, values):
         else:
             target[key] = value
     return target
+
+
+def _op_hold_set_setpoint(control, op, log):
+    """Hold at a new setpoint, raising `updated` only for a real mode change.
+
+    `updated` breaks the mode's work cycle, so Hold is re-entered and the
+    controller rebuilt -- discarding its estimator state, its learner, and any
+    calibration run in progress. Retargeting a cook that is ALREADY holding
+    does not need that; Hold applies the new setpoint to the running
+    controller. Entering Hold from another mode still does.
+
+    Which of the two it is can only be decided HERE. A request handler reads a
+    control blob that cannot see this queue, so two setpoints posted in one
+    cycle would disagree with the same two a cycle apart -- the invariant
+    tests/characterization/test_control_delta_seam.py exists to hold.
+    """
+    if control.get("mode") != Mode.HOLD:
+        control["mode"] = Mode.HOLD
+        control["updated"] = True
+    control["primary_setpoint"] = op["setpoint"]
 
 
 def _op_mpc_calibration_set(control, op, log):
@@ -423,4 +447,5 @@ _OP_APPLIERS = {
     "notify.delete": _op_notify_delete,
     "notify.replace": _op_notify_replace,
     "mpc_calibration.set": _op_mpc_calibration_set,
+    "hold.set_setpoint": _op_hold_set_setpoint,
 }

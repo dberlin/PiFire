@@ -240,23 +240,32 @@ describe("ControllerTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    // Wait for the save call carrying the pruned config.
+    // The pruned config, plus an EXPLICIT delete path: the backend merges, so
+    // leaving the key out of `set` would leave it in the tree forever.
     await waitFor(() =>
       expect(saveMock).toHaveBeenCalledWith(
         {
-          controller: {
-            selected: "pid",
-            config: { pid: { PB: 55, Td: 45, Ti: 180, center: 0.5 } },
+          __settings_delta__: 1,
+          set: {
+            controller: {
+              selected: "pid",
+              config: { pid: { PB: 55, Td: 45, Ti: 180, center: 0.5 } },
+            },
           },
+          delete: [["controller", "config", "pid", "ancient_option"]],
         },
         ["controller_update"],
       ),
     );
     const saved = saveMock.mock.calls[0]![0] as {
-      controller: { config: { pid: Record<string, unknown> } };
+      set: { controller: { config: { pid: Record<string, unknown> } } };
     };
-    expect(Object.keys(saved.controller.config.pid)).not.toContain("ancient_option");
-    expect(screen.getByRole("alert").textContent).toContain("ancient_option");
+    expect(Object.keys(saved.set.controller.config.pid)).not.toContain("ancient_option");
+    // The save SUCCEEDED and the removal is the intended cleanup, so this is a
+    // status notice, not the save error it used to be reported as.
+    expect(screen.getByRole("status").textContent).toContain("ancient_option");
+    expect(screen.getByRole("status").textContent).toContain("Removed");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("renders a PID-SP-only field when the Smith Predictor controller is selected", () => {

@@ -24,7 +24,10 @@ def _settings():
     return {
         "globals": {"units": "F"},
         "safety": {"maxtemp": 500},
-        "controller": {"selected": "mpc", "config": {"mpc": {"enable_grey_box": True}}},
+        "controller": {
+            "selected": "mpc",
+            "config": {"mpc": {"enable_grey_box": True, "enable_online_adaptation": True}},
+        },
     }
 
 
@@ -32,7 +35,6 @@ def _command(revision=3, **overrides):
     value = {
         "action": "start",
         "revision": revision,
-        "maximum_temperature_c": 130.0,
         "ambient_c": 20.0,
         "ambient_source": "configured",
         "empty_grill_confirmed": True,
@@ -68,7 +70,7 @@ def test_start_persists_exact_validated_calibration_request(monkeypatch):
 @pytest.mark.parametrize(
     "command",
     [
-        _command(maximum_temperature_c="130"),
+        _command(ambient_c="20"),
         _command(ambient_source="unknown"),
         _command(empty_grill_confirmed=False),
         _command(pellets_confirmed=False),
@@ -193,20 +195,6 @@ def test_fifo_drain_serializes_live_revision_and_high_water_reads(ds, monkeypatc
     assert read_pending_control_writes() == ()
 
 
-@pytest.mark.parametrize(
-    "units,maximum_temperature_c",
-    [("F", 260.0), ("C", 260.0)],
-)
-def test_maximum_at_configured_safety_ceiling_is_rejected_before_queueing(monkeypatch, units, maximum_temperature_c):
-    settings = _settings()
-    settings["globals"]["units"] = units
-    settings["safety"]["maxtemp"] = 500 if units == "F" else 260
-    result, writes = _invoke(monkeypatch, _control(), settings, _command(maximum_temperature_c=maximum_temperature_c))
-
-    assert result["result"] == "ERROR"
-    assert writes == []
-
-
 @pytest.mark.parametrize("action", ("pause", "resume", "stop", "reset-progress"))
 def test_non_start_actions_remain_issuable_after_the_safety_ceiling_is_lowered(monkeypatch, action):
     settings = _settings()
@@ -216,7 +204,7 @@ def test_non_start_actions_remain_issuable_after_the_safety_ceiling_is_lowered(m
         monkeypatch,
         _control(),
         settings,
-        _command(action=action, maximum_temperature_c=130.0),
+        _command(action=action),
     )
 
     assert result["result"] == "OK"

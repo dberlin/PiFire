@@ -13,6 +13,7 @@ import numpy as np
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     CalibrationSummaryEvidence,
+    EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
     RecorderGapEvidence,
@@ -576,7 +577,10 @@ def _status(
         return authoritative
     if invalidated:
         return ConfidenceStatus.SCHEMA_INVALIDATED
-    if not records:
+    # A recorder gap records that an observation was LOST, so a store holding
+    # nothing else has learned nothing. Counting gaps as progress reports a
+    # model being fitted on a grill where every frame was dropped.
+    if not any(record.kind is not EvidenceKind.RECORDER_GAP for record in records):
         return ConfidenceStatus.COLLECTING
     if not isinstance(refresh, RefreshDiagnosticsEvidence):
         return ConfidenceStatus.FITTING

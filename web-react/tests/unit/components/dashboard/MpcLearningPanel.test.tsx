@@ -122,16 +122,7 @@ afterEach(() => {
 });
 
 function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningPanel>> = {}) {
-  return render(
-    <MpcLearningPanel
-      apiBase=""
-      selectedController="mpc"
-      units="F"
-      safetyMaxTemp={500}
-      ambientC={20}
-      {...props}
-    />,
-  );
+  return render(<MpcLearningPanel apiBase="" selectedController="mpc" ambientC={20} {...props} />);
 }
 
 async function openPanel() {
@@ -193,32 +184,7 @@ describe("MpcLearningPanel", () => {
     expect(screen.queryByRole("button", { name: /activate/i })).not.toBeInTheDocument();
   });
 
-  it("requires both safety confirmations and a maximum temperature before start", async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        ...REPORT,
-        calibration: { ...REPORT.calibration, status: "idle" },
-      }),
-    );
-    renderPanel({ units: "C", safetyMaxTemp: 260 });
-    await openPanel();
-
-    const start = screen.getByRole("button", { name: "Start calibration" });
-    const maximum = screen.getByRole("spinbutton", {
-      name: "Maximum calibration temperature (°C)",
-    });
-    await userEvent.clear(maximum);
-    expect(start).toBeDisabled();
-
-    await userEvent.type(maximum, "210");
-    await userEvent.click(screen.getByRole("checkbox", { name: /grill is empty/i }));
-    expect(start).toBeDisabled();
-
-    await userEvent.click(screen.getByRole("checkbox", { name: /sufficient pellets/i }));
-    expect(start).toBeEnabled();
-  });
-
-  it("converts a Fahrenheit maximum to Celsius only in the request helper", async () => {
+  it("requires both safety confirmations before start", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
         ...REPORT,
@@ -228,11 +194,26 @@ describe("MpcLearningPanel", () => {
     renderPanel();
     await openPanel();
 
-    const maximum = screen.getByRole("spinbutton", {
-      name: "Maximum calibration temperature (°F)",
-    });
-    await userEvent.clear(maximum);
-    await userEvent.type(maximum, "392");
+    const start = screen.getByRole("button", { name: "Start calibration" });
+    expect(start).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /grill is empty/i }));
+    expect(start).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /sufficient pellets/i }));
+    expect(start).toBeEnabled();
+  });
+
+  it("sends the exact revisioned command, which carries no temperature ceiling of its own", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        calibration: { ...REPORT.calibration, status: "idle" },
+      }),
+    );
+    renderPanel();
+    await openPanel();
+
     await userEvent.click(screen.getByRole("checkbox", { name: /grill is empty/i }));
     await userEvent.click(screen.getByRole("checkbox", { name: /sufficient pellets/i }));
     await userEvent.click(screen.getByRole("button", { name: "Start calibration" }));
@@ -248,7 +229,6 @@ describe("MpcLearningPanel", () => {
     expect(body).toEqual({
       action: "start",
       revision: 13,
-      maximum_temperature_c: 200,
       ambient_c: 20,
       ambient_source: "configured",
       empty_grill_confirmed: true,
@@ -414,7 +394,48 @@ describe("MpcLearningPanel", () => {
     await openPanel();
 
     expect(screen.getByRole("alert")).toHaveTextContent("Calibration stage timed out");
-    expect(screen.getByRole("alert")).toHaveTextContent("Calibration is incomplete");
+    expect(screen.getByRole("alert")).toHaveTextContent("Calibration ended without completing");
     expect(screen.getByRole("button", { name: "Stop calibration" })).toBeEnabled();
+  });
+
+  it("does not warn about incompleteness while a run is still going", async () => {
+    // `incomplete` is true for every run that has not finished all its stages,
+    // so alerting on it alone puts a permanent warning on a healthy run.
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        calibration: { ...REPORT.calibration, status: "active", incomplete: true },
+      }),
+    );
+    renderPanel();
+    await openPanel();
+
+    expect(screen.queryByText(/without completing/i)).toBeNull();
+  });
+
+  it("does not warn about incompleteness before any run has been started", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        calibration: { ...REPORT.calibration, status: "inactive", stage: null, incomplete: true },
+      }),
+    );
+    renderPanel();
+    await openPanel();
+
+    expect(screen.queryByText(/without completing/i)).toBeNull();
+  });
+
+  it("shows the calibration status so a stopped run is distinguishable from one never started", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        calibration: { ...REPORT.calibration, status: "cancelled", incomplete: true },
+      }),
+    );
+    renderPanel();
+    await openPanel();
+
+    expect(screen.getByText(/Calibration: cancelled/i)).toBeInTheDocument();
   });
 });

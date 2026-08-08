@@ -141,6 +141,8 @@ class HoldMode(ControlMode):
     _activation_lifecycle_evidence_id: str | None = None
     _PENDING_MODEL_OBSERVATION_CAPACITY = 60
     _calibration_command_high_water: int = 0
+    _last_target: float | None = None
+    _safety_ceiling_fault: str | None = None
 
     def _pulse_frame_seconds(self) -> float:
         """The scheduler's frame, or zero before one has been built."""
@@ -537,7 +539,26 @@ class HoldMode(ControlMode):
                 "pending-observation-overflow",
             )
 
+    def _submit_calibration_frame_evidence(self, observation: FrameObservation) -> None:
+        """Record what calibration did with this frame, whatever the learner does.
+
+        The operator's calibration run is reported from this evidence, so it
+        cannot depend on the learner accepting the observation. With online
+        adaptation off the learner returns no outcome at all and every frame is
+        retired as a gap; a run that started, probed and aborted would then
+        leave the report reading "inactive" with nothing to show the operator.
+        """
+        worker = self._persistence_worker
+        if worker is None:
+            return
+        compact = self._calibration_frame_evidence(observation, self._trace_session_id, self._trace_cook_id)
+        if compact is None:
+            return
+        if not worker.submit_evidence_batch((compact,)).accepted:
+            self._learning_evidence_available = False
+
     def _deliver_completed_pulse_observation(self, frame_key: tuple[int, int], observation: FrameObservation) -> None:
+        self._submit_calibration_frame_evidence(observation)
         if not observation.probe_valid:
             self._pulse_observation_last_frame_key = frame_key
             if self._pending_model_observations is None:
@@ -861,12 +882,9 @@ class HoldMode(ControlMode):
                 records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
             queued = (*pending[:3], tuple(records))
             self._pending_model_observations[sequence] = queued
-            compact = self._calibration_frame_evidence(observation, pending[1], self._trace_cook_id)
-            compact_batch = (
-                (*(evidence if isinstance(evidence, tuple) else ()), compact)
-                if compact is not None
-                else (evidence if isinstance(evidence, tuple) else ())
-            )
+            # Calibration evidence is submitted when the frame is delivered, not
+            # here: it must not be gated on the learner accepting the frame.
+            compact_batch = evidence if isinstance(evidence, tuple) else ()
             if (
                 compact_batch
                 and self._persistence_worker is not None
@@ -1933,6 +1951,59 @@ class HoldMode(ControlMode):
         )
         self._runner_configuration_revision = installed_generation
 
+    def _retarget_running_controller(self) -> None:
+        """Give a new setpoint to the controller that is already running.
+
+        The alternative -- and what a setpoint change used to do -- is to raise
+        control['updated'], break the work cycle and re-enter Hold, which builds
+        a new controller core. For a PID that costs the integrator, which
+        set_target resets anyway; for the MPC it costs the state estimator, the
+        online learner and any calibration run in progress.
+
+        The first tick only records the target: build_runner already applied it.
+        """
+        try:
+            target = float(self.control["primary_setpoint"])
+        except KeyError, TypeError, ValueError:
+            return
+        previous, self._last_target = self._last_target, target
+        if previous is None or previous == target or self._runner is None:
+            return
+        self._runner.set_target(target)
+
+    def _publish_safety_ceiling(self, now: float) -> None:
+        """Push the grill's configured maximum down to the controller.
+
+        There is no separate limit for the MPC: this is
+        settings['safety']['maxtemp'], the same value the universal max-temp
+        guard trips on. It is read every tick rather than stamped onto a
+        calibration command, so lowering it mid-cook binds the next probe
+        instead of the next operator action.
+        """
+        try:
+            configured = self.settings["safety"]["maxtemp"]
+            units = self.settings["globals"]["units"]
+            if isinstance(configured, bool) or not isinstance(configured, (int, float)) or not isfinite(configured):
+                raise ValueError("grill maximum temperature is not finite")
+            if units == "F":
+                ceiling_c = (float(configured) - 32.0) * 5.0 / 9.0
+            elif units == "C":
+                ceiling_c = float(configured)
+            else:
+                raise ValueError("grill temperature units must be Celsius or Fahrenheit")
+            self._runner.set_safety_ceiling_c(ceiling_c)
+        except (KeyError, NotImplementedError, TypeError, ValueError) as error:
+            if self._safety_ceiling_fault != str(error):
+                self._safety_ceiling_fault = str(error)
+                self._trace_safety(
+                    SafetyEventType.SCHEDULER_RESET,
+                    now,
+                    f"cannot read the grill maximum temperature: {error}",
+                    InhibitReason.SAFETY,
+                )
+            return
+        self._safety_ceiling_fault = None
+
     def _consume_calibration_command(self, now: float) -> None:
         """Forward each control-plane revision once before its next controller solve."""
         raw = self.control.get("mpc_calibration")
@@ -1943,29 +2014,13 @@ class HoldMode(ControlMode):
             return
         controller = self.state.controller
         try:
-            configured_ceiling = self.settings["safety"]["maxtemp"]
-            units = self.settings["globals"]["units"]
-            if (
-                isinstance(configured_ceiling, bool)
-                or not isinstance(configured_ceiling, (int, float))
-                or not isfinite(configured_ceiling)
-            ):
-                raise ValueError("MPC calibration safety maximum is not finite")
-            if units == "F":
-                safety_ceiling_c = (float(configured_ceiling) - 32.0) * 5.0 / 9.0
-            elif units == "C":
-                safety_ceiling_c = float(configured_ceiling)
-            else:
-                raise ValueError("MPC calibration safety units must be Celsius or Fahrenheit")
             command = CalibrationCommand(
                 action=raw["action"],
                 command_revision=revision,
-                maximum_temperature_c=raw["maximum_temperature_c"],
                 ambient_c=raw["ambient_c"],
                 ambient_source=raw["ambient_source"],
                 empty_grill_confirmed=raw["empty_grill_confirmed"],
                 pellets_confirmed=raw["pellets_confirmed"],
-                safety_ceiling_c=safety_ceiling_c,
             )
             self._runner.request_calibration(command)
         except (KeyError, NotImplementedError, TypeError, ValueError) as error:
@@ -1978,6 +2033,39 @@ class HoldMode(ControlMode):
             return
         self._calibration_command_high_water = revision
         controller.calibration_command_revision = revision
+
+    #: How a finished run is named in the operator's report. "inactive" is
+    #: reserved for a run that never began, so a stopped or aborted one is never
+    #: reported as though the operator had not asked for anything.
+    _CALIBRATION_OUTCOME_STATUS = {
+        "start_rejected": "rejected",
+        "safety_aborted": "cancelled",
+        "stage_timeout": "cancelled",
+        "stopped": "cancelled",
+        "completed": "accepted",
+    }
+
+    @classmethod
+    def _calibration_status(cls, calibration) -> str:
+        if calibration is None:
+            return "inactive"
+        if calibration.active:
+            return "active"
+        named = cls._CALIBRATION_OUTCOME_STATUS.get(calibration.outcome or "")
+        if named is not None:
+            return named
+        return "accepted" if any(event.kind == "start_accepted" for event in calibration.events) else "inactive"
+
+    @staticmethod
+    def _calibration_reason(calibration) -> str | None:
+        """The coordinator's own terminal reasons.
+
+        They reach the control trace but nothing else, so the report can say a
+        run stopped without ever saying why.
+        """
+        if calibration is None or not calibration.outcome_reasons:
+            return None
+        return ", ".join(calibration.outcome_reasons)
 
     def _calibration_cancellation_reason(self, result, now: float) -> str | None:
         calibration = result.calibration
@@ -2131,6 +2219,8 @@ class HoldMode(ControlMode):
                     InhibitReason.SAFETY,
                 )
 
+        self._retarget_running_controller()
+        self._publish_safety_ceiling(now)
         self._consume_calibration_command(now)
 
         # Feed the runner every tick so a threaded core always has a fresh temp
@@ -2213,22 +2303,10 @@ class HoldMode(ControlMode):
                 controller.pulse_calibration_command_generation = (
                     result.calibration.command_generation if result.calibration is not None else 0
                 )
-                controller.pulse_calibration_cancellation_reason = cancellation_reason
-                controller.pulse_calibration_status = (
-                    "active"
-                    if result.calibration is not None and result.calibration.active
-                    else (
-                        "rejected"
-                        if result.calibration is not None
-                        and any(event.kind == "start_rejected" for event in result.calibration.events)
-                        else (
-                            "accepted"
-                            if result.calibration is not None
-                            and any(event.kind == "start_accepted" for event in result.calibration.events)
-                            else "inactive"
-                        )
-                    )
+                controller.pulse_calibration_cancellation_reason = cancellation_reason or self._calibration_reason(
+                    result.calibration
                 )
+                controller.pulse_calibration_status = self._calibration_status(result.calibration)
                 controller.pulse_allocation_evidence_checked = True
                 controller.pulse_allocation_result_revision = result.revision if result.allocation is not None else None
                 controller.pulse_requested_fan_duty = result.fan["duty"] if result.fan is not None else None
@@ -2546,6 +2624,9 @@ class HoldMode(ControlMode):
             if not (
                 controller_config.get("enable_identification") or controller_config.get("enable_online_adaptation")
             ):
+                _control.eventLogger.info(
+                    "Model refit skipped at cook end: neither Learn This Grill nor Online Model Adaptation is enabled."
+                )
                 return
         except Exception as error:
             _control.eventLogger.error(f"Model refit failed at cook end: {error}")
@@ -2558,6 +2639,17 @@ class HoldMode(ControlMode):
         except Exception as error:
             refit_error = error
             _control.eventLogger.error(f"Model refit failed at cook end: {error}")
+        else:
+            # The outcome only reached the control trace, so an operator reading
+            # the log could not tell a refit that ran and was rejected from one
+            # that never happened -- and every reason it can decline (too few
+            # samples, a worse fit, an online-adaptation checkpoint) is
+            # something they may want to act on.
+            reason = getattr(verdict, "reason", None) or "no reason recorded"
+            _control.eventLogger.info(
+                f"Model refit at cook end: {'adopted' if getattr(verdict, 'accepted', False) else 'not adopted'} "
+                f"({reason})."
+            )
         finally:
             try:
                 snapshot = self._runner.get_model_snapshot()

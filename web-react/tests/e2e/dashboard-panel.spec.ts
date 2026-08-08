@@ -382,7 +382,6 @@ test("MPC Hold exposes calibration, exact activation, framed outputs, and fallba
     const body = route.request().postDataJSON() as {
       action: string;
       revision: number;
-      maximum_temperature_c: number;
       empty_grill_confirmed: boolean;
       pellets_confirmed: boolean;
     };

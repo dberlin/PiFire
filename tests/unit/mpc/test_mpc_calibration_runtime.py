@@ -31,6 +31,9 @@ def _controller(monkeypatch, *, safe_forecast=True):
         )
     controller = Controller({"n_delay": 0, "enable_fan_input": False}, "C", {"u_max": 0.9})
     controller.set_target(110.0)
+    # Hold publishes the grill's configured maximum every tick; without it the
+    # controller has no ceiling and fails closed on every probe.
+    controller.set_safety_ceiling_c(260.0)
     return controller
 
 
@@ -38,12 +41,10 @@ def _start(revision=1):
     return CalibrationCommand(
         action="start",
         command_revision=revision,
-        maximum_temperature_c=130.0,
         ambient_c=20.0,
         ambient_source="configured",
         empty_grill_confirmed=True,
         pellets_confirmed=True,
-        safety_ceiling_c=260.0,
     )
 
 
@@ -111,6 +112,7 @@ def test_delayed_grey_box_overshoot_fails_closed_without_querying_challenger(mon
     )
     controller = _controller(monkeypatch, safe_forecast=False)
     runner = SyncControllerRunner(controller)
+    runner.set_safety_ceiling_c(130.0)  # the forecast peaks past this, later in the horizon
     runner.request_calibration(_start())
 
     result = runner.latest_from(100.0)
@@ -288,12 +290,15 @@ def test_partial_frame_feedback_cancels_without_counting_an_observation(monkeypa
     assert cancelled.calibration.command_action == "safety-cancel"
 
 
-def test_runtime_uses_current_command_safety_ceiling_not_a_fixed_limit(monkeypatch):
+def test_probing_binds_to_the_grill_maximum_in_force_now_not_the_one_a_command_carried(monkeypatch):
+    """The grill maximum is the ONLY ceiling, and it is read every tick: lowering
+    it mid-cook must bind the next probe, not the next operator action."""
     controller = _controller(monkeypatch)
     runner = SyncControllerRunner(controller)
-    runner.request_calibration(replace(_start(), safety_ceiling_c=120.0))
+    runner.set_safety_ceiling_c(100.0)
+    runner.request_calibration(_start())
 
     rejected = runner.latest_from(100.0)
 
     assert not rejected.calibration.active
-    assert "safety_ceiling" in rejected.calibration.events[-1].reasons
+    assert "overshoot_prediction" in rejected.calibration.events[-1].reasons

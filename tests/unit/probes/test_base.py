@@ -24,6 +24,7 @@ import logging
 
 import pytest
 
+import probes.base as base
 from probes.base import FakeDevice, ProbeInterface, resolve_spi_bus
 from probes.kalman import TempKalman
 
@@ -337,7 +338,8 @@ def test_apply_filters_disabled_returns_input_unchanged():
     assert result["primary"]["Primary1"] == 123.4
 
 
-def test_apply_filters_updates_output_and_dedups_debug_log(caplog):
+def test_apply_filters_updates_output_and_dedups_debug_log(caplog, monkeypatch):
+    monkeypatch.setattr(base, "KALMAN_DEBUG", True)
     device_info = _device_info(["P1"])
     probe_info = [_probe("P1", "Primary1", "Primary")]
     obj = _make_probe(probe_info, device_info)
@@ -501,3 +503,18 @@ def test_resolve_spi_bus_basic_unknown_cs_raises():
 def test_fake_device_is_a_noop_stub():
     dev = FakeDevice(port_map={}, primary_port=None, units="F")
     assert dev.read_voltage("anything") is None
+
+
+def test_per_reading_kalman_tracing_stays_off_at_debug_unless_asked_for(caplog, monkeypatch):
+    """A live probe changes every tick, so the dedup cannot suppress anything and
+    this used to emit a record per probe per tick, burying every other message."""
+    monkeypatch.setattr(base, "KALMAN_DEBUG", False)
+    obj = _make_probe([_probe("P1", "Primary1", "Primary")], _device_info(["P1"]))
+    obj.port_filters["P1"] = _FixedKalman(output=200.5, x=200.5, v=0.1, outlier=False, none_streak=0)
+    data = {"primary": {"Primary1": 199.9}, "food": {}, "aux": {}}
+
+    with caplog.at_level(logging.DEBUG, logger="control"):
+        obj.apply_filters(data)
+
+    assert data["primary"]["Primary1"] == 200.5  # filtering itself is unaffected
+    assert "Kalman[" not in caplog.text

@@ -55,7 +55,6 @@ def test_hold_consumes_latest_calibration_revision_once_across_reconfiguration(h
     hold.control["mpc_calibration"] = {
         "action": "start",
         "revision": 1,
-        "maximum_temperature_c": 130.0,
         "ambient_c": 20.0,
         "ambient_source": "configured",
         "empty_grill_confirmed": True,

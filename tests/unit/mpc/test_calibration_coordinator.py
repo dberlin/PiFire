@@ -36,7 +36,7 @@ def context(**changes):
 
 
 def command(**changes):
-    values = dict(command_revision=7, maximum_temperature_c=240.0, seed=17)
+    values = dict(command_revision=7, seed=17)
     values.update(changes)
     return CalibrationCommand(**values)
 
@@ -106,13 +106,6 @@ def test_start_rejects_each_operator_and_evidence_precondition(field, value, rea
     assert decision.probe_q == 0.0
     assert decision.events[-1].kind == "start_rejected"
     assert reason in decision.events[-1].reasons
-
-
-def test_start_rejects_maximum_at_or_above_safety_ceiling():
-    decision = CalibrationCoordinator().start(command(maximum_temperature_c=260.0), context())
-    assert not decision.active
-    assert decision.probe_q == 0.0
-    assert "safety_ceiling" in decision.events[-1].reasons
 
 
 def test_start_begins_low_stage_and_emits_audit_events():
@@ -296,7 +289,7 @@ def test_snapshot_restore_is_deterministic_and_immutable():
 
 def test_invalid_command_and_runtime_values_are_rejected():
     with pytest.raises(ValueError):
-        CalibrationCommand(command_revision=-1, maximum_temperature_c=240.0)
+        CalibrationCommand(command_revision=-1)
     with pytest.raises(ValueError):
         context(now_s=math.nan)
     with pytest.raises(ValueError):
@@ -498,3 +491,70 @@ def test_reset_progress_clears_active_progress_and_history_but_stop_retains_them
     assert reset.progress == type(reset.progress)()
     assert reset.events[-1].kind == "progress_reset"
     assert coordinator.snapshot()["completed_stages"] == ()
+
+
+def _starve(coordinator, frames=12, **changes):
+    """Advance until a probe finds no room at the operating point.
+
+    The dwell plan's signs are seeded, so which slot first asks to move down is
+    not fixed; drive frames until one does.
+    """
+    current = None
+    for frame in range(1, frames + 1):
+        current = coordinator.advance(context(now_s=float(frame), baseline_q=0.0, realized_q=0.0, **changes))
+        if current.events and current.events[-1].kind == "probe_skipped":
+            return current
+    return current
+
+
+def test_a_probe_with_no_room_at_the_operating_point_is_skipped_not_fatal():
+    """A hold whose commanded load has fallen to zero leaves a downward probe
+    nothing to subtract from. That is a transient fact about the operating
+    point, not a safety event, so the stage waits rather than dying."""
+    coordinator, _ = start()
+
+    skipped = _starve(coordinator)
+
+    assert skipped.events[-1].kind == "probe_skipped"
+    assert skipped.events[-1].reasons == ("no_probe_room",)
+    assert skipped.active
+    assert skipped.probe_q == 0.0
+    assert skipped.stage == "low"
+
+
+def test_a_skipped_probe_is_retried_at_the_same_schedule_slot_once_room_returns():
+    coordinator, _ = start()
+    skipped = _starve(coordinator)
+    assert skipped.events[-1].kind == "probe_skipped"
+    position = coordinator.snapshot()["state"].schedule_position
+
+    resumed = coordinator.advance(context(now_s=99.0, baseline_q=0.50, realized_q=0.50))
+
+    assert resumed.active
+    assert resumed.probe_q != 0.0
+    assert coordinator.snapshot()["state"].schedule_position == position + 1
+
+
+def test_start_with_no_room_begins_the_stage_waiting_instead_of_rejecting():
+    """The operator asked for a calibration cook. Starting at an operating point
+    that cannot take the first probe yet is a wait, not a refusal."""
+    coordinator = CalibrationCoordinator(predict_max_c=safe_prediction)
+
+    decision = coordinator.start(command(), context(baseline_q=0.0, realized_q=0.0))
+
+    assert decision.active
+    assert decision.stage == "low"
+    assert decision.probe_q == 0.0
+    assert [event.kind for event in decision.events[-3:]] == ["start_accepted", "stage_started", "probe_skipped"]
+
+
+def test_explicit_headroom_signals_still_abort_rather_than_waiting():
+    """A reported loss of allocator/capability/saturation authority is not the
+    same as an operating point with no room, and stays fatal."""
+    coordinator, _ = start()
+
+    decision = coordinator.advance(context(now_s=1.0, capability_headroom=0.0))
+
+    assert not decision.active
+    assert decision.events[-1].kind == "safety_aborted"
+    assert "inadequate_headroom" in decision.events[-1].reasons

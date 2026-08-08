@@ -360,21 +360,20 @@ def _cmd_set_psp(data, control, settings, arglist, origin, kind):
     /api/set/psp/{integer/float temperature}
     """
     if is_float(arglist[1]):
-        control["mode"] = Mode.HOLD
         if settings["globals"]["units"] == "F":
-            control["primary_setpoint"] = int(float(arglist[1]))
+            setpoint = int(float(arglist[1]))
         else:
-            control["primary_setpoint"] = float(arglist[1])
-        control["updated"] = True
+            setpoint = float(arglist[1])
+        # Whether this is a mode change or a retarget of a cook already holding
+        # can only be decided at drain time, against live state -- see
+        # control_delta._op_hold_set_setpoint. The local blob is updated to
+        # match what that op will do, for the answer this call returns.
+        control["updated"] = control.get("mode") != Mode.HOLD
+        control["mode"] = Mode.HOLD
+        control["primary_setpoint"] = setpoint
         _write_control_delta(
             control,
-            control_delta(
-                set_values={
-                    "mode": Mode.HOLD,
-                    "primary_setpoint": control["primary_setpoint"],
-                    "updated": True,
-                }
-            ),
+            control_delta(ops=[{"op": "hold.set_setpoint", "setpoint": setpoint}]),
             kind,
             origin,
         )
@@ -664,22 +663,6 @@ def _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind):
     _write_control_delta(control, control_delta(set_values={"tuning_mode": control["tuning_mode"]}), kind, origin)
 
 
-def _mpc_calibration_safety_ceiling_c(settings):
-    """Convert the configured absolute safety maximum to the command's Celsius unit."""
-    try:
-        units = settings["globals"]["units"]
-        maximum = settings["safety"]["maxtemp"]
-    except (KeyError, TypeError) as error:
-        raise ValueError("MPC calibration safety maximum is not configured") from error
-    if isinstance(maximum, bool) or not isinstance(maximum, (int, float)) or not math.isfinite(maximum):
-        raise ValueError("MPC calibration safety maximum is not finite")
-    if units == "C":
-        return float(maximum)
-    if units == "F":
-        return (float(maximum) - 32.0) * 5.0 / 9.0
-    raise ValueError("MPC calibration safety units must be Celsius or Fahrenheit")
-
-
 def _mpc_grey_box_active(settings):
     controller = settings.get("controller")
     if not isinstance(controller, dict) or controller.get("selected") != "mpc":
@@ -687,6 +670,22 @@ def _mpc_grey_box_active(settings):
     config = controller.get("config")
     selected = config.get("mpc") if isinstance(config, dict) else None
     return not isinstance(selected, dict) or selected.get("enable_grey_box") is not False
+
+
+def _mpc_online_adaptation_active(settings):
+    """Whether anything is listening to what calibration records.
+
+    Calibration exists to excite the plant for the online learner. With the
+    learner off, MPC.observe_frame returns no outcome for any frame, every
+    observation is retired as a gap, and the run can neither complete nor
+    report -- it just looks like nothing happened.
+    """
+    controller = settings.get("controller")
+    if not isinstance(controller, dict) or controller.get("selected") != "mpc":
+        return False
+    config = controller.get("config")
+    selected = config.get("mpc") if isinstance(config, dict) else None
+    return isinstance(selected, dict) and selected.get("enable_online_adaptation") is True
 
 
 def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
@@ -702,15 +701,12 @@ def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
             data["result"] = "ERROR"
             data["message"] = "MPC calibration start requires MPC Hold with grey-box control"
             return
-        try:
-            safety_ceiling_c = _mpc_calibration_safety_ceiling_c(settings)
-        except ValueError as error:
+        if not _mpc_online_adaptation_active(settings):
             data["result"] = "ERROR"
-            data["message"] = str(error)
-            return
-        if command["maximum_temperature_c"] >= safety_ceiling_c:
-            data["result"] = "ERROR"
-            data["message"] = "MPC calibration maximum temperature must be below the configured safety ceiling"
+            data["message"] = (
+                "MPC calibration requires Online Model Adaptation, which consumes the probes it "
+                "records. Turn it on in Settings > Controller."
+            )
             return
     delta = control_delta(ops=[{"op": "mpc_calibration.set", "command": command}])
     if kind is not WriteKind.OVERWRITE:

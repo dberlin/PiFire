@@ -546,10 +546,16 @@ class ControlMode:
                 status_data["fan_duty"] = 100
         else:
             status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
-            if self.settings["platform"].get("dc_fan"):
+            # Both branches gate on the output, as the Manual branch above does:
+            # control['duty_cycle'] is the duty the fan WOULD be given, and
+            # reporting it for a fan that is off puts "FAN DUTY 100%" beside
+            # "FAN IDLE" on the dashboard.
+            if not current.get("fan"):
+                status_data["fan_duty"] = 0
+            elif self.settings["platform"].get("dc_fan"):
                 status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
             else:
-                status_data["fan_duty"] = 100 if current.get("fan") else 0
+                status_data["fan_duty"] = 100
         # ---- mode-specific status fields ----
         status_data.update(self.status_fragment())
         return status_data

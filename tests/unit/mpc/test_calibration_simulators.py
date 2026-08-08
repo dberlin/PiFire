@@ -122,7 +122,7 @@ def test_calibration_drives_both_plants_with_causal_identifying_evidence_without
     coordinator = CalibrationCoordinator(predict_max_c=prediction)
     measured = plant.measured()
     decision = coordinator.start(
-        CalibrationCommand(command_revision=3, maximum_temperature_c=240.0, seed=seed),
+        CalibrationCommand(command_revision=3, seed=seed),
         runtime(0.0, measured, _BASELINE_Q, 0.0, 0.0),
     )
     temperatures = [measured]

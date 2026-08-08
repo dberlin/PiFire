@@ -703,3 +703,22 @@ def test_acceptance_failure_matrix_has_one_exact_blocker_and_never_changes_owner
     assert report.blockers == (expected_blocker,)
     assert report.active_kind == "grey_box"
     assert report.status is not ConfidenceStatus.READY_FOR_REVIEW
+
+
+def test_recorder_gaps_alone_are_not_progress_and_stay_collecting() -> None:
+    """A gap records that an observation was LOST. A store holding nothing else
+    has learned nothing, and must not report a model being fitted -- which is
+    what a real grill shows when online adaptation is off and every frame is
+    dropped."""
+    gaps = tuple(
+        _record(
+            EvidenceKind.RECORDER_GAP,
+            RecorderGapEvidence(lost_record_count=1, reason="runner-no-observation-outcome"),
+            timestamp=index + 1,
+        )
+        for index in range(3)
+    )
+
+    report = evaluate_confidence(gaps, activation_state=_state(), target_timing=None, config=ConfidenceConfig())
+
+    assert report.status is ConfidenceStatus.COLLECTING

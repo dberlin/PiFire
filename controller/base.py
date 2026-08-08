@@ -122,6 +122,14 @@ class ControllerBase:
         self.set_point = set_point
         self.last_update = time.time()
 
+    def set_safety_ceiling_c(self, ceiling_c):
+        """The grill's configured maximum temperature, in Celsius.
+
+        There is no separate limit for a controller: this is
+        settings['safety']['maxtemp'], pushed down as it changes. A controller
+        that never drives the plant beyond what it was asked for ignores it.
+        """
+
     def get_control_period(self):
         """
         Desired re-solve / actuation period in seconds. Return None to delegate

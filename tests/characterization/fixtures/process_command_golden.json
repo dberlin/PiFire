@@ -6122,11 +6122,12 @@
       {
         "delta": {
           "__control_delta__": 1,
-          "set": {
-            "mode": "Hold",
-            "primary_setpoint": 107.5,
-            "updated": true
-          }
+          "ops": [
+            {
+              "op": "hold.set_setpoint",
+              "setpoint": 107.5
+            }
+          ]
         },
         "origin": "test"
       }
@@ -6163,11 +6164,12 @@
       {
         "delta": {
           "__control_delta__": 1,
-          "set": {
-            "mode": "Hold",
-            "primary_setpoint": 225,
-            "updated": true
-          }
+          "ops": [
+            {
+              "op": "hold.set_setpoint",
+              "setpoint": 225
+            }
+          ]
         },
         "origin": "test"
       }

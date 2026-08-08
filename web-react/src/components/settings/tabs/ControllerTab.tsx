@@ -3,6 +3,7 @@ import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { MPC_FAN_CONFLICT_MESSAGE, mpcFanConflict } from "../../../helpers/settings/mpcFan";
 import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
+import { settingsDelta } from "../../../helpers/settings/settingsDelta";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { SaveStatus } from "../../../helpers/settings/useSaveSettings";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -147,6 +148,8 @@ export function ControllerTab() {
     // not something a generated type can check (the selected controller is a
     // runtime string, so it can never index the generated map statically). Drop
     // anything the selected controller does not declare rather than persist it.
+    // Dropping it from what we send is not enough -- the backend MERGES, so an
+    // omitted key survives -- hence the explicit delete paths below.
     const declared = new Set((entry?.config ?? []).map((opt) => opt.option_name));
     const unknownKeys = Object.keys(rebuilt).filter((key) => !declared.has(key));
     for (const key of unknownKeys) delete rebuilt[key];
@@ -156,21 +159,27 @@ export function ControllerTab() {
     // path with a `Record<string, string | number | boolean>` value, so no cast
     // is needed here.
     d = setPath(d, `controller.config.${selected}`, rebuilt);
-    const ok = await save(d, ["controller_update"]);
+    const ok = await save(
+      settingsDelta(
+        d,
+        unknownKeys.map((key) => ["controller", "config", selected, key]),
+      ),
+      ["controller_update"],
+    );
     setDroppedOptions(ok ? unknownKeys : []);
     if (ok) markSaved();
   };
 
-  // A dropped-options warning takes the same slot SaveBar already renders a
-  // save error in; a genuine save failure (nothing persisted) takes priority
-  // over it, since droppedOptions only reflects the save that just succeeded.
-  const effectiveStatus: SaveStatus =
+  // Removing an option the controller has retired is the cleanup the
+  // controller itself asks for, and the save that reports it SUCCEEDED, so it
+  // is a notice rather than a save error -- which is what it read as while it
+  // occupied SaveBar's error slot saying "These were not saved."
+  const effectiveStatus: SaveStatus = status;
+  const droppedNotice =
     status.kind !== "error" && droppedOptions.length > 0
-      ? {
-          kind: "error",
-          message: `${selected} does not have options named: ${droppedOptions.join(", ")}. These were not saved.`,
-        }
-      : status;
+      ? `Removed ${droppedOptions.join(", ")}: ${selected} no longer has ` +
+        `${droppedOptions.length === 1 ? "that option" : "those options"}.`
+      : null;
 
   return (
     <Section title="Controller">
@@ -248,6 +257,11 @@ export function ControllerTab() {
       {fanConflict && (
         <p className="pf-settings-error-text" role="alert">
           {MPC_FAN_CONFLICT_MESSAGE}
+        </p>
+      )}
+      {droppedNotice !== null && (
+        <p className="pf-settings-hint" role="status">
+          {droppedNotice}
         </p>
       )}
       <SaveBar onSave={onSave} saving={saving} status={effectiveStatus} dirty={dirty} />

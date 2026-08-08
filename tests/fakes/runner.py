@@ -60,6 +60,7 @@ class FakeControllerRunner:
         # a test can hold the refit to after the worker was asked to stop
         # without reading the two counters as if they were ordered.
         self.stops_before_each_refit = []
+        self.safety_ceiling_c = None
 
     def script(self, outputs):
         self._script = list(outputs)
@@ -68,6 +69,9 @@ class FakeControllerRunner:
 
     def set_target(self, setpoint):
         self.target = setpoint
+
+    def set_safety_ceiling_c(self, ceiling_c):
+        self.safety_ceiling_c = ceiling_c
 
     def request_calibration(self, command):
         self.calibration_requests.append(command)

@@ -770,12 +770,10 @@ class CalibrationCommand:
 
     action: str
     command_revision: int
-    maximum_temperature_c: float
     ambient_c: float
     ambient_source: str
     empty_grill_confirmed: bool
     pellets_confirmed: bool
-    safety_ceiling_c: float
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -789,7 +787,7 @@ class CalibrationCommand:
             raise ValueError("calibration command revision must be positive")
         if not all(
             isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-            for value in (self.maximum_temperature_c, self.ambient_c, self.safety_ceiling_c)
+            for value in (self.ambient_c,)
         ):
             raise ValueError("calibration temperatures must be finite")
         if self.ambient_source not in {"measured", "manual", "weather", "configured"}:
@@ -2340,6 +2338,18 @@ class Controller(ControllerBase):
             )
         return self._online_teardown_checkpoint(verdict)
 
+    def set_safety_ceiling_c(self, ceiling_c) -> None:
+        """Track the grill's configured maximum, which probing must stay under.
+
+        Read from settings on every tick rather than carried on a calibration
+        command, so lowering the grill maximum mid-cook binds the next probe
+        instead of the next operator action.
+        """
+        value = float(ceiling_c)
+        if not math.isfinite(value):
+            raise ValueError("safety ceiling must be finite Celsius")
+        self._calibration_safety_ceiling_c = value
+
     def request_calibration(self, command: CalibrationCommand) -> None:
         """Queue each strictly newer operator command for ordered consumption."""
         if not isinstance(command, CalibrationCommand):
@@ -2456,7 +2466,6 @@ class Controller(ControllerBase):
                 command = payload
                 assert isinstance(command, CalibrationCommand)
                 self._calibration_ambient_c = command.ambient_c
-                self._calibration_safety_ceiling_c = command.safety_ceiling_c
                 runtime = self._calibration_runtime(baseline_q, temperature_c)
                 if command.action == "start":
                     self._calibration_generation += 1
@@ -2465,9 +2474,7 @@ class Controller(ControllerBase):
                     command_generation = self._trace_calibration.command_generation
                 if command.action == "start":
                     decision = self._calibration.start(
-                        _CoordinatorCalibrationCommand(
-                            command.command_revision, command.maximum_temperature_c, command.seed
-                        ),
+                        _CoordinatorCalibrationCommand(command.command_revision, command.seed),
                         runtime,
                     )
                 elif command.action == "pause":

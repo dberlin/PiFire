@@ -78,11 +78,10 @@ def test_the_applier_does_not_alias_the_envelope():
     assert envelope["set"]["manual"]["pwm"] == 50
 
 
-def _calibration_command(revision, maximum_temperature_c=130.0):
+def _calibration_command(revision, ambient_c=20.0):
     return {
         "action": "start",
         "revision": revision,
-        "maximum_temperature_c": maximum_temperature_c,
         "ambient_c": 20.0,
         "ambient_source": "configured",
         "empty_grill_confirmed": True,
@@ -94,7 +93,7 @@ def test_calibration_operation_applies_only_a_strictly_newer_live_revision():
     control = {"mpc_calibration": _calibration_command(2)}
     four = _calibration_command(4)
     three = _calibration_command(3)
-    conflicting_four = _calibration_command(4, maximum_temperature_c=140.0)
+    conflicting_four = _calibration_command(4, ambient_c=21.0)
 
     apply_control_delta(control, control_delta(ops=[{"op": "mpc_calibration.set", "command": four}]))
     assert control["mpc_calibration"] == four
@@ -110,7 +109,6 @@ def test_calibration_operation_applies_only_a_strictly_newer_live_revision():
 
     apply_control_delta(control, control_delta(ops=[{"op": "mpc_calibration.set", "command": four}]))
     assert control["mpc_calibration"] == four
-
 
 
 def test_apply_control_delta_drops_an_unknown_version_and_logs(caplog):

@@ -235,12 +235,10 @@ def _run_evidence_cook(
             CalibrationCommand(
                 action="start",
                 command_revision=1,
-                maximum_temperature_c=240.0,
                 ambient_c=plant.T_amb,
                 ambient_source="configured",
                 empty_grill_confirmed=True,
                 pellets_confirmed=True,
-                safety_ceiling_c=260.0,
             )
         )
     completed_stages: tuple[str, ...] = ()

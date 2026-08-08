@@ -11,6 +11,14 @@ _DWELL_COUNTS = (2, 3, 5, 4, 3, 2)
 _STAGES = ("low", "middle", "high")
 _COAST = "coast"
 
+#: The bounded probe collapsed to zero because the operating point has no room
+#: left in the intended direction. Distinct from `inadequate_headroom`, which
+#: reports a lost allocator/capability/saturation authority: this one is an
+#: ordinary transient. A hold low enough that the controller asks for no fuel
+#: leaves a downward move nothing to subtract from, and a stage that died there
+#: would make every low-band calibration impossible.
+_NO_ROOM = "no_probe_room"
+
 
 def _finite(value: float, name: str) -> float:
     if isinstance(value, bool):
@@ -88,7 +96,6 @@ class CalibrationConfig:
 @dataclass(frozen=True, slots=True)
 class CalibrationCommand:
     command_revision: int
-    maximum_temperature_c: float
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -98,7 +105,6 @@ class CalibrationCommand:
             or self.command_revision < 0
         ):
             raise ValueError("command_revision must be a non-negative integer")
-        object.__setattr__(self, "maximum_temperature_c", _finite(self.maximum_temperature_c, "maximum_temperature_c"))
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise ValueError("seed must be an integer")
 
@@ -210,6 +216,12 @@ class CalibrationDecision:
     command_action: str = "none"
     command_generation: int = 0
     completed_stages: tuple[str, ...] = ()
+    #: How the run ended, and why, once it has. Events are cleared on every
+    #: frame after the one that produced them, so without this the outcome of a
+    #: run is visible for a single frame and the operator's report falls back to
+    #: reading as though no run ever happened.
+    outcome: str | None = None
+    outcome_reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if any(stage not in _STAGES for stage in self.completed_stages):
@@ -272,8 +284,6 @@ class CalibrationCoordinator:
 
     def start(self, command: CalibrationCommand, runtime: CalibrationRuntimeContext) -> CalibrationDecision:
         reasons = self._guard_reasons(runtime)
-        if command.maximum_temperature_c >= runtime.safety_ceiling_c:
-            reasons += ("safety_ceiling",)
         if reasons:
             return self._with_provenance(
                 self._terminal("start_rejected", None, reasons), command.command_revision, "start"
@@ -289,14 +299,24 @@ class CalibrationCoordinator:
         state = _State(command, 0, runtime.now_s, 0, plan, schedule)
         self._state = state
         probe, reasons = self._bound_probe(schedule[0], runtime)
-        if reasons:
+        if reasons and reasons != (_NO_ROOM,):
             return self._with_provenance(
                 self._terminal("start_rejected", "low", reasons),
                 command.command_revision,
                 "start",
             )
+        # An operating point with no room for the first probe is a wait, not a
+        # refusal: the operator asked for a calibration cook, and the stage can
+        # begin and pick the move up as soon as the grill can take it.
+        waiting = reasons == (_NO_ROOM,)
         self._completed_history = ()
         self._state = self._with_probe(state, probe)
+        events = (
+            self._event("start_accepted", "low", schedule[0], probe, self._state),
+            self._event("stage_started", "low", schedule[0], probe, self._state),
+        )
+        if waiting:
+            events += (self._event("probe_skipped", "low", schedule[0], 0.0, self._state, (_NO_ROOM,)),)
         return self._with_provenance(
             self._remember(
                 CalibrationDecision(
@@ -304,10 +324,7 @@ class CalibrationCoordinator:
                     probe,
                     "low",
                     self._progress(self._state),
-                    (
-                        self._event("start_accepted", "low", schedule[0], probe, self._state),
-                        self._event("stage_started", "low", schedule[0], probe, self._state),
-                    ),
+                    events,
                     self._config.band_centers_c[0],
                 )
             ),
@@ -374,7 +391,7 @@ class CalibrationCoordinator:
         if reasons:
             return self._with_provenance(self._terminal("safety_aborted", self._actual_stage, reasons), 0, "resume")
         probe, reasons = self._bound_probe(self._state.current_probe_q, runtime)
-        if reasons:
+        if reasons and reasons != (_NO_ROOM,):
             return self._with_provenance(self._terminal("safety_aborted", self._actual_stage, reasons), 0, "resume")
         self._paused = False
         self._state = self._with_probe(self._state, probe)
@@ -497,6 +514,9 @@ class CalibrationCoordinator:
         ):
             return self._remember(self._decision(True, 0.0, _COAST, self._state))
         probe, reasons = self._bound_probe(self._state.schedule[0], runtime)
+        if reasons == (_NO_ROOM,):
+            # Hold the coast until the band can take the stage's first probe.
+            return self._remember(self._decision(True, 0.0, _COAST, self._state))
         if reasons:
             return self._terminal("safety_aborted", self._actual_stage, reasons)
         state = _State(
@@ -520,8 +540,33 @@ class CalibrationCoordinator:
             )
         )
 
+    def _wait_for_room(self, intended: float, state: _State) -> CalibrationDecision:
+        """Hold this schedule slot until the operating point can take the move.
+
+        The slot is retried rather than consumed, so the dwell plan keeps its
+        shape. The stage timeout still bounds how long a grill may sit here, so
+        an operating point that never recovers ends the stage on its own.
+        """
+        waiting = replace(
+            state,
+            schedule_position=max(0, state.schedule_position - 1),
+            current_probe_q=0.0,
+        )
+        self._state = waiting
+        return self._remember(
+            self._decision(
+                True,
+                0.0,
+                self._stage,
+                waiting,
+                (self._event("probe_skipped", self._actual_stage, intended, 0.0, waiting, (_NO_ROOM,)),),
+            )
+        )
+
     def _issue_probe(self, intended: float, runtime: CalibrationRuntimeContext, state: _State) -> CalibrationDecision:
         probe, reasons = self._bound_probe(intended, runtime)
+        if reasons == (_NO_ROOM,):
+            return self._wait_for_room(intended, state)
         if reasons:
             return self._terminal("safety_aborted", self._actual_stage, reasons)
         state = self._with_probe(state, probe)
@@ -568,14 +613,13 @@ class CalibrationCoordinator:
             runtime.baseline_q if intended < 0.0 else 1.0 - runtime.baseline_q,
         )
         if magnitude <= 0.0:
-            return 0.0, ("inadequate_headroom",)
+            return 0.0, (_NO_ROOM,)
         bounded = max(-magnitude, min(magnitude, intended))
         try:
             predicted = _finite(self._predict_max_c(runtime.baseline_q, bounded, runtime), "predicted_max_c")
         except Exception:
             return 0.0, ("prediction_invalid",)
-        assert self._state is not None
-        if predicted >= self._state.command.maximum_temperature_c or predicted >= runtime.safety_ceiling_c:
+        if predicted >= runtime.safety_ceiling_c:
             return 0.0, ("overshoot_prediction",)
         return bounded, ()
 
@@ -695,19 +739,7 @@ class CalibrationCoordinator:
     def _with_provenance(
         self, decision: CalibrationDecision, command_revision: int, command_action: str
     ) -> CalibrationDecision:
-        return self._remember(
-            CalibrationDecision(
-                decision.active,
-                decision.probe_q,
-                decision.stage,
-                decision.progress,
-                decision.events,
-                decision.target_c,
-                decision.activation_ready,
-                command_revision,
-                command_action,
-            )
-        )
+        return self._remember(replace(decision, command_revision=command_revision, command_action=command_action))
 
     def _terminal(
         self, kind: str, stage: str | None, reasons: tuple[str, ...], prefix: tuple[CalibrationEvent, ...] = ()
@@ -722,6 +754,8 @@ class CalibrationCoordinator:
                 stage,
                 progress,
                 prefix + (CalibrationEvent(kind, stage, 0.0, 0.0, progress.realized_probe_sum, reasons),),
+                outcome=kind,
+                outcome_reasons=reasons,
             )
         )
 

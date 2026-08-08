@@ -77,6 +77,22 @@ still [], because process_command's kind=OVERWRITE escape hatch still writes the
 blob directly. A delta cannot honour "land now", so that caller keeps the
 whole-dict write it asked for.
 
+DELIBERATE RE-BASELINE (hold retargeting): set/psp converts from a `set` of
+{mode, primary_setpoint, updated} to the `hold.set_setpoint` op, for the same
+reason the timer commands did -- the decision it carries can only be made
+against live state. WHAT CHANGED: `queued_writes` in exactly two entries,
+set_psp_f and set_psp_c. WHY: `updated` breaks the mode's work cycle, so Hold
+is re-entered and the controller REBUILT, discarding its estimator, its learner
+and any calibration run in progress. That is right when entering Hold from
+another mode and wrong when merely retargeting a cook already holding -- and a
+request handler reads a control blob that cannot see this queue, so deciding
+there made two setpoints posted in one cycle disagree with the same two a cycle
+apart (the invariant test_control_delta_seam.py holds). The op decides in the
+drain. WHAT DID NOT CHANGE: `control_diff_after_execute` is byte-identical in
+both, as are `return`, `arglist_after`, `log_calls`, `settings_diff`,
+`systemq`, `cmd_calls` and `sleeps` -- the resulting control state is the same;
+only where the mode-change decision is made moved.
+
 WHAT IS OBSERVED (per case, see `_run_case`):
   * the returned dict (result/message/data)
   * `arglist` AFTER the call -- process_command mutates its caller's list
@@ -185,7 +201,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 #   5a3702a7... -> 8d110035...  the six set_timer_ start/pause/stop entries
 #   8d110035... -> 2665570f...  the 18 notify / flag / hopper entries
 #   2665570f... -> 88c081a4...  the 44 scalar / mode / manual entries
-GOLDEN_SHA256 = "487c91602da2215fbc45541c4563b304bb4b55e4fc98241eced8479a80d17548"
+GOLDEN_SHA256 = "b86cfa9f2dd89eff594860ef223fe9d20f0a0d5af1e37e507afb57d9a8fc4c57"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0

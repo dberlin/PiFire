@@ -133,22 +133,14 @@ export function rollbackModel(
   return postModelAction("model-evidence/rollback", request, baseUrl);
 }
 
-/**
- * Send one revisioned calibration intent. The operator edits in the currently
- * displayed unit; this request boundary is the only place that value becomes Celsius.
- */
+/** Send one revisioned calibration intent. */
 export async function setMpcCalibration(
   request: MpcCalibrationRequest,
   baseUrl = DEFAULT_BASE_URL,
 ): Promise<ModelEvidenceResult<MpcCalibrationCommand>> {
-  const maximumTemperatureC =
-    request.temperature_unit === "F"
-      ? ((request.maximum_temperature - 32) * 5) / 9
-      : request.maximum_temperature;
   const command: MpcCalibrationCommand = {
     action: request.action,
     revision: request.revision,
-    maximum_temperature_c: maximumTemperatureC,
     ambient_c: request.ambient_c,
     ambient_source: request.ambient_source,
     empty_grill_confirmed: request.empty_grill_confirmed,

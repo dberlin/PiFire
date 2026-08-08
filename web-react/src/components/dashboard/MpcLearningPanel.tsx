@@ -11,12 +11,9 @@ import type {
   ModelEvidenceStatus,
   ModelScore,
   MpcCalibrationAction,
-  TemperatureUnit,
 } from "../../helpers/modelEvidence/types";
 
 const REPORT_REFRESH_MS = 5_000;
-const DEFAULT_MAXIMUM_F = 425;
-const MINIMUM_MAXIMUM: Record<TemperatureUnit, number> = { F: 225, C: 107 };
 
 const STATUS_LABEL: Record<ModelEvidenceStatus, string> = {
   collecting: "Collecting",
@@ -43,8 +40,6 @@ const STATUS_TONE: Record<ModelEvidenceStatus, string> = {
 interface MpcLearningPanelProps {
   apiBase: string;
   selectedController: string | null;
-  units: TemperatureUnit;
-  safetyMaxTemp: number;
   ambientC: number;
 }
 
@@ -97,22 +92,12 @@ export function MpcLearningPanel(props: MpcLearningPanelProps) {
   return props.selectedController === "mpc" ? <ActiveMpcLearningPanel {...props} /> : null;
 }
 
-function ActiveMpcLearningPanel({
-  apiBase,
-  units,
-  safetyMaxTemp,
-  ambientC,
-}: MpcLearningPanelProps) {
-  const initialMaximum =
-    units === "F"
-      ? Math.min(DEFAULT_MAXIMUM_F, safetyMaxTemp - 1)
-      : Math.min(((DEFAULT_MAXIMUM_F - 32) * 5) / 9, safetyMaxTemp - 1);
+function ActiveMpcLearningPanel({ apiBase, ambientC }: MpcLearningPanelProps) {
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<ModelEvidenceReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [reportError, setReportError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [maximumTemperature, setMaximumTemperature] = useState(String(initialMaximum));
   const [emptyGrill, setEmptyGrill] = useState(false);
   const [pellets, setPellets] = useState(false);
   const [pendingActions, setPendingActions] = useState<Set<MpcCalibrationAction>>(new Set());
@@ -188,20 +173,22 @@ function ActiveMpcLearningPanel({
     setDecisionIdConfirmation("");
   }, [report?.candidate.digest, report?.decision_id]);
 
-  const maximum = Number(maximumTemperature);
-  const maximumValid =
-    maximumTemperature.trim() !== "" &&
-    Number.isFinite(maximum) &&
-    maximum >= MINIMUM_MAXIMUM[units] &&
-    maximum < safetyMaxTemp;
   const calibrationRunning =
     report?.calibration.status === "active" || report?.calibration.status === "running";
   const calibrationPaused = report?.calibration.status === "paused";
+  // A run that never began, or one still going, has not failed at anything.
+  // `incomplete` is true for both of those by construction -- it means "the
+  // stages are not all done yet" -- so alerting on it alone puts a permanent
+  // warning on the panel that says nothing about what the grill is doing.
+  const calibrationEnded =
+    report !== null &&
+    !calibrationRunning &&
+    !calibrationPaused &&
+    report.calibration.status !== "inactive";
   const startDisabled =
     report === null ||
     calibrationRunning ||
     calibrationPaused ||
-    !maximumValid ||
     !emptyGrill ||
     !pellets ||
     pendingActions.has("start");
@@ -225,8 +212,6 @@ function ActiveMpcLearningPanel({
       {
         action,
         revision,
-        maximum_temperature: maximumValid ? maximum : initialMaximum,
-        temperature_unit: units,
         ambient_c: ambientC,
         ambient_source: "configured",
         // The legacy command envelope requires these fields for every action.
@@ -355,30 +340,7 @@ function ActiveMpcLearningPanel({
               {report !== null && (
                 <>
                   <section className="rounded-card border border-card-border bg-inset p-4">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div>
-                        <label className="font-semibold" htmlFor="mpc-calibration-maximum">
-                          Maximum calibration temperature (°{units})
-                        </label>
-                        <input
-                          id="mpc-calibration-maximum"
-                          className="mt-1 w-full rounded-lg border border-card-border bg-card px-3 py-2 text-text focus:outline-none focus:ring-2 focus:ring-accent"
-                          type="number"
-                          inputMode="decimal"
-                          min={MINIMUM_MAXIMUM[units]}
-                          max={safetyMaxTemp - 1}
-                          value={maximumTemperature}
-                          aria-describedby="mpc-calibration-maximum-help"
-                          onChange={(event) => setMaximumTemperature(event.target.value)}
-                        />
-                        <p
-                          className="mt-1 text-sm font-normal text-probe-label"
-                          id="mpc-calibration-maximum-help"
-                        >
-                          Enter {MINIMUM_MAXIMUM[units]}–{safetyMaxTemp - 1} °{units}; the maximum
-                          stays below the configured shutdown limit.
-                        </p>
-                      </div>
+                    <div className="grid gap-3">
                       <div className="grid content-start gap-2 text-sm">
                         <label className="flex items-start gap-2">
                           <input
@@ -450,10 +412,13 @@ function ActiveMpcLearningPanel({
                     )}
                   </section>
 
-                  {(report.calibration.timed_out || report.calibration.incomplete) && (
+                  {(report.calibration.timed_out ||
+                    (report.calibration.incomplete && calibrationEnded)) && (
                     <div className="rounded-lg border border-warn p-3 text-warn" role="alert">
                       {report.calibration.timed_out && <p>Calibration stage timed out.</p>}
-                      {report.calibration.incomplete && <p>Calibration is incomplete.</p>}
+                      {report.calibration.incomplete && calibrationEnded && (
+                        <p>Calibration ended without completing.</p>
+                      )}
                     </div>
                   )}
 
@@ -479,6 +444,7 @@ function ActiveMpcLearningPanel({
                         </p>
                       </div>
                       <div className="mt-3 grid gap-1 text-sm">
+                        <p>Calibration: {report.calibration.status}</p>
                         <p>Stage: {report.calibration.stage ?? "not started"}</p>
                         <p>
                           Current probe:{" "}

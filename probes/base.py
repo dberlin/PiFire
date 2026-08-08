@@ -17,6 +17,7 @@ Description:
 """
 
 import math
+import os
 import time
 import logging
 from probes.kalman import TempKalman
@@ -24,6 +25,13 @@ from probes.kalman import TempKalman
 # find_i2c_bus lives in the shared factory; re-export so existing
 # `from probes.base import find_i2c_bus` imports keep working.
 from common.i2c_bus import find_i2c_bus  # noqa: F401  # public re-export
+
+#: Per-reading Kalman tracing, OFF even at DEBUG. The dedup in apply_filters
+#: only suppresses an unchanged line, and a live probe changes every tick, so
+#: on real hardware this emitted a record per probe per tick and buried every
+#: other debug message. Set PIFIRE_KALMAN_DEBUG=1 to get it back while working
+#: on the filter itself.
+KALMAN_DEBUG = os.environ.get("PIFIRE_KALMAN_DEBUG", "").strip().lower() not in ("", "0", "false", "no")
 
 """
 *****************************************
@@ -374,7 +382,7 @@ class ProbeInterface:
             output_value = kalman.update(raw)  # None passes through
             output_data[group][label] = output_value
 
-            if self.logger.isEnabledFor(logging.DEBUG):
+            if KALMAN_DEBUG and self.logger.isEnabledFor(logging.DEBUG):
                 msg = (
                     f"Kalman[{label}] raw={raw} output={output_value} "
                     f"est={round(kalman.x, 2) if kalman.x is not None else None} "

@@ -30,6 +30,7 @@ NEW constraint must trace the same way.
 import copy
 import json
 from types import UnionType
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import (
@@ -779,8 +780,88 @@ def atomic_settings_paths() -> set[tuple[str, ...]]:
     return walk(SettingsSchema, ())
 
 
+#: Envelope marker for a settings write that states more than "merge this".
+#: Mirrors common/control_delta.py, which solved the same problem for the
+#: control blob: a deep merge can say "assign this" but has no way to say
+#: "remove this", because an omitted key is indistinguishable from silence.
+SETTINGS_DELTA_KEY = "__settings_delta__"
+SETTINGS_DELTA_VERSION = 1
+
+_SETTINGS_DELTA_MEMBERS = frozenset({SETTINGS_DELTA_KEY, "set", "delete"})
+
+
+class SettingsDeltaError(ValueError):
+    """A malformed settings-delta envelope."""
+
+
+def settings_delta(set_values=None, delete_paths=None):
+    """Build a validated settings write.
+
+    :param set_values: members to assign (deep-merged). Presence is intent;
+        absence is silence.
+    :param delete_paths: iterable of key paths to remove, e.g.
+        [["controller", "config", "mpc", "C_f"]]. The only deletion channel
+        there is. Without it a key can never leave the tree: every writer sends
+        a partial, and a partial that omits a key is asking for nothing, not
+        for its removal -- so an option a controller has retired outlives every
+        save that leaves it out, and a client that believes omitting it deletes
+        it reports doing so again on the next save, forever.
+    """
+    envelope = {SETTINGS_DELTA_KEY: SETTINGS_DELTA_VERSION}
+    if set_values:
+        envelope["set"] = copy.deepcopy(dict(set_values))
+    if delete_paths:
+        envelope["delete"] = [list(path) for path in delete_paths]
+    validate_settings_delta(envelope)
+    return envelope
+
+
+def is_settings_delta(payload):
+    """True when a write states its intent rather than being a bare partial."""
+    return isinstance(payload, Mapping) and SETTINGS_DELTA_KEY in payload
+
+
+def validate_settings_delta(envelope):
+    """Raise SettingsDeltaError unless `envelope` is a well-formed version-1 delta."""
+    if not isinstance(envelope, Mapping):
+        raise SettingsDeltaError(f"delta must be a mapping, got {type(envelope).__name__}")
+    unknown = sorted(set(envelope) - _SETTINGS_DELTA_MEMBERS)
+    if unknown:
+        raise SettingsDeltaError(f"unknown delta member(s): {', '.join(unknown)}")
+    if envelope.get(SETTINGS_DELTA_KEY) != SETTINGS_DELTA_VERSION:
+        raise SettingsDeltaError(
+            f"{SETTINGS_DELTA_KEY} must be {SETTINGS_DELTA_VERSION}, got {envelope.get(SETTINGS_DELTA_KEY)!r}"
+        )
+    members = envelope.get("set")
+    if members is not None and not isinstance(members, Mapping):
+        raise SettingsDeltaError(f"set must be a mapping, got {type(members).__name__}")
+    paths = envelope.get("delete")
+    if paths is None:
+        return
+    if not isinstance(paths, list):
+        raise SettingsDeltaError(f"delete must be a list, got {type(paths).__name__}")
+    for path in paths:
+        if not isinstance(path, list) or not path or not all(isinstance(key, str) for key in path):
+            raise SettingsDeltaError(f"delete path must be a non-empty list of strings, got {path!r}")
+
+
+def _delete_settings_path(settings, path):
+    """Remove one key path. A path that does not exist is already satisfied."""
+    node = settings
+    for key in path[:-1]:
+        node = node.get(key) if isinstance(node, Mapping) else None
+        if not isinstance(node, Mapping):
+            return
+    if isinstance(node, dict):
+        node.pop(path[-1], None)
+
+
 def apply_settings_delta(settings, delta):
     """Merge `delta` into `settings`, replacing tagged-union values wholesale.
+
+    `delta` is either a bare partial (merge only) or a `settings_delta()`
+    envelope, whose `delete` paths are removed after the merge -- so a write
+    that both assigns and removes ends with the removal.
 
     `deep_update` stays a generic, unconditional mapping merge -- the
     knowledge that a path like `platform.devices.distance.i2c_bus` is a
@@ -789,6 +870,12 @@ def apply_settings_delta(settings, delta):
     before the merge and assigned back directly afterward, so `deep_update`
     never even sees them as something to merge into.
     """
+    if is_settings_delta(delta):
+        validate_settings_delta(delta)
+        deletions = list(delta.get("delete") or [])
+        delta = delta.get("set") or {}
+    else:
+        deletions = []
     delta = copy.deepcopy(delta)
     overrides: dict[tuple[str, ...], Any] = {}
     for path in atomic_settings_paths():
@@ -809,6 +896,8 @@ def apply_settings_delta(settings, delta):
         for key in path[:-1]:
             node = node.setdefault(key, {})
         node[path[-1]] = value
+    for path in deletions:
+        _delete_settings_path(settings, path)
     return settings
 
 

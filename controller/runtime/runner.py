@@ -430,6 +430,9 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
 class ControllerRunner(ABC):
     @abstractmethod
     def set_target(self, setpoint): ...
+
+    @abstractmethod
+    def set_safety_ceiling_c(self, ceiling_c): ...
     @abstractmethod
     def request_calibration(self, command: "CalibrationCommand") -> None: ...
 
@@ -518,6 +521,9 @@ class SyncControllerRunner(ControllerRunner):
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
+
+    def set_safety_ceiling_c(self, ceiling_c):
+        self._core.set_safety_ceiling_c(ceiling_c)
 
     def request_calibration(self, command: "CalibrationCommand") -> None:
         self._core.request_calibration(command)
@@ -768,6 +774,7 @@ class ThreadedControllerRunner(ControllerRunner):
         )
         self._revision = 0
         self._pending_target = _UNSET
+        self._pending_safety_ceiling_c = _UNSET
         self._pending_core = None
         self._pending_controller_type = None
         self._configuration_revision = 0
@@ -864,6 +871,8 @@ class ThreadedControllerRunner(ControllerRunner):
             with self._lock:
                 target = self._pending_target
                 self._pending_target = _UNSET
+                safety_ceiling_c = self._pending_safety_ceiling_c
+                self._pending_safety_ceiling_c = _UNSET
                 new_core = None
                 handoff_output = None
                 new_controller_type = None
@@ -898,6 +907,8 @@ class ThreadedControllerRunner(ControllerRunner):
                     callback(payload)
             if pending_activations:
                 self._capture_activation_events()
+            if safety_ceiling_c is not _UNSET:
+                self._core.set_safety_ceiling_c(safety_ceiling_c)
             if target is not _UNSET:
                 self._core.set_target(target)
             # A command must reach the core before the temperature that command
@@ -1035,6 +1046,10 @@ class ThreadedControllerRunner(ControllerRunner):
     def set_target(self, setpoint):
         with self._lock:
             self._pending_target = setpoint
+
+    def set_safety_ceiling_c(self, ceiling_c):
+        with self._lock:
+            self._pending_safety_ceiling_c = ceiling_c
 
     def request_calibration(self, command: "CalibrationCommand") -> None:
         with self._lock:

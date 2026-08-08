@@ -278,3 +278,41 @@ def test_apply_manual_overrides_refreshes_last_now_unconditionally():
     )
 
     assert mode._last_now == 123.0
+
+
+def _status_with_dc_fan(*, fan_on: bool, duty: int):
+    settings = base_settings()
+    settings["platform"]["dc_fan"] = True
+    control_data = base_control(mode="Recording")
+    control_data["duty_cycle"] = duty
+    store = InMemoryStore(control=control_data, settings=settings, pellet_db=base_pellet_db())
+    grill = FakeGrillPlatform(dc_fan=True, outputs=tuple(settings["platform"]["outputs"]))
+    if fan_on:
+        grill.fan_on(duty)
+    ctx = ControllerContext(
+        devices=Devices(grill_platform=grill, probe_complex=FakeProbes().script([120]), dist_device=FakeDistance()),
+        store=store,
+        notifications=FakeNotifier(),
+        clock=ManualClock(),
+    )
+    real_now = ctx.clock.now
+    calls = {"n": 0}
+
+    def _now():
+        calls["n"] += 1
+        return real_now() if calls["n"] == 1 else real_now() + 0.6
+
+    ctx.clock.now = _now
+    _RecordingMode(ctx, WorkCycleState()).run()
+    return ctx.store.read_status()
+
+
+def test_a_dc_fan_that_is_not_running_reports_no_duty():
+    """control['duty_cycle'] is the duty the fan WOULD be given. Reporting it
+    while the fan is off puts "FAN IDLE" next to "FAN DUTY 100%" on the
+    dashboard. The AC branch and the Manual branch both gate on the output."""
+    assert _status_with_dc_fan(fan_on=False, duty=100)["fan_duty"] == 0
+
+
+def test_a_running_dc_fan_still_reports_its_commanded_duty():
+    assert _status_with_dc_fan(fan_on=True, duty=100)["fan_duty"] == 100

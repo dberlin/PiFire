@@ -160,12 +160,10 @@ export type MpcCalibrationAction = "start" | "pause" | "resume" | "stop";
 export type AmbientSource = "measured" | "manual" | "weather" | "configured";
 export type TemperatureUnit = "F" | "C";
 
-/** UI-domain action. maximum_temperature stays in the unit displayed to the operator. */
+/** UI-domain action. */
 export interface MpcCalibrationRequest {
   action: MpcCalibrationAction;
   revision: number;
-  maximum_temperature: number;
-  temperature_unit: TemperatureUnit;
   ambient_c: number;
   ambient_source: AmbientSource;
   empty_grill_confirmed: boolean;
@@ -176,7 +174,6 @@ export interface MpcCalibrationRequest {
 export interface MpcCalibrationCommand {
   action: MpcCalibrationAction;
   revision: number;
-  maximum_temperature_c: number;
   ambient_c: number;
   ambient_source: AmbientSource;
   empty_grill_confirmed: boolean;
