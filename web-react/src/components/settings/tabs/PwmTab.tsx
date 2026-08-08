@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { clampToBounds } from "../../../helpers/settings/bounds";
 import { setPath } from "../../../helpers/settings/delta";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import {
   MPC_FAN_DISABLED_NOTE,
   MPC_FAN_PWM_NOTE,
@@ -56,7 +57,7 @@ function readPwm(settings: Settings): Pwm {
 
 export function PwmTab() {
   const { settings, drafts } = useOutletContext<SettingsDraftContext & { mode: string }>();
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished table edit survives a trip to
   // another tab; re-read from the loader whenever there is no draft.
   const { value: pwm, setValue: setPwm, dirty, markSaved } = useSettingsDraft("pwm", readPwm);
@@ -165,73 +166,83 @@ export function PwmTab() {
   }
 
   return (
-    <Section title="PWM Fan">
-      <Toggle
-        label="PWM Control"
-        checked={pwm.pwm_control}
-        onChange={(v) => set("pwm_control", v)}
-      />
-      {mpcFanInert && (
-        <p className="pf-settings-error-text" role="alert">
-          {MPC_FAN_PWM_NOTE}
-        </p>
-      )}
-      <NumberField
-        integer
-        label="Update Time"
-        value={pwm.update_time}
-        onChange={(v) => set("update_time", v)}
-        min={1}
-        suffix="s"
-        disabled={mpcOwnsFan}
-      />
-      <NumberField
-        integer
-        label="Min Duty Cycle"
-        value={pwm.min_duty_cycle}
-        onChange={(v) => set("min_duty_cycle", v)}
-        min={1}
-        max={100}
-        suffix="%"
-      />
-      <NumberField
-        integer
-        label="Max Duty Cycle"
-        value={pwm.max_duty_cycle}
-        onChange={(v) => set("max_duty_cycle", v)}
-        min={1}
-        max={100}
-        suffix="%"
-      />
-      <NumberField
-        integer
-        label="Frequency"
-        value={pwm.frequency}
-        onChange={(v) => set("frequency", v)}
-        min={1}
-        suffix="Hz"
-      />
-      {mpcOwnsFan && <p className="pf-settings-hint">{MPC_FAN_DISABLED_NOTE}</p>}
-      <RangeProfileTable
-        disabled={mpcOwnsFan}
-        boundaries={pwm.temp_range_list}
-        profiles={pwm.profiles}
-        columns={DUTY_COLUMNS}
-        rangeHeader="ΔT range"
-        unit={units}
-        // index.html:932, 978
-        boundaryMin={0}
-        boundaryMax={200}
-        onChange={(temp_range_list, profiles) =>
-          setPwm((s) => ({ ...s, temp_range_list, profiles }))
-        }
-      />
-      {boundsError && (
-        <p className="pf-settings-error-text" role="alert">
-          {boundsError}
-        </p>
-      )}
-      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
-    </Section>
+    <SettingsFieldErrorsProvider errors={errors}>
+      <Section title="PWM Fan">
+        <Toggle
+          label="PWM Control"
+          checked={pwm.pwm_control}
+          onChange={(v) => set("pwm_control", v)}
+          path="pwm.pwm_control"
+        />
+        {mpcFanInert && (
+          <p className="pf-settings-error-text" role="alert">
+            {MPC_FAN_PWM_NOTE}
+          </p>
+        )}
+        <NumberField
+          integer
+          label="Update Time"
+          value={pwm.update_time}
+          onChange={(v) => set("update_time", v)}
+          min={1}
+          suffix="s"
+          disabled={mpcOwnsFan}
+          path="pwm.update_time"
+        />
+        <NumberField
+          integer
+          label="Min Duty Cycle"
+          value={pwm.min_duty_cycle}
+          onChange={(v) => set("min_duty_cycle", v)}
+          min={1}
+          max={100}
+          suffix="%"
+          path="pwm.min_duty_cycle"
+        />
+        <NumberField
+          integer
+          label="Max Duty Cycle"
+          value={pwm.max_duty_cycle}
+          onChange={(v) => set("max_duty_cycle", v)}
+          min={1}
+          max={100}
+          suffix="%"
+          path="pwm.max_duty_cycle"
+        />
+        <NumberField
+          integer
+          label="Frequency"
+          value={pwm.frequency}
+          onChange={(v) => set("frequency", v)}
+          min={1}
+          suffix="Hz"
+          path="pwm.frequency"
+        />
+        {mpcOwnsFan && <p className="pf-settings-hint">{MPC_FAN_DISABLED_NOTE}</p>}
+        <RangeProfileTable
+          disabled={mpcOwnsFan}
+          boundaries={pwm.temp_range_list}
+          profiles={pwm.profiles}
+          columns={DUTY_COLUMNS}
+          rangeHeader="ΔT range"
+          unit={units}
+          // index.html:932, 978
+          boundaryMin={0}
+          boundaryMax={200}
+          onChange={(temp_range_list, profiles) =>
+            setPwm((s) => ({ ...s, temp_range_list, profiles }))
+          }
+          // PwmSettings._check_profiles raises on the whole submodel, so
+          // pydantic's loc lands on "pwm", not a specific field.
+          path="pwm"
+        />
+        {boundsError && (
+          <p className="pf-settings-error-text" role="alert">
+            {boundsError}
+          </p>
+        )}
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
+      </Section>
+    </SettingsFieldErrorsProvider>
   );
 }

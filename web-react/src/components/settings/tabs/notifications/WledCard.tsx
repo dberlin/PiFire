@@ -121,11 +121,13 @@ export function WledCard({ wled, onChange }: WledCardProps) {
         label="WLED Enabled"
         checked={asBool(wled.enabled)}
         onChange={(b) => setKey("enabled", b)}
+        path="notify_services.wled.enabled"
       />
       <TextField
         label="WLED Device Address"
         value={asStr(wled.device_address)}
         onChange={(val) => setKey("device_address", val)}
+        path="notify_services.wled.device_address"
       />
       <div className="pf-settings-actions">
         <button
@@ -162,12 +164,14 @@ export function WledCard({ wled, onChange }: WledCardProps) {
         // index.html:2003. UI-only: the schema has ge=0 and no upper bound.
         min={0}
         max={3600}
+        path="notify_services.wled.notify_duration"
       />
 
       <Toggle
         label="Use PiFire Suggested LED Behaviors"
         checked={useSuggested}
         onChange={(b) => setKey("use_suggested_presets", b)}
+        path="notify_services.wled.use_suggested_presets"
       />
       {useSuggested && (
         <>
@@ -180,6 +184,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
               { value: "green", label: "Green" },
             ]}
             onChange={(v) => setSuggested("cooking_color", v)}
+            path="notify_services.wled.suggested_config.cooking_color"
           />
           <NumberField
             integer
@@ -189,6 +194,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
             min={1}
             max={100}
             suffix="%"
+            path="notify_services.wled.suggested_config.idle_brightness"
           />
           <NumberField
             integer
@@ -197,11 +203,13 @@ export function WledCard({ wled, onChange }: WledCardProps) {
             onChange={(n) => setSuggested("led_count", n)}
             min={1}
             max={1000}
+            path="notify_services.wled.suggested_config.led_count"
           />
           <Toggle
             label="Night Mode (dim amber glow)"
             checked={asBool(suggested.night_mode)}
             onChange={(b) => setSuggested("night_mode", b)}
+            path="notify_services.wled.suggested_config.night_mode"
           />
         </>
       )}
@@ -210,6 +218,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
         label="Use Profile-Based WLED Control"
         checked={useProfiles}
         onChange={(b) => setKey("use_profiles", b)}
+        path="notify_services.wled.use_profiles"
       />
       {useProfiles && (
         <>
@@ -242,6 +251,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
                 onChange={(n) => setProfile(state, n)}
                 min={1}
                 max={250}
+                path={`notify_services.wled.profile_numbers.${state}`}
               />
             ))}
           </div>

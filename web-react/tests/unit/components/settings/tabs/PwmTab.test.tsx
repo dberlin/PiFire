@@ -16,6 +16,7 @@ rs.mock("../../../../../src/helpers/settings/useSaveSettings", () => ({
     save: saveMock,
     saving: false,
     status: mockStatus,
+    errors: [],
     baseUrl: "",
   }),
 }));

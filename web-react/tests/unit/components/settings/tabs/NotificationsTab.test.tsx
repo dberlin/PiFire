@@ -11,6 +11,7 @@ rs.mock("../../../../../src/helpers/settings/useSaveSettings", () => ({
     save: saveMock,
     saving: false,
     status: { kind: "idle" } as const,
+    errors: [],
     baseUrl: "",
   }),
 }));

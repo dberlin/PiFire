@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { MPC_FAN_CONFLICT_MESSAGE, mpcFanConflict } from "../../../helpers/settings/mpcFan";
 import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
 import { settingsDelta } from "../../../helpers/settings/settingsDelta";
@@ -69,7 +70,7 @@ export function ControllerTab() {
     mode: string;
     controllerMeta: ControllerMetadata | null;
   }>();
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
 
   // Held on SettingsShell, so an unfinished edit survives a trip to another
   // tab. `selected` and `values` are ONE draft because they are one choice: the
@@ -182,89 +183,99 @@ export function ControllerTab() {
       : null;
 
   return (
-    <Section title="Controller">
-      <Select
-        label="Controller"
-        value={selected}
-        options={Object.entries(controllerMeta.metadata).map(([key, c]) => ({
-          value: key,
-          label: c.friendly_name,
-        }))}
-        onChange={(v) => setSelected(v)}
-      />
-      {entry?.description && <p className="pf-field-hint">{entry.description}</p>}
-      {(entry?.config.length ?? 0) === 0 && (
-        <p className="pf-field-hint">This controller has no configuration options.</p>
-      )}
-      {entry?.config.map((opt) => {
-        if (opt.option_type === "bool") {
-          return (
-            <Toggle
-              key={opt.option_name}
-              label={opt.option_friendly_name}
-              checked={!!values[opt.option_name]}
-              onChange={(b) => set(opt.option_name, b)}
-            />
-          );
-        }
-        if (opt.option_type === "float" || opt.option_type === "int") {
-          return (
-            <NumberField
-              key={opt.option_name}
-              label={opt.option_friendly_name}
-              value={Number(values[opt.option_name] ?? 0)}
-              onChange={(n) => set(opt.option_name, n)}
-              min={opt.option_min ?? undefined}
-              max={opt.option_max ?? undefined}
-              step={opt.option_step ?? undefined}
-            />
-          );
-        }
-        if (opt.option_type === "list") {
-          const listValues = opt.list_values ?? [];
-          const listLabels = opt.list_labels ?? [];
-          return (
-            <Select
-              key={opt.option_name}
-              label={opt.option_friendly_name}
-              value={String(values[opt.option_name] ?? "")}
-              options={listValues.map((lv, i) => ({
-                value: String(lv),
-                label: listLabels[i] ?? String(lv),
-              }))}
-              onChange={(v) => set(opt.option_name, v)}
-            />
-          );
-        }
-        if (opt.option_type === "string") {
-          return (
-            <TextField
-              key={opt.option_name}
-              label={opt.option_friendly_name}
-              value={String(values[opt.option_name] ?? "")}
-              onChange={(v) => set(opt.option_name, v)}
-            />
-          );
-        }
-        return null;
-      })}
-      {learning && netPolicy && (
-        <p className="pf-settings-hint">
-          A learned calibration no longer matches the pre-trained neural policy, so the controller
-          falls back to the full optimisation until it is retrained.
-        </p>
-      )}
-      {fanConflict && (
-        <p className="pf-settings-error-text" role="alert">
-          {MPC_FAN_CONFLICT_MESSAGE}
-        </p>
-      )}
-      {droppedNotice !== null && (
-        <p className="pf-settings-hint" role="status">
-          {droppedNotice}
-        </p>
-      )}
-      <SaveBar onSave={onSave} saving={saving} status={effectiveStatus} dirty={dirty} />
-    </Section>
+    <SettingsFieldErrorsProvider errors={errors}>
+      <Section title="Controller">
+        <Select
+          label="Controller"
+          value={selected}
+          options={Object.entries(controllerMeta.metadata).map(([key, c]) => ({
+            value: key,
+            label: c.friendly_name,
+          }))}
+          onChange={(v) => setSelected(v)}
+          path="controller.selected"
+        />
+        {entry?.description && <p className="pf-field-hint">{entry.description}</p>}
+        {(entry?.config.length ?? 0) === 0 && (
+          <p className="pf-field-hint">This controller has no configuration options.</p>
+        )}
+        {entry?.config.map((opt) => {
+          // controller.config is keyed by the selected controller, and this
+          // loop covers exactly the option names it declares.
+          const optionPath = `controller.config.${selected}.${opt.option_name}`;
+          if (opt.option_type === "bool") {
+            return (
+              <Toggle
+                key={opt.option_name}
+                label={opt.option_friendly_name}
+                checked={!!values[opt.option_name]}
+                onChange={(b) => set(opt.option_name, b)}
+                path={optionPath}
+              />
+            );
+          }
+          if (opt.option_type === "float" || opt.option_type === "int") {
+            return (
+              <NumberField
+                key={opt.option_name}
+                label={opt.option_friendly_name}
+                value={Number(values[opt.option_name] ?? 0)}
+                onChange={(n) => set(opt.option_name, n)}
+                min={opt.option_min ?? undefined}
+                max={opt.option_max ?? undefined}
+                step={opt.option_step ?? undefined}
+                path={optionPath}
+              />
+            );
+          }
+          if (opt.option_type === "list") {
+            const listValues = opt.list_values ?? [];
+            const listLabels = opt.list_labels ?? [];
+            return (
+              <Select
+                key={opt.option_name}
+                label={opt.option_friendly_name}
+                value={String(values[opt.option_name] ?? "")}
+                options={listValues.map((lv, i) => ({
+                  value: String(lv),
+                  label: listLabels[i] ?? String(lv),
+                }))}
+                onChange={(v) => set(opt.option_name, v)}
+                path={optionPath}
+              />
+            );
+          }
+          if (opt.option_type === "string") {
+            return (
+              <TextField
+                key={opt.option_name}
+                label={opt.option_friendly_name}
+                value={String(values[opt.option_name] ?? "")}
+                onChange={(v) => set(opt.option_name, v)}
+                path={optionPath}
+              />
+            );
+          }
+          return null;
+        })}
+        {learning && netPolicy && (
+          <p className="pf-settings-hint">
+            A learned calibration no longer matches the pre-trained neural policy, so the controller
+            falls back to the full optimisation until it is retrained.
+          </p>
+        )}
+        {fanConflict && (
+          <p className="pf-settings-error-text" role="alert">
+            {MPC_FAN_CONFLICT_MESSAGE}
+          </p>
+        )}
+        {droppedNotice !== null && (
+          <p className="pf-settings-hint" role="status">
+            {droppedNotice}
+          </p>
+        )}
+        <SaveBar onSave={onSave} saving={saving} status={effectiveStatus} dirty={dirty} />
+      </Section>
+    </SettingsFieldErrorsProvider>
   );
 }

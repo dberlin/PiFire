@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -51,7 +52,7 @@ function deviceLabel(d: OneSignalDevice | undefined): string {
 }
 
 export function NotificationsTab() {
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const {
     value: v,
@@ -116,17 +117,19 @@ export function NotificationsTab() {
   const wled = svc("wled");
 
   return (
-    <>
+    <SettingsFieldErrorsProvider errors={errors}>
       <Section title="Apprise">
         <Toggle
           label="Apprise Enabled"
           checked={bool(apprise, "enabled")}
           onChange={(b) => setField("apprise", "enabled", b)}
+          path="notify_services.apprise.enabled"
         />
         <StringListField
           label="Apprise Locations"
           values={(apprise.locations as string[] | undefined) ?? []}
           onChange={(next) => setField("apprise", "locations", next)}
+          path="notify_services.apprise.locations"
         />
       </Section>
 
@@ -135,11 +138,13 @@ export function NotificationsTab() {
           label="IFTTT Enabled"
           checked={bool(ifttt, "enabled")}
           onChange={(b) => setField("ifttt", "enabled", b)}
+          path="notify_services.ifttt.enabled"
         />
         <SecretField
           label="IFTTT API Key"
           value={str(ifttt, "APIKey")}
           onChange={(val) => setField("ifttt", "APIKey", val)}
+          path="notify_services.ifttt.APIKey"
         />
       </Section>
 
@@ -148,16 +153,19 @@ export function NotificationsTab() {
           label="Pushbullet Enabled"
           checked={bool(pushbullet, "enabled")}
           onChange={(b) => setField("pushbullet", "enabled", b)}
+          path="notify_services.pushbullet.enabled"
         />
         <SecretField
           label="Pushbullet API Key"
           value={str(pushbullet, "APIKey")}
           onChange={(val) => setField("pushbullet", "APIKey", val)}
+          path="notify_services.pushbullet.APIKey"
         />
         <TextField
           label="Pushbullet Public URL"
           value={str(pushbullet, "PublicURL")}
           onChange={(val) => setField("pushbullet", "PublicURL", val)}
+          path="notify_services.pushbullet.PublicURL"
         />
       </Section>
 
@@ -166,21 +174,25 @@ export function NotificationsTab() {
           label="Pushover Enabled"
           checked={bool(pushover, "enabled")}
           onChange={(b) => setField("pushover", "enabled", b)}
+          path="notify_services.pushover.enabled"
         />
         <SecretField
           label="Pushover API Key"
           value={str(pushover, "APIKey")}
           onChange={(val) => setField("pushover", "APIKey", val)}
+          path="notify_services.pushover.APIKey"
         />
         <SecretField
           label="Pushover User Keys"
           value={str(pushover, "UserKeys")}
           onChange={(val) => setField("pushover", "UserKeys", val)}
+          path="notify_services.pushover.UserKeys"
         />
         <TextField
           label="Pushover Public URL"
           value={str(pushover, "PublicURL")}
           onChange={(val) => setField("pushover", "PublicURL", val)}
+          path="notify_services.pushover.PublicURL"
         />
       </Section>
 
@@ -189,6 +201,7 @@ export function NotificationsTab() {
           label="OneSignal Enabled"
           checked={bool(onesignal, "enabled")}
           onChange={(b) => setField("onesignal", "enabled", b)}
+          path="notify_services.onesignal.enabled"
         />
         {onesignalDevices.length === 0 ? (
           <p className="pf-settings-hint">
@@ -216,6 +229,7 @@ export function NotificationsTab() {
                       label={`Friendly Name (${deviceId})`}
                       value={deviceStr(device, "friendly_name")}
                       onChange={(val) => setDeviceField(deviceId, "friendly_name", val)}
+                      path={`notify_services.onesignal.devices.${deviceId}.friendly_name`}
                     />
                   </td>
                   <td className="pf-device-meta">{deviceStr(device, "device_name")}</td>
@@ -241,26 +255,31 @@ export function NotificationsTab() {
           label="InfluxDB Enabled"
           checked={bool(influxdb, "enabled")}
           onChange={(b) => setField("influxdb", "enabled", b)}
+          path="notify_services.influxdb.enabled"
         />
         <TextField
           label="InfluxDB URL"
           value={str(influxdb, "url")}
           onChange={(val) => setField("influxdb", "url", val)}
+          path="notify_services.influxdb.url"
         />
         <SecretField
           label="InfluxDB Token"
           value={str(influxdb, "token")}
           onChange={(val) => setField("influxdb", "token", val)}
+          path="notify_services.influxdb.token"
         />
         <TextField
           label="InfluxDB Org"
           value={str(influxdb, "org")}
           onChange={(val) => setField("influxdb", "org", val)}
+          path="notify_services.influxdb.org"
         />
         <TextField
           label="InfluxDB Bucket"
           value={str(influxdb, "bucket")}
           onChange={(val) => setField("influxdb", "bucket", val)}
+          path="notify_services.influxdb.bucket"
         />
       </Section>
 
@@ -269,43 +288,51 @@ export function NotificationsTab() {
           label="MQTT Enabled"
           checked={bool(mqtt, "enabled")}
           onChange={(b) => setField("mqtt", "enabled", b)}
+          path="notify_services.mqtt.enabled"
         />
         <TextField
           label="MQTT Client ID"
           value={str(mqtt, "id")}
           onChange={(val) => setField("mqtt", "id", val)}
+          path="notify_services.mqtt.id"
         />
         <TextField
           label="MQTT Broker"
           value={str(mqtt, "broker")}
           onChange={(val) => setField("mqtt", "broker", val)}
+          path="notify_services.mqtt.broker"
         />
         {/* schema types port as str — TextField, not NumberField */}
         <TextField
           label="MQTT Port"
           value={str(mqtt, "port")}
           onChange={(val) => setField("mqtt", "port", val)}
+          path="notify_services.mqtt.port"
         />
         <TextField
           label="MQTT Username"
           value={str(mqtt, "username")}
           onChange={(val) => setField("mqtt", "username", val)}
+          path="notify_services.mqtt.username"
         />
         <SecretField
           label="MQTT Password"
           value={str(mqtt, "password")}
           onChange={(val) => setField("mqtt", "password", val)}
+          path="notify_services.mqtt.password"
         />
         <TextField
           label="MQTT Home Assistant Autodiscovery Topic"
           value={str(mqtt, "homeassistant_autodiscovery_topic")}
           onChange={(val) => setField("mqtt", "homeassistant_autodiscovery_topic", val)}
+          path="notify_services.mqtt.homeassistant_autodiscovery_topic"
         />
         {/* schema types update_sec as str — TextField, not NumberField */}
         <TextField
           label="MQTT Update Interval"
           value={str(mqtt, "update_sec")}
           onChange={(val) => setField("mqtt", "update_sec", val)}
+          path="notify_services.mqtt.update_sec"
         />
       </Section>
 
@@ -325,6 +352,6 @@ export function NotificationsTab() {
         onCancel={() => setPendingDevice(null)}
       />
       <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
-    </>
+    </SettingsFieldErrorsProvider>
   );
 }

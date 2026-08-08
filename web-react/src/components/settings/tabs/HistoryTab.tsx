@@ -1,5 +1,6 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
@@ -83,7 +84,7 @@ function readHistory(s: Settings): History {
 
 export function HistoryTab() {
   const { mode } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("history", readHistory);
   const set = <K extends keyof History>(k: K, val: History[K]) => setV((s) => ({ ...s, [k]: val }));
@@ -120,7 +121,7 @@ export function HistoryTab() {
   const labelPrefixes = computeLabelPrefixes(v.probeConfig);
 
   return (
-    <>
+    <SettingsFieldErrorsProvider errors={errors}>
       <Section title="History">
         {/* Floor is 1, not 0: blueprints/api_history/routes.py:36 rejects
             minutes < 1 with a 400 (invalid_minutes). */}
@@ -130,6 +131,7 @@ export function HistoryTab() {
           value={v.minutes}
           onChange={(n) => set("minutes", n)}
           min={1}
+          path="history_page.minutes"
         />
         {/* NOT "how many points to draw": file_mgmt/downsample.py's
             select_indices returns EVERY index when the window holds this many
@@ -141,6 +143,7 @@ export function HistoryTab() {
           value={v.datapoints}
           onChange={(n) => set("datapoints", n)}
           min={2}
+          path="history_page.datapoints"
         />
         <p className="pf-settings-hint">
           Windows holding this many samples or fewer are drawn from every sample. Above it, the
@@ -153,6 +156,7 @@ export function HistoryTab() {
           min={0}
           step={0.1}
           suffix="degrees"
+          path="history_page.fidelity_degrees"
         />
         <p className="pf-settings-hint">
           The most the drawn line may deviate from the real reading. Smaller keeps more detail and
@@ -162,11 +166,13 @@ export function HistoryTab() {
           label="Clear History on Start"
           checked={v.clearhistoryonstart}
           onChange={(b) => set("clearhistoryonstart", b)}
+          path="history_page.clearhistoryonstart"
         />
         <Toggle
           label="Auto Refresh"
           checked={v.autorefresh}
           onChange={(b) => set("autorefresh", b)}
+          path="history_page.autorefresh"
         />
         <div className="relative">
           <Toggle
@@ -181,6 +187,7 @@ export function HistoryTab() {
                   : "Stop the grill to change extended-data logging"
                 : undefined
             }
+            path="globals.ext_data"
           />
         </div>
       </Section>
@@ -201,6 +208,7 @@ export function HistoryTab() {
                     label={`${labelPrefix} Enabled`}
                     checked={entry.enabled}
                     onChange={(b) => setProbe(probeKey, "enabled", b)}
+                    path={`history_page.probe_config.${probeKey}.enabled`}
                   />
                 </div>
                 {COLOR_FIELD_SPECS.map((f) => {
@@ -214,6 +222,7 @@ export function HistoryTab() {
                       label={`${labelPrefix} ${f.label}`}
                       value={color}
                       onChange={(c) => setProbe(probeKey, f.key, c)}
+                      path={`history_page.probe_config.${probeKey}.${f.key}`}
                     />
                   );
                 })}
@@ -221,11 +230,13 @@ export function HistoryTab() {
                   label={`${labelPrefix} Dash Setpoint`}
                   checked={entry.dash_setpoint}
                   onChange={(b) => setProbe(probeKey, "dash_setpoint", b)}
+                  path={`history_page.probe_config.${probeKey}.dash_setpoint`}
                 />
                 <Toggle
                   label={`${labelPrefix} Fill`}
                   checked={entry.fill}
                   onChange={(b) => setProbe(probeKey, "fill", b)}
+                  path={`history_page.probe_config.${probeKey}.fill`}
                 />
               </div>
             );
@@ -233,6 +244,6 @@ export function HistoryTab() {
         )}
         <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
       </Section>
-    </>
+    </SettingsFieldErrorsProvider>
   );
 }

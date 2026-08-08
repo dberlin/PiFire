@@ -1,5 +1,6 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { Settings, SettingsFlag } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
@@ -35,7 +36,7 @@ function readPellets(s: Settings): Pellets {
 
 export function PelletsTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("pellets", readPellets);
 
@@ -66,71 +67,80 @@ export function PelletsTab() {
   };
 
   return (
-    <Section title="Pellets">
-      <Toggle
-        label="Warning Enabled"
-        checked={v.warning_enabled}
-        onChange={(b) => set("warning_enabled", b)}
-      />
-      <NumberField
-        integer
-        label="Warning Time"
-        value={v.warning_time}
-        onChange={(n) => set("warning_time", n)}
-        // index.html:1325
-        min={5}
-        max={240}
-        suffix="min"
-      />
-      <NumberField
-        integer
-        label="Warning Level"
-        value={v.warning_level}
-        onChange={(n) => set("warning_level", n)}
-        min={0}
-        max={100}
-        suffix="%"
-      />
-      <NumberField
-        integer
-        label="Empty"
-        value={v.empty}
-        onChange={(n) => set("empty", n)}
-        // index.html:1362 — the audit missed this one
-        min={1}
-        max={100}
-        suffix="cm"
-      />
-      <NumberField
-        integer
-        label="Full"
-        value={v.full}
-        onChange={(n) => set("full", n)}
-        // index.html:1354 — the audit missed this one
-        min={0}
-        max={100}
-        suffix="cm"
-      />
-      <NumberField
-        label="Auger Rate"
-        value={v.augerrate}
-        onChange={(n) => set("augerrate", n)}
-        step={0.1}
-      />
-      <Toggle
-        label="Prime Ignition"
-        checked={v.prime_ignition}
-        onChange={(b) => set("prime_ignition", b)}
-      />
-      {/* I16 — safety copy from index.html:1403-1412, dropped in the port.
-          This control lights a fire, so the warning travels with it. */}
-      <p className="pf-settings-error-text">
-        DANGER: Only enable the igniter during Priming if you are absolutely sure that you need to
-        do this. Enabling the igniter will ignite pellets and start the firepot, even without the
-        fan enabled. This feature will only turn on the igniter if Prime &amp; Startup is selected;
-        otherwise, priming without startup will not utilize the igniter.
-      </p>
-      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
-    </Section>
+    <SettingsFieldErrorsProvider errors={errors}>
+      <Section title="Pellets">
+        <Toggle
+          label="Warning Enabled"
+          checked={v.warning_enabled}
+          onChange={(b) => set("warning_enabled", b)}
+          path="pelletlevel.warning_enabled"
+        />
+        <NumberField
+          integer
+          label="Warning Time"
+          value={v.warning_time}
+          onChange={(n) => set("warning_time", n)}
+          // index.html:1325
+          min={5}
+          max={240}
+          suffix="min"
+          path="pelletlevel.warning_time"
+        />
+        <NumberField
+          integer
+          label="Warning Level"
+          value={v.warning_level}
+          onChange={(n) => set("warning_level", n)}
+          min={0}
+          max={100}
+          suffix="%"
+          path="pelletlevel.warning_level"
+        />
+        <NumberField
+          integer
+          label="Empty"
+          value={v.empty}
+          onChange={(n) => set("empty", n)}
+          // index.html:1362 — the audit missed this one
+          min={1}
+          max={100}
+          suffix="cm"
+          path="pelletlevel.empty"
+        />
+        <NumberField
+          integer
+          label="Full"
+          value={v.full}
+          onChange={(n) => set("full", n)}
+          // index.html:1354 — the audit missed this one
+          min={0}
+          max={100}
+          suffix="cm"
+          path="pelletlevel.full"
+        />
+        <NumberField
+          label="Auger Rate"
+          value={v.augerrate}
+          onChange={(n) => set("augerrate", n)}
+          step={0.1}
+          path="globals.augerrate"
+        />
+        <Toggle
+          label="Prime Ignition"
+          checked={v.prime_ignition}
+          onChange={(b) => set("prime_ignition", b)}
+          path="globals.prime_ignition"
+        />
+        {/* I16 — safety copy from index.html:1403-1412, dropped in the port.
+            This control lights a fire, so the warning travels with it. */}
+        <p className="pf-settings-error-text">
+          DANGER: Only enable the igniter during Priming if you are absolutely sure that you need to
+          do this. Enabling the igniter will ignite pellets and start the firepot, even without the
+          fan enabled. This feature will only turn on the igniter if Prime &amp; Startup is
+          selected; otherwise, priming without startup will not utilize the igniter.
+        </p>
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
+      </Section>
+    </SettingsFieldErrorsProvider>
   );
 }

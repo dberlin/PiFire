@@ -1,5 +1,6 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
@@ -71,7 +72,7 @@ function readWorkMode(s: Settings): WorkMode {
 
 export function WorkModeTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const {
     value: v,
@@ -118,7 +119,7 @@ export function WorkModeTab() {
   };
 
   return (
-    <>
+    <SettingsFieldErrorsProvider errors={errors}>
       <Section title="Cycle Data">
         <NumberField
           integer
@@ -127,6 +128,7 @@ export function WorkModeTab() {
           onChange={(n) => setCycleData("HoldCycleTime", n)}
           min={0}
           suffix="s"
+          path="cycle_data.HoldCycleTime"
         />
         <NumberField
           integer
@@ -135,6 +137,7 @@ export function WorkModeTab() {
           onChange={(n) => setCycleData("SmokeOnCycleTime", n)}
           min={1}
           suffix="s"
+          path="cycle_data.SmokeOnCycleTime"
         />
         <NumberField
           integer
@@ -143,6 +146,7 @@ export function WorkModeTab() {
           onChange={(n) => setCycleData("SmokeOffCycleTime", n)}
           min={1}
           suffix="s"
+          path="cycle_data.SmokeOffCycleTime"
         />
         <NumberField
           integer
@@ -155,23 +159,27 @@ export function WorkModeTab() {
           min={0}
           max={9}
           hint="0–9"
+          path="cycle_data.PMode"
         />
         <NumberField
           label="U Min"
           value={v.cycle_data.u_min}
           onChange={(n) => setCycleData("u_min", n)}
           step={0.1}
+          path="cycle_data.u_min"
         />
         <NumberField
           label="U Max"
           value={v.cycle_data.u_max}
           onChange={(n) => setCycleData("u_max", n)}
           step={0.1}
+          path="cycle_data.u_max"
         />
         <Toggle
           label="Lid Open Detect Enabled"
           checked={v.cycle_data.LidOpenDetectEnabled}
           onChange={(b) => setCycleData("LidOpenDetectEnabled", b)}
+          path="cycle_data.LidOpenDetectEnabled"
         />
         <NumberField
           integer
@@ -182,6 +190,7 @@ export function WorkModeTab() {
           min={1}
           max={80}
           step={1}
+          path="cycle_data.LidOpenThreshold"
         />
         <NumberField
           integer
@@ -193,6 +202,7 @@ export function WorkModeTab() {
           max={1000}
           step={1}
           suffix="s"
+          path="cycle_data.LidOpenPauseTime"
         />
       </Section>
 
@@ -201,6 +211,7 @@ export function WorkModeTab() {
           label="Enabled"
           checked={v.smoke_plus.enabled}
           onChange={(b) => setSmokePlus("enabled", b)}
+          path="smoke_plus.enabled"
         />
         <NumberField
           integer
@@ -209,6 +220,7 @@ export function WorkModeTab() {
           onChange={(n) => setSmokePlus("min_temp", n)}
           min={1}
           suffix="°"
+          path="smoke_plus.min_temp"
         />
         <NumberField
           integer
@@ -217,6 +229,7 @@ export function WorkModeTab() {
           onChange={(n) => setSmokePlus("max_temp", n)}
           min={1}
           suffix="°"
+          path="smoke_plus.max_temp"
         />
         <NumberField
           integer
@@ -225,6 +238,7 @@ export function WorkModeTab() {
           onChange={(n) => setSmokePlus("on_time", n)}
           min={1}
           suffix="s"
+          path="smoke_plus.on_time"
         />
         <NumberField
           integer
@@ -233,6 +247,7 @@ export function WorkModeTab() {
           onChange={(n) => setSmokePlus("off_time", n)}
           min={1}
           suffix="s"
+          path="smoke_plus.off_time"
         />
         {/* Hiding these does NOT drop their keys: onSave iterates
             Object.entries(v.smoke_plus), so the loaded values keep
@@ -251,11 +266,13 @@ export function WorkModeTab() {
               min={20}
               max={100}
               suffix="%"
+              path="smoke_plus.duty_cycle"
             />
             <Toggle
               label="Fan Ramp"
               checked={v.smoke_plus.fan_ramp}
               onChange={(b) => setSmokePlus("fan_ramp", b)}
+              path="smoke_plus.fan_ramp"
             />
           </>
         )}
@@ -269,14 +286,16 @@ export function WorkModeTab() {
           onChange={(n) => setKeepWarm("temp", n)}
           min={1}
           suffix="°"
+          path="keep_warm.temp"
         />
         <Toggle
           label="S Plus"
           checked={v.keep_warm.s_plus}
           onChange={(b) => setKeepWarm("s_plus", b)}
+          path="keep_warm.s_plus"
         />
         <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
       </Section>
-    </>
+    </SettingsFieldErrorsProvider>
   );
 }

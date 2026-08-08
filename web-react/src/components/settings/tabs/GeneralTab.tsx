@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router";
 import { accentPath, readAccent, storedAccentName } from "../../../helpers/settings/accent";
 import { setPath } from "../../../helpers/settings/delta";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { SettingsPath } from "../../../helpers/settings/paths";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
@@ -37,12 +38,15 @@ function readGeneral(s: Settings): General {
 }
 
 export function GeneralTab() {
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   const { settings } = useOutletContext<{ settings: Settings }>();
   const { setAccent } = useAppPrefs();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("general", readGeneral);
   const set = <K extends keyof General>(k: K, val: General[K]) => setV((s) => ({ ...s, [k]: val }));
+  // Runtime-dependent: which display module is installed decides the exact
+  // settings path the Theme select writes (display.config.<module>.accent_theme).
+  const themePath = accentPath(settings) ?? undefined;
 
   const onSave = async () => {
     let delta = setPath({}, "globals.grill_name", v.grill_name);
@@ -59,35 +63,44 @@ export function GeneralTab() {
   };
 
   return (
-    <Section title="General">
-      <TextField label="Grill Name" value={v.grill_name} onChange={(x) => set("grill_name", x)} />
-      <Select
-        label="Theme"
-        value={v.accent_theme}
-        options={ACCENTS}
-        // Applied as it is picked so the choice can be seen before it is saved;
-        // Save is what writes it to the store the display reads.
-        onChange={(x) => {
-          set("accent_theme", x);
-          setAccent(x.toLowerCase() as AccentName);
-        }}
-      />
-      {/* Flask kept this on its Display pane (settings/index.html:1080); the
-          React app has no Display tab and General is where it belongs. It is
-          live, not decorative: display/qtapp.py re-reads it once a second and
-          drives the backlight plus `swaymsg output * dpms off` through
-          ScreenPowerController. */}
-      <NumberField
-        integer
-        label="Screen Sleep Timeout"
-        value={v.sleep_timeout}
-        onChange={(x) => set("sleep_timeout", x)}
-        min={0}
-        step={1}
-        suffix="s"
-        hint="Idle seconds before the attached screen sleeps. 0 = never sleep."
-      />
-      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
-    </Section>
+    <SettingsFieldErrorsProvider errors={errors}>
+      <Section title="General">
+        <TextField
+          label="Grill Name"
+          value={v.grill_name}
+          onChange={(x) => set("grill_name", x)}
+          path="globals.grill_name"
+        />
+        <Select
+          label="Theme"
+          value={v.accent_theme}
+          options={ACCENTS}
+          // Applied as it is picked so the choice can be seen before it is saved;
+          // Save is what writes it to the store the display reads.
+          onChange={(x) => {
+            set("accent_theme", x);
+            setAccent(x.toLowerCase() as AccentName);
+          }}
+          path={themePath}
+        />
+        {/* Flask kept this on its Display pane (settings/index.html:1080); the
+            React app has no Display tab and General is where it belongs. It is
+            live, not decorative: display/qtapp.py re-reads it once a second and
+            drives the backlight plus `swaymsg output * dpms off` through
+            ScreenPowerController. */}
+        <NumberField
+          integer
+          label="Screen Sleep Timeout"
+          value={v.sleep_timeout}
+          onChange={(x) => set("sleep_timeout", x)}
+          min={0}
+          step={1}
+          suffix="s"
+          hint="Idle seconds before the attached screen sleeps. 0 = never sleep."
+          path="display.sleep_timeout"
+        />
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
+      </Section>
+    </SettingsFieldErrorsProvider>
   );
 }

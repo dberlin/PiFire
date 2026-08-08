@@ -4,19 +4,22 @@ import { PelletsTab } from "../../../../../src/components/settings/tabs/PelletsT
 import { renderRoute } from "../../../test-utils";
 
 const saveMock = rs.fn().mockResolvedValue(true);
+const useSaveSettingsMock = rs.fn();
 
 // Mock the useSaveSettings module
 rs.mock("../../../../../src/helpers/settings/useSaveSettings", () => ({
-  useSaveSettings: () => ({
-    save: saveMock,
-    saving: false,
-    status: { kind: "idle" } as const,
-    baseUrl: "",
-  }),
+  useSaveSettings: () => useSaveSettingsMock(),
 }));
 
 beforeEach(() => {
   saveMock.mockClear();
+  useSaveSettingsMock.mockReset().mockReturnValue({
+    save: saveMock,
+    saving: false,
+    status: { kind: "idle" } as const,
+    errors: [],
+    baseUrl: "",
+  });
 });
 
 afterEach(cleanup);
@@ -225,6 +228,37 @@ describe("PelletsTab", () => {
       const danger = screen.getByText(/DANGER/);
       expect(danger).toBeInTheDocument();
       expect(screen.getByText(/ignite pellets and start the firepot/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("per-field save errors", () => {
+    const fixture = { settings: {}, mode: "Stop" };
+
+    // Proves the field's `path` prop is load-bearing: it is what lets
+    // Warning Time claim "pelletlevel.warning_time" and show the backend's
+    // rejection inline instead of it falling to the save bar's generic
+    // prefixed line.
+    it("puts the backend's rejection on the field that caused it", () => {
+      useSaveSettingsMock.mockReturnValue({
+        save: saveMock,
+        saving: false,
+        status: { kind: "error", message: "Some settings were refused" },
+        errors: [
+          {
+            path: "pelletlevel.warning_time",
+            message: "Input should be less than or equal to 240",
+          },
+        ],
+        baseUrl: "",
+      });
+
+      renderRoute(<PelletsTab />, fixture);
+
+      const alerts = screen.getAllByRole("alert").map((n) => n.textContent);
+      expect(alerts).toContain("Input should be less than or equal to 240");
+      expect(alerts).not.toContain(
+        "pelletlevel.warning_time: Input should be less than or equal to 240",
+      );
     });
   });
 });

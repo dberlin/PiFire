@@ -1,4 +1,5 @@
 import { setPath } from "../../../helpers/settings/delta";
+import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
@@ -31,7 +32,7 @@ function readSafety(s: Settings): Safety {
 }
 
 export function SafetyTab() {
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("safety", readSafety);
   const set = <K extends keyof Safety>(k: K, val: Safety[K]) => setV((s) => ({ ...s, [k]: val }));
@@ -47,62 +48,71 @@ export function SafetyTab() {
   };
 
   return (
-    <Section title="Safety">
-      <NumberField
-        integer
-        label="Min Startup Temp"
-        value={v.minstartuptemp}
-        onChange={(n) => set("minstartuptemp", n)}
-        // index.html:1262 — without this React accepts a NEGATIVE grill temp
-        min={1}
-        suffix="°"
-      />
-      <NumberField
-        integer
-        label="Max Startup Temp"
-        value={v.maxstartuptemp}
-        onChange={(n) => set("maxstartuptemp", n)}
-        // index.html:1269
-        min={1}
-        suffix="°"
-      />
-      <NumberField
-        integer
-        label="Max Grill Temp"
-        value={v.maxtemp}
-        onChange={(n) => set("maxtemp", n)}
-        // index.html:1276
-        min={1}
-        suffix="°"
-      />
-      <NumberField
-        integer
-        label="Reignite Retries"
-        value={v.reigniteretries}
-        onChange={(n) => set("reigniteretries", n)}
-        // index.html:1286
-        min={0}
-        max={10}
-      />
-      <NumberField
-        integer
-        label="Manual Override Time"
-        value={v.manual_override_time}
-        onChange={(n) => set("manual_override_time", n)}
-        min={0}
-        suffix="s"
-      />
-      <Toggle
-        label="Startup Check"
-        checked={v.startup_check}
-        onChange={(b) => set("startup_check", b)}
-      />
-      <Toggle
-        label="Allow Manual Output Changes"
-        checked={v.allow_manual_changes}
-        onChange={(b) => set("allow_manual_changes", b)}
-      />
-      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
-    </Section>
+    <SettingsFieldErrorsProvider errors={errors}>
+      <Section title="Safety">
+        <NumberField
+          integer
+          label="Min Startup Temp"
+          value={v.minstartuptemp}
+          onChange={(n) => set("minstartuptemp", n)}
+          // index.html:1262 — without this React accepts a NEGATIVE grill temp
+          min={1}
+          suffix="°"
+          path="safety.minstartuptemp"
+        />
+        <NumberField
+          integer
+          label="Max Startup Temp"
+          value={v.maxstartuptemp}
+          onChange={(n) => set("maxstartuptemp", n)}
+          // index.html:1269
+          min={1}
+          suffix="°"
+          path="safety.maxstartuptemp"
+        />
+        <NumberField
+          integer
+          label="Max Grill Temp"
+          value={v.maxtemp}
+          onChange={(n) => set("maxtemp", n)}
+          // index.html:1276
+          min={1}
+          suffix="°"
+          path="safety.maxtemp"
+        />
+        <NumberField
+          integer
+          label="Reignite Retries"
+          value={v.reigniteretries}
+          onChange={(n) => set("reigniteretries", n)}
+          // index.html:1286
+          min={0}
+          max={10}
+          path="safety.reigniteretries"
+        />
+        <NumberField
+          integer
+          label="Manual Override Time"
+          value={v.manual_override_time}
+          onChange={(n) => set("manual_override_time", n)}
+          min={0}
+          suffix="s"
+          path="safety.manual_override_time"
+        />
+        <Toggle
+          label="Startup Check"
+          checked={v.startup_check}
+          onChange={(b) => set("startup_check", b)}
+          path="safety.startup_check"
+        />
+        <Toggle
+          label="Allow Manual Output Changes"
+          checked={v.allow_manual_changes}
+          onChange={(b) => set("allow_manual_changes", b)}
+          path="safety.allow_manual_changes"
+        />
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
+      </Section>
+    </SettingsFieldErrorsProvider>
   );
 }

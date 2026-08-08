@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { clampToBounds } from "../../helpers/settings/bounds";
+import { useSettingsFieldErrors } from "../../helpers/settings/fieldErrorContext";
 
 export interface RangeProfileColumn {
   key: string;
@@ -58,6 +59,7 @@ export function RangeProfileTable({
   boundaryMin,
   boundaryMax,
   disabled = false,
+  path,
 }: {
   boundaries: number[];
   profiles: Record<string, number>[];
@@ -70,7 +72,21 @@ export function RangeProfileTable({
   /** Render read-only. The rows still show their values: the settings they
    *  describe are unreachable, not unset. */
   disabled?: boolean;
+  /** Dotted settings path of the cross-field check covering this table's
+   *  array pair (e.g. "startup.smartstart") -- NOT a single cell's path.
+   *  A per-cell bound violation carries its own deeper path and is left to
+   *  the save bar; this only claims the whole-table check. */
+  path?: string;
 }) {
+  const ctx = useSettingsFieldErrors();
+  // Claim on MOUNT, matching Field: the claimed set describes what has a slot
+  // on screen, not this save's outcome.
+  useEffect(() => {
+    if (!path || !ctx) return;
+    return ctx.claim(path);
+  }, [path, ctx]);
+  const tableError =
+    path && ctx ? (ctx.errors.find((e) => e.path === path)?.message ?? null) : null;
   const canRemove = !disabled && profiles.length > 2;
   // An out-of-order keystroke is held here instead of being pushed up, so
   // `onChange` is never called with an unsorted array while multi-digit entry
@@ -214,6 +230,11 @@ export function RangeProfileTable({
         <p className="pf-settings-error-text" role="alert">
           {boundaryError}
         </p>
+      )}
+      {tableError && (
+        <span className="pf-field-error" role="alert">
+          {tableError}
+        </span>
       )}
       <button type="button" className="pf-rpt-add" disabled={disabled} onClick={handleAdd}>
         + Add

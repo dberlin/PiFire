@@ -1,7 +1,6 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
-import { errorFor, unmatchedErrors } from "../../../helpers/settings/fieldErrors";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
@@ -26,23 +25,6 @@ const SMARTSTART_COLUMNS: RangeProfileColumn[] = [
 
 const SHUTDOWN_DEFAULTS = SETTINGS_DEFAULTS.shutdown;
 const STARTUP_DEFAULTS = SETTINGS_DEFAULTS.startup;
-
-// The paths whose widget on this tab can actually display a rejection
-// inline — the NumberFields wired to `error={errorFor(errors, ...)}` below.
-// Toggle, Select and RangeProfileTable have no error slot yet, so their
-// paths must stay OUT of this list: a path with no error slot that is
-// wrongly listed here would have its rejection shown nowhere at all.
-// Feeds the transitional unmatchedErrors() filter below, until Task 3's
-// fields claim their own paths through SettingsFieldErrorsProvider directly.
-const CLAIMED_PATHS = [
-  "shutdown.shutdown_duration",
-  "startup.duration",
-  "startup.startup_exit_temp",
-  "startup.prime_on_startup",
-  "startup.pwm_duty_cycle",
-  "startup.smartstart.exit_temp",
-  "startup.start_to_mode.primary_setpoint",
-];
 
 type Startup = {
   shutdown_duration: number;
@@ -184,21 +166,14 @@ export function StartupTab() {
   ];
 
   return (
-    // Transitional: no field on this tab claims its path through the context
-    // yet (Task 3 wires that), so handing the provider the raw `errors` array
-    // would let SaveBar's unmatched fallback repeat every error a NumberField
-    // already renders inline via `error={errorFor(errors, ...)}` below.
-    // Filtering through CLAIMED_PATHS preserves the pre-context behavior:
-    // only errors nothing on this tab can display reach the bar. Drop this
-    // filter (and CLAIMED_PATHS) once Task 3's fields claim their own paths.
-    <SettingsFieldErrorsProvider errors={unmatchedErrors(errors, CLAIMED_PATHS)}>
+    <SettingsFieldErrorsProvider errors={errors}>
       <Section title="Shutdown">
         <NumberField
           integer
           label="Shutdown Duration"
           value={v.shutdown_duration}
           onChange={(n) => set("shutdown_duration", n)}
-          error={errorFor(errors, "shutdown.shutdown_duration")}
+          path="shutdown.shutdown_duration"
           min={0}
           suffix="s"
         />
@@ -206,6 +181,7 @@ export function StartupTab() {
           label="Auto Power Off"
           checked={v.auto_power_off}
           onChange={(b) => set("auto_power_off", b)}
+          path="shutdown.auto_power_off"
         />
       </Section>
 
@@ -215,10 +191,13 @@ export function StartupTab() {
           label="Duration"
           value={v.duration}
           onChange={(n) => set("duration", n)}
-          error={errorFor(errors, "startup.duration")}
+          path="startup.duration"
           min={0}
           suffix="s"
         />
+        {/* The switch is a derived on/off view of startup.startup_exit_temp,
+            not a second widget for the same path -- the NumberField below
+            claims that path only while it is on screen. */}
         <Toggle
           label="Exit Startup @ Temperature"
           checked={exitTempOn}
@@ -230,12 +209,13 @@ export function StartupTab() {
             label="Startup Exit Temp"
             value={v.startup_exit_temp}
             onChange={(n) => set("startup_exit_temp", n)}
-            error={errorFor(errors, "startup.startup_exit_temp")}
+            path="startup.startup_exit_temp"
             min={0}
             suffix="°"
             hint="0 = disabled"
           />
         )}
+        {/* Same derived-switch reasoning as above, for startup.prime_on_startup. */}
         <Toggle
           label="Always Prime on Startup"
           checked={primeOn}
@@ -247,7 +227,7 @@ export function StartupTab() {
             label="Prime on Startup"
             value={v.prime_on_startup}
             onChange={(n) => set("prime_on_startup", n)}
-            error={errorFor(errors, "startup.prime_on_startup")}
+            path="startup.prime_on_startup"
             min={0}
             max={200}
             hint="0 = disabled"
@@ -259,7 +239,7 @@ export function StartupTab() {
             label="PWM Duty Cycle"
             value={v.pwm_duty_cycle}
             onChange={(n) => set("pwm_duty_cycle", n)}
-            error={errorFor(errors, "startup.pwm_duty_cycle")}
+            path="startup.pwm_duty_cycle"
             min={0}
             max={100}
             suffix="%"
@@ -272,13 +252,14 @@ export function StartupTab() {
           label="Enabled"
           checked={v.smartstart_enabled}
           onChange={(b) => set("smartstart_enabled", b)}
+          path="startup.smartstart.enabled"
         />
         <NumberField
           integer
           label="Exit Temp"
           value={v.smartstart_exit_temp}
           onChange={(n) => set("smartstart_exit_temp", n)}
-          error={errorFor(errors, "startup.smartstart.exit_temp")}
+          path="startup.smartstart.exit_temp"
           min={0}
           suffix="°"
         />
@@ -294,6 +275,9 @@ export function StartupTab() {
           onChange={(boundaries, profiles) =>
             setV((s) => ({ ...s, smartstartTemps: boundaries, smartstartProfiles: profiles }))
           }
+          // SmartStart._check_profile_count raises on the whole submodel, so
+          // pydantic's loc lands on the model itself, not a specific field.
+          path="startup.smartstart"
         />
       </Section>
 
@@ -303,6 +287,7 @@ export function StartupTab() {
           value={v.after_startup_mode}
           options={modeOptions}
           onChange={(v) => set("after_startup_mode", v)}
+          path="startup.start_to_mode.after_startup_mode"
         />
         {/* Flask hides the whole Hold block unless after_startup_mode is
             'Hold' (index.html:812-826, settings.js:943-950). Hiding is NOT
@@ -314,7 +299,7 @@ export function StartupTab() {
               label="Primary Setpoint"
               value={v.primary_setpoint}
               onChange={(n) => set("primary_setpoint", n)}
-              error={errorFor(errors, "startup.start_to_mode.primary_setpoint")}
+              path="startup.start_to_mode.primary_setpoint"
               // index.html:819 — the bound is dynamic, read off the Safety tab.
               min={settings.safety?.maxstartuptemp ?? SETTINGS_DEFAULTS.safety.maxstartuptemp}
               max={settings.safety?.maxtemp ?? SETTINGS_DEFAULTS.safety.maxtemp}
@@ -324,6 +309,7 @@ export function StartupTab() {
               label="Start to Hold Prompt"
               checked={v.start_to_hold_prompt}
               onChange={(b) => set("start_to_hold_prompt", b)}
+              path="startup.start_to_mode.start_to_hold_prompt"
             />
           </>
         )}

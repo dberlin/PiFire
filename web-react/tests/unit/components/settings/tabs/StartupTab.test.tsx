@@ -709,25 +709,5 @@ describe("StartupTab", () => {
       expect(alerts).toContain("pwm.frequency: Input should be greater than 0");
       expect(alerts).toContain("Save failed.");
     });
-
-    // shutdown.auto_power_off IS a path this tab writes, but it is
-    // Toggle-backed and Toggle has no error slot. CLAIMED_PATHS must list
-    // only the paths a widget can actually display inline, or SaveBar treats
-    // this one as claimed, drops it from the fallback, and the rejection
-    // renders nowhere.
-    it("still shows an error on a Toggle-backed path this tab writes but cannot display inline", () => {
-      useSaveSettingsMock.mockReturnValue({
-        save: saveMock,
-        saving: false,
-        status: { kind: "error", message: "Save failed." },
-        errors: [{ path: "shutdown.auto_power_off", message: "Input should be a valid boolean" }],
-        baseUrl: "",
-      });
-
-      renderRoute(<StartupTab />, fixture());
-
-      const alerts = screen.getAllByRole("alert").map((el) => el.textContent);
-      expect(alerts).toContain("shutdown.auto_power_off: Input should be a valid boolean");
-    });
   });
 });

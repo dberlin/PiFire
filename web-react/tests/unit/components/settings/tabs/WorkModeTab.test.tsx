@@ -4,19 +4,22 @@ import { WorkModeTab } from "../../../../../src/components/settings/tabs/WorkMod
 import { renderRoute } from "../../../test-utils";
 
 const saveMock = rs.fn().mockResolvedValue(true);
+const useSaveSettingsMock = rs.fn();
 
 // Mock the useSaveSettings module
 rs.mock("../../../../../src/helpers/settings/useSaveSettings", () => ({
-  useSaveSettings: () => ({
-    save: saveMock,
-    saving: false,
-    status: { kind: "idle" } as const,
-    baseUrl: "",
-  }),
+  useSaveSettings: () => useSaveSettingsMock(),
 }));
 
 beforeEach(() => {
   saveMock.mockClear();
+  useSaveSettingsMock.mockReset().mockReturnValue({
+    save: saveMock,
+    saving: false,
+    status: { kind: "idle" } as const,
+    errors: [],
+    baseUrl: "",
+  });
 });
 
 // Field associates its <label> to the control via htmlFor/id, so
@@ -356,6 +359,46 @@ describe("WorkModeTab", () => {
       fireEvent.change(pmode, { target: { value: "44" } });
       fireEvent.blur(pmode);
       expect(inputFor("PMode")).toHaveValue(9);
+    });
+  });
+
+  describe("per-field save errors", () => {
+    const fixture = { settings: { platform: { dc_fan: true } }, mode: "Stop" };
+
+    it("places a rejected field's reason beside that field, not in the save bar", () => {
+      useSaveSettingsMock.mockReturnValue({
+        save: saveMock,
+        saving: false,
+        status: { kind: "error", message: "Some settings were refused" },
+        errors: [{ path: "cycle_data.PMode", message: "Input should be less than or equal to 9" }],
+        baseUrl: "",
+      });
+
+      renderRoute(<WorkModeTab />, fixture);
+
+      // Inline, next to the control that owns the path.
+      const alerts = screen.getAllByRole("alert").map((n) => n.textContent);
+      expect(alerts).toContain("Input should be less than or equal to 9");
+      // The save bar prefixes unplaced errors with their path. This one is
+      // placed, so that prefixed form must NOT appear.
+      expect(alerts).not.toContain("cycle_data.PMode: Input should be less than or equal to 9");
+    });
+
+    it("falls back to the save bar for a path this tab does not render", () => {
+      // A cross-section rule can refuse a path that lives on another tab.
+      useSaveSettingsMock.mockReturnValue({
+        save: saveMock,
+        saving: false,
+        status: { kind: "error", message: "Some settings were refused" },
+        errors: [{ path: "safety.maxtemp", message: "Input should be greater than 0" }],
+        baseUrl: "",
+      });
+
+      renderRoute(<WorkModeTab />, fixture);
+
+      expect(screen.getAllByRole("alert").map((n) => n.textContent)).toContain(
+        "safety.maxtemp: Input should be greater than 0",
+      );
     });
   });
 });
