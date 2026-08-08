@@ -171,7 +171,11 @@ export function PwmTab() {
         checked={pwm.pwm_control}
         onChange={(v) => set("pwm_control", v)}
       />
-      {mpcFanInert && <p className="pf-settings-hint">{MPC_FAN_PWM_NOTE}</p>}
+      {mpcFanInert && (
+        <p className="pf-settings-error-text" role="alert">
+          {MPC_FAN_PWM_NOTE}
+        </p>
+      )}
       <NumberField
         integer
         label="Update Time"
