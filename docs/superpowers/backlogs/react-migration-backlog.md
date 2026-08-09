@@ -2476,6 +2476,51 @@ more than a fragile scanner.
 
 ---
 
+### 18. `pid_sp`'s guard windows now pace off the auger frame — MEASURED 2026-08-08, ships
+
+**Status:** DONE. Retiring `cycle_data.HoldCycleTime` moved `pid_sp.cycle_time`
+from the retired 25 s default to `AUGER_TIMING.frame_s` = 20 s, shortening both
+guard windows (`cycle_time * 3`) from 75 s to 60 s: the integral-reset gate and
+the `STARTUP_REDUCTION = 0.65` ease-off, both armed only by a setpoint change.
+
+**Decision rule, fixed before running:** the change ships if setpoint-change
+overshoot and settling do not regress against a 25 s arm. A regression stops the
+work for a human ruling, it does not get fixed in place.
+
+**Result — no regression.** `pid_sp` on `GrillSim`, scenario `step_225_275`,
+seeds 0-9, paired per seed. Overshoot in the 600 s after the step: 22.54 °F at
+20 s vs 22.17 °F at 25 s, paired delta **+0.36 °F, 95 % CI [-1.32, +2.04]**,
+4 seeds worse / 3 better / 3 bit-identical. Settling, measured as the first time
+the 300 s trailing mean enters ±5 °F of the new target: **-2.20 s, CI [-4.19,
+-0.21]** — the 20 s arm is faster on 6 seeds and slower on none. Three seeds
+produce byte-identical runs, which is what 60 s vs 75 s should do at a 20 s solve
+period: the two windows differ by exactly one control solve.
+
+**A third absurd arm is what makes that readable.** At `frame_s = 300` (900 s
+windows) the 600 s overshoot falls to 10.46 °F — **-11.71 °F on 10 seeds out of
+10** — and settling slows by **+64.5 s, also 10 of 10**. So both metrics do
+resolve this guard; the 20 s-vs-25 s null is a real null, not an inert metric.
+Without that arm the two arms agreeing would have proved nothing.
+
+**Two metrics that look like they answer this and do not.** The harness's
+`overshoot_f` is `err.max()` over the *whole* run, so on `step_225_275` it
+reports the ambient→225 startup peak two hours before the step: identical to the
+last decimal across the 20 s and 25 s arms on all ten seeds. And its `settle_s`
+is `None` for almost every row, because `pid_sp` holds 275 °F as a continuous
+±16 °F limit cycle on `GrillSim` and never stops leaving the ±5 °F band — the
+metric is well defined, it just never fires for this controller. Any step-local
+comparison here has to window the error itself.
+
+Measured with a scratch driver over `run_scenario`, varying only the module-local
+`controller.pid_sp.AUGER_TIMING` — never `grillplat.actuator_capabilities
+.AUGER_TIMING`, which is the object `PulseScheduler` defaults its timing from and
+would have retimed actuation along with the guard. Every one of the 30 rows was
+asserted at `frame_seconds == 20` and `pulse_seconds == 2` to prove the patch did
+not leak, and at `core.cycle_time == arm` to prove it landed. Full per-seed table
+in `.superpowers/sdd/2026-08-08-settings-field-contract-and-missing-ui/task-13-report.md`.
+
+---
+
 ## Test-harness notes
 
 - **Running several checkouts at once needs four variables.** Ports and origins
