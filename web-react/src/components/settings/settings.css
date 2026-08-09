@@ -239,17 +239,19 @@
   font: 600 14px "Barlow";
 }
 /* Per-field helper copy: NumberField's `hint`, and ControllerTab's option
-   descriptions, which have been rendering unstyled. Same tokens as
-   .pf-settings-hint — no new palette.
+   descriptions. Same tokens as .pf-settings-hint — no new palette.
 
    The hint is a sibling of the label and control, so it takes a row of its own
-   in both layouts a field row can be in: a full-width flex line in the wizard's
-   module config, and in a settings section a row starting at the control it
-   describes. Sharing the field's row instead would displace the control. */
+   rather than sharing the field's, which would displace the control. It spans
+   every column of that row: confined to the control's column it is a ~16em
+   strip beside an empty label column, which turns a manifest description into
+   five short lines and leaves it reading as though it belonged to the row
+   below. Full width also matches the section-level .pf-settings-hint, so the
+   two kinds of description do not sit at different indents on one page. */
 .pf-field-hint {
   @apply text-text-dim;
   flex: 1 0 100%;
-  grid-column: 2 / -1;
+  grid-column: 1 / -1;
   font: 500 13px "Barlow";
   line-height: 1.6;
 }
