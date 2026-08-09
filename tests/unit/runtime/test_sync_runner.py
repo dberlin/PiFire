@@ -511,3 +511,50 @@ def test_controller_state_from_get_status_is_a_copy():
     state = runner.controller_state()
     state["K"] = 999
     assert runner.controller_state() == {"K": 700.0}
+
+
+def test_sync_reconfigure_installs_complete_core_before_closing_replaced_core(monkeypatch):
+    import controller.runtime.runner as runner_module
+
+    events = []
+
+    class CloseCore(_RecordingCore):
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+
+        def close(self):
+            events.append((f"close-{self.name}", runner._core.name))
+
+    old = CloseCore("old")
+    new = CloseCore("new")
+    runner = SyncControllerRunner(old)
+    monkeypatch.setattr(
+        runner_module,
+        "_build_core",
+        lambda settings, control, logger=None: (new, "Active"),
+    )
+
+    assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
+
+    assert runner._core is new
+    assert events == [("close-old", "new")]
+    assert runner.configuration_revision() == 1
+    runner.stop()
+    assert events[-1] == ("close-new", "new")
+
+
+def test_sync_stop_closes_final_core_exactly_once():
+    class CloseCore(_RecordingCore):
+        def __init__(self):
+            super().__init__()
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    core = CloseCore()
+    runner = SyncControllerRunner(core)
+    runner.stop()
+    runner.stop()
+    assert core.closed == 1

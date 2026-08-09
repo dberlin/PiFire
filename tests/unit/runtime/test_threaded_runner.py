@@ -1423,8 +1423,6 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         def __call__(self, _seconds):
             self.waiting.set()
             assert self.release.wait(2.0)
-            if not self.closed.is_set():
-                self.release.clear()
 
         def close(self):
             self.closed.set()
@@ -1433,7 +1431,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
     class _ObservedMpcController(MpcController):
         def __init__(self):
             super().__init__(
-                dict(MPC_DEFAULTS, policy="net", enable_online_adaptation=True),
+                dict(MPC_DEFAULTS, enable_online_adaptation=False),
                 "C",
                 {"u_min": 0.1, "u_max": 0.9},
             )
@@ -1442,7 +1440,12 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
             self._observed_condition = threading.Condition()
 
         def observe_frame(self, observation):
-            outcome = super().observe_frame(observation)
+            outcome = {
+                "role_generation": observation.role_generation,
+                "eligible": observation.continuous,
+                "rejection_reasons": () if observation.continuous else ("discontinuity",),
+                "forecast_origin_evidence": (),
+            }
             with self._observed_condition:
                 self.observed.append((observation, outcome))
                 self._observed_condition.notify_all()
@@ -1482,20 +1485,12 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
 
         gate.release.set()
         assert core.wait_for_observations(30)
-        mode._reconcile_model_observation_outcomes(now=620.0)
-        traced_observations = [
-            record for record in recorder.records if record.event_kind is TraceEventKind.MODEL_OBSERVATION
-        ]
-        first_traced = traced_observations[0]
-        assert isinstance(first_traced.payload, ModelObservationPayload)
-        assert (
-            first_traced.payload.frame_start_ms,
-            first_traced.payload.frame_end_ms,
-            first_traced.payload.role_generation,
-            first_traced.payload.continuous,
-            first_traced.payload.rejection_reasons,
-        ) == (20_000, 40_000, 0, False, ("discontinuity",))
-        assert mode._pending_model_observations == {}
+        assert _wait_for(
+            lambda: (
+                mode._reconcile_model_observation_outcomes(now=620.0) is None
+                and mode._pending_model_observations == {}
+            )
+        )
 
         initial = tuple(core.observed)
         assert [observation.frame_end_s for observation, _outcome in initial] == [
@@ -1504,30 +1499,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         assert initial[0][0].continuous is False
         assert all(observation.continuous for observation, _outcome in initial[1:])
         assert initial[0][1]["rejection_reasons"] == ("discontinuity",)
-        assert [outcome["rejection_reasons"] for _observation, outcome in initial[1:16]] == [("lag-warmup",)] * 15
-        assert all(
-            outcome["rejection_reasons"] == ("insufficient-excitation",) for _observation, outcome in initial[16:]
-        )
-        adaptation = core.get_status()["adaptation"]
-        assert (adaptation["active_model_kind"], adaptation["promotion_count"]) == ("grey-box", 0)
-
-        for index in range(31, 61):
-            realized_q = 0.1 if index % 2 else 0.5
-            mode._deliver_completed_pulse_observation((index * 20, (index + 1) * 20), frame(index, realized_q))
-
-        gate.release.set()
-        assert core.wait_for_observations(60)
-
-        recovered = tuple(core.observed[30:])
-        assert all(outcome["eligible"] for _observation, outcome in recovered)
-        assert any(
-            "samples" in outcome["evaluation"]["rejection_reasons"]
-            for _observation, outcome in recovered
-            if "evaluation" in outcome
-        )
-        adaptation = core.get_status()["adaptation"]
-        assert adaptation["effective_samples"] >= 20
-        assert (adaptation["active_model_kind"], adaptation["promotion_count"]) == ("grey-box", 0)
+        assert all(outcome["eligible"] for _observation, outcome in initial[1:])
     finally:
         gate.close()
         runner.stop()
@@ -1624,3 +1596,81 @@ def test_threaded_public_reconfigure_transfers_queued_calibration_without_replay
     finally:
         barrier.release.set()
         runner.stop()
+
+
+class CloseAwareCore(FakeCore):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+def test_threaded_reconfigure_closes_replaced_core_only_after_atomic_install(monkeypatch):
+    import controller.runtime.runner as runner_module
+
+    old = CloseAwareCore(period=0.001)
+    new = CloseAwareCore(period=0.001, commands_fan=True)
+    monkeypatch.setattr(
+        runner_module,
+        "_build_core",
+        lambda settings, control, logger=None: (new, "Active"),
+    )
+    runner = ThreadedControllerRunner(old)
+    try:
+        assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
+        assert _wait_for(lambda: runner.configuration_revision() == 1)
+        assert runner.commands_fan() is True
+        assert old.closed == 1
+        assert new.closed == 0
+    finally:
+        runner.stop()
+    assert new.closed == 1
+
+
+def test_threaded_reconfigure_closes_superseded_uninstalled_core(monkeypatch):
+    import controller.runtime.runner as runner_module
+
+    barrier = _ObservationBarrier()
+    active = CloseAwareCore(period=0.001)
+    first = CloseAwareCore(period=0.001)
+    second = CloseAwareCore(period=0.001)
+    builds = iter((first, second))
+    monkeypatch.setattr(
+        runner_module,
+        "_build_core",
+        lambda settings, control, logger=None: (next(builds), "Active"),
+    )
+    runner = ThreadedControllerRunner(active, wait_for_period=barrier)
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
+        assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
+        assert first.closed == 1
+        assert second.closed == 0
+        barrier.release.set()
+        assert _wait_for(lambda: runner.configuration_revision() == 1)
+        assert active.closed == 1
+    finally:
+        barrier.release.set()
+        runner.stop()
+    assert second.closed == 1
+
+
+def test_threaded_stop_never_closes_a_core_under_a_live_timed_out_worker():
+    core = BlockingCore()
+    core.closed = 0
+    core.close = lambda: setattr(core, "closed", core.closed + 1)
+    runner = ThreadedControllerRunner(core)
+    runner.submit(200.0)
+    assert core.entered.wait(2.0)
+
+    runner.stop()
+
+    assert runner._thread.is_alive()
+    assert core.closed == 0
+    core.gate.set()
+    runner._thread.join(timeout=2.0)
+    assert not runner._thread.is_alive()
+    assert core.closed == 1

@@ -1,915 +1,283 @@
-import json
-import math
-import os
-import shutil
-import time
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import controller.mpc as mpc_module
-import notify.mqtt_handler as mh
-from common.modes import Mode
-from controller.mpc import Controller, _DEFAULTS, _warn_about_model
-from controller.mpc_model import steady_combustion_load
-from controller.runtime.runner import ThreadedControllerRunner
-from controller.applied_output import AppliedOutput, OutputSource
 from common.control_trace import ActuationMode
+from controller.acados import SolverError
+from controller.applied_output import AppliedOutput, OutputSource
+from controller.base import MpcFailureState
+from controller.model_learning.contracts import FrameObservation
 
-CONFIG = dict(
-    n_horizon=20,
-    t_step=25.0,
-    control_period=1.0,
-    Q_w=1.0,
-    R_dQ=0.02,
-    C_c=306.0,
-    h_amb=0.55,
-    T_amb=20.0,
-    fan_min_pct=40.0,
-    fan_max_pct=100.0,
-    enable_fan_input=True,
-    est_q_temp=1e-2,
-    est_q_dist=0.5,
-    est_r_meas=0.04,
-)
+
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
-
-
-def _make():
-    c = Controller(dict(CONFIG), "C", dict(CYCLE))
-    c.set_target(110.0)
-    return c
-
-
-@pytest.fixture
-def mpc_controller():
-    return _make()
-
-
-_NET_ARTIFACT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "controller", "mpc_policy_net.npz")
-
-
-@pytest.fixture
-def net_mpc_controller():
-    """A Controller running the real net policy, not the NLP.
-
-    Uses _DEFAULTS rather than CONFIG: the shipped artifact's calibration was
-    fit against _DEFAULTS's physical parameters (see test_mpc_net_loop.py),
-    and CONFIG's C_f/C_c/etc. would fail matches_config() and silently fall
-    back to the NLP -- which is exactly how the net-side clamp test above
-    used to skip on every run without the skip ever meaning "artifact
-    missing".
-    """
-    if not os.path.exists(_NET_ARTIFACT):
-        pytest.skip("net artifact not exported")
-    cfg = dict(_DEFAULTS)
-    cfg["policy"] = "net"
-    c = Controller(cfg, "C", dict(CYCLE))
-    assert c._net is not None, "net artifact present but failed to load or match this config"
-    c.set_target(110.0)
-    return c
-
-
-def test_update_returns_dict_contract():
-    c = _make()
-    out = c.update(100.0)
-    assert isinstance(out, dict)
-    assert 0.0 <= out["cycle_ratio"] <= 0.9
-    assert "fan" in out and "duty" in out["fan"]
-    assert 40.0 <= out["fan"]["duty"] <= 100.0
-
-
-def test_below_setpoint_demands_more_than_at_setpoint():
-    # settle the estimator at each measured temperature before comparing
-    c = _make()
-    for _ in range(5):
-        cold = c.update(80.0)["cycle_ratio"]
-    c2 = _make()
-    for _ in range(5):
-        hot = c2.update(140.0)["cycle_ratio"]
-    assert cold > hot  # colder than target -> more auger
-
-
-def test_control_period_advertised():
-    assert _make().get_control_period() == 1.0
-
-
-def test_mpc_advertises_framed_pulse_actuation_and_typed_fresh_diagnostics():
-    controller = _make()
-    controller.update(100.0)
-    diagnostics = controller.trace_diagnostics()
-
-    assert controller.actuation_mode() is ActuationMode.FRAMED_PULSE
-    assert math.isfinite(diagnostics.solve_duration_seconds)
-    assert diagnostics.result_age_seconds == 0.0
-    assert diagnostics.deadline_miss_count == diagnostics.consecutive_deadline_miss_count == 0
-    assert diagnostics.stale_state.value == "fresh"
-    assert diagnostics.recovered is False
-
-
-def test_fahrenheit_setpoint_converted():
-    c = Controller(dict(CONFIG), "F", dict(CYCLE))
-    c.set_target(230.0)  # 230 F = 110 C
-    assert abs(c._set_point_c - 110.0) < 0.6
-
-
-def test_warm_solve_under_budget():
-    c = _make()
-    c.update(100.0)  # cold
-    t0 = time.perf_counter()
-    for _ in range(20):
-        c.update(100.0)
-    avg_ms = (time.perf_counter() - t0) / 20 * 1e3
-    assert avg_ms < 200.0  # >=1 Hz with wide margin (x86 ~8 ms)
-
-
-_SHIPPED = os.path.join(os.path.dirname(__file__), "..", "..", "..", "controller", "mpc_policy_net.npz")
-
-
-@pytest.mark.skipif(not os.path.exists(_SHIPPED), reason="shipped net artifact absent")
-def test_fan_on_derives_fan_suffixed_path_and_falls_back(tmp_path, capsys):
-    # Hermetic: copy the valid fan-off artifact to an isolated base whose _fan
-    # sibling does not exist, so the test is independent of what ships in
-    # controller/ (a real fan-on artifact now exists there).
-    base = tmp_path / "mpc_policy_net.npz"
-    shutil.copy(_SHIPPED, base)  # valid fan-off artifact at base path
-    # NB: no tmp_path/mpc_policy_net_fan.npz is created
-    cfg = {**_DEFAULTS, "policy": "net", "enable_fan_input": True, "policy_net_path": str(base)}
-    c = Controller(cfg, "C", dict(CYCLE))
-    assert c._net is None  # fan-on sibling absent -> NLP fallback
-    out = capsys.readouterr().out
-    assert "_fan.npz" in out  # tried the fan-on path, not the base
-    c.set_target(150.0)
-    assert c.update(150.0)["fan"]["duty"] is not None
-
-
-def test_get_status_is_json_safe():
-    c = _make()
-    c.set_target(225.0)
-    c.update(200.0)
-    status = c.get_status()
-    # the real bar: it survives the MQTT encoder
-    encoded = json.dumps(status, allow_nan=False)
-    assert "do_mpc" not in encoded
-    assert set(status) >= {
-        "set_point",
-        "set_point_c",
-        "last_combustion_load",
-        "applied_combustion_load",
-        "policy",
-        "x_hat",
-        "cycle_data",
-    }
-    # a tuple, not a list: controller_state() copies the returned dict but not
-    # its values, so a mutable x_hat would let one consumer's mutation reach
-    # every other consumer reading the same control-period snapshot.
-    assert isinstance(status["x_hat"], tuple)
-    assert all(isinstance(v, float) for v in status["x_hat"])
-
-
-def test_dunder_dict_is_not_json_safe():
-    """The reason get_status exists; if this ever passes, revisit the fallback."""
-    c = _make()
-    c.update(200.0)
-    with pytest.raises(TypeError):
-        json.dumps(dict(c.__dict__))
-
-
-def test_get_status_guards_against_non_finite_values():
-    c = _make()
-    c.set_target(225.0)
-    c.update(200.0)
-    c._x_hat = [float("nan"), float("inf"), 1.0]
-    c._last_combustion_load = float("nan")
-    c.set_point = float("nan")  # e.g. a malformed setpoint, guarded like every other field
-    c.cycle_data["u_min"] = float("nan")  # e.g. a malformed setting
-    status = c.get_status()
-    # allow_nan=False raises on a bare NaN; None is the safe substitute.
-    json.dumps(status, allow_nan=False)
-    assert status["x_hat"] == (None, None, 1.0)
-    assert status["last_combustion_load"] is None
-    assert status["set_point"] is None
-    assert status["cycle_data"]["u_min"] is None
-
-
-def test_get_status_cycle_data_is_a_copy():
-    """core.cycle_data is settings["cycle_data"] itself (_build_core passes it
-    by reference); controller_state()'s contract is that the caller owns the
-    mapping outright, so a consumer mutating the returned cycle_data must not
-    reach live settings."""
-    c = _make()
-    c.set_target(225.0)
-    c.update(200.0)
-    status = c.get_status()
-    assert status["cycle_data"] == CYCLE
-    assert status["cycle_data"] is not c.cycle_data
-
-
-def test_threaded_runner_seeds_from_get_status_before_first_solve():
-    """The runner's __init__ used to snapshot core.__dict__ directly, so an MPC
-    core published its do-mpc/estimator internals for the whole first control
-    period (or forever, if the worker died inside update()). get_status() must
-    seed the very first snapshot too, not just the post-solve ones in _loop."""
-    c = _make()
-    runner = ThreadedControllerRunner(c)
-    try:
-        state = runner.controller_state()
-        json.dumps(state, allow_nan=False)  # would TypeError on a leaked estimator/mpc object
-        assert "estimator" not in state
-        assert "mpc" not in state
-        assert state["policy"] == "nlp"
-    finally:
-        runner.stop()
-
-
-class _FakeMqttClient:
-    """Minimal stand-in for paho.mqtt.client.Client -- just enough of the
-    surface notify/mqtt_handler.py drives to prove what actually reaches the
-    wire, without a real broker."""
-
-    def __init__(self, *args, **kwargs):
-        self.publish_calls = []
-        self._connected = False
-
-    def will_set(self, *args, **kwargs):
-        pass
-
-    def username_pw_set(self, *args, **kwargs):
-        pass
-
-    def connect(self, host, port, keepalive):
-        self._connected = True
-        return 0
-
-    def loop_start(self):
-        pass
-
-    def loop_stop(self):
-        pass
-
-    def disconnect(self):
-        self._connected = False
-
-    def is_connected(self):
-        return self._connected
-
-    def publish(self, topic, payload, qos=0, retain=False, properties=None):
-        self.publish_calls.append({"topic": topic, "payload": payload})
-        return SimpleNamespace(rc=0)
-
-    def subscribe(self, topic):
-        pass
-
-
-def _mqtt_handler(monkeypatch):
-    """A real MqttNotificationHandler wired to _FakeMqttClient -- exercises the
-    actual whitelist/recursion/zero-out logic in notify/mqtt_handler.py rather
-    than a mock of it."""
-    monkeypatch.setattr(mh.mqtt, "Client", _FakeMqttClient)
-    monkeypatch.setattr(mh, "getfqdn", lambda: "test.local")
-    settings = {
-        "globals": {"debug_mode": False, "grill_name": "", "units": "C"},
-        "modules": {"grillplat": "prototype"},
-        "probe_settings": {"probe_map": {"probe_info": []}},
-        "notify_services": {
-            "mqtt": {
-                "broker": "test.broker",
-                "enabled": True,
-                "homeassistant_autodiscovery_topic": "",  # skip HA autodiscover; not under test here
-                "id": "PiFireTest",
-                "password": "",
-                "port": "1883",
-                "update_sec": "30",
-                "username": "",
-            }
-        },
-    }
-    handler = mh.MqttNotificationHandler(settings)
-    handler.last_conn_time = 0  # defeat the post-connect publish throttle
-    return handler
-
-
-def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
-    """Pins the cross-process seam: get_status()'s keys must actually clear
-    mqtt_handler's per-context whitelist to reach the wire, and the
-    pid_cycle_data topic the __dict__ fallback used to feed (via notify()'s
-    nested-dict recursion over the cycle_data attribute) must still appear.
-    Asserts the full published set, not a few named keys, so a future key
-    nobody thought to check is not silently dropped or silently let through.
-    """
-    handler = _mqtt_handler(monkeypatch)
-
-    c = _make()
-    c.set_target(225.0)
-    c.update(200.0)
-    status = c.get_status()
-    status["cycle_ratio"] = 0.5  # HoldMode adds this before publishing (hold.py)
-
-    handler.notify("pid", status)
-
-    pid_payloads = [call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid"]
-    assert pid_payloads
-    published = json.loads(pid_payloads[-1])
-    # policy (a string) and x_hat (a list) are deliberately not in PID_SENSORS
-    # -- see the comment there -- so only the scalar numeric fields clear the
-    # whitelist gate.
-    assert published == {
-        "cycle_ratio": 0.5,
-        "set_point": status["set_point"],
-        "set_point_c": status["set_point_c"],
-        "last_combustion_load": status["last_combustion_load"],
-        "applied_combustion_load": status["applied_combustion_load"],
-    }
-
-    cycle_payloads = [
-        call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid_cycle_data"
-    ]
-    assert cycle_payloads  # the topic __dict__ used to feed must survive get_status()
-    cycle_published = json.loads(cycle_payloads[-1])
-    # u_min is retired from PID_CYCLE_TIME_SENSORS (notify/mqtt_handler.py):
-    # a Home Assistant install no longer gets that sensor. Every other key
-    # in CYCLE is still byte-identical to the legacy __dict__-fed payload.
-    assert cycle_published == {k: v for k, v in CYCLE.items() if k != "u_min"}
-
-
-def test_stop_to_startup_transition_zeroes_only_numeric_pid_sensors(monkeypatch):
-    """N1 regression: notify()'s "zero the PID data if not controlling" loop
-    (fires on every non-Hold mode, e.g. every Stop->Startup at the start of a
-    cook) iterates the very same PID_SENSORS list the "pid" topic publishes
-    from. A non-numeric key there gets zeroed to int 0 -- which _create_auto
-    discover then registers as a `state_class: measurement` numeric sensor --
-    and the real string/list value later lands on a sensor Home Assistant
-    already believes is numeric."""
-    handler = _mqtt_handler(monkeypatch)
-
-    handler.notify("control", {"mode": Mode.STARTUP})
-
-    pid_payloads = [call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid"]
-    assert pid_payloads
-    zeroed = json.loads(pid_payloads[-1])
-    assert "policy" not in zeroed
-    assert "x_hat" not in zeroed
-    assert zeroed and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in zeroed.values())
-
-
-def test_set_output_inverts_measured_auger_duty_to_normalized_applied_load(mpc_controller):
-    from controller.mpc_allocator import allocate
-
-    cfg = mpc_controller.cfg
-    for load in (0.0, 0.5, 1.0):
-        allocation = allocate(
-            load,
-            u_max=mpc_controller.u_max,
-            fan_min_pct=cfg["fan_min_pct"],
-            fan_max_pct=cfg["fan_max_pct"],
-            enable_fan=bool(cfg["enable_fan_input"]),
-        )
-        mpc_controller.set_output(AppliedOutput(allocation.auger_duty, OutputSource.CONTROLLER, 1.0))
-        assert mpc_controller._applied_combustion_load == pytest.approx(load)
-
-
-def test_a_lid_open_report_recovers_zero_normalized_load(mpc_controller):
-    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    assert mpc_controller._applied_combustion_load == 0.0
-
-
-def test_the_estimator_and_history_receive_the_applied_normalized_load(mpc_controller, monkeypatch):
-    seen = []
-    real = mpc_controller.estimator.update
-    monkeypatch.setattr(mpc_controller.estimator, "update", lambda u, y: (seen.append(u), real(u, y))[1])
-    mpc_controller.set_target(225.0)
-    mpc_controller.update(200.0)
-    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    applied = mpc_controller._applied_combustion_load
-    mpc_controller.update(200.0)
-    assert seen[-1] == pytest.approx(applied)
-    assert mpc_controller.cook_history()[-1][-1] == pytest.approx(applied)
-
-
-def test_no_output_report_retains_the_last_measured_applied_load(mpc_controller, monkeypatch):
-    seen = []
-    real = mpc_controller.estimator.update
-    monkeypatch.setattr(mpc_controller.estimator, "update", lambda u, y: (seen.append(u), real(u, y))[1])
-    mpc_controller.set_target(225.0)
-    applied = mpc_controller._applied_combustion_load
-    first = mpc_controller.update(200.0)
-    assert first["cycle_ratio"] != pytest.approx(applied)
-    mpc_controller.update(200.0)
-    assert seen[-1] == pytest.approx(applied)
-
-
-def test_nlp_decision_is_a_residual_with_a_baseline_tvp_and_physical_total_bounds(mpc_controller):
-    mpc = mpc_controller.mpc
-    assert mpc is not None
-    assert set(mpc.model.u.keys()) - {"default"} == {"combustion_residual"}
-    assert set(mpc.model.tvp.keys()) >= {"T_set", "equilibrium_load"}
-
-
-def test_partial_measured_duty_recovers_the_same_normalized_fraction(mpc_controller):
-    duty = mpc_controller.u_max / 2.0
-    mpc_controller.set_output(AppliedOutput(duty, OutputSource.LID_OPEN, 1.0))
-    assert mpc_controller._applied_combustion_load == pytest.approx(0.5)
-
-
-def test_measured_duty_above_the_actuator_ceiling_is_bounded_at_full_load(mpc_controller):
-    mpc_controller.set_output(AppliedOutput(mpc_controller.u_max * 2.0, OutputSource.CONTROLLER, 1.0))
-    assert mpc_controller._applied_combustion_load == 1.0
-
-
-def test_a_solve_failure_during_a_pause_holds_the_command_not_the_applied_value(mpc_controller, monkeypatch):
-    calls = {"n": 0}
-
-    def fake_make_step(x):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return np.array([[0.4]])
-        raise RuntimeError("solver failure")
-
-    monkeypatch.setattr(mpc_controller.mpc, "make_step", fake_make_step)
-    mpc_controller.set_target(225.0)
-    mpc_controller.update(200.0)
-    commanded = mpc_controller._last_combustion_load
-    assert 0.0 <= commanded <= 1.0
-    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    mpc_controller.update(200.0)
-    assert mpc_controller._last_combustion_load == pytest.approx(commanded)
-
-
-def test_shipped_defaults_are_reported_as_uncalibrated(capsys):
-    _warn_about_model(dict(_DEFAULTS))
-    out = capsys.readouterr().out
-    assert "uncalibrated" in out.lower()
-    assert "update_mpc" in out
-
-
-def test_calibrated_params_are_not_reported_as_uncalibrated(capsys):
-    cfg = dict(_DEFAULTS)
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, n_horizon=200)
-    _warn_about_model(cfg)
-    assert "uncalibrated" not in capsys.readouterr().out.lower()
-
-
-def test_a_two_lump_settings_record_still_starts_and_says_the_keys_do_nothing(capsys):
-    """Every install that ran the two-lump model arrives carrying C_f and h_fc.
-
-    They name nothing now, so no value could be right and there is nothing to
-    migrate them into -- but refusing to start a grill over an obsolete key is
-    worse than running and saying the key does nothing. Both are asserted here:
-    a Controller built from such a record works, and the message names them.
-    """
-    c = Controller(dict(CONFIG, C_f=9.0, h_fc=1.3), "C", dict(CYCLE))
-    out = capsys.readouterr().out
-    assert "C_f" in out and "h_fc" in out
-    assert "ignoring" in out.lower()
-
-    # Ignored, not absorbed: they reach neither the estimator's state vector nor
-    # anything the controller plans with.
-    c.set_target(110.0)
-    result = c.update(100.0)
-    assert 0.0 <= result["cycle_ratio"] <= 1.0
-    assert c.estimator.n == int(CONFIG.get("n_delay", _DEFAULTS["n_delay"])) + 2
-
-
-def test_a_record_without_the_retired_keys_says_nothing_about_them(capsys):
-    """The negative control for the message above -- otherwise it could be
-    unconditional and the test would not notice."""
-    Controller(dict(CONFIG), "C", dict(CYCLE))
-    assert "ignoring" not in capsys.readouterr().out.lower()
-
-
-def test_a_policy_that_always_raises_does_not_freeze_the_output_in_silence(capsys):
-    """The failure mode the net's width check exists to prevent, pinned directly.
-
-    `update()` catches every exception from the policy and holds the previous
-    firing rate. For one bad solve that is right: the control loop must not
-    break and the last move is the best guess for the next few seconds. Held
-    forever it means nothing is steering the fire, and the `except` is exactly
-    what would make that invisible -- which is how a stale policy artifact
-    could have run a grill on a frozen command with nothing in the log.
-
-    So the property is not that the output changes; it cannot, there is no
-    answer to compute. It is that the condition ANNOUNCES itself, in the log
-    and in the status a caller can read without one.
-    """
-    c = _make()
-
-    class _AlwaysRaises:
-        def firing_rate_raw(self, *a, **k):
-            raise RuntimeError("simulated policy failure")
-
-    c._net = _AlwaysRaises()
-    c.mpc = None
-    capsys.readouterr()
-
-    outs = [c.update(110.0) for _ in range(60)]
-    log = capsys.readouterr().out
-
-    # It really is frozen -- otherwise this test proves nothing about silence.
-    assert len({o["cycle_ratio"] for o in outs}) == 1
-
-    # It said so, on the first step and again as the run went on, and not once
-    # per step (which on a 5 s loop would bury the first message).
-    assert log.count("policy has failed") >= 2
-    assert log.count("policy has failed") <= 10
-    assert "1 consecutive step" in log
-    assert "not being controlled to setpoint" in log
-    assert "simulated policy failure" in log
-
-    # And it is visible without reading the log at all.
-    assert c.get_status()["policy_failures"] == 60
-
-
-def test_a_recovering_policy_clears_the_frozen_output_report(capsys):
-    """The negative control: a working policy must never claim to be frozen.
-
-    Without this, a `policy_failures` that only ever counted up and a message
-    that fired unconditionally would both pass the test above.
-    """
-    c = _make()
-    assert c.get_status()["policy_failures"] == 0
-
-    class _FailsTwice:
-        def __init__(self):
-            self.calls = 0
-
-        def firing_rate_raw(self, *a, **k):
-            self.calls += 1
-            if self.calls <= 2:
-                raise RuntimeError("transient")
-            return 0.42
-
-    c._net = _FailsTwice()
-    c.mpc = None
-    capsys.readouterr()
-
-    for _ in range(4):
-        c.update(110.0)
-    log = capsys.readouterr().out
-
-    assert c.get_status()["policy_failures"] == 0
-    assert "recovered after 2 failed step(s)" in log
-    # A healthy controller says nothing about failures at all.
-    c2 = _make()
-    capsys.readouterr()
-    c2.update(110.0)
-    assert "policy has failed" not in capsys.readouterr().out
-
-
-def test_set_target_keeps_the_applied_normalized_load_history():
-    c = Controller(dict(CONFIG), "C", dict(CYCLE))
-    c._last_combustion_load = 0.875
-    c._applied_combustion_load = 0.84
-    c.set_target(300)
-    assert c._last_combustion_load == 0.875
-    assert c._applied_combustion_load == 0.84
-
-
-def test_set_target_still_updates_the_target():
-    c = Controller(dict(CONFIG), "C", dict(CYCLE))
-    c.set_target(300)
-    assert c.set_point == 300
-    assert c._set_point_c == 300  # units are "C" here, so no conversion
-
-
-def _residual_controller(*, feed_forward=True):
-    controller = Controller(
-        dict(
-            CONFIG,
-            n_delay=0,
-            theta=0.0,
-            K_Q=100.0,
-            h_amb=0.5,
-            sigma=0.0,
-            estimator="kf",
-            feed_forward=feed_forward,
-        ),
-        "C",
-        dict(CYCLE),
+CONFIG = {
+    "n_horizon": 5,
+    "control_period": 1.0,
+    "Q_w": 1.0,
+    "R_dQ": 0.1,
+    "C_c": 320.0,
+    "h_amb": 0.5,
+    "T_amb": 20.0,
+    "theta": 50.0,
+    "K_Q": 350.0,
+    "sigma": 1.4e-9,
+    "estimator": "ekf",
+    "est_q_temp": 1e-2,
+    "est_q_dist": 0.05,
+    "est_r_meas": 0.04,
+    "enable_fan_input": True,
+    "fan_min_pct": 40.0,
+    "fan_max_pct": 100.0,
+    "enable_online_adaptation": False,
+}
+
+
+class FakeEstimator:
+    def __init__(self, **_kwargs):
+        self.calls = []
+        self.closed = 0
+        self.x = np.array([0.1] * 8 + [72.0, 0.03], dtype=float)
+
+    def update(self, applied_load, measured_c):
+        self.calls.append((applied_load, measured_c))
+        return self.x.copy()
+
+    def close(self):
+        self.closed += 1
+
+
+class FakeSolver:
+    def __init__(self, config, results=None):
+        self.config = config
+        self.results = list(results or [])
+        self.calls = []
+        self.closed = 0
+
+    def solve(self, state, *, setpoint_c, q_previous, equilibrium_q):
+        self.calls.append((np.asarray(state).copy(), setpoint_c, q_previous, equilibrium_q))
+        if self.results:
+            result = self.results.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return _solve(self.config.horizon_steps, 0.5)
+
+    def close(self):
+        self.closed += 1
+
+
+def _diagnostics(**overrides):
+    values = dict(
+        status=0,
+        backend_status=0,
+        iterations=2,
+        solve_time_s=0.001,
+        objective=3.0,
+        kkt_residual=1e-7,
+        constraint_residual=0.0,
+        warm_started=True,
     )
-    controller.set_target(120.0)
-    controller.estimator.update = lambda applied, measured: np.asarray((measured, 10.0))
-    return controller
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
-def test_policy_residual_is_composed_with_raw_equilibrium_and_traced_without_intermediate_clamping():
-    controller = _residual_controller()
-    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.2
-    controller._adopt_model(
-        dict(controller.cfg),
-        rmse=1.0,
-        samples=120,
-        band_c=(20.0, 140.0),
+def _solve(length, first, **overrides):
+    values = dict(
+        sequence_q=np.array([first] + [first / 2.0] * (length - 1), dtype=float),
+        sequence_residual=np.zeros(length, dtype=float),
+        objective=3.0,
+        diagnostics=_diagnostics(),
     )
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
-    controller.update(100.0)
-    diagnostics = controller.trace_diagnostics()
 
-    assert diagnostics.equilibrium_feed_forward == pytest.approx(0.4)
-    assert diagnostics.residual_move == pytest.approx(0.2)
-    assert diagnostics.raw_policy_firing_load == pytest.approx(0.6)
-    assert diagnostics.bounded_firing_load == pytest.approx(0.6)
-    assert controller.get_status()["last_equilibrium_load"] == pytest.approx(0.4)
-    assert controller.get_status()["last_residual_load"] == pytest.approx(0.2)
-    assert controller.get_status()["last_raw_combustion_load"] == pytest.approx(0.6)
-    assert diagnostics.feasibility.state.value == "reachable"
-    assert controller.get_status()["feasibility"]["state"] == "reachable"
+def _make(monkeypatch, *, results=None, config=None):
+    estimator = FakeEstimator()
+    solver_box = {}
+    monkeypatch.setattr(mpc_module, "GreyBoxEKF", lambda **_kwargs: estimator)
 
-    controller.set_target(140.0)
-    controller.update(100.0)
-    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.5)
-    assert controller.trace_diagnostics().raw_policy_firing_load == pytest.approx(0.7)
+    def build_solver(native_config):
+        solver = FakeSolver(native_config, results)
+        solver_box["solver"] = solver
+        return solver
 
-    controller.estimator.update = lambda applied, measured: np.asarray((measured, 20.0))
-    controller.update(100.0)
-    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.4)
-    assert controller.trace_diagnostics().raw_policy_firing_load == pytest.approx(0.6)
+    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", build_solver, raising=False)
+    controller = mpc_module.Controller(dict(CONFIG if config is None else config), "C", dict(CYCLE))
+    controller.set_target(110.0)
+    return controller, estimator, solver_box["solver"]
+
+
+def test_success_estimates_from_realized_load_and_uses_first_valid_native_command(monkeypatch):
+    controller, estimator, solver = _make(monkeypatch, results=[_solve(5, 0.625)])
+    controller.set_output(AppliedOutput(0.45, OutputSource.CONTROLLER, 1.0))
+
+    output = controller.update(74.0)
+
+    assert estimator.calls == [(0.5, 74.0)]
+    state, setpoint, previous, equilibrium = solver.calls[0]
+    assert state == pytest.approx(estimator.x)
+    assert setpoint == 110.0
+    assert previous == 0.5
+    assert equilibrium == 0.0
+    assert controller._last_combustion_load == pytest.approx(0.625)
+    assert output["cycle_ratio"] == pytest.approx(0.625 * CYCLE["u_max"])
+    assert 40.0 <= output["fan"]["duty"] <= 100.0
+    trace = controller.trace_diagnostics()
+    assert trace.policy_kind == "acados-grey"
+    assert trace.failure_state is MpcFailureState.SUCCESS
+    assert trace.applied_combustion_load == 0.5
 
 
 @pytest.mark.parametrize(
-    ("residual", "raw_total", "bounded_total"),
-    [(-0.8, -0.4, 0.0), (0.9, 1.3, 1.0)],
+    "invalid",
+    [
+        _solve(4, 0.5),
+        _solve(5, 0.5, sequence_residual=np.zeros(4)),
+        _solve(5, float("nan")),
+        _solve(5, 1.01),
+        _solve(5, 0.5, objective=float("inf")),
+        _solve(5, 0.5, diagnostics=_diagnostics(status=1)),
+        _solve(5, 0.5, diagnostics=_diagnostics(kkt_residual=float("nan"))),
+    ],
+    ids=["length", "residual-length", "nonfinite-q", "bounds", "objective", "status", "diagnostics"],
 )
-def test_residual_policy_clamps_only_the_combined_load_once(residual, raw_total, bounded_total):
-    controller = _residual_controller()
-    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: residual
-
-    controller.update(100.0)
-    diagnostics = controller.trace_diagnostics()
-
-    assert diagnostics.equilibrium_feed_forward == pytest.approx(0.4)
-    assert diagnostics.residual_move == pytest.approx(residual)
-    assert diagnostics.raw_policy_firing_load == pytest.approx(raw_total)
-    assert diagnostics.bounded_firing_load == pytest.approx(bounded_total)
-
-
-def test_identified_model_refuses_a_net_without_residual_objective_provenance(monkeypatch):
-    controller = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
-    legacy_net = object()
-    built = {}
-    monkeypatch.setattr(mpc_module, "_load_net_policy", lambda cfg, n_horizon: legacy_net)
-
-    def build_nlp(cfg, n_delay, n_horizon, *, residual_weight):
-        built["residual_weight"] = residual_weight
-        return "model", "mpc"
-
-    monkeypatch.setattr(controller, "_build_nlp", build_nlp)
-
-    _, net, model, policy = controller._build_for(
-        dict(_DEFAULTS, policy="net"),
-        model_identified=True,
+def test_every_malformed_native_result_holds_the_last_safe_load(monkeypatch, invalid):
+    controller, _estimator, _solver = _make(
+        monkeypatch, results=[_solve(5, 0.6), invalid]
     )
+    controller.update(72.0)
 
-    assert net is None
-    assert (model, policy) == ("model", "mpc")
-    assert built["residual_weight"] == mpc_module._LEARNED_RESIDUAL_WEIGHT
+    output = controller.update(73.0)
 
-
-def test_restored_model_regularizes_residual_demand_without_changing_first_cook_defaults():
-    fresh = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
-    learned = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
-    snapshot = {
-        "version": learned._MODEL_SCHEMA,
-        "revision": 1,
-        "params": {key: float(_DEFAULTS[key]) for key in learned._MODEL_PARAM_KEYS},
-        "rmse": 1.0,
-        "samples": 120,
-        "band_c": [20.0, 170.0],
-        "nfev": 3,
-    }
-    assert learned.restore_model(snapshot) is True
-
-    state = np.asarray([0.0] * int(_DEFAULTS["n_delay"]) + [150.0, 0.0])
-    for controller in (fresh, learned):
-        controller.set_target(162.7778)
-        controller.estimator.update = lambda applied, measured: state
-
-    fresh.update(150.0)
-    learned.update(150.0)
-    fresh_diagnostics = fresh.trace_diagnostics()
-    learned_diagnostics = learned.trace_diagnostics()
-
-    assert fresh_diagnostics.equilibrium_feed_forward == 0.0
-    assert learned_diagnostics.equilibrium_feed_forward > 0.0
-    assert learned_diagnostics.raw_policy_firing_load < fresh_diagnostics.raw_policy_firing_load
+    assert controller._last_combustion_load == pytest.approx(0.6)
+    assert output["cycle_ratio"] == pytest.approx(0.54)
+    trace = controller.trace_diagnostics()
+    assert trace.failure_state is MpcFailureState.POLICY_EXCEPTION
+    assert trace.consecutive_policy_failures == 1
+    assert trace.policy_kind == "acados-grey"
 
 
-def test_retired_feed_forward_config_cannot_disable_the_identified_model_baseline():
-    controller = _residual_controller(feed_forward=False)
-    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
-
-    controller.update(100.0)
-
-    assert "feed_forward" not in controller.cfg
-    assert controller.trace_diagnostics().equilibrium_feed_forward == pytest.approx(0.4)
-    assert controller.trace_diagnostics().bounded_firing_load == pytest.approx(0.4)
-
-
-def test_nondefault_configured_model_is_reachability_known_while_exact_defaults_remain_unknown():
-    configured = _residual_controller()
-    configured._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
-    configured.update(100.0)
-
-    configured_report = configured.trace_diagnostics().feasibility
-    assert configured_report.state.value == "reachable"
-    assert (configured_report.model_revision, configured_report.model_provenance) == (0, "configured")
-
-    defaults = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
-    defaults.set_target(120.0)
-    defaults.estimator.update = lambda applied, measured: np.zeros(int(defaults.cfg["n_delay"]) + 2)
-    defaults._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
-    defaults.update(100.0)
-    assert defaults.trace_diagnostics().equilibrium_feed_forward == 0.0
-
-    default_report = defaults.trace_diagnostics().feasibility
-    assert default_report.state.value == "unknown_model"
-
-
-def test_private_equilibrium_provider_seam_can_run_a_no_feed_forward_experiment():
-    controller = _residual_controller()
-    controller._equilibrium_load = lambda target, disturbance: 0.0
-    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.25
-
-    controller.update(100.0)
-
-    diagnostics = controller.trace_diagnostics()
-    assert diagnostics.equilibrium_feed_forward == 0.0
-    assert diagnostics.residual_move == 0.25
-    assert diagnostics.raw_policy_firing_load == 0.25
-    assert diagnostics.bounded_firing_load == 0.25
-
-
-def test_loaded_net_keeps_its_full_raw_command_with_zero_and_analytic_equilibrium_seams(net_mpc_controller):
-    """The outer composition must not drop or double-add the net's analytic baseline."""
-    controller = net_mpc_controller
-    state = np.asarray([0.0] * int(controller.cfg["n_delay"]) + [100.0, 10.0])
-    controller.estimator.update = lambda applied, measured: state
-    expected_raw = controller._net.firing_rate_raw(state, 0.0, controller._set_point_c)
-    analytic_equilibrium = steady_combustion_load(controller.cfg, controller._set_point_c, state[-1])
-
-    controller.update(100.0)
-    production = controller.trace_diagnostics()
-
-    controller._applied_combustion_load = 0.0
-    controller._equilibrium_load = lambda target, disturbance: analytic_equilibrium
-    controller.update(100.0)
-    experiment = controller.trace_diagnostics()
-
-    for diagnostics, equilibrium in ((production, 0.0), (experiment, analytic_equilibrium)):
-        assert diagnostics.equilibrium_feed_forward == pytest.approx(equilibrium)
-        assert diagnostics.residual_move == pytest.approx(expected_raw - equilibrium)
-        assert diagnostics.raw_policy_firing_load == pytest.approx(expected_raw)
-        assert diagnostics.bounded_firing_load == pytest.approx(np.clip(expected_raw, 0.0, 1.0))
-
-
-def test_radiation_only_model_keeps_controller_equilibrium_finite():
-    controller = Controller(
-        dict(CONFIG, n_delay=0, theta=0.0, h_amb=0.0, K_Q=100.0, sigma=1.4e-9, estimator="ekf"),
-        "C",
-        dict(CYCLE),
-    )
-    controller.set_target(240.0)
-    controller._policy_residual = lambda x_hat, previous_load, equilibrium_load: 0.0
-    controller._equilibrium_load = lambda target, disturbance: steady_combustion_load(
-        controller.cfg,
-        target,
-        disturbance,
-    )
-
-    controller.update(100.0)
-
-    assert np.isfinite(controller.trace_diagnostics().equilibrium_feed_forward)
-
-
-def test_nlp_reaches_upper_authority_when_raw_equilibrium_exceeds_two_without_failing_policy():
-    controller = Controller(
-        dict(
-            CONFIG,
-            n_horizon=2,
-            t_step=5.0,
-            control_period=1.0,
-            n_delay=0,
-            theta=0.0,
-            h_amb=0.5,
-            K_Q=10.0,
-            sigma=0.0,
-            estimator="kf",
-            policy="nlp",
-        ),
-        "C",
-        dict(CYCLE),
-    )
-    controller.set_target(100.0)
-    controller._equilibrium_load = lambda target, disturbance: steady_combustion_load(
-        controller.cfg,
-        target,
-        disturbance,
-    )
-
-    controller.update(20.0)
-
-    diagnostics = controller.trace_diagnostics()
-    assert diagnostics.equilibrium_feed_forward > 2.0
-    assert diagnostics.residual_move == pytest.approx(1.0 - diagnostics.equilibrium_feed_forward, abs=1e-6)
-    assert diagnostics.raw_policy_firing_load == pytest.approx(1.0, abs=1e-6)
-    assert diagnostics.bounded_firing_load == pytest.approx(1.0)
-    assert diagnostics.failure_state.value == "success"
-    assert controller.get_status()["policy_failures"] == 0
-
-
-def test_configured_horizon_is_the_only_horizon_built_or_reported(capsys):
-    """A slow fitted coast must not rewrite MPC construction or status."""
-    configured = 3
-    controller = Controller(
-        dict(
-            CONFIG,
-            C_c=2520.0,
-            h_amb=0.224,
-            T_amb=20.0,
-            theta=600.0,
-            n_delay=8,
-            K_Q=695.0,
-            sigma=1.4e-9,
-            n_horizon=configured,
-        ),
-        "C",
-        dict(CYCLE),
-    )
-
-    assert not hasattr(controller, "_built_n_horizon")
-    assert controller.mpc.settings.n_horizon == configured
-    assert "horizon" not in capsys.readouterr().out.lower()
-
-
-def test_online_adaptation_is_explicitly_opt_in():
-    assert _DEFAULTS["enable_online_adaptation"] is False
-
-
-def test_online_certificate_boundary_rejects_fake_invalid_kkt():
-    config = mpc_module.LinearMPCConfig(horizon_steps=2)
-    certificate = SimpleNamespace(
-        sequence_q=np.array([0.2, 0.3]),
+def test_structured_solver_failure_holds_and_preserves_diagnostics(monkeypatch):
+    diagnostics = mpc_module.SolverDiagnostics(
+        status=4,
+        backend_status=7,
+        iterations=10,
+        solve_time_s=0.02,
         objective=1.0,
-        kkt_residual=config.tolerance * 2.0,
-        iterations=1,
-        hessian_condition=1.0,
+        kkt_residual=0.2,
+        constraint_residual=0.1,
+        warm_started=True,
+    )
+    error = SolverError("native solve failed", diagnostics)
+    controller, _estimator, _solver = _make(
+        monkeypatch, results=[_solve(5, 0.7), error]
+    )
+    controller.update(70.0)
+    controller.update(71.0)
+
+    assert controller._last_combustion_load == pytest.approx(0.7)
+    assert controller.native_failure_diagnostics() is diagnostics
+    assert controller.get_status()["policy_failures"] == 1
+
+
+def test_partial_native_build_closes_the_estimator(monkeypatch):
+    estimator = FakeEstimator()
+    monkeypatch.setattr(mpc_module, "GreyBoxEKF", lambda **_kwargs: estimator)
+    monkeypatch.setattr(
+        mpc_module,
+        "AcadosGreyBoxMPC",
+        lambda _config: (_ for _ in ()).throw(RuntimeError("native unavailable")),
+        raising=False,
     )
 
-    assert not Controller._valid_linear_solve(certificate, config)
-    assert Controller._linear_certificate_rejection(certificate, config) == "invalid-kkt-certificate"
-    assert (
-        str(Controller._normalized_forecast_failure(RuntimeError("ARX horizon forecast is non-finite")))
-        == "non-finite-forecast"
+    with pytest.raises(RuntimeError, match="native unavailable"):
+        mpc_module.Controller(dict(CONFIG), "C", dict(CYCLE))
+
+    assert estimator.closed == 1
+
+
+def test_close_releases_learning_then_exactly_one_complete_pair(monkeypatch):
+    events = []
+    controller, estimator, solver = _make(monkeypatch)
+    estimator.close = lambda: events.append("estimator")
+    solver.close = lambda: events.append("solver")
+    controller._learning = SimpleNamespace(close=lambda: events.append("learning"))
+
+    controller.close()
+    controller.close()
+
+    assert events == ["learning", "solver", "estimator"]
+
+
+def _frame(*, sequence=1, operator=False):
+    return FrameObservation(
+        frame_start_s=float(sequence * 20 - 20),
+        frame_end_s=float(sequence * 20),
+        temp_c=80.0,
+        setpoint_c=110.0,
+        ambient_c=20.0,
+        requested_q=0.4,
+        realized_q=0.35,
+        requested_auger_duty=0.36,
+        delivered_on_s=7.0,
+        requested_fan_duty=None,
+        actual_fan_duty=None,
+        result_revision=sequence,
+        output_source="controller",
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+        role_generation=0,
+        observation_sequence=sequence,
+        calibration_fit=operator,
+        baseline_q=0.3 if operator else None,
+        calibration_stage="low" if operator else None,
+        probe_q=0.1 if operator else 0.0,
     )
 
 
-def test_online_linear_policy_uses_fixed_bakeoff_config():
-    config = mpc_module._SCHEDULED_ARX_LINEAR_CONFIG
-    assert (config.horizon_steps, config.temperature_weight, config.terminal_weight) == (30, 1.0, 4.0)
-    assert (config.move_weight, config.tolerance) == (0.05, 1e-3)
+def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+    seen = []
+    orchestrator = SimpleNamespace(
+        observe_completed_frame=lambda frame, *, identifiability: seen.append((frame, identifiability))
+        or SimpleNamespace(
+            history=SimpleNamespace(accepted=True, reasons=()),
+            completed_forecasts=(),
+        ),
+        poll_fit_off_path=lambda **kwargs: ("polled", kwargs),
+        evaluate_ready_off_path=lambda: "evaluated",
+        close=lambda: None,
+    )
+    controller._learning = orchestrator
+    passive = _frame(sequence=1)
+    operator = _frame(sequence=2, operator=True)
+
+    passive_outcome = controller.observe_frame(passive)
+    operator_outcome = controller.observe_frame(operator)
+    off_path = controller.poll_learning_off_path(live_origin="passive-online")
+
+    assert [item[0] for item in seen] == [passive, operator]
+    assert all(item[1] >= 0.0 for item in seen)
+    assert passive_outcome["eligible"] is True
+    assert operator_outcome["eligible"] is True
+    assert off_path[0][0] == "polled"
+    assert off_path[1] == "evaluated"
 
 
-def test_stale_generation_resets_real_online_continuity_before_next_frame():
-    controller = Controller(dict(CONFIG, enable_online_adaptation=True), "C", dict(CYCLE))
-    controller.set_target(110.0)
-    controller._online._role_generation = 1
-
-    def observation(index, generation):
-        return mpc_module.FrameObservation(
-            frame_start_s=index * 20.0,
-            frame_end_s=(index + 1) * 20.0,
-            temp_c=100.0 + index * 0.1,
-            setpoint_c=110.0,
-            ambient_c=20.0,
-            requested_q=0.2 if index % 2 else 0.8,
-            realized_q=0.2 if index % 2 else 0.8,
-            requested_auger_duty=0.2 if index % 2 else 0.8,
-            delivered_on_s=4.0,
-            requested_fan_duty=None,
-            actual_fan_duty=None,
-            result_revision=index,
-            output_source="controller",
-            lid_open=False,
-            safety_inhibited=False,
-            manual_override=False,
-            stale=False,
-            skipped=False,
-            reset=False,
-            continuous=True,
-            role_generation=generation,
-        )
-
-    outcomes = [controller.observe_frame(observation(index, 1)) for index in range(20)]
-    assert any(outcome["eligible"] for outcome in outcomes)
-    assert controller._online.lag_warmup_remaining == 0
-    assert controller._online._origins
-
-    stale = controller.observe_frame(observation(20, 0))
-
-    assert stale["challenger_innovation_c"] is None
-    assert stale["rejection_reasons"] == ("stale-generation",)
-    assert controller._online.challenger.snapshot()["history"]["temperature_c"] == []
-
-    next_frame = controller.observe_frame(observation(21, 1))
-    assert next_frame["rejection_reasons"] == ("lag-warmup",)
-    assert controller._online.challenger.snapshot()["history"]["temperature_c"] == pytest.approx([102.1])
+def test_control_capabilities_and_status_remain_stable(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+    assert controller.get_control_period() == 1.0
+    assert controller.commands_fan() is True
+    assert controller.wants_async() is True
+    assert controller.actuation_mode() is ActuationMode.FRAMED_PULSE
+    status = controller.get_status()
+    assert status["policy_kind"] == "acados-grey"
+    assert status["n_horizon"] == 5

@@ -1,27 +1,17 @@
 #!/usr/bin/env python3
 
+"""Grey-box MPC control through the repository-published acados runtime.
+
+The active controller owns one EKF/KF estimator and one native solver.  The
+configured control period is estimator/runner cadence; the prediction model is
+the fixed 25-second, eight-delay generated map.
 """
-*****************************************
- PiFire MPC Controller (cascade: firing-rate + combustion allocator)
-*****************************************
+from __future__ import annotations
 
- Outer loop manipulates a scalar firing-rate demand Q against a grey-box thermal
- model with an integrating-disturbance state (offset-free tracking). The inner
- combustion allocator maps Q to auger/fan. Returns a dict:
- {'cycle_ratio': auger_duty, 'fan': {'duty': pct or None}}.
-
- State is estimated by the EKF (default), MHE, or KF. The firing-rate policy is
- either the do-mpc NLP solve ('nlp') or a pure-numpy neural approximation
- ('net', no IPOPT/CasADi) that falls back to the NLP if its artifact is missing
- or mismatched. net policy + EKF needs only numpy/scipy at runtime.
-
- Operates internally in Celsius.
-
-*****************************************
-"""
 
 import collections
 import copy
+import hashlib
 import json
 import math
 import os
@@ -30,8 +20,6 @@ from dataclasses import asdict, dataclass, replace
 import time
 
 import numpy as np
-# do_mpc (CasADi/IPOPT) is imported lazily only when the NLP policy is built; the
-# net policy + EKF path is pure numpy/scipy and never imports it.
 
 from common.control_trace import (
     AmbientSource,
@@ -44,29 +32,25 @@ from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.applied_output import FrameFeedbackDisposition
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import feasibility_report
-from controller.mpc_model import (
-    MODEL_SCHEMA,
-    GreyBoxEKF,
-    GreyBoxKF,
-    GreyBoxMHE,
-    build_do_mpc_model,
-    steady_combustion_load,
-)
+from controller.mpc_model import MODEL_SCHEMA, GreyBoxEKF, GreyBoxKF, steady_combustion_load
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RefreshDiagnosticsEvidence
-from controller.linear_mpc.activation import (
-    ActivationManager,
-    GREY_BOX_KIND,
-    STATE_SPACE_KIND,
+from controller.acados import (
+    AcadosGreyBoxMPC,
+    GreyBoxMPCConfig,
+    SolverDiagnostics,
+    SolverError,
 )
-from controller.linear_mpc.adaptation import AdaptationPolicy, EvaluationDecision, OnlineAdaptation
-from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
-from controller.linear_mpc.contracts import ModelUpdate
-from controller.model_learning.contracts import FrameObservation
+from controller.runtime.model_fitting import (
+    CandidatePair,
+    GreyLearningOrchestrator,
+    LiveLearningIdentity,
+    TargetTimingEvidence,
+    grey_config_digest,
+)
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.grey_box import GreyBoxPredictionAdapter
-from controller.linear_mpc.state_space import InnovationStateSpace, StateSpaceConfig
-from controller.linear_mpc.policy import LinearMPC, LinearMPCConfig
 from controller.model_learning.calibration import (
     CalibrationCommand as _CoordinatorCalibrationCommand,
     CalibrationCoordinator,
@@ -80,7 +64,7 @@ _DEFAULTS = dict(
     # a looser steady band. 0.1 gives ~4x faster setpoint-step rise and a tighter
     # band, at a modest step-overshoot increase.
     n_horizon=24,
-    t_step=25.0,
+    # The generated prediction map is fixed at 25 seconds.
     control_period=5.0,
     Q_w=1.0,
     R_dQ=0.1,
@@ -89,26 +73,12 @@ _DEFAULTS = dict(
     h_amb=0.50,
     T_amb=20.0,
     theta=50.0,
-    # n_delay is a STRUCTURE constant, not a fitted parameter, so raising it
-    # costs no degrees of freedom -- it buys a sharper, more plug-flow delay
-    # for solver time alone. 8 is where that trade stops paying: against the
-    # MAK plant, going 4 -> 8 recovers the dead time the model predicts from
-    # 0.56x of the plant's own to 0.71x and the coast from 0.84x to 0.90x, for
-    # 27% more NLP solve time; 8 -> 12 buys a third as much for three times the
-    # increment, and 16 and 20 less again for more. Measured in
-    # docs/superpowers/experiments/ndelay_sweep.py.
+    # The generated grey model always has eight delay states.
     n_delay=8,
     K_Q=350.0,
     sigma=1.4e-9,
-    # 'ekf' linearizes the nonlinear radiative term each step (~us, default);
-    # 'mhe' solves an NLP (nonlinear, slower); 'kf' is linear-only.
+    # The only supported live estimators are EKF and KF.
     estimator="ekf",
-    # Firing-rate policy: 'nlp' solves the MPC NLP each step (do_mpc/IPOPT);
-    # 'net' uses a pure-numpy neural approximation of the policy (no IPOPT/CasADi)
-    # and falls back to 'nlp' if the artifact is missing or its calibration does
-    # not match this config.
-    policy="nlp",
-    policy_net_path="./controller/mpc_policy_net.npz",
     fan_min_pct=40.0,
     fan_max_pct=100.0,
     enable_fan_input=False,
@@ -118,8 +88,6 @@ _DEFAULTS = dict(
     est_q_temp=1e-2,
     est_q_dist=0.05,
     est_r_meas=0.04,
-    # Experimental: the existing grey-box controller remains authoritative
-    # unless a scheduled ARX challenger has earned an explicit promotion.
     enable_online_adaptation=False,
 )
 
@@ -130,17 +98,9 @@ _DEFAULTS = dict(
 # also what bounds a refit: the longest cook the fit can ever be handed off
 # the teardown path is one full history.
 _HISTORY_MAX = 8640
-# The online model is identified on 20 s framed-pulse evidence.  Keep the
-_ONLINE_HORIZONS = (3, 15, 45, 90, 180)
-# independently validated 600 s / 30-frame horizon and bakeoff penalties out
-# of legacy grey-box controller settings.
-_SCHEDULED_ARX_LINEAR_CONFIG = LinearMPCConfig(
-    horizon_steps=30,
-    temperature_weight=1.0,
-    terminal_weight=4.0,
-    move_weight=0.05,
-    tolerance=1e-3,
-)
+_SCHEDULED_ARX_LINEAR_CONFIG = None
+GREY_BOX_KIND = "grey-box"
+STATE_SPACE_KIND = "innovation-state-space"
 
 # Below this a record is an interrupted cook rather than a description of a
 # grill, and fitting it would produce a confident answer from nothing. There
@@ -749,20 +709,8 @@ def _warn_about_model(cfg):
 
 
 def requires_modules(config):
-    """Import names `Controller(config, ...)` will need but a base install lacks.
-
-    do-mpc's CasADi/IPOPT stack publishes no Linux-ARM wheel and so builds from
-    source, which is why it is a PiFire *optional* dependency -- the `mpc` extra
-    in pyproject.toml -- installed only when someone selects this controller.
-
-    Every MPC config needs it. The gate used to exempt `policy=net` when the
-    artifact's calibration matched, but that answer is only true until the
-    calibration changes: a learned model, or any hand-edited thermal parameter,
-    makes the artifact stale and drops the controller onto the NLP mid-cook,
-    where the import would fail on a machine this gate had already cleared.
-    An answer that expires is worse than a conservative one.
-    """
-    return ("do_mpc",)
+    """The live controller has no optional Python dependency."""
+    return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -799,8 +747,8 @@ class CalibrationCommand:
 
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data, *, _online_challenger_kind=None):
-        if _online_challenger_kind not in (None, "state-space"):
-            raise ValueError("_online_challenger_kind must be None or 'state-space'")
+        if _online_challenger_kind is not None:
+            raise ValueError("legacy online challenger selection is retired")
         super().__init__(config, units, cycle_data)
 
         self._activation_configuration = {
@@ -820,10 +768,7 @@ class Controller(ControllerBase):
         self._online_enabled = cfg.get("enable_online_adaptation") is True
         self._online = None
         self._linear_config = None
-        self._online_challenger_kind = _online_challenger_kind
-        # This private experiment arm observes and scores on the normal worker,
-        # but may never become an output-owning model until evidence authorizes
-        # a code change that opens this gate.
+        self._online_challenger_kind = None
         self._online_experiment_active = False
         self._linear_policy = None
         self._online_next_evaluation_s = None
@@ -879,8 +824,12 @@ class Controller(ControllerBase):
 
         self._online_pending_parameter_promotion = None
         self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
-        if self._online_enabled:
-            self._initialize_online_adaptation()
+        self._native_failure_diagnostics: SolverDiagnostics | None = None
+        self._closed = False
+        self._learning_session_id = "runtime"
+        self._learning_cook_id = None
+        self._learning_role_generation = self._model_revision
+        self._learning = self._build_learning() if self._online_enabled else None
 
     def _new_scheduled_arx(self):
         return ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0))
@@ -914,32 +863,40 @@ class Controller(ControllerBase):
         self._online = self._new_online_adaptation(incumbent, challenger)
 
     def _build_for(self, cfg, *, model_identified=None):
-        """Build thermal components at the configured planning horizon."""
+        """Build one complete estimator/native-solver pair or leave no owner."""
         if model_identified is None:
             model_identified = _model_is_identified(cfg, self._model_meta)
-        n_delay = int(cfg["n_delay"])
-        n_horizon = int(cfg["n_horizon"])
+        n_delay = int(cfg.get("n_delay", 8))
+        if n_delay != 8:
+            raise ValueError("the generated grey-box controller requires exactly eight delay states")
         estimator = self._build_estimator(cfg, n_delay)
-        net, model, mpc = None, None, None
-        if str(cfg.get("policy", "nlp")).lower() == "net":
-            if model_identified:
-                print(
-                    "[mpc] net policy artifacts do not encode the learned residual objective; "
-                    "using NLP for the identified model"
-                )
-            else:
-                net = _load_net_policy(cfg, n_horizon)
-        if net is None:
-            residual_weight = _LEARNED_RESIDUAL_WEIGHT if model_identified else 0.0
-            model, mpc = self._build_nlp(cfg, n_delay, n_horizon, residual_weight=residual_weight)
-        return estimator, net, model, mpc
+        residual_weight = _LEARNED_RESIDUAL_WEIGHT if model_identified else 0.0
+        native_config = GreyBoxMPCConfig(
+            C_c=cfg["C_c"],
+            h_amb=cfg["h_amb"],
+            T_amb=cfg["T_amb"],
+            theta=cfg["theta"],
+            K_Q=cfg["K_Q"],
+            sigma=cfg["sigma"],
+            horizon_steps=cfg["n_horizon"],
+            delay_states=8,
+            state_size=10,
+            timestep_s=25.0,
+            temperature_weight=cfg["Q_w"],
+            terminal_weight=cfg["Q_w"],
+            move_weight=cfg["R_dQ"],
+            residual_weight=residual_weight,
+            max_iterations=10,
+        )
+        try:
+            solver = AcadosGreyBoxMPC(native_config)
+        except BaseException:
+            self._close_component(estimator)
+            raise
+        return estimator, None, None, solver
 
     def _build_estimator(self, cfg, n_delay):
-        """State/disturbance estimator (independent of the policy). EKF linearizes
-        the nonlinear radiative term each step (default); MHE solves an NLP; KF
-        is linear-only. All expose update(Q_applied, y) -> state estimate and are
-        discretized at the control period so faster re-solves track elapsed time.
-        """
+        """Build the selected estimator at the runtime control cadence."""
         est_kind = str(cfg.get("estimator", "ekf")).lower()
         if est_kind == "kf":
             return GreyBoxKF(
@@ -968,77 +925,70 @@ class Controller(ControllerBase):
                 K_Q=float(cfg["K_Q"]),
                 sigma=float(cfg["sigma"]),
             )
-        return GreyBoxMHE(
-            C_c=cfg["C_c"],
-            h_amb=cfg["h_amb"],
-            T_amb=cfg["T_amb"],
-            t_step=float(cfg["control_period"]),
-            theta=float(cfg["theta"]),
-            n_delay=n_delay,
-            K_Q=float(cfg["K_Q"]),
-            sigma=float(cfg["sigma"]),
-            r_meas=cfg["est_r_meas"],
+        raise ValueError("estimator must be 'ekf' or 'kf'")
+
+    @staticmethod
+    def _close_component(component):
+        close = getattr(component, "close", None)
+        if callable(close):
+            close()
+
+    def _candidate_estimator(self, native_config):
+        candidate = dict(self.cfg)
+        for name in ("C_c", "h_amb", "T_amb", "theta", "K_Q", "sigma"):
+            candidate[name] = getattr(native_config, name)
+        return self._build_estimator(candidate, 8)
+
+    def _candidate_timing(self, solver):
+        state = np.zeros(10, dtype=float)
+        state[8] = float(solver.config.T_amb)
+        durations = []
+        for _ in range(5):
+            started = time.monotonic()
+            solver.solve(
+                state,
+                setpoint_c=float(solver.config.T_amb) + 50.0,
+                q_previous=0.0,
+                equilibrium_q=0.4,
+            )
+            durations.append((time.monotonic() - started) * 1_000.0)
+        return TargetTimingEvidence(
+            target="active-runtime",
+            samples=len(durations),
+            p99_ms=max(durations),
+            limit_ms=self.get_control_period() * 200.0,
         )
 
-    def _build_nlp(self, cfg, n_delay, n_horizon, *, residual_weight):
-        """Build the do-mpc NLP policy at the configured horizon."""
-        import do_mpc
-
-        model = build_do_mpc_model(
-            C_c=cfg["C_c"],
-            h_amb=cfg["h_amb"],
-            T_amb=cfg["T_amb"],
-            theta=float(cfg["theta"]),
-            n_delay=n_delay,
-            K_Q=float(cfg["K_Q"]),
-            sigma=float(cfg["sigma"]),
+    def _learning_identity(self):
+        document = {
+            "config": self.cfg,
+            "cycle_data": self.cycle_data,
+            "units": self.units,
+        }
+        encoded = json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return LiveLearningIdentity(
+            session_id=self._learning_session_id,
+            cook_id=self._learning_cook_id,
+            configuration_digest=hashlib.sha256(encoded).hexdigest(),
+            incumbent_digest=grey_config_digest(self.mpc.config),
+            role_generation=self._learning_role_generation,
+            candidate_generation=self._learning_role_generation + 1,
         )
-        mpc = do_mpc.controller.MPC(model)
-        mpc.set_param(
-            n_horizon=int(n_horizon),
-            t_step=float(cfg["t_step"]),
-            store_full_solution=False,
-            nlpsol_opts={
-                "ipopt.print_level": 0,
-                "print_time": 0,
-                "ipopt.sb": "yes",
-                # do_mpc supplies the previous solve's primal AND dual point on
-                # every step after the first; IPOPT ignores the duals unless
-                # warm starting is on. The cap bounds the tail -- the cold
-                # start needs ~60 iterations with nothing to warm from, while
-                # the median warm solve needs 6, so 10 truncates the spike
-                # without touching the typical step.
-                "ipopt.warm_start_init_point": "yes",
-                "ipopt.max_iter": 10,
-            },
+
+    def _build_learning(self):
+        return GreyLearningOrchestrator(
+            identity=self._learning_identity(),
+            config=self.mpc.config,
+            incumbent_pair=CandidatePair(self.estimator, self.mpc),
+            estimator_factory=self._candidate_estimator,
+            controller_factory=AcadosGreyBoxMPC,
+            timing_probe=self._candidate_timing,
         )
-        T_c = model.x["T_c"]
-        T_set = model.tvp["T_set"]
-        combustion_residual = model.u["combustion_residual"]
-        tracking_cost = cfg["Q_w"] * (T_c - T_set) ** 2
-        stage_cost = tracking_cost + residual_weight * combustion_residual**2
-        mpc.set_objective(mterm=tracking_cost, lterm=stage_cost)
-        total_load = model.tvp["equilibrium_load"] + combustion_residual
-        mpc.set_rterm(combustion_residual=cfg["R_dQ"])
-        mpc.set_nl_cons("normalized_load_upper", total_load, ub=1.0)
-        mpc.set_nl_cons("normalized_load_lower", -total_load, ub=0.0)
-
-        tvp_template = mpc.get_tvp_template()
-
-        def tvp_fun(t_now):
-            for k in range(int(n_horizon) + 1):
-                tvp_template["_tvp", k, "T_set"] = self._set_point_c
-                tvp_template["_tvp", k, "equilibrium_load"] = self._policy_equilibrium_load
-            return tvp_template
-
-        mpc.set_tvp_fun(tvp_fun)
-        mpc.setup()
-
-        x0 = np.zeros((n_delay + 2, 1))
-        x0[n_delay, 0] = cfg["T_amb"]  # T_c
-        mpc.x0 = x0
-        mpc.set_initial_guess()
-        return model, mpc
 
     def set_target(self, set_point):
         self.set_point = set_point
@@ -1747,86 +1697,35 @@ class Controller(ControllerBase):
         }
 
     def observe_frame(self, observation):
-        """Consume one completed framed-pulse observation on Hold's worker."""
+        """Dispatch passive and completed operator frames to Task 7."""
         if not isinstance(observation, FrameObservation):
             raise TypeError("observation must be a FrameObservation")
-        if self._active_state_space():
-            try:
-                self._activation_manager.active_model.track(observation)
-            except Exception as error:
-                self.activation_runtime_failure(f"invalid-active-state:{type(error).__name__}:{error}")
-        if not self._online_enabled:
+        if self._learning is None:
             return None
-        generation = observation.role_generation
-        if generation != self._online.role_generation:
-            self._online_last_rejection_reason = "stale-generation"
-            self._online.reset_continuity()
-            self._online_rejected_updates += 1
-            return {
-                "role_generation": generation,
-                "eligible": False,
-                "rejection_reasons": ("stale-generation",),
-                "input_variance": 0.0,
-                "input_levels": 0,
-                "incumbent_innovation_c": None,
-                "challenger_innovation_c": None,
-                "effective_updates": self._online.effective_updates,
-                "model_digest": OnlineAdaptation.model_digest(self._online.challenger),
-            }
-        if not self._active_arx() and not isinstance(self._online.incumbent, InnovationStateSpace):
-            # Grey-box incumbents are immutable forecast origins. Refresh only
-            # that role at a frame boundary; an active state-space incumbent is
-            # a separately owned filter and must remain immutable in parameters.
-            self._online.incumbent = self._new_grey_box_model()
-        actuation_known = observation.output_source != "unknown"
-        braking = observation.realized_q <= 0.05 or (
-            self._online_previous_setpoint is not None and observation.setpoint_c < self._online_previous_setpoint
-        )
-        started = time.monotonic()
-        outcome = self._online.observe(
+        result = self._learning.observe_completed_frame(
             observation,
-            actuation_known=actuation_known,
-            ambient_future=np.full(180, observation.ambient_c),
-            braking=braking,
+            identifiability=1.0,
         )
-        self._online_previous_setpoint = observation.setpoint_c
-        self._online_learner_duration = time.monotonic() - started
-        reasons = tuple(reason.value for reason in outcome.gate.reasons)
-        if outcome.gate.permitted:
-            self._online_eligible_updates += 1
-            self._online_last_rejection_reason = None
-        else:
-            self._online_rejected_updates += 1
-            if not actuation_known:
-                reasons = ("unknown-actuation",)
-            self._online_last_rejection_reason = reasons[0]
-        result = {
-            "role_generation": generation,
-            "eligible": outcome.gate.permitted,
+        reasons = tuple(result.history.reasons)
+        return {
+            "role_generation": observation.role_generation,
+            "eligible": bool(result.history.accepted),
             "rejection_reasons": reasons,
-            "input_variance": outcome.gate.input_variance,
-            "input_levels": outcome.gate.input_levels,
-            "incumbent_innovation_c": None if outcome.incumbent is None else outcome.incumbent.innovation_c,
-            "challenger_innovation_c": None if outcome.challenger is None else outcome.challenger.innovation_c,
-            "effective_updates": outcome.effective_updates,
-            "model_digest": OnlineAdaptation.model_digest(self._online.challenger),
+            "input_variance": 0.0,
+            "input_levels": 0,
+            "incumbent_innovation_c": None,
+            "challenger_innovation_c": None,
+            "effective_updates": len(self._learning.passive_history.observations)
+            if hasattr(self._learning, "passive_history")
+            else 0,
+            "model_digest": grey_config_digest(self.mpc.config),
+            "forecast_origin_evidence": tuple(result.completed_forecasts),
         }
-        event = self._evaluate_online(observation)
-        if event:
-            result.update(event)
-        return result
 
     def observation_failure(self, observation, error):
-        """Reject one failed learner delivery without stopping grey-box control."""
-        if self._online is None or not isinstance(observation, FrameObservation):
+        """Turn an isolated learning-hook failure into explicit frame evidence."""
+        if self._learning is None or not isinstance(observation, FrameObservation):
             return None
-        self._online.reset_continuity()
-        self._online_rejected_updates += 1
-        self._online_last_rejection_reason = "learner-exception"
-        detail = f"learner-exception:{type(error).__name__}"
-        self._online_last_lifecycle_reason = detail
-        lifecycle = self._online_lifecycle("reject", detail)
-        self._online_last_lifecycle = lifecycle
         return {
             "role_generation": observation.role_generation,
             "eligible": False,
@@ -1835,10 +1734,35 @@ class Controller(ControllerBase):
             "input_levels": 0,
             "incumbent_innovation_c": None,
             "challenger_innovation_c": None,
-            "effective_updates": self._online.effective_updates,
-            "model_digest": OnlineAdaptation.model_digest(self._online.challenger),
-            "lifecycle": lifecycle,
+            "effective_updates": 0,
+            "model_digest": grey_config_digest(self.mpc.config),
+            "learner_error": f"{type(error).__name__}: {error}",
+            "forecast_origin_evidence": (),
         }
+
+    def bind_learning_identity(self, session_id, cook_id, role_generation):
+        """Fence Task 7 work to the runner's current cook/configuration identity."""
+        self._learning_session_id = session_id
+        self._learning_cook_id = cook_id
+        self._learning_role_generation = int(role_generation)
+        if self._learning is not None:
+            self._learning.update_identity(
+                self._learning_identity(),
+                config=self.mpc.config,
+                incumbent_pair=CandidatePair(self.estimator, self.mpc),
+            )
+
+    def poll_learning_off_path(self, *, live_origin):
+        """Build/evaluate candidates only when called by the lifecycle worker."""
+        if self._learning is None:
+            return None, None
+        origin = live_origin if isinstance(live_origin, CandidateOrigin) else CandidateOrigin(live_origin)
+        delivery = self._learning.poll_fit_off_path(
+            live_identity=self._learning_identity(),
+            live_origin=origin,
+        )
+        evaluation = self._learning.evaluate_ready_off_path()
+        return delivery, evaluation
 
     def get_status(self):
         return {
@@ -1849,7 +1773,9 @@ class Controller(ControllerBase):
             "last_equilibrium_load": _optional_float(self._last_equilibrium_load),
             "last_residual_load": _optional_float(self._last_residual_load),
             "applied_combustion_load": _finite_float(self._applied_combustion_load),
-            "policy": "net" if self._net is not None else "nlp",
+            "policy": "acados-grey",
+            "policy_kind": "acados-grey",
+            "n_horizon": int(self.cfg["n_horizon"]),
             # Non-zero means update() is returning a held command rather than a
             # computed one, so the number this reports is how many control
             # periods the grill has been running open-loop.
@@ -1962,34 +1888,21 @@ class Controller(ControllerBase):
         }
 
     def get_model_snapshot(self):
-        if not self._online_enabled:
-            if self._model_meta is None:
-                return None
-            return {
-                "version": self._MODEL_SCHEMA,
-                "revision": int(self._model_revision),
-                "params": {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS},
-                **self._model_meta,
-                "band_c": list(self._model_meta["band_c"]),
-            }
+        """Return only the active grey physical model; Task 11 owns reports."""
+        if self._model_meta is None:
+            return None
         snapshot = {
             "version": self._MODEL_SCHEMA,
             "revision": int(self._model_revision),
-            "params": {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS},
-            "grey_box_identified": self._model_meta is not None,
-            "online_adaptation": self._online_snapshot(),
+            "params": {key: float(self.cfg[key]) for key in self._MODEL_PARAM_KEYS},
+            **self._model_meta,
+            "band_c": list(self._model_meta["band_c"]),
         }
-        if self._model_meta is not None:
-            snapshot.update(self._model_meta)
-            snapshot["band_c"] = list(self._model_meta["band_c"])
         try:
             encoded = json.dumps(snapshot, allow_nan=False).encode()
-            if len(encoded) > MAX_SNAPSHOT_BYTES:
-                raise ValueError("snapshot exceeds store limit")
-        except TypeError, ValueError, OverflowError:
-            return None if self._online_last_snapshot is None else copy.deepcopy(self._online_last_snapshot)
-        self._online_last_snapshot = copy.deepcopy(snapshot)
-        return copy.deepcopy(snapshot)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return snapshot if len(encoded) <= MAX_SNAPSHOT_BYTES else None
 
     def restore_model(self, snapshot):
         from controller.model_promotion import PROMOTION_BOUNDS, n_delay_is_whole
@@ -2066,8 +1979,15 @@ class Controller(ControllerBase):
         except Exception as exc:
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
+        old_estimator = self.estimator
+        old_solver = self.mpc
+        old_learning = self._learning
         self.cfg.update(merged)
         self.estimator, self._net, self.model, self.mpc = rebuilt
+        self._learning = None
+        self._close_component(old_learning)
+        self._close_component(old_solver)
+        self._close_component(old_estimator)
         # The state estimate belonged to the estimator just replaced. The new
         # one starts from its own initial state, so there is nothing to report
         # until it has seen a measurement.
@@ -2099,133 +2019,7 @@ class Controller(ControllerBase):
         if not snapshot.get("grey_box_identified", True):
             self._model_meta = None
         if self._online_enabled:
-            # Build a fresh local wrapper first.  A malformed nested record must
-            # never undo the independently validated grey-box restoration.
-            self._initialize_online_adaptation()
-            self._online_eligible_updates = 0
-            self._online_rejected_updates = 0
-            self._online_promotion_count = 0
-            self._online_rollback_count = 0
-            self._online_last_rejection_reason = None
-            self._online_last_lifecycle_reason = None
-            self._online_last_lifecycle = None
-            self._online_last_evaluation = None
-            payload = snapshot.get("online_adaptation")
-            if payload is not None:
-                try:
-                    legacy_online_snapshot = (
-                        isinstance(payload, Mapping) and payload.get("schema") == "online-adaptation/v1"
-                    )
-                    required_metadata = {
-                        "active_model_kind",
-                        "eligible_updates",
-                        "rejected_updates",
-                        "promotion_count",
-                        "rollback_count",
-                        "last_lifecycle_reason",
-                        "last_evaluation",
-                        "last_lifecycle",
-                    }
-                    if not required_metadata.issubset(payload):
-                        raise ValueError("online snapshot lacks controller metadata")
-
-                    state_space_active = payload.get("active_model_kind") == "innovation-state-space"
-
-                    def load_model(model_snapshot):
-                        schema = model_snapshot.get("schema")
-                        if schema == "scheduled-arx/v2":
-                            return ScheduledARX.from_snapshot(model_snapshot)
-                        if schema == "innovation-state-space/v2":
-                            return (
-                                InnovationStateSpace.from_snapshot(model_snapshot)
-                                if state_space_active
-                                else _StateSpaceShadow.from_fitted_snapshot(model_snapshot)
-                            )
-                        if schema == _GreyBoxAdaptiveModel._SCHEMA:
-                            return _GreyBoxAdaptiveModel.from_snapshot(model_snapshot)
-                        raise ValueError("unsupported online model schema")
-
-                    restored = OnlineAdaptation.from_snapshot(payload, model_loader=load_model)
-                    if isinstance(restored.incumbent, _StateSpaceShadow):
-                        raise ValueError("state-space snapshot cannot restore as a pre-activation incumbent")
-                    active_kind = payload.get("active_model_kind")
-                    actual_kind = (
-                        "innovation-state-space"
-                        if isinstance(restored.incumbent, InnovationStateSpace)
-                        else "scheduled-arx"
-                        if isinstance(restored.incumbent, ScheduledARX)
-                        else "grey-box"
-                    )
-                    if active_kind != actual_kind:
-                        raise ValueError("online active model kind does not match incumbent")
-                    previous = restored._previous_incumbent
-                    if actual_kind == "scheduled-arx":
-                        if isinstance(restored.challenger, _StateSpaceShadow):
-                            if previous is not None or restored.previous_incumbent_digest is not None:
-                                raise ValueError("state-space shadow cannot own a rollback model")
-                        elif (
-                            not isinstance(restored.challenger, ScheduledARX)
-                            or previous is None
-                            or restored.previous_incumbent_digest is None
-                        ):
-                            raise ValueError("active ARX lacks a valid rollback owner")
-                    elif actual_kind == "innovation-state-space":
-                        if (
-                            not isinstance(restored.challenger, InnovationStateSpace)
-                            or previous is None
-                            or restored.previous_incumbent_digest is None
-                        ):
-                            raise ValueError("active state-space lacks challenger or rollback ownership")
-                    elif (
-                        not isinstance(restored.challenger, (ScheduledARX, _StateSpaceShadow))
-                        or previous is not None
-                        or restored.previous_incumbent_digest is not None
-                    ):
-                        raise ValueError("active grey-box has invalid rollback ownership")
-                    eligible_updates = _online_count(payload["eligible_updates"], "eligible_updates")
-                    rejected_updates = _online_count(payload["rejected_updates"], "rejected_updates")
-                    promotion_count = _online_count(payload["promotion_count"], "promotion_count")
-                    rollback_count = _online_count(payload["rollback_count"], "rollback_count")
-                    lifecycle_reason = _online_optional_string(
-                        payload["last_lifecycle_reason"], "last_lifecycle_reason"
-                    )
-                    legacy_evaluation_keys = {
-                        "decision_id",
-                        "evaluated_at_s",
-                        "role_generation",
-                        "promoted",
-                        "committed",
-                        "consecutive_wins",
-                        "rejection_reasons",
-                        "incumbent_prediction_score",
-                        "challenger_prediction_score",
-                        "incumbent_braking_score",
-                        "challenger_braking_score",
-                        "sample_count",
-                        "prospective_digest",
-                    }
-                    raw_evaluation = payload["last_evaluation"]
-                    last_evaluation = (
-                        None
-                        if (
-                            legacy_online_snapshot
-                            and isinstance(raw_evaluation, Mapping)
-                            and set(raw_evaluation) == legacy_evaluation_keys
-                        )
-                        else _online_evaluation(raw_evaluation)
-                    )
-                    last_lifecycle = _online_lifecycle_metadata(payload["last_lifecycle"])
-                    self._online = restored
-                    self._online.begin_restored_session(preserve_persisted_models=legacy_online_snapshot)
-                    self._online_eligible_updates = eligible_updates
-                    self._online_rejected_updates = rejected_updates
-                    self._online_promotion_count = promotion_count
-                    self._online_rollback_count = rollback_count
-                    self._online_last_lifecycle_reason = lifecycle_reason
-                    self._online_last_evaluation = last_evaluation
-                    self._online_last_lifecycle = last_lifecycle
-                except TypeError, ValueError, KeyError:
-                    pass
+            self._learning = self._build_learning()
         self._online_last_snapshot = None
         self.get_model_snapshot()
         return True
@@ -2552,17 +2346,47 @@ class Controller(ControllerBase):
         )
 
     def _equilibrium_load(self, target, disturbance):
-        """Private experiment seam for the identified-model equilibrium baseline."""
+        """Return the bounded equilibrium passed to the native residual model."""
         if not _model_is_identified(self.cfg, self._model_meta):
             return 0.0
-        return steady_combustion_load(self.cfg, target, disturbance)
+        return float(
+            np.clip(
+                steady_combustion_load(self.cfg, target, disturbance),
+                0.0,
+                1.0,
+            )
+        )
 
-    def _policy_residual(self, x_hat, previous_load, equilibrium_load):
-        """Return the policy move that outer composition adds to its injected equilibrium."""
-        self._policy_equilibrium_load = equilibrium_load
-        if self._net is not None:
-            return float(self._net.firing_rate_raw(x_hat, previous_load, self._set_point_c)) - equilibrium_load
-        return float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+    def _validated_native_command(self, solve):
+        horizon = int(self.cfg["n_horizon"])
+        sequence = np.asarray(solve.sequence_q, dtype=float)
+        residual = np.asarray(solve.sequence_residual, dtype=float)
+        objective = float(solve.objective)
+        diagnostics = solve.diagnostics
+        diagnostic_values = (
+            diagnostics.solve_time_s,
+            diagnostics.objective,
+            diagnostics.kkt_residual,
+            diagnostics.constraint_residual,
+        )
+        if (
+            sequence.shape != (horizon,)
+            or residual.shape != (horizon,)
+            or not np.isfinite(sequence).all()
+            or not np.isfinite(residual).all()
+            or not np.all((0.0 <= sequence) & (sequence <= 1.0))
+            or not math.isfinite(objective)
+            or diagnostics.status != 0
+            or diagnostics.backend_status != 0
+            or isinstance(diagnostics.iterations, bool)
+            or not isinstance(diagnostics.iterations, int)
+            or diagnostics.iterations < 0
+            or not all(math.isfinite(float(value)) and float(value) >= 0.0 for value in diagnostic_values)
+            or not isinstance(diagnostics.warm_started, bool)
+        ):
+            raise ValueError("native grey-box result is malformed")
+        self._native_failure_diagnostics = None
+        return float(sequence[0])
 
     def update(self, current):
         y = _to_c(current, self.units)
@@ -2589,76 +2413,25 @@ class Controller(ControllerBase):
         solve_start = time.monotonic()
         failure_state = MpcFailureState.SUCCESS
         failure_error = None
-        active_arx = self._active_arx()
-        state_space_policy_active = self._active_state_space()
-        # Keep restored ARX authority visible while fresh frames rebuild its lags.
-        arx_policy_active = active_arx and self._online is not None and self._online.lag_warmup_remaining == 0
-        linear_policy_active = state_space_policy_active or arx_policy_active
-        state_space_failed = False
         try:
-            if linear_policy_active:
-                if (
-                    state_space_policy_active
-                    and self._activation_expected_temperature_c is not None
-                    and abs(y - self._activation_expected_temperature_c) > 15.0
-                ):
-                    raise ValueError("residual-degradation")
-                linear_model = (
-                    self._activation_manager.active_model if state_space_policy_active else self._online.incumbent
-                )
-                try:
-                    prediction = linear_model.affine_prediction(
-                        self._linear_config.horizon_steps,
-                        self._applied_combustion_load,
-                        np.full(self._linear_config.horizon_steps, self.cfg["T_amb"]),
-                    )
-                except (ValueError, FloatingPointError, RuntimeError) as error:
-                    raise self._normalized_forecast_failure(error) from error
-                if not (np.isfinite(prediction.free_output_c).all() and np.isfinite(prediction.input_response_c).all()):
-                    raise ValueError("non-finite-forecast")
-                linear_started = time.monotonic()
-                solve = self._linear_policy.solve(
-                    prediction,
-                    setpoint_c=self._set_point_c,
-                    q_previous=self._applied_combustion_load,
-                    equilibrium_q=equilibrium,
-                )
-                self._online_linear_duration = time.monotonic() - linear_started
-                certificate_rejection = self._linear_certificate_rejection(solve, self._linear_config)
-                if certificate_rejection is not None:
-                    raise ValueError(certificate_rejection)
-                combustion_load = float(solve.sequence_q[0])
-                raw_firing_load = combustion_load
-                residual_move = combustion_load - equilibrium
-                if state_space_policy_active:
-                    self._activation_manager.note_safe_command(combustion_load)
-                    self._activation_expected_temperature_c = float(
-                        prediction.free_output_c[0] + prediction.input_response_c[0] @ np.asarray(solve.sequence_q)
-                    )
-                    self._activation_residual_failures = 0
-            else:
-                residual_move = self._policy_residual(x_hat, self._policy_u_prev, equilibrium)
-                raw_firing_load = equilibrium + residual_move
-                combustion_load = float(np.clip(raw_firing_load, 0.0, 1.0))
+            solve = self.mpc.solve(
+                x_hat,
+                setpoint_c=self._set_point_c,
+                q_previous=applied_combustion_load,
+                equilibrium_q=equilibrium,
+            )
+            combustion_load = self._validated_native_command(solve)
+            raw_firing_load = combustion_load
+            residual_move = combustion_load - equilibrium
         except Exception as error:
             failure_state = MpcFailureState.POLICY_EXCEPTION
             failure_error = error
-            if state_space_policy_active:
-                state_space_failed = self.activation_runtime_failure(str(error) or type(error).__name__)
-                try:
-                    residual_move = self._policy_residual(x_hat, self._policy_u_prev, equilibrium)
-                    raw_firing_load = equilibrium + residual_move
-                    combustion_load = float(np.clip(raw_firing_load, 0.0, 1.0))
-                except Exception:
-                    combustion_load = self._last_combustion_load
-                    equilibrium = None
-                    residual_move = None
-                    raw_firing_load = None
-            else:
-                combustion_load = self._last_combustion_load
-                equilibrium = None
-                residual_move = None
-                raw_firing_load = None
+            if isinstance(error, SolverError):
+                self._native_failure_diagnostics = error.diagnostics
+            combustion_load = self._last_combustion_load
+            equilibrium = None
+            residual_move = None
+            raw_firing_load = None
         finally:
             solve_end = time.monotonic()
 
@@ -2677,24 +2450,8 @@ class Controller(ControllerBase):
                     f"holding normalized combustion load {combustion_load:.3f}. The grill is not being controlled to "
                     "setpoint -- check the policy artifact and the model configuration."
                 )
-            if arx_policy_active and self._online is not None:
-                message = str(failure_error)
-                immediate = message in (
-                    "non-finite-forecast",
-                    "invalid-linear-certificate",
-                    "invalid-kkt-certificate",
-                )
-                if (immediate or n >= 2) and self._online.rollback():
-                    reason = message if immediate else "repeated-solve-failure"
-                    self._online_rollback_count += 1
-                    self._online_last_lifecycle_reason = reason
-                    self._online_last_rejection_reason = reason
-                    self._model_revision += 1
-                    self._online_pending_lifecycle = self._online_lifecycle("reject", reason)
-                    self._online_last_lifecycle = self._online_pending_lifecycle
-                    self._consecutive_policy_failures = 0
-            elif state_space_failed:
-                self._consecutive_policy_failures = 0
+            # The runner owns stale/deadline fallback; the controller keeps the
+            # last physically safe command until that ownership boundary acts.
 
         self._last_equilibrium_load = equilibrium
         self._last_residual_load = residual_move
@@ -2727,7 +2484,7 @@ class Controller(ControllerBase):
             residual_move=residual_move,
             bounded_firing_load=combustion_load,
             applied_combustion_load=applied_combustion_load,
-            policy_kind="linear-mpc" if linear_policy_active else ("net" if self._net is not None else "nlp"),
+            policy_kind="acados-grey",
             failure_state=failure_state,
             consecutive_policy_failures=self._consecutive_policy_failures,
             solve_start_monotonic=solve_start,
@@ -2750,3 +2507,17 @@ class Controller(ControllerBase):
 
     def trace_calibration(self) -> CalibrationDecision:
         return self._trace_calibration
+
+    def native_failure_diagnostics(self) -> SolverDiagnostics | None:
+        return self._native_failure_diagnostics
+
+    def close(self):
+        """Release learning, native solver, and estimator exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        learning = self._learning
+        self._learning = None
+        self._close_component(learning)
+        self._close_component(self.mpc)
+        self._close_component(self.estimator)

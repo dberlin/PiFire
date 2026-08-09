@@ -518,6 +518,7 @@ class SyncControllerRunner(ControllerRunner):
         self._configuration_revision = 0
         period = getattr(core, "get_control_period", lambda: None)()
         self._quality = _ResultQualityTracker(_control_period_seconds(period))
+        self._stopped = False
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
@@ -533,6 +534,9 @@ class SyncControllerRunner(ControllerRunner):
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
         self._evidence_contexts[generation] = (session_id, cook_id)
+        bind = getattr(self._core, "bind_learning_identity", None)
+        if callable(bind):
+            bind(session_id, cook_id, generation)
 
     def retire_evidence_context(self, generation: int) -> None:
         self._evidence_contexts.pop(generation, None)
@@ -579,10 +583,12 @@ class SyncControllerRunner(ControllerRunner):
     def reconfigure(self, settings, control, logger=None):
         core, status = _build_core(settings, control, logger=logger)
         if status == "Active":
+            retired = self._core
             self._core = core
             self._controller_type = _controller_type_for(_selected_controller(settings))
             self._configuration_revision += 1
             self._quality.control_period = _control_period_seconds(core.get_control_period())
+            _close_core(retired)
         else:
             report_reconfigure_failure(settings, logger=logger)
         return status
@@ -609,7 +615,10 @@ class SyncControllerRunner(ControllerRunner):
         return False
 
     def stop(self):
-        pass
+        if self._stopped:
+            return
+        self._stopped = True
+        _close_core(self._core)
 
     def set_output(self, applied):
         self._core.set_output(applied)
@@ -741,6 +750,11 @@ def _safe_initial_status(core):
     except Exception:
         return None
 
+def _close_core(core) -> None:
+    close = getattr(core, "close", None)
+    if callable(close):
+        close()
+
 
 class ThreadedControllerRunner(ControllerRunner):
     """Runs core.update() on a background thread at the core's control period, so
@@ -816,6 +830,15 @@ class ThreadedControllerRunner(ControllerRunner):
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
         with self._lock:
             self._evidence_contexts[generation] = (session_id, cook_id)
+            target = (
+                self._pending_core
+                if self._pending_core is not None
+                and generation == self._configuration_revision + 1
+                else self._core
+            )
+        bind = getattr(target, "bind_learning_identity", None)
+        if callable(bind):
+            bind(session_id, cook_id, generation)
 
     def retire_evidence_context(self, generation: int) -> None:
         with self._lock:
@@ -876,6 +899,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 new_core = None
                 handoff_output = None
                 new_controller_type = None
+                retired_core = None
                 pending_outputs = list(self._pending_outputs)
                 self._pending_outputs.clear()
                 restore = self._pending_restore
@@ -990,6 +1014,7 @@ class ThreadedControllerRunner(ControllerRunner):
                     new_controller_type = self._pending_controller_type
                     self._pending_core = None
                     self._pending_controller_type = None
+                    retired_core = self._core
                     self._core = new_core
                     self._control_period = new_core.get_control_period()
                     self._commands_fan = new_core.commands_fan()
@@ -1008,6 +1033,7 @@ class ThreadedControllerRunner(ControllerRunner):
                         new_core.cancel_calibration(payload)
                 if handoff_output is not None:
                     new_core.set_output(handoff_output)
+                _close_core(retired_core)
                 continue
             for operation, payload in pending_calibrations:
                 if operation == "command":
@@ -1040,6 +1066,8 @@ class ThreadedControllerRunner(ControllerRunner):
                 with self._lock:
                     if self._pending_observations:
                         continue
+                    final_core = self._core
+                _close_core(final_core)
                 return
             self._wait_for_period(self._control_period or 1.0)
 
@@ -1096,10 +1124,13 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def reconfigure(self, settings, control, logger=None):
         core, status = _build_core(settings, control, logger=logger)
+        retired_pending = None
         if status == "Active":
             with self._lock:
+                retired_pending = self._pending_core
                 self._pending_core = core
                 self._pending_controller_type = _controller_type_for(_selected_controller(settings))
+            _close_core(retired_pending)
         else:
             report_reconfigure_failure(settings, logger=logger)
         return status

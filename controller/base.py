@@ -197,6 +197,9 @@ class ControllerBase:
         """
         return False
 
+    def close(self) -> None:
+        """Release controller-owned resources after all worker calls drain."""
+
 
 def normalize_controller_output(output):
     """
