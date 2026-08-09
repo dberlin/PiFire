@@ -93,15 +93,18 @@ Full mode performs these ordered steps:
 
 1. Acquire a build lock so concurrent updater, installer, and developer builds cannot publish over one another.
 2. Configure CMake and populate the pinned acados checkout in the ignored build directory.
-3. Create staging directories on the same filesystem as the eventual published outputs.
+3. Create staging directories on the same filesystem as the runtime release root.
 4. Run the PiFire grey-box generator with the code-generation dependency group and the fetched acados Python templates.
 5. Validate generated provenance, generated-tree completeness, and numerical equation parity.
-6. Build acados, BLASFEO, HPIPM, the generated solver, and the PiFire native wrapper with the imported platform settings.
-7. Validate the native ABI, Python library discovery, horizon 5 and horizon 24 construction, invalid-horizon rejection, one cold solve, and representative perturbed warm solves.
-8. Write a complete build manifest into staging.
-9. Atomically replace the checked generated solver tree, native library, and installed manifest only after every check succeeds.
+6. Build acados, BLASFEO, HPIPM, the generated solver, and the PiFire native wrapper into a new immutable release directory.
+7. Validate the exact native ABI path, Python library discovery, every horizon from 5 through 24, invalid-horizon rejection, cost scaling, cold solves, and representative perturbed warm solves.
+8. Write the build manifest beside the library in that same release directory.
+9. Replace the checked generated solver tree as a developer source update. This tree is not loaded at runtime.
+10. Atomically switch one `controller/_native/current` pointer to the validated release directory.
 
-A failed command leaves every previously published output intact and returns nonzero.
+Every runtime-consumed artifact for one build, including the library and manifest, lives under `controller/_native/releases/<release-id>/`. The loader resolves only `current`. A pointer rename is the single publication commit point, and the previous release is retained for rollback. An interruption before that rename leaves the running release coherent. The next invocation detects and repairs a checked-generated-tree/runtime mismatch.
+
+A failed command returns nonzero. It may leave a validated generated-source change for developer review, but it never partially publishes a runtime release.
 
 ### Conditional deployed rebuild
 
@@ -115,22 +118,25 @@ A failed command leaves every previously published output intact and returns non
 - relevant CMake configuration;
 - compiler/runtime compatibility fields required by the native loader.
 
-If those inputs match, it exits successfully without building. If they differ, it compiles the committed reviewed generated C into staging, runs the deployed smoke checks, and atomically publishes the result.
+If those inputs match, it exits successfully without building. If they differ, it compiles the committed reviewed generated C into a new immutable release directory, runs the deployed smoke checks, writes the manifest beside the library, and atomically switches `current`. The previous release remains available.
 
-The updater calls `--if-needed` after source and Python dependency synchronization and before it declares the update successful or restarts PiFire. A branch change follows the same ordering. A native build or smoke failure is fatal to that update: the updater records a terminal failure, does not publish `Finished`, and does not restart the service. The already-running process continues with the library it already loaded.
+The updater ensures CMake/compiler prerequisites before moving the live checkout. It records the exact pre-update revision and branch, updates the source, and invokes `--if-needed` immediately—before Python dependency synchronization, version-cursor advancement, or settings migration. Conditional mode therefore uses only the system toolchain and Python standard library. If the native build or smoke check fails, the runtime release pointer is still unchanged; the updater restores the exact prior source revision/branch, records a terminal failure, does not publish `Finished`, and does not restart PiFire. A branch change follows the same transaction.
 
-Fresh installers call `--if-needed` after installing the compiler and CMake prerequisites. Service startup also runs the conditional check before starting PiFire, so a machine rebooted after an interrupted update must finish a compatible native build or fail closed rather than load new Python against an old ABI. Build output is delimited in the updater log so native failures are independently diagnosable.
+After native publication succeeds, the updater continues with Python dependencies and migrations. Fresh installers call `--if-needed` after installing compiler and CMake prerequisites. Service startup also runs the conditional check before starting PiFire, so an interrupted update must finish a compatible native build or fail closed rather than load mismatched Python/native ABI generations. Build output is delimited in the updater log so native failures are independently diagnosable.
+
+The first release that introduces this requirement has an explicit bootstrap path because an updater process imports `updater.py` before it moves the checkout and therefore cannot execute newly pulled Python control flow. The new updater manifest installs native build prerequisites, then invokes a standard-library-only bootstrap command from the updated checkout. That command validates the previous revision/branch from the checkout's update metadata before building. On success it leaves the complete native release for the old updater to finish normally. On failure it restores the previous source revision/branch and runtime pointer, writes terminal failure status, and terminates the old updater process so the old `run_update()` cannot overwrite failure with `Finished`. Upgrade tests start from the pre-migration updater to prove this handoff for both update and branch-change flows.
 
 ## Native ABI and Python Boundary
 
 The public ABI is based on the reviewed wrapper in `../acados` and is bumped for runtime horizon support and removal of linear exports.
 
-The grey configuration includes `horizon_steps`. Valid values are 5 through 24. The prediction step and delay-state count are ABI constants: 25 seconds and eight states.
+The grey configuration includes `uint32_t horizon_steps`. Valid values are 5 through 24. The prediction step and delay-state count are ABI constants: 25 seconds and eight states.
 
 The native handle:
 
 - creates the generated capsule with `pifire_grey_acados_create_with_discretization()`;
 - supplies a 25-second vector for the selected stage count;
+- immediately resets external-cost `scaling` to `1.0` at every stage from zero through the terminal stage, preserving the generated solver's reviewed objective while leaving `Ts=25`;
 - allocates warm-start state, control, multiplier, and diagnostic storage for that stage count;
 - updates physical parameters at every stage;
 - retains the last successful iterate;
@@ -138,7 +144,9 @@ The native handle:
 - emits bounded structured diagnostics without returning NaN or infinity across the ABI;
 - rejects unsupported dimensions before allocating solver state.
 
-The public solve-output structure retains fixed capacity for the maximum 24 stages and reports the selected sequence length explicitly. The wrapper writes only that many entries and zeroes the unused tail. Runtime selection therefore does not expose allocator ownership or variable-length C storage across the ABI.
+ABI v2 defines `ACADOS_PIFIRE_GREY_HORIZON_CAPACITY` as 24. The public solve-output structure contains `uint32_t sequence_length` plus fixed-capacity `sequence_q[24]` and `sequence_residual[24]` arrays. A successful solve sets `sequence_length` to the handle's configured horizon, writes exactly those entries, and zeroes the unused tail. Failure initialization also zeroes the full capacity.
+
+The Python FFI defines the same capacity, requires `1 <= sequence_length <= 24` and equality with the handle configuration, and exposes immutable arrays sliced to `sequence_length`. It never interprets the unused tail. Runtime selection therefore exposes neither allocator ownership nor variable-length C storage across the ABI.
 
 The Python wrapper owns native-handle lifetime and finalization. It validates finite configuration and input values, shapes arrays without hidden copies, exposes immutable solve results and diagnostics, and converts every backend failure into the established structured `SolverError` contract.
 
@@ -197,6 +205,8 @@ A Release, single-threaded workstation probe of the existing generated solver wi
 
 Runtime creation was below 2 ms in the probe. Horizons above 24 showed unacceptable solve-failure rates with the currently generated solver options and are not supported.
 
+The non-success statuses above came from an intentionally perturbed synthetic sequence and demonstrate why recovery remains part of the contract; they are not an unlimited production allowance. Target-hardware acceptance runs 1,000 perturbed solves at every integer horizon from 5 through 24. Each horizon must have at most five transient non-success statuses (0.5%), no consecutive non-success statuses, a finite successful recovery on the next call, p99 solve time below 20% of the configured control period, and maximum solve time below one full control period. Any horizon that misses those bounds is unsupported until solver options are retuned.
+
 The generated discrete RK4 map hardcodes 25 seconds. Acados' runtime time-step array changes cost scaling and solver metadata but does not change that map, so `t_step` must not remain a user setting under a false claim of physical discretization. Supporting a different step is outside this migration and would require a parameterized transition or continuous-dynamics regeneration plus new parity and stability evidence.
 
 ## Estimator Decision
@@ -214,10 +224,12 @@ The optional KF remains because it is a lightweight estimator, not a linear MPC 
 One candidate pipeline accepts three labeled evidence origins:
 
 - `passive-online`: completed normal Hold frames while Online Model Adaptation is enabled;
-- `operator-calibration`: completed eligible probe frames produced by the learning panel's calibration workflow;
-- `cook-refit`: the complete bounded cook record submitted at teardown when Learn This Grill is enabled.
+- `operator-calibration`: any fit window containing an applied operator-directed probe frame;
+- `cook-refit`: a complete bounded teardown record containing no operator-directed probe frame and submitted while Learn This Grill is enabled.
 
-Every observation carries requested load, realized load, chamber temperature, ambient provenance, continuity, inhibition/discard disposition, cook/session identity, frame revision, and model generation. Discarded, unknown-actuation, interrupted, or stale-generation frames cannot enter a fit.
+Origin authority follows the most restrictive evidence in the complete fit window: `operator-calibration` overrides `cook-refit`, which overrides `passive-online`. A mixed normal/probe cook therefore remains `operator-calibration` and cannot gain automatic authority by being refit at teardown.
+
+Every observation carries requested load, realized load, chamber temperature, ambient provenance, continuity, inhibition/discard disposition, probe provenance, cook/session identity, frame revision, and model generation. Discarded, unknown-actuation, interrupted, or stale-generation frames cannot enter a fit.
 
 ### Background fitting
 
@@ -247,15 +259,17 @@ Incumbent and challenger predictions are evaluated prospectively from identical 
 
 A `passive-online` candidate may activate automatically only when `enable_online_adaptation` is true and every automatic gate passes. The activation reason records `passive-auto`.
 
-An `operator-calibration` candidate stops at `ready-for-review`. The existing activation endpoint must receive the exact candidate digest and confidence decision ID. Its activation reason records `operator-reviewed`.
+An `operator-calibration` candidate stops at `ready-for-review`, including when it was fit from a mixed normal/probe teardown record. The existing activation endpoint must receive the exact candidate digest and confidence decision ID. Its activation reason records `operator-reviewed`.
 
-A `cook-refit` candidate retains the existing Learn This Grill authorization: when `enable_identification` is true, an accepted teardown fit is adopted for the next cook and records `cook-refit`. If the setting is false, teardown does not fit or activate. Probe observations may improve that cook record, but they do not independently change this explicit end-of-cook setting.
+A `cook-refit` candidate retains the existing Learn This Grill authorization: when `enable_identification` is true, an accepted probe-free teardown fit is adopted for the next cook and records `cook-refit`. If the setting is false, teardown does not fit or activate.
 
-For a `passive-online` or `operator-calibration` candidate, the runtime builds the candidate estimator and acados handle before committing. After durable persistence succeeds, the controller swaps the estimator/solver pair at a completed-frame boundary. The previous pair remains the rollback owner through the confidence observation window. A failed build, persistence transaction, swap, or post-activation confidence check leaves or restores the incumbent and records the exact reason.
+Runtime activation uses a two-phase durable record. After building and dry-solving the candidate pair, the activation manager persists `prepared` with exact incumbent, candidate, origin, generation, digest, and decision identities. At a completed-frame boundary it installs the in-memory pair but does not permit a candidate solve or output yet, then compare-and-swaps the durable record from `prepared` to `active`. Only the committed `active` record authorizes the next controller update. Any swap or persistence failure restores the incumbent pair and compare-and-swaps `prepared` to `aborted`; failure to compensate terminates MPC rather than issuing an ambiguously authorized command.
+
+Startup treats `prepared` as uncommitted: it restores the incumbent, records an interrupted activation, and marks the record `aborted`. Startup restores the candidate only from `active`. A process death before the durable `active` transition therefore returns to the incumbent; a death after it restores the candidate. The prior active pair remains the rollback owner through the confidence observation window.
 
 ### End-of-cook learning
 
-The full end-of-cook refit remains as the `cook-refit` origin. It runs only after the controller worker stops, uses the complete bounded cook history, applies the same physical and identifiability rules, records its outcome, and publishes a final checkpoint. Its accepted parameters become active for the next cook only when Learn This Grill (`enable_identification`) authorized the refit. It does not revive a linear or neural candidate path or perform a mid-frame activation.
+The full end-of-cook refit remains. It runs only after the controller worker stops, uses the complete bounded cook history, applies the same physical and identifiability rules, records its outcome, and publishes a final checkpoint. A probe-free record is `cook-refit` and may become active for the next cook under Learn This Grill. Any record containing an applied calibration probe is `operator-calibration` and remains staged for reviewed activation. No teardown path revives a linear/neural candidate or performs a mid-frame activation.
 
 ## Calibration Probes and Learning Panel
 
@@ -274,22 +288,23 @@ The operator-facing calibration workflow remains functionally intact:
 
 ### Unified learning report
 
-One report covers passive and manual learning. It exposes:
+One report covers passive, operator-calibration, and end-of-cook learning. It exposes:
 
-- current mode and candidate origin;
-- observation eligibility and rejection reasons;
+- current mode and candidate origin, including mixed-window authority;
+- `enable_online_adaptation` and Learn This Grill authorization;
+- observation eligibility, probe provenance, and rejection reasons;
 - probe calibration state, current band/probe, and stage progress;
-- fit queue/running/result state and evidence-window identity;
-- stale-result and fit-failure status;
+- fit queue/running/result state and evidence-window identity for passive, calibration, and teardown fits;
+- stale-result, fit-failure, and latest `cook-refit` outcome;
 - candidate generation, digest, parameter values/deltas, fit quality, and identifiability;
 - native candidate build and dry-solve status;
 - incumbent/challenger scores and missing gates;
 - automatic versus manual activation requirement;
-- persistence and pending frame-boundary swap state;
+- durable activation phase (`prepared`, `active`, or `aborted`) and pending frame-boundary swap state;
 - active, candidate, default, and rollback identities;
-- latest activation, rejection, fallback, and rollback reasons;
+- latest activation, rejection, fallback, interrupted-activation, and rollback reasons;
 - ambient provenance and target-hardware timing evidence;
-- schema invalidation and other terminal errors.
+- checkpoint publication, schema invalidation, and other terminal errors.
 
 The existing panel continues polling this report and remains available whenever MPC is selected. It presents calibration controls, complete progress, candidate/readiness details, prediction scores, manual reviewed activation when required, active-model status, history, and rollback controls.
 
@@ -348,6 +363,20 @@ The new online snapshot stores only:
 
 Pending process jobs are not persisted. Restoration starts a fresh worker session and discards any candidate whose recorded generation does not match the restored active model.
 
+### Durable authority migration
+
+Migration runs transactionally before controller construction across both durable authorities:
+
+- `controller_model_state`, including the versioned MPC top-level `params` and fit metadata;
+- `model_activation_state`, including active, candidate, prepared, and rollback snapshots;
+- confidence/activation pointers into model-evidence rows.
+
+A compatible grey authority must have the current grey schema, finite in-bounds physical parameters, and `n_delay=8`. Migration chooses authority in this order: a compatible active grey snapshot, a compatible grey rollback snapshot, a compatible top-level controller grey snapshot, then shipped defaults. If the active authority is Scheduled ARX, innovation state-space, another linear kind, or malformed, migration invalidates it and installs the highest-priority compatible grey authority with an operator-visible `schema-invalidated` reason.
+
+Historical evidence rows remain immutable audit history, but rows whose model kind or schema was removed are excluded from current confidence and activation decisions. Migration clears their live pointers and appends one invalidation lifecycle record; it never relabels linear evidence as grey evidence. The datastore transaction updates controller state, activation state, and live evidence pointers together or changes none of them.
+
+The activation-state schema includes the durable phase `prepared`, `active`, or `aborted`. Its compare-and-swap key is the incumbent/candidate generation, digest, and decision identity. This same schema enforces the activation crash recovery described above.
+
 ## Deletion Boundary
 
 Delete production code, dependencies, tests, and generated artifacts dedicated to:
@@ -378,12 +407,13 @@ The runtime dependency set drops do-mpc, CasADi, and neural-policy-only packages
 ## Failure Semantics
 
 - A missing native library or ABI mismatch prevents MPC construction and names the rebuild command.
-- A build/update failure never replaces the previously working library.
+- A runtime release is visible only after one atomic `current` pointer switch; failed publication retains the previous release.
+- A native updater failure restores the prior source revision before dependency or settings migration and never restarts PiFire.
 - A solve failure retains the last safe command and increments existing failure diagnostics.
 - A fit failure never affects the active controller.
 - A stale fit result is recorded and discarded.
 - A candidate build or dry-solve failure rejects only that candidate.
-- A persistence failure prevents activation.
+- A prepared activation never authorizes output; persistence/swap failure restores incumbent authority or terminates MPC.
 - A post-activation confidence or runtime failure invokes the existing rollback path.
 - Learning report failures change the pill/panel to an explicit error state; they do not disappear as `collecting`.
 
@@ -395,17 +425,18 @@ The runtime dependency set drops do-mpc, CasADi, and neural-policy-only packages
 - The repository contains no acados Gitlink and no vendored upstream source.
 - Regeneration check mode is reproducible against the committed generated tree.
 - The platform-selection matrix imported from `../acados` passes unchanged.
-- `--if-needed` skips a matching build and rebuilds each individually stale input class.
+- `--if-needed` skips a matching release and rebuilds each individually stale input class.
 - Concurrent rebuild attempts serialize.
-- A forced compile or smoke failure preserves the old library and manifest.
+- Fault injection before and after every publication step proves that `current` always resolves one complete library/manifest release.
+- A native updater failure restores the exact prior source revision and branch before Python dependency sync or settings migration.
 - An interrupted update followed by service startup reruns `--if-needed`; incompatible Python/native ABI combinations fail before PiFire starts.
 
 ### Native and runtime contracts
 
 - ABI structure-size, invalid-argument, allocation/backend-failure, invalid-solution, reset, and lifetime tests pass.
-- Horizon 5 and 24 cold/warm solves pass; values outside 5 through 24 are rejected.
+- Every integer horizon from 5 through 24 passes C and Python cold/warm construction, sequence-length/tail-zeroing, cost-scaling, perturbed recovery, and target timing contracts; values outside the range are rejected.
 - Generated equations match the canonical PiFire grey equations within the established parity tolerance.
-- Acados and the previous accepted grey controller agree on representative decisions within the established control tolerance before do-mpc is removed.
+- The exact runtime-horizon ABI path, including post-creation cost scaling of 1.0, matches the reviewed fixed-horizon control objective and decisions within the established tolerance.
 - The asynchronous runner's stale generation, deadline, hold-last-command, and repeated-failure paths remain covered.
 
 ### Learning and migration
@@ -413,12 +444,14 @@ The runtime dependency set drops do-mpc, CasADi, and neural-policy-only packages
 - Passive wrong-model runs produce a grey candidate and improve after a fully gated automatic activation.
 - Correctly initialized runs do not materially regress or accept a worse candidate.
 - Probe calibration still enforces safety ceilings, stage order, realized-load eligibility, pause/resume/stop behavior, and manual activation.
-- Learn This Grill still gates end-of-cook fitting and accepted `cook-refit` parameters become active on the next cook.
-- Automatic and manual candidates appear in the same report with the correct origin and activation policy.
-- The panel exposes every learning phase, candidate, blocker, score, activation, and rollback state.
-- The dashboard pill remains present for MPC, opens the panel, and matches the report through automatic/manual transitions and errors.
+- A mixed normal/probe teardown fit remains operator-calibration authority and cannot auto-activate through Learn This Grill.
+- A probe-free Learn This Grill record still produces a `cook-refit` candidate for the next cook.
+- Injected swap failure and process death at each two-phase activation boundary restore the authority prescribed by the durable phase after restart.
+- Transactional migration covers active grey, active Scheduled ARX, active state-space, grey rollback, malformed authority, and incompatible delay-state records across both durable stores and evidence pointers.
+- Automatic, manual, and cook-refit candidates appear in the same report with the correct origin, authorization, durable phase, and outcome.
+- The panel exposes every collection, fit, candidate, blocker, score, activation, teardown, error, and rollback state.
+- The dashboard pill remains present for MPC, opens the panel, and matches the report through passive/manual/teardown transitions and errors.
 - Settings migration covers net, NLP, MHE, both horizon bounds, and removed structural settings.
-- Snapshot migration preserves compatible grey parameters, removes linear payloads, and rejects incompatible delay structures.
 
 ### End to end
 
