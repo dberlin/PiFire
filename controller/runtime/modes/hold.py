@@ -2577,6 +2577,16 @@ class HoldMode(ControlMode):
     def _activation_identity(state) -> tuple[object, ...] | None:
         if state is None:
             return None
+        if getattr(state, "transaction_id", None) is not None:
+            return (
+                state.phase,
+                state.transaction_id,
+                state.role_generation,
+                state.incumbent_pair_json,
+                state.candidate_pair_json,
+                state.rollback_pair_json,
+                state.reason,
+            )
         return (
             state.evidence_decision_id,
             state.controller_configuration_digest,
@@ -2584,6 +2594,27 @@ class HoldMode(ControlMode):
             state.active_snapshot_json,
             state.rollback_snapshot_json,
         )
+
+    @staticmethod
+    def _pair_activation_lifecycle(state, records):
+        candidate = getattr(state, "candidate_pair", None)
+        if candidate is None:
+            return None
+        matches = [
+            record
+            for record in records
+            if (
+                isinstance(record.payload, RollbackEvidence)
+                and record.payload.decision_id == state.evidence_decision_id
+                and record.model_digest == candidate.model_digest
+            )
+            or (
+                isinstance(record.payload, FallbackEvidence)
+                and record.payload.failed_digest == candidate.model_digest
+                and record.payload.failed_generation == candidate.role_generation
+            )
+        ]
+        return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id), default=None)
 
     def _reconcile_activation_state(self) -> None:
         """Submit durable ownership changes without persistence work on Hold."""
@@ -2597,12 +2628,16 @@ class HoldMode(ControlMode):
             self._trace_warning(f"Model activation state unavailable: {error}")
             return
         identity = self._activation_identity(state)
-        activation = None if state is None else activation_record_for_state(records, state)
-        if state is not None and activation is None:
-            self._learning_evidence_available = False
-            self._trace_warning("Model activation lineage is unavailable")
-            return
-        lifecycle = None if activation is None else matching_activation_lifecycle(records, activation)
+        pair_transaction = state is not None and state.transaction_id is not None
+        if pair_transaction:
+            lifecycle = self._pair_activation_lifecycle(state, records)
+        else:
+            activation = None if state is None else activation_record_for_state(records, state)
+            if state is not None and activation is None:
+                self._learning_evidence_available = False
+                self._trace_warning("Model activation lineage is unavailable")
+                return
+            lifecycle = None if activation is None else matching_activation_lifecycle(records, activation)
         if state is not None and identity != self._activation_state_identity:
             self._runner.restore_activation(state, records)
             self._activation_state_identity = identity

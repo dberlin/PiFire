@@ -7,7 +7,14 @@ from types import SimpleNamespace
 
 
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.model_learning.contracts import FrameObservation
+from controller.model_learning.activation import (
+    ActivationPhase,
+    GreyControlPairDescriptor,
+    OwnedGreyControlPair,
+    PreparedActivationRecord,
+    canonical_snapshot_digest,
+)
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FrameObservation
 from common.control_trace import (
     ActuationMode,
     HorizonScorePayload,
@@ -24,9 +31,11 @@ from common.model_evidence import (
     SessionSummaryEvidence,
 )
 from controller.runtime.modes.hold import HoldMode
+from controller.runtime.model_persistence import DurableActivationReceipt
 from controller.runtime.runner import (
     SyncControllerRunner,
     ThreadedControllerRunner,
+    PreparedPairTransition,
     _MAX_PENDING_OBSERVATIONS,
     _MAX_PENDING_OUTPUTS,
     _freeze_evidence,
@@ -1926,6 +1935,19 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
     try:
         runner.bind_evidence_context(0, "session", "cook")
         observation = _frame(3)
+        first_submission = runner.observe_frame(observation)
+        first_drain = runner.drain_observation_outcomes()
+        assert first_drain.envelopes[0].submission_sequence == first_submission.submission_sequence
+        confidence = [
+            record
+            for record in first_drain.envelopes[0].evidence
+            if record.kind is EvidenceKind.CONFIDENCE_DECISION
+        ]
+        assert len(confidence) == 1
+        assert confidence[0].payload.decision_id == evaluation.decision_id
+        assert confidence[0].payload.blocked is True
+        assert confidence[0].payload.reason == "no-completed-window"
+        core._learning_pending_evaluation = evaluation
         submission = runner.observe_frame(observation)
         mode = HoldMode.__new__(HoldMode)
         mode._runner = runner
@@ -1954,3 +1976,260 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         assert mode._pending_model_observations == {}
     finally:
         runner.stop()
+
+
+def _runner_activation_fixture():
+    incumbent_config = {"schema": "pifire-grey-box-model/v4", "theta": 50.0}
+    candidate_config = {"schema": "pifire-grey-box-model/v4", "theta": 40.0}
+
+    def descriptor(config, candidate_generation, role_generation):
+        return GreyControlPairDescriptor(
+            model_digest=canonical_snapshot_digest(config),
+            configuration=config,
+            estimator_kind="ekf",
+            solver_kind="acados-grey",
+            candidate_generation=candidate_generation,
+            role_generation=role_generation,
+        )
+
+    incumbent = descriptor(incumbent_config, 3, 4)
+    candidate = descriptor(candidate_config, 4, 5)
+    prepared = PreparedActivationRecord.prepared(
+        timestamp_ms=1_000,
+        incumbent=incumbent,
+        candidate=candidate,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        decision_id="decision-runner",
+    )
+    return incumbent, candidate, prepared
+
+
+class _PairHandle:
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class _ActivationCore(FakeCore):
+    def __init__(self, *, compensation=True):
+        super().__init__(period=0.005)
+        incumbent, _candidate, _prepared = _runner_activation_fixture()
+        self.owner = incumbent
+        self.authorized = True
+        self.compensation = compensation
+        self.activation_calls = []
+        self.installed = threading.Event()
+        self.authorized_event = threading.Event()
+        self.compensated = threading.Event()
+        self.terminated = threading.Event()
+
+    def update(self, temp):
+        self.activation_calls.append(("update", self.owner.model_digest, self.authorized))
+        return super().update(temp)
+
+    def install_candidate_pair_inert(self, pair, record):
+        self.activation_calls.append(("install", record.transaction_id))
+        self.owner = pair.descriptor
+        self.authorized = False
+        self.installed.set()
+        return True
+
+    def authorize_candidate_pair(self, record):
+        self.activation_calls.append(("authorize", record.transaction_id))
+        assert self.owner == record.candidate
+        self.authorized = True
+        self.authorized_event.set()
+        return True
+
+    def compensate_candidate_pair(self, pair, record, reason):
+        self.activation_calls.append(("compensate", record.transaction_id, reason))
+        if not self.compensation:
+            return False
+        self.owner = record.incumbent
+        self.authorized = True
+        pair.close()
+        self.compensated.set()
+        return True
+
+    def terminate_mpc_activation(self, reason):
+        self.activation_calls.append(("terminate", reason))
+        self.authorized = False
+        self.terminated.set()
+
+
+def _durable_receipt() -> DurableActivationReceipt:
+    receipt = DurableActivationReceipt(accepted=True)
+    receipt._complete(durable=True)
+    return receipt
+
+
+def test_durable_prepared_receipt_precedes_one_frame_boundary_swap_and_active_authority() -> None:
+    _incumbent, candidate, prepared = _runner_activation_fixture()
+    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    active_receipt = DurableActivationReceipt(accepted=True)
+    persist_calls = []
+
+    def persist(record, expected_phase):
+        persist_calls.append((record.phase, expected_phase))
+        return active_receipt
+
+    core = _ActivationCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert not runner.queue_pair_activation(
+            PreparedPairTransition(prepared, pair, DurableActivationReceipt(accepted=True), persist)
+        )
+        runner.submit(100.0)
+        assert core.updated.wait(timeout=1.0)
+        core.updated.clear()
+        assert runner.queue_pair_activation(
+            PreparedPairTransition(prepared, pair, _durable_receipt(), persist)
+        )
+        assert core.installed.wait(timeout=1.0)
+        time.sleep(0.02)
+        assert not core.authorized
+        assert not core.updated.is_set()
+        assert persist_calls == [(ActivationPhase.ACTIVE, ActivationPhase.PREPARED)]
+
+        active_receipt._complete(durable=True)
+        assert core.authorized_event.wait(timeout=1.0)
+        assert core.updated.wait(timeout=1.0)
+    finally:
+        runner.stop()
+
+    installs = [call for call in core.activation_calls if call[0] == "install"]
+    assert len(installs) == 1
+    assert any(call[0] == "update" and call[1] == candidate.model_digest and call[2] for call in core.activation_calls)
+
+
+def test_active_cas_failure_restores_exact_incumbent_then_durably_aborts() -> None:
+    incumbent, candidate, prepared = _runner_activation_fixture()
+    estimator = _PairHandle()
+    solver = _PairHandle()
+    pair = OwnedGreyControlPair(candidate, estimator, solver)
+    active_receipt = DurableActivationReceipt(accepted=True)
+    aborted_receipt = _durable_receipt()
+    persist_calls = []
+
+    def persist(record, expected_phase):
+        persist_calls.append((record.phase, expected_phase, record.reason))
+        return active_receipt if record.phase is ActivationPhase.ACTIVE else aborted_receipt
+
+    core = _ActivationCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(100.0)
+        assert core.updated.wait(timeout=1.0)
+        core.updated.clear()
+        assert runner.queue_pair_activation(
+            PreparedPairTransition(prepared, pair, _durable_receipt(), persist)
+        )
+        assert core.installed.wait(timeout=1.0)
+        active_receipt._complete(
+            durable=False,
+            error=ValueError("activation-authority-changed"),
+        )
+        assert core.compensated.wait(timeout=1.0)
+        assert core.updated.wait(timeout=1.0)
+    finally:
+        runner.stop()
+
+    assert core.owner == incumbent
+    assert estimator.closed == solver.closed == 1
+    assert persist_calls == [
+        (ActivationPhase.ACTIVE, ActivationPhase.PREPARED, None),
+        (ActivationPhase.ABORTED, ActivationPhase.PREPARED, "activation-confidence-changed"),
+    ]
+
+
+def test_ambiguous_compensation_terminates_mpc_without_another_update() -> None:
+    _incumbent, candidate, prepared = _runner_activation_fixture()
+    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    active_receipt = DurableActivationReceipt(accepted=True)
+
+    core = _ActivationCore(compensation=False)
+    runner = ThreadedControllerRunner(
+        core,
+    )
+    try:
+        runner.submit(100.0)
+        assert core.updated.wait(timeout=1.0)
+        update_count = len(core.updates)
+        assert runner.queue_pair_activation(
+            PreparedPairTransition(
+                prepared,
+                pair,
+                _durable_receipt(),
+                lambda _record, _expected: active_receipt,
+            )
+        )
+        assert core.installed.wait(timeout=1.0)
+        active_receipt._complete(durable=False, error=RuntimeError("disk unavailable"))
+        assert core.terminated.wait(timeout=1.0)
+        time.sleep(0.02)
+        assert len(core.updates) == update_count
+        assert runner.mpc_activation_terminated
+    finally:
+        runner.stop()
+
+
+def test_duplicate_transaction_is_never_installed_twice() -> None:
+    _incumbent, candidate, prepared = _runner_activation_fixture()
+    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    active_receipt = _durable_receipt()
+    transition = PreparedPairTransition(
+        prepared,
+        pair,
+        _durable_receipt(),
+        lambda _record, _expected: active_receipt,
+    )
+    core = _ActivationCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(100.0)
+        assert core.updated.wait(timeout=1.0)
+        assert runner.queue_pair_activation(transition)
+        assert runner.queue_pair_activation(transition)
+        assert core.authorized_event.wait(timeout=1.0)
+        time.sleep(0.02)
+    finally:
+        runner.stop()
+
+    assert len([call for call in core.activation_calls if call[0] == "install"]) == 1
+
+
+def test_automatic_learning_handoff_reaches_the_same_durable_frame_boundary_path() -> None:
+    _incumbent, candidate, prepared = _runner_activation_fixture()
+    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    transition = PreparedPairTransition(
+        prepared,
+        pair,
+        _durable_receipt(),
+        lambda _record, _expected: _durable_receipt(),
+    )
+
+    class AutomaticCore(_ActivationCore):
+        def __init__(self):
+            super().__init__()
+            self.transitions = collections.deque((transition,))
+
+        def poll_learning_off_path(self):
+            return None
+
+        def drain_prepared_pair_transitions(self):
+            values = tuple(self.transitions)
+            self.transitions.clear()
+            return values
+
+    core = AutomaticCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(100.0)
+        assert core.authorized_event.wait(timeout=1.0)
+    finally:
+        runner.stop()
+
+    assert len([call for call in core.activation_calls if call[0] == "install"]) == 1

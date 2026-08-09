@@ -13,6 +13,7 @@ import collections
 import copy
 import hashlib
 import json
+import logging
 import math
 import os
 from collections.abc import Mapping
@@ -38,7 +39,15 @@ from controller.model_promotion import feasibility_report
 from controller.mpc_model import MODEL_SCHEMA, GreyBoxEKF, GreyBoxKF, steady_combustion_load
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
-from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RefreshDiagnosticsEvidence
+from common.model_evidence import (
+    EvidenceKind,
+    ConfidenceDecisionEvidence,
+    FallbackEvidence,
+    ForecastOriginEvidence,
+    ModelEvidenceRecord,
+    RefreshDiagnosticsEvidence,
+    RollbackEvidence,
+)
 from controller.acados import (
     AcadosGreyBoxMPC,
     GreyBoxMPCConfig,
@@ -52,7 +61,17 @@ from controller.runtime.model_fitting import (
     TargetTimingEvidence,
     grey_config_digest,
 )
-from controller.model_learning.contracts import CandidateOrigin, FrameObservation
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FrameObservation
+from controller.model_learning.activation import (
+    ActivationManager,
+    ActivationPhase,
+    ActivationRequest,
+    GreyControlPairDescriptor,
+    OwnedGreyControlPair,
+    PreparedActivationRecord,
+    canonical_snapshot_digest,
+    recover_startup_activation,
+)
 from controller.grey_box import GreyBoxPredictionAdapter
 from controller.model_learning.calibration import (
     CalibrationCommand as _CoordinatorCalibrationCommand,
@@ -827,6 +846,32 @@ class Controller(ControllerBase):
 
         self._online_pending_parameter_promotion = None
         self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
+        live_configuration = {
+            name: getattr(self.mpc.config, name)
+            for name in self.mpc.config.__dataclass_fields__
+        }
+        live_descriptor = GreyControlPairDescriptor(
+            model_digest=canonical_snapshot_digest(live_configuration),
+            configuration=live_configuration,
+            estimator_kind=str(cfg["estimator"]),
+            solver_kind="acados-grey",
+            candidate_generation=self._model_revision,
+            role_generation=self._model_revision,
+        )
+        self._active_control_pair = OwnedGreyControlPair(
+            live_descriptor,
+            self.estimator,
+            self.mpc,
+        )
+        self._rollback_control_pair: OwnedGreyControlPair | None = None
+        self._inert_activation: PreparedActivationRecord | None = None
+        self._active_activation_record: PreparedActivationRecord | None = None
+        self._activation_output_authorized = True
+        self._activation_terminated_reason: str | None = None
+        self._failed_role_generations: set[int] = set()
+        self._activation_persistence_worker = None
+        self._persisted_activation_confidence_ids: set[str] = set()
+        self._prepared_pair_transitions = collections.deque()
         self._native_failure_diagnostics: SolverDiagnostics | None = None
         self._closed = False
         self._learning_lock = threading.RLock()
@@ -836,6 +881,7 @@ class Controller(ControllerBase):
         self._learning_pending_origin: CandidateOrigin | None = None
         self._learning_candidate_pair: CandidatePair | None = None
         self._learning_pending_evaluation = None
+        self._learning_pending_confidence_accepted: bool | None = None
         self._learning_session_id = "runtime"
         self._learning_cook_id = None
         self._learning_role_generation = self._model_revision
@@ -1142,6 +1188,146 @@ class Controller(ControllerBase):
         self._online._failed_generations.update(state.failed_generations)
         self._online._begin_role_generation()
 
+    @property
+    def active_control_pair(self) -> OwnedGreyControlPair:
+        return self._active_control_pair
+
+    @property
+    def rollback_control_pair(self) -> OwnedGreyControlPair | None:
+        return self._rollback_control_pair
+
+    @property
+    def activation_output_authorized(self) -> bool:
+        return self._activation_output_authorized
+
+    @property
+    def failed_role_generations(self) -> frozenset[int]:
+        return frozenset(self._failed_role_generations)
+
+    def install_candidate_pair_inert(
+        self,
+        pair: OwnedGreyControlPair,
+        record: PreparedActivationRecord,
+    ) -> bool:
+        """Install both handles while making every solve/output path illegal."""
+        if (
+            not isinstance(pair, OwnedGreyControlPair)
+            or not isinstance(record, PreparedActivationRecord)
+            or record.phase is not ActivationPhase.PREPARED
+            or pair.descriptor != record.candidate
+            or self._active_control_pair.descriptor != record.incumbent
+        ):
+            return False
+        if self._inert_activation is not None:
+            return self._inert_activation.transaction_id == record.transaction_id
+        self._rollback_control_pair = self._active_control_pair
+        self._active_control_pair = pair
+        self.estimator = pair.estimator
+        self.mpc = pair.solver
+        self._inert_activation = record
+        self._activation_output_authorized = False
+        return True
+
+    def authorize_candidate_pair(self, record: PreparedActivationRecord) -> bool:
+        """Authorize the installed pair only for its exact durable active record."""
+        prepared = self._inert_activation
+        if (
+            prepared is None
+            or not isinstance(record, PreparedActivationRecord)
+            or record.phase is not ActivationPhase.ACTIVE
+            or record.transaction_id != prepared.transaction_id
+            or record.candidate != self._active_control_pair.descriptor
+        ):
+            return False
+        self._activation_output_authorized = True
+        self._active_activation_record = record
+        self._inert_activation = None
+        self._model_revision = max(self._model_revision, record.candidate.role_generation)
+        return True
+
+    def compensate_candidate_pair(
+        self,
+        pair: OwnedGreyControlPair,
+        record: PreparedActivationRecord,
+        _reason: str,
+    ) -> bool:
+        """Restore the exact retained incumbent after an uncommitted install."""
+        rollback = self._rollback_control_pair
+        if (
+            rollback is None
+            or pair is not self._active_control_pair
+            or pair.descriptor != record.candidate
+            or rollback.descriptor != record.incumbent
+        ):
+            return False
+        self._active_control_pair = rollback
+        self.estimator = rollback.estimator
+        self.mpc = rollback.solver
+        self._rollback_control_pair = None
+        self._inert_activation = None
+        self._active_activation_record = None
+        self._activation_output_authorized = True
+        try:
+            pair.close()
+        except Exception:
+            return False
+        return True
+
+    def terminate_mpc_activation(self, reason: str) -> None:
+        self._activation_output_authorized = False
+        self._activation_terminated_reason = reason
+
+    def _restore_activation_rollback(self, reason: str, *, emit_fallback: bool) -> bool:
+        rollback = self._rollback_control_pair
+        if rollback is None or not self._activation_output_authorized:
+            return False
+        failed = self._active_control_pair
+        activation_record = self._active_activation_record
+        self._active_control_pair = rollback
+        self.estimator = rollback.estimator
+        self.mpc = rollback.solver
+        self._rollback_control_pair = None
+        self._failed_role_generations.add(failed.descriptor.role_generation)
+        self._model_revision = max(self._model_revision, failed.descriptor.role_generation + 1)
+        try:
+            failed.close()
+        except Exception:
+            self.terminate_mpc_activation("rollback-close-failed")
+            return False
+        if emit_fallback:
+            timestamp_ms = time.time_ns() // 1_000_000
+            self._activation_events.append(
+                ModelEvidenceRecord(
+                    evidence_id=(
+                        f"fallback:{failed.descriptor.role_generation}:"
+                        f"{timestamp_ms}:{failed.descriptor.model_digest}"
+                    ),
+                    kind=EvidenceKind.FALLBACK,
+                    session_id="mpc-runtime-activation",
+                    cook_id=None,
+                    timestamp_ms=timestamp_ms,
+                    role_generation=self._model_revision,
+                    model_digest=failed.descriptor.model_digest,
+                    provenance_digest=rollback.descriptor.model_digest,
+                    payload=FallbackEvidence(
+                        decision_id=(
+                            activation_record.decision_id
+                            if isinstance(activation_record, PreparedActivationRecord)
+                            else "runtime-confidence-window"
+                        ),
+                        reason=reason,
+                        failed_digest=failed.descriptor.model_digest,
+                        failed_generation=failed.descriptor.role_generation,
+                        last_safe_command=self._last_combustion_load,
+                        fallback_kind="grey-box",
+                    ),
+                )
+            )
+        self._active_activation_record = None
+        self._inert_activation = None
+        self._activation_output_authorized = True
+        return True
+
     def commit_active_parameter_promotion(self, manager, decision_id, confidence):
         """Publish the exact durable activation without re-adjudicating its confidence."""
         if not isinstance(manager, ActivationManager):
@@ -1181,75 +1367,126 @@ class Controller(ControllerBase):
         self._online_last_lifecycle = self._online_lifecycle("adopt", "parameter-promotion")
         return True
 
+    def _build_pair_from_descriptor(
+        self,
+        descriptor: GreyControlPairDescriptor,
+    ) -> OwnedGreyControlPair:
+        candidate_cfg = dict(self.cfg)
+        configuration = dict(descriptor.configuration)
+        nested = configuration.get("controller_config")
+        if isinstance(nested, Mapping):
+            candidate_cfg.update(nested)
+        else:
+            field_map = {
+                "C_c": "C_c",
+                "h_amb": "h_amb",
+                "T_amb": "T_amb",
+                "theta": "theta",
+                "K_Q": "K_Q",
+                "sigma": "sigma",
+                "horizon_steps": "n_horizon",
+                "temperature_weight": "Q_w",
+                "move_weight": "R_dQ",
+            }
+            for source, target in field_map.items():
+                if source in configuration:
+                    candidate_cfg[target] = configuration[source]
+        candidate_cfg["estimator"] = descriptor.estimator_kind
+        estimator, _net, _model, solver = self._build_for(candidate_cfg)
+        actual_digest = grey_config_digest(solver.config)
+        if actual_digest != descriptor.model_digest:
+            self._close_component(solver)
+            self._close_component(estimator)
+            raise ValueError("restored pair configuration digest changed")
+        return OwnedGreyControlPair(descriptor, estimator, solver)
+
     def restore_activation(self, persisted, records):
-        """Restore one durable activation without bypassing its exact lineage."""
-        manager = ActivationManager(
-            tuple(records),
-            candidate_snapshot={},
-            rollback_snapshot={},
-            controller_configuration=self._activation_configuration,
-            prospective_solve=lambda candidate, _configuration: self._activation_prospective_solve(candidate),
-            persist_activation=lambda _record: False,
-            append_evidence=self._activation_events.append,
-            session_id="mpc-runtime-activation",
-        )
-        decision = manager.restore(persisted)
-        self._activation_manager = manager
-        self._activation_expected_temperature_c = None
-        self._activation_residual_failures = 0
-        restored_fallback = decision.reason == "restore-generation-already-failed"
-        if not decision.accepted and not restored_fallback:
+        """Converge startup before authorizing the pair selected by durable authority."""
+        from common.controller_model_state import ControllerModelStore
+        from controller.runtime.model_persistence import ModelPersistenceWorker
+
+        records = tuple(records)
+        worker = self._activation_persistence_worker
+        if worker is None:
+            worker = ModelPersistenceWorker(
+                ControllerModelStore(),
+                logging.getLogger("control"),
+            )
+            self._activation_persistence_worker = worker
+        try:
+            recovery = recover_startup_activation(
+                persisted,
+                persist_aborted=lambda record: worker.submit_activation_phase(
+                    record,
+                    expected_phase=ActivationPhase.PREPARED,
+                ),
+                receipt_timeout=2.0,
+            )
+            lifecycle = max(
+                (
+                    record
+                    for record in records
+                    if (
+                        isinstance(record.payload, RollbackEvidence)
+                        and record.payload.decision_id == recovery.record.decision_id
+                        and record.model_digest == recovery.record.candidate.model_digest
+                    )
+                    or (
+                        isinstance(record.payload, FallbackEvidence)
+                        and record.payload.failed_digest == recovery.record.candidate.model_digest
+                        and record.payload.failed_generation
+                        == recovery.record.candidate.role_generation
+                    )
+                ),
+                key=lambda record: (record.timestamp_ms, record.evidence_id),
+                default=None,
+            )
+            restore_descriptor = recovery.rollback if lifecycle is not None else recovery.restore
+            restored = self._build_pair_from_descriptor(restore_descriptor)
+            rollback = (
+                self._build_pair_from_descriptor(recovery.rollback)
+                if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None
+                else None
+            )
+        except Exception:
+            candidate = locals().get("restored")
+            if isinstance(candidate, OwnedGreyControlPair):
+                candidate.close()
             return False
-        self._synchronize_active_adaptation()
-        if self._online is not None:
-            self._online.reset_continuity()
-        self._model_revision += 1
+        retired_active = self._active_control_pair
+        retired_rollback = self._rollback_control_pair
+        self._active_control_pair = restored
+        self._rollback_control_pair = rollback
+        self.estimator = restored.estimator
+        self.mpc = restored.solver
+        self._inert_activation = None
+        self._active_activation_record = (
+            recovery.record
+            if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None
+            else None
+        )
+        self._activation_output_authorized = True
+        restored_generation = recovery.restore.role_generation
+        if lifecycle is not None:
+            restored_generation = lifecycle.role_generation
+            self._failed_role_generations.add(recovery.record.candidate.role_generation)
+        self._model_revision = restored_generation
+        retired_active.close()
+        if retired_rollback is not None:
+            retired_rollback.close()
         return True
 
     def activation_runtime_failure(self, reason):
-        """Immediately leave active state-space ownership for a named failure."""
+        """Restore the exact rollback pair and persist a fenced failure off-path."""
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("activation fallback reason must be non-blank")
-        manager = self._activation_manager
-        if manager is None or manager.active_kind != STATE_SPACE_KIND:
-            return False
-        manager.fallback(
-            reason.strip(),
-            last_safe_command=self._last_combustion_load,
-        )
-        self._activation_expected_temperature_c = None
-        self._activation_residual_failures = 0
-        if self._online is not None:
-            self._online.fence_active_generation(reason.strip())
-            self._synchronize_active_adaptation()
-            self._online.reset_continuity()
-        self._model_revision += 1
-        self._online_pending_lifecycle = {
-            "event": "reject",
-            "detail": reason.strip(),
-            "model_revision": self._model_revision,
-            "model_kind": STATE_SPACE_KIND,
-            "role_generation": manager.state.failed_generation,
-            "model_digest": manager.state.failed_digest,
-            "fallback_kind": manager.state.fallback_kind,
-            "last_safe_command": manager.state.last_safe_command,
-        }
-        return True
+        return self._restore_activation_rollback(reason.strip(), emit_fallback=True)
 
     def rollback_activation(self, reason):
-        """Apply a persisted operator rollback without duplicating its decision."""
-        manager = self._activation_manager
-        if manager is None or manager.active_kind != STATE_SPACE_KIND:
-            return False
-        manager.fallback(reason, last_safe_command=self._last_combustion_load)
-        self._activation_expected_temperature_c = None
-        self._activation_residual_failures = 0
-        if self._online is not None:
-            self._online.fence_active_generation(reason)
-            self._synchronize_active_adaptation()
-            self._online.reset_continuity()
-        self._model_revision += 1
-        return True
+        """Restore only the retained owner named by the durable activation."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("activation rollback reason must be non-blank")
+        return self._restore_activation_rollback(reason.strip(), emit_fallback=False)
 
     def drain_activation_events(self):
         events = tuple(self._activation_events)
@@ -1869,6 +2106,15 @@ class Controller(ControllerBase):
                 self._learning_pending_origin = request.origin
             evaluation = self._learning_pending_evaluation
             self._learning_pending_evaluation = None
+            confidence_accepted = self._learning_pending_confidence_accepted
+            self._learning_pending_confidence_accepted = None
+            evaluation_decision_id = getattr(evaluation, "decision_id", None)
+            confidence_already_persisted = (
+                isinstance(evaluation_decision_id, str)
+                and evaluation_decision_id in self._persisted_activation_confidence_ids
+            )
+            if confidence_already_persisted:
+                self._persisted_activation_confidence_ids.discard(evaluation_decision_id)
         forecasts = tuple(
             self._completed_forecast_evidence(value)
             for value in result.completed_forecasts
@@ -1889,6 +2135,8 @@ class Controller(ControllerBase):
             "forecast_origin_evidence": forecasts,
             "learning_evaluation": evaluation,
             "evaluation_payload": evaluation,
+            "confidence_accepted": confidence_accepted,
+            "confidence_already_persisted": confidence_already_persisted,
         }
 
     def observation_failure(self, observation, error):
@@ -1933,6 +2181,153 @@ class Controller(ControllerBase):
         """Drain and prepare fits only from the runner's lifecycle dispatcher."""
         with self._learning_lifecycle_lock:
             return self._poll_learning_off_path_locked(live_origin=live_origin)
+
+    def _prepare_automatic_pair_activation(self, preparation, policy):
+        """Persist one passive candidate and expose it to the runner only after receipt."""
+        from common.controller_model_state import ControllerModelStore
+        from controller.runtime.model_persistence import ModelPersistenceWorker
+        from controller.runtime.runner import PreparedPairTransition
+
+        if policy is not ActivationPolicy.PASSIVE_AUTO:
+            raise ValueError("manual candidate requires the reviewed activation endpoint")
+        candidate_pair = getattr(preparation, "candidate_pair", None)
+        candidate_result = getattr(preparation, "candidate", None)
+        request = getattr(candidate_result, "request", None)
+        native_config = getattr(candidate_result, "config", None)
+        if candidate_pair is None or request is None or native_config is None:
+            raise ValueError("candidate preparation is incomplete")
+        configuration = {
+            name: getattr(native_config, name)
+            for name in native_config.__dataclass_fields__
+        }
+        candidate_descriptor = GreyControlPairDescriptor(
+            model_digest=canonical_snapshot_digest(configuration),
+            configuration=configuration,
+            estimator_kind=str(self.cfg["estimator"]),
+            solver_kind="acados-grey",
+            candidate_generation=request.candidate_generation,
+            role_generation=request.window.role_generation + 1,
+        )
+        if candidate_descriptor.model_digest != preparation.candidate_digest:
+            raise ValueError("candidate-digest-changed")
+        owned_candidate = OwnedGreyControlPair(
+            candidate_descriptor,
+            candidate_pair.estimator,
+            candidate_pair.controller,
+        )
+        worker = self._activation_persistence_worker
+        if worker is None:
+            worker = ModelPersistenceWorker(
+                ControllerModelStore(),
+                logging.getLogger("control"),
+            )
+            self._activation_persistence_worker = worker
+        receipts = []
+
+        def persist_prepared(record):
+            receipt = worker.submit_activation_phase(record, expected_phase=None)
+            receipts.append(receipt)
+            return receipt
+
+        manager = ActivationManager(
+            incumbent_pair=self._active_control_pair,
+            build_candidate=lambda descriptor: (
+                owned_candidate
+                if descriptor == candidate_descriptor
+                else (_ for _ in ()).throw(ValueError("candidate-digest-changed"))
+            ),
+            validate_candidate=lambda pair: pair is owned_candidate,
+            native_dry_solve=lambda _pair: bool(preparation.dry_solve_finite),
+            persist_prepared=persist_prepared,
+            receipt_timeout=2.0,
+        )
+        evaluation = getattr(self._learning, "_last_evaluation", None)
+        decision_id = getattr(evaluation, "decision_id", None)
+        evaluation_role_generation = getattr(evaluation, "role_generation", None)
+        evaluation_candidate_generation = getattr(evaluation, "candidate_generation", None)
+        challenger_digest = getattr(evaluation, "challenger_digest", None)
+        incumbent_digest = getattr(evaluation, "incumbent_digest", None)
+        if (
+            not isinstance(decision_id, str)
+            or not isinstance(evaluation_role_generation, int)
+            or not isinstance(evaluation_candidate_generation, int)
+            or not isinstance(challenger_digest, str)
+            or not isinstance(incumbent_digest, str)
+            or not bool(getattr(evaluation, "accepted", False))
+            or tuple(getattr(evaluation, "blockers", ()))
+            or challenger_digest != candidate_descriptor.model_digest
+            or evaluation_candidate_generation != candidate_descriptor.candidate_generation
+            or evaluation_role_generation
+            != self._active_control_pair.descriptor.role_generation
+        ):
+            owned_candidate.close()
+            raise RuntimeError("activation-confidence-changed")
+        evaluated_at_ms = max(
+            (
+                int(origin.completion_time_s * 1_000)
+                for origin in tuple(getattr(evaluation, "completed_origins", ()))
+            ),
+            default=time.time_ns() // 1_000_000,
+        )
+        confidence = ModelEvidenceRecord(
+            evidence_id=(
+                f"activation-confidence:{decision_id}:"
+                f"{evaluation_role_generation}"
+            ),
+            kind=EvidenceKind.CONFIDENCE_DECISION,
+            session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
+            cook_id=getattr(self, "_learning_cook_id", None),
+            timestamp_ms=evaluated_at_ms,
+            role_generation=evaluation_role_generation,
+            model_digest=challenger_digest,
+            provenance_digest=incumbent_digest,
+            payload=ConfidenceDecisionEvidence(
+                decision_id=decision_id,
+                blocked=False,
+                reason=None,
+            ),
+        )
+        confidence_receipt = worker.submit_activation_confidence(confidence)
+        if (
+            not confidence_receipt.accepted
+            or confidence_receipt.wait(2.0) is not True
+            or confidence_receipt.durable is not True
+        ):
+            owned_candidate.close()
+            raise RuntimeError("activation-confidence-not-durable")
+        persisted_confidence = getattr(
+            self,
+            "_persisted_activation_confidence_ids",
+            None,
+        )
+        if persisted_confidence is None:
+            persisted_confidence = set()
+            self._persisted_activation_confidence_ids = persisted_confidence
+        persisted_confidence.add(decision_id)
+        decision = manager.prepare(
+            ActivationRequest(candidate_descriptor.model_digest, decision_id),
+            candidate_descriptor,
+            origin=request.origin,
+            policy=policy,
+        )
+        if not decision.accepted or decision.record is None or decision.candidate_pair is None:
+            raise RuntimeError(decision.reason)
+        transition = PreparedPairTransition(
+            decision.record,
+            decision.candidate_pair,
+            receipts[0],
+            lambda record, expected: worker.submit_activation_phase(
+                record,
+                expected_phase=expected,
+            ),
+        )
+        self._prepared_pair_transitions.append(transition)
+        return decision.record.transaction_id
+
+    def drain_prepared_pair_transitions(self):
+        transitions = tuple(self._prepared_pair_transitions)
+        self._prepared_pair_transitions.clear()
+        return transitions
 
     def _poll_learning_off_path_locked(self, *, live_origin=None):
         """Run one lifecycle poll while identity mutation is fenced."""
@@ -1982,9 +2377,29 @@ class Controller(ControllerBase):
                 evaluation_duration_ms=evaluation_duration_ms,
             )
         )
+        preparation = getattr(learning, "prepared", None)
+        preparation_origin = getattr(
+            getattr(getattr(preparation, "candidate", None), "request", None),
+            "origin",
+            None,
+        )
+        if (
+            evaluation is not None
+            and not blockers
+            and bool(getattr(evaluation, "accepted", False))
+            and preparation_origin is CandidateOrigin.PASSIVE_ONLINE
+        ):
+            learning.handoff_if_ready(
+                confidence_accepted=True,
+                online_enabled=self._online_enabled,
+                prepare=self._prepare_automatic_pair_activation,
+            )
         with self._learning_lock:
             if learning is self._learning and payload is not None:
                 self._learning_pending_evaluation = payload
+                self._learning_pending_confidence_accepted = bool(
+                    getattr(evaluation, "accepted", False)
+                )
                 if blockers:
                     self._learning_candidate_pair = None
         return delivery, payload
@@ -2614,6 +3029,8 @@ class Controller(ControllerBase):
         return float(sequence[0])
 
     def update(self, current):
+        if not self._activation_output_authorized:
+            raise RuntimeError("MPC activation pair is not durably authorized")
         y = _to_c(current, self.units)
         applied_combustion_load = self._applied_combustion_load
         x_hat = self.estimator.update(applied_combustion_load, y)
@@ -2677,6 +3094,12 @@ class Controller(ControllerBase):
                 )
             # The runner owns stale/deadline fallback; the controller keeps the
             # last physically safe command until that ownership boundary acts.
+            if isinstance(self._active_activation_record, PreparedActivationRecord):
+                if not self._restore_activation_rollback(
+                    "native-solve-failure",
+                    emit_fallback=True,
+                ):
+                    self.terminate_mpc_activation("native-failure-compensation-failed")
 
         self._last_equilibrium_load = equilibrium
         self._last_residual_load = residual_move
@@ -2744,5 +3167,12 @@ class Controller(ControllerBase):
         learning = self._learning
         self._learning = None
         self._close_component(learning)
-        self._close_component(self.mpc)
-        self._close_component(self.estimator)
+        persistence_worker = self._activation_persistence_worker
+        self._activation_persistence_worker = None
+        if persistence_worker is not None:
+            persistence_worker.flush_and_stop(timeout=0.1)
+        self._active_control_pair.close()
+        rollback = self._rollback_control_pair
+        self._rollback_control_pair = None
+        if rollback is not None:
+            rollback.close()

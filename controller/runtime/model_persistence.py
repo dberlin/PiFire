@@ -10,7 +10,14 @@ from typing import Protocol
 
 from common.controller_model_state import CheckpointSaveOutcome, copy_valid_snapshot
 from common.datastore_accessors import append_model_evidence, commit_model_activation
-from common.model_evidence import EvidenceKind, ModelEvidenceRecord, RecorderGapEvidence, RefreshDiagnosticsEvidence
+from common.model_evidence import (
+    ConfidenceDecisionEvidence,
+    EvidenceKind,
+    ModelEvidenceRecord,
+    RecorderGapEvidence,
+    RefreshDiagnosticsEvidence,
+)
+from controller.model_learning.activation import ActivationPhase, PreparedActivationRecord
 
 
 class _ModelStore(Protocol):
@@ -27,6 +34,69 @@ class EvidenceSubmission:
 
     accepted: bool
     recorder_gap: ModelEvidenceRecord | None = None
+
+
+class DurableActivationReceipt:
+    """Completion handle whose durability changes only after the worker transaction."""
+
+    def __init__(self, *, accepted: bool) -> None:
+        self.accepted = accepted
+        self._condition = Condition()
+        self._completed = not accepted
+        self._durable = False
+        self._error: str | None = "persistence-unavailable" if not accepted else None
+
+    @property
+    def completed(self) -> bool:
+        with self._condition:
+            return self._completed
+
+    @property
+    def durable(self) -> bool:
+        with self._condition:
+            return self._durable
+
+    @property
+    def error(self) -> str | None:
+        with self._condition:
+            return self._error
+
+    def wait(self, timeout: float | None = None) -> bool:
+        if timeout is not None and (not isinstance(timeout, (int, float)) or timeout < 0.0):
+            raise ValueError("activation receipt timeout must be nonnegative")
+        with self._condition:
+            self._condition.wait_for(lambda: self._completed, timeout=timeout)
+            return self._completed and self._durable
+
+    def _complete(self, *, durable: bool, error: BaseException | None = None) -> None:
+        with self._condition:
+            if self._completed:
+                return
+            self._durable = durable
+            self._error = None if error is None else f"{type(error).__name__}: {error}"
+            self._completed = True
+            self._condition.notify_all()
+
+
+@dataclass(slots=True)
+class _ActivationPhaseWork:
+    record: PreparedActivationRecord
+    expected_phase: ActivationPhase | None
+    receipt: DurableActivationReceipt
+
+
+
+@dataclass(slots=True)
+class _ActivationConfidenceWork:
+    record: ModelEvidenceRecord
+    receipt: DurableActivationReceipt
+
+def _default_persist_activation_phase(
+    record: PreparedActivationRecord, expected_phase: ActivationPhase | None
+) -> None:
+    from common.datastore_accessors import commit_model_activation_phase
+
+    commit_model_activation_phase(record, expected_phase=expected_phase)
 
 
 @dataclass(slots=True)
@@ -47,6 +117,9 @@ class ModelPersistenceWorker:
         evidence_capacity: int = 128,
         append_evidence: Callable[[Sequence[ModelEvidenceRecord]], None] = append_model_evidence,
         commit_activation: Callable[[ModelEvidenceRecord], None] = commit_model_activation,
+        persist_activation_phase: Callable[
+            [PreparedActivationRecord, ActivationPhase | None], None
+        ] = _default_persist_activation_phase,
     ) -> None:
         if isinstance(evidence_capacity, bool) or not isinstance(evidence_capacity, int) or evidence_capacity < 1:
             raise ValueError("evidence_capacity must be a positive integer")
@@ -54,12 +127,16 @@ class ModelPersistenceWorker:
         self._logger = logger
         self._append_evidence = append_evidence
         self._commit_activation = commit_activation
+        self._persist_activation_phase = persist_activation_phase
         self._evidence_capacity = evidence_capacity
         self._condition = Condition()
         self._pending_checkpoints: dict[str, dict[str, object]] = {}
         self._pending_evidence: deque[tuple[ModelEvidenceRecord, ...]] = deque()
         self._pending_recorder_gaps: deque[ModelEvidenceRecord] = deque()
         self._pending_activations: deque[_ActivationWork] = deque()
+        self._pending_activation_fifo: deque[
+            tuple[str, _ActivationConfidenceWork | _ActivationPhaseWork]
+        ] = deque()
         self._stopping = False
         self._thread: Thread | None = None
         self._evidence_blocked = False
@@ -165,6 +242,51 @@ class ModelPersistenceWorker:
             completed = self._condition.wait_for(lambda: work.completed, timeout=timeout)
             return completed and work.succeeded
 
+    def submit_activation_confidence(
+        self,
+        decision: ModelEvidenceRecord,
+    ) -> DurableActivationReceipt:
+        """Queue the exact confidence authority in the activation FIFO."""
+        if not isinstance(decision, ModelEvidenceRecord):
+            raise TypeError("decision must be ModelEvidenceRecord")
+        owned = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
+        if (
+            owned.kind is not EvidenceKind.CONFIDENCE_DECISION
+            or not isinstance(owned.payload, ConfidenceDecisionEvidence)
+        ):
+            raise ValueError("activation confidence requires confidence-decision evidence")
+        receipt = DurableActivationReceipt(accepted=True)
+        with self._condition:
+            if self._failed or self._stopping:
+                return DurableActivationReceipt(accepted=False)
+            self._pending_activation_fifo.append(
+                ("activation-confidence", _ActivationConfidenceWork(owned, receipt))
+            )
+            self._start_locked()
+            self._condition.notify()
+        return receipt
+
+    def submit_activation_phase(
+        self,
+        record: PreparedActivationRecord,
+        *,
+        expected_phase: ActivationPhase | None,
+    ) -> DurableActivationReceipt:
+        """Queue one exact phase CAS and return a receipt that is not yet durable."""
+        if not isinstance(record, PreparedActivationRecord):
+            raise TypeError("record must be a PreparedActivationRecord")
+        if expected_phase is not None and not isinstance(expected_phase, ActivationPhase):
+            expected_phase = ActivationPhase(expected_phase)
+        receipt = DurableActivationReceipt(accepted=True)
+        work = _ActivationPhaseWork(record, expected_phase, receipt)
+        with self._condition:
+            if self._failed or self._stopping:
+                return DurableActivationReceipt(accepted=False)
+            self._pending_activation_fifo.append(("activation-phase", work))
+            self._start_locked()
+            self._condition.notify()
+        return receipt
+
     def _save_checkpoint(self, name: str, snapshot: dict[str, object]) -> CheckpointSaveOutcome:
         return self._store.save_outcome(name, snapshot)
 
@@ -222,6 +344,8 @@ class ModelPersistenceWorker:
         return EvidenceSubmission(accepted=False, recorder_gap=gap)
 
     def _next_work_locked(self) -> tuple[str, object] | None:
+        if self._pending_activation_fifo:
+            return self._pending_activation_fifo.popleft()
         if self._pending_activations:
             return "activation", self._pending_activations.popleft()
         if self._pending_evidence:
@@ -233,6 +357,11 @@ class ModelPersistenceWorker:
             return "checkpoint", (name, self._pending_checkpoints.pop(name))
         return None
 
+    def _fail_pending_activation_fifo_locked(self, error: BaseException) -> None:
+        while self._pending_activation_fifo:
+            _kind, work = self._pending_activation_fifo.popleft()
+            work.receipt._complete(durable=False, error=error)
+
     def _run(self) -> None:
         while True:
             with self._condition:
@@ -242,9 +371,22 @@ class ModelPersistenceWorker:
                     return
             kind, payload = work
             activation_work = payload if kind == "activation" and isinstance(payload, _ActivationWork) else None
+            phase_work = (
+                payload
+                if kind == "activation-phase" and isinstance(payload, _ActivationPhaseWork)
+                else None
+            )
+            confidence_work = (
+                payload
+                if kind == "activation-confidence"
+                and isinstance(payload, _ActivationConfidenceWork)
+                else None
+            )
             succeeded = False
             try:
                 if kind == "checkpoint":
+                    if not isinstance(payload, tuple) or len(payload) != 2:
+                        raise TypeError("checkpoint work is malformed")
                     name, snapshot = payload
                     outcome = self._save_checkpoint(name, snapshot)
                     if outcome is CheckpointSaveOutcome.FAILED:
@@ -253,10 +395,19 @@ class ModelPersistenceWorker:
                         raise RuntimeError(f"unknown checkpoint store outcome: {outcome!r}")
                 elif kind == "evidence":
                     self._append_evidence(self._durable_evidence_batch(payload))
+                elif confidence_work is not None:
+                    self._append_evidence((confidence_work.record,))
                 elif activation_work is not None:
                     result = self._commit_activation(activation_work.decision)
                     if result is False:
                         raise RuntimeError("activation transaction declined")
+                elif phase_work is not None:
+                    result = self._persist_activation_phase(
+                        phase_work.record,
+                        phase_work.expected_phase,
+                    )
+                    if result is False:
+                        raise RuntimeError("activation phase transaction declined")
                 else:
                     raise TypeError("activation work is malformed")
                 succeeded = True
@@ -264,7 +415,17 @@ class ModelPersistenceWorker:
                 with self._condition:
                     self._failed = True
                     self._evidence_blocked = True
+                    self._fail_pending_activation_fifo_locked(error)
                 self._logger.error(f"Could not persist model {kind}: {error}")
+                if phase_work is not None:
+                    phase_work.receipt._complete(durable=False, error=error)
+                if confidence_work is not None:
+                    confidence_work.receipt._complete(durable=False, error=error)
+            else:
+                if phase_work is not None:
+                    phase_work.receipt._complete(durable=True)
+                if confidence_work is not None:
+                    confidence_work.receipt._complete(durable=True)
             finally:
                 with self._condition:
                     if activation_work is not None:

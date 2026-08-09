@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 from common.control_trace import ActuationMode, ControllerType, ResultStaleState
 from common.model_evidence import (
+    ConfidenceDecisionEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
@@ -40,6 +41,11 @@ from common.model_evidence import (
     SessionSummaryEvidence,
 )
 
+from controller.model_learning.activation import (
+    ActivationPhase,
+    OwnedGreyControlPair,
+    PreparedActivationRecord,
+)
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
 
@@ -164,12 +170,42 @@ def _freeze_evidence(
         or not isinstance(role_generation, int)
     ):
         return (summary,) + records
-    if not isinstance(refresh, RefreshDiagnosticsEvidence):
-        return (summary,) + records
-    return (
-        (summary,)
-        + records
-        + (
+    additions: tuple[ModelEvidenceRecord, ...] = ()
+    if not bool(outcome.get("confidence_already_persisted", False)):
+        rejection_reasons = tuple(getattr(evaluation, "rejection_reasons", ()))
+        accepted = outcome.get("confidence_accepted")
+        if not isinstance(accepted, bool):
+            accepted = not rejection_reasons and int(
+                getattr(evaluation, "consecutive_wins", 0)
+            ) >= 2
+        reason = (
+            None
+            if accepted
+            else (
+                ";".join(rejection_reasons)
+                if rejection_reasons
+                else "confidence-window-incomplete"
+            )
+        )
+        additions += (
+            ModelEvidenceRecord(
+                evidence_id=f"{session_id}:{decision_id}:confidence:{role_generation}",
+                kind=EvidenceKind.CONFIDENCE_DECISION,
+                session_id=session_id,
+                cook_id=cook_id,
+                timestamp_ms=evaluated_at_ms,
+                role_generation=role_generation,
+                model_digest=challenger_digest,
+                provenance_digest=incumbent_digest,
+                payload=ConfidenceDecisionEvidence(
+                    decision_id=decision_id,
+                    blocked=not accepted,
+                    reason=reason,
+                ),
+            ),
+        )
+    if isinstance(refresh, RefreshDiagnosticsEvidence):
+        additions += (
             ModelEvidenceRecord(
                 evidence_id=f"{session_id}:{decision_id}:refresh:{role_generation}",
                 kind=EvidenceKind.REFRESH_DIAGNOSTICS,
@@ -182,7 +218,7 @@ def _freeze_evidence(
                 payload=refresh,
             ),
         )
-    )
+    return (summary,) + records + additions
 
 
 def _freeze_status_value(value: object) -> StatusValue:
@@ -759,6 +795,35 @@ def _close_core(core) -> None:
         close()
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedPairTransition:
+    """A durable prepared receipt plus the exact inert pair to install once."""
+
+    record: PreparedActivationRecord
+    candidate_pair: OwnedGreyControlPair
+    prepared_receipt: object
+    persist_phase: Callable[[PreparedActivationRecord, ActivationPhase | None], object]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.record, PreparedActivationRecord):
+            raise TypeError("record must be a PreparedActivationRecord")
+        if self.record.phase is not ActivationPhase.PREPARED:
+            raise ValueError("runner transition requires prepared phase")
+        if not isinstance(self.candidate_pair, OwnedGreyControlPair):
+            raise TypeError("candidate_pair must be an OwnedGreyControlPair")
+        if self.candidate_pair.descriptor != self.record.candidate:
+            raise ValueError("candidate pair does not match prepared transaction")
+        if not callable(self.persist_phase):
+            raise TypeError("persist_phase must be callable")
+
+
+@dataclass(slots=True)
+class _PairActivationFlight:
+    transition: PreparedPairTransition
+    phase: ActivationPhase
+    receipt: object
+
+
 class ThreadedControllerRunner(ControllerRunner):
     """Runs core.update() on a background thread at the core's control period, so
     an expensive solve never blocks the caller. submit()/latest() are
@@ -805,6 +870,10 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_calibrations: collections.deque[tuple[str, object]] = collections.deque()
         self._pending_activations: collections.deque[tuple[str, object]] = collections.deque()
         self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
+        self._pending_pair_activation: PreparedPairTransition | None = None
+        self._pair_activation_flight: _PairActivationFlight | None = None
+        self._pair_activation_ids: set[str] = set()
+        self._mpc_activation_terminated = False
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
         self._accepted_observations: dict[int, tuple[int, FrameObservation]] = {}
         self._inflight_observations: set[int] = set()
@@ -906,6 +975,10 @@ class ThreadedControllerRunner(ControllerRunner):
                 poll = getattr(core, "poll_learning_off_path", None)
                 if callable(poll):
                     poll()
+                drain_transitions = getattr(core, "drain_prepared_pair_transitions", None)
+                if callable(drain_transitions):
+                    for transition in tuple(drain_transitions()):
+                        self.queue_pair_activation(transition)
             except Exception:
                 # Learning is optional control evidence. A failed drain must not
                 # kill either the lifecycle dispatcher or the live controller.
@@ -922,6 +995,133 @@ class ThreadedControllerRunner(ControllerRunner):
             while self._learning_poll_core is core:
                 self._learning_condition.wait()
 
+
+    @staticmethod
+    def _receipt_is_durable(receipt: object) -> bool:
+        return bool(
+            getattr(receipt, "accepted", False)
+            and getattr(receipt, "completed", False)
+            and getattr(receipt, "durable", False)
+        )
+
+    def _terminate_pair_activation(self, reason: str) -> None:
+        terminate = getattr(self._core, "terminate_mpc_activation", None)
+        if callable(terminate):
+            try:
+                terminate(reason)
+            except Exception:
+                pass
+        with self._lock:
+            self._mpc_activation_terminated = True
+
+    def _compensate_pair_activation(
+        self,
+        transition: PreparedPairTransition,
+        reason: str,
+    ) -> bool:
+        compensate = getattr(self._core, "compensate_candidate_pair", None)
+        try:
+            compensated = (
+                callable(compensate)
+                and compensate(transition.candidate_pair, transition.record, reason) is True
+            )
+        except Exception:
+            compensated = False
+        if not compensated:
+            self._terminate_pair_activation("activation-compensation-failed")
+            return False
+        aborted = transition.record.transition(ActivationPhase.ABORTED, reason=reason)
+        try:
+            receipt = transition.persist_phase(aborted, ActivationPhase.PREPARED)
+        except Exception:
+            self._terminate_pair_activation("activation-abort-persistence-failed")
+            return False
+        if not getattr(receipt, "accepted", False):
+            self._terminate_pair_activation("activation-abort-persistence-failed")
+            return False
+        with self._lock:
+            self._pair_activation_flight = _PairActivationFlight(
+                transition,
+                ActivationPhase.ABORTED,
+                receipt,
+            )
+        return False
+
+    def _advance_pair_activation(self) -> bool:
+        """Advance without blocking; True alone permits the next controller solve."""
+        with self._lock:
+            if self._mpc_activation_terminated:
+                return False
+            flight = self._pair_activation_flight
+            pending = self._pending_pair_activation if self._revision > 0 else None
+            if flight is None and pending is not None:
+                self._pending_pair_activation = None
+        if flight is not None:
+            receipt = flight.receipt
+            if not getattr(receipt, "completed", False):
+                return False
+            if flight.phase is ActivationPhase.ACTIVE:
+                if not self._receipt_is_durable(receipt):
+                    receipt_error = getattr(receipt, "error", None)
+                    reason = (
+                        "activation-confidence-changed"
+                        if isinstance(receipt_error, str)
+                        and "activation-authority-changed" in receipt_error
+                        else "active-persistence-failed"
+                    )
+                    return self._compensate_pair_activation(
+                        flight.transition,
+                        reason,
+                    )
+                authorize = getattr(self._core, "authorize_candidate_pair", None)
+                try:
+                    authorized = callable(authorize) and authorize(
+                        flight.transition.record.transition(ActivationPhase.ACTIVE)
+                    ) is True
+                except Exception:
+                    authorized = False
+                if not authorized:
+                    self._terminate_pair_activation("active-authorization-failed")
+                    return False
+            elif not self._receipt_is_durable(receipt):
+                self._terminate_pair_activation("activation-abort-persistence-failed")
+                return False
+            with self._lock:
+                self._pair_activation_flight = None
+            return True
+        if pending is None:
+            return True
+
+        install = getattr(self._core, "install_candidate_pair_inert", None)
+        try:
+            installed = callable(install) and install(
+                pending.candidate_pair,
+                pending.record,
+            ) is True
+        except Exception:
+            installed = False
+        if not installed:
+            return self._compensate_pair_activation(pending, "candidate-install-failed")
+        active = pending.record.transition(ActivationPhase.ACTIVE)
+        try:
+            receipt = pending.persist_phase(active, ActivationPhase.PREPARED)
+        except Exception:
+            return self._compensate_pair_activation(
+                pending,
+                "active-persistence-failed",
+            )
+        if not getattr(receipt, "accepted", False):
+            return self._compensate_pair_activation(
+                pending,
+                "active-persistence-failed",
+            )
+        with self._lock:
+            self._pair_activation_flight = _PairActivationFlight(
+                pending,
+                ActivationPhase.ACTIVE,
+                receipt,
+            )
+        return False
     def _loop(self):
         while True:
             stopping = self._stop_event.is_set()
@@ -1070,6 +1270,15 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._wait_for_learning_release(retired_core)
                 _close_core(retired_core)
                 continue
+            if not self._advance_pair_activation():
+                if stopping:
+                    with self._lock:
+                        final_core = self._core
+                    self._learning_thread.join()
+                    _close_core(final_core)
+                    return
+                self._wait_for_period(self._control_period or 1.0)
+                continue
             for operation, payload in pending_calibrations:
                 if operation == "command":
                     self._core.request_calibration(payload)
@@ -1123,6 +1332,28 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._pending_calibrations.append(("cancel", reason))
 
+    @property
+    def mpc_activation_terminated(self) -> bool:
+        with self._lock:
+            return self._mpc_activation_terminated
+
+    def queue_pair_activation(self, transition: PreparedPairTransition) -> bool:
+        """Accept exactly one swap only after its prepared receipt is durable."""
+        if not isinstance(transition, PreparedPairTransition):
+            raise TypeError("transition must be a PreparedPairTransition")
+        if not self._receipt_is_durable(transition.prepared_receipt):
+            return False
+        transaction_id = transition.record.transaction_id
+        with self._lock:
+            if self._mpc_activation_terminated:
+                return False
+            if transaction_id in self._pair_activation_ids:
+                return True
+            if self._pending_pair_activation is not None or self._pair_activation_flight is not None:
+                return False
+            self._pair_activation_ids.add(transaction_id)
+            self._pending_pair_activation = transition
+        return True
     def restore_activation(self, persisted, records):
         with self._lock:
             self._pending_activations.append(("restore", (persisted, tuple(records))))

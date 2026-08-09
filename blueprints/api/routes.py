@@ -1,4 +1,5 @@
 import json
+import math
 import logging
 import time
 
@@ -39,13 +40,13 @@ from common.modes import Mode
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings_pairs
 from common.controller_deps import guard_controller_selection
-from controller.linear_mpc.activation import (
+from controller.model_learning.activation import (
     ActivationManager,
     ActivationRequest,
-    activation_record_for_state,
-    extract_state_space_candidate,
-    rollback_kind_for_state,
+    GreyControlPairDescriptor,
+    OwnedGreyControlPair,
 )
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.linear_mpc.report import build_evidence_artifact, current_evidence_report
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from . import api_bp
@@ -225,17 +226,50 @@ def _model_activation_configuration(settings):
     }
 
 
-def _configured_activation_prospective_solve(candidate, configuration):
-    """Exercise the exact configured controller policy and certificate boundary."""
+def _build_manual_candidate_pair(descriptor: GreyControlPairDescriptor) -> OwnedGreyControlPair:
+    """Build an inert pair from the exact reviewed durable configuration."""
     from controller.mpc import Controller as MpcController
 
-    config = configuration.get("config")
-    cycle_data = configuration.get("cycle_data")
-    units = configuration.get("units")
-    if not isinstance(config, dict) or not isinstance(cycle_data, dict) or not isinstance(units, str):
+    settings = read_settings()
+    activation_configuration = _model_activation_configuration(settings)
+    configured = activation_configuration["config"]
+    if not isinstance(configured, dict):
         raise ValueError("controller configuration is incomplete")
-    controller = MpcController(config, units, cycle_data)
-    return controller._activation_prospective_solve(candidate)
+    candidate_config = dict(configured)
+    descriptor_config = dict(descriptor.configuration)
+    nested = descriptor_config.get("controller_config")
+    candidate_config.update(nested if isinstance(nested, dict) else descriptor_config)
+    controller = MpcController(
+        candidate_config,
+        activation_configuration["units"],
+        activation_configuration["cycle_data"],
+    )
+    pair = controller.active_control_pair
+    if pair.descriptor.model_digest != descriptor.model_digest:
+        pair.close()
+        raise ValueError("candidate-digest-changed")
+    return OwnedGreyControlPair(descriptor, pair.estimator, pair.solver)
+
+
+def _manual_candidate_dry_solve(pair: OwnedGreyControlPair) -> bool:
+    config = getattr(pair.solver, "config", None)
+    state_size = getattr(config, "state_size", None)
+    horizon = getattr(config, "horizon_steps", None)
+    if not isinstance(state_size, int) or not isinstance(horizon, int):
+        return False
+    state = getattr(pair.estimator, "state", getattr(pair.estimator, "x", (0.0,) * state_size))
+    result = pair.solver.solve(
+        state,
+        setpoint_c=float(getattr(config, "T_amb", 20.0)) + 50.0,
+        q_previous=0.0,
+        equilibrium_q=0.4,
+    )
+    sequence = tuple(result.sequence_q)
+    return (
+        len(sequence) == horizon
+        and math.isfinite(float(result.objective))
+        and all(math.isfinite(float(value)) for value in sequence)
+    )
 
 
 def _activation_checkpoint():
@@ -258,7 +292,7 @@ def _activation_rejection(reason, status=409):
 
 @api_bp.post("/model-evidence/activate")
 def api_model_evidence_activate():
-    """Persist the exact reviewed candidate before runtime ownership can change."""
+    """Durably prepare the exact reviewed grey pair; runtime alone may activate it."""
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or set(body) != {"candidate_digest", "decision_id"}:
         return _activation_rejection(
@@ -278,6 +312,15 @@ def api_model_evidence_activate():
             raise ValueError("candidate-digest-changed")
         if projection["decision_id"] != activation_request.decision_id:
             raise ValueError("stale-confidence-decision")
+        checkpoint = _activation_checkpoint()
+        incumbent_value = checkpoint.get("active_pair")
+        candidate_value = checkpoint.get("candidate_pair")
+        if not isinstance(incumbent_value, dict) or not isinstance(candidate_value, dict):
+            raise ValueError("candidate-pair-not-found")
+        incumbent = GreyControlPairDescriptor.from_dict(incumbent_value)
+        candidate = GreyControlPairDescriptor.from_dict(candidate_value)
+        if candidate.model_digest != activation_request.candidate_digest:
+            raise ValueError("candidate-digest-changed")
     except (KeyError, TypeError, ValueError) as error:
         return _activation_rejection(str(error), 422 if isinstance(error, (KeyError, TypeError)) else 409)
 
@@ -285,45 +328,42 @@ def api_model_evidence_activate():
         ControllerModelStore(),
         logging.getLogger("control"),
     )
+    incumbent_owner = OwnedGreyControlPair(incumbent, object(), object())
     manager = ActivationManager(
-        lambda: tuple(read_model_evidence()),
-        candidate_snapshot=lambda _digest, _generation: extract_state_space_candidate(_activation_checkpoint()),
-        rollback_snapshot=_activation_checkpoint,
-        controller_configuration=lambda: _model_activation_configuration(read_settings()),
-        prospective_solve=_configured_activation_prospective_solve,
-        persist_activation=worker.commit_activation,
-        session_id="api-manual-activation",
+        incumbent_pair=incumbent_owner,
+        build_candidate=_build_manual_candidate_pair,
+        validate_candidate=lambda pair: pair.descriptor == candidate,
+        native_dry_solve=_manual_candidate_dry_solve,
+        persist_prepared=lambda record: worker.submit_activation_phase(
+            record,
+            expected_phase=None,
+        ),
+        receipt_timeout=2.0,
     )
     try:
-        persisted_activation = read_model_activation()
-        if persisted_activation is not None:
-            restored = manager.restore(persisted_activation)
-            if not restored.accepted and restored.reason != "restore-generation-already-failed":
-                return _activation_rejection(restored.reason, 409)
-        prepared = manager.prepare(activation_request)
-        decision = manager.commit(prepared)
-    finally:
-        worker.flush_and_stop()
-    if not decision.accepted:
-        status = (
-            503
-            if decision.reason
-            in {
-                "activation-persistence-failed",
-                "activation-persistence-unavailable",
-            }
-            else 409
+        decision = manager.prepare(
+            activation_request,
+            candidate,
+            origin=CandidateOrigin.OPERATOR_CALIBRATION,
+            policy=ActivationPolicy.OPERATOR_REVIEWED,
         )
+    finally:
+        worker.flush_and_stop(timeout=2.0)
+    if not decision.accepted:
+        status = 503 if decision.reason.startswith("activation-persistence") else 409
         return _activation_rejection(decision.reason, status)
-    state = manager.state
+    if decision.candidate_pair is not None:
+        decision.candidate_pair.close()
+    record = decision.record
+    assert record is not None
     return jsonify(
         {
             "accepted": True,
-            "active_kind": state.active_kind,
-            "candidate_digest": state.active_digest,
-            "decision_id": state.decision_id,
-            "role_generation": state.role_generation,
-            "controller_configuration_digest": state.controller_configuration_digest,
+            "phase": record.phase.value,
+            "transaction_id": record.transaction_id,
+            "decision_id": record.decision_id,
+            "candidate_digest": record.candidate.model_digest,
+            "role_generation": record.candidate.role_generation,
         }
     ), 200
 
@@ -338,11 +378,11 @@ def api_model_evidence_rollback():
     if not isinstance(reason, str) or not reason.strip():
         return _activation_rejection("rollback reason must be non-blank", 422)
     activation = read_model_activation()
-    if activation is None:
-        return _activation_rejection("there is no active state-space generation", 409)
-    records = tuple(read_model_evidence())
-    source = activation_record_for_state(records, activation)
-    if source is None or source.model_digest is None:
+    if activation is None or activation.phase != "active":
+        return _activation_rejection("there is no active grey generation", 409)
+    active_pair = activation.active_pair
+    rollback_pair = activation.rollback_pair
+    if active_pair is None or rollback_pair is None:
         return _activation_rejection("activation-lineage-missing", 409)
     now_ms = int(time.time() * 1_000)
     decision = ModelEvidenceRecord(
@@ -352,8 +392,8 @@ def api_model_evidence_rollback():
         cook_id=None,
         timestamp_ms=now_ms,
         role_generation=activation.role_generation + 1,
-        model_digest=source.model_digest,
-        provenance_digest=source.provenance_digest,
+        model_digest=active_pair.model_digest,
+        provenance_digest=rollback_pair.model_digest,
         payload=RollbackEvidence(
             decision_id=activation.evidence_decision_id,
             reason=reason.strip(),
@@ -366,11 +406,7 @@ def api_model_evidence_rollback():
     except Exception as error:
         return _activation_rejection(f"rollback-persistence-failed: {error}", 503)
     lifecycle = outcome.record.payload
-    fallback_kind = (
-        lifecycle.fallback_kind
-        if isinstance(lifecycle, FallbackEvidence) and lifecycle.fallback_kind is not None
-        else rollback_kind_for_state(activation)
-    )
+    fallback_kind = "grey-box"
     return jsonify(
         {
             "accepted": True,
@@ -378,6 +414,7 @@ def api_model_evidence_rollback():
             "decision_id": activation.evidence_decision_id,
             "reason": lifecycle.reason,
             "role_generation": outcome.record.role_generation,
+            "rollback_digest": rollback_pair.model_digest,
         }
     ), 200
 

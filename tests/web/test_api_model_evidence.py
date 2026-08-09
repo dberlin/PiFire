@@ -1,4 +1,3 @@
-import hashlib
 import json
 
 import pytest
@@ -7,22 +6,25 @@ from app import app as flask_app
 from blueprints.api import routes
 from common.datastore_accessors import (
     append_model_evidence,
-    commit_model_activation,
+    commit_model_activation_phase,
     read_model_activation,
     read_model_evidence,
 )
 from common.model_evidence import (
-    ActivationEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
     RefreshDiagnosticsEvidence,
     RollbackEvidence,
 )
-from controller.linear_mpc.activation import canonical_snapshot_digest
-from tests.unit.mpc.test_innovation_state_space import _config, _frames
-from tests.unit.mpc.test_model_activation import _fixture
-from controller.linear_mpc.state_space import InnovationStateSpace
+from controller.model_learning.activation import (
+    ActivationPhase,
+    GreyControlPairDescriptor,
+    OwnedGreyControlPair,
+    PreparedActivationRecord,
+    canonical_snapshot_digest,
+)
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 
 
 _CANDIDATE = "c" * 64
@@ -168,179 +170,205 @@ def test_report_route_exposes_the_accepted_calibration_command_high_water(client
     assert response.get_json()["calibration"]["revision"] == 7
 
 
-def test_rollback_is_atomic_truthful_and_idempotent_for_the_exact_activation(client):
-    active_snapshot = {
-        "schema": "innovation-state-space/v2",
-        "config": {},
-        "model": {"generation": "b"},
-        "bounds": {},
-        "plausibility_bounds": {},
-        "state": {"temperature_c": 123.0},
-    }
-    rollback_snapshot = {**active_snapshot, "model": {"generation": "a"}}
-    active_json = json.dumps(active_snapshot, sort_keys=True, separators=(",", ":"))
-    rollback_json = json.dumps(rollback_snapshot, sort_keys=True, separators=(",", ":"))
-    assert canonical_snapshot_digest(active_snapshot) != hashlib.sha256(active_json.encode()).hexdigest()
-    activation = ModelEvidenceRecord(
-        evidence_id="activation-b",
-        kind=EvidenceKind.ACTIVATION,
+class _ReadyReport:
+    def __init__(self, candidate_digest: str, decision_id: str) -> None:
+        self._candidate_digest = candidate_digest
+        self._decision_id = decision_id
+
+    def to_dict(self):
+        return {
+            "status": "ready-for-review",
+            "candidate": {"digest": self._candidate_digest},
+            "decision_id": self._decision_id,
+        }
+
+
+class _ApiHandle:
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def _api_descriptor(config, candidate_generation, role_generation):
+    return GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(config),
+        configuration=config,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=candidate_generation,
+        role_generation=role_generation,
+    )
+
+
+def _api_activation():
+    incumbent = _api_descriptor(
+        {"schema": "pifire-grey-box-model/v4", "theta": 50.0},
+        3,
+        4,
+    )
+    candidate = _api_descriptor(
+        {"schema": "pifire-grey-box-model/v4", "theta": 40.0},
+        4,
+        5,
+    )
+    prepared = PreparedActivationRecord.prepared(
+        timestamp_ms=1_000,
+        incumbent=incumbent,
+        candidate=candidate,
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        decision_id="decision-api-grey",
+    )
+    confidence = ModelEvidenceRecord(
+        evidence_id="confidence-api-grey",
+        kind=EvidenceKind.CONFIDENCE_DECISION,
         session_id="session-api",
         cook_id=None,
-        timestamp_ms=1_000,
-        role_generation=8,
-        model_digest=canonical_snapshot_digest(active_snapshot),
-        provenance_digest=canonical_snapshot_digest(rollback_snapshot),
-        payload=ActivationEvidence(
-            decision_id="decision-b",
-            active_snapshot_json=active_json,
-            rollback_snapshot_json=rollback_json,
-            controller_configuration_digest="d" * 64,
+        timestamp_ms=999,
+        role_generation=incumbent.role_generation,
+        model_digest=candidate.model_digest,
+        provenance_digest=incumbent.model_digest,
+        payload=ConfidenceDecisionEvidence(
+            decision_id=prepared.decision_id,
+            blocked=False,
         ),
     )
-    append_model_evidence(
-        (
-            ModelEvidenceRecord(
-                evidence_id="confidence-b",
-                kind=EvidenceKind.CONFIDENCE_DECISION,
-                session_id="session-api",
-                cook_id=None,
-                timestamp_ms=999,
-                role_generation=7,
-                model_digest=activation.model_digest,
-                provenance_digest=activation.provenance_digest,
-                payload=ConfidenceDecisionEvidence(decision_id="decision-b", blocked=False),
-            ),
-        )
+    return incumbent, candidate, prepared, confidence
+
+
+def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
+    estimator = _ApiHandle()
+    solver = _ApiHandle()
+    pair = OwnedGreyControlPair(candidate, estimator, solver)
+    monkeypatch.setattr(
+        routes,
+        "_model_evidence_projection",
+        lambda: (_ReadyReport(candidate.model_digest, prepared.decision_id), ()),
     )
-    commit_model_activation(activation)
-
-    first = client.post("/api/model-evidence/rollback", json={"reason": "operator rollback b"})
-    duplicate = client.post("/api/model-evidence/rollback", json={"reason": "different retry text"})
-
-    assert first.status_code == 200
-    assert duplicate.status_code == 200
-    assert (
-        first.get_json()
-        == duplicate.get_json()
-        == {
-            "accepted": True,
-            "active_kind": "innovation-state-space",
-            "decision_id": "decision-b",
-            "reason": "operator rollback b",
-            "role_generation": 9,
-        }
-    )
-    rollbacks = [record for record in read_model_evidence() if isinstance(record.payload, RollbackEvidence)]
-    assert len(rollbacks) == 1
-    assert rollbacks[0].model_digest == activation.model_digest == canonical_snapshot_digest(active_snapshot)
-
-
-def test_activate_route_reloads_live_authorities_at_commit(client, monkeypatch):
-    model = InnovationStateSpace(_config(orders=(1,), delays=(1,)))
-    assert model.fit(_frames(order=1)).accepted
-    snapshot = model.snapshot()
-    _manager, activation_request, records, _writes, _invalidations, _config_tree, rollback = _fixture(snapshot)
-
-    class ReadyReport:
-        def to_dict(self):
-            return {
-                "status": "ready-for-review",
-                "candidate": {"digest": activation_request.candidate_digest},
-                "decision_id": activation_request.decision_id,
-            }
-
-    settings = {
-        "controller": {"selected": "mpc", "config": {"mpc": {"n_horizon": 24}}},
-        "cycle_data": {},
-        "globals": {"units": "F"},
-    }
-    settings_reads = 0
-
-    def read_live_settings():
-        nonlocal settings_reads
-        settings_reads += 1
-        if settings_reads == 2:
-            records.append(
-                ModelEvidenceRecord(
-                    evidence_id="decision-raced",
-                    kind=EvidenceKind.CONFIDENCE_DECISION,
-                    session_id="session-api",
-                    cook_id=None,
-                    timestamp_ms=9_999,
-                    role_generation=7,
-                    model_digest=activation_request.candidate_digest,
-                    provenance_digest=records[0].provenance_digest,
-                    payload=ConfidenceDecisionEvidence(decision_id="decision-raced", blocked=False),
-                )
-            )
-        return settings
-
-    monkeypatch.setattr(routes, "_model_evidence_projection", lambda: (ReadyReport(), tuple(records)))
-    monkeypatch.setattr(routes, "read_model_evidence", lambda: list(records))
-    monkeypatch.setattr(routes, "read_model_activation", lambda: None)
-    monkeypatch.setattr(routes, "read_settings", read_live_settings)
     monkeypatch.setattr(
         routes,
         "_activation_checkpoint",
-        lambda: {"online_adaptation": {"challenger": snapshot, "incumbent": rollback}},
-    )
-    monkeypatch.setattr(routes, "_configured_activation_prospective_solve", lambda _candidate, _configuration: 0.3)
-
-    response = client.post(
-        "/api/model-evidence/activate",
-        json={
-            "candidate_digest": activation_request.candidate_digest,
-            "decision_id": activation_request.decision_id,
+        lambda: {
+            "active_pair": incumbent.to_dict(),
+            "candidate_pair": candidate.to_dict(),
         },
     )
+    monkeypatch.setattr(routes, "_build_manual_candidate_pair", lambda _descriptor: pair)
+    monkeypatch.setattr(routes, "_manual_candidate_dry_solve", lambda value: value is pair)
+    return pair, estimator, solver
 
-    assert response.status_code == 409
-    assert response.get_json()["detail"] == "stale-confidence-decision"
-    assert read_model_activation() is None
 
-
-def test_activate_route_commits_the_exact_live_authority(client, monkeypatch):
-    model = InnovationStateSpace(_config(orders=(1,), delays=(1,)))
-    assert model.fit(_frames(order=1)).accepted
-    snapshot = model.snapshot()
-    _manager, activation_request, records, _writes, _invalidations, _config_tree, rollback = _fixture(snapshot)
-    append_model_evidence(tuple(records))
-
-    class ReadyReport:
-        def to_dict(self):
-            return {
-                "status": "ready-for-review",
-                "candidate": {"digest": activation_request.candidate_digest},
-                "decision_id": activation_request.decision_id,
-            }
-
-    settings = {
-        "controller": {"selected": "mpc", "config": {"mpc": {"n_horizon": 24}}},
-        "cycle_data": {},
-        "globals": {"units": "F"},
-    }
-    monkeypatch.setattr(routes, "_model_evidence_projection", lambda: (ReadyReport(), tuple(records)))
-    monkeypatch.setattr(routes, "read_settings", lambda: settings)
-    monkeypatch.setattr(
-        routes,
-        "_activation_checkpoint",
-        lambda: {"online_adaptation": {"challenger": snapshot, "incumbent": rollback}},
+def test_activate_route_persists_only_prepared_after_exact_manual_validation(client, monkeypatch):
+    incumbent, candidate, prepared, confidence = _api_activation()
+    append_model_evidence((confidence,))
+    _pair, estimator, solver = _patch_manual_candidate(
+        monkeypatch, incumbent, candidate, prepared
     )
-    monkeypatch.setattr(routes, "_configured_activation_prospective_solve", lambda _candidate, _configuration: 0.3)
 
     response = client.post(
         "/api/model-evidence/activate",
         json={
-            "candidate_digest": activation_request.candidate_digest,
-            "decision_id": activation_request.decision_id,
+            "candidate_digest": candidate.model_digest,
+            "decision_id": prepared.decision_id,
         },
     )
 
     assert response.status_code == 200
-    assert response.get_json()["active_kind"] == "innovation-state-space"
-    active = read_model_activation()
-    assert active is not None
-    assert active.evidence_decision_id == activation_request.decision_id
-    assert active.active_snapshot_json == json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
-    activations = [record for record in read_model_evidence() if isinstance(record.payload, ActivationEvidence)]
-    assert len(activations) == 1
+    assert response.get_json() == {
+        "accepted": True,
+        "phase": "prepared",
+        "transaction_id": prepared.transaction_id,
+        "decision_id": prepared.decision_id,
+        "candidate_digest": candidate.model_digest,
+        "role_generation": candidate.role_generation,
+    }
+    state = read_model_activation()
+    assert state is not None
+    assert state.phase == "prepared"
+    assert state.active_pair == incumbent
+    assert state.candidate_pair == candidate
+    assert estimator.closed == solver.closed == 1
+
+
+def test_activate_route_rechecks_latest_confidence_inside_prepared_transaction(client, monkeypatch):
+    incumbent, candidate, prepared, confidence = _api_activation()
+    append_model_evidence((confidence,))
+    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
+    original_checkpoint = routes._activation_checkpoint
+
+    def race_confidence():
+        checkpoint = original_checkpoint()
+        append_model_evidence(
+            (
+                confidence.model_copy(
+                    update={
+                        "evidence_id": "confidence-api-raced",
+                        "timestamp_ms": 1_001,
+                        "payload": ConfidenceDecisionEvidence(
+                            decision_id=prepared.decision_id,
+                            blocked=True,
+                            reason="confidence-regressed",
+                        ),
+                    }
+                ),
+            )
+        )
+        return checkpoint
+
+    monkeypatch.setattr(routes, "_activation_checkpoint", race_confidence)
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": candidate.model_digest,
+            "decision_id": prepared.decision_id,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["detail"] == "activation-authority-changed"
+    assert read_model_activation() is None
+
+
+def test_activate_route_requires_exact_body_digest_decision_and_operator_policy(client, monkeypatch):
+    incumbent, candidate, prepared, confidence = _api_activation()
+    append_model_evidence((confidence,))
+    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
+
+    malformed = client.post("/api/model-evidence/activate", json={"decision_id": prepared.decision_id})
+    stale = client.post(
+        "/api/model-evidence/activate",
+        json={"candidate_digest": candidate.model_digest, "decision_id": "stale"},
+    )
+
+    assert malformed.status_code == 422
+    assert stale.status_code == 409
+    assert read_model_activation() is None
+
+
+def test_rollback_is_atomic_idempotent_and_names_exact_recorded_owner(client):
+    incumbent, candidate, prepared, confidence = _api_activation()
+    append_model_evidence((confidence,))
+    commit_model_activation_phase(prepared, expected_phase=None)
+    commit_model_activation_phase(
+        prepared.transition(ActivationPhase.ACTIVE),
+        expected_phase=ActivationPhase.PREPARED,
+    )
+
+    first = client.post("/api/model-evidence/rollback", json={"reason": "operator rollback grey"})
+    duplicate = client.post("/api/model-evidence/rollback", json={"reason": "different retry text"})
+
+    assert first.status_code == duplicate.status_code == 200
+    assert first.get_json() == duplicate.get_json() == {
+        "accepted": True,
+        "active_kind": "grey-box",
+        "decision_id": prepared.decision_id,
+        "reason": "operator rollback grey",
+        "role_generation": candidate.role_generation + 1,
+        "rollback_digest": incumbent.model_digest,
+    }
+    rollbacks = [record for record in read_model_evidence() if isinstance(record.payload, RollbackEvidence)]
+    assert len(rollbacks) == 1
+    assert rollbacks[0].model_digest == candidate.model_digest

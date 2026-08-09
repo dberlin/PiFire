@@ -696,6 +696,43 @@ class ModelActivationState:
     evidence_decision_id: str
     controller_configuration_digest: str
     role_generation: int
+    phase: str = "active"
+    transaction_id: str | None = None
+    incumbent_pair_json: str | None = None
+    candidate_pair_json: str | None = None
+    rollback_pair_json: str | None = None
+    origin: str | None = None
+    policy: str | None = None
+    candidate_generation: int | None = None
+    candidate_digest: str | None = None
+    reason: str | None = None
+
+    @staticmethod
+    def _pair(value: str | None):
+        if value is None:
+            return None
+        from controller.model_learning.activation import GreyControlPairDescriptor
+
+        decoded = json.loads(value)
+        if not isinstance(decoded, dict):
+            raise ValueError("stored pair descriptor must be an object")
+        return GreyControlPairDescriptor.from_dict(decoded)
+
+    @property
+    def incumbent_pair(self):
+        return self._pair(self.incumbent_pair_json)
+
+    @property
+    def candidate_pair(self):
+        return self._pair(self.candidate_pair_json)
+
+    @property
+    def rollback_pair(self):
+        return self._pair(self.rollback_pair_json)
+
+    @property
+    def active_pair(self):
+        return self.candidate_pair if self.phase == "active" else self.incumbent_pair
 
 
 @dataclass(frozen=True, slots=True)
@@ -888,6 +925,192 @@ def commit_model_activation(
             )
 
 
+def _activation_state_row(connection: sqlite3.Connection):
+    return connection.execute(
+        """
+        SELECT active_snapshot_json, rollback_snapshot_json, evidence_decision_id,
+               controller_configuration_digest, role_generation, phase,
+               transaction_id, incumbent_pair_json, candidate_pair_json,
+               rollback_pair_json, origin, policy, candidate_generation,
+               candidate_digest, reason
+        FROM model_activation_state WHERE singleton=1
+        """
+    ).fetchone()
+
+
+def commit_model_activation_phase(
+    record,
+    *,
+    expected_phase=None,
+    database_path: str | os.PathLike[str] | None = None,
+) -> None:
+    """Durably prepare or CAS one exact grey estimator/native-pair transaction."""
+    from controller.model_learning.activation import ActivationPhase, PreparedActivationRecord
+
+    if not isinstance(record, PreparedActivationRecord):
+        raise TypeError("record must be a PreparedActivationRecord")
+    if expected_phase is not None:
+        expected_phase = ActivationPhase(expected_phase)
+    if record.phase is ActivationPhase.PREPARED and expected_phase is not None:
+        raise ValueError("prepared activation cannot have an expected phase")
+    if record.phase is not ActivationPhase.PREPARED and expected_phase is not ActivationPhase.PREPARED:
+        raise ValueError("active or aborted activation requires expected prepared phase")
+
+    incumbent_pair_json = json.dumps(
+        record.incumbent.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    candidate_pair_json = json.dumps(
+        record.candidate.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    rollback_pair_json = json.dumps(
+        record.rollback.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    incumbent_snapshot_json = json.dumps(
+        record.incumbent.to_dict()["configuration"],
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    candidate_snapshot_json = json.dumps(
+        record.candidate.to_dict()["configuration"],
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    with _model_evidence_connection(database_path) as connection:
+        with datastore.transaction(connection) as conn:
+            state_row = _activation_state_row(conn)
+            current = None if state_row is None else ModelActivationState(*state_row)
+            if record.phase is ActivationPhase.PREPARED:
+                authority_row = conn.execute(
+                    """
+                    SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+                           model_digest, provenance_digest, schema_version, payload
+                    FROM model_evidence
+                    WHERE kind=?
+                    ORDER BY timestamp_ms DESC, evidence_id DESC
+                    LIMIT 1
+                    """,
+                    (EvidenceKind.CONFIDENCE_DECISION.value,),
+                ).fetchone()
+                if authority_row is None:
+                    raise ValueError("activation-authority-changed")
+                authority = ModelEvidenceRecord.from_db_row(ModelEvidenceDbRow(*authority_row))
+                payload = authority.payload
+                if (
+                    not isinstance(payload, ConfidenceDecisionEvidence)
+                    or payload.blocked
+                    or payload.reason is not None
+                    or payload.decision_id != record.decision_id
+                    or authority.model_digest != record.candidate.model_digest
+                    or authority.provenance_digest != record.incumbent.model_digest
+                    or authority.role_generation != record.incumbent.role_generation
+                ):
+                    raise ValueError("activation-authority-changed")
+                provenance_rows = conn.execute(
+                    """
+                    SELECT DISTINCT provenance_digest
+                    FROM model_evidence
+                    WHERE model_digest=? AND role_generation=? AND provenance_digest IS NOT NULL
+                    """,
+                    (record.candidate.model_digest, record.incumbent.role_generation),
+                ).fetchall()
+                if {row[0] for row in provenance_rows} != {record.incumbent.model_digest}:
+                    raise ValueError("activation-authority-changed")
+                if current is not None:
+                    if (
+                        current.phase == ActivationPhase.PREPARED.value
+                        and current.transaction_id == record.transaction_id
+                        and current.incumbent_pair_json == incumbent_pair_json
+                        and current.candidate_pair_json == candidate_pair_json
+                    ):
+                        return
+                    if current.phase != ActivationPhase.ACTIVE.value or current.active_pair != record.incumbent:
+                        raise ValueError("activation-state-changed")
+            else:
+                if (
+                    current is None
+                    or current.phase != expected_phase.value
+                    or current.transaction_id != record.transaction_id
+                    or current.incumbent_pair_json != incumbent_pair_json
+                    or current.candidate_pair_json != candidate_pair_json
+                    or current.rollback_pair_json != rollback_pair_json
+                    or current.evidence_decision_id != record.decision_id
+                ):
+                    raise ValueError("activation-state-changed")
+                if record.phase is ActivationPhase.ACTIVE:
+                    authority_row = conn.execute(
+                        """
+                        SELECT evidence_id, session_id, cook_id, timestamp_ms, kind,
+                               role_generation, model_digest, provenance_digest,
+                               schema_version, payload
+                        FROM model_evidence
+                        WHERE kind=?
+                        ORDER BY timestamp_ms DESC, evidence_id DESC
+                        LIMIT 1
+                        """,
+                        (EvidenceKind.CONFIDENCE_DECISION.value,),
+                    ).fetchone()
+                    authority = (
+                        None
+                        if authority_row is None
+                        else ModelEvidenceRecord.from_db_row(
+                            ModelEvidenceDbRow(*authority_row)
+                        )
+                    )
+                    payload = None if authority is None else authority.payload
+                    if (
+                        not isinstance(payload, ConfidenceDecisionEvidence)
+                        or payload.blocked
+                        or payload.reason is not None
+                        or payload.decision_id != record.decision_id
+                        or authority.model_digest != record.candidate.model_digest
+                        or authority.provenance_digest != record.incumbent.model_digest
+                        or authority.role_generation != record.incumbent.role_generation
+                    ):
+                        raise ValueError("activation-authority-changed")
+
+            active_pair = (
+                record.candidate
+                if record.phase is ActivationPhase.ACTIVE
+                else record.incumbent
+            )
+            active_snapshot_json = (
+                candidate_snapshot_json
+                if record.phase is ActivationPhase.ACTIVE
+                else incumbent_snapshot_json
+            )
+            conn.execute("DELETE FROM model_activation_state WHERE singleton=1")
+            conn.execute(
+                """
+                INSERT INTO model_activation_state(
+                    singleton, active_snapshot_json, rollback_snapshot_json,
+                    evidence_decision_id, controller_configuration_digest,
+                    role_generation, phase, transaction_id, incumbent_pair_json,
+                    candidate_pair_json, rollback_pair_json, origin, policy,
+                    candidate_generation, candidate_digest, reason
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    active_snapshot_json,
+                    incumbent_snapshot_json,
+                    record.decision_id,
+                    record.candidate.ownership_digest,
+                    active_pair.role_generation,
+                    record.phase.value,
+                    record.transaction_id,
+                    incumbent_pair_json,
+                    candidate_pair_json,
+                    rollback_pair_json,
+                    record.origin.value,
+                    record.policy.value,
+                    record.candidate.candidate_generation,
+                    record.candidate.model_digest,
+                    record.reason,
+                ),
+            )
+
+
 def commit_model_rollback(
     decision: ModelEvidenceRecord,
     *,
@@ -901,13 +1124,7 @@ def commit_model_rollback(
     row = _validated_model_evidence_rows((validated,))[0]
     with _model_evidence_connection(database_path) as connection:
         with datastore.transaction(connection) as conn:
-            state_row = conn.execute(
-                """
-                SELECT active_snapshot_json, rollback_snapshot_json, evidence_decision_id,
-                       controller_configuration_digest, role_generation
-                FROM model_activation_state WHERE singleton=1
-                """
-            ).fetchone()
+            state_row = _activation_state_row(conn)
             current = None if state_row is None else ModelActivationState(*state_row)
             if current != expected_activation:
                 raise ValueError("activation-state-changed")
@@ -922,25 +1139,32 @@ def commit_model_rollback(
             records = tuple(
                 ModelEvidenceRecord.from_db_row(ModelEvidenceDbRow(*stored_row)) for stored_row in stored_rows
             )
-            activation = max(
-                (
-                    record
-                    for record in records
-                    if isinstance(record.payload, ActivationEvidence)
-                    and record.payload.decision_id == expected_activation.evidence_decision_id
-                    and record.payload.active_snapshot_json == expected_activation.active_snapshot_json
-                    and record.payload.rollback_snapshot_json == expected_activation.rollback_snapshot_json
-                    and record.payload.controller_configuration_digest
-                    == expected_activation.controller_configuration_digest
-                    and record.role_generation == expected_activation.role_generation
-                    and record.model_digest is not None
-                ),
-                key=lambda record: (record.timestamp_ms, record.evidence_id),
-                default=None,
-            )
-            if activation is None:
-                raise ValueError("activation-lineage-missing")
-            active_digest = activation.model_digest
+            if (
+                expected_activation.phase == "active"
+                and expected_activation.candidate_pair is not None
+                and expected_activation.rollback_pair is not None
+            ):
+                active_digest = expected_activation.candidate_pair.model_digest
+            else:
+                activation = max(
+                    (
+                        record
+                        for record in records
+                        if isinstance(record.payload, ActivationEvidence)
+                        and record.payload.decision_id == expected_activation.evidence_decision_id
+                        and record.payload.active_snapshot_json == expected_activation.active_snapshot_json
+                        and record.payload.rollback_snapshot_json == expected_activation.rollback_snapshot_json
+                        and record.payload.controller_configuration_digest
+                        == expected_activation.controller_configuration_digest
+                        and record.role_generation == expected_activation.role_generation
+                        and record.model_digest is not None
+                    ),
+                    key=lambda record: (record.timestamp_ms, record.evidence_id),
+                    default=None,
+                )
+                if activation is None or activation.model_digest is None:
+                    raise ValueError("activation-lineage-missing")
+                active_digest = activation.model_digest
             existing = max(
                 (
                     record
@@ -997,13 +1221,7 @@ def read_model_activation(*, database_path: str | os.PathLike[str] | None = None
             is None
         ):
             return None
-        row = connection.execute(
-            """
-            SELECT active_snapshot_json, rollback_snapshot_json, evidence_decision_id,
-                   controller_configuration_digest, role_generation
-            FROM model_activation_state WHERE singleton=1
-            """
-        ).fetchone()
+        row = _activation_state_row(connection)
     return None if row is None else ModelActivationState(*row)
 
 

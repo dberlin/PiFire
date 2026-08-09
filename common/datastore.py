@@ -125,7 +125,18 @@ CREATE TABLE IF NOT EXISTS model_activation_state (
     rollback_snapshot_json           TEXT NOT NULL CHECK(json_valid(rollback_snapshot_json)),
     evidence_decision_id             TEXT NOT NULL,
     controller_configuration_digest  TEXT NOT NULL,
-    role_generation                  INTEGER NOT NULL
+    role_generation                  INTEGER NOT NULL,
+    phase                           TEXT NOT NULL DEFAULT 'active'
+                                    CHECK(phase IN ('prepared', 'active', 'aborted')),
+    transaction_id                  TEXT,
+    incumbent_pair_json             TEXT CHECK(incumbent_pair_json IS NULL OR json_valid(incumbent_pair_json)),
+    candidate_pair_json             TEXT CHECK(candidate_pair_json IS NULL OR json_valid(candidate_pair_json)),
+    rollback_pair_json              TEXT CHECK(rollback_pair_json IS NULL OR json_valid(rollback_pair_json)),
+    origin                          TEXT,
+    policy                          TEXT,
+    candidate_generation            INTEGER,
+    candidate_digest                TEXT,
+    reason                          TEXT
 );
 """
 
@@ -308,6 +319,31 @@ def _ensure_schema(conn):
         # Schema v6 adds an independent durable evidence ledger and singleton
         # activation state. Both are additive and begin empty on upgrade.
         conn.execute("PRAGMA user_version=6")
+    if version < 7:
+        # Schema v7 turns activation authority into a crash-convergent pair
+        # transaction. Existing active-only rows retain their old projection.
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(model_activation_state)").fetchall()
+        }
+        additions = (
+            ("phase", "TEXT NOT NULL DEFAULT 'active'"),
+            ("transaction_id", "TEXT"),
+            ("incumbent_pair_json", "TEXT"),
+            ("candidate_pair_json", "TEXT"),
+            ("rollback_pair_json", "TEXT"),
+            ("origin", "TEXT"),
+            ("policy", "TEXT"),
+            ("candidate_generation", "INTEGER"),
+            ("candidate_digest", "TEXT"),
+            ("reason", "TEXT"),
+        )
+        with transaction(conn):
+            for name, declaration in additions:
+                if name not in columns:
+                    conn.execute(
+                        f"ALTER TABLE model_activation_state ADD COLUMN {name} {declaration}"
+                    )
+            conn.execute("PRAGMA user_version=7")
 
 
 def connection():
