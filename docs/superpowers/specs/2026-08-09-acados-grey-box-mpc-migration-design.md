@@ -345,9 +345,9 @@ The controller catalog no longer declares a do-mpc module or MPC Python extra. N
 
 ### Model snapshots
 
-The top-level schema remains a grey-model record and is revised for fixed structure and grey-only adaptation.
+The top-level grey model schema is bumped from `MODEL_SCHEMA = 3` to `MODEL_SCHEMA = 4` for the fixed eight-state structure and grey-only adaptation record. Every new writer emits only v4. Version 3 is accepted only as migration input and is never re-emitted.
 
-Migration preserves valid top-level grey physical parameters and fit metadata. It discards nested Scheduled ARX, innovation state-space, linear-policy, and neural artifacts. Online evidence counters that cannot be interpreted without the removed model are not relabeled.
+Migration preserves finite, in-bounds v3 top-level grey physical parameters and fit metadata only when `n_delay=8`. It emits their v4 equivalent and discards nested Scheduled ARX, innovation state-space, linear-policy, and neural artifacts. Online evidence counters that cannot be interpreted without the removed model are not relabeled.
 
 A snapshot fitted with a delay-state count other than eight is rejected with an operator-visible reason. Parameters fitted against a different delay chain are not silently attached to the new structure. The next eligible cook or calibration refits from current evidence.
 
@@ -448,6 +448,7 @@ The runtime dependency set drops do-mpc, CasADi, and neural-policy-only packages
 - A probe-free Learn This Grill record still produces a `cook-refit` candidate for the next cook.
 - Injected swap failure and process death at each two-phase activation boundary restore the authority prescribed by the durable phase after restart.
 - Transactional migration covers active grey, active Scheduled ARX, active state-space, grey rollback, malformed authority, and incompatible delay-state records across both durable stores and evidence pointers.
+- Snapshot coverage proves compatible v3-to-v4 migration, incompatible v3 rejection, v4 round-trip, and refusal to emit v3 from any new writer.
 - Automatic, manual, and cook-refit candidates appear in the same report with the correct origin, authorization, durable phase, and outcome.
 - The panel exposes every collection, fit, candidate, blocker, score, activation, teardown, error, and rollback state.
 - The dashboard pill remains present for MPC, opens the panel, and matches the report through passive/manual/teardown transitions and errors.
