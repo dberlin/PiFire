@@ -48,6 +48,10 @@ completion from a sweep:
   carved out of that design as its named out-of-scope work, not swept in from
   elsewhere. Item 6 was found by running the suite during that work and is
   pre-existing — verified by reproducing it at the prior commit, not inferred.
+- **2026-08-08** — item 7 added. Found while retiring `cycle_data.HoldCycleTime`,
+  and pre-existing: the retirement exposed the import layout, it did not create
+  it. The counts in the entry are from a full sweep of `tests/` and the
+  production packages, not a sample.
 
 ---
 
@@ -293,3 +297,58 @@ restores it — that is where to look first.
 
 It does not fail in a plain `pytest tests/` run, which is why it has stayed
 invisible: the full-suite ordering happens not to trigger it.
+
+---
+
+### 7. The test suite imports library code out of `docs/` — OPEN
+
+**Status:** OPEN. Found 2026-08-08 while retiring `cycle_data.HoldCycleTime`.
+Pre-existing; the retirement only made it visible.
+
+34 test files import from `docs/superpowers/experiments/` with real
+`from docs.superpowers.experiments...` statements, and
+`tests/unit/mpc/test_regenerate_mpc_net.py` additionally `sys.path.insert`s that
+directory. Eleven of the 70 modules there are load-bearing:
+
+| Module | Nature |
+|---|---|
+| `linear_mpc_bakeoff/` | a 15-file, 396K **package** with 13 dedicated test modules |
+| `controller_matrix` | a scenario harness; 5 test modules sit on it |
+| `sample_mpc`, `net_vs_nlp_replay`, `residual_mpc_compare`, `online_arx_compare`, `braking_horizon`, `promotion_signal`, `mutation_score`, `state_space_online_compare`, `state_space_refresh_diagnostics` | one-off scripts that acquired tests later |
+
+It resolves by accident. There is no `docs/__init__.py` and no
+`docs/superpowers/__init__.py`; the only `__init__.py` anywhere under `docs/` is
+`linear_mpc_bakeoff/`'s. Every other import rides on PEP 420 implicit namespace
+packages.
+
+**Production code is clean and should stay that way.** `controller/mpc.py`,
+`mpc_model.py`, `model_promotion.py` and `update_mpc.py` only *cite* experiment
+scripts in comments — naming the measurement behind a constant. That is what
+the directory is for.
+
+**Why it is worth fixing rather than tolerating.** A reader who treats `docs/`
+as documentation is right about 59 of the 70 files and wrong about the other 11,
+with no signal distinguishing them. That prior cost this plan a blocked task:
+`docs/` was excluded from a retirement sweep as "not code", and 13 tests
+`KeyError`'d because `controller_matrix.py` read the retired key. The same
+exclusion is one any future sweep, audit, or coverage rule will make.
+
+There is a second-order cost already realised. `controller_matrix.py` had been
+resolving `pid_sp`'s solve cadence to `HoldCycleTime` (25 s) while production
+`Hold` resolves it to the pulse frame (20 s) — a harness shadowing production
+behaviour with a cadence production never ran, in a tree nobody audits because
+it looks like documentation. Repairing it moved a measured lid recovery from
+~133 s to ~195 s and invalidated a committed threshold.
+
+**Not yet decided, and deliberately left open** — moving 34 files' imports is
+its own scoped piece of work, and the two groups do not want the same landing:
+
+- `linear_mpc_bakeoff/` is not an experiment. It is a library with a test suite,
+  and it wants a real source location.
+- The ten scripts raise a different question: whether the test should import the
+  script at all, or whether the part worth testing belongs in `controller/` with
+  the script left as a thin caller. `controller_matrix` is the sharp case,
+  being a harness five test modules depend on.
+
+Whatever the landing, the invariant to end at is: **nothing outside `docs/`
+imports from `docs/`.**
