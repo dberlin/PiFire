@@ -5,7 +5,7 @@ import numpy as np
 from dataclasses import replace
 
 from common.model_evidence import EvidenceKind, ForecastOriginEvidence
-from controller.linear_mpc.confidence import ConfidenceConfig, evaluate_confidence
+from controller.model_learning.confidence import ConfidenceConfig, evaluate_confidence
 from tests.unit.mpc.test_model_confidence import _qualifying, _rebuild, _state
 
 

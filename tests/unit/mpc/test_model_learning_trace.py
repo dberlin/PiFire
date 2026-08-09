@@ -26,7 +26,8 @@ from common.control_trace import (
     TraceSetting,
 )
 from controller.applied_output import OutputSource
-from controller.linear_mpc.trace import TraceSelectionError, calibration_samples, learning_observations
+from controller.model_learning.trace import TraceSelectionError, calibration_samples, learning_observations
+from controller.mpc_allocator import AllocationResult
 
 
 _SESSION_ID = "learning-session"
@@ -258,6 +259,111 @@ def test_exact_observation_is_canonical_over_fallback_records() -> None:
     assert frames[0].temp_c == pytest.approx(100.0)
     assert frames[0].ambient_c == pytest.approx(20.0)
     assert frames[0].realized_q == pytest.approx(0.35)
+
+
+def test_eligible_probe_frame_is_preserved_for_fit_records_with_exact_allocation_join() -> None:
+    source = _observation()
+    assert isinstance(source.payload, ModelObservationPayload)
+    probe = source.model_copy(
+        update={
+            "payload": replace(
+                source.payload,
+                probe_source="operator-calibration",
+                calibration_probe_load=0.05,
+                requested_combustion_load=0.45,
+                allocated_combustion_load=0.45,
+                realized_combustion_load=0.40,
+                calibration_stage="middle",
+                calibration_fit=True,
+            )
+        }
+    )
+
+    fit_frames = learning_observations((_session(), _allocation_record(probe), probe))
+
+    assert len(fit_frames) == 1
+    assert fit_frames[0].calibration_fit is True
+    assert fit_frames[0].calibration_stage == "middle"
+    assert fit_frames[0].probe_source == "operator-calibration"
+    assert fit_frames[0].realized_q == pytest.approx(0.40)
+
+
+def test_exact_observation_preserves_calibration_attribution_and_immutable_allocations() -> None:
+    source = _observation()
+    assert isinstance(source.payload, ModelObservationPayload)
+    baseline = AllocationPayload(
+        result_revision=1,
+        normalized_combustion_load=0.3,
+        requested_auger_duty=0.24,
+        requested_fan_duty=0.41,
+        u_max=0.8,
+        fan_min_pct=0.2,
+        fan_max_pct=0.9,
+        fan_enabled=True,
+        mpc_has_fan_authority=True,
+        auger_clamp_reason=AllocationClampReason.NONE,
+        fan_clamp_reason=AllocationClampReason.FAN_MIN,
+        allocator_revision=7,
+    )
+    combined = replace(
+        baseline,
+        normalized_combustion_load=0.4,
+        requested_auger_duty=0.32,
+        requested_fan_duty=0.48,
+        auger_clamp_reason=AllocationClampReason.AUGER_MAX,
+        fan_clamp_reason=AllocationClampReason.NONE,
+        allocator_revision=8,
+    )
+    attributed = source.model_copy(
+        update={
+            "payload": replace(
+                source.payload,
+                baseline_combustion_load=0.3,
+                calibration_probe_load=0.1,
+                calibration_command_revision=11,
+                calibration_command_action="start",
+                calibration_cancellation_reason="lid-open",
+                baseline_allocation=baseline,
+                combined_allocation=combined,
+                calibration_status="cancelled",
+                cancellation_command_revision=12,
+                cancellation_command_action="safety-cancel",
+            )
+        }
+    )
+
+    frame = learning_observations((_session(), _allocation_record(attributed), attributed))[0]
+
+    assert frame.calibration_command_revision == 11
+    assert frame.calibration_command_action == "start"
+    assert frame.calibration_cancellation_reason == "lid-open"
+    assert frame.calibration_status == "cancelled"
+    assert frame.cancellation_command_revision == 12
+    assert frame.cancellation_command_action == "safety-cancel"
+    assert frame.baseline_allocation == AllocationResult(
+        normalized_combustion_load=0.3,
+        auger_duty=0.24,
+        fan_duty=0.41,
+        u_max=0.8,
+        fan_min_pct=0.2,
+        fan_max_pct=0.9,
+        fan_enabled=True,
+        auger_clamp_reason=AllocationClampReason.NONE,
+        fan_clamp_reason=AllocationClampReason.FAN_MIN,
+        allocator_revision=7,
+    )
+    assert frame.combined_allocation == AllocationResult(
+        normalized_combustion_load=0.4,
+        auger_duty=0.32,
+        fan_duty=0.48,
+        u_max=0.8,
+        fan_min_pct=0.2,
+        fan_max_pct=0.9,
+        fan_enabled=True,
+        auger_clamp_reason=AllocationClampReason.AUGER_MAX,
+        fan_clamp_reason=AllocationClampReason.NONE,
+        allocator_revision=8,
+    )
 
 
 def test_fahrenheit_and_celsius_fallback_sessions_are_equivalent() -> None:

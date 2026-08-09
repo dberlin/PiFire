@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 
 from controller.grill_sim import GrillSim, MAKGrillSim
-from controller.linear_mpc.calibration import CalibrationCommand, CalibrationCoordinator, CalibrationRuntimeContext
+from controller.model_learning.calibration import CalibrationCommand, CalibrationCoordinator, CalibrationRuntimeContext
 
 CENTERS = tuple((fahrenheit - 32.0) * 5.0 / 9.0 for fahrenheit in (225.0, 325.0, 425.0))
-_FRAME_S = 20
+_FRAME_S = 25
 _BASELINE_Q = 0.20
 # A five-percent later-block MSE reduction is the shared minimum meaningful
 # causal gain: smaller improvements are indistinguishable from short-trace noise.
@@ -44,7 +44,7 @@ def run_frame(plant, requested_q):
 
 
 def causal_metrics(temperatures, realized_q, delay_frames):
-    """Score delayed actuation on unseen future ARX response blocks only."""
+    """Score delayed actuation on unseen future thermal-response blocks only."""
     temperature = np.asarray(temperatures, dtype=float)
     input_q = np.asarray(realized_q, dtype=float)
     if temperature.size != input_q.size + 1:
@@ -131,7 +131,8 @@ def test_calibration_drives_both_plants_with_causal_identifying_evidence_without
     for frame in range(1, 45):
         requested_q = _BASELINE_Q + decision.probe_q
         realized_q, next_measured = run_frame(plant, requested_q)
-        assert requested_q == pytest.approx(realized_q, abs=1e-12)
+        assert realized_q == pytest.approx(round(requested_q * _FRAME_S) / _FRAME_S, abs=1e-12)
+        assert abs(realized_q - requested_q) <= 0.5 / _FRAME_S + 1e-12
         assert abs(realized_q - _BASELINE_Q) <= 0.05 + 1e-12
         realized_q_trace.append(realized_q)
         temperatures.append(next_measured)

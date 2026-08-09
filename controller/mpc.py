@@ -62,11 +62,12 @@ from controller.linear_mpc.activation import (
 )
 from controller.linear_mpc.adaptation import AdaptationPolicy, EvaluationDecision, OnlineAdaptation
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
-from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
-from controller.linear_mpc.grey_box import GreyBoxPredictionAdapter
+from controller.linear_mpc.contracts import ModelUpdate
+from controller.model_learning.contracts import FrameObservation
+from controller.grey_box import GreyBoxPredictionAdapter
 from controller.linear_mpc.state_space import InnovationStateSpace, StateSpaceConfig
 from controller.linear_mpc.policy import LinearMPC, LinearMPCConfig
-from controller.linear_mpc.calibration import (
+from controller.model_learning.calibration import (
     CalibrationCommand as _CoordinatorCalibrationCommand,
     CalibrationCoordinator,
     CalibrationDecision,

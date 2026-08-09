@@ -54,7 +54,7 @@ from controller.applied_output import (
     classify_output_source,
     seed_output,
 )
-from controller.linear_mpc.contracts import FrameObservation
+from controller.model_learning.contracts import FrameObservation
 from controller.mpc import CalibrationCommand
 from controller.mpc_allocator import normalized_load_from_auger_duty
 from controller.runtime.logic.pulse import (

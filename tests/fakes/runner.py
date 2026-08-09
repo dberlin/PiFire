@@ -3,7 +3,7 @@ from dataclasses import replace
 from typing import Any
 
 from common.control_trace import ActuationMode, ControllerType
-from controller.linear_mpc.contracts import FrameObservation
+from controller.model_learning.contracts import FrameObservation
 from controller.runtime.runner import (
     ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,

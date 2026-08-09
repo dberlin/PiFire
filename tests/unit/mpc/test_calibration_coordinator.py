@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from controller.linear_mpc.calibration import (
+from controller.model_learning.calibration import (
     CalibrationCommand,
     CalibrationConfig,
     CalibrationCoordinator,

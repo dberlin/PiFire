@@ -32,7 +32,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from common.datastore_accessors import read_control_trace_cook, read_control_trace_session
-from controller.linear_mpc.trace import TraceSelectionError, calibration_samples
+from controller.model_learning.trace import TraceSelectionError, calibration_samples
 
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, steady_state_at_full_fire
 from controller.mpc_model import simulate_grey_box
