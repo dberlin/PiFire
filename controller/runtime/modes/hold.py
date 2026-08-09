@@ -7,7 +7,11 @@ from dataclasses import replace
 
 from common.common import WriteKind
 from common.controller_model_state import ControllerModelStore
-from common.datastore_accessors import read_model_activation, read_model_evidence
+from common.datastore_accessors import (
+    migrate_mpc_learning_authority,
+    read_model_activation,
+    read_model_evidence,
+)
 from common.modes import Mode
 from common.model_evidence import (
     AllocationEvidence,
@@ -1870,6 +1874,22 @@ class HoldMode(ControlMode):
 
         if self._runner is not None:
             self._configure_pulse_scheduler()
+            if self._controller_name == "mpc":
+                try:
+                    from controller.mpc import _DEFAULTS as mpc_defaults
+
+                    selected_config = (
+                        self.settings.get("controller", {})
+                        .get("config", {})
+                        .get("mpc", {})
+                    )
+                    defaults = dict(mpc_defaults)
+                    if isinstance(selected_config, Mapping):
+                        defaults.update(selected_config)
+                    migrate_mpc_learning_authority(defaults=defaults)
+                except Exception as error:
+                    self._learning_evidence_available = False
+                    self._trace_warning(f"Model authority migration failed: {error}")
             self._restore_model()
             self._reconcile_activation_state()
         self._configure_fan_authority()

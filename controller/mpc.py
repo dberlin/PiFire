@@ -25,6 +25,13 @@ import numpy as np
 
 from common.control_trace import (
     AmbientSource,
+    ControlTraceRecord,
+    ControllerType,
+    GreyActivationLifecyclePayload,
+    GreyCandidateAssessmentPayload,
+    GreyFitLifecyclePayload,
+    GreyLearningFailurePayload,
+    TraceEventKind,
     CompletedOriginEvidence,
     CompletedOriginPayload,
     HorizonScoreEvidence,
@@ -41,9 +48,13 @@ from controller.mpc_allocator import AllocationResult, allocate, normalized_load
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
 from common.model_evidence import (
     EvidenceKind,
+    ActivationLifecycleEvidence,
+    CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
     FallbackEvidence,
     ForecastOriginEvidence,
+    FitLifecycleEvidence,
+    LearningFailureEvidence,
     ModelEvidenceRecord,
     RefreshDiagnosticsEvidence,
     RollbackEvidence,
@@ -65,6 +76,7 @@ from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
     FitStatus,
+    FitWindowIdentity,
     FrameObservation,
     LearningStatus,
 )
@@ -209,6 +221,197 @@ def _grey_snapshot_metadata(value):
     return {"rmse": rmse, "samples": samples, "band_c": [lower, upper], "nfev": nfev}
 
 
+def _grey_v4_mapping(value, keys, reason):
+    if not isinstance(value, Mapping) or set(value) != set(keys):
+        raise GreySnapshotInvalid(reason)
+    return value
+
+
+def _grey_v4_nonnegative_int(value, reason):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise GreySnapshotInvalid(reason)
+    return value
+
+
+def _grey_v4_optional_text(value, reason):
+    if value is not None and (not isinstance(value, str) or not value.strip()):
+        raise GreySnapshotInvalid(reason)
+    return value
+
+
+def _grey_v4_optional_digest(value, reason):
+    if value is not None and (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise GreySnapshotInvalid(reason)
+    return value
+
+
+def _grey_v4_model(value, reason):
+    model = _grey_v4_mapping(value, ("parameters", "metadata"), reason)
+    metadata = _grey_v4_mapping(
+        model["metadata"],
+        ("rmse", "samples", "band_c", "nfev"),
+        f"{reason}:metadata",
+    )
+    return {
+        "parameters": _grey_snapshot_params(model["parameters"]),
+        "metadata": _grey_snapshot_metadata(metadata),
+    }
+
+
+def _grey_v4_snapshot(snapshot):
+    revision = _grey_v4_nonnegative_int(snapshot.get("revision"), "invalid-revision")
+    active = _grey_v4_model(snapshot.get("active"), "invalid-active")
+    challenger_value = snapshot.get("challenger")
+    challenger = (
+        None
+        if challenger_value is None
+        else _grey_v4_model(challenger_value, "invalid-challenger")
+    )
+    window_value = snapshot.get("window")
+    if window_value is None:
+        window = None
+    else:
+        try:
+            window_mapping = _grey_v4_mapping(
+                window_value,
+                (
+                    "session_id",
+                    "cook_id",
+                    "first_observation_sequence",
+                    "last_observation_sequence",
+                    "configuration_digest",
+                    "incumbent_digest",
+                    "role_generation",
+                ),
+                "invalid-window",
+            )
+            window = asdict(FitWindowIdentity(**dict(window_mapping)))
+        except (TypeError, ValueError) as error:
+            raise GreySnapshotInvalid("invalid-window") from error
+    evidence_value = _grey_v4_mapping(
+        snapshot.get("evidence"),
+        ("eligible", "rejected", "confidence_decision_id"),
+        "invalid-evidence",
+    )
+    evidence = {
+        "eligible": _grey_v4_nonnegative_int(evidence_value["eligible"], "invalid-evidence"),
+        "rejected": _grey_v4_nonnegative_int(evidence_value["rejected"], "invalid-evidence"),
+        "confidence_decision_id": _grey_v4_optional_text(
+            evidence_value["confidence_decision_id"],
+            "invalid-evidence",
+        ),
+    }
+    origin_value = snapshot.get("origin")
+    try:
+        origin = None if origin_value is None else CandidateOrigin(origin_value).value
+    except (TypeError, ValueError) as error:
+        raise GreySnapshotInvalid("invalid-origin") from error
+    policy_value = snapshot.get("policy")
+    try:
+        policy = None if policy_value is None else ActivationPolicy(policy_value).value
+    except (TypeError, ValueError) as error:
+        raise GreySnapshotInvalid("invalid-policy") from error
+    identification_value = _grey_v4_mapping(
+        snapshot.get("identification"),
+        ("status",),
+        "invalid-identification",
+    )
+    identification_status = identification_value["status"]
+    if identification_status not in ("identified", "unidentified"):
+        raise GreySnapshotInvalid("invalid-identification")
+    cook_refit_value = _grey_v4_mapping(
+        snapshot.get("cook_refit"),
+        ("status", "latest"),
+        "invalid-cook-refit",
+    )
+    try:
+        cook_refit_status = FitStatus(cook_refit_value["status"]).value
+    except (TypeError, ValueError) as error:
+        raise GreySnapshotInvalid("invalid-cook-refit") from error
+    cook_refit = {
+        "status": cook_refit_status,
+        "latest": _grey_v4_optional_text(cook_refit_value["latest"], "invalid-cook-refit"),
+    }
+    identities_value = _grey_v4_mapping(
+        snapshot.get("identities"),
+        (
+            "active_digest",
+            "active_generation",
+            "candidate_digest",
+            "candidate_generation",
+            "rollback_digest",
+            "rollback_generation",
+        ),
+        "invalid-identities",
+    )
+    identities = {}
+    for role in ("active", "candidate", "rollback"):
+        digest = _grey_v4_optional_digest(
+            identities_value[f"{role}_digest"],
+            "invalid-identities",
+        )
+        generation_value = identities_value[f"{role}_generation"]
+        generation = (
+            None
+            if generation_value is None
+            else _grey_v4_nonnegative_int(generation_value, "invalid-identities")
+        )
+        if (digest is None) != (generation is None):
+            raise GreySnapshotInvalid("invalid-identities")
+        identities[f"{role}_digest"] = digest
+        identities[f"{role}_generation"] = generation
+    if identities["active_digest"] is None:
+        raise GreySnapshotInvalid("invalid-identities")
+    activation_value = _grey_v4_mapping(
+        snapshot.get("activation"),
+        ("phase", "pending_persistence", "pending_swap"),
+        "invalid-activation",
+    )
+    if activation_value["phase"] not in ("prepared", "active", "aborted"):
+        raise GreySnapshotInvalid("invalid-activation")
+    if not isinstance(activation_value["pending_persistence"], bool) or not isinstance(
+        activation_value["pending_swap"], bool
+    ):
+        raise GreySnapshotInvalid("invalid-activation")
+    activation = dict(activation_value)
+    failure_value = snapshot.get("failure")
+    if failure_value is None:
+        failure = None
+    else:
+        failure_mapping = _grey_v4_mapping(
+            failure_value,
+            ("code", "detail"),
+            "invalid-failure",
+        )
+        failure = {
+            "code": _grey_v4_optional_text(failure_mapping["code"], "invalid-failure"),
+            "detail": _grey_v4_optional_text(failure_mapping["detail"], "invalid-failure"),
+        }
+        if failure["code"] is None or failure["detail"] is None:
+            raise GreySnapshotInvalid("invalid-failure")
+    return {
+        "version": MODEL_SCHEMA,
+        "revision": revision,
+        "schema": _GREY_V4_SCHEMA,
+        "structure": {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10},
+        "active": active,
+        "challenger": challenger,
+        "window": window,
+        "evidence": evidence,
+        "origin": origin,
+        "policy": policy,
+        "identification": {"status": identification_status},
+        "cook_refit": cook_refit,
+        "identities": identities,
+        "activation": activation,
+        "failure": failure,
+    }
+
+
 def _grey_parameters_digest(parameters):
     return hashlib.sha256(
         json.dumps(parameters, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -273,17 +476,7 @@ def migrate_grey_learning_snapshot(snapshot):
     structure = snapshot.get("structure")
     if structure != {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10}:
         raise GreySnapshotInvalid("incompatible-structure")
-    active = snapshot.get("active")
-    if not isinstance(active, Mapping):
-        raise GreySnapshotInvalid("missing-active-grey")
-    _grey_snapshot_params(active.get("parameters"))
-    _grey_snapshot_metadata(active.get("metadata"))
-    try:
-        owned = copy.deepcopy(dict(snapshot))
-        json.dumps(owned, allow_nan=False)
-    except (TypeError, ValueError, OverflowError) as error:
-        raise GreySnapshotInvalid("malformed-v4") from error
-    return owned
+    return _grey_v4_snapshot(snapshot)
 
 # One row per control period. At the 5 s default that is ~12 hours, which is
 # longer than any single cook; a longer one loses its beginning rather than
@@ -1416,6 +1609,26 @@ class Controller(ControllerBase):
         self._active_activation_record = record
         self._inert_activation = None
         self._model_revision = max(self._model_revision, record.candidate.role_generation)
+        timestamp_ms = time.time_ns() // 1_000_000
+        lifecycle = ActivationLifecycleEvidence(
+            decision_id=record.decision_id,
+            phase="active",
+            origin=record.origin.value,
+            policy=record.policy.value,
+        )
+        self._persist_grey_lifecycle(
+            lifecycle,
+            GreyActivationLifecyclePayload(
+                decision_id=lifecycle.decision_id,
+                phase=lifecycle.phase,
+                origin=lifecycle.origin,
+                policy=lifecycle.policy,
+            ),
+            timestamp_ms=timestamp_ms,
+            role_generation=record.candidate.role_generation,
+            model_digest=record.candidate.model_digest,
+            provenance_digest=record.incumbent.model_digest,
+        )
         return True
 
     def compensate_candidate_pair(
@@ -1440,6 +1653,28 @@ class Controller(ControllerBase):
         self._inert_activation = None
         self._active_activation_record = None
         self._activation_output_authorized = True
+        timestamp_ms = time.time_ns() // 1_000_000
+        lifecycle = ActivationLifecycleEvidence(
+            decision_id=record.decision_id,
+            phase="aborted",
+            origin=record.origin.value,
+            policy=record.policy.value,
+            reason=_reason,
+        )
+        self._persist_grey_lifecycle(
+            lifecycle,
+            GreyActivationLifecyclePayload(
+                decision_id=lifecycle.decision_id,
+                phase=lifecycle.phase,
+                origin=lifecycle.origin,
+                policy=lifecycle.policy,
+                reason=lifecycle.reason,
+            ),
+            timestamp_ms=timestamp_ms,
+            role_generation=record.candidate.role_generation,
+            model_digest=record.candidate.model_digest,
+            provenance_digest=record.incumbent.model_digest,
+        )
         try:
             pair.close()
         except Exception:
@@ -1496,6 +1731,23 @@ class Controller(ControllerBase):
                     ),
                 )
             )
+            failure = LearningFailureEvidence(
+                code="activation-terminal",
+                detail=reason,
+                terminal=True,
+            )
+            self._persist_grey_lifecycle(
+                failure,
+                GreyLearningFailurePayload(
+                    code=failure.code,
+                    detail=failure.detail,
+                    terminal=failure.terminal,
+                ),
+                timestamp_ms=timestamp_ms,
+                role_generation=failed.descriptor.role_generation,
+                model_digest=failed.descriptor.model_digest,
+                provenance_digest=rollback.descriptor.model_digest,
+            )
         self._active_activation_record = None
         self._inert_activation = None
         self._activation_output_authorized = True
@@ -1506,7 +1758,7 @@ class Controller(ControllerBase):
         from controller.runtime.model_persistence import ModelPersistenceWorker
 
         with self._activation_persistence_lock:
-            worker = self._activation_persistence_worker
+            worker = getattr(self, "_activation_persistence_worker", None)
             if worker is None:
                 worker = ModelPersistenceWorker(
                     ControllerModelStore(),
@@ -2368,6 +2620,61 @@ class Controller(ControllerBase):
         with self._learning_lifecycle_lock:
             return self._poll_learning_off_path_locked(live_origin=live_origin)
 
+    def _persist_grey_lifecycle(
+        self,
+        evidence_payload,
+        trace_payload,
+        *,
+        timestamp_ms,
+        role_generation,
+        model_digest,
+        provenance_digest,
+    ):
+        session_id = getattr(self, "_learning_session_id", None) or "mpc-learning"
+        cook_id = getattr(self, "_learning_cook_id", None)
+        evidence = ModelEvidenceRecord(
+            evidence_id=(
+                f"{session_id}:{evidence_payload.payload_type}:"
+                f"{timestamp_ms}:{role_generation}"
+            ),
+            kind=EvidenceKind(evidence_payload.payload_type),
+            session_id=session_id,
+            cook_id=cook_id,
+            timestamp_ms=timestamp_ms,
+            role_generation=role_generation,
+            model_digest=model_digest,
+            provenance_digest=provenance_digest,
+            payload=evidence_payload,
+        )
+        worker = self._activation_persistence_channel()
+        submission = worker.submit_evidence(evidence)
+        if not submission.accepted:
+            raise RuntimeError("learning-lifecycle-evidence-not-accepted")
+        try:
+            from common.datastore_accessors import append_control_trace
+
+            event_kind = {
+                "fit_lifecycle": TraceEventKind.FIT_LIFECYCLE,
+                "candidate_assessment": TraceEventKind.CANDIDATE_ASSESSMENT,
+                "activation_lifecycle": TraceEventKind.ACTIVATION_LIFECYCLE,
+                "learning_failure": TraceEventKind.LEARNING_FAILURE,
+            }[trace_payload.payload_type]
+            append_control_trace(
+                (
+                    ControlTraceRecord(
+                        ts_ms=timestamp_ms,
+                        session_id=session_id,
+                        cook_id=cook_id,
+                        controller=ControllerType.MPC,
+                        event_kind=event_kind,
+                        payload=trace_payload,
+                    ),
+                )
+            )
+        except Exception as error:
+            self._activation_terminated_reason = f"learning lifecycle trace failed: {error}"
+        return evidence
+
     def _prepare_automatic_pair_activation(self, preparation, policy):
         """Persist one passive candidate and expose it to the runner only after receipt."""
         from controller.runtime.runner import PreparedPairTransition
@@ -2447,6 +2754,65 @@ class Controller(ControllerBase):
             ),
             default=time.time_ns() // 1_000_000,
         )
+        window_session = getattr(
+            request.window,
+            "session_id",
+            getattr(self, "_learning_session_id", None) or "mpc-learning",
+        )
+        window_first = getattr(request.window, "first_observation_sequence", 0)
+        window_last = getattr(request.window, "last_observation_sequence", window_first)
+        window_id = f"{window_session}:{window_first}:{window_last}"
+        request_id = getattr(request, "request_id", f"fit:{decision_id}")
+        self._persist_grey_lifecycle(
+            FitLifecycleEvidence(
+                request_id=request_id,
+                status="succeeded",
+                origin=request.origin.value,
+                policy=policy.value,
+                window_id=window_id,
+            ),
+            GreyFitLifecyclePayload(
+                request_id=request_id,
+                status="succeeded",
+                origin=request.origin.value,
+                policy=policy.value,
+                window_id=window_id,
+            ),
+            timestamp_ms=evaluated_at_ms,
+            role_generation=evaluation_role_generation,
+            model_digest=challenger_digest,
+            provenance_digest=incumbent_digest,
+        )
+        assessment = CandidateAssessmentEvidence(
+            decision_id=decision_id,
+            origin=request.origin.value,
+            policy=policy.value,
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=True,
+        )
+        self._persist_grey_lifecycle(
+            assessment,
+            GreyCandidateAssessmentPayload(
+                decision_id=assessment.decision_id,
+                origin=assessment.origin,
+                policy=assessment.policy,
+                fit_accepted=assessment.fit_accepted,
+                identifiability_accepted=assessment.identifiability_accepted,
+                native_build=assessment.native_build,
+                native_dry_solve=assessment.native_dry_solve,
+                target_timing=assessment.target_timing,
+                confidence_accepted=assessment.confidence_accepted,
+                rejection_reasons=assessment.rejection_reasons,
+            ),
+            timestamp_ms=evaluated_at_ms,
+            role_generation=evaluation_role_generation,
+            model_digest=challenger_digest,
+            provenance_digest=incumbent_digest,
+        )
         confidence = ModelEvidenceRecord(
             evidence_id=(
                 f"activation-confidence:{decision_id}:"
@@ -2490,6 +2856,25 @@ class Controller(ControllerBase):
         )
         if not decision.accepted or decision.record is None or decision.candidate_pair is None:
             raise RuntimeError(decision.reason)
+        activation_lifecycle = ActivationLifecycleEvidence(
+            decision_id=decision.record.decision_id,
+            phase="prepared",
+            origin=decision.record.origin.value,
+            policy=decision.record.policy.value,
+        )
+        self._persist_grey_lifecycle(
+            activation_lifecycle,
+            GreyActivationLifecyclePayload(
+                decision_id=activation_lifecycle.decision_id,
+                phase=activation_lifecycle.phase,
+                origin=activation_lifecycle.origin,
+                policy=activation_lifecycle.policy,
+            ),
+            timestamp_ms=decision.record.timestamp_ms,
+            role_generation=decision.record.candidate.role_generation,
+            model_digest=decision.record.candidate.model_digest,
+            provenance_digest=decision.record.incumbent.model_digest,
+        )
         transition = PreparedPairTransition(
             decision.record,
             decision.candidate_pair,

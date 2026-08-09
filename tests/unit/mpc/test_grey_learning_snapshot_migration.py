@@ -9,10 +9,15 @@ import pytest
 
 from common import datastore
 from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
-from common.datastore_accessors import migrate_mpc_learning_authority, read_model_activation
+from common.datastore_accessors import (
+    migrate_mpc_learning_authority,
+    read_model_activation,
+    read_model_evidence,
+)
 from controller.mpc import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.mpc_model import MODEL_SCHEMA
 from controller.model_learning.activation import GreyControlPairDescriptor, canonical_snapshot_digest
+from controller.model_learning.report import backend_learning_report
 
 
 PARAMS = {
@@ -203,6 +208,76 @@ def test_real_activation_singleton_rolls_back_to_compatible_grey_atomically(ds):
     assert state.active_pair == rollback
     assert state.evidence_decision_id == ""
     assert json.loads(state.active_snapshot_json) == result.snapshot
+    assert _stored_controller() == result.snapshot
+
+
+def test_active_source_rewrites_snapshot_pointer_without_losing_singleton_identity(ds):
+    _seed_controller(_v3(theta=47.0))
+    active_config = {"schema": "pifire-grey-box-model/v4", **{**PARAMS, "theta": 31.0}}
+    active = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(active_config),
+        configuration=active_config,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=7,
+        role_generation=8,
+    )
+    noncanonical_snapshot_json = json.dumps(_v4(theta=31.0), indent=2)
+    pair_json = json.dumps(active.to_dict(), sort_keys=True, separators=(",", ":"))
+    with datastore.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO model_activation_state(
+                singleton, active_snapshot_json, rollback_snapshot_json,
+                evidence_decision_id, controller_configuration_digest,
+                role_generation, phase, transaction_id, incumbent_pair_json,
+                origin, policy, candidate_generation, candidate_digest
+            ) VALUES(1, ?, ?, 'decision-active', ?, 8, 'prepared',
+                     'transaction-active', ?, 'operator-calibration',
+                     'operator-reviewed', 7, ?)
+            """,
+            (
+                noncanonical_snapshot_json,
+                noncanonical_snapshot_json,
+                "d" * 64,
+                pair_json,
+                active.model_digest,
+            ),
+        )
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+    state = read_model_activation()
+
+    assert result.source == "active"
+    assert state is not None
+    assert state.active_snapshot_json == json.dumps(
+        result.snapshot,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    assert state.phase == "prepared"
+    assert state.transaction_id == "transaction-active"
+    assert state.evidence_decision_id == "decision-active"
+    assert state.incumbent_pair == active
+    assert state.candidate_generation == 7
+    assert state.candidate_digest == active.model_digest
+
+
+def test_migration_invalidation_is_durable_and_surfaces_from_real_backend(ds):
+    _seed_controller({"version": 3, "broken": True})
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+    report, records = backend_learning_report()
+
+    invalidations = [
+        record
+        for record in records
+        if record.kind.value == "schema_invalidation" and record.schema_version == 3
+    ]
+    assert result.reason == "schema-invalidated"
+    assert len(invalidations) == 1
+    assert report.as_dict()["status"] == "schema-invalidated"
     assert _stored_controller() == result.snapshot
 
 def test_atomic_migration_rolls_back_checkpoint_and_activation_pointer_together(ds):

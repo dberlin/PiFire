@@ -104,6 +104,7 @@ def _refresh(evidence_id: str) -> ModelEvidenceRecord:
         role_generation=1,
         model_digest=_OTHER_DIGEST,
         provenance_digest=_DIGEST,
+        schema_version=2,
         payload=RefreshDiagnosticsEvidence(
             accepted=True,
             full_rank=True,

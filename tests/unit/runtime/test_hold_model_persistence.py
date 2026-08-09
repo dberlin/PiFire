@@ -114,6 +114,51 @@ def test_setup_with_no_stored_model_restores_nothing(hold_cycle):
     assert runner.restored == []
 
 
+def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycle, monkeypatch):
+    from controller.runtime.modes import hold as hold_module
+
+    calls = []
+    v3 = {
+        "version": 3,
+        "revision": 1,
+        "params": {
+            "C_c": 2520.0,
+            "h_amb": 18.5,
+            "T_amb": 21.0,
+            "theta": 47.0,
+            "n_delay": 8,
+            "K_Q": 910.0,
+            "sigma": 0.0,
+        },
+        "rmse": None,
+        "samples": 0,
+        "band_c": [0.0, 0.0],
+        "nfev": None,
+    }
+
+    class OrderedStore(_FakeModelStore):
+        def load(self, name):
+            calls.append("restore-load")
+            return super().load(name)
+
+    store = OrderedStore({"mpc": v3})
+
+    def migrate_before_restore(*, defaults):
+        calls.append("migrate")
+        store.models["mpc"] = mpc_module.migrate_grey_learning_snapshot(v3)
+
+    monkeypatch.setattr(hold_module, "migrate_mpc_learning_authority", migrate_before_restore)
+    monkeypatch.setattr(hold_module, "read_model_activation", lambda: None)
+    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: ())
+    runner = FakeControllerRunner(period=0.01)
+    hold = hold_cycle(runner, model_store=store, controller="mpc")
+
+    hold.setup()
+
+    assert calls[:2] == ["migrate", "restore-load"]
+    assert runner.restored[0]["version"] == 4
+
+
 def test_setup_restores_durable_activation_before_control_ownership(hold_cycle, monkeypatch):
     from controller.runtime.modes import hold as hold_module
 

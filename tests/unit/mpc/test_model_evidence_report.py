@@ -1,14 +1,38 @@
 """Unified model-learning report vocabulary and authority contracts."""
 
 from __future__ import annotations
+import json
 
 
 import pytest
 
-from common.model_evidence import EvidenceKind, ModelEvidenceRecord, RecorderGapEvidence
+from common.model_evidence import (
+    CandidateAssessmentEvidence,
+    ActivationLifecycleEvidence,
+    EvidenceKind,
+    FitLifecycleEvidence,
+    LearningFailureEvidence,
+    ModelEvidenceRecord,
+    RecorderGapEvidence,
+    SchemaInvalidationEvidence,
+)
 from controller.model_learning import report as report_module
 from controller.model_learning.contracts import CandidateOrigin, CheckStatus, FitStatus, LearningStatus
-from controller.model_learning.report import build_learning_report, current_learning_report
+from common.control_trace import (
+    GreyActivationLifecyclePayload,
+    GreyCandidateAssessmentPayload,
+    GreyFitLifecyclePayload,
+    GreyLearningFailurePayload,
+)
+from common.controller_model_state import ControllerModelStore
+from common.datastore_accessors import read_control_trace_session, read_model_evidence
+from controller.mpc import Controller, _DEFAULTS
+from controller.model_learning.report import (
+    backend_learning_report,
+    build_learning_artifact,
+    build_learning_report,
+    current_learning_report,
+)
 
 
 _CANDIDATE = "b" * 64
@@ -269,6 +293,31 @@ def test_retired_evidence_is_counted_only_as_audit_history() -> None:
     assert evidence["retired_excluded"] == 1
 
 
+def test_retired_schema_invalidation_audit_cannot_gate_current_report() -> None:
+    retired = ModelEvidenceRecord(
+        evidence_id="retired-invalidation",
+        kind=EvidenceKind.SCHEMA_INVALIDATION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=2,
+        role_generation=4,
+        schema_version=2,
+        model_digest=None,
+        provenance_digest=None,
+        payload=SchemaInvalidationEvidence(previous_schema_version=1, reason="old-migration"),
+    )
+
+    payload = build_learning_report(
+        (retired,),
+        activation_state=_activation(phase="aborted"),
+        live_status=_live(status=LearningStatus.ACTIVE),
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    assert payload["status"] == "active"
+    assert payload["evidence"]["count"] == 0
+
+
 @pytest.mark.parametrize(
     ("live", "expected"),
     (
@@ -290,6 +339,62 @@ def test_live_transient_phases_overlay_without_changing_durable_identity(live, e
     assert _section(payload, "candidate")["digest"] == _CANDIDATE
 
 
+def test_live_terminal_failure_overrides_stale_active_lifecycle() -> None:
+    live = _live(status=LearningStatus.ACTIVE)
+    live["failure"] = {
+        "code": "activation-terminal",
+        "detail": "native solver crashed",
+        "terminal": True,
+    }
+
+    payload = build_learning_report(
+        (),
+        activation_state=_activation(phase="active"),
+        live_status=live,
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    assert payload["status"] == "error"
+    assert payload["errors"] == ["activation-terminal"]
+    assert payload["failure"] == live["failure"]
+
+
+def test_manual_policy_comes_from_matching_current_candidate_assessment() -> None:
+    assessment = ModelEvidenceRecord(
+        evidence_id="assessment-reviewed",
+        kind=EvidenceKind.CANDIDATE_ASSESSMENT,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=3,
+        role_generation=4,
+        model_digest=_CANDIDATE,
+        provenance_digest=_INCUMBENT,
+        payload=CandidateAssessmentEvidence(
+            decision_id="decision-1",
+            origin="operator-calibration",
+            policy="operator-reviewed",
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=True,
+        ),
+    )
+    live = _live(status=LearningStatus.EVALUATING)
+    live["origin"] = CandidateOrigin.OPERATOR_CALIBRATION
+
+    payload = build_learning_report(
+        (assessment,),
+        activation_state={**_activation(phase="aborted"), "policy": None},
+        live_status=live,
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    assert payload["status"] == "ready-for-review"
+    assert payload["candidate"]["policy"] == "operator-reviewed"
+
+
 def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> None:
     missing = build_learning_report(
         (),
@@ -309,3 +414,121 @@ def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> No
     assert missing["errors"] == ["checkpoint-missing"]
     assert incompatible["status"] == "schema-invalidated"
     assert incompatible["errors"] == ["checkpoint-schema-invalid"]
+
+
+def test_production_grey_lifecycle_writers_persist_matching_evidence_trace_report_and_artifact(ds):
+    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller.bind_learning_identity("session-lifecycle", "cook-lifecycle", 0)
+    incumbent = controller.active_control_pair.descriptor
+    candidate_digest = "b" * 64
+    events = (
+        (
+            FitLifecycleEvidence(
+                request_id="request-1",
+                status="succeeded",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+                window_id="window-1",
+            ),
+            GreyFitLifecyclePayload(
+                request_id="request-1",
+                status="succeeded",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+                window_id="window-1",
+            ),
+        ),
+        (
+            CandidateAssessmentEvidence(
+                decision_id="decision-1",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+                fit_accepted=True,
+                identifiability_accepted=True,
+                native_build="passed",
+                native_dry_solve="passed",
+                target_timing="passed",
+                confidence_accepted=True,
+            ),
+            GreyCandidateAssessmentPayload(
+                decision_id="decision-1",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+                fit_accepted=True,
+                identifiability_accepted=True,
+                native_build="passed",
+                native_dry_solve="passed",
+                target_timing="passed",
+                confidence_accepted=True,
+            ),
+        ),
+        (
+            ActivationLifecycleEvidence(
+                decision_id="decision-1",
+                phase="aborted",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+                reason="native-dry-solve-failed",
+            ),
+            GreyActivationLifecyclePayload(
+                decision_id="decision-1",
+                phase="aborted",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+                reason="native-dry-solve-failed",
+            ),
+        ),
+        (
+            LearningFailureEvidence(
+                code="native-dry-solve-failed",
+                detail="candidate failed finite dry solve",
+                terminal=True,
+            ),
+            GreyLearningFailurePayload(
+                code="native-dry-solve-failed",
+                detail="candidate failed finite dry solve",
+                terminal=True,
+            ),
+        ),
+    )
+    for offset, (evidence_payload, trace_payload) in enumerate(events):
+        controller._persist_grey_lifecycle(
+            evidence_payload,
+            trace_payload,
+            timestamp_ms=10 + offset,
+            role_generation=1,
+            model_digest=candidate_digest,
+            provenance_digest=incumbent.model_digest,
+        )
+    worker = controller._activation_persistence_worker
+    assert worker is not None
+    worker.flush_and_stop(timeout=2.0)
+    checkpoint = controller.get_model_snapshot()
+    checkpoint["challenger"] = {
+        "parameters": checkpoint["active"]["parameters"],
+        "metadata": checkpoint["active"]["metadata"],
+    }
+    checkpoint["origin"] = "operator-calibration"
+    checkpoint["policy"] = "operator-reviewed"
+    checkpoint["identities"]["candidate_digest"] = candidate_digest
+    checkpoint["identities"]["candidate_generation"] = 1
+    assert ControllerModelStore().save("mpc", checkpoint) is True
+
+    report, records = backend_learning_report()
+    artifact = build_learning_artifact(report, records)
+    trace = read_control_trace_session("session-lifecycle")
+
+    assert {record.kind.value for record in records} >= {
+        "fit_lifecycle",
+        "candidate_assessment",
+        "activation_lifecycle",
+        "learning_failure",
+    }
+    assert {record.event_kind.value for record in trace} == {
+        "fit_lifecycle",
+        "candidate_assessment",
+        "activation_lifecycle",
+        "learning_failure",
+    }
+    assert report.as_dict()["status"] == "error"
+    assert json.loads(artifact)["report"] == report.as_dict()

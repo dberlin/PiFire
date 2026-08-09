@@ -215,6 +215,7 @@ def _freeze_evidence(
                 role_generation=role_generation,
                 model_digest=challenger_digest,
                 provenance_digest=incumbent_digest,
+                schema_version=2,
                 payload=refresh,
             ),
         )

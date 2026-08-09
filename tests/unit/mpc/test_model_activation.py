@@ -487,6 +487,9 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     calls = []
 
     class _Worker:
+        def submit_evidence(self, record):
+            calls.append(("evidence", record))
+            return SimpleNamespace(accepted=True)
         def submit_activation_confidence(self, record):
             calls.append(("confidence", record))
             return _Receipt()
@@ -531,8 +534,14 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
 
     core._prepare_automatic_pair_activation(preparation, ActivationPolicy.PASSIVE_AUTO)
 
-    assert [kind for kind, *_ in calls] == ["confidence", "phase"]
-    confidence = calls[0][1]
+    assert [kind for kind, *_ in calls] == [
+        "evidence",
+        "evidence",
+        "confidence",
+        "phase",
+        "evidence",
+    ]
+    confidence = next(record for kind, record, *_ in calls if kind == "confidence")
     assert isinstance(confidence.payload, ConfidenceDecisionEvidence)
     assert confidence.payload.decision_id == evaluation.decision_id
     assert confidence.payload.blocked is False
@@ -606,6 +615,9 @@ def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
                 first_constructor_entered.set()
                 release_first_constructor.wait(timeout=1.0)
 
+        def submit_evidence(self, record):
+            self.calls.append(("evidence", record.evidence_id))
+            return SimpleNamespace(accepted=True)
         def submit_activation_confidence(self, record):
             self.calls.append(("confidence", record.evidence_id))
             return _Receipt()

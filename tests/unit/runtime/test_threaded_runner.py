@@ -29,6 +29,7 @@ from common.model_evidence import (
     FallbackEvidence,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
+    RefreshDiagnosticsEvidence,
     SessionSummaryEvidence,
 )
 from controller.runtime.modes.hold import HoldMode
@@ -101,6 +102,39 @@ def test_frozen_observation_evidence_counts_real_eligibility_and_rejections():
     assert rejected_summary.rejected_observations == 1
     assert rejected_summary.rejection_reasons == ("lid-open", "discontinuity")
     assert accepted[0].evidence_id != rejected[0].evidence_id
+
+
+def test_retired_refresh_evidence_is_frozen_only_as_schema_two_audit_history():
+    evaluation = SimpleNamespace(
+        decision_id="d" * 64,
+        evaluated_at_ms=21_000,
+        role_generation=4,
+        challenger_digest="b" * 64,
+        incumbent_digest="a" * 64,
+        rejection_reasons=("rank-deficient",),
+        consecutive_wins=0,
+    )
+    records = _freeze_evidence(
+        {
+            "eligible": False,
+            "rejection_reasons": ("rank-deficient",),
+            "forecast_origin_evidence": (),
+            "evaluation_payload": evaluation,
+            "refresh_diagnostics_evidence": RefreshDiagnosticsEvidence(
+                accepted=False,
+                reason="rank-deficient",
+            ),
+        },
+        "session",
+        "cook",
+        _frame(1),
+    )
+
+    refresh = next(record for record in records if record.kind is EvidenceKind.REFRESH_DIAGNOSTICS)
+    assert refresh.schema_version == 2
+    assert refresh not in [
+        record for record in records if record.schema_version == 3
+    ]
 
 
 class FakeCore:

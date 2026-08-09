@@ -22,7 +22,7 @@ from common.model_evidence import (
     SchemaInvalidationEvidence,
 )
 
-from .contracts import CandidateOrigin, CheckStatus, FitStatus, LearningStatus
+from .contracts import ActivationPolicy, CandidateOrigin, CheckStatus, FitStatus, LearningStatus
 
 REPORT_SCHEMA_VERSION = 2
 ARTIFACT_SCHEMA = "pifire-grey-learning-report/v2"
@@ -142,6 +142,7 @@ def build_learning_report(
     *,
     activation_state: object,
     live_status: object,
+    checkpoint_required: bool = False,
     calibration_command_high_water: int,
     checkpoint: object = None,
 ) -> LearningReport:
@@ -171,7 +172,7 @@ def build_learning_report(
         except (TypeError, ValueError):
             errors.append("checkpoint-schema-invalid")
             schema_invalidated = True
-    elif not activation and not live:
+    elif checkpoint_required or (not activation and not live):
         errors.append("checkpoint-missing")
 
     try:
@@ -264,11 +265,16 @@ def build_learning_report(
         errors.append("checks-invalid")
 
     fit_payload = _latest_payload(current_records, FitLifecycleEvidence)
-    assessment = _latest_payload(current_records, CandidateAssessmentEvidence)
+    assessment_record = _latest(current_records, CandidateAssessmentEvidence)
+    assessment = (
+        None
+        if assessment_record is None
+        else cast(CandidateAssessmentEvidence, assessment_record.payload)
+    )
     lifecycle = _latest_payload(current_records, ActivationLifecycleEvidence)
     failure = _latest_payload(current_records, LearningFailureEvidence)
     confidence = _latest_payload(current_records, ConfidenceDecisionEvidence)
-    invalidation = _latest_payload(records, SchemaInvalidationEvidence)
+    invalidation = _latest_payload(current_records, SchemaInvalidationEvidence)
 
     pending_persistence = bool(live.get("pending_persistence", False))
     pending_swap = bool(live.get("pending_swap", False)) or phase == "prepared"
@@ -280,6 +286,19 @@ def build_learning_report(
         status = LearningStatus.ACTIVE.value if lifecycle.phase == "active" else status
     if failure is not None and failure.terminal:
         errors.append(failure.code)
+    live_failure = live.get("failure")
+    if live_failure is not None:
+        if (
+            isinstance(live_failure, Mapping)
+            and isinstance(live_failure.get("code"), str)
+            and bool(live_failure.get("code"))
+            and isinstance(live_failure.get("detail"), str)
+            and bool(live_failure.get("detail"))
+            and live_failure.get("terminal") is True
+        ):
+            errors.append(cast(str, live_failure["code"]))
+        else:
+            errors.append("live-failure-invalid")
     if invalidation is not None:
         schema_invalidated = True
     if schema_invalidated:
@@ -292,6 +311,29 @@ def build_learning_report(
     candidate_metadata = candidate_checkpoint.get("metadata")
     candidate_metadata = candidate_metadata if isinstance(candidate_metadata, Mapping) else {}
     rejection_reasons = [] if assessment is None else list(assessment.rejection_reasons)
+    assessment_policy = None
+    if assessment is not None:
+        if (
+            candidate_digest is not None
+            and assessment_record is not None
+            and assessment_record.model_digest != candidate_digest
+        ):
+            errors.append("assessment-candidate-digest-mismatch")
+        elif origin is not None and assessment.origin != origin:
+            errors.append("assessment-candidate-origin-mismatch")
+        else:
+            assessment_policy = assessment.policy
+    if errors and not schema_invalidated:
+        status = LearningStatus.ERROR.value
+    if (
+        assessment_policy == ActivationPolicy.OPERATOR_REVIEWED.value
+        and assessment is not None
+        and not assessment.rejection_reasons
+        and status == LearningStatus.EVALUATING.value
+        and not errors
+        and not schema_invalidated
+    ):
+        status = LearningStatus.READY_FOR_REVIEW.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
     decision_id = activation.get("evidence_decision_id", activation.get("decision_id"))
     if not isinstance(decision_id, str) and assessment is not None:
@@ -325,7 +367,7 @@ def build_learning_report(
         "candidate": {
             "digest": candidate_digest,
             "origin": origin,
-            "policy": activation.get("policy", checkpoint_map.get("policy")),
+            "policy": assessment_policy,
             "role_generation": role_generation,
             "candidate_generation": candidate_generation,
             "parameters": candidate_checkpoint.get("parameters"),
@@ -358,7 +400,11 @@ def build_learning_report(
             "command_high_water": command_high_water,
         },
         "latest_lifecycle": None if lifecycle is None else _json_value(lifecycle),
-        "failure": None if failure is None else _json_value(failure),
+        "failure": (
+            _json_value(live_failure)
+            if live_failure is not None
+            else None if failure is None else _json_value(failure)
+        ),
         "gates": [
             {"name": name, "passed": value == CheckStatus.PASSED.value, "reason": None if value == CheckStatus.PASSED.value else name}
             for name, value in checks.items()
@@ -377,6 +423,7 @@ def current_learning_report(
     activation_state: object,
     live_status: object,
     calibration_command_high_water: int,
+    checkpoint_required: bool = False,
     checkpoint: object = None,
 ) -> LearningReport:
     """Return the value-cached report over every authority input."""
@@ -388,6 +435,7 @@ def current_learning_report(
         "checkpoint": checkpoint,
         "live": live_status,
         "calibration_command_high_water": calibration_command_high_water,
+        "checkpoint_required": checkpoint_required,
     }
     key = hashlib.sha256(_canonical_bytes(key_material)).hexdigest()
     with _REPORT_CACHE_LOCK:
@@ -399,6 +447,7 @@ def current_learning_report(
         records,
         activation_state=activation_state,
         checkpoint=checkpoint,
+        checkpoint_required=checkpoint_required,
         live_status=live_status,
         calibration_command_high_water=calibration_command_high_water,
     )
@@ -462,6 +511,7 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
         records,
         activation_state=read_model_activation(),
         checkpoint=ControllerModelStore().load("mpc"),
+        checkpoint_required=True,
         live_status=live,
         calibration_command_high_water=mpc_calibration_command_revision(),
     )

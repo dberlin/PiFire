@@ -6,6 +6,8 @@ from app import app as flask_app
 from blueprints.api import routes
 from common.datastore_accessors import (
     append_model_evidence,
+    read_status,
+    write_status,
     commit_model_activation_phase,
     read_model_activation,
     read_model_evidence,
@@ -25,7 +27,9 @@ from controller.model_learning.activation import (
     canonical_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from common.controller_model_state import ControllerModelStore
 
+from controller.mpc import migrate_grey_learning_snapshot
 
 _CANDIDATE = "c" * 64
 _INCUMBENT = "a" * 64
@@ -235,6 +239,111 @@ def _api_activation():
         ),
     )
     return incumbent, candidate, prepared, confidence
+
+
+def test_real_backend_requires_checkpoint_even_when_activation_exists(client):
+    _incumbent, _candidate, prepared, confidence = _api_activation()
+    append_model_evidence((confidence,))
+    commit_model_activation_phase(prepared, expected_phase=None)
+
+    response = client.get("/api/model-evidence/report")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "error"
+    assert response.get_json()["errors"] == ["checkpoint-missing"]
+
+
+def test_manual_policy_is_rejected_from_real_backend_candidate_assessment(client):
+    incumbent, candidate, prepared, _confidence = _api_activation()
+    checkpoint = migrate_grey_learning_snapshot(
+        {
+            "version": 3,
+            "revision": 1,
+            "params": {
+                "C_c": 2520.0,
+                "h_amb": 18.5,
+                "T_amb": 21.0,
+                "theta": 47.0,
+                "n_delay": 8,
+                "K_Q": 910.0,
+                "sigma": 0.0,
+            },
+            "rmse": None,
+            "samples": 0,
+            "band_c": [0.0, 0.0],
+            "nfev": None,
+        }
+    )
+    checkpoint["challenger"] = {
+        "parameters": checkpoint["active"]["parameters"],
+        "metadata": checkpoint["active"]["metadata"],
+    }
+    checkpoint["origin"] = "passive-online"
+    checkpoint["policy"] = "passive-auto"
+    checkpoint["identities"] = {
+        "active_digest": incumbent.model_digest,
+        "active_generation": incumbent.role_generation,
+        "candidate_digest": candidate.model_digest,
+        "candidate_generation": candidate.candidate_generation,
+        "rollback_digest": None,
+        "rollback_generation": None,
+    }
+    assert ControllerModelStore().save("mpc", checkpoint) is True
+    append_model_evidence(
+        (
+            ModelEvidenceRecord(
+                evidence_id="assessment-real-backend",
+                kind=EvidenceKind.CANDIDATE_ASSESSMENT,
+                session_id="session-api",
+                cook_id=None,
+                timestamp_ms=1_001,
+                role_generation=incumbent.role_generation,
+                model_digest=candidate.model_digest,
+                provenance_digest=incumbent.model_digest,
+                payload=CandidateAssessmentEvidence(
+                    decision_id=prepared.decision_id,
+                    origin="passive-online",
+                    policy="passive-auto",
+                    fit_accepted=True,
+                    identifiability_accepted=True,
+                    native_build="passed",
+                    native_dry_solve="passed",
+                    target_timing="passed",
+                    confidence_accepted=True,
+                ),
+            ),
+        )
+    )
+    write_status(
+        {
+            **read_status(),
+            "learning": {
+                "status": "ready-for-review",
+                "fit_status": "succeeded",
+                "role_generation": incumbent.role_generation,
+                "candidate_generation": candidate.candidate_generation,
+                "checkpoint_digest": incumbent.model_digest,
+                "candidate_digest": candidate.model_digest,
+                "origin": "passive-online",
+                "checks": {},
+                "activation_phase": "aborted",
+                "pending_persistence": False,
+                "pending_swap": False,
+                "failure": None,
+            },
+        }
+    )
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": candidate.model_digest,
+            "decision_id": prepared.decision_id,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["detail"] == "manual activation requires operator-reviewed policy"
 
 
 def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):

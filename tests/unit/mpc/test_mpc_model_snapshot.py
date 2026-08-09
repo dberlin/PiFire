@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from controller.mpc import _DEFAULTS, Controller, migrate_grey_learning_snapshot
+from controller.mpc import GreySnapshotInvalid, _DEFAULTS, Controller, migrate_grey_learning_snapshot
+from controller.model_learning.activation import ActivationPhase
 
 
 CURRENT_SCHEMA = 4
@@ -183,3 +186,61 @@ def test_v4_round_trip_is_exact_for_identified_and_default_snapshots():
         restored = _controller()
         assert restored.restore_model(snapshot) is True
         assert restored.get_model_snapshot() == snapshot
+
+
+
+@pytest.mark.parametrize(
+    ("section", "corrupt"),
+    (
+        ("active", {"parameters": PARAMS, "metadata": {"samples": -1}}),
+        ("challenger", {"parameters": PARAMS, "metadata": {"samples": -1}}),
+        ("window", {"session_id": "missing-the-rest"}),
+        ("evidence", {"eligible": -1, "rejected": 0, "confidence_decision_id": None}),
+        ("origin", "scheduled-arx"),
+        ("policy", "unreviewed"),
+        ("identification", {"status": "maybe"}),
+        ("cook_refit", {"status": "idle", "latest": 7}),
+        (
+            "identities",
+            {
+                "active_digest": "bad",
+                "active_generation": 0,
+                "candidate_digest": None,
+                "candidate_generation": None,
+                "rollback_digest": None,
+                "rollback_generation": None,
+            },
+        ),
+        (
+            "activation",
+            {"phase": "active", "pending_persistence": False, "pending_swap": 1},
+        ),
+        ("failure", {"code": "", "detail": "failed"}),
+    ),
+)
+def test_every_nested_v4_section_is_validated_before_atomic_restore(section, corrupt):
+    source = _identified()
+    snapshot = copy.deepcopy(source.get_model_snapshot())
+    snapshot[section] = corrupt
+    target = _controller()
+    before = target.get_model_snapshot()
+
+    with pytest.raises(GreySnapshotInvalid):
+        migrate_grey_learning_snapshot(snapshot)
+    assert target.restore_model(snapshot) is False
+    assert target.get_model_snapshot() == before
+
+
+def test_real_live_status_failure_overrides_prior_active_activation():
+    controller = _controller()
+    controller._active_activation_record = SimpleNamespace(phase=ActivationPhase.ACTIVE)
+    controller._activation_terminated_reason = "native solver crashed"
+
+    live = controller._learning_live_status()
+
+    assert live["status"] == "error"
+    assert live["activation_phase"] == "active"
+    assert live["failure"] == {
+        "code": "activation-terminal",
+        "detail": "native solver crashed",
+    }

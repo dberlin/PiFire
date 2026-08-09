@@ -64,6 +64,7 @@ from common.model_evidence import (
     ModelEvidenceDbRow,
     ModelEvidenceRecord,
     RollbackEvidence,
+    SchemaInvalidationEvidence,
 )
 
 
@@ -1454,6 +1455,21 @@ def migrate_mpc_learning_authority(
                 )
             elif source not in ("active", "rollback"):
                 conn.execute("DELETE FROM model_activation_state WHERE singleton=1")
+            elif source == "active":
+                selected_json = json.dumps(
+                    selected,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+                conn.execute(
+                    """
+                    UPDATE model_activation_state
+                    SET active_snapshot_json=?
+                    WHERE singleton=1
+                    """,
+                    (selected_json,),
+                )
             elif source == "rollback":
                 authority = activation_document.get("rollback")
                 pair_json = json.dumps(
@@ -1475,6 +1491,42 @@ def migrate_mpc_learning_authority(
                     WHERE singleton=1
                     """,
                     (selected_json, selected_json, pair_json, pair_json),
+                )
+            if reason is not None:
+                invalidation = ModelEvidenceRecord(
+                    evidence_id=f"mpc:schema-migration:{revision}:{source}",
+                    kind=EvidenceKind.SCHEMA_INVALIDATION,
+                    session_id="mpc-schema-migration",
+                    cook_id=None,
+                    timestamp_ms=0,
+                    role_generation=0,
+                    model_digest=current["snapshot"]["identities"]["active_digest"],
+                    provenance_digest=None,
+                    payload=SchemaInvalidationEvidence(
+                        previous_schema_version=3,
+                        reason=reason,
+                    ),
+                ).to_db_row()
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO model_evidence(
+                        evidence_id, session_id, cook_id, timestamp_ms, kind,
+                        role_generation, model_digest, provenance_digest,
+                        schema_version, payload
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        invalidation.evidence_id,
+                        invalidation.session_id,
+                        invalidation.cook_id,
+                        invalidation.timestamp_ms,
+                        invalidation.kind,
+                        invalidation.role_generation,
+                        invalidation.model_digest,
+                        invalidation.provenance_digest,
+                        invalidation.schema_version,
+                        invalidation.payload,
+                    ),
                 )
 
     return GreyLearningMigrationResult(selected, source, reason)
