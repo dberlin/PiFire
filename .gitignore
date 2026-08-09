@@ -1,5 +1,14 @@
 
 generated/
+!/native/generated/
+!/native/generated/**
+
+# acados build, FetchContent, generation transaction, and runtime publication state
+/build/
+/cmake-build-*/
+/native/.generated-stage-*/
+/native/.acados-exchange-probe-*/
+/controller/_native/
 
 *.pyc
 
@@ -58,6 +67,7 @@ bin/
 settings-v1.8.0.json
 
 include/
+!/native/include/
 
 lib/
 

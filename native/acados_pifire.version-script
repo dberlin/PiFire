@@ -1,0 +1,10 @@
+{
+    global:
+        acados_pifire_abi_version;
+        acados_pifire_grey_create;
+        acados_pifire_grey_destroy;
+        acados_pifire_grey_reset;
+        acados_pifire_grey_solve;
+    local:
+        *;
+};
