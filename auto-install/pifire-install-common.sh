@@ -268,6 +268,24 @@ pifire_build_web_ui() {
 	log " + Web UI built: $web/dist"
 }
 
+# pifire_rebuild_acados [repo_dir]
+#
+# Run after Python synchronization (the installer ordering contract) and before
+# Supervisor can start a native consumer. The public command owns build
+# serialization and atomic runtime publication.
+pifire_rebuild_acados() {
+	local repo="${1:-$PIFIRE_REPO_DIR}"
+	log " + Checking the acados native runtime"
+	if ! (
+		set -o pipefail
+		cd "$repo" && ./rebuild-acados.sh --if-needed 2>&1 | tee -a "$LOG"
+	); then
+		log " !! The acados native runtime could not be built. Installation cannot continue."
+		return 1
+	fi
+	log " + acados native runtime ready"
+}
+
 # ---------------------------------------------------------------------------
 # Device access
 # ---------------------------------------------------------------------------

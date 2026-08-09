@@ -198,6 +198,29 @@
           ]
         }
       }
+    },
+    {
+      "version": "1.12.0",
+      "build": 93,
+      "reboot_required": false,
+      "acados_bootstrap": true,
+      "dependencies": {
+        "app": {
+          "py_dependencies": [],
+          "apt_dependencies": [],
+          "command_list": [
+            [
+              "bash",
+              "/usr/local/bin/pifire/updater/install-acados-prerequisites.sh"
+            ]
+          ]
+        },
+        "control": {
+          "py_dependencies": [],
+          "apt_dependencies": [],
+          "command_list": []
+        }
+      }
     }
   ]
 }

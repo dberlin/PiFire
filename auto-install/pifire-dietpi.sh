@@ -181,7 +181,7 @@ echo "**                                                                     **"
 echo "**      Installing Dependencies... (This could take several minutes)   **" | tee -a ~/logs/pifire_install.log
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio build-essential nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio build-essential cmake nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
 
 # Grab project files
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
@@ -316,6 +316,10 @@ if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	exit 1
 fi
 echo " + Python dependency installation complete." | tee -a ~/logs/pifire_install.log
+if ! pifire_rebuild_acados /usr/local/bin/pifire; then
+	exit 1
+fi
+
 
 # Find all bluepy-helper executables in various possible locations
 BLUEPY_HELPERS=$(find /usr/local/bin/pifire/.venv/lib/ -path "*/bluepy/bluepy-helper" 2>/dev/null)

@@ -16,6 +16,9 @@
 
 import json
 import time
+from dataclasses import dataclass
+from pathlib import Path
+
 
 from common.common import (
     write_log,
@@ -27,6 +30,7 @@ from common.common import (
 )
 from common import datastore
 from common.install_log import INSTALL_FAILED_PERCENT
+from common.acados_build import run_acados_build
 from common.datastore_accessors import (
     set_updater_install_status,
     read_settings,
@@ -352,46 +356,179 @@ def get_update_data(settings):
     return update_data
 
 
-def change_branch(branch_target):
+@dataclass(frozen=True)
+class UpdateSnapshot:
+    revision: str
+    branch: str
+    runtime_target: str | None
+    metadata_path: Path
+
+
+def ensure_acados_prerequisites(repo_root=REPO_ROOT):
+    """Install only the native toolchain needed before the checkout moves."""
+    command = ["bash", str(Path(repo_root) / "updater" / "install-acados-prerequisites.sh"), "--prerequisites-only"]
+    status = "Checking acados native prerequisites..."
+    process = subprocess.Popen(
+        command,
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for raw_line in process.stdout:
+        _publish(15, status, raw_line.rstrip("\r\n"))
+    code = process.wait()
+    if code != 0:
+        return False, f"acados prerequisite installation exited {code}"
+    return True, "acados prerequisites ready"
+
+
+def capture_update_snapshot(repo_root=REPO_ROOT):
+    """Persist the exact source and runtime authorities before checkout."""
+    repository = Path(repo_root).resolve()
+    branch, branch_error = get_branch()
+    if branch_error:
+        raise RuntimeError(branch_error)
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if revision.returncode != 0 or not revision.stdout.strip():
+        raise RuntimeError(revision.stderr.strip() or "could not record the current source revision")
+
+    current = repository / "controller" / "_native" / "current"
+    if current.is_symlink():
+        runtime_target = os.readlink(current)
+    elif current.exists():
+        raise RuntimeError(f"{current} is not a symbolic link")
+    else:
+        runtime_target = None
+    metadata_path = current.parent / "update-transaction.json"
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot = UpdateSnapshot(revision.stdout.strip(), branch, runtime_target, metadata_path)
+    temporary = metadata_path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "previous_revision": snapshot.revision,
+                "previous_branch": snapshot.branch,
+                "runtime_target": snapshot.runtime_target,
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    os.replace(temporary, metadata_path)
+    return snapshot
+
+
+def restore_update_snapshot(snapshot, repo_root=REPO_ROOT):
+    """Restore source and runtime pointers after a failed source/native gate."""
+    repository = Path(repo_root).resolve()
+    checkout = subprocess.run(
+        ["git", "checkout", "-f", snapshot.branch],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    reset = subprocess.run(
+        ["git", "reset", "--hard", snapshot.revision],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    current = repository / "controller" / "_native" / "current"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    if snapshot.runtime_target is None:
+        current.unlink(missing_ok=True)
+    else:
+        temporary = current.with_name(f".current.rollback-{os.getpid()}")
+        temporary.unlink(missing_ok=True)
+        temporary.symlink_to(snapshot.runtime_target)
+        os.replace(temporary, current)
+    snapshot.metadata_path.unlink(missing_ok=True)
+    if checkout.returncode != 0 or reset.returncode != 0:
+        details = " | ".join(part for part in (checkout.stderr.strip(), reset.stderr.strip()) if part)
+        raise RuntimeError(details or "source rollback failed")
+
+
+def _change_branch_checkout(branch_target):
     command = ["git", "checkout", "-f", branch_target]
     target = subprocess.run(command, capture_output=True, text=True)
     if target.returncode == 0:
-        status = "Branch Changed Successfully"
-        output = " - " + target.stdout + target.stderr
-        success = True
-    else:
-        status = "ERROR Changing Branch"
-        output = " - " + target.stderr
-        success = False
-    return (success, status, output)
+        return True, "Branch Changed Successfully", " - " + target.stdout + target.stderr
+    return False, "ERROR Changing Branch", " - " + target.stderr
 
 
-def install_update():
+def _install_update_checkout():
     branch, error_msg1 = get_branch()
     remote, error_msg2 = get_remote_url()
     if error_msg1 == "" and error_msg2 == "":
-        command = ["git", "fetch"]
-        fetch = subprocess.run(command, capture_output=True, text=True)
-        command = ["git", "reset", "--hard", "HEAD"]
-        reset = subprocess.run(command, capture_output=True, text=True)
-        command = ["git", "merge", f"origin/{branch}"]
-        merge = subprocess.run(command, capture_output=True, text=True)
+        fetch = subprocess.run(["git", "fetch"], capture_output=True, text=True)
+        reset = subprocess.run(["git", "reset", "--hard", "HEAD"], capture_output=True, text=True)
+        merge = subprocess.run(["git", "merge", f"origin/{branch}"], capture_output=True, text=True)
         if fetch.returncode == 0 and reset.returncode == 0 and merge.returncode == 0:
-            status = "Update Completed Successfully"
-            output = " - " + fetch.stdout + reset.stdout + merge.stdout
-            success = True
-        else:
-            status = "ERROR Performing Update."
-            output = " - " + fetch.stdout + reset.stdout + merge.stdout
-            success = False
-    else:
-        # Reported rather than generalised to "check your git install": the
-        # ordinary cause is a detached HEAD, and that has a specific remedy the
-        # message from get_branch() spells out.
-        status = "ERROR Getting Remote URL or Branch."
-        output = " - " + " | ".join(m for m in (error_msg1, error_msg2) if m)
+            return True, "Update Completed Successfully", " - " + fetch.stdout + reset.stdout + merge.stdout
+        return False, "ERROR Performing Update.", " - " + fetch.stdout + reset.stdout + merge.stdout
+    # A detached HEAD has a specific remedy in get_branch()'s message.
+    return (
+        False,
+        "ERROR Getting Remote URL or Branch.",
+        " - " + " | ".join(message for message in (error_msg1, error_msg2) if message),
+    )
+
+
+def _source_native_transaction(checkout):
+    ready, prerequisite_output = ensure_acados_prerequisites(REPO_ROOT)
+    if not ready:
+        return False, "ERROR Preparing acados Native Prerequisites", f" - {prerequisite_output}"
+    try:
+        snapshot = capture_update_snapshot(REPO_ROOT)
+    except Exception as exc:
+        return False, "ERROR Recording Update Rollback State", f" - {exc}"
+
+    success, status, output = checkout()
+    if success:
+        native_status = "Building acados native runtime..."
+        try:
+            native_code = run_acados_build(
+                REPO_ROOT,
+                lambda line: _publish(25, native_status, line),
+                if_needed=True,
+            )
+        except Exception as exc:
+            native_code = -1
+            output = f"{output} | native runner failed: {exc}"
+        if native_code == 0:
+            snapshot.metadata_path.unlink(missing_ok=True)
+            return True, status, output
         success = False
-    return (success, status, output)
+        status = "ERROR Building acados Native Runtime"
+        output = f"{output} | acados native rebuild exited {native_code}"
+
+    try:
+        restore_update_snapshot(snapshot, REPO_ROOT)
+    except Exception as exc:
+        output = f"{output} | rollback failed: {exc}"
+    return False, status, output
+
+
+def change_branch(branch_target):
+    return _source_native_transaction(lambda: _change_branch_checkout(branch_target))
+
+
+def install_update():
+    return _source_native_transaction(_install_update_checkout)
 
 
 def read_output(command):
@@ -509,7 +646,9 @@ def run_update(branch):
         report_failure(status, output)
     time.sleep(4)
 
-    _, reboot = install_dependencies(current_version, current_build)
+    dependency_result, reboot = install_dependencies(current_version, current_build)
+    if dependency_result != 0:
+        report_failure("ERROR Installing Dependencies and Migrations", f" - dependency steps exited {dependency_result}")
     # After the dependencies, so a rebuild sees any new node/bun the migration
     # step installed -- and so an upgrade.sh that already built the bundle
     # leaves nothing for this to do.
@@ -534,7 +673,9 @@ def run_branch_change(branch):
         report_failure(status, output)
     time.sleep(4)
 
-    _, reboot = install_dependencies(current_version, current_build)
+    dependency_result, reboot = install_dependencies(current_version, current_build)
+    if dependency_result != 0:
+        report_failure("ERROR Installing Dependencies and Migrations", f" - dependency steps exited {dependency_result}")
     # A branch change swaps the React sources wholesale; the bundle from the
     # branch just left is exactly what must not keep being served.
     rebuild_web_ui_if_stale()
@@ -915,7 +1056,12 @@ if __name__ == "__main__":
         output = f" - APT, Python and Command Dependencies for version {current_version} ({current_build})"
         set_updater_install_status(percent, status, output)
 
-        _, reboot = install_dependencies(current_version, current_build)
+        dependency_result, reboot = install_dependencies(current_version, current_build)
+        if dependency_result != 0:
+            report_failure(
+                "ERROR Installing Dependencies and Migrations",
+                f" - dependency steps exited {dependency_result}",
+            )
         publish_finished(reboot)
 
     if args.piplist:

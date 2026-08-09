@@ -177,7 +177,7 @@ log "*************************************************************************"
 # Build toolchain + scientific libraries (scipy), web stack, supervisor,
 # bluetooth, and image libs. No Raspberry Pi packages.
 $SUDO apt install -y \
-	python3-dev python3-pip python3-venv python3-scipy \
+	python3-dev python3-pip python3-venv python3-scipy build-essential cmake \
 	gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev \
 	libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev \
 	nginx git supervisor nodejs \
@@ -365,6 +365,10 @@ uv sync --no-dev --inexact 2>&1 | tee -a "$LOG" ||
 		exit 1
 	}
 log " + Python dependency installation complete."
+if ! pifire_rebuild_acados /usr/local/bin/pifire; then
+	exit 1
+fi
+
 
 # Grant the BLE helper the capabilities it needs (best-effort).
 BLUEPY_HELPERS=$(find /usr/local/bin/pifire/.venv/lib/ -path "*/bluepy/bluepy-helper" 2>/dev/null)

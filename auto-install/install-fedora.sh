@@ -162,7 +162,7 @@ log "*************************************************************************"
 # bluetooth, image libs, and DejaVu fonts.
 $SUDO dnf -y install \
 	python3 python3-devel python3-pip python3-scipy \
-	gcc gcc-c++ make gcc-gfortran openblas-devel lapack-devel \
+	gcc gcc-c++ make cmake gcc-gfortran openblas-devel lapack-devel \
 	openjpeg-devel glib2-devel \
 	libjpeg-turbo-devel zlib-ng-compat-devel freetype-devel lcms2-devel libtiff-devel libwebp-devel \
 	nginx git supervisor sway seatd \
@@ -336,6 +336,10 @@ uv sync --no-dev --inexact 2>&1 | tee -a "$LOG" ||
 		exit 1
 	}
 log " + Python dependency installation complete."
+if ! pifire_rebuild_acados /usr/local/bin/pifire; then
+	exit 1
+fi
+
 
 # Grant the BLE helper the capabilities it needs (best-effort).
 BLUEPY_HELPERS=$(find /usr/local/bin/pifire/.venv/lib/ -path "*/bluepy/bluepy-helper" 2>/dev/null)
