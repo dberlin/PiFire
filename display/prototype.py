@@ -97,14 +97,14 @@ class Display:
 
     def display_splash(self):
         splash_str = []
-        splash_str.append("  (        (")
-        splash_str.append("  )\ )     )\ )")
-        splash_str.append(" (()/( (  (()/(  (   (      (")
-        splash_str.append("  /(_)))\  /(_)) )\  )(    ))\ ")
-        splash_str.append(" (_)) ((_)(_))_|((_)(()\  /((_) ")
-        splash_str.append(" | _ \ (_)| |_   (_) ((_)(_)) ")
-        splash_str.append(" |  _/ | || __|  | || '_|/ -_) ")
-        splash_str.append(" |_|   |_||_|    |_||_|  \___|  ")
+        splash_str.append(r"  (        (")
+        splash_str.append(r"  )\ )     )\ )")
+        splash_str.append(r" (()/( (  (()/(  (   (      (")
+        splash_str.append(r"  /(_)))\  /(_)) )\  )(    ))\ ")
+        splash_str.append(r" (_)) ((_)(_))_|((_)(()\  /((_) ")
+        splash_str.append(r" | _ \ (_)| |_   (_) ((_)(_)) ")
+        splash_str.append(r" |  _/ | || __|  | || '_|/ -_) ")
+        splash_str.append(r" |_|   |_||_|    |_||_|  \___|  ")
         self.screen.clear()
         num_rows, num_cols = self.screen.getmaxyx()
         self.screen.box()

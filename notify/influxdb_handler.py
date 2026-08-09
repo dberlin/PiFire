@@ -1,6 +1,6 @@
-import time
-from datetime import datetime
 import threading
+import time
+from datetime import UTC, datetime
 
 
 class InfluxNotificationHandler:
@@ -103,7 +103,7 @@ class InfluxNotificationHandler:
 
         p = (
             Point(name)
-            .time(time=datetime.utcnow())
+            .time(time=datetime.now(UTC))
             .field("GrillTemp", float(PrimaryTemp))
             .field("GrillSetPoint", float(PrimarySetpoint))
             .field("GrillNotifyPoint", float(PrimaryNotify))

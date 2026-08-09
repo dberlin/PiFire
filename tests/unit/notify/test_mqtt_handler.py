@@ -296,6 +296,7 @@ def test_connect_reuses_existing_client(patched_client):
     handler = _make_handler(patched_client)
     fake = handler.client
     assert len(FakeMqttClient.instances) == 1
+    assert fake.init_args[0] is mqtt.CallbackAPIVersion.VERSION2
 
     handler._connect()
 
@@ -329,7 +330,8 @@ def test_on_connect_publishes_availability_and_restores_subscriptions(patched_cl
     handler._subscribe = mock.Mock()
     handler.last_conn_time = 12345
 
-    handler._on_connect(handler.client, None, {}, mqtt.MQTT_ERR_SUCCESS, None)
+    reason_code = mqtt.ReasonCode(mqtt.PacketTypes.CONNACK, identifier=0)
+    handler._on_connect(handler.client, None, {}, reason_code, None)
 
     assert handler.last_conn_time == 0
     online_calls = [c for c in handler.client.publish_calls if c["payload"] == "online"]
@@ -338,24 +340,26 @@ def test_on_connect_publishes_availability_and_restores_subscriptions(patched_cl
     handler._subscribe.assert_has_calls([mock.call("topic/a"), mock.call("topic/b")])
 
 
-def test_on_disconnect_logs_error_for_nonzero_rc(patched_client, caplog):
+def test_on_disconnect_logs_error_for_a_failure_reason(patched_client, caplog):
     handler = _make_handler(patched_client)
+    reason_code = mqtt.ReasonCode(mqtt.PacketTypes.DISCONNECT, identifier=128)
     with caplog.at_level("INFO", logger="mqtt"):
-        handler._on_disconnect(handler.client, None, 7, None)
-    assert any(r.levelname == "ERROR" and "Disconnect returned result" in r.message for r in caplog.records)
+        handler._on_disconnect(handler.client, None, None, reason_code, None)
+    assert any(r.levelname == "ERROR" and "Unspecified error" in r.message for r in caplog.records)
 
 
-def test_on_disconnect_logs_info_for_zero_rc(patched_client, caplog):
+def test_on_disconnect_logs_info_for_a_success_reason(patched_client, caplog):
     handler = _make_handler(patched_client)
+    reason_code = mqtt.ReasonCode(mqtt.PacketTypes.DISCONNECT, identifier=0)
     with caplog.at_level("INFO", logger="mqtt"):
-        handler._on_disconnect(handler.client, None, 0, None)
-    assert any(r.levelname == "INFO" and "Disconnect returned result" in r.message for r in caplog.records)
+        handler._on_disconnect(handler.client, None, None, reason_code, None)
+    assert any(r.levelname == "INFO" and "Normal disconnection" in r.message for r in caplog.records)
 
 
 def test_on_connect_fail_logs_error(patched_client, caplog):
     handler = _make_handler(patched_client)
     with caplog.at_level("ERROR", logger="mqtt"):
-        handler._on_connect_fail(handler.client, None, 1)
+        handler._on_connect_fail(handler.client, None)
     assert any("Connection failure" in r.message for r in caplog.records)
 
 

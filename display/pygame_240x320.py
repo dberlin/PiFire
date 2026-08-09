@@ -110,7 +110,7 @@ class Display(DisplayBase):
         size = canvas.size
         raw_str = canvas.tobytes("raw", strFormat)
 
-        self.display_image = pygame.image.fromstring(raw_str, size, strFormat)
+        self.display_image = pygame.image.frombytes(raw_str, size, strFormat)
 
         self.display_surface.fill((255, 255, 255))
         self.display_surface.blit(self.display_image, (0, 0))

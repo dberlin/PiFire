@@ -25,6 +25,12 @@ import psutil
 # from common import write_control
 
 
+def _connack_text(reason_code):
+    if hasattr(reason_code, "value"):
+        return str(reason_code)
+    return mqtt.connack_string(reason_code)
+
+
 class MqttNotificationHandler:
     def __init__(self, settings) -> None:
         """Initialize an mqtt client
@@ -174,7 +180,7 @@ class MqttNotificationHandler:
             # Initialize our client if not already intialized
             if self.client == None:
                 # Future: may want to make these configurable
-                self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, transport="tcp", protocol=mqtt.MQTTv5)
+                self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="tcp", protocol=mqtt.MQTTv5)
                 self.client.on_connect = self._on_connect
                 self.client.on_disconnect = self._on_disconnect
                 self.client.on_connect_fail = self._on_connect_fail
@@ -197,9 +203,9 @@ class MqttNotificationHandler:
         except:
             self._mqttLogger.exception(f"Error occurred connecting to the mqtt broker: ")
 
-    def _on_connect(self, client, userdata, flags, rc, properties):
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
         self._mqttLogger.info(
-            f"Connection to '{self._mqtt_settings['broker']}' returned result: '{mqtt.connack_string(rc)}'"
+            f"Connection to '{self._mqtt_settings['broker']}' returned result: '{_connack_text(reason_code)}'"
         )
         self.last_conn_time = 0
         self._publish_data(topic=f"{self._mqtt_settings['id']}/availability", payload="online", qos=1)
@@ -241,14 +247,14 @@ class MqttNotificationHandler:
         # 		pass
         pass
 
-    def _on_disconnect(self, client, userdata, rc, properties):
-        if rc != 0:
-            self._mqttLogger.error(f"Disconnect returned result: {mqtt.connack_string(rc)}")
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        if reason_code != 0:
+            self._mqttLogger.error(f"Disconnect returned result: {_connack_text(reason_code)}")
         else:
-            self._mqttLogger.info(f"Disconnect returned result: {mqtt.connack_string(rc)}")
+            self._mqttLogger.info(f"Disconnect returned result: {_connack_text(reason_code)}")
 
-    def _on_connect_fail(self, client, userdata, rc):
-        self._mqttLogger.error(f"Connection failure: {mqtt.connack_string(rc)}")
+    def _on_connect_fail(self, client, userdata):
+        self._mqttLogger.error("Connection failure")
 
     def _check_connection(self):
 

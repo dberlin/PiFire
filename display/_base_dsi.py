@@ -209,7 +209,7 @@ class Display(DisplayBase):
         strFormat = self.transform_canvas.mode
         size = self.transform_canvas.size
         raw_str = self.transform_canvas.tobytes("raw", strFormat)
-        self.display_surface.blit(PyImage.fromstring(raw_str, size, strFormat), (0, 0))
+        self.display_surface.blit(PyImage.frombytes(raw_str, size, strFormat), (0, 0))
 
     def _display_background(self):
         self.display_canvas.paste(self.background, (0, 0))
