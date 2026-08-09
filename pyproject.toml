@@ -101,6 +101,7 @@ dev = [
     # own, not a side effect of `uv lock --upgrade`. Raise this ceiling in that
     # commit.
     "ruff>=0.8.0,<0.16",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
@@ -110,7 +111,7 @@ dev = [
 # absorbing a quarter-hour. Run them with `pytest -m slow` (a later `-m` wins
 # over this one), and never alongside the suite's wall-clock budget
 # assertions -- a loaded machine fails those on timing alone.
-addopts = ["--random-order", "-m", "not slow"]
+addopts = ["--random-order", "-n", "auto", "-m", "not slow"]
 markers = [
     "slow: simulates whole cooks and runs for minutes; excluded from the default run by addopts above.",
 ]

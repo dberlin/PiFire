@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -119,62 +120,54 @@ def test_read_settings_file_init_overlay_upgrades_stale_settings(tmp_path):
 
 
 def test_boot_path_import_via_app_import(tmp_path):
-    """End-to-end proof that the actual production boot path (importing the
-    real app.py) performs the first-boot SQLite import -- without any test
-    scaffolding calling datastore.init() itself. This is exactly the gap
-    that shipped uncaught: every prior init() call anywhere in the codebase
-    was in a test, never product code, so the real settings.json/pelletdb.json
-    of an upgrading user was never imported and read_settings() silently
-    returned defaults (data loss).
+    """The real app import consumes legacy JSON from an isolated working tree.
 
-    Runs `import app` in a subprocess (a fresh interpreter, cwd = repo root
-    so relative lookups like updater/updater_manifest.json still resolve)
-    against a fresh, isolated SQLite DB. settings.json/pelletdb.json in the
-    repo root are temporarily swapped for sentinel content and restored
-    afterward (they're gitignored, locally-generated files, never committed).
+    The subprocess needs the repository's updater manifest, but writing sentinel
+    files in the repository root races every other xdist worker's first-boot
+    datastore initialization. A temporary working directory keeps the real
+    relative-path boot behavior without exposing those files to another test.
     """
-    settings_path = os.path.join(_REPO_ROOT, "settings.json")
-    pelletdb_path = os.path.join(_REPO_ROOT, "pelletdb.json")
-    orig_settings = open(settings_path).read() if os.path.exists(settings_path) else None
-    orig_pelletdb = open(pelletdb_path).read() if os.path.exists(pelletdb_path) else None
-
     from common.defaults import default_pellets, default_settings
+
+    boot_root = tmp_path / "boot-root"
+    boot_root.mkdir()
+    for relative in (
+        "controller/controllers.json",
+        "probes/probes.json",
+        "updater/updater_manifest.json",
+        "wizard/wizard_manifest.json",
+    ):
+        target = boot_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(os.path.join(_REPO_ROOT, relative), target)
+    dashboard_source = os.path.join(_REPO_ROOT, "dashboard")
+    dashboard_target = boot_root / "dashboard"
+    dashboard_target.mkdir()
+    for filename in os.listdir(dashboard_source):
+        if filename.endswith(".json"):
+            shutil.copy2(os.path.join(dashboard_source, filename), dashboard_target / filename)
 
     sentinel_settings = default_settings()
     sentinel_settings["globals"]["grill_name"] = "BOOT_PATH_SENTINEL_GRILL"
-    del sentinel_settings["globals"]["uv"]  # a "new" field the import must backfill
+    del sentinel_settings["globals"]["uv"]
     sentinel_pelletdb = default_pellets()
     sentinel_pelletdb["current"]["hopper_level"] = 37
+    (boot_root / "settings.json").write_text(json.dumps(sentinel_settings))
+    (boot_root / "pelletdb.json").write_text(json.dumps(sentinel_pelletdb))
 
     db_path = str(tmp_path / "boot_app.db")
-
-    try:
-        with open(settings_path, "w") as fh:
-            json.dump(sentinel_settings, fh)
-        with open(pelletdb_path, "w") as fh:
-            json.dump(sentinel_pelletdb, fh)
-
-        env = dict(os.environ)
-        env["PIFIRE_DB_PATH"] = db_path
-        # Intentional real-process integration test: a fresh interpreter is required to
-        # exercise app.py's actual module-level boot wiring (see docstring above).
-        proc = subprocess.run(
-            [sys.executable, "-c", "import app"], cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=60
-        )
-        assert proc.returncode == 0, f"importing app.py failed:\nstdout={proc.stdout}\nstderr={proc.stderr}"
-    finally:
-        # Restore what was there, and REMOVE what we created. Only restoring
-        # `if orig is not None` used to leave the sentinel files behind on a
-        # clean checkout, where they then became load-bearing: the repo root's
-        # settings.json/pelletdb.json are the first-boot IMPORT source, so a
-        # leftover sentinel is silently imported by the next fresh-DB boot
-        # (that is how "BOOT_PATH_SENTINEL_GRILL" ended up in a dev install).
-        for path, orig in ((settings_path, orig_settings), (pelletdb_path, orig_pelletdb)):
-            if orig is not None:
-                with open(path, "w") as fh:
-                    fh.write(orig)
-            elif os.path.exists(path):
-                os.remove(path)
+    env = dict(os.environ)
+    env["PIFIRE_DB_PATH"] = db_path
+    env["PYTHONPATH"] = os.pathsep.join(path for path in (_REPO_ROOT, env.get("PYTHONPATH")) if path)
+    proc = subprocess.run(
+        [sys.executable, "-c", "import app"],
+        cwd=boot_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"importing app.py failed:\nstdout={proc.stdout}\nstderr={proc.stderr}"
 
     # Read the subprocess's isolated DB directly (it is not the DB this test
     # process's `datastore` module is bound to).

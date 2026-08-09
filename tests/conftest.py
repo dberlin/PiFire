@@ -37,10 +37,19 @@ for _blas_threads in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREAD
 # fixture can redirect it. (Proven: `pytest --collect-only` alone created it.)
 # The per-test `ds` / `live_server` fixtures still redirect as before; this
 # only moves the *default* off the repo so an import-time touch is harmless.
-os.environ.setdefault(
-    "PIFIRE_DB_PATH",
-    os.path.join(tempfile.mkdtemp(prefix="pifire-test-db-"), "pifire.db"),
-)
+_xdist_worker = os.environ.get("PYTEST_XDIST_WORKER")
+if _xdist_worker:
+    # The coordinator sets this before spawning workers, so setdefault() would
+    # make every worker collect against one SQLite file and race datastore.init().
+    os.environ["PIFIRE_DB_PATH"] = os.path.join(
+        tempfile.mkdtemp(prefix=f"pifire-test-db-{_xdist_worker}-"),
+        "pifire.db",
+    )
+else:
+    os.environ.setdefault(
+        "PIFIRE_DB_PATH",
+        os.path.join(tempfile.mkdtemp(prefix="pifire-test-db-"), "pifire.db"),
+    )
 
 # Must be set before `common.common` is imported, for the same reason as
 # PIFIRE_DB_PATH above: it resolves LOG_DIR at IMPORT time, and test modules
@@ -53,7 +62,10 @@ os.environ.setdefault(
 # content the log viewer shows a user, and why the log files disagreed with the
 # `logs` table -- tests already used a temporary database, but not temporary
 # log files.
-os.environ.setdefault("PIFIRE_LOG_DIR", tempfile.mkdtemp(prefix="pifire-test-logs-"))
+if _xdist_worker:
+    os.environ["PIFIRE_LOG_DIR"] = tempfile.mkdtemp(prefix=f"pifire-test-logs-{_xdist_worker}-")
+else:
+    os.environ.setdefault("PIFIRE_LOG_DIR", tempfile.mkdtemp(prefix="pifire-test-logs-"))
 
 from common import datastore  # noqa: E402
 
