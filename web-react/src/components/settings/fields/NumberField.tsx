@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { clampToBounds } from "../../../helpers/settings/bounds";
 import { Field } from "./Field";
 
@@ -9,6 +10,7 @@ export function NumberField({
   max,
   step,
   suffix,
+  trailing,
   hint,
   disabled,
   integer,
@@ -22,6 +24,13 @@ export function NumberField({
   max?: number;
   step?: number;
   suffix?: string;
+  /** An adornment rendered after the input — a button that fills the field in,
+   *  say. It SHARES the suffix's grid track (the field row's third column), so
+   *  a field passing both would stack them in one cell; no field does today.
+   *  Passing it here rather than rendering a sibling of the NumberField is what
+   *  keeps the input aligned with every other input in the section, instead of
+   *  landing the adornment in the label's column. */
+  trailing?: ReactNode;
   hint?: string;
   disabled?: boolean;
   integer?: boolean;
@@ -63,6 +72,7 @@ export function NumberField({
             }}
           />
           {suffix && <span className="pf-field-suffix">{suffix}</span>}
+          {trailing}
         </span>
       )}
     </Field>

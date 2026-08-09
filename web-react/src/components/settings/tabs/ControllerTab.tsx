@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
+import { readSelected } from "../../../helpers/settings/controllerSelection";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { MPC_FAN_CONFLICT_MESSAGE, mpcFanConflict } from "../../../helpers/settings/mpcFan";
@@ -19,17 +20,6 @@ import { SaveBar } from "../SaveBar";
  *  keyed by come from the runtime metadata list, not from a single static
  *  shape, so it stays a loose bag while the user is editing. */
 type ControllerValues = Record<string, number | boolean | string>;
-
-function firstControllerKey(meta: ControllerMetadata | null): string {
-  if (!meta) return "";
-  return Object.keys(meta.metadata)[0] ?? "";
-}
-
-function readSelected(settings: Settings, meta: ControllerMetadata | null): string {
-  const sel = settings.controller?.selected;
-  if (typeof sel === "string" && meta?.metadata[sel]) return sel;
-  return firstControllerKey(meta);
-}
 
 function deriveValues(
   selected: string,

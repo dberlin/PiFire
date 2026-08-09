@@ -24,8 +24,11 @@ export interface ControllerOption {
   option_description: string;
   option_type: "float" | "int" | "bool" | "list" | "string" | string;
   option_default: number | boolean | string | null;
-  option_min: number | null;
-  option_max: number | null;
+  // Bounds are declared only where they mean something: controllers.json omits
+  // both on every bool and list option. Optional, not `| null`, because the key
+  // is genuinely absent rather than present-and-empty.
+  option_min?: number | null;
+  option_max?: number | null;
   // _macro_settings.html:51 forwards this; controllers.json declares steps down
   // to 1e-10, so without it those spinners default to a step of 1.
   option_step?: number | null;
@@ -35,7 +38,17 @@ export interface ControllerOption {
 export interface ControllerMetadata {
   metadata: Record<
     string,
-    { friendly_name: string; description: string; config: ControllerOption[] }
+    {
+      friendly_name: string;
+      description: string;
+      config: ControllerOption[];
+      /** Values this controller suggests for settings that live OUTSIDE its own
+       *  config -- currently only `cycle_data.u_max`, offered as a one-click
+       *  button on the Work Mode tab. Optional at every level: nothing
+       *  validates controllers.json against a schema, so a controller that
+       *  recommends nothing is representable and simply offers no button. */
+      recommendations?: { cycle?: { cycle_ratio_max?: number } };
+    }
   >;
 }
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { WorkModeTab } from "../../../../../src/components/settings/tabs/WorkModeTab";
+import type { ControllerMetadata } from "../../../../../src/helpers/settings/settingsApi";
 import { renderRoute } from "../../../test-utils";
 
 const saveMock = rs.fn().mockResolvedValue(true);
@@ -348,6 +349,131 @@ describe("WorkModeTab", () => {
       fireEvent.change(pmode, { target: { value: "44" } });
       fireEvent.blur(pmode);
       expect(inputFor("PMode")).toHaveValue(9);
+    });
+  });
+
+  // Flask's _macro_settings.html:136 offered the selected controller's
+  // recommended value as a one-click button beside the input.
+  describe("recommended u_max button", () => {
+    const RECOMMEND_TITLE = "Click to Use Recommended Value.";
+
+    // Every controller in the SHIPPED catalog recommends the same 0.9, so
+    // production-shaped metadata cannot tell "reads the selected controller"
+    // from "reads the first controller" from "hardcodes 0.9". These values are
+    // fabricated and distinct per controller so that distinction is testable,
+    // and `pid` is deliberately declared FIRST while `mpc` is the selection.
+    const perControllerMeta: ControllerMetadata = {
+      metadata: {
+        pid: {
+          friendly_name: "PID Standard",
+          description: "",
+          config: [],
+          recommendations: { cycle: { cycle_ratio_max: 0.7 } },
+        },
+        mpc: {
+          friendly_name: "MPC",
+          description: "",
+          config: [],
+          recommendations: { cycle: { cycle_ratio_max: 0.55 } },
+        },
+      },
+    };
+
+    const contextFor = (controllerMeta: ControllerMetadata | null) => ({
+      settings: {
+        platform: { dc_fan: true },
+        cycle_data: { u_max: 0.5 },
+        controller: { selected: "mpc" },
+      },
+      mode: "Stop",
+      controllerMeta,
+    });
+
+    it("stages the recommended u_max into the draft without saving", () => {
+      renderRoute(<WorkModeTab />, contextFor(perControllerMeta));
+
+      expect(inputFor("U Max")).toHaveValue(0.5);
+      expect(screen.queryByText("Unsaved changes")).toBeNull();
+
+      fireEvent.click(screen.getByTitle(RECOMMEND_TITLE));
+
+      expect(inputFor("U Max")).toHaveValue(0.55);
+      // Staged only: SaveBar lights up, nothing is written until the user says so.
+      expect(saveMock).not.toHaveBeenCalled();
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    });
+
+    it("offers the SELECTED controller's recommendation, not the first one's", () => {
+      renderRoute(<WorkModeTab />, contextFor(perControllerMeta));
+
+      // 0.55 is mpc's (the selection); 0.7 is pid's (the first key).
+      expect(screen.getByTitle(RECOMMEND_TITLE)).toHaveTextContent("0.55");
+      expect(screen.getByTitle(RECOMMEND_TITLE)).not.toHaveTextContent("0.7");
+    });
+
+    // `title` is only an accessible-name FALLBACK: with text content present it
+    // is a tooltip, so without an aria-label the button announces as
+    // "leftwards arrow 0.55". Querying byRole/name computes the real accname,
+    // which getByTitle does not.
+    it("announces the action and the value, not just the arrow", () => {
+      renderRoute(<WorkModeTab />, contextFor(perControllerMeta));
+
+      expect(
+        screen.getByRole("button", { name: "Use recommended value 0.55" }),
+      ).toBeInTheDocument();
+    });
+
+    it("renders no button when controller metadata is unavailable", () => {
+      // getControllerMetadata fails OPEN with null by design, so the tab must
+      // still render -- without inventing a recommendation.
+      renderRoute(<WorkModeTab />, contextFor(null));
+
+      expect(screen.queryByTitle(RECOMMEND_TITLE)).toBeNull();
+      expect(inputFor("U Max")).toHaveValue(0.5);
+    });
+
+    it("renders no button when the selected controller recommends nothing", () => {
+      // Nothing validates controllers.json against a schema, so a controller
+      // with no recommendations block -- or one with no cycle_ratio_max in it
+      // -- is representable and must simply offer no button.
+      renderRoute(
+        <WorkModeTab />,
+        contextFor({
+          metadata: {
+            pid: {
+              friendly_name: "PID Standard",
+              description: "",
+              config: [],
+              recommendations: { cycle: { cycle_ratio_max: 0.7 } },
+            },
+            mpc: { friendly_name: "MPC", description: "", config: [] },
+          },
+        }),
+      );
+
+      expect(screen.queryByTitle(RECOMMEND_TITLE)).toBeNull();
+    });
+
+    // Same reasoning one level down: a third-party controller can ship the key
+    // with a null value. `!== undefined` would admit it, render an empty arrow
+    // and stage null into a float setting.
+    it("renders no button when the recommended value is null", () => {
+      renderRoute(
+        <WorkModeTab />,
+        contextFor({
+          metadata: {
+            mpc: {
+              friendly_name: "MPC",
+              description: "",
+              config: [],
+              recommendations: { cycle: { cycle_ratio_max: null } },
+            },
+          },
+        } as unknown as ControllerMetadata),
+      );
+
+      expect(screen.queryByTitle(RECOMMEND_TITLE)).toBeNull();
+      expect(inputFor("U Max")).toHaveValue(0.5);
     });
   });
 

@@ -1,8 +1,9 @@
 import { useOutletContext } from "react-router";
+import { readSelected } from "../../../helpers/settings/controllerSelection";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { hasDcFan } from "../../../helpers/settings/platform";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -67,7 +68,15 @@ function readWorkMode(s: Settings): WorkMode {
 }
 
 export function WorkModeTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
+  // settingsLoader already fetches the controller catalog alongside settings and
+  // SettingsShell puts it on the Outlet, so this is the same blob ControllerTab
+  // reads -- a query here would be a second request for data already in hand,
+  // and would let the two tabs disagree about it.
+  const { settings, controllerMeta } = useOutletContext<{
+    settings: Settings;
+    mode: string;
+    controllerMeta: ControllerMetadata | null;
+  }>();
   const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const {
@@ -93,6 +102,14 @@ export function WorkModeTab() {
   // Flask gates the fan-ramp NOTE, the sp_fan_ramp switch and the sp_duty_cycle
   // input on platform.dc_fan (settings/index.html:405-423).
   const dcFan = hasDcFan(settings);
+
+  // u_max is a duty-cycle CEILING the controller works under, so what a sensible
+  // value is depends on which controller is running -- hence the catalog, not a
+  // constant here. `undefined` (no catalog, or a controller that recommends
+  // nothing) simply means no button.
+  const recommendedUMax =
+    controllerMeta?.metadata[readSelected(settings, controllerMeta)]?.recommendations?.cycle
+      ?.cycle_ratio_max;
 
   const onSave = async () => {
     let d: object = {};
@@ -154,6 +171,31 @@ export function WorkModeTab() {
           onChange={(n) => setCycleData("u_max", n)}
           step={0.1}
           path="cycle_data.u_max"
+          // Flask's _macro_settings.html:136 labelled this button with the value
+          // itself and staged it without saving; SaveBar going dirty is the
+          // whole point. It rides in the field's `trailing` slot so it lands in
+          // the row's third grid track instead of under the label.
+          trailing={
+            // `typeof === "number"`, not `!== undefined`: nothing validates
+            // controllers.json against a schema, so a controller shipping
+            // `cycle_ratio_max: null` would otherwise render an empty arrow and
+            // stage null into a float setting.
+            typeof recommendedUMax === "number" && (
+              <button
+                type="button"
+                className="pf-recommend-btn"
+                title="Click to Use Recommended Value."
+                // The visible text is an arrow and a bare number, which names
+                // no action; `title` is only an accessible-name FALLBACK, so
+                // with text content present it stays a tooltip and a screen
+                // reader would announce "leftwards arrow 0.9".
+                aria-label={`Use recommended value ${recommendedUMax}`}
+                onClick={() => setCycleData("u_max", recommendedUMax)}
+              >
+                ← {recommendedUMax}
+              </button>
+            )
+          }
         />
         <Toggle
           label="Lid Open Detect Enabled"

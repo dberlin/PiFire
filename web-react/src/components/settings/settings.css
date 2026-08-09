@@ -150,6 +150,19 @@
 .pf-secret-toggle:hover {
   @apply text-text;
 }
+/* Same third track, same reason: NumberField's `trailing` adornment must not
+   push the input narrow, so the recommended-value button takes the suffix's
+   column rather than a slice of the control's. */
+.pf-recommend-btn {
+  @apply cursor-pointer justify-self-start whitespace-nowrap text-text-dim;
+  background: none;
+  border: none;
+  padding: 0;
+  font: 600 14px "Barlow";
+}
+.pf-recommend-btn:hover {
+  @apply text-accent;
+}
 .pf-stringlist-row {
   @apply flex items-center gap-[8px];
 }
