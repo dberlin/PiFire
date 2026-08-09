@@ -619,6 +619,13 @@ def _similarity_transformed_snapshot(snapshot: dict[str, object], transform: np.
     result["state"] = (inverse @ np.asarray(result["state"], dtype=np.float64)).tolist()
     covariance = np.asarray(result["state_covariance"], dtype=np.float64)
     result["state_covariance"] = (inverse @ covariance @ inverse.T).tolist()
+    lag = result["record"]["lag"]
+    delayed_index = len(lag["realized_q"]) - 1 - int(model["delay"])
+    result["status"]["state_output_c"] = float(
+        lag["ambient_c"][-1]
+        + np.asarray(model["C"], dtype=np.float64) @ np.asarray(result["state"], dtype=np.float64)
+        + model["D"][0] * (lag["realized_q"][delayed_index] - model["input_mean"])
+    )
     return result
 
 
