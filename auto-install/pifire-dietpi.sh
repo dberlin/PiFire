@@ -181,7 +181,7 @@ echo "**                                                                     **"
 echo "**      Installing Dependencies... (This could take several minutes)   **" | tee -a ~/logs/pifire_install.log
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio build-essential cmake nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
 
 # Grab project files
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
@@ -272,6 +272,10 @@ if [[ ! -r "$PIFIRE_COMMON" ]]; then
 fi
 # shellcheck source=pifire-install-common.sh
 source "$PIFIRE_COMMON"
+if ! pifire_install_acados_prerequisites debian; then
+	exit 1
+fi
+
 
 # Seat access for the sway Wayland compositor (QtQuick displays).
 $SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
@@ -307,16 +311,7 @@ uv venv --system-site-packages --allow-existing
 # Activate VENV
 source .venv/bin/activate
 
-echo " - Installing module dependencies from pyproject.toml... " | tee -a ~/logs/pifire_install.log
-uv sync --no-dev --inexact 2>&1 | tee -a ~/logs/pifire_install.log
-# PIPESTATUS, not `if !`: no `set -o pipefail` here, so the pipeline status is
-# tee's and a failed sync would be swallowed.
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-	echo " !! Failed to install Python dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
-	exit 1
-fi
-echo " + Python dependency installation complete." | tee -a ~/logs/pifire_install.log
-if ! pifire_rebuild_acados /usr/local/bin/pifire; then
+if ! pifire_sync_python_and_rebuild_acados /usr/local/bin/pifire; then
 	exit 1
 fi
 

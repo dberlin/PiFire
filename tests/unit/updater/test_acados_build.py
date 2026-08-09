@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import os
 from typing import Callable
+import logging
+import sqlite3
 
 import pytest
 
@@ -204,3 +206,113 @@ def test_dependency_failure_is_terminal_and_never_finishes_or_restarts(
 
     assert published[-1][0] < 0
     assert "dependencies" in published[-1][1].lower()
+
+
+def _git(cwd: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout.strip()
+
+
+def _commit_file(repo: Path, text: str, message: str) -> str:
+    (repo / "tracked.txt").write_text(text)
+    _git(repo, "add", "tracked.txt")
+    _git(repo, "commit", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("flow_name", ["update", "branch"])
+def test_real_git_flow_restores_branch_revision_runtime_and_terminal_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flow_name: str
+) -> None:
+    import updater
+    from common import datastore
+    from common.datastore_accessors import get_updater_install_status
+
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    checkout = tmp_path / "pifire"
+    remote.mkdir()
+    _git(remote, "init", "--bare", "--initial-branch=main")
+    seed.mkdir()
+    _git(seed, "init", "--initial-branch=main")
+    _git(seed, "config", "user.email", "tests@example.invalid")
+    _git(seed, "config", "user.name", "PiFire tests")
+    old_revision = _commit_file(seed, "old\n", "old")
+    _git(seed, "remote", "add", "origin", str(remote))
+    _git(seed, "push", "-u", "origin", "main")
+    _git(tmp_path, "clone", str(remote), str(checkout))
+    _git(checkout, "config", "user.email", "tests@example.invalid")
+    _git(checkout, "config", "user.name", "PiFire tests")
+
+    if flow_name == "update":
+        _commit_file(seed, "new\n", "new")
+        _git(seed, "push", "origin", "main")
+        target = "main"
+    else:
+        _git(checkout, "checkout", "-b", "development")
+        _commit_file(checkout, "development\n", "development")
+        _git(checkout, "checkout", "main")
+        target = "development"
+
+    native = checkout / "controller" / "_native"
+    (native / "releases" / "old").mkdir(parents=True)
+    (native / "current").symlink_to("releases/old")
+    rebuild = checkout / "rebuild-acados.sh"
+    rebuild.write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "cd \"$(dirname \"$0\")\"\n"
+        "rm -f controller/_native/current\n"
+        "ln -s releases/broken controller/_native/current\n"
+        "exit 31\n"
+    )
+    rebuild.chmod(0o755)
+
+    db_path = tmp_path / f"{flow_name}.db"
+    datastore._reset_for_tests(str(db_path))
+    datastore.init()
+    cursor = {"versions": {"server": "1.12.0", "build": 92}}
+    restart_marker = tmp_path / f"{flow_name}-restart"
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(updater, "REPO_ROOT", str(checkout))
+    monkeypatch.setattr(updater, "logger", logging.getLogger(f"real-{flow_name}-rollback"), raising=False)
+    monkeypatch.setattr(updater, "read_settings", lambda: cursor)
+    monkeypatch.setattr(updater, "time", type("_Time", (), {"sleep": staticmethod(lambda _: None)}))
+    monkeypatch.setattr(
+        updater,
+        "ensure_acados_prerequisites",
+        lambda *args, **kwargs: (True, "prerequisites ready"),
+    )
+    monkeypatch.setattr(
+        updater,
+        "install_dependencies",
+        lambda *args: pytest.fail("dependency/settings/cursor mutation ran after native failure"),
+    )
+    monkeypatch.setattr(
+        updater,
+        "rebuild_web_ui_if_stale",
+        lambda: pytest.fail("web build ran after native failure"),
+    )
+    monkeypatch.setattr(updater, "publish_finished", lambda reboot: restart_marker.write_text("Finished"))
+
+    run = updater.run_update if flow_name == "update" else updater.run_branch_change
+    with pytest.raises(SystemExit):
+        run(target)
+
+    assert _git(checkout, "branch", "--show-current") == "main"
+    assert _git(checkout, "rev-parse", "HEAD") == old_revision
+    assert os.readlink(native / "current") == "releases/old"
+    percent, status, output = get_updater_install_status()
+    assert percent < 0
+    assert "native" in status.lower()
+    assert "31" in output
+    assert cursor == {"versions": {"server": "1.12.0", "build": 92}}
+    assert not restart_marker.exists()
+    datastore._reset_for_tests(None)

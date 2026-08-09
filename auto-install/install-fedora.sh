@@ -162,7 +162,7 @@ log "*************************************************************************"
 # bluetooth, image libs, and DejaVu fonts.
 $SUDO dnf -y install \
 	python3 python3-devel python3-pip python3-scipy \
-	gcc gcc-c++ make cmake gcc-gfortran openblas-devel lapack-devel \
+	gcc-gfortran openblas-devel lapack-devel \
 	openjpeg-devel glib2-devel \
 	libjpeg-turbo-devel zlib-ng-compat-devel freetype-devel lcms2-devel libtiff-devel libwebp-devel \
 	nginx git supervisor sway seatd \
@@ -253,6 +253,10 @@ if [[ ! -r "$PIFIRE_COMMON" ]]; then
 fi
 # shellcheck source=pifire-install-common.sh
 source "$PIFIRE_COMMON"
+if ! pifire_install_acados_prerequisites fedora; then
+	exit 1
+fi
+
 
 # --- pifire group / ownership / sudoers -----------------------------------
 log " + Setting up the pifire group and permissions"
@@ -329,14 +333,7 @@ source .venv/bin/activate
 # version installed here contradicted the bound pyproject declares. It now
 # resolves from the lockfile like everything else; the influxdb [ciso] extra
 # moved into pyproject so it is still applied.
-log " + Installing module dependencies from pyproject.toml"
-uv sync --no-dev --inexact 2>&1 | tee -a "$LOG" ||
-	{
-		log " !! Python dependency install failed. Exiting."
-		exit 1
-	}
-log " + Python dependency installation complete."
-if ! pifire_rebuild_acados /usr/local/bin/pifire; then
+if ! pifire_sync_python_and_rebuild_acados /usr/local/bin/pifire; then
 	exit 1
 fi
 

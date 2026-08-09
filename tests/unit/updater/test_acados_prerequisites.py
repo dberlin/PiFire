@@ -185,21 +185,154 @@ def test_manifest_bootstrap_is_the_first_acados_migration_and_uses_no_python_env
     assert all(not section["py_dependencies"] and not section["apt_dependencies"] for section in entry["dependencies"].values())
 
 
-def test_fresh_installers_select_platform_toolchains_and_gate_after_python_sync() -> None:
-    expected = {
-        "auto-install/install.sh": ("build-essential", "cmake"),
-        "auto-install/pifire-dietpi.sh": ("build-essential", "cmake"),
-        "auto-install/install-debian.sh": ("build-essential", "cmake"),
-        "auto-install/install-fedora.sh": ("gcc", "gcc-c++", "cmake"),
-    }
-    for relative, packages in expected.items():
-        text = (REPOSITORY / relative).read_text()
-        for package in packages:
-            assert package in text, f"{relative} does not install {package}"
-        sync = text.index("uv sync --no-dev --inexact")
-        native = text.index("pifire_rebuild_acados", sync)
-        supervisor = text.lower().index("configuring supervisor", native)
-        assert sync < native < supervisor
+@pytest.mark.parametrize(
+    ("relative", "platform", "package_prefix"),
+    [
+        ("auto-install/install.sh", "debian", "apt-get install -y build-essential cmake"),
+        ("auto-install/pifire-dietpi.sh", "debian", "apt-get install -y build-essential cmake"),
+        ("auto-install/install-debian.sh", "debian", "apt-get install -y build-essential cmake"),
+        ("auto-install/install-fedora.sh", "fedora", "dnf -y install gcc gcc-c++ make cmake"),
+    ],
+)
+@pytest.mark.parametrize("rebuild_fails", [False, True], ids=["success", "native-failure"])
+def test_fresh_installer_harness_orders_package_sync_native_and_service(
+    tmp_path: Path,
+    relative: str,
+    platform: str,
+    package_prefix: str,
+    rebuild_fails: bool,
+) -> None:
+    installer = (REPOSITORY / relative).read_text()
+    assert f"pifire_install_acados_prerequisites {platform}" in installer
+    assert installer.count("pifire_sync_python_and_rebuild_acados /usr/local/bin/pifire") == 1
 
-    fedora = (REPOSITORY / "auto-install" / "install-fedora.sh").read_text()
-    assert "build-essential" not in fedora
+    repo = tmp_path / "pifire"
+    repo.mkdir()
+    log = tmp_path / "events.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_executable(fake_bin / "sudo", 'exec "$@"\n')
+    _write_executable(fake_bin / "apt-get", 'printf "apt-get %s\\n" "$*" >>"$COMMAND_LOG"\n')
+    _write_executable(fake_bin / "dnf", 'printf "dnf %s\\n" "$*" >>"$COMMAND_LOG"\n')
+    _write_executable(fake_bin / "uv", 'printf "uv %s\\n" "$*" >>"$COMMAND_LOG"\n')
+    _write_executable(
+        repo / "rebuild-acados.sh",
+        'printf "rebuild %s\\n" "$*" >>"$COMMAND_LOG"\n'
+        + ("exit 29\n" if rebuild_fails else ""),
+    )
+    harness = (
+        "set -u\n"
+        f"source {str(REPOSITORY / 'auto-install' / 'pifire-install-common.sh')!r}\n"
+        f"pifire_install_acados_prerequisites {platform}\n"
+        f"if pifire_sync_python_and_rebuild_acados {str(repo)!r}; then\n"
+        '  printf "service supervisor\\n" >>"$COMMAND_LOG"\n'
+        "else\n"
+        "  exit $?\n"
+        "fi\n"
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "COMMAND_LOG": str(log),
+        "LOG": os.devnull,
+        "SUDO": "sudo",
+    }
+    completed = subprocess.run(["/bin/bash", "-c", harness], env=env, capture_output=True, text=True, check=False)
+    events = log.read_text().splitlines()
+
+    assert events[0].startswith(package_prefix)
+    assert events.count("uv sync --no-dev --inexact") == 1
+    assert events.count("rebuild --if-needed") == 1
+    if rebuild_fails:
+        assert completed.returncode == 29
+        assert "service supervisor" not in events
+    else:
+        assert completed.returncode == 0, completed.stderr
+        assert events[-1] == "service supervisor"
+
+
+
+class _BootstrapProcess:
+    def __init__(self, command: list[str], events: list[tuple[str, ...]], code: int) -> None:
+        events.append(tuple(command))
+        self.stdout = iter(["native bootstrap failed\n"])
+        self._code = code
+
+    def wait(self) -> int:
+        return self._code
+
+    def poll(self) -> int:
+        return self._code
+
+
+def test_old_cursor_dispatches_bootstrap_before_any_dependency_collection_or_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import updater
+
+    events: list[tuple[str, ...]] = []
+    manifest = {
+        "metadata": {"versions": {"server": "1.12.0", "build": 93}},
+        "versions": [
+            {
+                "version": "1.12.0",
+                "build": 93,
+                "reboot_required": False,
+                "acados_bootstrap": True,
+                "dependencies": {
+                    "app": {
+                        "py_dependencies": [],
+                        "apt_dependencies": [],
+                        "command_list": [["bash", "/new-tree/install-acados-prerequisites.sh"]],
+                    }
+                },
+            },
+            {
+                "version": "1.10.0",
+                "build": 34,
+                "reboot_required": True,
+                "dependencies": {
+                    "app": {
+                        "py_dependencies": ["must-not-touch-venv"],
+                        "apt_dependencies": ["must-not-touch-packages"],
+                        "command_list": [["must-not-run-settings-migration"]],
+                    }
+                },
+            },
+        ],
+    }
+    monkeypatch.setattr(updater, "DEBUG", False, raising=False)
+    monkeypatch.setattr(updater, "read_updater_manifest", lambda: manifest)
+    monkeypatch.setattr(updater, "set_updater_install_status", lambda *args: None)
+    monkeypatch.setattr(updater, "time", type("_Time", (), {"sleep": staticmethod(lambda _: None)}))
+    monkeypatch.setattr(
+        updater.subprocess,
+        "Popen",
+        lambda command, **kwargs: _BootstrapProcess(command, events, 41),
+    )
+    monkeypatch.setattr(
+        updater,
+        "version",
+        lambda package: pytest.fail(f"Python dependency was inspected before native bootstrap: {package}"),
+    )
+    monkeypatch.setattr(
+        updater.subprocess,
+        "call",
+        lambda command: pytest.fail(f"package dependency was inspected before native bootstrap: {command}"),
+    )
+    monkeypatch.setattr(
+        updater,
+        "read_settings",
+        lambda: pytest.fail("settings were read before native bootstrap succeeded"),
+    )
+    monkeypatch.setattr(
+        updater,
+        "record_installed_version",
+        lambda manifest: pytest.fail("version cursor advanced after native bootstrap failure"),
+    )
+
+    result, reboot = updater.install_dependencies("1.9.0", 0)
+
+    assert result == 41
+    assert reboot is False
+    assert events == [("bash", "/new-tree/install-acados-prerequisites.sh")]

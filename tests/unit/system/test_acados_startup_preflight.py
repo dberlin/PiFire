@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 
+import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 START_CONTROL = REPOSITORY / "auto-install" / "start-control.sh"
@@ -101,3 +102,64 @@ def test_updater_and_startup_share_the_native_rebuild_lock_boundary(tmp_path: Pa
 
     phases = [line.split(":", 1)[0] for line in trace.read_text().splitlines()]
     assert phases == ["enter", "exit", "enter", "exit"]
+
+
+
+@pytest.mark.parametrize("flow_name", ["update", "branch"])
+def test_startup_waits_for_real_update_transaction_through_dependency_cursor(
+    tmp_path: Path, monkeypatch, flow_name: str
+) -> None:
+    import threading
+    import updater
+
+    repo, marker = _startup_tree(
+        tmp_path,
+        'printf "native:%s\\n" "$PPID" >>"$TRACE"\n',
+    )
+    trace = tmp_path / "transaction-trace.log"
+    dependency_started = threading.Event()
+    release_dependency = threading.Event()
+    monkeypatch.setattr(updater, "REPO_ROOT", str(repo))
+    monkeypatch.setattr(updater, "logger", __import__("logging").getLogger("transaction-lock-test"), raising=False)
+    monkeypatch.setattr(updater, "read_settings", lambda: {"versions": {"server": "1.12.0", "build": 92}})
+    monkeypatch.setattr(updater, "set_updater_install_status", lambda *args: None)
+    monkeypatch.setattr(updater, "time", type("_Time", (), {"sleep": staticmethod(lambda _: None)}))
+    monkeypatch.setattr(
+        updater,
+        "install_update",
+        lambda: (True, "Update Completed Successfully", " - native ready"),
+    )
+    monkeypatch.setattr(
+        updater,
+        "change_branch",
+        lambda branch: (True, "Branch Changed Successfully", f" - {branch} native ready"),
+    )
+
+    def dependencies(*args):
+        dependency_started.set()
+        assert release_dependency.wait(timeout=5)
+        with trace.open("a") as handle:
+            handle.write("dependency-cursor\n")
+        return 0, False
+
+    monkeypatch.setattr(updater, "install_dependencies", dependencies)
+    monkeypatch.setattr(updater, "rebuild_web_ui_if_stale", lambda: True)
+    monkeypatch.setattr(updater, "publish_finished", lambda reboot: None)
+    target = updater.run_update if flow_name == "update" else updater.run_branch_change
+    thread = threading.Thread(target=target, args=("development",), daemon=True)
+    thread.start()
+    assert dependency_started.wait(timeout=5)
+
+    env = {**os.environ, "TRACE": str(trace), "CONTROL_MARKER": str(marker)}
+    startup = subprocess.Popen(["/bin/bash", str(repo / "auto-install" / "start-control.sh")], env=env)
+    time.sleep(0.15)
+    assert not marker.exists(), "control exec raced ahead of dependency/settings/cursor completion"
+    release_dependency.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert startup.wait(timeout=5) == 0
+
+    lines = trace.read_text().splitlines()
+    assert lines[0] == "dependency-cursor"
+    assert lines[1].startswith("native:")
+    assert marker.exists()

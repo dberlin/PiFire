@@ -268,6 +268,28 @@ pifire_build_web_ui() {
 	log " + Web UI built: $web/dist"
 }
 
+# pifire_install_acados_prerequisites debian|fedora
+pifire_install_acados_prerequisites() {
+	local platform="$1"
+	local command=()
+	case "$platform" in
+	debian) command=(apt-get install -y build-essential cmake) ;;
+	fedora) command=(dnf -y install gcc gcc-c++ make cmake) ;;
+	*)
+		log " !! Unsupported acados prerequisite platform: $platform"
+		return 2
+		;;
+	esac
+	log " + Installing acados C/C++ and CMake prerequisites"
+	if ! (
+		set -o pipefail
+		$SUDO "${command[@]}" 2>&1 | tee -a "$LOG"
+	); then
+		log " !! Failed to install acados native prerequisites."
+		return 1
+	fi
+}
+
 # pifire_rebuild_acados [repo_dir]
 #
 # Run after Python synchronization (the installer ordering contract) and before
@@ -276,14 +298,32 @@ pifire_build_web_ui() {
 pifire_rebuild_acados() {
 	local repo="${1:-$PIFIRE_REPO_DIR}"
 	log " + Checking the acados native runtime"
-	if ! (
+	if (
 		set -o pipefail
 		cd "$repo" && ./rebuild-acados.sh --if-needed 2>&1 | tee -a "$LOG"
 	); then
+		log " + acados native runtime ready"
+		return 0
+	else
+		local code=$?
 		log " !! The acados native runtime could not be built. Installation cannot continue."
+		return "$code"
+	fi
+}
+
+# Synchronize Python and publish native runtime as one fail-fast installer gate.
+pifire_sync_python_and_rebuild_acados() {
+	local repo="${1:-$PIFIRE_REPO_DIR}"
+	log " + Installing module dependencies from pyproject.toml"
+	if ! (
+		set -o pipefail
+		cd "$repo" && uv sync --no-dev --inexact 2>&1 | tee -a "$LOG"
+	); then
+		log " !! Python dependency install failed. Installation cannot continue."
 		return 1
 	fi
-	log " + acados native runtime ready"
+	log " + Python dependency installation complete."
+	pifire_rebuild_acados "$repo"
 }
 
 # ---------------------------------------------------------------------------

@@ -177,7 +177,7 @@ log "*************************************************************************"
 # Build toolchain + scientific libraries (scipy), web stack, supervisor,
 # bluetooth, and image libs. No Raspberry Pi packages.
 $SUDO apt install -y \
-	python3-dev python3-pip python3-venv python3-scipy build-essential cmake \
+	python3-dev python3-pip python3-venv python3-scipy \
 	gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev \
 	libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev \
 	nginx git supervisor nodejs \
@@ -281,6 +281,10 @@ if [[ ! -r "$PIFIRE_COMMON" ]]; then
 fi
 # shellcheck source=pifire-install-common.sh
 source "$PIFIRE_COMMON"
+if ! pifire_install_acados_prerequisites debian; then
+	exit 1
+fi
+
 
 # --- pifire group / ownership / sudoers -----------------------------------
 log " + Setting up the pifire group and permissions"
@@ -358,14 +362,7 @@ source .venv/bin/activate
 # version installed here contradicted the bound pyproject declares. It now
 # resolves from the lockfile like everything else; the influxdb [ciso] extra
 # moved into pyproject so it is still applied.
-log " + Installing module dependencies from pyproject.toml"
-uv sync --no-dev --inexact 2>&1 | tee -a "$LOG" ||
-	{
-		log " !! Python dependency install failed. Exiting."
-		exit 1
-	}
-log " + Python dependency installation complete."
-if ! pifire_rebuild_acados /usr/local/bin/pifire; then
+if ! pifire_sync_python_and_rebuild_acados /usr/local/bin/pifire; then
 	exit 1
 fi
 

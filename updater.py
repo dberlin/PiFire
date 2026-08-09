@@ -16,6 +16,7 @@
 
 import json
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,7 @@ from common.web_ui_build import (
 )
 from importlib.metadata import version, PackageNotFoundError
 
+import fcntl
 import os
 import subprocess
 import sys
@@ -60,6 +62,20 @@ REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 #: name, so both names are one object. Bound here as well so the functions below
 #: can log when they are called from an import rather than from the CLI.
 logger = logging.getLogger("updater")
+
+
+@contextmanager
+def update_startup_transaction(repo_root=None):
+    """Serialize source/runtime mutation with control's startup preflight."""
+    repository = Path(repo_root or REPO_ROOT).resolve()
+    lock_path = repository / "controller" / "_native" / "update-startup.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 """
 ==============================================================================
@@ -629,55 +645,61 @@ def report_failure(status, output):
 
 
 def run_update(branch):
-    """The -u flow: pull, install dependencies, rebuild the bundle, finish."""
+    """The -u flow: pull, gate native, install dependencies, then finish."""
     settings = read_settings()
     current_version = settings["versions"]["server"]
     current_build = settings["versions"].get("build", 0)
 
-    set_updater_install_status(10, f"Attempting Update on {branch}...", f" - Attempting an update on branch {branch}")
-    time.sleep(2)
+    with update_startup_transaction():
+        set_updater_install_status(
+            10,
+            f"Attempting Update on {branch}...",
+            f" - Attempting an update on branch {branch}",
+        )
+        time.sleep(2)
+        success, status, output = install_update()
+        set_updater_install_status(20, status, output)
+        if not success:
+            report_failure(status, output)
+        time.sleep(4)
+        dependency_result, reboot = install_dependencies(current_version, current_build)
+        if dependency_result != 0:
+            report_failure(
+                "ERROR Installing Dependencies and Migrations",
+                f" - dependency steps exited {dependency_result}",
+            )
 
-    success, status, output = install_update()
-    set_updater_install_status(20, status, output)
-    if not success:
-        # git did not move the checkout, so the dependencies and the bundle
-        # below would be installed for code that never arrived -- and the run
-        # would go on to publish "Finished!" over the reason it failed.
-        report_failure(status, output)
-    time.sleep(4)
-
-    dependency_result, reboot = install_dependencies(current_version, current_build)
-    if dependency_result != 0:
-        report_failure("ERROR Installing Dependencies and Migrations", f" - dependency steps exited {dependency_result}")
-    # After the dependencies, so a rebuild sees any new node/bun the migration
-    # step installed -- and so an upgrade.sh that already built the bundle
-    # leaves nothing for this to do.
+    # Web remains outside the control transaction: it is diagnostic and does
+    # not consume the native ABI. Control may start once the cursor is durable.
     rebuild_web_ui_if_stale()
     publish_finished(reboot)
 
 
 def run_branch_change(branch):
-    """The -b flow. Same shape as run_update, with a checkout instead of a pull."""
+    """The -b flow uses the same source/native/startup transaction."""
     settings = read_settings()
     current_version = settings["versions"]["server"]
     current_build = settings["versions"].get("build", 0)
 
-    set_updater_install_status(10, f"Changing Branch to {branch}...", f" - Changing to selected branch {branch}")
-    time.sleep(2)
+    with update_startup_transaction():
+        set_updater_install_status(
+            10,
+            f"Changing Branch to {branch}...",
+            f" - Changing to selected branch {branch}",
+        )
+        time.sleep(2)
+        success, status, output = change_branch(branch)
+        set_updater_install_status(20, status, output)
+        if not success:
+            report_failure(status, output)
+        time.sleep(4)
+        dependency_result, reboot = install_dependencies(current_version, current_build)
+        if dependency_result != 0:
+            report_failure(
+                "ERROR Installing Dependencies and Migrations",
+                f" - dependency steps exited {dependency_result}",
+            )
 
-    success, status, output = change_branch(branch)
-    set_updater_install_status(20, status, output)
-    if not success:
-        # The checkout is still on the branch it started on. Rebuilding for a
-        # branch this run never reached would serve the wrong bundle.
-        report_failure(status, output)
-    time.sleep(4)
-
-    dependency_result, reboot = install_dependencies(current_version, current_build)
-    if dependency_result != 0:
-        report_failure("ERROR Installing Dependencies and Migrations", f" - dependency steps exited {dependency_result}")
-    # A branch change swaps the React sources wholesale; the bundle from the
-    # branch just left is exactly what must not keep being served.
     rebuild_web_ui_if_stale()
     publish_finished(reboot)
 
@@ -719,7 +741,55 @@ def record_installed_version(manifest=None):
     return True
 
 
+def _migration_is_pending(current_version_string, current_build, version_info):
+    return semantic_ver_is_lower(current_version_string, version_info["version"]) or (
+        current_version_string == version_info["version"]
+        and (current_build or 0) < version_info["build"]
+    )
+
+
+def _run_acados_bootstrap_migrations(updater_info, current_version_string, current_build):
+    """Run the new-tree native bootstrap before inspecting any dependency."""
+    status = "Bootstrapping acados native runtime..."
+    for version_info in updater_info["versions"]:
+        if not version_info.get("acados_bootstrap") or not _migration_is_pending(
+            current_version_string,
+            current_build,
+            version_info,
+        ):
+            continue
+        for section in version_info["dependencies"].values():
+            for command in section["command_list"]:
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                )
+                assert process.stdout is not None
+                for raw_line in process.stdout:
+                    line = raw_line.rstrip("\r\n")
+                    set_updater_install_status(25, status, line)
+                    logger.info(line)
+                return_code = process.wait()
+                if return_code != 0:
+                    return return_code
+    return 0
+
+
 def install_dependencies(current_version_string="0.0.0", current_build=None):
+    updaterInfo = read_updater_manifest()
+    bootstrap_result = _run_acados_bootstrap_migrations(
+        updaterInfo,
+        current_version_string,
+        current_build,
+    )
+    if bootstrap_result != 0:
+        return bootstrap_result, False
+
     result = 0
     percent = 30
     status = "Calculating Python/Package Dependencies..."
@@ -731,11 +801,8 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
     logger.debug(f"Percent: {percent}")
     logger.info(f"Status:  {status}")
     logger.debug(f"Output:  {output}")
-    # Update the status bar with the current status
     set_updater_install_status(percent, status, output)
     time.sleep(2)
-
-    updaterInfo = read_updater_manifest()
 
     # Get ALL PyPi & Apt dependencies and commands to install / update
     py_dependencies = []
@@ -745,9 +812,9 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
 
     for version_info in updaterInfo["versions"]:
         """ Walk list of versions in updater_manifest, check for dependencies """
-        if (semantic_ver_is_lower(current_version_string, version_info["version"])) or (
-            (current_version_string == version_info["version"]) and (current_build < version_info["build"])
-        ):
+        if _migration_is_pending(current_version_string, current_build, version_info):
+            if version_info.get("acados_bootstrap"):
+                continue
             # If the current version (pre-update) is less than this version information, install dependencies, etc.
             for section in version_info["dependencies"]:
                 for module in version_info["dependencies"][section]["py_dependencies"]:
