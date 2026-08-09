@@ -435,6 +435,83 @@ def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch)
         observing.join(2.0)
 
 
+def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidate(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+    preparing = threading.Event()
+    release = threading.Event()
+    rebound = threading.Event()
+
+    class Closable:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    old_pair = CandidatePair(Closable(), Closable())
+    new_pair = CandidatePair(Closable(), Closable())
+
+    class RacingLearning:
+        def __init__(self):
+            self.calls = 0
+            self.prepared = None
+            self.identities = []
+
+        def poll_fit_off_path(self, **_kwargs):
+            self.calls += 1
+            pair = old_pair if self.calls == 1 else new_pair
+            if self.calls == 1:
+                preparing.set()
+                assert release.wait(2.0)
+            preparation = SimpleNamespace(accepted=True, candidate_pair=pair)
+            self.prepared = preparation
+            return SimpleNamespace(preparation=preparation)
+
+        def evaluate_ready_off_path(self):
+            return None
+
+        def update_identity(self, identity, **_kwargs):
+            self.identities.append(identity)
+            if self.prepared is not None:
+                self.prepared.candidate_pair.controller.close()
+                self.prepared.candidate_pair.estimator.close()
+                self.prepared = None
+
+        def close(self):
+            return None
+
+    learning = RacingLearning()
+    controller._learning = learning
+    controller._learning_pending_origin = "passive-online"
+    polling = threading.Thread(target=controller.poll_learning_off_path)
+    rebinding = threading.Thread(
+        target=lambda: (
+            controller.bind_learning_identity("new-session", "new-cook", 1),
+            rebound.set(),
+        )
+    )
+    polling.start()
+    assert preparing.wait(1.0)
+    rebinding.start()
+    try:
+        release.set()
+        polling.join(2.0)
+        rebinding.join(2.0)
+    finally:
+        release.set()
+
+    assert rebound.is_set()
+    assert old_pair.controller.closed is True
+    assert old_pair.estimator.closed is True
+    assert controller._learning_candidate_pair is None
+    assert learning.identities[-1].role_generation == 1
+
+    controller._learning_pending_origin = "passive-online"
+    delivery, _evaluation = controller.poll_learning_off_path()
+    assert delivery.preparation.candidate_pair is new_pair
+    assert controller._learning_candidate_pair is new_pair
+
+
 def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(monkeypatch):
     controller, estimator, solver = _make(monkeypatch)
 

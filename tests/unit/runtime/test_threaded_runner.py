@@ -3,11 +3,19 @@ import threading
 import time
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.contracts import FrameObservation
-from common.control_trace import ActuationMode, ModelObservationPayload, ResultStaleState, TraceEventKind
+from common.control_trace import (
+    ActuationMode,
+    HorizonScorePayload,
+    ModelEvaluationPayload,
+    ModelObservationPayload,
+    ResultStaleState,
+    TraceEventKind,
+)
 from common.model_evidence import (
     EvidenceKind,
     FallbackEvidence,
@@ -15,6 +23,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     SessionSummaryEvidence,
 )
+from controller.runtime.modes.hold import HoldMode
 from controller.runtime.runner import (
     SyncControllerRunner,
     ThreadedControllerRunner,
@@ -1864,5 +1873,84 @@ def test_real_completed_forecast_survives_controller_to_runner_evidence_drain():
         assert len(forecast_records) == 1
         assert isinstance(forecast_records[0].payload, ForecastOriginEvidence)
         assert forecast_records[0].payload.observed_temperature_c == 102.0
+    finally:
+        runner.stop()
+
+
+def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_trace_valid():
+    evaluation = ModelEvaluationPayload(
+        decision_id="c" * 64,
+        evaluated_at_ms=80_000,
+        role_generation=0,
+        promoted=False,
+        committed=False,
+        consecutive_wins=0,
+        rejection_reasons=("no-completed-window",),
+        incumbent_prediction_score=None,
+        challenger_prediction_score=None,
+        incumbent_braking_score=None,
+        challenger_braking_score=None,
+        sample_count=0,
+        prospective_digest=None,
+        window_start_ms=80_000,
+        window_end_ms=80_000,
+        incumbent_digest="a" * 64,
+        challenger_digest="b" * 64,
+        completed_origins=(),
+        horizon_scores=(
+            HorizonScorePayload(3, None, None, 0),
+            HorizonScorePayload(15, None, None, 0),
+        ),
+        evaluation_duration_ms=1.0,
+        challenger_model_kind="grey-box",
+    )
+    learning = SimpleNamespace(
+        observe_completed_frame=lambda _frame, *, identifiability: SimpleNamespace(
+            history=SimpleNamespace(accepted=True, reasons=()),
+            completed_forecasts=(),
+            request=None,
+        ),
+        register_causal_forecasts=lambda *_args, **_kwargs: (),
+        update_identity=lambda *_args, **_kwargs: None,
+        close=lambda: None,
+    )
+    core = MpcController(
+        dict(MPC_DEFAULTS, enable_online_adaptation=False),
+        "C",
+        {"u_min": 0.1, "u_max": 0.9},
+    )
+    core._learning = learning
+    core._learning_pending_evaluation = evaluation
+    runner = SyncControllerRunner(core)
+    recorded = []
+    try:
+        runner.bind_evidence_context(0, "session", "cook")
+        observation = _frame(3)
+        submission = runner.observe_frame(observation)
+        mode = HoldMode.__new__(HoldMode)
+        mode._runner = runner
+        mode._trace_session_id = "session"
+        mode._pending_model_observations = {
+            submission.submission_sequence: (observation, "session", 0, None)
+        }
+        mode._persistence_worker = None
+        mode.ctx = SimpleNamespace(clock=SimpleNamespace(now=lambda: 100.0))
+        mode._trace_record = lambda kind, payload, published_ms: (
+            recorded.append((kind, payload, published_ms)),
+            True,
+        )[1]
+
+        mode._reconcile_model_observation_outcomes()
+        mode._reconcile_model_observation_outcomes()
+
+        assert [item[0] for item in recorded] == [
+            TraceEventKind.MODEL_OBSERVATION,
+            TraceEventKind.MODEL_EVALUATION,
+        ]
+        assert isinstance(recorded[0][1], ModelObservationPayload)
+        assert recorded[0][1].eligible is False
+        assert recorded[0][1].rejection_reasons == ("observation-outcome-malformed",)
+        assert recorded[1][1] is evaluation
+        assert mode._pending_model_observations == {}
     finally:
         runner.stop()

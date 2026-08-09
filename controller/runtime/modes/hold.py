@@ -727,15 +727,22 @@ class HoldMode(ControlMode):
             continuous=observation.continuous,
         )
 
-    def _queue_rejected_model_observation(self, sequence: int, reason: str) -> None:
+    def _queue_rejected_model_observation(
+        self,
+        sequence: int,
+        reason: str,
+        evaluation_payload: ModelEvaluationPayload | None = None,
+    ) -> None:
         pending = self._pending_model_observations.get(sequence)
         if pending is None or not isinstance(pending[0], FrameObservation):
             self._pending_model_observations.pop(sequence, None)
             return
-        self._pending_model_observations[sequence] = (
-            *pending[:3],
-            ((TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(pending[0], reason)),),
+        records: tuple[tuple[TraceEventKind, object], ...] = (
+            (TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(pending[0], reason)),
         )
+        if evaluation_payload is not None:
+            records += ((TraceEventKind.MODEL_EVALUATION, evaluation_payload),)
+        self._pending_model_observations[sequence] = (*pending[:3], records)
 
     def _flush_pending_model_trace(
         self,
@@ -787,16 +794,24 @@ class HoldMode(ControlMode):
                 self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
                 continue
             observation = delivered
+            evaluation_payload = outcome.get("evaluation_payload")
+            evaluation_payload = (
+                evaluation_payload if isinstance(evaluation_payload, ModelEvaluationPayload) else None
+            )
             try:
                 if observation.allocation_join_reason is not None:
-                    self._queue_rejected_model_observation(sequence, observation.allocation_join_reason)
+                    self._queue_rejected_model_observation(
+                        sequence, observation.allocation_join_reason, evaluation_payload
+                    )
                     continue
                 if not observation.probe_valid:
-                    self._queue_rejected_model_observation(sequence, "invalid-probe")
+                    self._queue_rejected_model_observation(sequence, "invalid-probe", evaluation_payload)
                     continue
                 role_generation = outcome["role_generation"]
                 if role_generation != observation.role_generation:
-                    self._queue_rejected_model_observation(sequence, "observation-role-generation-mismatch")
+                    self._queue_rejected_model_observation(
+                        sequence, "observation-role-generation-mismatch", evaluation_payload
+                    )
                     continue
                 if outcome.get("eligible") is True and (
                     observation.output_source != OutputSource.CONTROLLER.value
@@ -808,7 +823,9 @@ class HoldMode(ControlMode):
                     or observation.reset
                     or not observation.continuous
                 ):
-                    self._queue_rejected_model_observation(sequence, "observation-gate-mismatch")
+                    self._queue_rejected_model_observation(
+                        sequence, "observation-gate-mismatch", evaluation_payload
+                    )
                     continue
                 output_source = (
                     OutputSource(observation.output_source) if observation.output_source != "unknown" else None
@@ -871,11 +888,12 @@ class HoldMode(ControlMode):
                     continuous=observation.continuous,
                 )
             except KeyError, TypeError, ValueError:
-                self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
+                self._queue_rejected_model_observation(
+                    sequence, "observation-outcome-malformed", evaluation_payload
+                )
                 continue
             records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
-            evaluation_payload = outcome.get("evaluation_payload")
-            if isinstance(evaluation_payload, ModelEvaluationPayload):
+            if evaluation_payload is not None:
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation_payload))
             lifecycle_payload = self._model_lifecycle_payload(outcome.get("lifecycle"))
             if lifecycle_payload is not None:

@@ -832,6 +832,7 @@ class Controller(ControllerBase):
         self._learning_lock = threading.RLock()
         self._learning_evaluation_lock = threading.Lock()
         self._learning_preparing = False
+        self._learning_lifecycle_lock = threading.Lock()
         self._learning_pending_origin: CandidateOrigin | None = None
         self._learning_candidate_pair: CandidatePair | None = None
         self._learning_pending_evaluation = None
@@ -1910,21 +1911,31 @@ class Controller(ControllerBase):
 
     def bind_learning_identity(self, session_id, cook_id, role_generation):
         """Fence Task 7 work to the runner's current cook/configuration identity."""
-        self._learning_session_id = session_id
-        self._learning_cook_id = cook_id
-        self._learning_role_generation = int(role_generation)
-        with self._learning_lock:
-            if self._learning is not None:
-                self._learning.update_identity(
-                    self._learning_identity(),
-                    config=self.mpc.config,
-                    incumbent_pair=CandidatePair(self.estimator, self.mpc),
-                )
-                self._learning_pending_origin = None
-                self._learning_candidate_pair = None
+        with self._learning_lifecycle_lock:
+            self._learning_session_id = session_id
+            self._learning_cook_id = cook_id
+            self._learning_role_generation = int(role_generation)
+            with self._learning_lock:
+                learning = self._learning
+            if learning is not None:
+                with self._learning_evaluation_lock:
+                    learning.update_identity(
+                        self._learning_identity(),
+                        config=self.mpc.config,
+                        incumbent_pair=CandidatePair(self.estimator, self.mpc),
+                    )
+                with self._learning_lock:
+                    if learning is self._learning:
+                        self._learning_pending_origin = None
+                        self._learning_candidate_pair = None
 
     def poll_learning_off_path(self, *, live_origin=None):
         """Drain and prepare fits only from the runner's lifecycle dispatcher."""
+        with self._learning_lifecycle_lock:
+            return self._poll_learning_off_path_locked(live_origin=live_origin)
+
+    def _poll_learning_off_path_locked(self, *, live_origin=None):
+        """Run one lifecycle poll while identity mutation is fenced."""
         with self._learning_lock:
             learning = self._learning
             if learning is None:
