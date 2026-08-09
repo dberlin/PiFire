@@ -186,26 +186,38 @@ def test_manifest_bootstrap_is_the_first_acados_migration_and_uses_no_python_env
 
 
 @pytest.mark.parametrize(
-    ("relative", "platform", "package_prefix"),
+    ("relative", "package_prefix", "service_event"),
     [
-        ("auto-install/install.sh", "debian", "apt-get install -y build-essential cmake"),
-        ("auto-install/pifire-dietpi.sh", "debian", "apt-get install -y build-essential cmake"),
-        ("auto-install/install-debian.sh", "debian", "apt-get install -y build-essential cmake"),
-        ("auto-install/install-fedora.sh", "fedora", "dnf -y install gcc gcc-c++ make cmake"),
+        (
+            "auto-install/install.sh",
+            "apt-get install -y build-essential cmake",
+            "service supervisor start",
+        ),
+        (
+            "auto-install/pifire-dietpi.sh",
+            "apt-get install -y build-essential cmake",
+            "service supervisor start",
+        ),
+        (
+            "auto-install/install-debian.sh",
+            "apt-get install -y build-essential cmake",
+            "systemctl restart supervisor",
+        ),
+        (
+            "auto-install/install-fedora.sh",
+            "dnf -y install gcc gcc-c++ make cmake",
+            "systemctl restart supervisord",
+        ),
     ],
 )
 @pytest.mark.parametrize("rebuild_fails", [False, True], ids=["success", "native-failure"])
-def test_fresh_installer_harness_orders_package_sync_native_and_service(
+def test_actual_fresh_installer_entry_orders_package_sync_native_and_service(
     tmp_path: Path,
     relative: str,
-    platform: str,
     package_prefix: str,
+    service_event: str,
     rebuild_fails: bool,
 ) -> None:
-    installer = (REPOSITORY / relative).read_text()
-    assert f"pifire_install_acados_prerequisites {platform}" in installer
-    assert installer.count("pifire_sync_python_and_rebuild_acados /usr/local/bin/pifire") == 1
-
     repo = tmp_path / "pifire"
     repo.mkdir()
     log = tmp_path / "events.log"
@@ -215,20 +227,12 @@ def test_fresh_installer_harness_orders_package_sync_native_and_service(
     _write_executable(fake_bin / "apt-get", 'printf "apt-get %s\\n" "$*" >>"$COMMAND_LOG"\n')
     _write_executable(fake_bin / "dnf", 'printf "dnf %s\\n" "$*" >>"$COMMAND_LOG"\n')
     _write_executable(fake_bin / "uv", 'printf "uv %s\\n" "$*" >>"$COMMAND_LOG"\n')
+    _write_executable(fake_bin / "service", 'printf "service %s\\n" "$*" >>"$COMMAND_LOG"\n')
+    _write_executable(fake_bin / "systemctl", 'printf "systemctl %s\\n" "$*" >>"$COMMAND_LOG"\n')
     _write_executable(
         repo / "rebuild-acados.sh",
         'printf "rebuild %s\\n" "$*" >>"$COMMAND_LOG"\n'
         + ("exit 29\n" if rebuild_fails else ""),
-    )
-    harness = (
-        "set -u\n"
-        f"source {str(REPOSITORY / 'auto-install' / 'pifire-install-common.sh')!r}\n"
-        f"pifire_install_acados_prerequisites {platform}\n"
-        f"if pifire_sync_python_and_rebuild_acados {str(repo)!r}; then\n"
-        '  printf "service supervisor\\n" >>"$COMMAND_LOG"\n'
-        "else\n"
-        "  exit $?\n"
-        "fi\n"
     )
     env = {
         **os.environ,
@@ -236,8 +240,16 @@ def test_fresh_installer_harness_orders_package_sync_native_and_service(
         "COMMAND_LOG": str(log),
         "LOG": os.devnull,
         "SUDO": "sudo",
+        "PIFIRE_TEST_NATIVE_INSTALL_FLOW": "1",
+        "PIFIRE_TEST_REPO_ROOT": str(repo),
     }
-    completed = subprocess.run(["/bin/bash", "-c", harness], env=env, capture_output=True, text=True, check=False)
+    completed = subprocess.run(
+        ["/bin/bash", str(REPOSITORY / relative)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     events = log.read_text().splitlines()
 
     assert events[0].startswith(package_prefix)
@@ -245,10 +257,15 @@ def test_fresh_installer_harness_orders_package_sync_native_and_service(
     assert events.count("rebuild --if-needed") == 1
     if rebuild_fails:
         assert completed.returncode == 29
-        assert "service supervisor" not in events
+        assert service_event not in events
     else:
         assert completed.returncode == 0, completed.stderr
-        assert events[-1] == "service supervisor"
+        assert events == [
+            next(event for event in events if event.startswith(package_prefix)),
+            "uv sync --no-dev --inexact",
+            "rebuild --if-needed",
+            service_event,
+        ]
 
 
 

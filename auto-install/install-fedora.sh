@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+if [[ "${PIFIRE_TEST_NATIVE_INSTALL_FLOW:-0}" == "1" ]]; then
+	PIFIRE_ENTRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	: "${LOG:=/dev/null}"
+	# shellcheck source=pifire-install-common.sh
+	source "$PIFIRE_ENTRY_DIR/pifire-install-common.sh"
+	pifire_install_acados_prerequisites fedora || exit $?
+	pifire_sync_python_and_rebuild_acados "${PIFIRE_TEST_REPO_ROOT:?}" || exit $?
+	$SUDO systemctl restart supervisord
+	exit $?
+fi
+
 # PiFire Automatic Installation Script -- Fedora (x86_64)
 #
 # Companion to auto-install/install.sh (which targets Raspberry Pi OS / Debian on

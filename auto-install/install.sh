@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 
+# Safe executable seam for installer lifecycle regression tests. It invokes
+# the same shared production boundaries as the normal path, but no host setup.
+if [[ "${PIFIRE_TEST_NATIVE_INSTALL_FLOW:-0}" == "1" ]]; then
+	PIFIRE_ENTRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	: "${LOG:=/dev/null}"
+	# shellcheck source=pifire-install-common.sh
+	source "$PIFIRE_ENTRY_DIR/pifire-install-common.sh"
+	pifire_install_acados_prerequisites debian || exit $?
+	pifire_sync_python_and_rebuild_acados "${PIFIRE_TEST_REPO_ROOT:?}" || exit $?
+	$SUDO service supervisor start
+	exit $?
+fi
+
 # Automatic Installation Script
 # Many thanks to the PiVPN project (pivpn.io) for much of the inspiration for this script
 #
