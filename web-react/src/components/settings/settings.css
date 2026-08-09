@@ -279,6 +279,21 @@
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   letter-spacing: 0.02em;
 }
+/* A card stacks controls of two different widths -- a 7.5rem colour swatch and
+   a toggle a third that wide -- and the field's justify-between aligns only
+   their right edges, leaving the left ones ragged down the card. A control
+   column as wide as the swatch, filled from the left, starts every one of them
+   at the same x. The header's field is included, so its toggle sits in that
+   same column as the swatches beneath it. */
+.pf-probe-card .pf-field {
+  @apply grid items-center gap-x-[16px];
+  grid-template-columns: minmax(0, 1fr) 7.5rem;
+}
+/* The control is whatever the field's render prop returned -- a switch, a
+   colour input -- so it is named by exclusion rather than by class. */
+.pf-probe-card .pf-field > *:not(.pf-field-label):not(.pf-field-hint):not(.pf-field-error) {
+  justify-self: start;
+}
 
 /* RangeProfileTable: boundary + N+1 profile-row editor (SmartStart, PWM tabs) */
 .pf-rpt-wrap {
