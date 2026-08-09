@@ -843,6 +843,25 @@ def validate_settings_delta(envelope):
             raise SettingsDeltaError(f"delete path must be a non-empty list of strings, got {path!r}")
 
 
+def assigned_members(delta):
+    """The members `delta` will actually assign, whether or not it is an envelope.
+
+    A bare partial assigns itself; a `settings_delta()` envelope assigns its
+    `set`, and its own three members are transport, not settings fields.
+    Anything that type-checks a write has to look at this rather than at the
+    payload as sent -- validating the envelope against the settings schema
+    reports its members as unknown fields and refuses every write that carries
+    a deletion, which is every controller switch that retires an option.
+
+    Raises SettingsDeltaError on a malformed envelope, so a caller reports it
+    as a rejection instead of merging a broken payload as if it were a partial.
+    """
+    if not is_settings_delta(delta):
+        return delta
+    validate_settings_delta(delta)
+    return delta.get("set") or {}
+
+
 def _delete_settings_path(settings, path):
     """Remove one key path. A path that does not exist is already satisfied."""
     node = settings
@@ -972,6 +991,10 @@ def validate_partial_settings(delta: dict) -> list[str]:
     "value_error" entries leaves exactly the field-level errors.
     """
     try:
+        delta = assigned_members(delta)
+    except SettingsDeltaError as exc:
+        return [f"{SETTINGS_DELTA_KEY}: {exc}"]
+    try:
         PartialSettingsSchema.model_validate(delta, strict=True)
     except ValidationError as exc:
         field_errors = [err for err in exc.errors() if err["type"] != "value_error"]
@@ -987,6 +1010,10 @@ def validate_partial_settings_pairs(delta: dict) -> list[dict]:
     only, no cross-field validators, which on a sparse delta would run against
     static defaults rather than the store's real values.
     """
+    try:
+        delta = assigned_members(delta)
+    except SettingsDeltaError as exc:
+        return [{"path": SETTINGS_DELTA_KEY, "message": str(exc)}]
     try:
         PartialSettingsSchema.model_validate(delta, strict=True)
     except ValidationError as exc:

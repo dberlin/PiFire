@@ -343,5 +343,8 @@ def test_settings_update_rejects_a_malformed_delta_envelope(client):
 
     payload = resp.get_json()
     assert payload["result"] == "error"
-    assert "__settings_delta__" in payload["message"]
+    # The version check specifically -- not merely "some field was rejected",
+    # which is how this passed while the envelope was being type-checked as if
+    # its members were settings fields.
+    assert "must be 1, got 99" in payload["message"]
     assert read_settings()["pwm"]["update_time"] != 7
