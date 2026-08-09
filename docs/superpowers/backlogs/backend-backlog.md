@@ -52,6 +52,11 @@ completion from a sweep:
   and pre-existing: the retirement exposed the import layout, it did not create
   it. The counts in the entry are from a full sweep of `tests/` and the
   production packages, not a sample.
+- **2026-08-09** — item 8 added, from the same retirement. Its sibling
+  (`test_sampler_harness_lid_excursion.py`) was measured at the same time and is
+  sound, which is recorded inside the entry so it is not re-investigated. Both
+  were confirmed pre-existing by A/B — re-adding the deleted key and
+  re-measuring — not by reading the diff.
 
 ---
 
@@ -352,3 +357,43 @@ its own scoped piece of work, and the two groups do not want the same landing:
 
 Whatever the landing, the invariant to end at is: **nothing outside `docs/`
 imports from `docs/`.**
+
+---
+
+### 8. The replay harness's lid-recovery threshold cannot discriminate — OPEN
+
+**Status:** OPEN. Found 2026-08-09 while retiring `cycle_data.HoldCycleTime`.
+Pre-existing and **not** caused by that work — established by A/B, re-adding the
+exact key the retirement deleted and re-measuring: recovery is 198 either way.
+
+`tests/unit/controller/test_replay_harness_lid_excursion.py:55` asserts
+`MAX_RECOVERY_S = 200` against a signal-vs-whole-window pause comparison. Two
+things are wrong with it:
+
+- **It would fail on a seed it never runs.** The assertion reads the
+  `real_replay` fixture, which is `replay(seed=0)` alone and is
+  `@pytest.mark.slow`. Seed 1's *signal* arm measures **202** — `202 < 200` is
+  false. The threshold holds because one seed was chosen, not because the
+  property holds.
+- **A paired form would not rescue it.** The two pause models are separated by
+  **6 s at seed 0 and 1 s at seed 1**, which is the measurement noise floor. The
+  replay harness's recovery metric may simply not distinguish the two pause
+  models at all, in which case the test asserts nothing and should be deleted
+  rather than repaired.
+
+That second point is what makes this different from the matrix harness's version
+of the same defect, which was fixed in place: there, the arms separated by 52 s
+per seed, so replacing the absolute constant with a per-seed paired comparison
+recovered a real property. Here there may be no property to recover, and finding
+out is the first step, not the fix.
+
+**By contrast, `tests/unit/controller/test_sampler_harness_lid_excursion.py:65`
+is sound and needs nothing.** Its `MAX_RECOVERY_S = 180` separates 134–146 from
+182–195 with a clean 36 s gap across seeds 0–9. `SEEDS = (0, 1)` understates the
+sample without misleading.
+
+**Cost warning for whoever picks this up:** one `replay()` is roughly 180 s, so
+a ten-seed two-arm sweep is about an hour. Decide what the number decides before
+starting it — the question is "do the two pause models differ at all", which a
+two-seed two-arm run already answers well enough to choose between repair and
+deletion.
