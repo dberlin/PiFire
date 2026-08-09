@@ -114,6 +114,31 @@ Pictured below is version 2.0 of the hardware w/TFT screen and hardware buttons 
 
 And if you're interested in seeing more builds from other users, we have a discussions thread [here](https://github.com/nebhead/PiFire/discussions/28) or on [Discord](https://discord.gg/F9mbCrbrZS) (see below) where others have posted pictures of their unique builds.  
 
+## Rebuilding the acados native controller
+
+PiFire has one non-interactive rebuild command for developers, installers, CI,
+and updaters:
+
+```bash
+./rebuild-acados.sh
+```
+
+That full command fetches the pinned acados source when the ignored CMake cache
+is empty, regenerates the reviewed solver C in the isolated code-generation
+environment, validates it, builds and smokes the native library, and atomically
+publishes one immutable runtime release. Deployed systems use:
+
+```bash
+./rebuild-acados.sh --if-needed
+```
+
+An exact build-input match is a no-op. A stale deployed build compiles the
+committed generated C and runs the same runtime gates without importing CasADi
+or resolving code-generation dependencies. PiFire does not vendor acados and
+requires no manual clone, Gitlink, or submodule initialization. Network access
+is needed only when a full or stale build must populate an empty FetchContent
+cache.
+
 ## Full Documentation / Hardware and Software Installation
 
 The full documentation has been moved to a GitHub page here: [http://docs.pifire.io](http://docs.pifire.io)

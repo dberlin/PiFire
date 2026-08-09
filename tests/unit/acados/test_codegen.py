@@ -377,6 +377,11 @@ def test_generated_path_normalization_removes_checkout_and_fetchcontent_paths(
         acados_build="/other/fetch-state/acados-binary",
         python_prefix="/tools/python-two",
     )
+    for directory, openmp in ((first, "-fopenmp"), (second, "")):
+        metadata_path = directory / "pifire_grey.json"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["code_gen_options"]["acados_link_libs"] = {"openmp": openmp}
+        metadata_path.write_text(json.dumps(metadata, indent=4) + "\n")
 
     normalize_generated_tree(first, solver_name="pifire_grey")
     normalize_generated_tree(second, solver_name="pifire_grey")
@@ -396,6 +401,7 @@ def test_generated_path_normalization_removes_checkout_and_fetchcontent_paths(
         "acados_lib_path": "<ACADOS_BUILD_DIRECTORY>/lib",
         "code_export_directory": "<GENERATED_DIRECTORY>",
         "cython_include_dirs": ["<NUMPY_INCLUDE>", "<PYTHON_INCLUDE>"],
+        "acados_link_libs": {"openmp": ""},
         "json_file": "<GENERATED_DIRECTORY>/pifire_grey.json",
     }
 
@@ -429,6 +435,27 @@ def test_direct_write_refuses_publication_without_complete_gate(
     assert "./rebuild-acados.sh" in error
 
 
+def test_internal_stage_mode_populates_only_caller_owned_destination(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    generated = repository / "native/generated"
+    before = _tree_bytes(generated)
+    staging = repository / "native/.generated-staging/candidate"
+
+    assert regenerate(
+        "stage",
+        repository_root=repository,
+        generators=_generators(),
+        environment=deepcopy(_EXPECTED_ENVIRONMENT),
+        staging=staging,
+    ) == 0
+
+    assert (staging / "manifest.json").is_file()
+    assert (staging / "grey_box/solver.c").is_file()
+    assert _tree_bytes(generated) == before
+
+
 def test_write_does_not_mutate_generated_tree_when_a_gate_fails(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     generated = repository / "native/generated"
@@ -449,6 +476,43 @@ def test_write_does_not_mutate_generated_tree_when_a_gate_fails(tmp_path: Path) 
     assert _tree_bytes(generated) == before
 
 
+
+
+def test_staged_equation_parity_uses_compiled_equation_and_nonzero_sigma(
+    tmp_path: Path,
+) -> None:
+    seen_sigma: list[float] = []
+
+    def matching(
+        state: tuple[float, ...],
+        residual: float,
+        parameters: tuple[float, ...],
+    ) -> tuple[float, ...]:
+        seen_sigma.append(parameters[5])
+        return cli_module._reference_discrete_map(
+            state, residual, parameters
+        )
+
+    cli_module.validate_staged_equation_parity(
+        tmp_path, evaluator=matching
+    )
+    assert seen_sigma and all(value > 0.0 for value in seen_sigma)
+
+    def wrong(
+        state: tuple[float, ...],
+        residual: float,
+        parameters: tuple[float, ...],
+    ) -> tuple[float, ...]:
+        result = list(
+            cli_module._reference_discrete_map(state, residual, parameters)
+        )
+        result[8] += parameters[5] * 1e12
+        return tuple(result)
+
+    with pytest.raises(RegenerationError, match="equation parity"):
+        cli_module.validate_staged_equation_parity(
+            tmp_path, evaluator=wrong
+        )
 def test_atomic_replacement_uses_one_whole_tree_exchange(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -474,6 +538,32 @@ def test_atomic_replacement_uses_one_whole_tree_exchange(
     assert len(exchanges) == 1
     assert exchanges[0][1] == target
     assert (target / "grey_box/solver.c").read_bytes() == b"new\n"
+
+
+def test_atomic_replacement_fsyncs_copied_tree_before_exchange(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "generated"
+    staged = tmp_path / "staged"
+    _write_solver(target / "grey_box", b"old\n")
+    _write_solver(staged / "grey_box", b"new\n")
+    events: list[str] = []
+    monkeypatch.setattr(cli_module, "_probe_directory_exchange", lambda _: None)
+    monkeypatch.setattr(
+        cli_module,
+        "_fsync_tree",
+        lambda _: events.append("fsync-tree"),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_platform_directory_exchange",
+        lambda _left, _right: events.append("exchange"),
+    )
+
+    _atomic_replace_tree(staged, target)
+
+    assert events == ["fsync-tree", "exchange"]
 
 
 def test_atomic_replacement_fails_before_target_mutation_when_unsupported(

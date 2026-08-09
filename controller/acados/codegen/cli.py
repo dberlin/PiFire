@@ -6,9 +6,11 @@ import argparse
 import ctypes
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+import math
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 from typing import Any
@@ -145,6 +147,31 @@ def _probe_directory_exchange(parent: Path) -> None:
         shutil.rmtree(probe_root)
 
 
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _fsync_tree(root: Path) -> None:
+    for path in root.rglob("*"):
+        if path.is_file():
+            descriptor = os.open(path, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+    for directory in sorted(
+        (path for path in root.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        _fsync_directory(directory)
+    _fsync_directory(root)
+
+
 def _atomic_replace_tree(staged: Path, target: Path) -> None:
     """Commit the complete generated tree with one atomic directory exchange."""
     target_parent = target.parent
@@ -156,10 +183,45 @@ def _atomic_replace_tree(staged: Path, target: Path) -> None:
     transaction = target_parent / f".{target.name}-stage-{uuid4().hex}"
     shutil.copytree(staged, transaction)
     try:
+        _fsync_tree(transaction)
         _platform_directory_exchange(transaction, target)
+        _fsync_directory(target_parent)
     finally:
         if transaction.exists():
             shutil.rmtree(transaction)
+
+
+def _populate_staged_tree(
+    repository: Path,
+    staged: Path,
+    *,
+    generators: Mapping[str, Generator],
+    environment: Mapping[str, Any],
+) -> None:
+    """Generate the complete normalized tree and manifest into empty staging."""
+    if staged.is_symlink():
+        raise RegenerationError(f"staging path must not be a symlink: {staged}")
+    if staged.exists():
+        if not staged.is_dir():
+            raise RegenerationError(f"staging path must be a directory: {staged}")
+        if any(staged.iterdir()):
+            raise RegenerationError(f"staging directory must be empty: {staged}")
+    else:
+        staged.mkdir(parents=True)
+
+    for solver in _SOLVER_NAMES:
+        destination = staged / solver
+        result = Path(generators[solver](destination)).resolve()
+        if result != destination.resolve():
+            raise RegenerationError(
+                f"{solver} generator returned {result}, expected {destination.resolve()}"
+            )
+    manifest = create_manifest(
+        repository,
+        staged,
+        environment=environment,
+    )
+    write_manifest(staged / "manifest.json", manifest)
 
 
 def regenerate(
@@ -169,13 +231,18 @@ def regenerate(
     generators: Mapping[str, Generator] | None = None,
     gate: Gate | None = None,
     environment: Mapping[str, Any] | None = None,
+    staging: str | Path | None = None,
     output: Callable[[str], None] = print,
 ) -> int:
-    """Generate the grey solver in temporary storage, then check or commit it."""
-    if mode not in {"check", "write"}:
+    """Generate the grey solver for comparison, gated publication, or staging."""
+    if mode not in {"check", "write", "stage"}:
         raise ValueError(f"unsupported regeneration mode: {mode}")
     if mode == "write" and gate is None:
         raise RegenerationError(_DIRECT_WRITE_ERROR)
+    if mode == "stage" and staging is None:
+        raise RegenerationError("internal stage mode requires a destination")
+    if mode != "stage" and staging is not None:
+        raise RegenerationError("a staging destination is valid only in stage mode")
     repository = Path(repository_root).resolve()
     target = repository / "native/generated"
     resolved_environment = (
@@ -188,26 +255,30 @@ def regenerate(
             f"generators must define exactly {', '.join(_SOLVER_NAMES)}"
         )
 
+    if mode == "stage":
+        assert staging is not None
+        staged = Path(staging).resolve()
+        if staged == target or target in staged.parents:
+            raise RegenerationError("staging must be outside native/generated")
+        _populate_staged_tree(
+            repository,
+            staged,
+            generators=resolved_generators,
+            environment=resolved_environment,
+        )
+        output(f"generated solver tree staged at {staged}")
+        return 0
+
     with tempfile.TemporaryDirectory(prefix="acados-regenerate-") as temporary:
         temporary_root = Path(temporary).resolve()
         staged = temporary_root / "generated"
         staged.mkdir()
-        if staged == target or target in staged.parents:
-            raise RegenerationError("temporary generation must be outside native/generated")
-
-        for solver in _SOLVER_NAMES:
-            destination = staged / solver
-            result = Path(resolved_generators[solver](destination)).resolve()
-            if result != destination.resolve():
-                raise RegenerationError(
-                    f"{solver} generator returned {result}, expected {destination.resolve()}"
-                )
-        manifest = create_manifest(
+        _populate_staged_tree(
             repository,
             staged,
+            generators=resolved_generators,
             environment=resolved_environment,
         )
-        write_manifest(staged / "manifest.json", manifest)
 
         if mode == "check":
             differences = compare_trees(staged, target)
@@ -227,6 +298,167 @@ def regenerate(
         return 0
 
 
+EquationEvaluator = Callable[
+    [tuple[float, ...], float, tuple[float, ...]], tuple[float, ...]
+]
+
+
+def _reference_discrete_map(
+    state11: tuple[float, ...],
+    residual: float,
+    parameters: tuple[float, ...],
+) -> tuple[float, ...]:
+    def rhs(current: tuple[float, ...]) -> tuple[float, ...]:
+        C_c, h_amb, T_amb, theta, K_Q, sigma = parameters[:6]
+        equilibrium_q = parameters[7]
+        derivatives = [
+            (equilibrium_q + residual - current[0]) / (theta / 8.0)
+        ]
+        derivatives.extend(
+            (current[index - 1] - current[index]) / (theta / 8.0)
+            for index in range(1, 8)
+        )
+        derivatives.append(
+            (
+                K_Q * current[7]
+                - h_amb * (current[8] - T_amb)
+                - sigma
+                * (
+                    (current[8] + 273.15) ** 4
+                    - (T_amb + 273.15) ** 4
+                )
+                + current[9]
+            )
+            / C_c
+        )
+        derivatives.append(0.0)
+        return tuple(derivatives)
+
+    current = state11[:10]
+    step = 25.0 / 8.0
+    for _ in range(8):
+        k1 = rhs(current)
+        k2 = rhs(tuple(x + 0.5 * step * k for x, k in zip(current, k1)))
+        k3 = rhs(tuple(x + 0.5 * step * k for x, k in zip(current, k2)))
+        k4 = rhs(tuple(x + step * k for x, k in zip(current, k3)))
+        current = tuple(
+            x + step * (a + 2.0 * b + 2.0 * c + d) / 6.0
+            for x, a, b, c, d in zip(current, k1, k2, k3, k4)
+        )
+    return (*current, residual)
+
+
+def _compiled_equation_evaluator(
+    staged: Path, temporary: Path
+) -> EquationEvaluator:
+    source = (
+        staged
+        / "grey_box/pifire_grey_model/pifire_grey_dyn_disc_phi_fun.c"
+    )
+    if not source.is_file():
+        raise RegenerationError(f"staged dynamics source is missing: {source}")
+    library_path = temporary / (
+        "equation.dylib" if sys.platform == "darwin" else "equation.so"
+    )
+    subprocess.run(
+        (
+            os.environ.get("CC", "cc"),
+            "-shared",
+            "-fPIC",
+            "-O2",
+            str(source),
+            "-lm",
+            "-o",
+            str(library_path),
+        ),
+        check=True,
+    )
+    library = ctypes.CDLL(str(library_path))
+    function = library.pifire_grey_dyn_disc_phi_fun
+    double_pointer = ctypes.POINTER(ctypes.c_double)
+    function.argtypes = [
+        ctypes.POINTER(double_pointer),
+        ctypes.POINTER(double_pointer),
+        ctypes.POINTER(ctypes.c_int),
+        double_pointer,
+        ctypes.c_int,
+    ]
+    function.restype = ctypes.c_int
+
+    def evaluate(
+        state: tuple[float, ...],
+        residual: float,
+        parameters: tuple[float, ...],
+    ) -> tuple[float, ...]:
+        state_array = (ctypes.c_double * 11)(*state)
+        residual_array = (ctypes.c_double * 1)(residual)
+        parameter_array = (ctypes.c_double * 12)(*parameters)
+        output_array = (ctypes.c_double * 11)()
+        arguments = (double_pointer * 3)(
+            ctypes.cast(state_array, double_pointer),
+            ctypes.cast(residual_array, double_pointer),
+            ctypes.cast(parameter_array, double_pointer),
+        )
+        results = (double_pointer * 1)(
+            ctypes.cast(output_array, double_pointer)
+        )
+        status = function(arguments, results, None, None, 0)
+        if status != 0:
+            raise RegenerationError(
+                f"staged dynamics evaluation failed with status {status}"
+            )
+        return tuple(float(value) for value in output_array)
+
+    return evaluate
+
+
+def _run_equation_parity(evaluator: EquationEvaluator) -> None:
+    parameters = (
+        320.0,
+        0.5,
+        20.0,
+        50.0,
+        350.0,
+        1.4e-9,
+        120.0,
+        0.25,
+        1.0,
+        1.0,
+        0.1,
+        0.0,
+    )
+    cases = (
+        ((0.2,) * 8 + (100.0, 0.0, -0.05), 0.1),
+        ((0.4,) * 8 + (145.0, -2.0, 0.15), -0.1),
+        ((0.05,) * 8 + (65.0, 3.0, 0.0), 0.3),
+    )
+    for state, residual in cases:
+        expected = _reference_discrete_map(state, residual, parameters)
+        actual = evaluator(state, residual, parameters)
+        if len(actual) != len(expected) or any(
+            not math.isclose(left, right, rel_tol=1e-10, abs_tol=1e-10)
+            for left, right in zip(actual, expected)
+        ):
+            raise RegenerationError("staged generated equation parity mismatch")
+
+
+def validate_staged_equation_parity(
+    staged: Path,
+    *,
+    evaluator: EquationEvaluator | None = None,
+) -> None:
+    if evaluator is not None:
+        _run_equation_parity(evaluator)
+        return
+    with tempfile.TemporaryDirectory(
+        prefix="acados-equation-parity-"
+    ) as temporary:
+        resolved = _compiled_equation_evaluator(
+            Path(staged).resolve(), Path(temporary)
+        )
+        _run_equation_parity(resolved)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="acados-regenerate",
@@ -239,14 +471,35 @@ def _parser() -> argparse.ArgumentParser:
         help="unsupported directly; use ./rebuild-acados.sh once Task 6 lands",
     )
     mode.add_argument("--check", action="store_true", help="compare without modifying files")
+    mode.add_argument(
+        "--stage",
+        type=Path,
+        help=argparse.SUPPRESS,
+    )
+    mode.add_argument(
+        "--equation-parity",
+        type=Path,
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
+        if arguments.equation_parity is not None:
+            validate_staged_equation_parity(arguments.equation_parity)
+            return 0
+        if arguments.stage is not None:
+            return regenerate("stage", staging=arguments.stage)
         return regenerate("write" if arguments.write else "check")
-    except (EnvironmentMismatch, RegenerationError, OSError, ValueError) as error:
+    except (
+        EnvironmentMismatch,
+        RegenerationError,
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+    ) as error:
         print(f"acados-regenerate: {error}", file=sys.stderr)
         return 2
 

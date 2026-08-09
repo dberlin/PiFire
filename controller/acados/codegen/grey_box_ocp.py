@@ -248,6 +248,9 @@ def normalize_generated_tree(
     options["code_export_directory"] = "<GENERATED_DIRECTORY>"
     options["cython_include_dirs"] = ["<NUMPY_INCLUDE>", "<PYTHON_INCLUDE>"]
     options["json_file"] = f"<GENERATED_DIRECTORY>/{solver_name}.json"
+    link_libraries = options.get("acados_link_libs")
+    if isinstance(link_libraries, dict) and "openmp" in link_libraries:
+        link_libraries["openmp"] = ""
     if "hash" in metadata:
         stable_metadata = {key: value for key, value in metadata.items() if key != "hash"}
         metadata["hash"] = hashlib.sha256(
