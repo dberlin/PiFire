@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 
-# Safe executable seam for installer lifecycle regression tests. It invokes
-# the same shared production boundaries as the normal path, but no host setup.
-if [[ "${PIFIRE_TEST_NATIVE_INSTALL_FLOW:-0}" == "1" ]]; then
+PIFIRE_NATIVE_FLOW_TEST="${PIFIRE_TEST_NATIVE_INSTALL_FLOW:-0}"
+if [[ "$PIFIRE_NATIVE_FLOW_TEST" == "1" ]]; then
 	PIFIRE_ENTRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	: "${LOG:=/dev/null}"
 	# shellcheck source=pifire-install-common.sh
 	source "$PIFIRE_ENTRY_DIR/pifire-install-common.sh"
-	pifire_install_acados_prerequisites debian || exit $?
-	pifire_sync_python_and_rebuild_acados "${PIFIRE_TEST_REPO_ROOT:?}" || exit $?
-	$SUDO service supervisor start
-	exit $?
-fi
+else
 
 # Automatic Installation Script
 # Many thanks to the PiVPN project (pivpn.io) for much of the inspiration for this script
@@ -364,9 +359,6 @@ if [[ ! -r "$PIFIRE_COMMON" ]]; then
 fi
 # shellcheck source=pifire-install-common.sh
 source "$PIFIRE_COMMON"
-if ! pifire_install_acados_prerequisites debian; then
-	exit 1
-fi
 
 
 # Seat access for the sway Wayland compositor (QtQuick displays).
@@ -450,9 +442,19 @@ source .venv/bin/activate
 # --inexact: rpi.gpio is installed conditionally below and is deliberately NOT
 # a pyproject dependency, because it has to be skipped on a Pi 5. A default
 # `uv sync` prunes everything outside the lockfile and would remove it again.
-if ! pifire_sync_python_and_rebuild_acados /usr/local/bin/pifire; then
-	exit 1
 fi
+PIFIRE_NATIVE_REPO="${PIFIRE_TEST_REPO_ROOT:-/usr/local/bin/pifire}"
+pifire_install_acados_prerequisites debian
+PIFIRE_NATIVE_CODE=$?
+if [[ $PIFIRE_NATIVE_CODE -ne 0 ]]; then
+	exit "$PIFIRE_NATIVE_CODE"
+fi
+pifire_sync_python_and_rebuild_acados "$PIFIRE_NATIVE_REPO"
+PIFIRE_NATIVE_CODE=$?
+if [[ $PIFIRE_NATIVE_CODE -ne 0 ]]; then
+	exit "$PIFIRE_NATIVE_CODE"
+fi
+if [[ "$PIFIRE_NATIVE_FLOW_TEST" != "1" ]]; then
 
 
 # rpi.gpio drives the legacy /dev/gpiomem interface, which the Pi 5 does not
@@ -566,8 +568,13 @@ else
 	echo "No WebUI Setup." | tee -a ~/logs/pifire_install.log
 fi
 
+fi
 # If supervisor isn't already running, startup Supervisor
 $SUDO service supervisor start 2>&1 | tee -a ~/logs/pifire_install.log
+PIFIRE_SERVICE_CODE=${PIPESTATUS[0]}
+if [[ "$PIFIRE_NATIVE_FLOW_TEST" == "1" ]]; then
+	exit "$PIFIRE_SERVICE_CODE"
+fi
 
 # Installation Complete, Reboot Prompt
 echo "+ Installation completed at $(date '+%Y-%m-%d %H:%M:%S')" | tee -a ~/logs/pifire_install.log

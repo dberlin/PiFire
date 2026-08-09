@@ -221,6 +221,8 @@ def test_actual_fresh_installer_entry_orders_package_sync_native_and_service(
     repo = tmp_path / "pifire"
     repo.mkdir()
     log = tmp_path / "events.log"
+    home = tmp_path / "home"
+    (home / "logs").mkdir(parents=True)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     _write_executable(fake_bin / "sudo", 'exec "$@"\n')
@@ -242,6 +244,7 @@ def test_actual_fresh_installer_entry_orders_package_sync_native_and_service(
         "SUDO": "sudo",
         "PIFIRE_TEST_NATIVE_INSTALL_FLOW": "1",
         "PIFIRE_TEST_REPO_ROOT": str(repo),
+        "HOME": str(home),
     }
     completed = subprocess.run(
         ["/bin/bash", str(REPOSITORY / relative)],

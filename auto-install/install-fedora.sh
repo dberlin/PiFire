@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 
-if [[ "${PIFIRE_TEST_NATIVE_INSTALL_FLOW:-0}" == "1" ]]; then
+PIFIRE_NATIVE_FLOW_TEST="${PIFIRE_TEST_NATIVE_INSTALL_FLOW:-0}"
+if [[ "$PIFIRE_NATIVE_FLOW_TEST" == "1" ]]; then
 	PIFIRE_ENTRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	: "${LOG:=/dev/null}"
 	# shellcheck source=pifire-install-common.sh
 	source "$PIFIRE_ENTRY_DIR/pifire-install-common.sh"
-	pifire_install_acados_prerequisites fedora || exit $?
-	pifire_sync_python_and_rebuild_acados "${PIFIRE_TEST_REPO_ROOT:?}" || exit $?
-	$SUDO systemctl restart supervisord
-	exit $?
-fi
+else
 
 # PiFire Automatic Installation Script -- Fedora (x86_64)
 #
@@ -264,9 +261,6 @@ if [[ ! -r "$PIFIRE_COMMON" ]]; then
 fi
 # shellcheck source=pifire-install-common.sh
 source "$PIFIRE_COMMON"
-if ! pifire_install_acados_prerequisites fedora; then
-	exit 1
-fi
 
 
 # --- pifire group / ownership / sudoers -----------------------------------
@@ -344,9 +338,19 @@ source .venv/bin/activate
 # version installed here contradicted the bound pyproject declares. It now
 # resolves from the lockfile like everything else; the influxdb [ciso] extra
 # moved into pyproject so it is still applied.
-if ! pifire_sync_python_and_rebuild_acados /usr/local/bin/pifire; then
-	exit 1
 fi
+PIFIRE_NATIVE_REPO="${PIFIRE_TEST_REPO_ROOT:-/usr/local/bin/pifire}"
+pifire_install_acados_prerequisites fedora
+PIFIRE_NATIVE_CODE=$?
+if [[ $PIFIRE_NATIVE_CODE -ne 0 ]]; then
+	exit "$PIFIRE_NATIVE_CODE"
+fi
+pifire_sync_python_and_rebuild_acados "$PIFIRE_NATIVE_REPO"
+PIFIRE_NATIVE_CODE=$?
+if [[ $PIFIRE_NATIVE_CODE -ne 0 ]]; then
+	exit "$PIFIRE_NATIVE_CODE"
+fi
+if [[ "$PIFIRE_NATIVE_FLOW_TEST" != "1" ]]; then
 
 
 # Grant the BLE helper the capabilities it needs (best-effort).
@@ -511,7 +515,12 @@ fi
 
 log " + Enabling and starting supervisord"
 $SUDO systemctl enable supervisord 2>&1 | tee -a "$LOG"
+fi
 $SUDO systemctl restart supervisord 2>&1 | tee -a "$LOG"
+PIFIRE_SERVICE_CODE=${PIPESTATUS[0]}
+if [[ "$PIFIRE_NATIVE_FLOW_TEST" == "1" ]]; then
+	exit "$PIFIRE_SERVICE_CODE"
+fi
 
 # --- Done ------------------------------------------------------------------
 log "*************************************************************************"
