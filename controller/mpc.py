@@ -1328,6 +1328,26 @@ class Controller(ControllerBase):
         self._activation_output_authorized = True
         return True
 
+    def submit_activation_confidence(self, record: ModelEvidenceRecord):
+        """Queue confidence on the same FIFO that owns activation phases."""
+        from common.controller_model_state import ControllerModelStore
+        from controller.runtime.model_persistence import ModelPersistenceWorker
+
+        if (
+            not isinstance(record, ModelEvidenceRecord)
+            or record.kind is not EvidenceKind.CONFIDENCE_DECISION
+        ):
+            raise TypeError("activation confidence must be confidence-decision evidence")
+        with self._learning_lock:
+            worker = self._activation_persistence_worker
+            if worker is None:
+                worker = ModelPersistenceWorker(
+                    ControllerModelStore(),
+                    logging.getLogger("control"),
+                )
+                self._activation_persistence_worker = worker
+        return worker.submit_activation_confidence(record)
+
     def commit_active_parameter_promotion(self, manager, decision_id, confidence):
         """Publish the exact durable activation without re-adjudicating its confidence."""
         if not isinstance(manager, ActivationManager):

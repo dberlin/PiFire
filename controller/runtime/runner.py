@@ -524,6 +524,9 @@ class ControllerRunner(ABC):
 
     def drain_activation_events(self):
         return ()
+    def submit_activation_confidence(self, record):
+        return None
+
 
     @abstractmethod
     def stop(self): ...
@@ -595,6 +598,10 @@ class SyncControllerRunner(ControllerRunner):
     def drain_activation_events(self):
         drain = getattr(self._core, "drain_activation_events", None)
         return () if drain is None else tuple(drain())
+    def submit_activation_confidence(self, record):
+        submit = getattr(self._core, "submit_activation_confidence", None)
+        return None if submit is None else submit(record)
+
 
     def submit(self, temp):
         self._temp = temp
@@ -1160,7 +1167,8 @@ class ThreadedControllerRunner(ControllerRunner):
                     continue
                 if operation == "restore":
                     persisted, records = payload
-                    callback(persisted, records)
+                    if callback(persisted, records) is not True:
+                        self._terminate_pair_activation("activation-recovery-failed")
                 else:
                     callback(payload)
             if pending_activations:
@@ -1374,6 +1382,10 @@ class ThreadedControllerRunner(ControllerRunner):
             events = tuple(self._activation_events)
             self._activation_events.clear()
         return events
+    def submit_activation_confidence(self, record):
+        submit = getattr(self._core, "submit_activation_confidence", None)
+        return None if submit is None else submit(record)
+
 
     def submit(self, temp):
         with self._lock:

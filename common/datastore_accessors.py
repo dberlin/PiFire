@@ -1025,7 +1025,11 @@ def commit_model_activation_phase(
                         and current.candidate_pair_json == candidate_pair_json
                     ):
                         return
-                    if current.phase != ActivationPhase.ACTIVE.value or current.active_pair != record.incumbent:
+                    if (
+                        current.phase
+                        not in (ActivationPhase.ACTIVE.value, ActivationPhase.ABORTED.value)
+                        or current.active_pair != record.incumbent
+                    ):
                         raise ValueError("activation-state-changed")
             else:
                 if (

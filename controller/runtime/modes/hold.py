@@ -762,6 +762,27 @@ class HoldMode(ControlMode):
         self._pending_model_observations.pop(sequence, None)
         return True
 
+    def _persist_controller_evidence(self, evidence) -> None:
+        compact_batch = evidence if isinstance(evidence, tuple) else ()
+        confidence = tuple(
+            record
+            for record in compact_batch
+            if isinstance(record, ModelEvidenceRecord)
+            and record.kind is EvidenceKind.CONFIDENCE_DECISION
+        )
+        ordinary = tuple(record for record in compact_batch if record not in confidence)
+        submit_confidence = getattr(self._runner, "submit_activation_confidence", None)
+        for record in confidence:
+            receipt = submit_confidence(record) if callable(submit_confidence) else None
+            if not getattr(receipt, "accepted", False):
+                self._learning_evidence_available = False
+        if (
+            ordinary
+            and self._persistence_worker is not None
+            and not self._persistence_worker.submit_evidence_batch(ordinary).accepted
+        ):
+            self._learning_evidence_available = False
+
     def _reconcile_model_observation_outcomes(self, now: float | None = None) -> None:
         publication_ms = int((self.ctx.clock.now() if now is None else now) * 1_000)
         if not self._pending_model_observations or self._runner is None:
@@ -793,6 +814,7 @@ class HoldMode(ControlMode):
             if not isinstance(delivered, FrameObservation) or not isinstance(outcome, Mapping):
                 self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
                 continue
+            self._persist_controller_evidence(evidence)
             observation = delivered
             evaluation_payload = outcome.get("evaluation_payload")
             evaluation_payload = (
@@ -900,15 +922,6 @@ class HoldMode(ControlMode):
                 records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
             queued = (*pending[:3], tuple(records))
             self._pending_model_observations[sequence] = queued
-            # Calibration evidence is submitted when the frame is delivered, not
-            # here: it must not be gated on the learner accepting the frame.
-            compact_batch = evidence if isinstance(evidence, tuple) else ()
-            if (
-                compact_batch
-                and self._persistence_worker is not None
-                and not self._persistence_worker.submit_evidence_batch(compact_batch).accepted
-            ):
-                self._learning_evidence_available = False
         for sequence, pending in tuple(self._pending_model_observations.items()):
             if pending[3] is None or not self._flush_pending_model_trace(sequence, pending, publication_ms):
                 break

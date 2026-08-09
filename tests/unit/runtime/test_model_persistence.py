@@ -635,6 +635,80 @@ def test_active_pair_can_become_the_exact_incumbent_of_one_new_prepared_transact
     assert state.candidate_pair == next_candidate
 
 
+def test_aborted_authority_can_prepare_one_new_exact_incumbent_transaction(tmp_path) -> None:
+    database_path = tmp_path / "aborted-retry.sqlite"
+    first = _prepared_activation()
+    append_model_evidence((_confidence_for(first),), database_path=database_path)
+    commit_model_activation_phase(first, expected_phase=None, database_path=database_path)
+    commit_model_activation_phase(
+        first.transition(ActivationPhase.ABORTED, reason="interrupted"),
+        expected_phase=ActivationPhase.PREPARED,
+        database_path=database_path,
+    )
+    next_candidate = _pair_descriptor(
+        {"schema": "pifire-grey-box-model/v4", "theta": 31.0},
+        candidate_generation=6,
+        role_generation=7,
+    )
+    second = PreparedActivationRecord.prepared(
+        timestamp_ms=2_000,
+        incumbent=first.incumbent,
+        candidate=next_candidate,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        decision_id="decision-after-abort",
+    )
+    append_model_evidence(
+        (_confidence_for(second, timestamp_ms=1_900),),
+        database_path=database_path,
+    )
+
+    commit_model_activation_phase(second, expected_phase=None, database_path=database_path)
+
+    state = read_model_activation(database_path=database_path)
+    assert state is not None
+    assert state.phase == ActivationPhase.PREPARED.value
+    assert state.incumbent_pair == first.incumbent
+    assert state.candidate_pair == next_candidate
+
+
+def test_aborted_authority_rejects_new_prepared_with_different_incumbent(tmp_path) -> None:
+    database_path = tmp_path / "aborted-mismatch.sqlite"
+    first = _prepared_activation()
+    append_model_evidence((_confidence_for(first),), database_path=database_path)
+    commit_model_activation_phase(first, expected_phase=None, database_path=database_path)
+    commit_model_activation_phase(
+        first.transition(ActivationPhase.ABORTED, reason="interrupted"),
+        expected_phase=ActivationPhase.PREPARED,
+        database_path=database_path,
+    )
+    next_candidate = _pair_descriptor(
+        {"schema": "pifire-grey-box-model/v4", "theta": 32.0},
+        candidate_generation=6,
+        role_generation=7,
+    )
+    wrong = PreparedActivationRecord.prepared(
+        timestamp_ms=2_000,
+        incumbent=first.candidate,
+        candidate=next_candidate,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        decision_id="decision-after-abort-wrong-owner",
+    )
+    append_model_evidence(
+        (_confidence_for(wrong, timestamp_ms=1_900),),
+        database_path=database_path,
+    )
+
+    with pytest.raises(ValueError, match="activation-state-changed"):
+        commit_model_activation_phase(wrong, expected_phase=None, database_path=database_path)
+
+    state = read_model_activation(database_path=database_path)
+    assert state is not None
+    assert state.phase == ActivationPhase.ABORTED.value
+    assert state.active_pair == first.incumbent
+
+
 def test_prepared_transaction_rechecks_the_latest_unblocked_confidence_atomically(tmp_path) -> None:
     database_path = tmp_path / "activation.sqlite"
     prepared = _prepared_activation()

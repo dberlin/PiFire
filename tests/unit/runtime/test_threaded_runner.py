@@ -24,6 +24,7 @@ from common.control_trace import (
     TraceEventKind,
 )
 from common.model_evidence import (
+    ConfidenceDecisionEvidence,
     EvidenceKind,
     FallbackEvidence,
     ForecastOriginEvidence,
@@ -31,7 +32,7 @@ from common.model_evidence import (
     SessionSummaryEvidence,
 )
 from controller.runtime.modes.hold import HoldMode
-from controller.runtime.model_persistence import DurableActivationReceipt
+from controller.runtime.model_persistence import DurableActivationReceipt, ModelPersistenceWorker
 from controller.runtime.runner import (
     SyncControllerRunner,
     ThreadedControllerRunner,
@@ -1930,6 +1931,14 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
     )
     core._learning = learning
     core._learning_pending_evaluation = evaluation
+    activation_confidence = []
+    core._activation_persistence_worker = SimpleNamespace(
+        submit_activation_confidence=lambda record: (
+            activation_confidence.append(record),
+            SimpleNamespace(accepted=True),
+        )[1],
+        flush_and_stop=lambda **_kwargs: True,
+    )
     runner = SyncControllerRunner(core)
     recorded = []
     try:
@@ -1955,7 +1964,13 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         mode._pending_model_observations = {
             submission.submission_sequence: (observation, "session", 0, None)
         }
-        mode._persistence_worker = None
+        normal_evidence = []
+        mode._persistence_worker = SimpleNamespace(
+            submit_evidence_batch=lambda records: (
+                normal_evidence.extend(records),
+                SimpleNamespace(accepted=True),
+            )[1]
+        )
         mode.ctx = SimpleNamespace(clock=SimpleNamespace(now=lambda: 100.0))
         mode._trace_record = lambda kind, payload, published_ms: (
             recorded.append((kind, payload, published_ms)),
@@ -1973,6 +1988,12 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         assert recorded[0][1].eligible is False
         assert recorded[0][1].rejection_reasons == ("observation-outcome-malformed",)
         assert recorded[1][1] is evaluation
+        assert len(activation_confidence) == 1
+        assert activation_confidence[0].payload.decision_id == evaluation.decision_id
+        assert all(
+            record.kind is not EvidenceKind.CONFIDENCE_DECISION
+            for record in normal_evidence
+        )
         assert mode._pending_model_observations == {}
     finally:
         runner.stop()
@@ -2145,6 +2166,85 @@ def test_active_cas_failure_restores_exact_incumbent_then_durably_aborts() -> No
     ]
 
 
+def test_queued_blocking_confidence_cannot_be_overtaken_by_active_cas() -> None:
+    _incumbent, candidate, prepared = _runner_activation_fixture()
+    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    confidence_started = threading.Event()
+    release_confidence = threading.Event()
+    calls = []
+
+    def append(records):
+        calls.append(("confidence-start", records[0].evidence_id))
+        confidence_started.set()
+        release_confidence.wait(timeout=1.0)
+        calls.append(("confidence-durable", records[0].evidence_id))
+
+    def persist_phase(record, expected_phase):
+        calls.append(("phase-durable", record.phase, expected_phase))
+
+    worker = ModelPersistenceWorker(
+        SimpleNamespace(save_outcome=lambda *_args: None),
+        SimpleNamespace(error=lambda _message: None),
+        append_evidence=append,
+        persist_activation_phase=persist_phase,
+    )
+
+    class SharedWorkerCore(_ActivationCore):
+        def submit_activation_confidence(self, record):
+            return worker.submit_activation_confidence(record)
+
+    core = SharedWorkerCore()
+    runner = ThreadedControllerRunner(core)
+    confidence = ModelEvidenceRecord(
+        evidence_id="blocked-before-active",
+        kind=EvidenceKind.CONFIDENCE_DECISION,
+        session_id="session-shared-fifo",
+        cook_id=None,
+        timestamp_ms=2_000,
+        role_generation=prepared.incumbent.role_generation,
+        model_digest=prepared.candidate.model_digest,
+        provenance_digest=prepared.incumbent.model_digest,
+        payload=ConfidenceDecisionEvidence(
+            decision_id=prepared.decision_id,
+            blocked=True,
+            reason="confidence-regressed",
+        ),
+    )
+    try:
+        runner.submit(100.0)
+        assert core.updated.wait(timeout=1.0)
+        receipt = runner.submit_activation_confidence(confidence)
+        assert receipt.accepted
+        assert confidence_started.wait(timeout=1.0)
+        assert runner.queue_pair_activation(
+            PreparedPairTransition(
+                prepared,
+                pair,
+                _durable_receipt(),
+                lambda record, expected: worker.submit_activation_phase(
+                    record,
+                    expected_phase=expected,
+                ),
+            )
+        )
+        assert core.installed.wait(timeout=1.0)
+        time.sleep(0.02)
+        assert all(call[0] != "phase-durable" for call in calls)
+        release_confidence.set()
+        assert receipt.wait(timeout=1.0)
+        assert core.authorized_event.wait(timeout=1.0)
+    finally:
+        release_confidence.set()
+        runner.stop()
+        worker.flush_and_stop(timeout=1.0)
+
+    assert [call[0] for call in calls] == [
+        "confidence-start",
+        "confidence-durable",
+        "phase-durable",
+    ]
+
+
 def test_ambiguous_compensation_terminates_mpc_without_another_update() -> None:
     _incumbent, candidate, prepared = _runner_activation_fixture()
     pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
@@ -2176,6 +2276,60 @@ def test_ambiguous_compensation_terminates_mpc_without_another_update() -> None:
         runner.stop()
 
 
+
+
+def test_failed_active_recovery_terminalizes_before_configured_pair_can_update() -> None:
+    core = MpcController(
+        dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
+        "C",
+        {"u_min": 0.1, "u_max": 0.9},
+    )
+    incumbent = core.active_control_pair.descriptor
+    candidate_configuration = dict(incumbent.to_dict()["configuration"])
+    candidate_configuration["theta"] = float(candidate_configuration["theta"]) + 1.0
+    candidate = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(candidate_configuration),
+        configuration=candidate_configuration,
+        estimator_kind=incumbent.estimator_kind,
+        solver_kind=incumbent.solver_kind,
+        candidate_generation=incumbent.candidate_generation + 1,
+        role_generation=incumbent.role_generation + 1,
+    )
+    active = PreparedActivationRecord.prepared(
+        timestamp_ms=1_000,
+        incumbent=incumbent,
+        candidate=candidate,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        decision_id="failed-active-recovery",
+    ).transition(ActivationPhase.ACTIVE)
+    persisted = SimpleNamespace(
+        phase=active.phase.value,
+        transaction_id=active.transaction_id,
+        evidence_decision_id=active.decision_id,
+        incumbent_pair_json=json.dumps(active.incumbent.to_dict()),
+        candidate_pair_json=json.dumps(active.candidate.to_dict()),
+        rollback_pair_json=json.dumps(active.rollback.to_dict()),
+        origin=active.origin.value,
+        policy=active.policy.value,
+        reason=None,
+    )
+    update_calls = []
+    original_update = core.update
+    core.update = lambda current: (update_calls.append(current), original_update(current))[1]
+    core._build_pair_from_descriptor = lambda _descriptor: (_ for _ in ()).throw(
+        RuntimeError("candidate artifact unavailable")
+    )
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.restore_activation(persisted, ())
+        runner.submit(200.0)
+        assert _wait_for(lambda: runner.mpc_activation_terminated)
+        time.sleep(0.02)
+        assert update_calls == []
+        assert runner.latest().revision == 0
+    finally:
+        runner.stop()
 def test_duplicate_transaction_is_never_installed_twice() -> None:
     _incumbent, candidate, prepared = _runner_activation_fixture()
     pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())

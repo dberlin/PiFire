@@ -2,19 +2,34 @@
 
 from copy import deepcopy
 import json
+import time
+from types import SimpleNamespace
 
 import threading
 import pytest
 
 from common.control_trace import ActuationMode
 from common.controller_model_state import CheckpointSaveOutcome, ControllerModelStore
-from common.datastore_accessors import ModelActivationState
-from common.model_evidence import ActivationEvidence, EvidenceKind, ModelEvidenceRecord, RollbackEvidence
+from common.datastore_accessors import (
+    ModelActivationState,
+    append_model_evidence,
+    commit_model_activation_phase,
+    read_model_activation,
+    read_model_evidence,
+)
+from common.model_evidence import (
+    ActivationEvidence,
+    ConfidenceDecisionEvidence,
+    EvidenceKind,
+    FallbackEvidence,
+    ModelEvidenceRecord,
+    RollbackEvidence,
+)
 
 from controller.linear_mpc.activation import canonical_snapshot_digest
 from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
-from controller.runtime.runner import ControllerUpdateResult
+from controller.runtime.runner import ControllerUpdateResult, ThreadedControllerRunner
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
@@ -22,6 +37,8 @@ from controller.model_learning.activation import (
     canonical_snapshot_digest as grey_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
+import controller.mpc as mpc_module
 
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
@@ -713,3 +730,232 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
         release_old_write.set()
         old_worker.flush_and_stop(timeout=1.0)
         new_worker.flush_and_stop(timeout=1.0)
+
+class _CrashRecoveryEstimator:
+    def __init__(self, **_kwargs):
+        self.closed = False
+
+    def update(self, _load, temperature):
+        return [0.0] * 8 + [float(temperature), 0.0]
+
+    def close(self):
+        self.closed = True
+
+
+class _CrashRecoverySolver:
+    def __init__(self, config):
+        self.config = config
+        self.calls = []
+        self.closed = False
+
+    def solve(self, state, *, setpoint_c, q_previous, equilibrium_q):
+        self.calls.append((state, setpoint_c, q_previous, equilibrium_q))
+        return SimpleNamespace(
+            sequence_q=[0.5] * self.config.horizon_steps,
+            sequence_residual=[0.0] * self.config.horizon_steps,
+            objective=1.0,
+            diagnostics=SimpleNamespace(
+                status=0,
+                backend_status=0,
+                iterations=1,
+                solve_time_s=0.001,
+                objective=1.0,
+                kkt_residual=0.0,
+                constraint_residual=0.0,
+                warm_started=False,
+            ),
+        )
+
+    def close(self):
+        self.closed = True
+
+
+
+@pytest.mark.parametrize(
+    ("crash_boundary", "durable_phase", "lifecycle_kind"),
+    (
+        ("before-prepared-receipt", None, None),
+        ("after-prepared-receipt", ActivationPhase.PREPARED, None),
+        ("after-inert-install-before-active-receipt", ActivationPhase.PREPARED, None),
+        ("after-active-receipt-before-authorization", ActivationPhase.ACTIVE, None),
+        ("after-active-authorization", ActivationPhase.ACTIVE, None),
+        ("after-compensation-abort-receipt", ActivationPhase.ABORTED, None),
+        ("after-confidence-fallback-receipt", ActivationPhase.ACTIVE, EvidenceKind.FALLBACK),
+        ("after-operator-rollback-receipt", ActivationPhase.ACTIVE, EvidenceKind.ROLLBACK),
+    ),
+)
+def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
+    hold_cycle,
+    monkeypatch,
+    tmp_path,
+    crash_boundary,
+    durable_phase,
+    lifecycle_kind,
+) -> None:
+    from controller.runtime.modes import hold as hold_module
+
+    database_path = tmp_path / f"{crash_boundary}.sqlite"
+    monkeypatch.setattr(mpc_module, "GreyBoxEKF", _CrashRecoveryEstimator)
+    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", _CrashRecoverySolver)
+    core = MpcController(
+        dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
+        "C",
+        {"u_min": 0.1, "u_max": 0.9},
+    )
+    incumbent = core.active_control_pair.descriptor
+    candidate_controller_config = dict(core.cfg)
+    candidate_controller_config["theta"] = float(candidate_controller_config["theta"]) + 1.0
+    candidate_estimator, _net, _model, candidate_solver = core._build_for(
+        candidate_controller_config
+    )
+    candidate_configuration = {
+        name: getattr(candidate_solver.config, name)
+        for name in candidate_solver.config.__dataclass_fields__
+    }
+    candidate_digest = mpc_module.grey_config_digest(candidate_solver.config)
+    assert grey_snapshot_digest(candidate_configuration) == candidate_digest
+    candidate = GreyControlPairDescriptor(
+        model_digest=candidate_digest,
+        configuration=candidate_configuration,
+        estimator_kind=incumbent.estimator_kind,
+        solver_kind=incumbent.solver_kind,
+        candidate_generation=incumbent.candidate_generation + 1,
+        role_generation=incumbent.role_generation + 1,
+    )
+    candidate_estimator.close()
+    candidate_solver.close()
+    validation_pair = core._build_pair_from_descriptor(candidate)
+    assert validation_pair.descriptor == candidate
+    validation_pair.close()
+    prepared = PreparedActivationRecord.prepared(
+        timestamp_ms=1_000,
+        incumbent=incumbent,
+        candidate=candidate,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        decision_id=f"crash-{crash_boundary}",
+    )
+    if durable_phase is not None:
+        confidence = ModelEvidenceRecord(
+            evidence_id=f"confidence-{crash_boundary}",
+            kind=EvidenceKind.CONFIDENCE_DECISION,
+            session_id="crash-recovery",
+            cook_id=None,
+            timestamp_ms=900,
+            role_generation=incumbent.role_generation,
+            model_digest=candidate.model_digest,
+            provenance_digest=incumbent.model_digest,
+            payload=ConfidenceDecisionEvidence(
+                decision_id=prepared.decision_id,
+                blocked=False,
+                reason=None,
+            ),
+        )
+        append_model_evidence((confidence,), database_path=database_path)
+        commit_model_activation_phase(
+            prepared,
+            expected_phase=None,
+            database_path=database_path,
+        )
+        if durable_phase is ActivationPhase.ACTIVE:
+            commit_model_activation_phase(
+                prepared.transition(ActivationPhase.ACTIVE),
+                expected_phase=ActivationPhase.PREPARED,
+                database_path=database_path,
+            )
+        elif durable_phase is ActivationPhase.ABORTED:
+            commit_model_activation_phase(
+                prepared.transition(ActivationPhase.ABORTED, reason="compensated"),
+                expected_phase=ActivationPhase.PREPARED,
+                database_path=database_path,
+            )
+    if lifecycle_kind is not None:
+        if lifecycle_kind is EvidenceKind.FALLBACK:
+            payload = FallbackEvidence(
+                decision_id=prepared.decision_id,
+                reason="confidence-window-regressed",
+                failed_digest=candidate.model_digest,
+                failed_generation=candidate.role_generation,
+                last_safe_command=0.25,
+                fallback_kind="grey-box",
+            )
+        else:
+            payload = RollbackEvidence(
+                decision_id=prepared.decision_id,
+                reason="operator rollback",
+            )
+        lifecycle = ModelEvidenceRecord(
+            evidence_id=f"{lifecycle_kind.value}-{crash_boundary}",
+            kind=lifecycle_kind,
+            session_id="crash-recovery",
+            cook_id=None,
+            timestamp_ms=2_000,
+            role_generation=candidate.role_generation + 1,
+            model_digest=candidate.model_digest,
+            provenance_digest=incumbent.model_digest,
+            payload=payload,
+        )
+        append_model_evidence((lifecycle,), database_path=database_path)
+
+    core._activation_persistence_worker = ModelPersistenceWorker(
+        _FakeModelStore(),
+        SimpleNamespace(error=lambda _message: None),
+        append_evidence=lambda batch: append_model_evidence(
+            batch,
+            database_path=database_path,
+        ),
+        persist_activation_phase=lambda record, expected: commit_model_activation_phase(
+            record,
+            expected_phase=expected,
+            database_path=database_path,
+        ),
+    )
+    monkeypatch.setattr(
+        hold_module,
+        "read_model_activation",
+        lambda: read_model_activation(database_path=database_path),
+    )
+    monkeypatch.setattr(
+        hold_module,
+        "read_model_evidence",
+        lambda: read_model_evidence(database_path=database_path),
+    )
+    runner = ThreadedControllerRunner(core)
+    hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
+    expected = (
+        candidate
+        if durable_phase is ActivationPhase.ACTIVE and lifecycle_kind is None
+        else incumbent
+    )
+    try:
+        hold.setup()
+        runner.set_target(225.0)
+        runner.submit(225.0)
+        deadline = time.monotonic() + 5.0
+        while (
+            (
+                runner.latest().revision == 0
+                or core.active_control_pair.descriptor != expected
+            )
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.005)
+        result = runner.latest()
+        assert result.revision > 0
+        assert 0.0 < result.cycle_ratio <= 0.5
+        assert core.mpc.calls
+        assert core.active_control_pair.descriptor == expected
+        assert core.estimator is core.active_control_pair.estimator
+        assert core.mpc is core.active_control_pair.solver
+        assert not runner.mpc_activation_terminated
+        converged = read_model_activation(database_path=database_path)
+        if durable_phase is ActivationPhase.PREPARED:
+            assert converged is not None
+            assert converged.phase == ActivationPhase.ABORTED.value
+            assert converged.active_pair == incumbent
+        elif durable_phase is not None:
+            assert converged is not None
+            assert converged.phase == durable_phase.value
+    finally:
+        hold.ctx.clock.advance(400.0)
+        hold.teardown(225.0)
