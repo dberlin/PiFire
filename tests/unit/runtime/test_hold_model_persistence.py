@@ -14,6 +14,7 @@ from common.datastore_accessors import (
     ModelActivationState,
     append_model_evidence,
     commit_model_activation_phase,
+    commit_model_rollback,
     read_model_activation,
     read_model_evidence,
 )
@@ -29,7 +30,11 @@ from common.model_evidence import (
 from controller.linear_mpc.activation import canonical_snapshot_digest
 from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
-from controller.runtime.runner import ControllerUpdateResult, ThreadedControllerRunner
+from controller.runtime.runner import (
+    ControllerUpdateResult,
+    PreparedPairTransition,
+    ThreadedControllerRunner,
+)
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
@@ -747,6 +752,7 @@ class _CrashRecoveryEstimator:
 
 class _CrashRecoverySolver:
     created = []
+    solve_order = []
 
     def __init__(self, config):
         self.config = config
@@ -755,6 +761,7 @@ class _CrashRecoverySolver:
         self.created.append(self)
 
     def solve(self, state, *, setpoint_c, q_previous, equilibrium_q):
+        self.solve_order.append(self)
         self.calls.append((state, setpoint_c, q_previous, equilibrium_q))
         return SimpleNamespace(
             sequence_q=[0.5] * self.config.horizon_steps,
@@ -774,6 +781,45 @@ class _CrashRecoverySolver:
 
     def close(self):
         self.closed += 1
+
+
+class _CrashRecoveryRunnerGate:
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._permits = 0
+        self._arrivals = 0
+        self._open = False
+
+    def __call__(self, _period):
+        with self._condition:
+            self._arrivals += 1
+            self._condition.notify_all()
+            self._condition.wait_for(
+                lambda: self._open or self._permits > 0,
+                timeout=5.0,
+            )
+            if not self._open and self._permits > 0:
+                self._permits -= 1
+
+    def wait_for_arrivals(self, count, timeout=1.0):
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while self._arrivals < count:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return False
+                self._condition.wait(remaining)
+            return True
+
+    def release(self):
+        with self._condition:
+            self._permits += 1
+            self._condition.notify_all()
+
+    def open(self):
+        with self._condition:
+            self._open = True
+            self._condition.notify_all()
 
 
 
@@ -861,6 +907,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
 
     _CrashRecoveryEstimator.created.clear()
     _CrashRecoverySolver.created.clear()
+    _CrashRecoverySolver.solve_order.clear()
     database_path = tmp_path / f"{crash_boundary}.sqlite"
     monkeypatch.setattr(mpc_module, "GreyBoxEKF", _CrashRecoveryEstimator)
     monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", _CrashRecoverySolver)
@@ -906,6 +953,24 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         policy=ActivationPolicy.PASSIVE_AUTO,
         decision_id=f"crash-{crash_boundary}",
     )
+    prepared_write_started = threading.Event()
+    prepared_write_release = threading.Event()
+
+    def persist_activation_phase(record, expected):
+        if (
+            crash_boundary == "before-prepared-receipt"
+            and record.phase is ActivationPhase.PREPARED
+        ):
+            prepared_write_started.set()
+            if not prepared_write_release.wait(timeout=5.0):
+                raise TimeoutError("prepared write was not released")
+            raise RuntimeError("simulated process death before prepared receipt")
+        return commit_model_activation_phase(
+            record,
+            expected_phase=expected,
+            database_path=database_path,
+        )
+
     persistence_worker = ModelPersistenceWorker(
         _FakeModelStore(),
         SimpleNamespace(error=lambda _message: None),
@@ -913,11 +978,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
             batch,
             database_path=database_path,
         ),
-        persist_activation_phase=lambda record, expected: commit_model_activation_phase(
-            record,
-            expected_phase=expected,
-            database_path=database_path,
-        ),
+        persist_activation_phase=persist_activation_phase,
     )
     first_core._activation_persistence_worker = persistence_worker
 
@@ -930,6 +991,39 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         assert receipt.accepted
         assert receipt.wait(timeout=1.0)
         assert receipt.durable is True
+
+    first_boundary_runner = None
+    first_boundary_gate = None
+    if crash_boundary == "before-prepared-receipt":
+        prepared_receipt = persistence_worker.submit_activation_phase(
+            prepared,
+            expected_phase=None,
+        )
+        assert prepared_receipt.accepted
+        assert prepared_write_started.wait(timeout=1.0)
+        assert prepared_receipt.completed is False
+        assert prepared_receipt.durable is False
+        first_boundary_gate = _CrashRecoveryRunnerGate()
+        first_boundary_runner = ThreadedControllerRunner(
+            first_core,
+            wait_for_period=first_boundary_gate,
+        )
+        assert first_boundary_gate.wait_for_arrivals(1)
+        transition = PreparedPairTransition(
+            prepared,
+            candidate_pair,
+            prepared_receipt,
+            lambda record, expected: persistence_worker.submit_activation_phase(
+                record,
+                expected_phase=expected,
+            ),
+        )
+        assert first_boundary_runner.queue_pair_activation(transition) is False
+        prepared_write_release.set()
+        assert prepared_receipt.wait(timeout=1.0) is False
+        assert prepared_receipt.completed is True
+        assert prepared_receipt.durable is False
+        assert read_model_activation(database_path=database_path) is None
 
     if durable_phase is not None:
         confidence = ModelEvidenceRecord(
@@ -1014,8 +1108,25 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
                 reason="operator rollback",
             ),
         )
-        append_model_evidence((lifecycle,), database_path=database_path)
-        assert first_core.rollback_activation("operator rollback")
+        rollback_authority = read_model_activation(database_path=database_path)
+        assert rollback_authority is not None
+        assert rollback_authority.phase == ActivationPhase.ACTIVE.value
+        rollback_outcome = commit_model_rollback(
+            lifecycle,
+            expected_activation=rollback_authority,
+            database_path=database_path,
+        )
+        assert rollback_outcome.inserted is True
+        assert rollback_outcome.record == lifecycle
+        first_boundary_gate = _CrashRecoveryRunnerGate()
+        first_boundary_runner = ThreadedControllerRunner(
+            first_core,
+            wait_for_period=first_boundary_gate,
+        )
+        assert first_boundary_gate.wait_for_arrivals(1)
+        assert first_boundary_runner.rollback_activation("operator rollback")
+        first_boundary_gate.release()
+        assert first_boundary_gate.wait_for_arrivals(2)
 
     expected_precrash_pair = (
         candidate_pair if precrash_owner == "candidate" else incumbent_pair
@@ -1031,9 +1142,15 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     else:
         assert precrash_authority is not None
         assert precrash_authority.phase == durable_phase.value
+    precrash_records = tuple(read_model_evidence(database_path=database_path))
     if not installs_candidate:
         candidate_pair.close()
-    first_core.close()
+    if first_boundary_runner is None:
+        first_core.close()
+    else:
+        assert first_boundary_gate is not None
+        first_boundary_gate.open()
+        first_boundary_runner.stop()
     first_runtime_handles = (
         incumbent_pair.estimator,
         incumbent_pair.solver,
@@ -1073,7 +1190,9 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
             database_path=database_path,
         ),
     )
-    runner = ThreadedControllerRunner(core)
+    restart_gate = _CrashRecoveryRunnerGate()
+    runner = ThreadedControllerRunner(core, wait_for_period=restart_gate)
+    assert restart_gate.wait_for_arrivals(1)
     hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
     expected = (
         candidate
@@ -1082,36 +1201,45 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     )
     try:
         hold.setup()
+        restart_solve_offset = len(_CrashRecoverySolver.solve_order)
         runner.set_target(225.0)
         runner.submit(225.0)
-        deadline = time.monotonic() + 5.0
-        while (
-            (
-                runner.latest().revision == 0
-                or core.active_control_pair.descriptor != expected
-            )
-            and time.monotonic() < deadline
-        ):
-            time.sleep(0.005)
+        restart_gate.release()
+        assert restart_gate.wait_for_arrivals(2, timeout=5.0)
         result = runner.latest()
-        assert result.revision > 0
+        assert result.revision == 1
         assert 0.0 < result.cycle_ratio <= 0.5
-        assert core.mpc.calls
         assert core.active_control_pair.descriptor == expected
         assert core.estimator is core.active_control_pair.estimator
         assert core.mpc is core.active_control_pair.solver
+        assert _CrashRecoverySolver.solve_order[restart_solve_offset:] == [
+            core.active_control_pair.solver
+        ]
+        assert core.mpc.calls
         assert not runner.mpc_activation_terminated
-        if durable_phase is ActivationPhase.PREPARED:
-            hold._reconcile_activation_state()
-            runner.submit(225.0)
-            time.sleep(0.02)
+
         restored_pair = core.active_control_pair
         constructed_count = len(_CrashRecoverySolver.created)
-        hold._reconcile_activation_state()
-        runner.submit(225.0)
-        time.sleep(0.02)
-        assert core.active_control_pair is restored_pair
-        assert len(_CrashRecoverySolver.created) == constructed_count
+        completed_revision = result.revision
+        completed_solve_count = len(_CrashRecoverySolver.solve_order)
+        if precrash_authority is not None:
+            runner.submit(None)
+            assert runner.restore_activation(
+                precrash_authority,
+                precrash_records,
+            )
+            assert runner.restore_activation(
+                precrash_authority,
+                precrash_records,
+            )
+            restart_gate.release()
+            assert restart_gate.wait_for_arrivals(3, timeout=5.0)
+            assert runner.latest().revision == completed_revision
+            assert len(_CrashRecoverySolver.solve_order) == completed_solve_count
+            assert core.active_control_pair is restored_pair
+            assert len(_CrashRecoverySolver.created) == constructed_count
+            assert not runner.mpc_activation_terminated
+
         converged = read_model_activation(database_path=database_path)
         if durable_phase is ActivationPhase.PREPARED:
             assert converged is not None
@@ -1121,6 +1249,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
             assert converged is not None
             assert converged.phase == durable_phase.value
     finally:
+        restart_gate.open()
         hold.ctx.clock.advance(400.0)
         hold.teardown(225.0)
     handles = (

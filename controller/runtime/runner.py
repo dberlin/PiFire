@@ -1363,7 +1363,13 @@ class ThreadedControllerRunner(ControllerRunner):
             self._pending_pair_activation = transition
         return True
     def restore_activation(self, persisted, records):
+        """Queue one durable transaction for convergence exactly once."""
+        transaction_id = getattr(persisted, "transaction_id", None)
         with self._lock:
+            if isinstance(transaction_id, str) and transaction_id:
+                if transaction_id in self._pair_activation_ids:
+                    return True
+                self._pair_activation_ids.add(transaction_id)
             self._pending_activations.append(("restore", (persisted, tuple(records))))
         return True
 
