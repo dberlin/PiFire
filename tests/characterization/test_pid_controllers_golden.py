@@ -23,7 +23,7 @@ PID_CONFIGS = {
     },
 }
 
-CYCLE_DATA = {"HoldCycleTime": 20}
+CYCLE_DATA = {}
 SERIES = [150, 160, 180, 200, 205, 210, 215, 218, 220, 221]
 SETPOINT = 220.0
 STEP = 20.0

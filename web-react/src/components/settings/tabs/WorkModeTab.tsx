@@ -13,7 +13,6 @@ import { SaveBar } from "../SaveBar";
 
 type WorkMode = {
   cycle_data: {
-    HoldCycleTime: number;
     SmokeOnCycleTime: number;
     SmokeOffCycleTime: number;
     PMode: number;
@@ -43,7 +42,6 @@ function readWorkMode(s: Settings): WorkMode {
   const kw = s.keep_warm ?? {};
   return {
     cycle_data: {
-      HoldCycleTime: cd.HoldCycleTime ?? SETTINGS_DEFAULTS.cycle_data.HoldCycleTime,
       SmokeOnCycleTime: cd.SmokeOnCycleTime ?? SETTINGS_DEFAULTS.cycle_data.SmokeOnCycleTime,
       SmokeOffCycleTime: cd.SmokeOffCycleTime ?? SETTINGS_DEFAULTS.cycle_data.SmokeOffCycleTime,
       PMode: cd.PMode ?? SETTINGS_DEFAULTS.cycle_data.PMode,
@@ -119,15 +117,6 @@ export function WorkModeTab() {
   return (
     <SettingsFieldErrorsProvider errors={errors}>
       <Section title="Cycle Data">
-        <NumberField
-          integer
-          label="Hold Cycle Time"
-          value={v.cycle_data.HoldCycleTime}
-          onChange={(n) => setCycleData("HoldCycleTime", n)}
-          min={0}
-          suffix="s"
-          path="cycle_data.HoldCycleTime"
-        />
         <NumberField
           integer
           label="Smoke On Cycle Time"

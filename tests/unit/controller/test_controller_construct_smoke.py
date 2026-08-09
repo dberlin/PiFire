@@ -30,7 +30,7 @@ CONFIGS = {
         "theta": 65,
     },
 }
-CYCLE_DATA = {"HoldCycleTime": 20}
+CYCLE_DATA = {}
 CATALOG = Path(__file__).resolve().parents[3] / "controller" / "controllers.json"
 
 

@@ -15,7 +15,7 @@ from controller.mpc import _DEFAULTS, _HISTORY_MAX, _REFIT_INIT, Controller
 from controller.mpc_model import simulate_grey_box
 from docs.superpowers.experiments import promotion_signal
 
-CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9}
 #: h_amb matches the shipped default rather than differing from it: `_FREE`
 #: holds h_amb and sigma both, so a cook whose sigma/h_amb differs from the
 #: fitter's is one the fitter cannot represent, and the refit would be judged

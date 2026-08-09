@@ -59,11 +59,6 @@
     "CycleData": {
       "additionalProperties": false,
       "properties": {
-        "HoldCycleTime": {
-          "default": 25,
-          "title": "Holdcycletime",
-          "type": "integer"
-        },
         "LidOpenDetectEnabled": {
           "default": false,
           "title": "Lidopendetectenabled",
@@ -2141,7 +2136,6 @@
     "cycle_data": {
       "$ref": "#/$defs/CycleData",
       "default": {
-        "HoldCycleTime": 25,
         "LidOpenDetectEnabled": false,
         "LidOpenPauseTime": 60,
         "LidOpenThreshold": 15,

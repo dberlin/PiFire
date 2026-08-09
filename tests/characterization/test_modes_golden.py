@@ -415,7 +415,6 @@ def test_manual_override_fan_on_applies_and_records_grill_call():
 
 def test_hold_lid_open_stops_auger_and_fan():
     settings = base_settings()
-    settings["cycle_data"]["HoldCycleTime"] = 0.2
     settings["cycle_data"]["LidOpenDetectEnabled"] = True
     settings["cycle_data"]["LidOpenThreshold"] = 15
     control_data = base_control(mode="Hold")
@@ -494,7 +493,6 @@ def test_manual_override_pwm_sets_duty_cycle():
     settings = base_settings()
     settings["platform"]["dc_fan"] = True
     settings["safety"]["allow_manual_changes"] = True
-    settings["cycle_data"]["HoldCycleTime"] = 100  # avoid auger-cycle noise
     control_data = base_control(mode="Hold")
     control_data["manual"]["change"] = "pwm"
     control_data["manual"]["pwm"] = 55
@@ -658,7 +656,6 @@ def test_hold_lid_open_clears_and_restores_fan_after_pause_time():
     # LidOpenPauseTime elapses, LidOpenDetect clears and _start_fan() is
     # called again to resume fan control (control.py ~716-719).
     settings = base_settings()
-    settings["cycle_data"]["HoldCycleTime"] = 0.2
     settings["cycle_data"]["LidOpenDetectEnabled"] = True
     settings["cycle_data"]["LidOpenThreshold"] = 15
     settings["cycle_data"]["LidOpenPauseTime"] = 0.15
@@ -688,7 +685,6 @@ def test_hold_lid_open_manual_toggle_stops_auger_and_fan():
     # and immediately stops auger+fan, exactly like the automatic path -- and
     # the toggle flag itself is always cleared after being read.
     settings = base_settings()
-    settings["cycle_data"]["HoldCycleTime"] = 0.2
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
     control_data["lid_open_toggle"] = True
@@ -806,9 +802,8 @@ def test_hold_controller_receives_current_tick_ptemp():
     # sense->act: the controller is submitted an in-loop probe value, not a
     # pre-loop-only stash. Below maxtemp so the loop runs a few ticks.
     settings = base_settings()
-    # period=0.0 is falsy, so the controller-submit gate uses cycle_time as its
-    # interval; shrink HoldCycleTime so the gate fires within these few ticks.
-    settings["cycle_data"]["HoldCycleTime"] = 0.02
+    # period=0.0 is falsy, so the controller-submit gate falls back to the
+    # auger's pulse frame.
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
     probes = FakeProbes().script([200, 205, 210, 215, 220])

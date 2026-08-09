@@ -124,7 +124,6 @@ def default_settings():
     }
 
     settings["cycle_data"] = {
-        "HoldCycleTime": 25,
         "SmokeOnCycleTime": 15,  # Smoke/Startup Auger On Time.
         "SmokeOffCycleTime": 45,  # Smoke/Startup Auger Off Time.  Starting value for PMode (10s is added for each PMode setting)
         "PMode": 2,  # http://tipsforbbq.com/Definition/Traeger-P-Setting

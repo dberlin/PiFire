@@ -91,7 +91,6 @@ class SmokePlus(_Section):
 
 class CycleData(_Section):
     # Mirrors defaults.py settings["cycle_data"].
-    HoldCycleTime: int = 25
     SmokeOnCycleTime: int = 15
     SmokeOffCycleTime: int = 45
     PMode: int = 2

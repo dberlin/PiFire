@@ -15,7 +15,7 @@ from common.control_trace import ActuationMode
 # Controllers with no optional dependency, so this runs on every install.
 PLAIN_CONTROLLERS = ["pid", "pid_sp"]
 
-CYCLE_DATA = {"HoldCycleTime": 20}
+CYCLE_DATA = {}
 
 
 def test_base_defaults_are_inert():

@@ -34,7 +34,7 @@ CONFIG = dict(
     fan_min_pct=40.0,
     fan_max_pct=100.0,
 )
-CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9}
 
 
 def _opts(controller):

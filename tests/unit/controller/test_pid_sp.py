@@ -8,9 +8,10 @@ import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.pid_sp import STARTUP_REDUCTION
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 CONFIG = {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010}
-CYCLE_DATA = {"HoldCycleTime": 20}
+CYCLE_DATA = {}
 
 
 class _Clock:
@@ -31,6 +32,15 @@ def clock(monkeypatch):
 def _controller(name, clock, units="F"):
     mod = importlib.import_module(f"controller.{name}")
     return mod.Controller(dict(CONFIG), units, dict(CYCLE_DATA))
+
+
+def test_pid_sp_paces_its_guards_off_the_real_auger_frame(clock):
+    """The three-cycle windows below are three control cycles. The control
+    cycle is the auger's pulse frame, which is what actually paces the auger,
+    and it comes from the platform rather than from any setting -- so an empty
+    cycle_data gives the guards the frame they mean."""
+    sp = _controller("pid_sp", clock)
+    assert sp.cycle_time == AUGER_TIMING.frame_s
 
 
 def test_the_startup_reduction_is_applied_to_the_new_output(clock):

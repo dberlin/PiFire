@@ -83,7 +83,6 @@ class MqttNotificationHandler:
             ]
             self.PID_CONFIG_SENSORS = ["PB", "Td", "Ti", "center"]
             self.PID_CYCLE_TIME_SENSORS = [
-                "HoldCycleTime",
                 "LidOpenPauseTime",
                 "LidOpenThreshold",
                 "PMode",
@@ -424,7 +423,7 @@ class MqttNotificationHandler:
                         elif device in ["duty_cycle", "hopper_level", "cpu"]:
                             discovery["unit_of_measurement"] = "%"
 
-                        elif device in ["PB", "Td", "Ti", "HoldCycleTime", "LidOpenPauseTime"]:
+                        elif device in ["PB", "Td", "Ti", "LidOpenPauseTime"]:
                             discovery["unit_of_measurement"] = "s"
                             discovery["enabled_by_default"] = False
 

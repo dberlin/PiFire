@@ -9,7 +9,7 @@ from controller import mpc, pid, pid_sp
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.mpc_allocator import AllocationResult
 
-CYCLE_DATA = {"HoldCycleTime": 20.0, "u_min": 0.1, "u_max": 0.9}
+CYCLE_DATA = {"u_min": 0.1, "u_max": 0.9}
 
 
 def test_pid_trace_diagnostics_reproduce_completed_update(monkeypatch):

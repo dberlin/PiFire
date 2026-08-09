@@ -47,7 +47,6 @@
     },
     "cycle_data": {
       "FanPidEnabled": false,
-      "HoldCycleTime": 25,
       "LidOpenDetectEnabled": false,
       "LidOpenPauseTime": 60,
       "LidOpenThreshold": 15,

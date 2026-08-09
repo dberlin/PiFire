@@ -6,7 +6,7 @@ from controller.grill_sim import GrillSim
 
 # Exercises the PRODUCTION defaults (nonlinear radiative model + EKF) against the
 # realistic plant (pellet pulses, ~20s deadtime, fan lever, light wind, sensor lag).
-CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9}
 TS = 25.0
 SETPOINT = 110.0
 

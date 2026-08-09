@@ -92,8 +92,8 @@ def test_low_duty_credit_becomes_two_second_pulses_on_every_solve_cadence(contro
 
 
 def test_cycle_override_cannot_retime_the_framed_scheduler(monkeypatch):
-    row, plant = _run_stub(20, monkeypatch, cycle_config={"HoldCycleTime": 4, "u_max": 0.7})
+    row, plant = _run_stub(20, monkeypatch, cycle_config={"SmokeOnCycleTime": 4, "u_max": 0.7})
 
-    assert row["effective_run"]["cycle_config"]["HoldCycleTime"] == 4
+    assert row["effective_run"]["cycle_config"]["SmokeOnCycleTime"] == 4
     assert row["effective_run"]["pulse_timing"] == {"frame_seconds": 20.0, "pulse_seconds": 2.0}
     assert [tick for tick, on in enumerate(plant.on_fracs) if on] == [20, 21, 60, 61]

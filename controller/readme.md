@@ -129,8 +129,6 @@ For Example (excerpt from controllers.json):
             "attributions" : ["Python Foundation", "Flask, Copyright 2023, MIT License"],
             "recommendations" : {
                 "cycle" : { 
-                    "cycle_time" : 25,
-                    "cycle_ratio_min" : 0.1,
                     "cycle_ratio_max" : 0.9
                 }   
             },

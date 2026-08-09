@@ -51,6 +51,7 @@ from controller.base import PidSpTraceDiagnostics
 from controller.fopdt_identifier import FOPDTIdentifier
 from controller.pid_base import PIDControllerBase
 from controller.smith_predictor import SmithPredictor
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 #: Output reduction for the first three cycles after a setpoint change.
 STARTUP_REDUCTION = 0.65
@@ -96,7 +97,10 @@ class Controller(PIDControllerBase):
         self._integral_seeded = False
 
         self.stable_window = config.get("stable_window", 12)
-        self.cycle_time = cycle_data["HoldCycleTime"]
+        # Three control cycles is what the guards below mean. The control cycle
+        # is the auger's pulse frame: Hold paces the auger from PulseScheduler's
+        # timing, which takes no setting.
+        self.cycle_time = AUGER_TIMING.frame_s
 
         # Off is the negative control every measurement of this needs, not a
         # user-facing choice: the identified operating point beats the heuristic

@@ -734,7 +734,7 @@ def test_migration_v1_4_cascade_full_migrates_strict(migration_env):
     old["modules"]["grillplat"] = "some_real_platform"
     prof_key = next(iter(old["probe_settings"]["probe_profiles"].keys()))
     old["probe_settings"]["probe_profiles"][prof_key].pop("id", None)
-    old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
+    old["cycle_data"] = {"SmokeCycleTime": 30}
     old["globals"]["startup_timer"] = 999
     old["globals"]["startup_exit_temp"] = 111
     old["globals"]["shutdown_timer"] = 222
@@ -758,7 +758,7 @@ def test_migration_v1_4_cascade_preserves_start_to_mode_strict(migration_env):
     old["probe_settings"]["probe_sources"] = {}
     old["probe_settings"]["probes_enabled"] = {}
     old["modules"]["adc"] = "mcp3008"
-    old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
+    old["cycle_data"] = {"SmokeCycleTime": 30}
 
     result = _migrate_and_check(migration_env, "v1_4_preserve", old)
     assert result["startup"]["start_to_mode"]["primary_setpoint"] == 225

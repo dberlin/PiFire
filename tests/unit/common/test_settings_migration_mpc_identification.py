@@ -18,7 +18,7 @@ def _v5_settings(stored):
                 "pid_sp": {"PB": 51.0, "cycle": 23},
             },
         },
-        "cycle_data": {"HoldCycleTime": 25, "u_min": 0.1, "u_max": 0.9},
+        "cycle_data": {"u_min": 0.1, "u_max": 0.9},
         "globals": {"grill_name": "Learning Grill"},
     }
 
@@ -48,7 +48,7 @@ def test_current_schema_includes_v6_identification_choice_removal():
                 "pid_sp": {"PB": 51.0, "cycle": 23},
             },
         },
-        "cycle_data": {"HoldCycleTime": 25, "u_min": 0.1, "u_max": 0.9},
+        "cycle_data": {"u_min": 0.1, "u_max": 0.9},
         "globals": {"grill_name": "Learning Grill"},
     }
 

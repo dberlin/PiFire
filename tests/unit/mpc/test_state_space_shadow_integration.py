@@ -10,7 +10,7 @@ from controller.linear_mpc.contracts import FrameObservation
 from controller.mpc import Controller, _DEFAULTS
 
 
-CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9}
 
 
 class _Estimator:

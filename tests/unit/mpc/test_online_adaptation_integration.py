@@ -214,7 +214,7 @@ def _make_live_hold(monkeypatch, *, model_store=None):
     core = Controller(
         dict(_DEFAULTS, enable_online_adaptation=True, policy="net", control_period=19.0),
         "F",
-        {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25},
+        {"u_min": 0.1, "u_max": 0.9},
     )
     core.set_target(225.0)
     _pretrain_real_coordinator(core)

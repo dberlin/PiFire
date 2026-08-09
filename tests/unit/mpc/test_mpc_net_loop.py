@@ -7,7 +7,7 @@ from controller.grill_sim import GrillSim
 from controller.mpc_net import NetPolicy, net_path_for
 
 ART = os.path.join(os.path.dirname(__file__), "..", "..", "..", "controller", "mpc_policy_net.npz")
-CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9}
 TS = 25.0
 
 needs_art = pytest.mark.skipif(not os.path.exists(ART), reason="net artifact not exported")

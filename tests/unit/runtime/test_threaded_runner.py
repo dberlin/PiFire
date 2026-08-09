@@ -1435,7 +1435,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
             super().__init__(
                 dict(MPC_DEFAULTS, policy="net", enable_online_adaptation=True),
                 "C",
-                {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25},
+                {"u_min": 0.1, "u_max": 0.9},
             )
             self.set_target(110.0)
             self.observed = []

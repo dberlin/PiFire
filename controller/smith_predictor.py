@@ -35,10 +35,12 @@ TEMP_MIN_F, TEMP_MAX_F = -100.0, 1200.0
 #: A one-step residual this large means the model has stopped describing the plant.
 MAX_RESIDUAL_F = 100.0
 MAX_RESIDUAL_STREAK = 4
-#: Retention must outlast the deepest delayed window by more than any control
-#: cycle a deployment could plausibly configure: nothing bounds HoldCycleTime,
-#: so a constant margin can only make truncation unlikely, never impossible --
-#: _integrate detects and refuses it instead of silently answering wrong.
+#: Retention must outlast the deepest delayed window by more than the gap
+#: between the last recorded command and the tick that integrates it. The
+#: predictor does not choose that gap: it is whatever its caller's wall clock
+#: reports between one tick and the next, so a constant margin can only make
+#: truncation unlikely, never impossible -- _integrate detects and refuses it
+#: instead of silently answering wrong.
 HISTORY_MARGIN_S = 1800.0
 
 

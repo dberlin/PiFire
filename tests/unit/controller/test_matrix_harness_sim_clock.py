@@ -45,7 +45,9 @@ def test_controller_observes_the_intended_control_period(controller, scenario_na
     row = run_scenario(controller, SCENARIOS[scenario_name], seed=0)
 
     assert observed_dts, "the controller was never solved"
-    period = row["effective_run"]["cycle_config"]["HoldCycleTime"]
+    # pid_sp names no cadence of its own, so it is solved on the pulse frame --
+    # the same fallback hold.py takes.
+    period = row["effective_run"]["scheduler"]["frame_seconds"]
     assert observed_dts == pytest.approx([period] * len(observed_dts))
 
     # Not [u_min, u_max] -- the controller's raw output is clamped to that

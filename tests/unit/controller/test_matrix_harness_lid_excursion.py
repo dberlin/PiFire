@@ -34,10 +34,12 @@ LID_WINDOW_S = SCENARIO.lid_open[0][1]
 THRESHOLD_PCT = default_settings()["cycle_data"]["LidOpenThreshold"]
 # hold.py:241's condition, spelled the same way.
 TRIGGER_F = SETPOINT * ((100 - THRESHOLD_PCT) / 100)
-# Between the ~128 s the modelled LidOpenPauseTime produces and the ~180 s a
-# pause running the whole lid window produces, so the band separates them.
-MAX_RECOVERY_S = 150
-SEEDS = (0, 1, 2)
+# Every seed, because the recovery claim below is a per-seed pairing and the
+# spread between seeds is what makes the paired form necessary: the whole
+# excursion can land ~70 s earlier on one draw than another, so a three-seed
+# sample silently excludes that regime. Twenty pid_sp runs cost under six
+# seconds.
+SEEDS = tuple(range(10))
 
 
 def _lid_results(monkeypatch, h_lid=None, pause_s=None):
@@ -61,19 +63,22 @@ def test_lid_open_scenario_crosses_the_lid_open_threshold(monkeypatch):
     )
 
 
-def test_the_chamber_recovers_on_the_pause_timer_not_the_lid_window(monkeypatch):
+def test_the_chamber_returns_to_band_after_the_pause_expires(monkeypatch):
     """Width of the cold excursion after its trough.
 
     Probe/transport lag can briefly cross the band before the trough, so the
-    metric starts recovery only after that coldest point. It returns well
-    inside `MAX_RECOVERY_S` because Hold hands control back on the timer rather
-    than when the lid shuts.
+    metric starts recovery only after that coldest point. The lower bound is
+    the pause itself, which control cannot outrun. The only upper bound is
+    `is not None`: `_recovery_s` reports `None` when the chamber never comes
+    back inside the band before the run ends, so the assertion says recovery
+    happens at all and deliberately leaves the discrimination between pause
+    models to the paired negative control below.
     """
     recoveries = [r["lid_recovery_s"] for r in _lid_results(monkeypatch)]
 
     pause_s = default_settings()["cycle_data"]["LidOpenPauseTime"]
-    assert all(r is not None and pause_s < r < MAX_RECOVERY_S for r in recoveries), (
-        f"recovery must fall between the {pause_s} s pause and {MAX_RECOVERY_S} s; got {recoveries}"
+    assert all(r is not None and r > pause_s for r in recoveries), (
+        f"recovery must happen, and no sooner than the {pause_s} s pause; got {recoveries}"
     )
 
 
@@ -101,16 +106,27 @@ def test_a_lidless_plant_misses_the_threshold(monkeypatch):
     )
 
 
-def test_a_pause_lasting_the_whole_lid_window_recovers_too_slowly(monkeypatch):
+def test_a_pause_lasting_the_whole_lid_window_recovers_more_slowly(monkeypatch):
     """Negative control for width: a pause held for as long as the lid is open,
     which is twice what `LidOpenPauseTime` grants it. The trough it digs still
-    clears the detector trigger, so only the recovery bound catches it."""
+    clears the detector trigger, so only recovery time catches it."""
+    # Stated as a per-seed pairing rather than against a fixed bound. Seed to
+    # seed the excursion shifts by tens of seconds, enough that the two models'
+    # recovery times overlap when pooled across seeds -- a fixed bound would be
+    # measuring which seeds were sampled. Within a seed the plant noise is
+    # shared, so the difference is the pause model and nothing else.
+    on_timer = [r["lid_recovery_s"] for r in _lid_results(monkeypatch)]
     results = _lid_results(monkeypatch, pause_s=LID_WINDOW_S)
-    recoveries = [r["lid_recovery_s"] for r in results]
+    whole_window = [r["lid_recovery_s"] for r in results]
 
-    assert all(r >= MAX_RECOVERY_S for r in recoveries), (
-        f"a whole-window pause was expected to blow through the {MAX_RECOVERY_S} s recovery bound, "
-        f"so the assertion above measures the pause length; got {recoveries}"
+    assert all(r is not None for r in whole_window), (
+        f"a whole-window pause must still recover within the run, or the comparison "
+        f"below is vacuous; got {whole_window}"
+    )
+    assert all(slow > quick for quick, slow in zip(on_timer, whole_window, strict=True)), (
+        f"a whole-window pause was expected to surrender control for longer on every seed, "
+        f"so the assertion above measures the pause length; on the timer {on_timer} "
+        f"against the whole window {whole_window}"
     )
     # The depth-only assertion cannot tell this model from the correct one.
     assert all(r["lid_min_temp_f"] < TRIGGER_F for r in results)

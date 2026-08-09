@@ -26,7 +26,6 @@ def _settings(*, config=None, cycle=None):
     return {
         "controller": {"config": {"_matrix_probe": dict(config or {})}},
         "cycle_data": {
-            "HoldCycleTime": 20,
             "u_min": 0.1,
             "u_max": 0.9,
             "PMode": 2,
@@ -70,7 +69,9 @@ class _ProbeCore:
         self.target = target
 
     def get_control_period(self):
-        return float(self.config.get("period", self.cycle_data["HoldCycleTime"]))
+        # A cadence of its own, so these runs exercise the branch where the
+        # harness takes the core's period rather than the pulse frame.
+        return float(self.config.get("period", 20.0))
 
     def update(self, temperature):
         del temperature
@@ -91,21 +92,20 @@ def _install(monkeypatch, core):
 
 def test_every_run_uses_framed_pulses_without_a_controller_mode_capability(monkeypatch):
     _install(monkeypatch, _ProbeCore)
-    shipped = _settings(config={"ratio": 0.2}, cycle={"HoldCycleTime": 10, "u_min": 0.05})
+    shipped = _settings(config={"ratio": 0.2}, cycle={"PMode": 4, "u_min": 0.05})
     monkeypatch.setattr(defaults, "default_settings", lambda: shipped)
 
     row = matrix.run_scenario("_matrix_probe", matrix.Scenario("one", 11, [(0, 120.0)]), seed=7)
 
     core = _ProbeCore.instances[-1]
     assert core.config == {"ratio": 0.2}
-    assert core.cycle_data["HoldCycleTime"] == 10
+    assert core.cycle_data["PMode"] == 4
     assert row["effective_run"] == {
         "controller_config": {"ratio": 0.2},
         "cycle_config": {
-            "HoldCycleTime": 10,
             "u_min": 0.05,
             "u_max": 0.9,
-            "PMode": 2,
+            "PMode": 4,
             "LidOpenPauseTime": 6,
         },
         "actuation_mode": ActuationMode.FRAMED_PULSE.value,
@@ -119,9 +119,9 @@ def test_every_run_uses_framed_pulses_without_a_controller_mode_capability(monke
 
     # A later defaults mutation must not rewrite evidence already recorded.
     shipped["controller"]["config"]["_matrix_probe"]["ratio"] = 0.8
-    shipped["cycle_data"]["HoldCycleTime"] = 99
+    shipped["cycle_data"]["PMode"] = 99
     assert row["effective_run"]["controller_config"]["ratio"] == 0.2
-    assert row["effective_run"]["cycle_config"]["HoldCycleTime"] == 10
+    assert row["effective_run"]["cycle_config"]["PMode"] == 4
 
 
 def test_next_run_resolves_a_manifest_substituted_after_matrix_import(monkeypatch):
@@ -164,14 +164,14 @@ def test_explicit_overrides_change_controller_bounds_but_not_the_framed_schedule
         matrix.Scenario("override", 41, [(0, 120.0)]),
         seed=3,
         config={"ratio": 0.05, "period": 20},
-        cycle_config={"HoldCycleTime": 4, "u_max": 0.7},
+        cycle_config={"PMode": 4, "u_max": 0.7},
     )
 
     assert _ProbeCore.instances[-1].config == {"ratio": 0.05, "period": 20}
-    assert _ProbeCore.instances[-1].cycle_data["HoldCycleTime"] == 4
+    assert _ProbeCore.instances[-1].cycle_data["PMode"] == 4
     assert row["effective_run"]["overrides"] == {
         "controller": {"ratio": 0.05, "period": 20},
-        "cycle": {"HoldCycleTime": 4, "u_max": 0.7},
+        "cycle": {"PMode": 4, "u_max": 0.7},
     }
     assert row["effective_run"]["cycle_config"]["u_max"] == 0.7
     assert row["effective_run"]["pulse_timing"] == {"frame_seconds": 20.0, "pulse_seconds": 2.0}
@@ -273,7 +273,7 @@ def test_unreachable_high_row_retains_binding_authority(monkeypatch):
 def test_main_writes_a_deterministic_header_rows_and_summary_envelope(monkeypatch, tmp_path):
     effective_run = {
         "controller_config": {"ratio": 0.2},
-        "cycle_config": {"HoldCycleTime": 20, "u_min": 0.1, "u_max": 0.9, "PMode": 2, "LidOpenPauseTime": 6},
+        "cycle_config": {"u_min": 0.1, "u_max": 0.9, "PMode": 2, "LidOpenPauseTime": 6},
         "actuation_mode": ActuationMode.FRAMED_PULSE.value,
         "pulse_timing": {"frame_seconds": 20.0, "pulse_seconds": 2.0},
         "plant": "GrillSim",

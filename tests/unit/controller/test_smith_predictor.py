@@ -188,13 +188,13 @@ def test_an_out_of_order_record_does_not_falsely_report_truncation():
 
 
 def test_a_control_cycle_beyond_retention_margin_suppresses_the_correction_and_is_surfaced():
-    """Nothing bounds HoldCycleTime, so a constant retention margin can only
-    make truncation unlikely, never impossible: a control cycle whose
-    interval plus theta exceeds retention must not silently answer with a
-    plausible-looking wrong xd. The predictor must instead suppress the
+    """The predictor does not choose how often it is ticked, so a constant
+    retention margin can only make truncation unlikely, never impossible: a
+    tick whose interval plus theta exceeds retention must not silently answer
+    with a plausible-looking wrong xd. The predictor must instead suppress the
     correction for that tick, exactly as the safety path does, and surface
     it via status() -- without becoming a sticky disable, since the
-    condition can clear on its own once the cycle shrinks back to something
+    condition can clear on its own once the interval shrinks back to something
     retention covers."""
     theta = float(DELAYS.max())
     # comfortably exceeds retention regardless of HISTORY_MARGIN_S's value;
@@ -228,10 +228,10 @@ def test_delayed_branch_matches_the_unpruned_profile_across_a_realistic_control_
     """History retention must outlive the deepest delayed window by more than
     a single control cycle: the last recorded command and the tick that
     integrates it are never at the same instant, so retention equal to theta
-    alone prunes duty this tick's window still needs. Tick at HoldCycleTime's
-    default of 25 s, at the deepest identification candidate theta, and check
-    xd against the exact x0(t - theta) an unpruned history of the same
-    profile would give."""
+    alone prunes duty this tick's window still needs. Tick at 25 s, above the
+    20 s pulse frame Hold actually paces pid_sp on, at the deepest
+    identification candidate theta, and check xd against the exact
+    x0(t - theta) an unpruned history of the same profile would give."""
     theta = float(DELAYS.max())
     K, tau = 800.0, 600.0
     cycle = 25.0
@@ -259,7 +259,7 @@ def test_delayed_branch_matches_the_unpruned_profile_across_a_realistic_control_
 
 
 def test_delayed_branch_matches_the_unpruned_profile_at_a_large_but_realistic_cycle():
-    """A 600 s cycle is a plausible HoldCycleTime, not an adversarial one; at
+    """A 600 s tick interval is a plausible stall, not an adversarial one; at
     theta = DELAYS.max() that needs 720 s of history behind the current tick,
     and any retention below that makes the predictor decline instead of
     correcting."""

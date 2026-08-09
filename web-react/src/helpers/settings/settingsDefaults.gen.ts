@@ -7,7 +7,6 @@ export const SETTINGS_DEFAULTS = {
     "selected": "pid"
   },
   "cycle_data": {
-    "HoldCycleTime": 25,
     "LidOpenDetectEnabled": false,
     "LidOpenPauseTime": 60,
     "LidOpenThreshold": 15,

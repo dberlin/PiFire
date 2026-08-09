@@ -34,8 +34,7 @@ describe("WorkModeTab", () => {
       settings: {
         platform: { dc_fan: true },
         cycle_data: {
-          HoldCycleTime: 10,
-          SmokeOnCycleTime: 5,
+          SmokeOnCycleTime: 10,
           SmokeOffCycleTime: 5,
           PMode: 1,
           u_max: 95.5,
@@ -99,8 +98,7 @@ describe("WorkModeTab", () => {
       settings: {
         platform: { dc_fan: true },
         cycle_data: {
-          HoldCycleTime: 10,
-          SmokeOnCycleTime: 5,
+          SmokeOnCycleTime: 10,
           SmokeOffCycleTime: 5,
           PMode: 0,
           u_max: 100,
@@ -127,10 +125,10 @@ describe("WorkModeTab", () => {
 
     renderRoute(<WorkModeTab />, context);
 
-    // Edit a cycle_data field - find HoldCycleTime and change from 10 to 15
+    // Edit a cycle_data field - find SmokeOnCycleTime and change from 10 to 15
     const inputs = screen.getAllByDisplayValue("10");
-    const holdCycleInput = inputs[0];
-    fireEvent.change(holdCycleInput, { target: { value: "15" } });
+    const smokeOnCycleInput = inputs[0];
+    fireEvent.change(smokeOnCycleInput, { target: { value: "15" } });
 
     // Toggle a smoke_plus field (enabled from false to true)
     const enabledButton = screen.getByRole("button", { name: "Enabled" });
@@ -146,7 +144,7 @@ describe("WorkModeTab", () => {
       expect(saveMock).toHaveBeenCalledWith(
         expect.objectContaining({
           cycle_data: expect.objectContaining({
-            HoldCycleTime: 15,
+            SmokeOnCycleTime: 15,
           }),
           smoke_plus: expect.objectContaining({
             enabled: true,
@@ -165,7 +163,6 @@ describe("WorkModeTab", () => {
       settings: {
         platform: { dc_fan: true },
         cycle_data: {
-          HoldCycleTime: 11,
           SmokeOnCycleTime: 6,
           SmokeOffCycleTime: 7,
           PMode: 1,
@@ -200,7 +197,6 @@ describe("WorkModeTab", () => {
       fireEvent.change(screen.getByDisplayValue(from), { target: { value: to } });
 
     // cycle_data
-    change("11", "21");
     change("6", "26");
     change("7", "27");
     change("1", "41");
@@ -229,7 +225,6 @@ describe("WorkModeTab", () => {
       expect(saveMock).toHaveBeenCalledWith(
         {
           cycle_data: {
-            HoldCycleTime: 21,
             SmokeOnCycleTime: 26,
             SmokeOffCycleTime: 27,
             PMode: 41,

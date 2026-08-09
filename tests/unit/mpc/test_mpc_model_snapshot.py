@@ -17,7 +17,7 @@ from controller.mpc import _DEFAULTS, Controller, _online_evaluation
 #: happens to an OLDER record keep their own literals.
 CURRENT_SCHEMA = 3
 
-CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9}
 PARAMS = dict(
     C_c=2520.0,
     h_amb=0.224,

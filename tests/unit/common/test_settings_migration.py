@@ -109,7 +109,7 @@ def test_upgrade_settings_v1_4_cascade_migrates_notify_probe_and_platform():
     old["modules"]["grillplat"] = "some_real_platform"
     prof_key = next(iter(old["probe_settings"]["probe_profiles"].keys()))
     old["probe_settings"]["probe_profiles"][prof_key].pop("id", None)
-    old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
+    old["cycle_data"] = {"SmokeCycleTime": 30}
     old["globals"]["startup_timer"] = 999
     old["globals"]["startup_exit_temp"] = 111
     old["globals"]["shutdown_timer"] = 222
@@ -199,7 +199,7 @@ def test_upgrade_settings_v1_4_cascade_preserves_start_to_mode():
     old["probe_settings"]["probe_sources"] = {}
     old["probe_settings"]["probes_enabled"] = {}
     old["modules"]["adc"] = "mcp3008"
-    old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
+    old["cycle_data"] = {"SmokeCycleTime": 30}
 
     result = upgrade_settings([1, 4, 0], old, d)
 

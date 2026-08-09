@@ -61,7 +61,7 @@ LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
 # the test suite binds it against the recovery bound for exactly that reason.
 LID_RECOVERY_WINDOW_S = 300
 
-CYCLE_DATA = {"HoldCycleTime": 20, "u_max": 0.9}
+CYCLE_DATA = {"u_max": 0.9}
 
 # A run that has drifted this far from set point over its last simulated hour
 # is not a baseline of controlled behavior -- it is a runaway (a prior version

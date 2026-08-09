@@ -88,6 +88,16 @@ def test_current_schema_omits_retired_u_min_setting():
     assert "u_min" not in SettingsSchema.model_fields["cycle_data"].annotation.model_fields
 
 
+def test_current_schema_omits_retired_hold_cycle_time_setting():
+    """HoldCycleTime never set the hold cycle: Hold paces the auger from
+    PulseScheduler's frame (AUGER_TIMING in grillplat/actuator_capabilities.py),
+    and pid_sp's three-cycle guards read that same frame."""
+    settings = default_settings()
+
+    assert "HoldCycleTime" not in settings["cycle_data"]
+    assert "HoldCycleTime" not in SettingsSchema.model_fields["cycle_data"].annotation.model_fields
+
+
 def test_the_shape_version_is_not_derived_from_the_release_version():
     """schema_version must never move because a release number moved."""
     from common.settings_schema import SETTINGS_SCHEMA_VERSION
@@ -156,7 +166,7 @@ def _migrate_ancient_settings(migration_env):
     old["probe_settings"]["probe_sources"] = {"x": 1}
     old["probe_settings"]["probes_enabled"] = {"x": 1}
     old["modules"]["adc"] = "mcp3008"
-    old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
+    old["cycle_data"] = {"SmokeCycleTime": 30}
 
     p = migration_env / "settings.json"
     p.write_text(json.dumps(old))

@@ -54,7 +54,7 @@ EPISODE_MINUTES = 30
 # to a clipped 0 or 1 at random. An episode driven that way swings tens of
 # degrees on its own, which is not a lid excursion and cannot be measured as one.
 DITHER = 0.08
-CYCLE_S = sample_mpc.CYCLE["HoldCycleTime"]
+CYCLE_S = sample_mpc.STEP_S
 LID_START_STEP = 40
 LID_WINDOW_STEPS = 5
 LID_EVENT = (LID_START_STEP, LID_START_STEP + LID_WINDOW_STEPS)

@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
 from controller.runtime.logic.pulse import PulseResetReason, PulseScheduler  # noqa: E402
 from controller.runtime.runner import ControllerType, SyncControllerRunner  # noqa: E402
+from grillplat.actuator_capabilities import AUGER_TIMING  # noqa: E402
 
 OUT = "./docs/superpowers/experiments/_matrix_baseline.json"
 STEADY_TAIL_S = 30 * 60
@@ -267,7 +268,7 @@ def run_scenario(
     core_config, cycle_data, controller_override, cycle_override = _effective_configuration(
         controller, config, cycle_config
     )
-    clock = _SimClock(-float(cycle_data["HoldCycleTime"]))
+    clock = _SimClock(-float(AUGER_TIMING.frame_s))
     real_time_time = time.time
     time.time = clock
     try:
@@ -310,7 +311,7 @@ def run_scenario(
         else:
             runner.set_target(setpoint)
         period = float(
-            (core.get_control_period() if runner is None else runner.control_period()) or cycle_data["HoldCycleTime"]
+            (core.get_control_period() if runner is None else runner.control_period()) or scheduler.timing.frame_s
         )
         if trace_sink is not None:
             trace_sink.start(

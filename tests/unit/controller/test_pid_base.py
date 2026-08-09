@@ -54,7 +54,7 @@ def test_update_twice_at_the_same_clock_value_stays_finite(monkeypatch, controll
     monkeypatch.setattr(time, "time", lambda: fixed_time)
 
     config = {"PB": 60.0, "Ti": 180.0, "Td": 45.0}
-    cycle_data = {"HoldCycleTime": 1}
+    cycle_data = {}
     controller = controller_cls(config, "F", cycle_data)
     controller.set_target(225.0)
 

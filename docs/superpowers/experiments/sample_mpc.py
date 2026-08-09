@@ -41,7 +41,11 @@ from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
 from controller.grill_sim import GrillSim
 
 SP = 110.0
-CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9}
+#: Seconds per sampled step. The grid every episode below is generated on, and
+#: the unit LID_PAUSE_STEPS counts -- changing it invalidates the recorded
+#: datasets, so it is a constant of this sampler rather than a setting.
+STEP_S = 25
 ND = int(_DEFAULTS["n_delay"])
 OUT = "./docs/superpowers/experiments/_ampc_data/pifire_samples.npz"
 OUT_SPAN = "./docs/superpowers/experiments/_ampc_data/pifire_span.npz"
@@ -98,7 +102,7 @@ def span_dataset_metadata(*, episodes, sampled_state_count, minutes, dither, sp_
 # this grid is `ceil(pause / cycle)` steps; rounding down would hand control
 # back a whole cycle earlier than production ever does.
 LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
-LID_PAUSE_STEPS = math.ceil(LID_PAUSE_S / CYCLE["HoldCycleTime"])
+LID_PAUSE_STEPS = math.ceil(LID_PAUSE_S / STEP_S)
 
 
 def generate_states(n, *, seed=0, op_frac=0.55):
@@ -180,7 +184,7 @@ def _episode(arg):
     else:
         lastQ = 0.0
     Xh, Up, Q = [], [], []
-    nsteps = int(minutes * 60 / 25)
+    nsteps = int(minutes * 60 / STEP_S)
     for k in range(nsteps):
         y = plant.measured()
         x_hat = c.estimator.update(lastQ, y)
@@ -254,7 +258,7 @@ def _episode_span(arg):
     c = Controller({**_DEFAULTS, "enable_fan_input": bool(enable_fan)}, "C", dict(CYCLE))
     cfg = c.cfg
     plant = GrillSim(seed=ep_seed)
-    nsteps = int(minutes * 60 / 25)
+    nsteps = int(minutes * 60 / STEP_S)
     # random setpoint schedule: 1-3 segments across the range
     nseg = int(rng.integers(1, 4))
     seg_sp = rng.uniform(sp_lo, sp_hi, size=nseg)

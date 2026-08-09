@@ -87,7 +87,7 @@ COOKS = 3
 #: a reading of the actuator rather than of the controller.
 def _shipped_cycle_data():
     settings = default_settings()["cycle_data"]
-    return {key: settings[key] for key in ("HoldCycleTime", "u_min", "u_max", "PMode")}
+    return {key: settings[key] for key in ("u_min", "u_max", "PMode")}
 
 
 #: Long enough past this plant's ~2 h time constant that the chamber has
