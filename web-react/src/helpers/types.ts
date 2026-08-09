@@ -104,6 +104,8 @@ export interface LiveState {
   };
   primaryProbe: ProbeData;
   foodProbes: ProbeData[];
+  /** REST report invalidation only. The dashboard never renders this value. */
+  learningReportRevision?: number;
   /** Hash of the probe map (common/app.py::create_ui_hash). It moves when a
    *  probe is reconfigured anywhere, including from another client. Note it
    *  also moves on a server restart, because Python salts hash() for strings

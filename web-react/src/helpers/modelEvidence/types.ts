@@ -4,21 +4,56 @@ export type ModelEvidenceStatus =
   | "fitting"
   | "evaluating"
   | "ready-for-review"
+  | "activating"
   | "active"
   | "fallback"
+  | "error"
   | "schema-invalidated";
 
+export type LearningMode = "passive" | "calibration" | "cook-refit";
+export type CandidateOrigin = "passive-online" | "operator-calibration" | "cook-refit";
+export type FitStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "stale";
+export type EvidenceCheckStatus = "not-run" | "pending" | "passed" | "failed";
+export type ActivationPolicy = "passive-auto" | "operator-reviewed" | "cook-refit";
+export type ActivationReason = "passive-auto" | "operator-reviewed" | "cook-refit";
+
+/** Every model role uses this identity shape; there is no state-space special case. */
 export interface ModelIdentity {
   kind: string;
   digest: string | null;
+  model_schema: number | null;
+  role_generation: number | null;
+  candidate_generation: number | null;
 }
 
-export interface CandidateIdentity extends ModelIdentity {
-  generation: number | null;
+export interface ObservationRejectionReason {
+  reason: string;
+  count: number;
 }
+
+export interface ObservationEligibility {
+  window_id: string | null;
+  eligible_count: number;
+  ineligible_count: number;
+  rejection_reasons: ObservationRejectionReason[];
+  probe_provenance: string;
+  mixed_window_authority: CandidateOrigin | null;
+}
+
+export type CalibrationStatus =
+  | "inactive"
+  | "idle"
+  | "active"
+  | "running"
+  | "paused"
+  | "accepted"
+  | "completed"
+  | "cancelled"
+  | "timed-out"
+  | "failed";
 
 export interface CalibrationEvidence {
-  status: string;
+  status: CalibrationStatus;
   stage: string | null;
   current_probe: number | null;
   completed_stages: string[];
@@ -31,24 +66,85 @@ export interface CalibrationEvidence {
   revision: number;
 }
 
+export interface FitEvidenceWindow {
+  window_id: string;
+  session_id: string | null;
+  cook_id: string | null;
+  sample_count: number;
+  config_digest: string;
+  incumbent_digest: string;
+  started_at_ms: number;
+  ended_at_ms: number;
+}
+
+export interface FitEvidenceResult {
+  reason: string;
+  solver_iterations: number | null;
+  finished_at_ms: number | null;
+}
+
+export interface FitEvidence {
+  status: FitStatus;
+  job_id: string | null;
+  process_id: number | null;
+  role_generation: number;
+  origin: CandidateOrigin;
+  window: FitEvidenceWindow | null;
+  result: FitEvidenceResult | null;
+}
+
+export interface GreyParameterDelta {
+  name: string;
+  unit: string;
+  incumbent_value: number | null;
+  candidate_value: number | null;
+  delta: number | null;
+}
+
+export interface CandidateStructure {
+  prediction_step_seconds: number;
+  delay_states: number;
+  horizon_steps: number;
+}
+
+export interface ParameterInterval {
+  lower: number;
+  upper: number;
+}
+
+export interface PhysicalBoundsEvidence {
+  status: EvidenceCheckStatus;
+  detail: string | null;
+}
+
 export interface IdentifiabilityDiagnostics {
-  available: boolean;
-  accepted: boolean;
+  status: EvidenceCheckStatus;
   reason: string | null;
-  full_rank: boolean;
+  matrix_rank: number | null;
+  parameter_count: number;
+  condition_number: number | null;
   finite_diagnostics: boolean;
-  pole_magnitude: number | null;
-  gain: number | null;
-  delay_steps: number | null;
-  covariance_finite: boolean;
-  alignment_error_c: number | null;
-  snapshot_round_trip: boolean;
-  sequential_wins: number;
-  generation_continuity: boolean;
-  atomic_persistence: boolean;
-  production_prospective: boolean;
-  braking_error_c: number | null;
-  incumbent_braking_error_c: number | null;
+  confidence_intervals: Record<string, ParameterInterval> | null;
+  physical_bounds: PhysicalBoundsEvidence;
+}
+
+export interface NativeBuildEvidence {
+  status: EvidenceCheckStatus;
+  build_digest: string | null;
+  manifest_digest: string | null;
+  detail: string | null;
+}
+
+export interface NativeDrySolveEvidence {
+  status: EvidenceCheckStatus;
+  solve_time_ms: number | null;
+  finite_diagnostics: boolean;
+  detail: string | null;
+}
+
+export interface NativeCandidateEvidence {
+  build: NativeBuildEvidence;
+  dry_solve: NativeDrySolveEvidence;
 }
 
 export interface BootstrapEvidence {
@@ -63,7 +159,7 @@ export interface ModelScore {
   temperature_band: string;
   phase: string;
   ambient_source: string;
-  generation: number;
+  candidate_generation: number;
   challenger_rmse_c: number | null;
   incumbent_rmse_c: number | null;
   challenger_bias_c: number | null;
@@ -75,8 +171,54 @@ export interface ModelScore {
 
 export interface EvidenceGate {
   name: string;
-  passed: boolean;
+  status: EvidenceCheckStatus;
   reason: string | null;
+}
+
+export type ActivationPersistencePhase = "prepared" | "active" | "aborted" | null;
+
+export interface ActivationPersistence {
+  status: EvidenceCheckStatus;
+  phase: ActivationPersistencePhase;
+  record_id: string | null;
+  detail: string | null;
+}
+
+export interface PendingModelSwap {
+  status: EvidenceCheckStatus;
+  frame_boundary: number | null;
+  detail: string | null;
+}
+
+export interface ActivationEvidence {
+  policy: ActivationPolicy;
+  reason: ActivationReason;
+  decision_id: string | null;
+  persistence: ActivationPersistence;
+  pending_swap: PendingModelSwap;
+}
+
+export interface RollbackEvidence {
+  permitted: boolean;
+  confidence_window_remaining: number;
+  latest_reason: string | null;
+}
+
+export type CookRefitStatus =
+  | "not-run"
+  | "disabled"
+  | "queued"
+  | "running"
+  | "accepted"
+  | "rejected"
+  | "failed"
+  | "stale";
+
+export interface CookRefitEvidence {
+  authorized: boolean;
+  status: CookRefitStatus;
+  outcome: string | null;
+  activation_timing: "next-cook-restore" | null;
 }
 
 export interface TargetTimingEvidence {
@@ -86,19 +228,33 @@ export interface TargetTimingEvidence {
   p95_ms: number | null;
   p99_ms: number | null;
   hardware_provenance: string | null;
-  gate_passed: boolean;
+  status: EvidenceCheckStatus;
+}
+
+export interface LearningLifecycleEntry {
+  phase: string;
+  timestamp_ms: number;
+  reason: string | null;
+  role_generation: number;
+  candidate_generation: number | null;
+}
+
+export interface LearningReportError {
+  code: string;
+  message: string;
+  phase: string;
+  retryable: boolean;
+  timestamp_ms: number;
 }
 
 export interface ModelEvidenceHistoryEntry {
   evidence_id: string;
   timestamp_ms: number;
-  event: "activation" | "rollback" | "fallback";
+  event: "activation" | "rejection" | "fallback" | "interrupted-activation" | "rollback";
   decision_id: string | null;
   reason: string | null;
-  failed_digest?: string | null;
-  failed_generation?: number | null;
-  last_safe_command?: number | null;
-  fallback_kind?: string | null;
+  role_generation: number | null;
+  candidate_generation: number | null;
 }
 
 export interface EvidenceArtifactMetadata {
@@ -110,21 +266,38 @@ export interface EvidenceArtifactMetadata {
   evidence_ids: string[];
 }
 
-/** Raw JSON returned by GET /api/model-evidence/report. */
+/** Raw schema-v2 JSON returned by GET /api/model-evidence/report. */
 export interface ModelEvidenceReport {
-  schema_version: number;
+  schema_version: 2;
   status: ModelEvidenceStatus;
+  mode: LearningMode;
+  origin: CandidateOrigin;
+  role_generation: number;
+  candidate_generation: number | null;
   decision_id: string | null;
+  enable_online_adaptation: boolean;
+  enable_identification: boolean;
   active_model: ModelIdentity;
   default_model: ModelIdentity;
-  candidate: CandidateIdentity;
+  candidate: ModelIdentity;
+  rollback_owner: ModelIdentity | null;
+  observation: ObservationEligibility;
   calibration: CalibrationEvidence;
+  fit: FitEvidence;
+  grey_parameters: GreyParameterDelta[];
+  candidate_structure: CandidateStructure;
   identifiability: IdentifiabilityDiagnostics;
+  native: NativeCandidateEvidence;
   scores: ModelScore[];
   gates: EvidenceGate[];
   missing_gates: string[];
   blockers: string[];
+  activation: ActivationEvidence;
+  rollback: RollbackEvidence;
+  cook_refit: CookRefitEvidence;
   target_timing: TargetTimingEvidence;
+  lifecycle: LearningLifecycleEntry[];
+  errors: LearningReportError[];
   history: ModelEvidenceHistoryEntry[];
   ambient_provenance_limitation: string | null;
   artifact_metadata: EvidenceArtifactMetadata;
@@ -142,25 +315,27 @@ export interface ModelActivationRequest {
   decision_id: string;
 }
 
-export interface ModelActivationResponse {
+export interface ModelActivationAcknowledgement {
   accepted: boolean;
-  active_kind: string;
-  candidate_digest?: string;
-  decision_id: string;
-  role_generation: number;
-  controller_configuration_digest?: string;
-  reason?: string;
+  acknowledgement: string;
+  detail?: string | null;
 }
 
 export interface ModelRollbackRequest {
   reason: string;
 }
 
-export type MpcCalibrationAction = "start" | "pause" | "resume" | "stop";
+export interface ModelRollbackAcknowledgement {
+  accepted: boolean;
+  acknowledgement: string;
+  detail?: string | null;
+}
+
+export type MpcCalibrationAction = "start" | "pause" | "resume" | "stop" | "reset-progress";
 export type AmbientSource = "measured" | "manual" | "weather" | "configured";
 export type TemperatureUnit = "F" | "C";
 
-/** UI-domain action. */
+/** UI-domain calibration intent. */
 export interface MpcCalibrationRequest {
   action: MpcCalibrationAction;
   revision: number;

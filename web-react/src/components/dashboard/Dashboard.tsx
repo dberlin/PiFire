@@ -415,6 +415,7 @@ export function Dashboard({
               selectedController={mpcConfig.selectedController}
               units={dash.tempUnits}
               ambientC={mpcConfig.ambientC}
+              learningReportRevision={dash.learningReportRevision}
             />
           </div>
         </div>

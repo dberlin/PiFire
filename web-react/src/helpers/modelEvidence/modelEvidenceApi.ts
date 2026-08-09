@@ -1,8 +1,9 @@
 import type {
+  ModelActivationAcknowledgement,
   ModelActivationRequest,
-  ModelActivationResponse,
   ModelEvidenceReport,
   ModelEvidenceResult,
+  ModelRollbackAcknowledgement,
   ModelRollbackRequest,
   MpcCalibrationCommand,
   MpcCalibrationRequest,
@@ -81,7 +82,14 @@ export async function fetchModelEvidenceArtifact(
   }
 }
 
-async function postModelAction<TRequest, TResponse>(
+async function postModelAction<
+  TRequest,
+  TResponse extends {
+    accepted: boolean;
+    acknowledgement: string;
+    detail?: string | null;
+  },
+>(
   path: string,
   request: TRequest,
   baseUrl: string,
@@ -92,20 +100,31 @@ async function postModelAction<TRequest, TResponse>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     });
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        message: await responseMessage(response),
-        data: null,
-      };
-    }
-    const data = (await response.json()) as TResponse;
+    const body = (await response.json().catch(() => null)) as
+      | (Partial<TResponse> & {
+          message?: string;
+          error?: string;
+          detail?: string | null;
+        })
+      | null;
+    const acknowledgement =
+      body !== null &&
+      typeof body.accepted === "boolean" &&
+      typeof body.acknowledgement === "string" &&
+      body.acknowledgement.trim() !== ""
+        ? (body as TResponse)
+        : null;
+    const ok = response.ok && acknowledgement?.accepted === true;
     return {
-      ok: true,
+      ok,
       status: response.status,
-      message: "",
-      data,
+      message: ok
+        ? ""
+        : (body?.detail ??
+          body?.message ??
+          body?.error ??
+          (acknowledgement === null ? "Invalid acknowledgement response" : `HTTP ${response.status}`)),
+      data: acknowledgement,
     };
   } catch (error) {
     return {
@@ -121,15 +140,15 @@ async function postModelAction<TRequest, TResponse>(
 export function activateModel(
   request: ModelActivationRequest,
   baseUrl = DEFAULT_BASE_URL,
-): Promise<ModelEvidenceResult<ModelActivationResponse>> {
+): Promise<ModelEvidenceResult<ModelActivationAcknowledgement>> {
   return postModelAction("model-evidence/activate", request, baseUrl);
 }
 
-/** Roll back active state-space ownership with a required durable operator reason. */
+/** Roll back only when the unified report names an explicit rollback owner. */
 export function rollbackModel(
   request: ModelRollbackRequest,
   baseUrl = DEFAULT_BASE_URL,
-): Promise<ModelEvidenceResult<ModelActivationResponse>> {
+): Promise<ModelEvidenceResult<ModelRollbackAcknowledgement>> {
   return postModelAction("model-evidence/rollback", request, baseUrl);
 }
 
