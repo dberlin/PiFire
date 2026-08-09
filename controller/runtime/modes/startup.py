@@ -52,22 +52,14 @@ class StartupMode(ControlMode):
         self.state.cycle.raw_ratio = _ct.cycle_ratio
         self.state.lid.open_detected = False
         self.state.lid.expires = 0
-        # Stage p_mode/auger_cycle_time on self.state.metrics for later use, but
-        # do NOT update_metrics() here: setup() (this method's caller, also used by
-        # ReigniteMode via inheritance) runs BEFORE ControlMode.run() stamps a
-        # fresh metrics row (append_metric() + self.state.metrics =
-        # read_metrics()), so self.state.metrics is still the freshly-constructed
-        # WorkCycleState default ({}) at this point -- missing 'starttime' and
-        # every other column. update_metrics() would hit the "amend last record"
-        # path and, via `metrics.get(k)` defaulting missing keys to None, silently
-        # null out EVERY column (including starttime) of the PREVIOUS mode's
-        # already-stamped row -- the root cause of a None-starttime row that later
-        # crashes process_metrics/create_cookfile at the next Stop transition. The
-        # reassignment below the stamp already replaces self.state.metrics
-        # wholesale, so this write's effect was being discarded anyway; dropping
-        # it is a pure bugfix, not a behavior change.
-        self.state.metrics["p_mode"] = self.settings["cycle_data"]["PMode"]
-        self.state.metrics["auger_cycle_time"] = self.settings["cycle_data"]["SmokeOnCycleTime"]
+
+    def on_metrics_stamped(self):
+        # Shared with Smoke, and inherited by Reignite. The cycle settings are
+        # recorded from here, not from setup(): setup() runs before run() stamps
+        # the row, and anything written to self.state.metrics there is discarded
+        # when the stamped row replaces it. See
+        # ControlMode._stage_smoke_cycle_metrics.
+        self._stage_smoke_cycle_metrics()
 
     def setup_safety(self, ptemp) -> str:
         # This value is needed for the case when the grill starts hot and exit

@@ -44,6 +44,12 @@ class ControlMode:
         skeleton, BEFORE the manual-override block -- never re-fetch either
         inside a hook. This is the merged control+fan hook: it runs the
         controller/auger work and the fan/smoke-plus/lid-open work together.
+      - on_metrics_stamped(): called once, after run() has stamped this
+        run's metrics row and staged the fields shared by every mode, and
+        before that row is first written (default no-op). Mode-specific
+        metrics belong here rather than in setup(), which runs while
+        `self.state.metrics` is still the state's empty default and is about
+        to be replaced wholesale by the stamped row.
       - on_settings_reload(): called after `self.settings` is reloaded in
         the `settings_update` block (default no-op).
       - on_publish(now): called immediately after the notifications-check
@@ -85,6 +91,9 @@ class ControlMode:
         return "Active"
 
     def on_tick(self, now, ptemp, current_output_status):
+        pass
+
+    def on_metrics_stamped(self):
         pass
 
     def on_settings_reload(self):
@@ -247,6 +256,22 @@ class ControlMode:
             self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
             grill_platform.set_duty_cycle(control["duty_cycle"])
             _control.eventLogger.debug("Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle")
+
+    def _stage_smoke_cycle_metrics(self):
+        """Shared `on_metrics_stamped()` body for Startup/Reignite/Smoke: record
+        the cycle settings this run started under on the row run() has just
+        stamped.
+
+        `p_mode` is what the attached display's P-MODE pill and
+        `/api/get/status` report, and both values end up in the cookfile, so a
+        run that never stages them reports zeros for its whole life however
+        `cycle_data` is configured.
+
+        Runs before `setup_safety()`, which is what lets SmartStart overwrite
+        `p_mode` with the selected profile's -- during a ramp the profile is
+        the number actually driving the cycle."""
+        self.state.metrics["p_mode"] = self.settings["cycle_data"]["PMode"]
+        self.state.metrics["auger_cycle_time"] = self.settings["cycle_data"]["SmokeOnCycleTime"]
 
     def _reload_smoke_cycle_from_settings(self):
         """Shared `on_settings_reload()` body for Startup/Reignite/Smoke
@@ -633,6 +658,7 @@ class ControlMode:
         pellet_brand = pelletdb["archive"][current_pellet_id]["brand"]
         pellet_type = pelletdb["archive"][current_pellet_id]["wood"]
         self.state.metrics["pellet_brand_type"] = f"{pellet_brand} {pellet_type}"
+        self.on_metrics_stamped()
         ctx.store.update_metrics(self.state.metrics)
 
         # Get initial probe sensor data, temperatures
