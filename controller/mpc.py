@@ -870,6 +870,7 @@ class Controller(ControllerBase):
         self._activation_terminated_reason: str | None = None
         self._failed_role_generations: set[int] = set()
         self._activation_persistence_worker = None
+        self._activation_persistence_lock = threading.Lock()
         self._persisted_activation_confidence_ids: set[str] = set()
         self._prepared_pair_transitions = collections.deque()
         self._native_failure_diagnostics: SolverDiagnostics | None = None
@@ -1328,17 +1329,11 @@ class Controller(ControllerBase):
         self._activation_output_authorized = True
         return True
 
-    def submit_activation_confidence(self, record: ModelEvidenceRecord):
-        """Queue confidence on the same FIFO that owns activation phases."""
+    def _activation_persistence_channel(self):
         from common.controller_model_state import ControllerModelStore
         from controller.runtime.model_persistence import ModelPersistenceWorker
 
-        if (
-            not isinstance(record, ModelEvidenceRecord)
-            or record.kind is not EvidenceKind.CONFIDENCE_DECISION
-        ):
-            raise TypeError("activation confidence must be confidence-decision evidence")
-        with self._learning_lock:
+        with self._activation_persistence_lock:
             worker = self._activation_persistence_worker
             if worker is None:
                 worker = ModelPersistenceWorker(
@@ -1346,7 +1341,16 @@ class Controller(ControllerBase):
                     logging.getLogger("control"),
                 )
                 self._activation_persistence_worker = worker
-        return worker.submit_activation_confidence(record)
+            return worker
+
+    def submit_activation_confidence(self, record: ModelEvidenceRecord):
+        """Queue confidence on the same FIFO that owns activation phases."""
+        if (
+            not isinstance(record, ModelEvidenceRecord)
+            or record.kind is not EvidenceKind.CONFIDENCE_DECISION
+        ):
+            raise TypeError("activation confidence must be confidence-decision evidence")
+        return self._activation_persistence_channel().submit_activation_confidence(record)
 
     def commit_active_parameter_promotion(self, manager, decision_id, confidence):
         """Publish the exact durable activation without re-adjudicating its confidence."""
@@ -1419,20 +1423,10 @@ class Controller(ControllerBase):
             self._close_component(estimator)
             raise ValueError("restored pair configuration digest changed")
         return OwnedGreyControlPair(descriptor, estimator, solver)
-
     def restore_activation(self, persisted, records):
         """Converge startup before authorizing the pair selected by durable authority."""
-        from common.controller_model_state import ControllerModelStore
-        from controller.runtime.model_persistence import ModelPersistenceWorker
-
         records = tuple(records)
-        worker = self._activation_persistence_worker
-        if worker is None:
-            worker = ModelPersistenceWorker(
-                ControllerModelStore(),
-                logging.getLogger("control"),
-            )
-            self._activation_persistence_worker = worker
+        worker = self._activation_persistence_channel()
         try:
             recovery = recover_startup_activation(
                 persisted,
@@ -2204,8 +2198,6 @@ class Controller(ControllerBase):
 
     def _prepare_automatic_pair_activation(self, preparation, policy):
         """Persist one passive candidate and expose it to the runner only after receipt."""
-        from common.controller_model_state import ControllerModelStore
-        from controller.runtime.model_persistence import ModelPersistenceWorker
         from controller.runtime.runner import PreparedPairTransition
 
         if policy is not ActivationPolicy.PASSIVE_AUTO:
@@ -2235,13 +2227,7 @@ class Controller(ControllerBase):
             candidate_pair.estimator,
             candidate_pair.controller,
         )
-        worker = self._activation_persistence_worker
-        if worker is None:
-            worker = ModelPersistenceWorker(
-                ControllerModelStore(),
-                logging.getLogger("control"),
-            )
-            self._activation_persistence_worker = worker
+        worker = self._activation_persistence_channel()
         receipts = []
 
         def persist_prepared(record):
@@ -3187,8 +3173,9 @@ class Controller(ControllerBase):
         learning = self._learning
         self._learning = None
         self._close_component(learning)
-        persistence_worker = self._activation_persistence_worker
-        self._activation_persistence_worker = None
+        with self._activation_persistence_lock:
+            persistence_worker = self._activation_persistence_worker
+            self._activation_persistence_worker = None
         if persistence_worker is not None:
             persistence_worker.flush_and_stop(timeout=0.1)
         self._active_control_pair.close()

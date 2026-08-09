@@ -5,6 +5,8 @@ from __future__ import annotations
 import collections
 from dataclasses import FrozenInstanceError
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +17,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
+import controller.runtime.model_persistence as model_persistence_module
 
 from controller.model_learning.activation import (
     ActivationDecision,
@@ -471,6 +474,7 @@ def _bare_mpc_pair_owner():
     core._inert_activation = None
     core._activation_output_authorized = True
     core._activation_terminated_reason = None
+    core._activation_persistence_lock = threading.Lock()
     core._failed_role_generations = set()
     core._activation_events = collections.deque()
     core._last_combustion_load = 0.35
@@ -533,6 +537,119 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     assert confidence.payload.decision_id == evaluation.decision_id
     assert confidence.payload.blocked is False
 
+
+
+def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
+    monkeypatch,
+) -> None:
+    core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner()
+    core.cfg = {"estimator": "ekf"}
+    core._learning_lock = threading.Lock()
+    core._activation_persistence_worker = None
+    core._persisted_activation_confidence_ids = set()
+    core._prepared_pair_transitions = collections.deque()
+    configuration = {"theta": 39.0, "horizon_steps": 12}
+    evaluation = SimpleNamespace(
+        decision_id="decision-raced-first-use",
+        accepted=True,
+        blockers=(),
+        role_generation=4,
+        candidate_generation=4,
+        incumbent_digest=core.active_control_pair.descriptor.model_digest,
+        challenger_digest=canonical_snapshot_digest(configuration),
+    )
+    core._learning = SimpleNamespace(_last_evaluation=evaluation)
+    preparation = SimpleNamespace(
+        candidate_pair=SimpleNamespace(
+            estimator=_Handle("raced-estimator"),
+            controller=_Handle("raced-solver"),
+        ),
+        candidate=SimpleNamespace(
+            request=SimpleNamespace(
+                origin=CandidateOrigin.PASSIVE_ONLINE,
+                candidate_generation=4,
+                window=SimpleNamespace(role_generation=4),
+            ),
+            config=SimpleNamespace(
+                __dataclass_fields__={"theta": None, "horizon_steps": None},
+                theta=39.0,
+                horizon_steps=12,
+            ),
+        ),
+        candidate_digest=canonical_snapshot_digest(configuration),
+        dry_solve_finite=True,
+    )
+    hold_confidence = ModelEvidenceRecord(
+        evidence_id="hold-confidence-first",
+        kind=EvidenceKind.CONFIDENCE_DECISION,
+        session_id="session-raced-first-use",
+        cook_id=None,
+        timestamp_ms=900,
+        role_generation=4,
+        model_digest=canonical_snapshot_digest(configuration),
+        provenance_digest=core.active_control_pair.descriptor.model_digest,
+        payload=ConfidenceDecisionEvidence(
+            decision_id=evaluation.decision_id,
+            blocked=False,
+            reason=None,
+        ),
+    )
+    first_constructor_entered = threading.Event()
+    release_first_constructor = threading.Event()
+    constructors = []
+
+    class _Worker:
+        def __init__(self, *_args, **_kwargs):
+            self.calls = []
+            constructors.append(self)
+            if len(constructors) == 1:
+                first_constructor_entered.set()
+                release_first_constructor.wait(timeout=1.0)
+
+        def submit_activation_confidence(self, record):
+            self.calls.append(("confidence", record.evidence_id))
+            return _Receipt()
+
+        def submit_activation_phase(self, record, *, expected_phase):
+            self.calls.append(("phase", record.transaction_id, expected_phase))
+            return _Receipt()
+
+    monkeypatch.setattr(model_persistence_module, "ModelPersistenceWorker", _Worker)
+    errors = []
+    hold_thread = threading.Thread(
+        target=lambda: (
+            core.submit_activation_confidence(hold_confidence)
+            if not errors
+            else None
+        )
+    )
+
+    def prepare_from_learning():
+        try:
+            core._prepare_automatic_pair_activation(
+                preparation,
+                ActivationPolicy.PASSIVE_AUTO,
+            )
+        except Exception as error:
+            errors.append(error)
+
+    learning_thread = threading.Thread(target=prepare_from_learning)
+    hold_thread.start()
+    assert first_constructor_entered.wait(timeout=1.0)
+    learning_thread.start()
+    time.sleep(0.02)
+    release_first_constructor.set()
+    hold_thread.join(timeout=1.0)
+    learning_thread.join(timeout=1.0)
+
+    assert not hold_thread.is_alive()
+    assert not learning_thread.is_alive()
+    assert errors == []
+    assert len(constructors) == 1
+    assert core._activation_persistence_worker is constructors[0]
+    calls = constructors[0].calls
+    phase_index = next(index for index, call in enumerate(calls) if call[0] == "phase")
+    assert any(call[0] == "confidence" for call in calls[:phase_index])
 
 def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_receipt() -> None:
     core, incumbent, candidate, prepared = _bare_mpc_pair_owner()
