@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from common.control_trace import (
+    AmbientSource,
     FramedPulseFramePayload,
     ModelEventType,
     ModelObservationPayload,
@@ -19,7 +20,14 @@ from common.control_trace import (
 from controller.applied_output import OutputSource
 from controller.linear_mpc.adaptation import EvaluationRejectionReason, OnlineAdaptation
 from controller.linear_mpc.arx import ScheduledARX, ScheduledARXConfig
-from controller.linear_mpc.contracts import AffinePrediction, FrameObservation, ModelUpdate
+from controller.linear_mpc.contracts import AffinePrediction, ModelUpdate
+from controller.model_learning.contracts import FrameObservation
+from controller.model_learning.evaluation import (
+    CausalForecastEvaluator,
+    EvaluationConfig,
+    ForecastOrigin,
+    evaluate_forecasts,
+)
 from controller.mpc import Controller, _DEFAULTS
 from controller.runtime.modes.hold import HoldMode
 from controller.runtime.runner import ThreadedControllerRunner
@@ -303,97 +311,58 @@ def test_live_scheduled_arx_evaluations_trace_all_five_causal_horizons(monkeypat
         runner.stop()
 
 
-def test_restart_restores_one_win_but_rebuilds_a_post_shutdown_scoring_window(monkeypatch):
-    first_hold, first_core, _first_runner, first_recorder, first_gate, first_worker_clock = _make_live_hold(monkeypatch)
-    try:
-        first_win = None
-        for now in range(2, 4_203, 20):
-            first_worker_clock.now = float(now)
-            first_hold.ctx.clock.advance(2.0 if now == 2 else 20.0)
-            first_hold.on_tick(float(now), 212.0, first_hold.grill.get_output_status())
-            first_gate.advance()
-            first_win = next(
-                (
-                    record.payload
-                    for record in first_recorder.records
-                    if record.event_kind is TraceEventKind.MODEL_EVALUATION
-                    and record.payload.consecutive_wins == 1
-                    and not record.payload.promoted
-                    and record.payload.rejection_reasons == ()
-                ),
-                None,
-            )
-            if first_win is not None:
-                break
-        assert first_win is not None
-        next_now = float(now + 20)
-        first_worker_clock.now = next_now
-        first_hold.ctx.clock.advance(20.0)
-        first_hold.on_tick(next_now, 212.0, first_hold.grill.get_output_status())
-        first_gate.advance()
-        assert first_core._online is not None
-        assert first_core._online._origins
-        live_checkpoint = first_core.get_model_snapshot()
-        assert live_checkpoint is not None
-        assert live_checkpoint["online_adaptation"]["consecutive_wins"] == 1
-        live_revision = live_checkpoint["revision"]
-        assert first_core.get_status()["adaptation"]["active_model_kind"] == "grey-box"
-        assert first_core.get_status()["adaptation"]["role_generation"] == 0
-        persisted_store = first_hold._model_store
-    finally:
-        first_gate.close()
-        first_hold.teardown(212.0)
+def test_restart_keeps_a_durable_grey_win_but_scores_only_fresh_post_restart_origins():
+    config = EvaluationConfig(required_consecutive_wins=2)
+    incumbent_digest = "1" * 64
+    challenger_digest = "2" * 64
 
-    checkpoint = persisted_store.load("mpc")
-    assert checkpoint is not None
-    assert checkpoint["online_adaptation"]["consecutive_wins"] == 1
-    assert checkpoint["online_adaptation"]["partial_origins"] == []
-    assert checkpoint["revision"] > live_revision
+    def origin(sequence, horizon):
+        frame = _pretraining_frame(sequence)
+        return ForecastOrigin(
+            origin_sequence=sequence,
+            origin_time_s=frame.frame_end_s,
+            horizon_steps=horizon,
+            role_generation=0,
+            candidate_generation=9,
+            incumbent_digest=incumbent_digest,
+            challenger_digest=challenger_digest,
+            incumbent_prediction_c=100.0,
+            challenger_prediction_c=90.0,
+            temperature_band="near-target",
+            phase="hold",
+            ambient_source=AmbientSource.CONFIGURED,
+            calibration_fit=False,
+        )
 
-    second_hold, second_core, _second_runner, second_recorder, second_gate, second_worker_clock = _make_live_hold(
-        monkeypatch, model_store=persisted_store
+    before_restart = CausalForecastEvaluator(role_generation=0, candidate_generation=9)
+    for horizon in config.required_horizons:
+        before_restart.register(origin(0, horizon))
+    for sequence in range(1, max(config.required_horizons) + 1):
+        before_restart.observe(_pretraining_frame(sequence))
+    durable = evaluate_forecasts(
+        before_restart.completed_origins,
+        role_generation=0,
+        candidate_generation=9,
+        prior_consecutive_wins=0,
+        config=config,
     )
-    try:
-        restored = second_core.get_status()["adaptation"]
-        assert restored["active_model_kind"] == "grey-box"
-        assert restored["role_generation"] == 0
-        assert restored["last_evaluation_outcome"]["consecutive_wins"] == 1
-        assert second_core.get_model_snapshot()["revision"] == checkpoint["revision"]
+    assert durable.consecutive_wins == 1
+    assert durable.accepted is False
 
-        saw_lag_warmup = False
-        promotion = None
-        for now in range(1002, 2003, 20):
-            second_worker_clock.now = float(now)
-            second_hold.ctx.clock.advance(1002.0 if now == 1002 else 20.0)
-            second_hold.on_tick(float(now), 212.0, second_hold.grill.get_output_status())
-            second_gate.advance()
-            saw_lag_warmup |= second_core.get_status()["adaptation"]["current_rejection_reason"] == "lag-warmup"
-            promotion = next(
-                (
-                    record.payload
-                    for record in second_recorder.records
-                    if record.event_kind is TraceEventKind.MODEL_EVALUATION
-                    and record.payload.promoted
-                    and record.payload.committed
-                ),
-                None,
-            )
-            if promotion is not None:
-                break
-
-        assert saw_lag_warmup
-        assert promotion is not None
-        assert promotion.consecutive_wins == 2
-        # The boundary origin survives its checkpoint, then the following
-        # fifteen endpoints complete thirteen 3-step and one 15-step origin.
-        # This exact fresh window proves no shutdown-crossing origin scored.
-        completed_horizons = tuple(origin.horizon_steps for origin in promotion.completed_origins)
-        assert promotion.sample_count == 14
-        assert completed_horizons.count(3) == 13
-        assert completed_horizons.count(15) == 1
-        assert second_core.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
-        assert second_core.get_status()["adaptation"]["role_generation"] == 1
-        assert second_core.get_model_snapshot()["revision"] > checkpoint["revision"]
-    finally:
-        second_gate.close()
-        second_hold.teardown(212.0)
+    after_restart = CausalForecastEvaluator(role_generation=0, candidate_generation=9)
+    assert after_restart.pending_origins == ()
+    assert after_restart.completed_origins == ()
+    for horizon in config.required_horizons:
+        after_restart.register(origin(1000, horizon))
+    for sequence in range(1001, 1000 + max(config.required_horizons) + 1):
+        after_restart.observe(_pretraining_frame(sequence))
+    promoted = evaluate_forecasts(
+        after_restart.completed_origins,
+        role_generation=0,
+        candidate_generation=9,
+        prior_consecutive_wins=durable.consecutive_wins,
+        config=config,
+    )
+    assert promoted.accepted is True
+    assert promoted.consecutive_wins == 2
+    assert {row.origin_sequence for row in after_restart.completed_origins} == {1000}

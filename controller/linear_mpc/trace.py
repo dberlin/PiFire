@@ -27,7 +27,7 @@ from controller.applied_output import OutputSource
 from controller.control_trace_replay import validate_records
 from controller.mpc_allocator import normalized_load_from_auger_duty
 
-from .contracts import FrameObservation
+from controller.model_learning.contracts import FrameObservation
 
 
 class TraceSelectionError(ValueError):

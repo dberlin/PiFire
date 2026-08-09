@@ -167,7 +167,7 @@ def _log_or_floor(value, floor):
     return math.log(value) if value > 0.0 and math.isfinite(value) else floor
 
 
-def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
+def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0, log_bounds=None):
     """Fit the free grey-box parameters to a logged temperature series.
 
     `sigma` is a starting value like every other in `init`, and gets the same
@@ -211,9 +211,26 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
     # holds the parameters it drops rather than dropping them from the model.
     held = {k: float(init[k]) for k in _FIT_KEYS if k not in _FREE}
     lo = math.log(_LOWER_BOUND)
+    if log_bounds is None:
+        lower = np.full(len(_FREE), lo, dtype=float)
+        upper = np.full(len(_FREE), np.inf, dtype=float)
+    else:
+        if set(log_bounds) != set(_FREE):
+            raise ValueError(f"log_bounds must contain exactly {tuple(sorted(_FREE))}")
+        pairs = tuple(log_bounds[key] for key in _FREE)
+        if any(
+            len(pair) != 2
+            or not all(math.isfinite(float(value)) for value in pair)
+            or float(pair[0]) >= float(pair[1])
+            for pair in pairs
+        ):
+            raise ValueError("each log bound must be a finite increasing pair")
+        lower = np.array([float(pair[0]) for pair in pairs], dtype=float)
+        upper = np.array([float(pair[1]) for pair in pairs], dtype=float)
     # A non-positive or non-finite starting value has no logarithm to start
     # from, so it starts at the floor rather than taking the solve down with it.
-    x0 = np.array([_log_or_floor(init[k], lo) for k in _FREE], dtype=float)
+    x0 = np.array([_log_or_floor(init[k], lower[index]) for index, k in enumerate(_FREE)], dtype=float)
+    x0 = np.clip(x0, lower, upper)
 
     def simulate(z):
         """The trajectory at `z`, or None where the model cannot be simulated.
@@ -247,7 +264,7 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
             return np.full_like(temp, _DIVERGED)
         return y - temp
 
-    res = least_squares(residual, x0, method="trf", bounds=(lo, np.inf), max_nfev=_MAX_NFEV)
+    res = least_squares(residual, x0, method="trf", bounds=(lower, upper), max_nfev=_MAX_NFEV)
     out = dict(held)
     out.update(zip(_FREE, (math.exp(float(v)) for v in res.x)))
     # status 0 is scipy's "the evaluation budget ran out"; every other

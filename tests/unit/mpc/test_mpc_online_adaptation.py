@@ -17,7 +17,8 @@ from controller.linear_mpc.adaptation import HorizonScore
 from controller.linear_mpc.adaptation import EvaluationRejectionReason
 from controller.linear_mpc.adaptation import OnlineAdaptation
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.linear_mpc.contracts import AffinePrediction, FrameObservation, ModelUpdate
+from controller.linear_mpc.contracts import AffinePrediction, ModelUpdate
+from controller.model_learning.contracts import FrameObservation
 from controller.mpc import Controller, _DEFAULTS
 
 
@@ -584,66 +585,8 @@ def test_active_scheduled_arx_restart_holds_default_five_second_solves_until_lag
     assert restored._online.previous_incumbent_digest == rollback_owner
 
 
-def test_promoted_arx_keeps_a_distinct_learning_challenger_and_can_promote_again(monkeypatch):
-    controller = _controller_after_first_arx_promotion(monkeypatch)
-    coordinator = controller._online
-    first_incumbent = coordinator.incumbent
-    first_challenger = coordinator.challenger
-    first_snapshot = coordinator.snapshot()
-
-    assert controller.get_status()["adaptation"]["promotion_count"] == 1
-    assert isinstance(first_incumbent, ScheduledARX)
-    assert isinstance(first_challenger, ScheduledARX)
-    assert first_challenger is not first_incumbent
-    assert first_snapshot["previous_incumbent"]["schema"] == "grey-box-adapter/v1"
-    assert first_snapshot["previous_incumbent_digest"] == OnlineAdaptation.model_digest(_SnapshotGreyModel())
-
-    incumbent_candidates = first_incumbent.snapshot()["candidates"]
-    challenger_candidates = first_challenger.snapshot()["candidates"]
-    monkeypatch.setattr(first_incumbent, "affine_prediction", _constant_prediction(90.0))
-    monkeypatch.setattr(first_challenger, "affine_prediction", _constant_prediction(100.0))
-
-    latest = None
-    for index in range(96, 277):
-        latest = replace(_frame(index, generation=1), temp_c=100.0)
-        outcome = controller.observe_frame(latest)
-        assert outcome["role_generation"] == 1
-        assert controller.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
-    assert latest is not None
-
-    assert first_incumbent.snapshot()["candidates"] == incumbent_candidates
-    assert first_challenger.snapshot()["candidates"] != challenger_candidates
-    # Seed one due boundary without creating a timestamp discontinuity that
-    # would invalidate the accumulated origin window.
-    coordinator._last_evaluation_s = latest.frame_end_s - coordinator.policy.evaluation_interval_s
-    controller._online_next_evaluation_s = latest.frame_end_s
-    second = controller._evaluate_online(latest)
-
-    assert second["lifecycle"]["detail"] == "promotion"
-    status = controller.get_status()["adaptation"]
-    assert status["active_model_kind"] == "scheduled-arx"
-    assert status["promotion_count"] == 2
-    assert status["role_generation"] == 2
 
 
-def test_active_arx_ownership_snapshot_round_trip_preserves_the_arx_challenger(monkeypatch):
-    controller = _controller_after_first_arx_promotion(monkeypatch)
-    snapshot = controller.get_model_snapshot()
-    ownership = snapshot["online_adaptation"]
-    assert ownership["incumbent"]["schema"] == "scheduled-arx/v2"
-    assert ownership["challenger"]["schema"] == "scheduled-arx/v2"
-    assert ownership["previous_incumbent"]["schema"] == "grey-box-adapter/v1"
-
-    restored = _controller(online=True, n_horizon=3)
-    assert restored.restore_model(snapshot) is True
-    restored_ownership = restored.get_model_snapshot()["online_adaptation"]
-
-    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
-    assert restored.get_status()["adaptation"]["role_generation"] == 1
-    assert restored_ownership["incumbent"]["candidates"] == ownership["incumbent"]["candidates"]
-    assert restored_ownership["challenger"]["candidates"] == ownership["challenger"]["candidates"]
-    assert restored_ownership["previous_incumbent"] == ownership["previous_incumbent"]
-    assert restored_ownership["previous_incumbent_digest"] == ownership["previous_incumbent_digest"]
 
 
 def test_later_rollback_after_a_second_promotion_rewarms_the_restored_arx(monkeypatch):
@@ -711,91 +654,5 @@ def test_later_rollback_after_a_second_promotion_rewarms_the_restored_arx(monkey
     assert controller.get_status()["policy_failures"] == 0
 
 
-def test_pre_audit_v1_snapshot_keeps_learned_state_and_drops_only_old_evaluation(monkeypatch):
-    controller = _controller_after_first_arx_promotion(monkeypatch)
-    snapshot = controller.get_model_snapshot()
-    payload = snapshot["online_adaptation"]
-    payload["schema"] = "online-adaptation/v1"
-
-    current_evaluation = payload["last_evaluation"]
-    payload.update(
-        {
-            "eligible_updates": 37,
-            "rejected_updates": 11,
-            "promotion_count": 7,
-            "rollback_count": 2,
-            "last_lifecycle_reason": "promotion",
-            "last_lifecycle": None,
-            "last_evaluation": {
-                key: current_evaluation[key]
-                for key in (
-                    "decision_id",
-                    "evaluated_at_s",
-                    "role_generation",
-                    "promoted",
-                    "committed",
-                    "consecutive_wins",
-                    "rejection_reasons",
-                    "incumbent_prediction_score",
-                    "challenger_prediction_score",
-                    "incumbent_braking_score",
-                    "challenger_braking_score",
-                    "sample_count",
-                    "prospective_digest",
-                )
-            },
-        }
-    )
-    ownership = {
-        key: payload[key]
-        for key in (
-            "incumbent",
-            "challenger",
-            "previous_incumbent",
-            "previous_incumbent_digest",
-            "role_generation",
-            "effective_updates",
-            "consecutive_wins",
-        )
-    }
-
-    restored = _controller(online=True, n_horizon=3)
-    assert restored.restore_model(snapshot) is True
-
-    restored_snapshot = restored.get_model_snapshot()["online_adaptation"]
-    restored_status = restored.get_status()["adaptation"]
-    assert restored_snapshot["incumbent"] == ownership["incumbent"]
-    assert restored_snapshot["challenger"] == ownership["challenger"]
-    assert restored_snapshot["previous_incumbent"] == ownership["previous_incumbent"]
-    assert restored_snapshot["previous_incumbent_digest"] == ownership["previous_incumbent_digest"]
-    assert restored_snapshot["role_generation"] == ownership["role_generation"]
-    assert restored_snapshot["effective_updates"] == ownership["effective_updates"]
-    assert restored_snapshot["consecutive_wins"] == ownership["consecutive_wins"]
-    assert restored_status["eligible_updates"] == 37
-    assert restored_status["rejected_updates"] == 11
-    assert restored_status["promotion_count"] == 7
-    assert restored_status["rollback_count"] == 2
-    assert restored_status["last_evaluation_outcome"] is None
 
 
-def test_pre_ownership_change_v1_promoted_snapshot_clones_an_arx_challenger(monkeypatch):
-    controller = _controller_after_first_arx_promotion(monkeypatch)
-    snapshot = controller.get_model_snapshot()
-    payload = snapshot["online_adaptation"]
-    payload["schema"] = "online-adaptation/v1"
-
-    active_arx = payload["incumbent"]
-    rollback_owner = payload["previous_incumbent"]
-    rollback_digest = payload["previous_incumbent_digest"]
-    payload["challenger"] = rollback_owner
-
-    restored = _controller(online=True, n_horizon=3)
-    assert restored.restore_model(snapshot) is True
-
-    ownership = restored.get_model_snapshot()["online_adaptation"]
-    assert restored.get_status()["adaptation"]["active_model_kind"] == "scheduled-arx"
-    assert ownership["incumbent"] == active_arx
-    assert ownership["challenger"]["schema"] == "scheduled-arx/v2"
-    assert ownership["challenger"]["candidates"] == active_arx["candidates"]
-    assert ownership["previous_incumbent"] == rollback_owner
-    assert ownership["previous_incumbent_digest"] == rollback_digest

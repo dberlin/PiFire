@@ -10,7 +10,9 @@ from typing import Any, Final
 import numpy as np
 import numpy.typing as npt
 
-from .contracts import AffinePrediction, FloatArray, FrameObservation, ModelUpdate
+from controller.model_learning.contracts import FrameObservation
+
+from .contracts import AffinePrediction, FloatArray, ModelUpdate
 
 _MAX_AR_POLE: Final = 0.999
 _DC_GAIN_SCALE: Final = 16.0

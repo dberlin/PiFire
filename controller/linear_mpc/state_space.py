@@ -13,7 +13,9 @@ from typing import cast
 import numpy as np
 import numpy.typing as npt
 
-from .contracts import AffinePrediction, FloatArray, FrameObservation, ModelUpdate
+from controller.model_learning.contracts import FrameObservation
+
+from .contracts import AffinePrediction, FloatArray, ModelUpdate
 
 _SCHEMA = "innovation-state-space/v2"
 _EPSILON = np.finfo(np.float64).eps

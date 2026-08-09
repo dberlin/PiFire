@@ -13,7 +13,9 @@ from typing import Protocol, cast
 import numpy as np
 from common.control_trace import AmbientSource
 from .arx import ScheduledARX
-from .contracts import AffinePrediction, FrameObservation, ModelUpdate
+from controller.model_learning.contracts import FrameObservation
+
+from .contracts import AffinePrediction, ModelUpdate
 from .state_space import InnovationStateSpace
 from .confidence import ConfidenceReport, parameter_promotion_blockers
 
