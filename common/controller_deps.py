@@ -122,8 +122,22 @@ def missing_modules(modules):
     return tuple(missing)
 
 
+def load_native():
+    """Load and validate the published acados runtime for the MPC gate."""
+    from controller.acados._library import load_native as load_acados_native
+
+    return load_acados_native()
+
+
 def check_controller_dependencies(selected, config, metadata=None):
-    """None if `selected` can be constructed here, else a MissingDependency."""
+    """None if `selected` can be constructed here, else a MissingDependency.
+
+    MPC has no optional Python dependency: availability means a complete,
+    ABI-compatible native release can be loaded.
+    """
+    if selected == "mpc":
+        load_native()
+        return None
     needed = required_modules_for(selected, config, metadata)
     if not needed:
         return None
@@ -243,7 +257,10 @@ def guard_controller_selection(settings):
         config = settings["controller"]["config"].get(selected, {})
     except KeyError, TypeError, AttributeError:
         return None
-    missing = check_controller_dependencies(selected, config)
+    try:
+        missing = check_controller_dependencies(selected, config)
+    except Exception as exc:
+        return f"The {selected.upper()} controller is unavailable: {exc} The controller is unchanged."
     if missing is None:
         return None
     if missing.extra is None:

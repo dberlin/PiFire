@@ -7,24 +7,13 @@
         {
           "hidden": false,
           "option_default": 24,
-          "option_description": "Number of prediction steps. [Default=24]",
+          "option_description": "Number of 25-second prediction steps. [Default=24]",
           "option_friendly_name": "Prediction Horizon (steps)",
-          "option_max": 60,
+          "option_max": 24,
           "option_min": 5,
           "option_name": "n_horizon",
           "option_step": 1,
           "option_type": "int"
-        },
-        {
-          "hidden": false,
-          "option_default": 25.0,
-          "option_description": "Prediction discretization interval in seconds. [Default=25]",
-          "option_friendly_name": "Prediction Step (s)",
-          "option_max": 60.0,
-          "option_min": 1.0,
-          "option_name": "t_step",
-          "option_step": 1.0,
-          "option_type": "float"
         },
         {
           "hidden": false,
@@ -105,17 +94,6 @@
         },
         {
           "hidden": false,
-          "option_default": 8,
-          "option_description": "Number of first-order lag states approximating the transport deadtime (more = sharper delay, larger model and slower solve). 0 disables deadtime modeling. Raising this costs no calibration - it is a model structure choice, not a fitted value. What it buys is how much of the grill's real deadtime the model reproduces instead of smearing: against the reference plant 4 states recover 57% of it, 8 recover 71%, and 12 recover 79% for four times the solver time. Past 12 each further step recovers 4% more or less, so the ceiling is set there. [Default=8]",
-          "option_friendly_name": "Deadtime Lag States",
-          "option_max": 12,
-          "option_min": 0,
-          "option_name": "n_delay",
-          "option_step": 1,
-          "option_type": "int"
-        },
-        {
-          "hidden": false,
           "option_default": 350.0,
           "option_description": "Maps normalized full combustion load (1.0) to heat input; calibrate to your grill's power (run the calibration utility). [Default=350.0]",
           "option_friendly_name": "Full-Load Heat Gain",
@@ -128,7 +106,7 @@
         {
           "hidden": false,
           "option_default": 1.4e-9,
-          "option_description": "Radiative (T^4) chamber-loss coefficient. Captures the temperature-dependent gain so one calibration spans the whole range. 0 = purely linear model. [Default=1.4e-9]",
+          "option_description": "Radiative (T^4) chamber-loss coefficient. Captures the temperature-dependent gain so one calibration spans the whole range. 0 disables radiative loss. [Default=1.4e-9]",
           "option_friendly_name": "Radiative Loss Coefficient",
           "option_max": null,
           "option_min": 0.0,
@@ -138,31 +116,13 @@
         },
         {
           "hidden": false,
-          "list_labels": ["EKF (nonlinear, fast)", "MHE (nonlinear)", "Kalman (linear)"],
-          "list_values": ["ekf", "mhe", "kf"],
+          "list_labels": ["EKF (nonlinear)", "Kalman filter"],
+          "list_values": ["ekf", "kf"],
           "option_default": "ekf",
-          "option_description": "Disturbance/state estimator. EKF linearizes the nonlinear radiative term each step -- nonlinear-capable and fast (~us), recommended. MHE solves an NLP each step (nonlinear, slower). KF is a linear-only Kalman filter (requires sigma=0). [Default=ekf]",
+          "option_description": "State estimator for the fixed eight-delay grey-box model. EKF handles the nonlinear radiative term; KF provides a Kalman filter. [Default=ekf]",
           "option_friendly_name": "State Estimator",
           "option_name": "estimator",
           "option_type": "list"
-        },
-        {
-          "hidden": false,
-          "list_labels": ["NLP solve (do_mpc)", "Neural net (fast, IPOPT-free)"],
-          "list_values": ["nlp", "net"],
-          "option_default": "nlp",
-          "option_description": "How the firing rate is computed. NLP solves the MPC optimization each step (do_mpc/IPOPT). Neural net uses a pre-trained pure-numpy approximation of the policy (no IPOPT/CasADi) -- much faster, and falls back to NLP automatically if the trained net (below) is missing or was trained for a different calibration. Retrain the net (export_span_net.py) after recalibrating. [Default=nlp]",
-          "option_friendly_name": "Firing-Rate Policy",
-          "option_name": "policy",
-          "option_type": "list"
-        },
-        {
-          "hidden": false,
-          "option_default": "./controller/mpc_policy_net.npz",
-          "option_description": "Path to the trained neural-net policy artifact (.npz) used when policy is set to Neural net.",
-          "option_friendly_name": "Policy Net Path",
-          "option_name": "policy_net_path",
-          "option_type": "string"
         },
         {
           "hidden": false,
@@ -230,7 +190,7 @@
         {
           "hidden": false,
           "option_default": true,
-          "option_description": "After each cook, refit the thermal model from that cook and keep it if it describes the grill better. On the Neural Net firing-rate policy, a learned calibration no longer matches the trained artifact, so the controller falls back to the full optimisation until it is retrained. [Default=true]",
+          "option_description": "After each cook, refit the grey-box model from that cook and, when accepted, use it on the next cook. [Default=true]",
           "option_friendly_name": "Learn This Grill",
           "option_name": "enable_identification",
           "option_type": "bool"
@@ -238,18 +198,14 @@
         {
           "hidden": false,
           "option_default": false,
-          "option_description": "Learn a scheduled linear model during cooks and let it take over after repeated validation wins. Experimental. [Default=false]",
+          "option_description": "Passively learn grey-box parameters during cooks and activate them automatically only after validation and safety gates pass. [Default=false]",
           "option_friendly_name": "Online Model Adaptation",
           "option_name": "enable_online_adaptation",
           "option_type": "bool"
         }
       ],
       "contributors": [],
-      "dependencies": {
-        "extra": "mpc",
-        "modules": ["do_mpc"]
-      },
-      "description": "Model Predictive Controller. An outer optimizer commands a firing-rate demand against a grey-box thermal model with offset-free disturbance estimation; an inner combustion allocator maps it to auger and (on PWM/DC-fan builds) fan. Targets a tight temperature band. Built on do-mpc.",
+      "description": "Acados grey-box model predictive controller. It predicts with a fixed 25-second, eight-delay-state thermal model while the combustion allocator maps firing demand to auger and fan outputs.",
       "friendly_name": "Model Predictive Control (MPC)",
       "image": "pid.png",
       "link": "",

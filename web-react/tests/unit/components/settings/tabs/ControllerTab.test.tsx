@@ -1,24 +1,10 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { ControllerTab } from "../../../../../src/components/settings/tabs/ControllerTab";
 import type { ControllerMetadata } from "../../../../../src/helpers/settings/settingsApi";
 import { renderRoute } from "../../../test-utils";
 
-// Shared with controllers.json's enable_identification option_description
-// (checked below) so the two descriptions of the same setting cannot drift
-// without a test noticing on at least one side.
-const LEARNING_FALLBACK_CLAIM = "falls back to the full optimisation until it is retrained";
-const LEARNING_FALLBACK_REGEX = new RegExp(LEARNING_FALLBACK_CLAIM, "i");
-// The "Learn This Grill" field's own option_description now renders
-// unconditionally as its Field hint (Task 5) and happens to share
-// LEARNING_FALLBACK_CLAIM's trailing clause with the *conditional* note
-// ControllerTab prints only while `learning && netPolicy` hold. This
-// wording is unique to that conditional note, so it -- not the always-on
-// hint -- is what the tests below can use to tell "the note is showing"
-// from "the note is not showing".
-const IDENTIFICATION_NOTE_REGEX = /no longer matches the pre-trained neural policy/i;
+const NEURAL_WARNING_REGEX = /pre-trained neural policy|full optimisation until it is retrained/i;
 
 const saveMock = rs.fn().mockResolvedValue(true);
 
@@ -109,38 +95,18 @@ const controllerMeta: ControllerMetadata = {
           option_type: "int",
           option_default: 24,
           option_min: 5,
-          option_max: 60,
+          option_max: 24,
         },
         {
           option_name: "estimator",
           option_friendly_name: "State Estimator",
-          option_description: "Disturbance/state estimator.",
+          option_description: "State estimator for the fixed eight-delay grey-box model.",
           option_type: "list",
           option_default: "ekf",
           option_min: null,
           option_max: null,
-          list_values: ["ekf", "mhe", "kf"],
-          list_labels: ["EKF (nonlinear, fast)", "MHE (nonlinear)", "Kalman (linear)"],
-        },
-        {
-          option_name: "policy",
-          option_friendly_name: "Firing-Rate Policy",
-          option_description: "How the firing rate is computed.",
-          option_type: "list",
-          option_default: "nlp",
-          option_min: null,
-          option_max: null,
-          list_values: ["nlp", "net"],
-          list_labels: ["NLP solve (do_mpc)", "Neural net (fast, IPOPT-free)"],
-        },
-        {
-          option_name: "policy_net_path",
-          option_friendly_name: "Policy Net Path",
-          option_description: "Path to the trained neural-net policy artifact.",
-          option_type: "string",
-          option_default: "./controller/mpc_policy_net.npz",
-          option_min: null,
-          option_max: null,
+          list_values: ["ekf", "kf"],
+          list_labels: ["EKF (nonlinear)", "Kalman filter"],
         },
         {
           option_name: "enable_fan_input",
@@ -155,12 +121,8 @@ const controllerMeta: ControllerMetadata = {
           option_name: "enable_identification",
           option_friendly_name: "Learn This Grill",
           option_description:
-            "After each cook, refit the thermal model from that cook and keep it if it " +
-            "describes the grill better. On the Neural Net firing-rate policy, a learned " +
-            "calibration no longer matches the trained artifact, so the controller falls " +
-            "back to the full optimisation until it is retrained.",
-          // (kept in sync with controller/controllers.json's enable_identification entry;
-          // see the "matches controllers.json" test below)
+            "After each cook, refit the grey-box model from that cook and, when accepted, " +
+            "use it on the next cook.",
           option_type: "bool",
           option_default: false,
           option_min: null,
@@ -223,8 +185,6 @@ describe("ControllerTab", () => {
               mpc: {
                 n_horizon: 24,
                 estimator: "ekf",
-                policy: "nlp",
-                policy_net_path: "./controller/mpc_policy_net.npz",
                 enable_fan_input: false,
                 enable_identification: false,
               },
@@ -305,7 +265,7 @@ describe("ControllerTab", () => {
     );
   });
 
-  it("renders a Select for list options and a TextField for string options with default values", () => {
+  it("renders the retained EKF/KF estimator list without retired MHE or policy fields", () => {
     renderRoute(<ControllerTab />, makeContext());
 
     fireEvent.change(screen.getByLabelText("Controller"), { target: { value: "mpc" } });
@@ -313,29 +273,24 @@ describe("ControllerTab", () => {
     const estimatorSelect = screen.getByLabelText("State Estimator");
     expect(estimatorSelect.tagName).toBe("SELECT");
     expect(estimatorSelect).toHaveValue("ekf");
-    expect(screen.getByText("EKF (nonlinear, fast)")).toBeInTheDocument();
-    expect(screen.getByText("Kalman (linear)")).toBeInTheDocument();
-
-    const policyPathField = screen.getByLabelText("Policy Net Path");
-    expect(policyPathField.tagName).toBe("INPUT");
-    expect(policyPathField).toHaveValue("./controller/mpc_policy_net.npz");
+    expect(screen.getByText("EKF (nonlinear)")).toBeInTheDocument();
+    expect(screen.getByText("Kalman filter")).toBeInTheDocument();
+    expect(screen.queryByText(/MHE/)).toBeNull();
+    expect(screen.queryByLabelText("Firing-Rate Policy")).toBeNull();
+    expect(screen.queryByLabelText("Policy Net Path")).toBeNull();
   });
 
-  it("saves list (mapped back to the original metadata value), string, and Math.round-coerced int values for mpc", async () => {
+  it("saves the retained estimator and rounded native horizon", async () => {
     renderRoute(<ControllerTab />, makeContext());
 
     fireEvent.change(screen.getByLabelText("Controller"), { target: { value: "mpc" } });
     fireEvent.change(screen.getByLabelText("State Estimator"), { target: { value: "kf" } });
-    fireEvent.change(screen.getByLabelText("Policy Net Path"), {
-      target: { value: "./custom/net.npz" },
-    });
     fireEvent.change(screen.getByLabelText("Prediction Horizon (steps)"), {
       target: { value: "7.6" },
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    // Wait for the save call carrying the coerced mpc config.
     await waitFor(() =>
       expect(saveMock).toHaveBeenCalledWith(
         {
@@ -345,8 +300,6 @@ describe("ControllerTab", () => {
               mpc: {
                 n_horizon: 8,
                 estimator: "kf",
-                policy: "nlp",
-                policy_net_path: "./custom/net.npz",
                 enable_fan_input: false,
                 enable_identification: false,
               },
@@ -478,13 +431,14 @@ describe("generated controller config types", () => {
     expect(pidSp.stable_window).toBe(12);
   });
 
-  it("constrains a list option to its declared values", () => {
-    const ok: ControllerConfigs["mpc"]["estimator"] = "ekf";
-    expect(ok).toBe("ekf");
+  it("constrains the retained estimator to EKF or KF", () => {
+    const ekf: ControllerConfigs["mpc"]["estimator"] = "ekf";
+    const kf: ControllerConfigs["mpc"]["estimator"] = "kf";
+    expect([ekf, kf]).toEqual(["ekf", "kf"]);
 
-    // @ts-expect-error -- "ekfx" is not one of ekf | mhe | kf
-    const typo: ControllerConfigs["mpc"]["estimator"] = "ekfx";
-    expect(typo).toBeTruthy();
+    // @ts-expect-error -- MHE is retired from the generated settings contract.
+    const mhe: ControllerConfigs["mpc"]["estimator"] = "mhe";
+    expect(mhe).toBeTruthy();
   });
 });
 
@@ -529,58 +483,65 @@ describe("ControllerTab MPC fan authority", () => {
   });
 });
 
-describe("ControllerTab identification note", () => {
-  const ctx = (learning: boolean, policy = "net") => ({
+describe("ControllerTab retired neural settings", () => {
+  const staleMpcContext = () => ({
     settings: {
       platform: { dc_fan: true },
       pwm: { pwm_control: true },
       controller: {
         selected: "mpc",
-        config: { mpc: { enable_fan_input: false, enable_identification: learning, policy } },
+        config: {
+          mpc: {
+            n_horizon: 12,
+            estimator: "ekf",
+            enable_fan_input: false,
+            enable_identification: true,
+            policy: "net",
+            policy_net_path: "/data/legacy-policy.npz",
+            t_step: 10,
+            n_delay: 4,
+            C_f: 19,
+            mhe_horizon: 8,
+          },
+        },
       },
     },
     mode: "Stop",
     controllerMeta,
   });
 
-  it("explains the fallback when learning is on and the fast path is in use", () => {
-    renderRoute(<ControllerTab />, ctx(true));
-    expect(screen.getByText(IDENTIFICATION_NOTE_REGEX)).toBeInTheDocument();
+  it("does not render a neural-policy warning for a stale saved policy", () => {
+    renderRoute(<ControllerTab />, staleMpcContext());
+
+    expect(screen.queryByText(NEURAL_WARNING_REGEX)).toBeNull();
   });
 
-  it("says nothing when learning is off", () => {
-    renderRoute(<ControllerTab />, ctx(false));
-    expect(screen.queryByText(IDENTIFICATION_NOTE_REGEX)).toBeNull();
-  });
+  it("explicitly deletes every undeclared retired MPC key on save", async () => {
+    renderRoute(<ControllerTab />, staleMpcContext());
 
-  it("appears as soon as the toggle is flipped, before saving", () => {
-    renderRoute(<ControllerTab />, ctx(false));
-    fireEvent.click(screen.getByRole("button", { name: "Learn This Grill" }));
-    expect(screen.getByText(IDENTIFICATION_NOTE_REGEX)).toBeInTheDocument();
-  });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-  it("says nothing when learning is on but the firing-rate policy is NLP (already solves in full)", () => {
-    renderRoute(<ControllerTab />, ctx(true, "nlp"));
-    expect(screen.queryByText(IDENTIFICATION_NOTE_REGEX)).toBeNull();
-  });
-
-  it("shows the option's own description as the field hint regardless of identification state", () => {
-    // Task 5: every generated field gets hint={opt.option_description}, so
-    // "Learn This Grill" shows its manifest description whether or not the
-    // conditional note above is also showing.
-    renderRoute(<ControllerTab />, ctx(false));
-    expect(screen.getByText(LEARNING_FALLBACK_REGEX)).toBeInTheDocument();
-  });
-
-  it("keeps controllers.json's option_description making the same claim as the rendered note", () => {
-    // Nothing type-checks this pairing: the JSON is read by the Flask/legacy
-    // settings surface and by no code the React bundle imports, so a wording
-    // change on one side has no compiler or runtime signal on the other.
-    const raw = readFileSync(resolve("../controller/controllers.json"), "utf-8");
-    const meta = JSON.parse(raw) as {
-      metadata: { mpc: { config: Array<{ option_name: string; option_description: string }> } };
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
+    const delta = saveMock.mock.calls[0]![0] as {
+      set: { controller: { config: { mpc: Record<string, unknown> } } };
+      delete: string[][];
     };
-    const opt = meta.metadata.mpc.config.find((o) => o.option_name === "enable_identification");
-    expect(opt?.option_description).toMatch(LEARNING_FALLBACK_REGEX);
+    expect(delta.set.controller.config.mpc).toEqual({
+      n_horizon: 12,
+      estimator: "ekf",
+      enable_fan_input: false,
+      enable_identification: true,
+    });
+    expect(delta.delete).toHaveLength(6);
+    expect(delta.delete).toEqual(
+      expect.arrayContaining([
+        ["controller", "config", "mpc", "policy"],
+        ["controller", "config", "mpc", "policy_net_path"],
+        ["controller", "config", "mpc", "t_step"],
+        ["controller", "config", "mpc", "n_delay"],
+        ["controller", "config", "mpc", "C_f"],
+        ["controller", "config", "mpc", "mhe_horizon"],
+      ]),
+    );
   });
 });

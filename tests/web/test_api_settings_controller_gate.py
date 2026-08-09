@@ -1,15 +1,4 @@
-"""`POST /api/settings_update` refuses a controller whose optional dependency is
-missing, and leaves the store completely untouched when it does.
-
-This is the route-level half of tests/unit/deps/test_settings_gate.py. It exists
-because the refusal has to hold at the seam the React Controller tab actually
-posts to -- the gate being right in isolation is not the same as it being wired
-in, and a save that half-applies would leave settings naming a controller the
-control loop cannot build.
-
-NO REAL INSTALL RUNS. `install_extra_detached` is stubbed at its subprocess
-`popen` seam; the assertions pin the argv that would have been spawned.
-"""
+"""The settings API gates MPC selection on the published acados native release."""
 
 import json
 
@@ -17,6 +6,9 @@ import pytest
 
 from common import controller_deps as cd
 from common.datastore_accessors import read_settings, write_settings
+
+
+REBUILD = "./rebuild-acados.sh --if-needed"
 
 
 @pytest.fixture
@@ -28,30 +20,22 @@ def client(ds):
 
 
 @pytest.fixture
-def no_do_mpc(monkeypatch):
-    """Make do_mpc look absent without uninstalling it."""
-    real_find_spec = cd.importlib.util.find_spec
-
-    def fake(name, *args, **kwargs):
-        if name == "do_mpc" or name.startswith("do_mpc."):
-            return None
-        return real_find_spec(name, *args, **kwargs)
-
-    monkeypatch.setattr(cd.importlib.util, "find_spec", fake)
-
-
-@pytest.fixture
-def spawned(monkeypatch):
-    """Capture what would have been spawned, spawning nothing."""
+def no_extra_install(monkeypatch):
     calls = []
-    real = cd.install_extra_detached
 
-    def record(command, **kwargs):
-        calls.append((list(command), kwargs))
-        return object()
+    def unexpected(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("native MPC readiness must not launch a Python-extra installer")
 
-    monkeypatch.setattr(cd, "install_extra_detached", lambda extra, **kw: real(extra, popen=record, **kw))
+    monkeypatch.setattr(cd, "install_extra_detached", unexpected)
     return calls
+
+
+def _native_failure(monkeypatch, detail="native publication is missing"):
+    def fail():
+        raise RuntimeError(f"{detail}. Run {REBUILD}")
+
+    monkeypatch.setattr(cd, "load_native", fail, raising=False)
 
 
 def _select_mpc(client):
@@ -59,66 +43,69 @@ def _select_mpc(client):
     return client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
 
 
-def test_selecting_mpc_without_do_mpc_is_rejected(client, no_do_mpc, spawned):
-    resp = _select_mpc(client)
+def test_selecting_mpc_without_a_native_publication_is_rejected_with_rebuild_guidance(
+    client, monkeypatch, no_extra_install
+):
+    _native_failure(monkeypatch)
 
-    assert resp.status_code == 200
-    payload = resp.get_json()
+    response = _select_mpc(client)
+
+    assert response.status_code == 200
+    payload = response.get_json()
     assert payload["result"] == "error"
-    assert "do_mpc" in payload["message"]
-    assert "controller is unchanged" in payload["message"]
+    assert "native publication is missing" in payload["message"]
+    assert REBUILD in payload["message"]
+    assert "controller is unchanged" in payload["message"].lower()
+    assert no_extra_install == []
 
 
-def test_a_rejected_selection_leaves_the_store_untouched(client, no_do_mpc, spawned):
+def test_an_abi_mismatch_rejection_leaves_the_saved_selection_untouched(client, monkeypatch, no_extra_install):
     before = read_settings()["controller"]["selected"]
+    _native_failure(monkeypatch, "native ABI mismatch: expected 2, got 1")
 
-    _select_mpc(client)
+    response = _select_mpc(client)
 
-    # The whole save is refused, matching the two validation layers above it --
-    # so the controller currently running the user's cook is not disturbed.
+    assert response.get_json()["result"] == "error"
     assert read_settings()["controller"]["selected"] == before
+    assert REBUILD in response.get_json()["message"]
+    assert no_extra_install == []
 
 
-def test_the_rejection_triggers_the_background_install(client, no_do_mpc, spawned):
-    _select_mpc(client)
+def test_an_unrelated_save_does_not_probe_acados(client, monkeypatch, no_extra_install):
+    def unexpected():
+        raise AssertionError("an unrelated settings save must not probe acados")
 
-    assert len(spawned) == 1
-    command, kwargs = spawned[0]
-    assert command[1:] == ["-m", "common.extra_installer", "mpc"]
-    assert kwargs["start_new_session"] is True
-
-
-def test_an_unrelated_save_is_unaffected_by_the_gate(client, no_do_mpc, spawned):
-    # do_mpc is missing, but this save does not touch the controller: it must
-    # succeed and must not kick off a CasADi build.
+    monkeypatch.setattr(cd, "load_native", unexpected, raising=False)
     body = {"settings": {"pwm": {"update_time": 9}}, "flags": ["settings_update"]}
-    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
 
-    assert resp.get_json()["result"] == "success"
+    response = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    assert response.get_json()["result"] == "success"
     assert read_settings()["pwm"]["update_time"] == 9
-    assert spawned == []
+    assert no_extra_install == []
 
 
-def test_selecting_mpc_succeeds_when_do_mpc_is_present(client, spawned):
-    # The dev venv has do-mpc. Guards against the gate becoming an unconditional
-    # "you may never select MPC".
-    resp = _select_mpc(client)
+def test_selecting_mpc_succeeds_when_the_native_loader_is_ready(client, monkeypatch, no_extra_install):
+    calls = []
+    monkeypatch.setattr(cd, "load_native", lambda: calls.append("loaded") or object(), raising=False)
 
-    assert resp.get_json()["result"] == "success"
+    response = _select_mpc(client)
+
+    assert response.get_json()["result"] == "success"
     assert read_settings()["controller"]["selected"] == "mpc"
-    assert spawned == []
+    assert calls == ["loaded"]
+    assert no_extra_install == []
 
 
-def test_switching_away_from_a_broken_mpc_selection_is_allowed(client, no_do_mpc, spawned):
-    # A user stuck on MPC (e.g. a restored backup) must always be able to get
-    # back to a controller that works.
+def test_switching_away_from_a_broken_mpc_selection_is_always_allowed(client, monkeypatch, no_extra_install):
     settings = read_settings()
     settings["controller"]["selected"] = "mpc"
     write_settings(settings)
-
+    _native_failure(monkeypatch)
     body = {"settings": {"controller": {"selected": "pid"}}, "flags": ["controller_update"]}
-    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
 
-    assert resp.get_json()["result"] == "success"
+    response = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    assert response.get_json()["result"] == "success"
     assert read_settings()["controller"]["selected"] == "pid"
-    assert spawned == []
+    assert no_extra_install == []

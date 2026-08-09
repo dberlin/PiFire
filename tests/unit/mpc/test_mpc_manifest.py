@@ -9,29 +9,37 @@ def _meta():
         return json.load(f)["metadata"]
 
 
-def test_mpc_entry_present():
-    e = _meta()["mpc"]
-    assert e["module_name"] == "mpc"
-    names = {o["option_name"] for o in e["config"]}
-    # a representative subset of the required options
-    assert {
+def test_mpc_entry_exposes_only_retained_acados_grey_box_options():
+    entry = _meta()["mpc"]
+    options = {option["option_name"]: option for option in entry["config"]}
+
+    assert entry["module_name"] == "mpc"
+    assert "dependencies" not in entry
+    assert set(options) == {
         "n_horizon",
         "control_period",
+        "Q_w",
+        "R_dQ",
+        "C_c",
+        "h_amb",
+        "T_amb",
         "theta",
-        "n_delay",
         "K_Q",
         "sigma",
         "estimator",
-        "policy",
-        "policy_net_path",
-        "C_c",
-        "h_amb",
+        "fan_min_pct",
+        "fan_max_pct",
         "enable_fan_input",
+        "est_q_temp",
+        "est_q_dist",
         "est_r_meas",
-    } <= names
-    policy = next(o for o in e["config"] if o["option_name"] == "policy")
-    assert set(policy["list_values"]) == {"nlp", "net"}
-    assert policy["option_default"] == "nlp"
+        "enable_identification",
+        "enable_online_adaptation",
+    }
+    assert options["n_horizon"]["option_min"] == 5
+    assert options["n_horizon"]["option_max"] == 24
+    assert options["estimator"]["list_values"] == ["ekf", "kf"]
+    assert options["estimator"]["option_default"] == "ekf"
 
 
 def test_pid_sp_declares_numpy_without_an_extra():
@@ -59,21 +67,43 @@ def test_numpy_is_an_explicit_project_dependency():
     assert any(d.split(">")[0].split("=")[0].strip() == "numpy" for d in project["dependencies"])
 
 
-def test_default_controller_config_includes_mpc():
+def test_default_controller_config_exposes_only_retained_acados_mpc_values():
     cwd = os.getcwd()
     os.chdir(BASE)
     try:
         from common.defaults import _default_controller_config
 
-        cfg = _default_controller_config()
+        cfg = _default_controller_config()["mpc"]
     finally:
         os.chdir(cwd)
-    assert "mpc" in cfg
-    assert cfg["mpc"]["control_period"] == 5.0
-    assert cfg["mpc"]["theta"] == 50.0
-    assert cfg["mpc"]["n_delay"] == 8
-    assert cfg["mpc"]["K_Q"] == 350.0
-    assert cfg["mpc"]["estimator"] == "ekf"
-    assert cfg["mpc"]["policy"] == "nlp"
-    assert cfg["mpc"]["sigma"] > 0.0
-    assert cfg["mpc"]["enable_fan_input"] is False
+
+    assert set(cfg) == {
+        "n_horizon",
+        "control_period",
+        "Q_w",
+        "R_dQ",
+        "C_c",
+        "h_amb",
+        "T_amb",
+        "theta",
+        "K_Q",
+        "sigma",
+        "estimator",
+        "fan_min_pct",
+        "fan_max_pct",
+        "enable_fan_input",
+        "est_q_temp",
+        "est_q_dist",
+        "est_r_meas",
+        "enable_identification",
+        "enable_online_adaptation",
+    }
+    assert cfg["n_horizon"] == 24
+    assert cfg["control_period"] == 5.0
+    assert cfg["theta"] == 50.0
+    assert cfg["K_Q"] == 350.0
+    assert cfg["estimator"] == "ekf"
+    assert cfg["sigma"] > 0.0
+    assert cfg["enable_fan_input"] is False
+    assert cfg["enable_identification"] is True
+    assert cfg["enable_online_adaptation"] is False

@@ -5,13 +5,13 @@
         "mpc": {
           "C_c": 320.0,
           "K_Q": 3.5,
-          "Q_max": 100.0,
-          "Q_min": 5.0,
           "Q_w": 1.0,
           "R_dQ": 0.1,
           "T_amb": 20.0,
           "control_period": 5.0,
           "enable_fan_input": false,
+          "enable_identification": true,
+          "enable_online_adaptation": false,
           "est_q_dist": 0.05,
           "est_q_temp": 0.01,
           "est_r_meas": 0.04,
@@ -19,12 +19,8 @@
           "fan_max_pct": 100.0,
           "fan_min_pct": 40.0,
           "h_amb": 0.5,
-          "n_delay": 8,
           "n_horizon": 24,
-          "policy": "nlp",
-          "policy_net_path": "./controller/mpc_policy_net.npz",
           "sigma": 1.4e-9,
-          "t_step": 25.0,
           "theta": 50.0
         },
         "pid": {
@@ -609,7 +605,7 @@
         "primary": "Grill"
       }
     },
-    "schema_version": 4,
+    "schema_version": 9,
     "safety": {
       "allow_manual_changes": false,
       "manual_override_time": 30,

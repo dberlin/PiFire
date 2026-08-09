@@ -341,6 +341,65 @@ def _clear_mpc_identification_choice(settings):
     return mpc.pop("enable_identification", sentinel) is not sentinel
 
 
+_RETIRED_ACADOS_MPC_KEYS = (
+    "policy",
+    "policy_net_path",
+    "t_step",
+    "n_delay",
+    "C_f",
+    "h_fc",
+    "feed_forward",
+    "enable_grey_box",
+    "mhe_horizon",
+    "pw_state",
+    "pw_dist",
+    "px_state",
+    "px_dist",
+    "r_meas",
+    "Q_min",
+    "Q_max",
+    "log_data",
+    "log_path",
+)
+
+
+def _migrate_acados_mpc_settings(settings):
+    """Normalize the persisted MPC shape for the fixed acados grey-box model."""
+    controller = settings.get("controller")
+    if not isinstance(controller, MutableMapping):
+        return False
+    config = controller.get("config")
+    if not isinstance(config, MutableMapping):
+        return False
+    mpc = config.get("mpc")
+    if not isinstance(mpc, MutableMapping):
+        return False
+
+    changed = False
+    if mpc.get("estimator") == "mhe":
+        mpc["estimator"] = "ekf"
+        changed = True
+
+    horizon = mpc.get("n_horizon")
+    if isinstance(horizon, int) and not isinstance(horizon, bool):
+        integral_horizon = horizon
+    elif isinstance(horizon, float) and horizon.is_integer():
+        integral_horizon = int(horizon)
+    else:
+        integral_horizon = None
+    if integral_horizon is not None:
+        clamped_horizon = min(24, max(5, integral_horizon))
+        if type(horizon) is not int or clamped_horizon != horizon:
+            mpc["n_horizon"] = clamped_horizon
+            changed = True
+
+    sentinel = object()
+    for key in _RETIRED_ACADOS_MPC_KEYS:
+        if mpc.pop(key, sentinel) is not sentinel:
+            changed = True
+    return changed
+
+
 def _add_mcp2221_selector(settings):
     """Seed the USB selector introduced for the MCP2221 relay platform."""
     platform = settings.get("platform")
@@ -363,6 +422,7 @@ _SHAPE_MIGRATIONS = [
     (6, _clear_mpc_identification_choice),
     (7, _remove_retired_fan_pid),
     (8, _add_mcp2221_selector),
+    (9, _migrate_acados_mpc_settings),
 ]
 
 

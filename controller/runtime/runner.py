@@ -44,8 +44,8 @@ from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, nor
 from controller.mpc_allocator import AllocationResult
 
 if TYPE_CHECKING:
-    from controller.linear_mpc.calibration import CalibrationDecision
-    from controller.linear_mpc.contracts import FrameObservation
+    from controller.model_learning.calibration import CalibrationDecision
+    from controller.model_learning.contracts import FrameObservation
     from controller.mpc import CalibrationCommand
 
 
@@ -1326,13 +1326,16 @@ def _raise_banner(text, logger=None):
 
 
 def _dependency_hint(controller_type, settings):
-    """A sentence naming the uninstalled package, or "" if that is not the problem."""
+    """A dependency/load failure hint, or "" if dependencies are not the problem."""
     try:
         from common.controller_deps import check_controller_dependencies
 
         config = (settings.get("controller") or {}).get("config", {}).get(controller_type, {})
         missing = check_controller_dependencies(controller_type, config)
-    except Exception:
+    except Exception as exc:
+        if controller_type == "mpc":
+            detail = str(exc)
+            return f"{detail} " if detail else ""
         return ""
     if missing is None:
         return ""

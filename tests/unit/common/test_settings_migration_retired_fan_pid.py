@@ -13,7 +13,7 @@ def test_schema_six_fan_pid_setting_is_removed_without_disturbing_cycle_values()
     settings["cycle_data"]["u_max"] = 0.81
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
-    assert settings["schema_version"] == 8
+    assert settings["schema_version"] == 9
     assert settings["cycle_data"] == {
         "SmokeOnCycleTime": 15,
         "SmokeOffCycleTime": 45,

@@ -139,264 +139,220 @@
       ]
     },
     "mpc": {
-      "friendly_name": "Model Predictive Control (MPC)",
-      "module_name": "mpc",
-      "image": "pid.png",
-      "description": "Model Predictive Controller. An outer optimizer commands a firing-rate demand against a grey-box thermal model with offset-free disturbance estimation; an inner combustion allocator maps it to auger and (on PWM/DC-fan builds) fan. Targets a tight temperature band. Built on do-mpc.",
-      "author": "PiFire",
-      "link": "",
-      "contributors": [],
       "attributions": [],
-      "dependencies": {
-        "extra": "mpc",
-        "modules": ["do_mpc"]
-      },
+      "author": "PiFire",
+      "config": [
+        {
+          "hidden": false,
+          "option_default": 24,
+          "option_description": "Number of 25-second prediction steps. [Default=24]",
+          "option_friendly_name": "Prediction Horizon (steps)",
+          "option_max": 24,
+          "option_min": 5,
+          "option_name": "n_horizon",
+          "option_step": 1,
+          "option_type": "int"
+        },
+        {
+          "hidden": false,
+          "option_default": 5.0,
+          "option_description": "How often the MPC re-solves and updates the actuators; the estimator is discretized at this interval. [Default=5.0]",
+          "option_friendly_name": "Control Period (s)",
+          "option_max": 25.0,
+          "option_min": 1.0,
+          "option_name": "control_period",
+          "option_step": 1.0,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 1.0,
+          "option_description": "Penalty on temperature tracking error. [Default=1.0]",
+          "option_friendly_name": "Tracking Weight",
+          "option_max": null,
+          "option_min": 0.0,
+          "option_name": "Q_w",
+          "option_step": 0.1,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 0.1,
+          "option_description": "Penalty on firing-rate changes (smoothness/damping). Low by default for fast rise and a tight band; raise it for gentler moves (less step overshoot) at the cost of slower rise. [Default=0.1]",
+          "option_friendly_name": "Move Suppression",
+          "option_max": null,
+          "option_min": 0.0,
+          "option_name": "R_dQ",
+          "option_step": 0.05,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 320.0,
+          "option_description": "Chamber lumped thermal mass (nominal; calibrate per grill). [Default=320.0]",
+          "option_friendly_name": "Chamber Heat Capacity",
+          "option_max": null,
+          "option_min": 1.0,
+          "option_name": "C_c",
+          "option_step": 1.0,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 0.5,
+          "option_description": "Chamber->ambient convective loss coefficient (nominal; calibrate). [Default=0.50]",
+          "option_friendly_name": "Ambient Loss Coefficient",
+          "option_max": null,
+          "option_min": 0.0,
+          "option_name": "h_amb",
+          "option_step": 0.01,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 20.0,
+          "option_description": "Nominal ambient temperature in Celsius. [Default=20.0]",
+          "option_friendly_name": "Ambient Temperature (C)",
+          "option_max": 60.0,
+          "option_min": -40.0,
+          "option_name": "T_amb",
+          "option_step": 1.0,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 50.0,
+          "option_description": "Feed -> combustion -> sensor transport delay, modeled as a chain of lag states so the MPC predicts across it. Set near your grill's measured deadtime. [Default=50.0]",
+          "option_friendly_name": "Transport Deadtime (s)",
+          "option_max": 180.0,
+          "option_min": 0.0,
+          "option_name": "theta",
+          "option_step": 1.0,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 350.0,
+          "option_description": "Maps normalized full combustion load (1.0) to heat input; calibrate to your grill's power (run the calibration utility). [Default=350.0]",
+          "option_friendly_name": "Full-Load Heat Gain",
+          "option_max": null,
+          "option_min": 10.0,
+          "option_name": "K_Q",
+          "option_step": 1.0,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 1.4e-9,
+          "option_description": "Radiative (T^4) chamber-loss coefficient. Captures the temperature-dependent gain so one calibration spans the whole range. 0 disables radiative loss. [Default=1.4e-9]",
+          "option_friendly_name": "Radiative Loss Coefficient",
+          "option_max": null,
+          "option_min": 0.0,
+          "option_name": "sigma",
+          "option_step": 1e-10,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "list_labels": ["EKF (nonlinear)", "Kalman filter"],
+          "list_values": ["ekf", "kf"],
+          "option_default": "ekf",
+          "option_description": "State estimator for the fixed eight-delay grey-box model. EKF handles the nonlinear radiative term; KF provides a Kalman filter. [Default=ekf]",
+          "option_friendly_name": "State Estimator",
+          "option_name": "estimator",
+          "option_type": "list"
+        },
+        {
+          "hidden": false,
+          "option_default": 40.0,
+          "option_description": "Fan duty percent at minimum firing rate (PWM fans). [Default=40.0]",
+          "option_friendly_name": "Fan Duty at Min Fire (%)",
+          "option_max": 100.0,
+          "option_min": 0.0,
+          "option_name": "fan_min_pct",
+          "option_step": 1.0,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 100.0,
+          "option_description": "Fan duty percent at maximum firing rate (PWM fans). [Default=100.0]",
+          "option_friendly_name": "Fan Duty at Max Fire (%)",
+          "option_max": 100.0,
+          "option_min": 0.0,
+          "option_name": "fan_max_pct",
+          "option_step": 1.0,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": false,
+          "option_description": "If enabled, the MPC commands fan duty (PWM/DC-fan builds only). [Default=false]",
+          "option_friendly_name": "MPC Controls Fan",
+          "option_name": "enable_fan_input",
+          "option_type": "bool"
+        },
+        {
+          "hidden": false,
+          "option_default": 0.01,
+          "option_description": "Process-noise variance on temperature states. [Default=0.01]",
+          "option_friendly_name": "Estimator Temp Noise",
+          "option_max": null,
+          "option_min": 0.0,
+          "option_name": "est_q_temp",
+          "option_step": 0.001,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 0.05,
+          "option_description": "Random-walk variance on the disturbance state (drift tracking). Kept low so the disturbance estimate does not chase fast unmeasured transients, which reduces setpoint-step overshoot without widening the steady band. [Default=0.05]",
+          "option_friendly_name": "Estimator Disturbance Noise",
+          "option_max": null,
+          "option_min": 0.0,
+          "option_name": "est_q_dist",
+          "option_step": 0.01,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": 0.04,
+          "option_description": "Measurement-noise variance (sensor). [Default=0.04]",
+          "option_friendly_name": "Estimator Measurement Noise",
+          "option_max": null,
+          "option_min": 0.0,
+          "option_name": "est_r_meas",
+          "option_step": 0.01,
+          "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": true,
+          "option_description": "After each cook, refit the grey-box model from that cook and, when accepted, use it on the next cook. [Default=true]",
+          "option_friendly_name": "Learn This Grill",
+          "option_name": "enable_identification",
+          "option_type": "bool"
+        },
+        {
+          "hidden": false,
+          "option_default": false,
+          "option_description": "Passively learn grey-box parameters during cooks and activate them automatically only after validation and safety gates pass. [Default=false]",
+          "option_friendly_name": "Online Model Adaptation",
+          "option_name": "enable_online_adaptation",
+          "option_type": "bool"
+        }
+      ],
+      "contributors": [],
+      "description": "Acados grey-box model predictive controller. It predicts with a fixed 25-second, eight-delay-state thermal model while the combustion allocator maps firing demand to auger and fan outputs.",
+      "friendly_name": "Model Predictive Control (MPC)",
+      "image": "pid.png",
+      "link": "",
+      "module_name": "mpc",
       "recommendations": {
         "cycle": {
           "cycle_ratio_max": 0.9
         }
-      },
-      "config": [
-        {
-          "option_name": "n_horizon",
-          "option_friendly_name": "Prediction Horizon (steps)",
-          "option_description": "Number of prediction steps. [Default=24]",
-          "option_type": "int",
-          "option_default": 24,
-          "option_min": 5,
-          "option_max": 60,
-          "option_step": 1,
-          "hidden": false
-        },
-        {
-          "option_name": "t_step",
-          "option_friendly_name": "Prediction Step (s)",
-          "option_description": "Prediction discretization interval in seconds. [Default=25]",
-          "option_type": "float",
-          "option_default": 25.0,
-          "option_min": 1.0,
-          "option_max": 60.0,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "control_period",
-          "option_friendly_name": "Control Period (s)",
-          "option_description": "How often the MPC re-solves and updates the actuators; the estimator is discretized at this interval. [Default=5.0]",
-          "option_type": "float",
-          "option_default": 5.0,
-          "option_min": 1.0,
-          "option_max": 25.0,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "Q_w",
-          "option_friendly_name": "Tracking Weight",
-          "option_description": "Penalty on temperature tracking error. [Default=1.0]",
-          "option_type": "float",
-          "option_default": 1.0,
-          "option_min": 0.0,
-          "option_max": null,
-          "option_step": 0.1,
-          "hidden": false
-        },
-        {
-          "option_name": "R_dQ",
-          "option_friendly_name": "Move Suppression",
-          "option_description": "Penalty on firing-rate changes (smoothness/damping). Low by default for fast rise and a tight band; raise it for gentler moves (less step overshoot) at the cost of slower rise. [Default=0.1]",
-          "option_type": "float",
-          "option_default": 0.1,
-          "option_min": 0.0,
-          "option_max": null,
-          "option_step": 0.05,
-          "hidden": false
-        },
-        {
-          "option_name": "C_c",
-          "option_friendly_name": "Chamber Heat Capacity",
-          "option_description": "Chamber lumped thermal mass (nominal; calibrate per grill). [Default=320.0]",
-          "option_type": "float",
-          "option_default": 320.0,
-          "option_min": 1.0,
-          "option_max": null,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "h_amb",
-          "option_friendly_name": "Ambient Loss Coefficient",
-          "option_description": "Chamber->ambient convective loss coefficient (nominal; calibrate). [Default=0.50]",
-          "option_type": "float",
-          "option_default": 0.5,
-          "option_min": 0.0,
-          "option_max": null,
-          "option_step": 0.01,
-          "hidden": false
-        },
-        {
-          "option_name": "T_amb",
-          "option_friendly_name": "Ambient Temperature (C)",
-          "option_description": "Nominal ambient temperature in Celsius. [Default=20.0]",
-          "option_type": "float",
-          "option_default": 20.0,
-          "option_min": -40.0,
-          "option_max": 60.0,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "theta",
-          "option_friendly_name": "Transport Deadtime (s)",
-          "option_description": "Feed -> combustion -> sensor transport delay, modeled as a chain of lag states so the MPC predicts across it. Set near your grill's measured deadtime. [Default=50.0]",
-          "option_type": "float",
-          "option_default": 50.0,
-          "option_min": 0.0,
-          "option_max": 180.0,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "n_delay",
-          "option_friendly_name": "Deadtime Lag States",
-          "option_description": "Number of first-order lag states approximating the transport deadtime (more = sharper delay, larger model and slower solve). 0 disables deadtime modeling. Raising this costs no calibration - it is a model structure choice, not a fitted value. What it buys is how much of the grill's real deadtime the model reproduces instead of smearing: against the reference plant 4 states recover 57% of it, 8 recover 71%, and 12 recover 79% for four times the solver time. Past 12 each further step recovers 4% more or less, so the ceiling is set there. [Default=8]",
-          "option_type": "int",
-          "option_default": 8,
-          "option_min": 0,
-          "option_max": 12,
-          "option_step": 1,
-          "hidden": false
-        },
-        {
-          "option_name": "K_Q",
-          "option_friendly_name": "Full-Load Heat Gain",
-          "option_description": "Maps normalized full combustion load (1.0) to heat input; calibrate to your grill's power (run the calibration utility). [Default=350.0]",
-          "option_type": "float",
-          "option_default": 350.0,
-          "option_min": 10.0,
-          "option_max": null,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "sigma",
-          "option_friendly_name": "Radiative Loss Coefficient",
-          "option_description": "Radiative (T^4) chamber-loss coefficient. Captures the temperature-dependent gain so one calibration spans the whole range. 0 = purely linear model. [Default=1.4e-9]",
-          "option_type": "float",
-          "option_default": 1.4e-9,
-          "option_min": 0.0,
-          "option_max": null,
-          "option_step": 1e-10,
-          "hidden": false
-        },
-        {
-          "option_name": "estimator",
-          "option_friendly_name": "State Estimator",
-          "option_description": "Disturbance/state estimator. EKF linearizes the nonlinear radiative term each step -- nonlinear-capable and fast (~us), recommended. MHE solves an NLP each step (nonlinear, slower). KF is a linear-only Kalman filter (requires sigma=0). [Default=ekf]",
-          "option_type": "list",
-          "list_values": ["ekf", "mhe", "kf"],
-          "list_labels": ["EKF (nonlinear, fast)", "MHE (nonlinear)", "Kalman (linear)"],
-          "option_default": "ekf",
-          "hidden": false
-        },
-        {
-          "option_name": "policy",
-          "option_friendly_name": "Firing-Rate Policy",
-          "option_description": "How the firing rate is computed. NLP solves the MPC optimization each step (do_mpc/IPOPT). Neural net uses a pre-trained pure-numpy approximation of the policy (no IPOPT/CasADi) -- much faster, and falls back to NLP automatically if the trained net (below) is missing or was trained for a different calibration. Retrain the net (export_span_net.py) after recalibrating. [Default=nlp]",
-          "option_type": "list",
-          "list_values": ["nlp", "net"],
-          "list_labels": ["NLP solve (do_mpc)", "Neural net (fast, IPOPT-free)"],
-          "option_default": "nlp",
-          "hidden": false
-        },
-        {
-          "option_name": "policy_net_path",
-          "option_friendly_name": "Policy Net Path",
-          "option_description": "Path to the trained neural-net policy artifact (.npz) used when policy is set to Neural net.",
-          "option_type": "string",
-          "option_default": "./controller/mpc_policy_net.npz",
-          "hidden": false
-        },
-        {
-          "option_name": "fan_min_pct",
-          "option_friendly_name": "Fan Duty at Min Fire (%)",
-          "option_description": "Fan duty percent at minimum firing rate (PWM fans). [Default=40.0]",
-          "option_type": "float",
-          "option_default": 40.0,
-          "option_min": 0.0,
-          "option_max": 100.0,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "fan_max_pct",
-          "option_friendly_name": "Fan Duty at Max Fire (%)",
-          "option_description": "Fan duty percent at maximum firing rate (PWM fans). [Default=100.0]",
-          "option_type": "float",
-          "option_default": 100.0,
-          "option_min": 0.0,
-          "option_max": 100.0,
-          "option_step": 1.0,
-          "hidden": false
-        },
-        {
-          "option_name": "enable_fan_input",
-          "option_friendly_name": "MPC Controls Fan",
-          "option_description": "If enabled, the MPC commands fan duty (PWM/DC-fan builds only). [Default=false]",
-          "option_type": "bool",
-          "option_default": false,
-          "hidden": false
-        },
-        {
-          "option_name": "est_q_temp",
-          "option_friendly_name": "Estimator Temp Noise",
-          "option_description": "Process-noise variance on temperature states. [Default=0.01]",
-          "option_type": "float",
-          "option_default": 0.01,
-          "option_min": 0.0,
-          "option_max": null,
-          "option_step": 0.001,
-          "hidden": false
-        },
-        {
-          "option_name": "est_q_dist",
-          "option_friendly_name": "Estimator Disturbance Noise",
-          "option_description": "Random-walk variance on the disturbance state (drift tracking). Kept low so the disturbance estimate does not chase fast unmeasured transients, which reduces setpoint-step overshoot without widening the steady band. [Default=0.05]",
-          "option_type": "float",
-          "option_default": 0.05,
-          "option_min": 0.0,
-          "option_max": null,
-          "option_step": 0.01,
-          "hidden": false
-        },
-        {
-          "option_name": "est_r_meas",
-          "option_friendly_name": "Estimator Measurement Noise",
-          "option_description": "Measurement-noise variance (sensor). [Default=0.04]",
-          "option_type": "float",
-          "option_default": 0.04,
-          "option_min": 0.0,
-          "option_max": null,
-          "option_step": 0.01,
-          "hidden": false
-        },
-        {
-          "option_name": "enable_identification",
-          "option_friendly_name": "Learn This Grill",
-          "option_description": "After each cook, refit the thermal model from that cook and keep it if it describes the grill better. On the Neural Net firing-rate policy, a learned calibration no longer matches the trained artifact, so the controller falls back to the full optimisation until it is retrained. [Default=true]",
-          "option_type": "bool",
-          "option_default": true,
-          "hidden": false
-        },
-        {
-          "option_name": "enable_online_adaptation",
-          "option_friendly_name": "Online Model Adaptation",
-          "option_description": "Learn a scheduled linear model during cooks and let it take over after repeated validation wins. Experimental. [Default=false]",
-          "option_type": "bool",
-          "option_default": false,
-          "hidden": false
-        }
-      ]
+      }
     }
   }
 }

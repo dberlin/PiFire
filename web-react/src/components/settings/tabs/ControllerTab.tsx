@@ -105,13 +105,6 @@ export function ControllerTab() {
     settings,
   });
 
-  // Derived from the draft so the consequence is visible while deciding, not
-  // after saving.
-  const learning = selected === "mpc" && !!values.enable_identification;
-  // The NLP solve is already unconditional; only the neural-net fast path is
-  // displaced by a refit, so the cost only applies under that policy.
-  const netPolicy = selected === "mpc" && values.policy === "net";
-
   const onSave = async () => {
     if (fanConflict) return; // do NOT call save(): the fan lever would be wired to nothing
     let d: object = {};
@@ -252,12 +245,6 @@ export function ControllerTab() {
           }
           return null;
         })}
-        {learning && netPolicy && (
-          <p className="pf-settings-hint">
-            A learned calibration no longer matches the pre-trained neural policy, so the controller
-            falls back to the full optimisation until it is retrained.
-          </p>
-        )}
         {fanConflict && (
           <p className="pf-settings-error-text" role="alert">
             {MPC_FAN_CONFLICT_MESSAGE}

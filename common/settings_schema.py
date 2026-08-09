@@ -645,7 +645,7 @@ class Recipe(_Section):
 #: It lives at the top level of the tree rather than beside versions.server /
 #: versions.build, so that nothing suggests the three move together. They do
 #: not: versions is the RELEASE, read from updater/updater_manifest.json.
-SETTINGS_SCHEMA_VERSION = 8
+SETTINGS_SCHEMA_VERSION = 9
 
 
 class SettingsSchema(_Section):

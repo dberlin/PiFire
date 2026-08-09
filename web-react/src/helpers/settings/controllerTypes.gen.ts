@@ -18,7 +18,6 @@ export interface PidSpConfig {
 
 export interface MpcConfig {
   n_horizon: number;
-  t_step: number;
   control_period: number;
   Q_w: number;
   R_dQ: number;
@@ -26,12 +25,9 @@ export interface MpcConfig {
   h_amb: number;
   T_amb: number;
   theta: number;
-  n_delay: number;
   K_Q: number;
   sigma: number;
-  estimator: "ekf" | "mhe" | "kf";
-  policy: "nlp" | "net";
-  policy_net_path: string;
+  estimator: "ekf" | "kf";
   fan_min_pct: number;
   fan_max_pct: number;
   enable_fan_input: boolean;
