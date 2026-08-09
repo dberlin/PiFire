@@ -259,7 +259,7 @@ class PidSpUpdatePayload(_ControlUpdatePayload):
     measured_rate: FiniteFloat
     predicted_temperature: FiniteFloat
     predicted_error: FiniteFloat
-    tau_seconds: PositiveFloat
+    tau_seconds: NonNegativeFloat
     theta_seconds: NonNegativeFloat
     stable_window_seconds: PositiveFloat
     center_factor: FiniteFloat

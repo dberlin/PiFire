@@ -89,7 +89,7 @@ ALLOWED_EXITS: dict[Mode, set[Mode]] = {
     Mode.PRIME: {Mode.STARTUP, Mode.STOP, Mode.ERROR},
     Mode.STARTUP: {Mode.PRIME, Mode.SMOKE, Mode.HOLD, Mode.MONITOR, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
     Mode.SMOKE: {Mode.HOLD, Mode.MONITOR, Mode.SHUTDOWN, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
-    Mode.HOLD: {Mode.SMOKE, Mode.MONITOR, Mode.SHUTDOWN, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
+    Mode.HOLD: {Mode.HOLD, Mode.SMOKE, Mode.MONITOR, Mode.SHUTDOWN, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
     Mode.REIGNITE: {Mode.SMOKE, Mode.HOLD, Mode.STARTUP, Mode.STOP, Mode.ERROR},
     Mode.SHUTDOWN: {Mode.STOP, Mode.ERROR},
     Mode.MONITOR: {Mode.STOP, Mode.ERROR},

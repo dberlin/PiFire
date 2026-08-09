@@ -208,12 +208,13 @@ def test_tick_hold_dispatches_work_cycle_then_next_mode(monkeypatch):
     control_data = base_control(mode="Hold")
     control_data["updated"] = True
     control_data["next_mode"] = "Stop"
+    control_data["primary_setpoint"] = 225
     c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
     calls = _spy_dispatch(c)
     c.setup()
     c.tick()
     assert ("work_cycle", "Hold") in calls
-    assert ("next_mode", "Stop", 0) in calls
+    assert ("next_mode", "Stop", 225) in calls
 
 
 def test_tick_monitor_sets_status_monitor_and_runs_cycle(monkeypatch):

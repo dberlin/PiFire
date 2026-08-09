@@ -190,7 +190,7 @@ _EXPECTED_GRAPH = {
     "Prime": {"Startup", "Stop", "Error"},
     "Startup": {"Prime", "Smoke", "Hold", "Monitor", "Stop", "Error", "Reignite"},
     "Smoke": {"Hold", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
-    "Hold": {"Smoke", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
+    "Hold": {"Hold", "Smoke", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
     "Reignite": {"Smoke", "Hold", "Startup", "Stop", "Error"},
     "Shutdown": {"Stop", "Error"},
     "Monitor": {"Stop", "Error"},

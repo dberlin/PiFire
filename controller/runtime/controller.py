@@ -634,7 +634,7 @@ class Controller:
     def _dispatch_hold(self):
         # Hold (hold at setpoint)
         self.work_cycle(Mode.HOLD)
-        self.next_mode(self.control["next_mode"])
+        self.next_mode(self.control["next_mode"], setpoint=self.control["primary_setpoint"])
 
     def _dispatch_shutdown(self):
         # Shutdown (shutdown sequence)

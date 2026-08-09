@@ -82,6 +82,23 @@ def test_next_mode_forces_setpoint_zero_when_not_hold(monkeypatch):
     assert out["primary_setpoint"] == 0  # non-Hold target forces setpoint to 0
 
 
+def test_hold_dispatch_self_restart_preserves_the_active_setpoint(monkeypatch):
+    c, store = build_controller(
+        monkeypatch,
+        mode="Hold",
+        control_over={"updated": False, "next_mode": "Hold", "primary_setpoint": 225},
+    )
+    c.control = store.read_control()
+    c.work_cycle = lambda _mode: ()
+
+    c._dispatch_hold()
+
+    out = store.read_control()
+    assert out["mode"] == "Hold"
+    assert out["primary_setpoint"] == 225
+    assert out["updated"] is True
+
+
 # --------------------------------------------------------------------------
 # Step 2: recipe_mode() internal edges (gap #11)
 # --------------------------------------------------------------------------

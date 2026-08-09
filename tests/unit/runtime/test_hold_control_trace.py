@@ -42,12 +42,14 @@ from controller.linear_mpc.adaptation import (
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.mpc_allocator import allocate
 from controller.mpc import Controller
+from tests.characterization.fixtures import base_control, base_settings
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.runner import (
     ControllerUpdateResult,
     ObservationOutcomeEnvelope,
     SyncControllerRunner,
     ThreadedControllerRunner,
+    build_runner,
 )
 from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
 from controller.runtime.model_persistence import EvidenceSubmission
@@ -598,6 +600,28 @@ def test_pid_sp_completed_update_records_exact_typed_fields_and_branch(hold_cycl
         payload.target_change_ms,
         payload.branch,
     ) == (-0.4, 221.5, 3.5, 12.0, 4.0, 15.0, 0.75, True, False, 218.0, 500, ControllerBranch.OVERSHOOT)
+
+
+def test_real_pid_sp_first_hold_update_records_unidentified_model_trace(hold_cycle, monkeypatch):
+    settings = base_settings()
+    settings["controller"]["selected"] = "pid_sp"
+    control = base_control(mode="Hold")
+    control["primary_setpoint"] = 225
+    runner, status = build_runner(settings, control)
+    assert status == "Active"
+    assert isinstance(runner, SyncControllerRunner)
+
+    recorder = _install_recorder(monkeypatch)
+    mode = hold_cycle(runner, controller="pid_sp")
+    mode.setup()
+    mode.state.metrics = {"id": "cook-real-pid-sp"}
+
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+
+    (payload,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
+    assert isinstance(payload, PidSpUpdatePayload)
+    assert payload.tau_seconds == 0.0
+    assert validate_records(recorder.records).valid
 
 
 def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_session(hold_cycle, monkeypatch):
