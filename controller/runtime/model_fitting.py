@@ -1317,6 +1317,22 @@ class GreyLearningOrchestrator:
             self._ownership_transferred = True
         return self._handoff
 
+    def retire_evaluated_candidate(self, decision: Any) -> bool:
+        """Release one terminally rejected candidate so a later fit may proceed."""
+        if (
+            decision is not self._last_evaluation
+            or bool(getattr(decision, "accepted", False))
+            or not tuple(getattr(decision, "blockers", ()))
+        ):
+            return False
+        self._release_prepared()
+        self._evaluator = None
+        self._evaluation_cursor = 0
+        self._consecutive_wins = 0
+        self._last_evaluation = None
+        self._handoff = None
+        return True
+
     def close(self) -> None:
         self._release_prepared()
         close = getattr(self.worker, "close", None)

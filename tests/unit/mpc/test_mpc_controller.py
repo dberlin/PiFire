@@ -1,17 +1,27 @@
+from dataclasses import replace
+import threading
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import controller.mpc as mpc_module
-from common.control_trace import ActuationMode, AmbientSource
+from common.control_trace import ActuationMode, AmbientSource, ModelEvaluationPayload
 from common.model_evidence import ForecastOriginEvidence
 from controller.acados import SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
 from controller.model_learning.contracts import FrameObservation
-from controller.model_learning.evaluation import CompletedForecastOrigin, ForecastOrigin
+from controller.model_learning.evaluation import CompletedForecastOrigin, EvaluationDecision, ForecastOrigin, HorizonScore
 
+from controller.runtime.model_fitting import (
+    CandidatePair,
+    FitSubmission,
+    GreyFitSuccess,
+    GreyLearningOrchestrator,
+    TargetTimingEvidence,
+    TriggerConfig,
+)
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
 CONFIG = {
@@ -255,7 +265,7 @@ def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkey
             completed_forecasts=(),
         ),
         poll_fit_off_path=lambda **kwargs: ("polled", kwargs),
-        evaluate_ready_off_path=lambda: "evaluated",
+        evaluate_ready_off_path=lambda: None,
         close=lambda: None,
     )
     controller._learning = orchestrator
@@ -271,7 +281,7 @@ def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkey
     assert passive_outcome["eligible"] is True
     assert operator_outcome["eligible"] is True
     assert off_path[0][0] == "polled"
-    assert off_path[1] == "evaluated"
+    assert off_path[1] is None
 
 
 def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(monkeypatch):
@@ -327,6 +337,242 @@ def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(mon
             calibration_fit=False,
         ),
     )
+
+
+def test_task7_evaluation_is_published_through_the_established_runner_payload(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+    completed = CompletedForecastOrigin(
+        forecast=ForecastOrigin(
+            origin_sequence=1,
+            origin_time_s=20.0,
+            horizon_steps=3,
+            role_generation=0,
+            candidate_generation=1,
+            incumbent_digest="a" * 64,
+            challenger_digest="b" * 64,
+            incumbent_prediction_c=79.0,
+            challenger_prediction_c=81.0,
+            temperature_band="below-target",
+            phase="heating",
+            ambient_source=AmbientSource.CONFIGURED,
+            calibration_fit=False,
+        ),
+        completion_time_s=80.0,
+        observed_temperature_c=82.0,
+    )
+    decision = EvaluationDecision(
+        decision_id="c" * 64,
+        accepted=False,
+        role_generation=0,
+        candidate_generation=1,
+        incumbent_digest="a" * 64,
+        challenger_digest="b" * 64,
+        consecutive_wins=1,
+        blockers=(),
+        scores=(HorizonScore(3, 3.0, 1.0, 1), HorizonScore(15, 0.0, 0.0, 0)),
+        completed_origins=(completed,),
+    )
+    controller._learning = SimpleNamespace(
+        poll_fit_off_path=lambda **_kwargs: None,
+        evaluate_ready_off_path=lambda: decision,
+        observe_completed_frame=lambda _frame, *, identifiability: SimpleNamespace(
+            history=SimpleNamespace(accepted=True, reasons=()),
+            completed_forecasts=(),
+            request=None,
+        ),
+        passive_history=SimpleNamespace(observations=()),
+        register_causal_forecasts=lambda *_args, **_kwargs: (),
+        close=lambda: None,
+    )
+
+    _delivery, evaluation = controller.poll_learning_off_path()
+    outcome = controller.observe_frame(_frame(sequence=5))
+
+    assert isinstance(evaluation, ModelEvaluationPayload)
+    assert outcome["evaluation_payload"] is evaluation
+    assert evaluation.challenger_model_kind == "grey-box"
+    assert evaluation.completed_origins[0].observed_temperature_c == 82.0
+    assert evaluation.horizon_scores[0].challenger_rmse_c == 1.0
+
+
+def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+    preparing = threading.Event()
+    release = threading.Event()
+    observed = threading.Event()
+
+    def slow_poll(**_kwargs):
+        preparing.set()
+        assert release.wait(2.0)
+        return None
+
+    controller._learning = SimpleNamespace(
+        poll_fit_off_path=slow_poll,
+        evaluate_ready_off_path=lambda: None,
+        observe_completed_frame=lambda _frame, *, identifiability: (
+            observed.set(),
+            SimpleNamespace(
+                history=SimpleNamespace(accepted=True, reasons=()),
+                completed_forecasts=(),
+                request=None,
+            ),
+        )[1],
+        passive_history=SimpleNamespace(observations=()),
+        register_causal_forecasts=lambda *_args, **_kwargs: (),
+        close=lambda: None,
+    )
+    controller._learning_pending_origin = "passive-online"
+    polling = threading.Thread(target=controller.poll_learning_off_path)
+    observing = threading.Thread(target=controller.observe_frame, args=(_frame(sequence=6),))
+    polling.start()
+    assert preparing.wait(1.0)
+    observing.start()
+    try:
+        assert observed.wait(0.1)
+    finally:
+        release.set()
+        polling.join(2.0)
+        observing.join(2.0)
+
+
+def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(monkeypatch):
+    controller, estimator, solver = _make(monkeypatch)
+
+    class ImmediateWorker:
+        def __init__(self):
+            self.job = None
+
+        def start(self):
+            return self
+
+        def submit(self, job):
+            self.job = job
+            return FitSubmission.ACCEPTED
+
+        def receive(self, *, timeout_s):
+            assert timeout_s == 0.0
+            return SimpleNamespace(
+                outcome=GreyFitSuccess(
+                    request=self.job.request,
+                    config=replace(self.job.config, C_c=900.0, K_Q=700.0, theta=75.0),
+                    rmse_c=1.0,
+                    max_error_c=2.0,
+                    identifiability=1.0,
+                    sample_count=len(self.job.observations),
+                    temperature_band_c=(
+                        self.job.observations[0].temp_c,
+                        self.job.observations[-1].temp_c,
+                    ),
+                    nfev=4,
+                )
+            )
+
+        def close(self):
+            return None
+
+    class CandidateEstimator:
+        def __init__(self, config):
+            self.config = config
+            self.state = np.zeros(10)
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class CandidateController:
+        def __init__(self, config):
+            self.config = config
+            self.closed = False
+
+        def solve(self, state, **_kwargs):
+            assert np.asarray(state).shape == (10,)
+            return SimpleNamespace(
+                sequence_q=np.full(self.config.horizon_steps, 0.4),
+                objective=1.0,
+            )
+
+        def close(self):
+            self.closed = True
+
+    identity = controller._learning_identity()
+    learning = GreyLearningOrchestrator(
+        identity=identity,
+        config=solver.config,
+        incumbent_pair=CandidatePair(estimator, solver),
+        estimator_factory=CandidateEstimator,
+        controller_factory=CandidateController,
+        timing_probe=lambda _native: TargetTimingEvidence(
+            target="pi",
+            samples=1_000,
+            p99_ms=1.0,
+            limit_ms=5.0,
+        ),
+        trigger_config=TriggerConfig(
+            min_samples=9,
+            min_input_variance=0.02,
+            min_input_levels=3,
+            min_temperature_span_c=8.0,
+            min_identifiability=0.5,
+        ),
+        worker=ImmediateWorker(),
+        max_observations=200,
+    ).start()
+    controller._learning = learning
+
+    def exciting_frame(sequence, temperature):
+        q = (0.15, 0.5, 0.85)[sequence % 3]
+        return replace(
+            _frame(sequence=sequence),
+            temp_c=temperature,
+            requested_q=q,
+            realized_q=q,
+            requested_auger_duty=q,
+            delivered_on_s=q * 20.0,
+            baseline_q=q,
+            allocated_q=q,
+            scheduled_on_s=q * 20.0,
+            realized_auger_duty=q,
+        )
+
+    submitted = None
+    for sequence in range(1, 10):
+        submitted = learning.observe_completed_frame(
+            exciting_frame(sequence, 69.0 + sequence),
+            identifiability=1.0,
+        )
+    controller._learning_pending_origin = submitted.request.origin
+    first_delivery, _ = controller.poll_learning_off_path()
+    first_candidate = first_delivery.preparation.candidate_pair.controller
+    assert first_delivery.preparation.accepted is True
+
+    origin_frame = _frame(sequence=10)
+    learning.observe_completed_frame(origin_frame, identifiability=1.0)
+    learning.register_causal_forecasts(
+        origin_frame,
+        incumbent_predict=lambda _origin: 80.0,
+        challenger_predict=lambda _origin: 0.0,
+    )
+    for sequence in range(11, 191):
+        learning.observe_completed_frame(_frame(sequence=sequence), identifiability=1.0)
+
+    _delivery, evaluation = controller.poll_learning_off_path()
+
+    assert isinstance(evaluation, ModelEvaluationPayload)
+    assert evaluation.rejection_reasons == tuple(
+        f"challenger-horizon-{horizon}" for horizon in (3, 15, 45, 90, 180)
+    )
+    assert learning.prepared is None
+    assert first_candidate.closed is True
+
+    later = None
+    for sequence in range(300, 309):
+        later = learning.observe_completed_frame(
+            exciting_frame(sequence, 70.0 + sequence - 300),
+            identifiability=1.0,
+        )
+    controller._learning_pending_origin = later.request.origin
+    later_delivery, _ = controller.poll_learning_off_path()
+    assert later_delivery.preparation.accepted is True
 
 
 def test_control_capabilities_and_status_remain_stable(monkeypatch):

@@ -25,7 +25,9 @@ import numpy as np
 from common.control_trace import (
     AmbientSource,
     CompletedOriginEvidence,
+    CompletedOriginPayload,
     HorizonScoreEvidence,
+    HorizonScorePayload,
     ModelEvaluationPayload,
     StateSpaceRefreshPayload,
 )
@@ -828,6 +830,8 @@ class Controller(ControllerBase):
         self._native_failure_diagnostics: SolverDiagnostics | None = None
         self._closed = False
         self._learning_lock = threading.RLock()
+        self._learning_evaluation_lock = threading.Lock()
+        self._learning_preparing = False
         self._learning_pending_origin: CandidateOrigin | None = None
         self._learning_candidate_pair: CandidatePair | None = None
         self._learning_pending_evaluation = None
@@ -1737,6 +1741,84 @@ class Controller(ControllerBase):
         )
 
     @staticmethod
+    def _grey_evaluation_payload(decision, *, evaluation_duration_ms):
+        completed = tuple(decision.completed_origins)
+        raw_origins = tuple(
+            CompletedOriginPayload(
+                origin_time_ms=int(origin.forecast.origin_time_s * 1_000),
+                completion_time_ms=int(origin.completion_time_s * 1_000),
+                horizon_steps=origin.horizon_steps,
+                generation=origin.role_generation,
+                observed_temperature_c=origin.observed_temperature_c,
+                incumbent_error_c=origin.incumbent_error_c,
+                challenger_error_c=origin.challenger_error_c,
+                braking=origin.phase == "coasting",
+                observation_sequence=origin.origin_sequence,
+                incumbent_digest=origin.incumbent_digest,
+                challenger_digest=origin.challenger_digest,
+                incumbent_prediction_c=origin.forecast.incumbent_prediction_c,
+                challenger_prediction_c=origin.forecast.challenger_prediction_c,
+                temperature_band=origin.temperature_band,
+                ambient_source=origin.ambient_source,
+            )
+            for origin in completed
+        )
+        evaluated_at_s = (
+            max(origin.completion_time_s for origin in completed)
+            if completed
+            else time.monotonic()
+        )
+        incumbent_score = (
+            math.sqrt(sum(origin.incumbent_error_c**2 for origin in completed) / len(completed))
+            if completed
+            else None
+        )
+        challenger_score = (
+            math.sqrt(sum(origin.challenger_error_c**2 for origin in completed) / len(completed))
+            if completed
+            else None
+        )
+        return ModelEvaluationPayload(
+            decision_id=decision.decision_id,
+            evaluated_at_ms=int(evaluated_at_s * 1_000),
+            role_generation=decision.role_generation,
+            promoted=False,
+            committed=False,
+            consecutive_wins=decision.consecutive_wins,
+            rejection_reasons=tuple(decision.blockers),
+            incumbent_prediction_score=incumbent_score,
+            challenger_prediction_score=challenger_score,
+            incumbent_braking_score=None,
+            challenger_braking_score=None,
+            sample_count=len(raw_origins),
+            prospective_digest=None,
+            window_start_ms=(
+                min(origin.origin_time_ms for origin in raw_origins)
+                if raw_origins
+                else int(evaluated_at_s * 1_000)
+            ),
+            window_end_ms=(
+                max(origin.completion_time_ms for origin in raw_origins)
+                if raw_origins
+                else int(evaluated_at_s * 1_000)
+            ),
+            incumbent_digest=decision.incumbent_digest,
+            challenger_digest=decision.challenger_digest,
+            completed_origins=raw_origins,
+            horizon_scores=tuple(
+                HorizonScorePayload(
+                    horizon_steps=score.horizon_steps,
+                    incumbent_rmse_c=score.incumbent_rmse_c if score.sample_count else None,
+                    challenger_rmse_c=score.challenger_rmse_c if score.sample_count else None,
+                    sample_count=score.sample_count,
+                )
+                for score in decision.scores
+            ),
+            evaluation_duration_ms=evaluation_duration_ms,
+            challenger_model_kind="grey-box",
+        )
+
+    @staticmethod
     def _forecast_from_adapter(adapter, origin):
         horizon = origin.horizon_steps
         frame = origin.frame
@@ -1770,38 +1852,43 @@ class Controller(ControllerBase):
         if not isinstance(observation, FrameObservation):
             raise TypeError("observation must be a FrameObservation")
         with self._learning_lock:
-            if self._learning is None:
-                return None
-            result = self._learning.observe_completed_frame(
+            learning = self._learning
+            preparing = self._learning_preparing
+        if learning is None:
+            return None
+        with self._learning_evaluation_lock:
+            result = learning.observe_completed_frame(
                 observation,
-                identifiability=1.0,
+                identifiability=0.0 if preparing else 1.0,
             )
-            request = getattr(result, "request", None)
-            if request is not None:
-                self._learning_pending_origin = request.origin
             self._register_learning_forecasts(observation)
-            forecasts = tuple(
-                self._completed_forecast_evidence(value)
-                for value in result.completed_forecasts
-            )
-            reasons = tuple(result.history.reasons)
+        request = getattr(result, "request", None)
+        with self._learning_lock:
+            if learning is self._learning and request is not None:
+                self._learning_pending_origin = request.origin
             evaluation = self._learning_pending_evaluation
             self._learning_pending_evaluation = None
-            return {
-                "role_generation": observation.role_generation,
-                "eligible": bool(result.history.accepted),
-                "rejection_reasons": reasons,
-                "input_variance": 0.0,
-                "input_levels": 0,
-                "incumbent_innovation_c": None,
-                "challenger_innovation_c": None,
-                "effective_updates": len(self._learning.passive_history.observations)
-                if hasattr(self._learning, "passive_history")
-                else 0,
-                "model_digest": grey_config_digest(self.mpc.config),
-                "forecast_origin_evidence": forecasts,
-                "learning_evaluation": evaluation,
-            }
+        forecasts = tuple(
+            self._completed_forecast_evidence(value)
+            for value in result.completed_forecasts
+        )
+        reasons = tuple(result.history.reasons)
+        return {
+            "role_generation": observation.role_generation,
+            "eligible": bool(result.history.accepted),
+            "rejection_reasons": reasons,
+            "input_variance": 0.0,
+            "input_levels": 0,
+            "incumbent_innovation_c": None,
+            "challenger_innovation_c": None,
+            "effective_updates": len(learning.passive_history.observations)
+            if hasattr(learning, "passive_history")
+            else 0,
+            "model_digest": grey_config_digest(self.mpc.config),
+            "forecast_origin_evidence": forecasts,
+            "learning_evaluation": evaluation,
+            "evaluation_payload": evaluation,
+        }
 
     def observation_failure(self, observation, error):
         """Turn an isolated learning-hook failure into explicit frame evidence."""
@@ -1839,25 +1926,57 @@ class Controller(ControllerBase):
     def poll_learning_off_path(self, *, live_origin=None):
         """Drain and prepare fits only from the runner's lifecycle dispatcher."""
         with self._learning_lock:
-            if self._learning is None:
+            learning = self._learning
+            if learning is None:
                 return None, None
             origin = self._learning_pending_origin if live_origin is None else live_origin
-            if origin is None:
-                return None, None
-            origin = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
-            delivery = self._learning.poll_fit_off_path(
-                live_identity=self._learning_identity(),
-                live_origin=origin,
-            )
+            if origin is not None:
+                origin = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
+                self._learning_preparing = True
+
+        delivery = None
+        try:
+            if origin is not None:
+                delivery = learning.poll_fit_off_path(
+                    live_identity=self._learning_identity(),
+                    live_origin=origin,
+                )
+        finally:
+            with self._learning_lock:
+                self._learning_preparing = False
+
+        with self._learning_lock:
+            if learning is not self._learning:
+                return delivery, None
             if delivery is not None:
                 self._learning_pending_origin = None
-                prepared = getattr(delivery, "prepared", None)
+                prepared = getattr(delivery, "preparation", getattr(delivery, "prepared", None))
                 if prepared is not None and prepared.accepted:
                     self._learning_candidate_pair = prepared.candidate_pair
-            evaluation = self._learning.evaluate_ready_off_path()
-            if evaluation is not None:
-                self._learning_pending_evaluation = evaluation
-            return delivery, evaluation
+
+        evaluation_started = time.monotonic()
+        with self._learning_evaluation_lock:
+            evaluation = learning.evaluate_ready_off_path()
+            blockers = () if evaluation is None else tuple(evaluation.blockers)
+            if blockers:
+                retire = getattr(learning, "retire_evaluated_candidate", None)
+                if callable(retire):
+                    retire(evaluation)
+        evaluation_duration_ms = (time.monotonic() - evaluation_started) * 1_000
+        payload = (
+            None
+            if evaluation is None
+            else self._grey_evaluation_payload(
+                evaluation,
+                evaluation_duration_ms=evaluation_duration_ms,
+            )
+        )
+        with self._learning_lock:
+            if learning is self._learning and payload is not None:
+                self._learning_pending_evaluation = payload
+                if blockers:
+                    self._learning_candidate_pair = None
+        return delivery, payload
 
     def get_status(self):
         return {

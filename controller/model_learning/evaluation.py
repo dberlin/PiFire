@@ -193,6 +193,7 @@ class EvaluationDecision:
     scores: tuple[HorizonScore, ...]
     consecutive_wins: int
     blockers: tuple[str, ...]
+    completed_origins: tuple[CompletedForecastOrigin, ...] = ()
 
 
 class CausalForecastEvaluator:
@@ -348,4 +349,5 @@ def evaluate_forecasts(
         scores=tuple(scores),
         consecutive_wins=wins,
         blockers=tuple(blockers),
+        completed_origins=rows,
     )

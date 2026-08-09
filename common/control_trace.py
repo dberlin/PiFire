@@ -864,7 +864,7 @@ class ModelEvaluationPayload:
     evaluation_duration_ms: NonNegativeFloat
     payload_type: Literal["model_evaluation"] = "model_evaluation"
 
-    challenger_model_kind: Literal["scheduled-arx", "innovation-state-space"] = "scheduled-arx"
+    challenger_model_kind: Literal["grey-box", "scheduled-arx", "innovation-state-space"] = "scheduled-arx"
     state_space_refresh: StateSpaceRefreshEvidence | None = None
 
     @model_validator(mode="after")
