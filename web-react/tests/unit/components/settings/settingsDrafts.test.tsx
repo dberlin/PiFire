@@ -163,7 +163,13 @@ describe("settings drafts survive a tab switch", () => {
     await waitFor(() => expect(screen.getByText("Saved ✓")).toBeInTheDocument());
     await router.revalidate();
 
-    expect(await screen.findByLabelText("Duty cycle row 3")).toHaveValue(50);
+    // waitFor, not findBy: the input exists throughout, so findBy resolves on
+    // the first tick and leaves the VALUE assertion unguarded -- and
+    // `revalidate()` resolves when the loader settles, which is before React
+    // has committed the render carrying its result. Retiring the draft is
+    // exactly that render, so asserting straight after the await sampled the
+    // pre-revalidation value about a quarter of the time.
+    await waitFor(() => expect(screen.getByLabelText("Duty cycle row 3")).toHaveValue(50));
     expect(screen.queryByText("Unsaved changes")).toBeNull();
   });
 });
