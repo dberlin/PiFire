@@ -354,8 +354,7 @@ def _drive(identifier, plant, duties, commanded=True):
 
 
 def _excitation_schedule(n, dt=20.0):
-    """Alternating duty levels with sustained transitions, long enough to clear
-    the 3600 s and 240-observation gates."""
+    """Alternating sustained duty levels that clear the excitation gates."""
     out = []
     for k in range(n):
         out.append(0.25 if (k // 30) % 2 == 0 else 0.55)
@@ -388,12 +387,27 @@ def test_no_promotion_without_enough_temperature_span():
     assert identifier.trusted_model() is None
 
 
-def test_no_promotion_before_the_time_gate():
+def _early_excitation_schedule(n):
+    """Eighty-second duty blocks that identify the exact plant by 500 s."""
+    return [0.2 if (index // 4) % 2 == 0 else 0.6 for index in range(n)]
+
+
+def test_first_trust_is_900_seconds_at_the_production_cadence():
     identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant()
-    _drive(identifier, plant, _excitation_schedule(100))  # 2000 s < 3600 s
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=20.0)
+    schedule = _early_excitation_schedule(45)
+
+    _drive(identifier, plant, schedule[:44])
+
+    assert plant.t == 880.0
+    assert identifier.status()["confirming"] == CONFIRM_WINDOW - 1
     assert identifier.trusted_model() is None
-    assert identifier.status()["accepted_seconds"] < 3600.0
+
+    _drive(identifier, plant, schedule[44:45])
+
+    assert plant.t == 900.0
+    assert identifier.status()["confirming"] is None
+    assert identifier.trusted_model() is not None
 
 
 def test_no_promotion_when_duty_std_is_the_sole_blocker():
@@ -439,7 +453,7 @@ def test_no_promotion_when_temp_span_is_the_sole_blocker():
 def test_no_promotion_when_the_count_gate_is_satisfied_but_the_time_gate_is_not():
     identifier = FOPDTIdentifier()
     plant = _FOPDTPlant(dt=5.0)
-    _drive(identifier, plant, _excitation_schedule(300))  # 300 * 5s = 1500s < 3600s
+    _drive(identifier, plant, _excitation_schedule(80))
     status = identifier.status()
     assert status["accepted"] >= MIN_ACCEPTED
     assert status["accepted_seconds"] < MIN_ACCEPTED_SECONDS
@@ -450,7 +464,8 @@ def test_no_promotion_when_the_count_gate_is_satisfied_but_the_time_gate_is_not(
 def test_no_promotion_when_the_time_gate_is_satisfied_but_the_count_gate_is_not():
     identifier = FOPDTIdentifier()
     plant = _FOPDTPlant(dt=60.0)
-    _drive(identifier, plant, _excitation_schedule(200))  # 199 * 60s = 11940s >= 3600s
+    duties = [0.25 if (index // 2) % 2 == 0 else 0.55 for index in range(20)]
+    _drive(identifier, plant, duties)
     status = identifier.status()
     assert status["accepted"] < MIN_ACCEPTED
     assert status["accepted_seconds"] >= MIN_ACCEPTED_SECONDS
@@ -699,16 +714,33 @@ def test_confirmation_requires_a_full_window_before_trust():
     believed: confirming climbs 1..CONFIRM_WINDOW-1 with no trusted model, then
     the window closes and a model appears in the same step confirming clears."""
     identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant()
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=20.0)
     seen_confirming = []
-    for u in _excitation_schedule(260):
+    for u in _early_excitation_schedule(45):
         _drive(identifier, plant, [u])
         confirming = identifier.status()["confirming"]
         if confirming is not None:
             assert identifier.trusted_model() is None
             seen_confirming.append(confirming)
     assert seen_confirming == list(range(1, CONFIRM_WINDOW))
+    assert plant.t == 900.0
     assert identifier.trusted_model() is not None
+
+
+def test_evaluation_continues_on_every_accepted_observation_after_900(monkeypatch):
+    identifier = FOPDTIdentifier()
+    plant = _FOPDTPlant()
+    evaluated_at = []
+    original_evaluate = identifier._evaluate
+
+    def recording_evaluate():
+        evaluated_at.append(identifier._prev[0])
+        original_evaluate()
+
+    monkeypatch.setattr(identifier, "_evaluate", recording_evaluate)
+    _drive(identifier, plant, _excitation_schedule(50))
+
+    assert [at for at in evaluated_at if at >= 900.0] == [900.0, 920.0, 940.0, 960.0, 980.0, 1000.0]
 
 
 def test_confirmation_resets_when_the_candidate_k_jumps():
@@ -791,15 +823,14 @@ def test_restore_clears_a_stale_confirmation_window():
     """A confirmation window accumulated against the pre-restore trusted state
     must not count toward confirming a candidate against the restored one."""
     identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant()
-    schedule = _excitation_schedule(260)
-    _drive(identifier, plant, schedule[:259])
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=20.0)
+    schedule = _early_excitation_schedule(45)
+    _drive(identifier, plant, schedule[:44])
     assert identifier.status()["confirming"] == CONFIRM_WINDOW - 1
     assert identifier.trusted_model() is None
     assert identifier.restore({"K": 700.0, "tau": 900.0, "theta": 10.0, "revision": 9}) is True
     assert identifier.status()["confirming"] is None
-    _drive(identifier, plant, schedule[259:260])
-    # A record predating the integrating form names none, and restore settles it.
+    _drive(identifier, plant, schedule[44:45])
     assert identifier.trusted_model() == {
         "form": FORM_FOPDT,
         "K": 700.0,
@@ -915,33 +946,35 @@ def test_distrust_is_not_sticky():
     assert identifier.status()["distrust_count"] == 1  # unchanged: no re-trip
 
 
-def test_distrust_clears_and_the_identifier_re_promotes_normally():
-    """End-to-end through observe()/record_output(), not direct resid_ew
-    manipulation: a model restored at a delay the actual plant no longer
-    supports is dropped, and normal promotion re-adopts a model that matches
-    the plant actually being observed -- distrust is not a dead end."""
+def test_confirmed_current_cook_model_directly_replaces_wrong_restored_model():
+    """Twenty agreeing current-cook evaluations may revise a wrong restored
+    model directly; distrust remains the backstop when no revision confirms."""
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 100.0, "revision": 9})
-    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=35.0)  # true delay far from the restored one
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=35.0)
+    seen_confirming = []
 
-    dropped = False
     for u in _excitation_schedule(1200):
         _drive(identifier, plant, [u])
-        if identifier.status()["distrust_count"] >= 1:
-            dropped = True
+        status = identifier.status()
+        model = identifier.trusted_model()
+        if status["confirming"] is not None:
+            seen_confirming.append(status["confirming"])
+        if model is not None and model["revision"] > 9:
             break
-    assert dropped, identifier.status()
-    assert identifier.trusted_model() is None
+        assert model is not None
+        assert model["revision"] == 9
+        assert status["distrust_count"] == 0
+    else:
+        pytest.fail(f"current-cook model did not replace restored model: {identifier.status()}")
 
-    promoted = False
-    for u in _excitation_schedule(1200):
-        _drive(identifier, plant, [u])
-        if identifier.trusted_model() is not None:
-            promoted = True
-            break
-    assert promoted, identifier.status()
-    model = identifier.trusted_model()
-    assert model["K"] == pytest.approx(800.0, rel=0.10)
+    assert seen_confirming == list(range(1, CONFIRM_WINDOW))
+    assert plant.t == 1640.0
+    assert model["form"] == FORM_FOPDT
+    assert model["K"] == pytest.approx(plant.K, rel=0.10)
+    assert model["tau"] == pytest.approx(plant.tau, rel=0.10)
+    assert model["theta"] == pytest.approx(plant.theta, abs=5.0)
+    assert identifier.status()["distrust_count"] == 0
 
 
 def test_status_reports_what_the_gates_are_waiting_for():

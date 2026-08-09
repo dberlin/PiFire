@@ -4,7 +4,7 @@
 
 **Goal:** Permit a fresh PID-SP model to activate at 900 seconds when every existing evidence gate passes, while slow or weakly excited grills continue evaluating every accepted sample until their evidence becomes defensible.
 
-**Architecture:** Retain the existing passive `FOPDTIdentifier`, delay banks, physical and uncertainty gates, 20-evaluation confirmation, and persisted-model behavior. Reduce only the coarse pre-confirmation count and accepted-time floors so confirmation can begin near 520 seconds at the fixed 20-second pulse cadence; the twentieth stable evaluation can then activate at 900 seconds.
+**Architecture:** Retain the existing passive `FOPDTIdentifier`, delay banks, physical and uncertainty gates, 20-evaluation confirmation, and persisted-model first-tick behavior. Reduce only the coarse pre-confirmation count and accepted-time floors so confirmation can begin near 520 seconds at the fixed 20-second pulse cadence; the twentieth stable evaluation can then activate at 900 seconds. A confirmed current-cook candidate may directly revise a wrong restored model before distrust, while the existing distrust thresholds and drop mechanics remain the backstop when no revision confirms.
 
 **Tech Stack:** Python 3.11+, NumPy, pytest, PiFire PID-SP controller, framed `PulseScheduler`, GrillSim, MAKGrillSim, Jujutsu.
 
@@ -14,7 +14,7 @@
 - `MIN_ACCEPTED` is exactly `25`.
 - `CONFIRM_WINDOW` remains exactly `20`.
 - `FOPDTIdentifier.MIN_HOLD_DUTY_SAMPLES` remains exactly `60`.
-- The 15°F temperature span, duty variation, sustained transition, physics, uncertainty, residual-margin, gap, confirmation, blending, distrust, restore, and persistence behavior must not change.
+- The 15°F temperature span, duty variation, sustained transition, physics, uncertainty, residual-margin, gap, confirmation, blending, restore serialization, persistence, and distrust thresholds/drop mechanics must not change. Exact event ordering between confirmed revision and distrust is not required: either may act first, and a confirmed current-cook candidate may directly replace a wrong restored model.
 - A model is never forced active at 900 seconds; 900 seconds is only the earliest activation at the production 20-second cadence.
 - After eligibility, evaluation continues on every accepted observation with no later scheduled checkpoint.
 - Add no setting, migration, persistence-schema change, fallback model, or deliberate excitation.
@@ -26,6 +26,8 @@
 **Files:**
 - Modify: `controller/fopdt_identifier.py:348-355`
 - Modify: `tests/unit/controller/test_fopdt_identifier.py:356-358,391-458,697-711,790-809`
+- Modify: `docs/superpowers/specs/2026-08-09-pid-sp-opportunistic-learning-design.md`
+- Modify: `docs/superpowers/plans/2026-08-09-pid-sp-opportunistic-learning.md`
 - Verify: `tests/unit/controller/test_pid_sp.py`
 - Behavioral harness: `docs/superpowers/experiments/controller_matrix.py`
 
@@ -238,7 +240,17 @@ Expected: all six tests PASS. The production-cadence test must report `plant.t =
 
 - [ ] **Step 10: Run the complete PID-SP identifier and controller unit suites**
 
-Run:
+First run the restored-model path that was affected by the lower floors:
+
+```bash
+python -m pytest -q \
+  tests/unit/controller/test_fopdt_identifier.py::test_confirmed_current_cook_model_directly_replaces_wrong_restored_model
+```
+
+Expected: PASS through unmodified `observe()`/`record_output()` behavior. The 20-evaluation current-cook confirmation directly replaces the wrong restored model before distrust in this fixture, and `distrust_count` remains zero. The direct distrust threshold and drop tests remain the backstop coverage.
+
+Then run:
+
 
 ```bash
 python -m pytest -q \
@@ -248,7 +260,7 @@ python -m pytest -q \
   tests/unit/controller/test_pid_sp.py
 ```
 
-Expected: PASS with no deselected identifier, Smith-predictor, or PID-SP tests. In particular, constant-duty, insufficient-span, physics, uncertainty, residual-margin, confirmation-reset, distrust, persistence, and first-tick restore tests must remain green.
+Expected: PASS with no deselected identifier, Smith-predictor, or PID-SP tests. In particular, constant-duty, insufficient-span, physics, uncertainty, residual-margin, confirmation-reset, direct restored-model revision, direct distrust backstop, persistence, and first-tick restore tests must remain green.
 
 - [ ] **Step 11: Run the paired behavioral simulator matrix**
 
@@ -327,6 +339,8 @@ Expected changed files only:
 ```text
 controller/fopdt_identifier.py
 tests/unit/controller/test_fopdt_identifier.py
+docs/superpowers/specs/2026-08-09-pid-sp-opportunistic-learning-design.md
+docs/superpowers/plans/2026-08-09-pid-sp-opportunistic-learning.md
 ```
 
 The working-copy description remains `feat(pid_sp): allow opportunistic model trust at 900 seconds`. Do not squash it into the design or plan commits.

@@ -345,9 +345,12 @@ def promote(resid_ew, mask):
     return int(np.argmin(resid)), float(margin)
 
 
-#: Trust gates. Profile-independent, so no cook shape is privileged.
-MIN_ACCEPTED_SECONDS = 3600.0
-MIN_ACCEPTED = 240
+#: Initial trust can begin after 25 accepted observations spanning 500 s.
+#: At PID-SP's fixed 20 s cadence, the subsequent 20-sample confirmation
+#: window makes 900 s the earliest activation. Every evidence-dependent gate
+#: below remains authoritative, so a slow or unexcited grill keeps learning.
+MIN_ACCEPTED_SECONDS = 500.0
+MIN_ACCEPTED = 25
 MIN_DUTY_STD = 0.05
 MIN_TRANSITION = 0.05
 MIN_TRANSITION_HOLD = 60.0

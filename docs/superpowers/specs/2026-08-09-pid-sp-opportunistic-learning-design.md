@@ -26,9 +26,11 @@ Keep unchanged:
 - FOPDT and IPDT physical bounds;
 - relative-standard-error limits;
 - the delay-bank promotion margin;
-- material-change, blending, distrust, persistence, and restore behavior.
+- material-change, blending, persistence, restore serialization, and distrust thresholds and drop mechanics.
 
 At the fixed 20-second cadence, the 25th accepted regression observation arrives near 520 seconds after the initial temperature anchor. That observation can begin confirmation. Nineteen further agreeing observations put the earliest activation at 900 seconds.
+
+A restored model is not privileged over a newly confirmed current-cook candidate. Twenty agreeing gated evaluations may directly revise a wrong restored model before its residual mismatch sustains the distrust window. Distrust keeps the same thresholds, sustain count, and drop behavior as a backstop when no replacement earns confirmation first; the design does not require a distrust event to precede revision.
 
 ## Continuous Evaluation
 
@@ -79,6 +81,7 @@ The existing identifier status remains the source of learning progress:
 No countdown or promise that activation will occur at 900 seconds is introduced. User-facing wording must describe 900 seconds as the earliest activation and state that slow or unexcited cooks continue collecting evidence.
 
 A restored model remains trusted on the first tick of a subsequent cook. The reduced initial floors apply only to earning or revising a model from current-cook evidence; they do not delay persisted models.
+Current-cook evidence may directly replace that restored model after the unchanged 20-evaluation confirmation window. If no replacement confirms, the unchanged distrust thresholds and drop mechanics can still clear a contradicted restored model.
 
 ## Simulation Evidence
 
@@ -129,7 +132,7 @@ Implementation is limited to:
 
 - changing the two eligibility constants;
 - updating comments and tests that encode the old one-hour/240-observation contract;
-- adding focused tests for the 500-second/25-observation eligibility floor, continuous reevaluation, and 900-second earliest activation at the production cadence;
+- adding focused tests for the 500-second/25-observation eligibility floor, continuous reevaluation, 900-second earliest activation at the production cadence, and direct confirmed revision of a wrong restored model;
 - running the paired simulator scenarios as the behavioral acceptance check.
 
 No controller setting, migration, persistence-schema change, deliberate excitation, learning deadline, fallback model, or forced promotion path is added.
@@ -139,7 +142,7 @@ No controller setting, migration, persistence-schema change, deliberate excitati
 1. No candidate can activate before 900 simulated seconds at the production 20-second cadence from a fresh identifier.
 2. An identifiable GrillSim candidate can activate at 900 seconds after 20 stable gated evaluations.
 3. A candidate that is not ready at 900 seconds is evaluated on every later accepted observation and can activate as soon as it completes confirmation.
-4. Physics, uncertainty, delay-margin, excitation, temperature-span, gap, confirmation, distrust, and restore tests retain their existing behavior.
+4. Physics, uncertainty, delay-margin, excitation, temperature-span, gap, confirmation, persistence, and first-tick restore tests retain their existing behavior. A confirmed current-cook model may replace a wrong restored model before distrust; the unchanged distrust thresholds and drop mechanics remain backstop coverage when no replacement confirms.
 5. The 60-observation hold-duty floor remains unchanged.
 6. Ten paired seeds across steady 225°F, steady 450°F, and 225→275°F show no material overshoot regression on either simulator.
 7. MAKGrillSim is not forced active at 900 seconds when its evidence gates fail.
