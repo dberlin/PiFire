@@ -7,6 +7,10 @@ that the updater page will actually show what you asked for.
     updater/tag_release.py v1.11-dannyb --tag-only   # manifest already committed; just tag
     updater/tag_release.py v1.11-dannyb --no-push    # local only
     updater/tag_release.py --check                   # what shows today, change nothing
+    updater/tag_release.py --dev                     # latest dev tag + 1
+    updater/tag_release.py --patch                   # X.Y.Z -> X.Y.(Z+1)
+    updater/tag_release.py --minor                   # X.Y.Z -> X.(Y+1).0
+    updater/tag_release.py --major                   # X.Y.Z -> (X+1).0.0
 
     updater/tag_release.py v1.11-dannyb --git        # force the git path in a jj checkout
     updater/tag_release.py v1.11-dannyb --bookmark b # jj: which bookmark to move and push
@@ -89,6 +93,27 @@ def derive_version(tag: str) -> str:
     version = tag.removeprefix("v").split("-", 1)[0]
     parts = version.split(".")
     return ".".join(parts + ["0"] * (3 - len(parts))) if len(parts) < 3 else version
+
+
+_RELEASE_TAG = re.compile(r"^v?([0-9]+)\.([0-9]+)\.([0-9]+)(?:-dev([0-9]+))?$")
+
+
+def increment_tag(current: str, kind: str) -> str:
+    """Advance one component of a conventional release tag."""
+    match = _RELEASE_TAG.fullmatch(current)
+    if match is None:
+        raise Refused(f"cannot auto-increment latest tag {current!r}; expected vX.Y.Z or vX.Y.Z-devN.")
+    major, minor, patch = (int(value) for value in match.group(1, 2, 3))
+    dev = int(match.group(4)) if match.group(4) is not None else None
+    if kind == "dev":
+        return f"v{major}.{minor}.{patch}-dev{1 if dev is None else dev + 1}"
+    if kind == "patch":
+        return f"v{major}.{minor}.{patch + 1}"
+    if kind == "minor":
+        return f"v{major}.{minor + 1}.0"
+    if kind == "major":
+        return f"v{major + 1}.0.0"
+    raise ValueError(f"unknown increment kind: {kind}")
 
 
 def check_numeric(version: str) -> None:
@@ -212,7 +237,8 @@ class GitVcs:
         return self.runner.out("git", "rev-parse", "HEAD").strip()
 
     def resolve_bookmark(self) -> str:
-        return self.runner.out("git", "symbolic-ref", "--quiet", "--short", "HEAD").strip()
+        command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
+        return self.runner.out(*command).strip() if self.runner.ok(*command) else ""
 
     def require_clean(self) -> None:
         """Nothing to check: the git path commits the manifest by path."""
@@ -264,6 +290,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("tag", nargs="?", help="the release tag, e.g. v1.11.0-dev28")
+    increments = parser.add_mutually_exclusive_group()
+    increments.add_argument("--dev", dest="increment", action="store_const", const="dev")
+    increments.add_argument("--patch", dest="increment", action="store_const", const="patch")
+    increments.add_argument("--minor", dest="increment", action="store_const", const="minor")
+    increments.add_argument("--major", dest="increment", action="store_const", const="major")
     parser.add_argument("--version", help="manifest server version (default: derived from the tag)")
     parser.add_argument("--build", type=int, help="manifest build number (default: current + 1)")
     parser.add_argument("--bookmark", help="jj: which bookmark to move and push")
@@ -273,19 +304,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--jj", dest="vcs", action="store_const", const="jj")
     mode.add_argument("--git", dest="vcs", action="store_const", const="git")
-    parser.set_defaults(push=True, commit=True, vcs=None)
+    parser.set_defaults(push=True, commit=True, vcs=None, increment=None)
     args = parser.parse_args(argv)
-    if not args.check and not args.tag:
-        parser.error("a tag is required (or use --check)")
+    if args.check:
+        if args.tag or args.increment:
+            parser.error("--check cannot be combined with a tag or increment option")
+    elif bool(args.tag) == bool(args.increment):
+        parser.error("pass exactly one tag or increment option (--dev, --patch, --minor, --major)")
     return args
 
 
-def measured_against(runner: Runner, bookmark: str) -> str:
-    """The ref the updater measures "Remote:" against: origin/<branch>, or HEAD
-    when there is none -- the same choice updater.py's get_remote_version makes.
+def measured_against(runner: Runner) -> str:
+    """Match updater.get_remote_version(): the active Git branch, or HEAD.
+
+    A jj publication bookmark is not evidence that colocated Git HEAD names
+    that branch. In the normal jj workspace HEAD is detached, so the updater
+    measures tags reachable from HEAD.
     """
-    if bookmark and runner.ok("git", "rev-parse", "--verify", "--quiet", f"origin/{bookmark}"):
-        return f"origin/{bookmark}"
+    command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
+    if runner.ok(*command):
+        return f"origin/{runner.out(*command).strip()}"
     return "HEAD"
 
 
@@ -295,7 +333,7 @@ def latest_merged_tag(runner: Runner, ref: str) -> str:
 
 
 def report(runner: Runner, vcs, manifest: Path, bookmark: str) -> tuple[str, str]:
-    ref = measured_against(runner, bookmark)
+    ref = measured_against(runner)
     commit = vcs.release_commit()
     described = runner.out("git", "describe", "--tags", "--always", commit).strip()
     shown = latest_merged_tag(runner, ref)
@@ -317,6 +355,18 @@ def main(argv=None, runner=None, vcs=None, manifest=None) -> int:
     manifest = manifest or MANIFEST
 
     bookmark = args.bookmark or vcs.resolve_bookmark()
+
+    if args.increment:
+        # Refresh before deriving or writing anything. A stale local tag set
+        # could otherwise choose a name that already exists remotely, publish
+        # the release commit, then fail only when the duplicate tag is pushed.
+        runner.run("git", "fetch", "--tags", "--force")
+        ref = measured_against(runner)
+        current_tag = latest_merged_tag(runner, ref)
+        if not current_tag:
+            raise Refused(f"cannot auto-increment: no tag is merged into {ref}")
+        args.tag = increment_tag(current_tag, args.increment)
+        print(f"Latest tag on {ref}: {current_tag}; cutting {args.tag}")
 
     if args.check:
         report(runner, vcs, manifest, bookmark)

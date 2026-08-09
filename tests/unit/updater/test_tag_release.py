@@ -101,6 +101,25 @@ def test_derive_version_strips_prefix_suffix_and_pads(tag, expected):
     assert tag_release.derive_version(tag) == expected
 
 
+@pytest.mark.parametrize(
+    "current,kind,expected",
+    [
+        ("v1.11.0-dev37", "dev", "v1.11.0-dev38"),
+        ("v1.11.0", "dev", "v1.11.0-dev1"),
+        ("v1.11.0-dev37", "patch", "v1.11.1"),
+        ("v1.11.0-dev37", "minor", "v1.12.0"),
+        ("v1.11.0-dev37", "major", "v2.0.0"),
+    ],
+)
+def test_increment_tag_advances_the_requested_component(current, kind, expected):
+    assert tag_release.increment_tag(current, kind) == expected
+
+
+def test_increment_tag_refuses_an_unstructured_latest_tag():
+    with pytest.raises(tag_release.Refused, match="cannot auto-increment"):
+        tag_release.increment_tag("v1.11-dannyb", "dev")
+
+
 @pytest.mark.parametrize("version", ["1.11-dannyb", "1.11.0-dev28", "dev", "1..2", ""])
 def test_non_numeric_versions_are_rejected(version):
     # semantic_ver_to_list runs int() over each dotted part, so a non-numeric
@@ -202,6 +221,23 @@ def test_jj_commit_seals_the_release_and_moves_the_bookmark():
     assert runner.ran("jj", "bookmark", "set", "trunk", "-r", "@-")
 
 
+def test_git_vcs_detached_head_resolves_no_publication_bookmark():
+    command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
+    vcs = tag_release.GitVcs(FakeRunner(ok={command: False}))
+    assert vcs.resolve_bookmark() == ""
+
+
+def test_detached_git_head_is_measured_from_head_even_with_a_jj_bookmark():
+    runner = FakeRunner(ok={("git", "symbolic-ref", "--quiet", "--short", "HEAD"): False})
+    assert tag_release.measured_against(runner) == "HEAD"
+
+
+def test_attached_git_head_is_measured_from_its_origin_branch():
+    command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
+    runner = FakeRunner(replies={command: "main\n"}, ok={command: True})
+    assert tag_release.measured_against(runner) == "origin/main"
+
+
 # --------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------
@@ -237,6 +273,25 @@ def test_a_clean_cut_tags_an_annotated_tag_and_pushes_both_refs(manifest):
     assert runner.ran("git", "tag", "-a", "v1.11.0-dev28")
     assert runner.ran("jj", "git", "push", "-b", "trunk")
     assert runner.ran("git", "push", "origin", "refs/tags/v1.11.0-dev28")
+
+
+def test_auto_dev_uses_the_latest_merged_tag_and_runs_the_normal_release(manifest):
+    runner = _release_runner(
+        extra={
+            ("git", "describe"): "v1.11.0-dev29",
+            ("git", "tag", "--sort=v:refname", "--merged"): [
+                "v1.11.0-dev28",
+                "v1.11.0-dev29",
+            ],
+        }
+    )
+    assert _cut(runner, manifest, ["--dev"]) == 0
+    assert runner.ran("git", "tag", "-a", "v1.11.0-dev29")
+    assert runner.ran("git", "push", "origin", "refs/tags/v1.11.0-dev29")
+    fetch = runner.calls.index(["git", "fetch", "--tags", "--force"])
+    tag = next(index for index, call in enumerate(runner.calls) if call[:3] == ["git", "tag", "-a"])
+    commit = next(index for index, call in enumerate(runner.calls) if call[:2] == ["jj", "describe"])
+    assert fetch < commit < tag
 
 
 def test_no_push_leaves_both_refs_local(manifest):
