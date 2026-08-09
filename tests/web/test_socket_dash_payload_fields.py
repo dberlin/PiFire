@@ -70,3 +70,15 @@ def test_the_limit_is_not_the_gauge_ceiling(ds):
     data = _dash_data()
     assert data["safetyMaxTemp"] == 412
     assert data["primaryProbe"]["maxTemp"] != 412
+
+
+
+def test_payload_carries_only_the_model_learning_invalidation_revision(ds, monkeypatch):
+    from blueprints.mobile import socket_io
+
+    monkeypatch.setattr(socket_io, "learning_report_revision", lambda: "revision-17")
+
+    data = _dash_data()
+
+    assert data["modelLearningRevision"] == "revision-17"
+    assert "modelLearningReport" not in data

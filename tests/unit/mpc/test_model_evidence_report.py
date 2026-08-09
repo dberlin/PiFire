@@ -62,7 +62,7 @@ def _live(
 def _payload(*, status: LearningStatus = LearningStatus.COLLECTING) -> dict[str, object]:
     return build_learning_report(
         (),
-        activation_state=_activation(),
+        activation_state=_activation(phase="aborted"),
         live_status=_live(status=status),
         calibration_command_high_water=7,
     ).as_dict()
@@ -138,7 +138,7 @@ def test_report_projects_calibration_command_high_water_without_making_it_a_seco
     assert "command_status" not in calibration
 
 
-def test_current_report_cache_key_includes_evidence_activation_live_status_and_command_high_water(
+def test_current_report_cache_key_includes_every_authoritative_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = 0
@@ -153,10 +153,12 @@ def test_current_report_cache_key_includes_evidence_activation_live_status_and_c
     base_records = (_evidence(),)
     base_activation = _activation()
     base_live = _live()
+    base_checkpoint = {"cache-token": 1}
 
     first = current_learning_report(
         base_records,
         activation_state=base_activation,
+        checkpoint=base_checkpoint,
         live_status=base_live,
         calibration_command_high_water=7,
     )
@@ -164,6 +166,7 @@ def test_current_report_cache_key_includes_evidence_activation_live_status_and_c
         base_records,
         activation_state=dict(base_activation),
         live_status=dict(base_live),
+        checkpoint=dict(base_checkpoint),
         calibration_command_high_water=7,
     )
     assert first is duplicate
@@ -172,29 +175,40 @@ def test_current_report_cache_key_includes_evidence_activation_live_status_and_c
     current_learning_report(
         (_evidence("gap-2"),),
         activation_state=base_activation,
+        checkpoint=base_checkpoint,
         live_status=base_live,
         calibration_command_high_water=7,
     )
     current_learning_report(
         base_records,
         activation_state={**base_activation, "phase": "aborted"},
+        checkpoint=base_checkpoint,
         live_status=base_live,
         calibration_command_high_water=7,
     )
     current_learning_report(
         base_records,
         activation_state=base_activation,
+        checkpoint=base_checkpoint,
         live_status={**base_live, "status": LearningStatus.ERROR},
         calibration_command_high_water=7,
     )
     current_learning_report(
         base_records,
         activation_state=base_activation,
+        checkpoint=base_checkpoint,
         live_status=base_live,
         calibration_command_high_water=8,
     )
+    current_learning_report(
+        base_records,
+        activation_state=base_activation,
+        checkpoint={"cache-token": 2},
+        live_status=base_live,
+        calibration_command_high_water=7,
+    )
 
-    assert calls == 5
+    assert calls == 6
 
 
 def test_invalid_live_checkpoint_generation_fails_closed_visibly() -> None:
@@ -236,3 +250,62 @@ def test_inconsistent_live_candidate_authority_fails_closed_visibly(
 
     assert payload["status"] == "error"
     assert payload["errors"] == [error]
+
+
+def test_retired_evidence_is_counted_only_as_audit_history() -> None:
+    current = _evidence("current-gap")
+    retired = _evidence("retired-gap").model_copy(update={"schema_version": 2})
+
+    payload = build_learning_report(
+        (retired, current),
+        activation_state=_activation(phase="aborted"),
+        live_status=_live(),
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    evidence = _section(payload, "evidence")
+    assert evidence["count"] == 1
+    assert evidence["audit_count"] == 2
+    assert evidence["retired_excluded"] == 1
+
+
+@pytest.mark.parametrize(
+    ("live", "expected"),
+    (
+        ({**_live(), "fit_status": FitStatus.QUEUED}, "fitting"),
+        ({**_live(), "fit_status": FitStatus.RUNNING}, "fitting"),
+        ({**_live(), "pending_swap": True}, "activating"),
+    ),
+)
+def test_live_transient_phases_overlay_without_changing_durable_identity(live, expected) -> None:
+    payload = build_learning_report(
+        (),
+        activation_state=_activation(phase="aborted"),
+        live_status=live,
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    assert payload["status"] == expected
+    assert _section(payload, "active_model")["digest"] == _INCUMBENT
+    assert _section(payload, "candidate")["digest"] == _CANDIDATE
+
+
+def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> None:
+    missing = build_learning_report(
+        (),
+        activation_state=None,
+        live_status=None,
+        calibration_command_high_water=0,
+    ).as_dict()
+    incompatible = build_learning_report(
+        (),
+        activation_state=None,
+        checkpoint={"version": 3, "revision": 1},
+        live_status=None,
+        calibration_command_high_water=0,
+    ).as_dict()
+
+    assert missing["status"] == "error"
+    assert missing["errors"] == ["checkpoint-missing"]
+    assert incompatible["status"] == "schema-invalidated"
+    assert incompatible["errors"] == ["checkpoint-schema-invalid"]

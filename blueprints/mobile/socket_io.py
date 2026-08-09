@@ -64,6 +64,7 @@ from common.system import (
     gather_system_info,
 )
 from common.modes import Mode
+from controller.model_learning.report import learning_report_revision
 from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
 from common.app import (
     CONTROL_DOWN_ERROR,
@@ -381,6 +382,7 @@ def _get_dash_data(settings, pelletdb):
         },
         "foodProbes": food_probes,
         "primaryProbe": primary_probe,
+        "modelLearningRevision": learning_report_revision(),
     }
     return dash_data
 

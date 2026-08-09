@@ -815,8 +815,8 @@ def read_model_evidence(
     database_path: str | os.PathLike[str] | None = None,
 ) -> list[ModelEvidenceRecord]:
     """Return compatible compact evidence in deterministic append order."""
-    clauses = ["schema_version IN (?, ?)"]
-    params: list[object] = [1, MODEL_EVIDENCE_SCHEMA_VERSION]
+    clauses = ["schema_version IN (?, ?, ?)"]
+    params: list[object] = [1, 2, MODEL_EVIDENCE_SCHEMA_VERSION]
     if session_id is not None:
         clauses.append("session_id=?")
         params.append(_require_control_trace_identifier(session_id, "session_id"))
@@ -857,11 +857,11 @@ def commit_model_activation(
                 SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
                        model_digest, provenance_digest, schema_version, payload
                 FROM model_evidence
-                WHERE kind=?
+                WHERE kind=? AND schema_version=?
                 ORDER BY timestamp_ms DESC, evidence_id DESC
                 LIMIT 1
                 """,
-                (EvidenceKind.CONFIDENCE_DECISION.value,),
+                (EvidenceKind.CONFIDENCE_DECISION.value, MODEL_EVIDENCE_SCHEMA_VERSION),
             ).fetchone()
             if authority_row is None:
                 raise ValueError("activation-authority-changed")
@@ -882,8 +882,9 @@ def commit_model_activation(
                 SELECT DISTINCT provenance_digest
                 FROM model_evidence
                 WHERE model_digest=? AND role_generation=? AND provenance_digest IS NOT NULL
+                  AND schema_version=?
                 """,
-                (validated.model_digest, authority.role_generation),
+                (validated.model_digest, authority.role_generation, MODEL_EVIDENCE_SCHEMA_VERSION),
             ).fetchall()
             if {row[0] for row in provenance_rows} != {validated.provenance_digest}:
                 raise ValueError("activation-authority-changed")
@@ -987,11 +988,11 @@ def commit_model_activation_phase(
                     SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
                            model_digest, provenance_digest, schema_version, payload
                     FROM model_evidence
-                    WHERE kind=?
+                    WHERE kind=? AND schema_version=?
                     ORDER BY timestamp_ms DESC, evidence_id DESC
                     LIMIT 1
                     """,
-                    (EvidenceKind.CONFIDENCE_DECISION.value,),
+                    (EvidenceKind.CONFIDENCE_DECISION.value, MODEL_EVIDENCE_SCHEMA_VERSION),
                 ).fetchone()
                 if authority_row is None:
                     raise ValueError("activation-authority-changed")
@@ -1012,8 +1013,13 @@ def commit_model_activation_phase(
                     SELECT DISTINCT provenance_digest
                     FROM model_evidence
                     WHERE model_digest=? AND role_generation=? AND provenance_digest IS NOT NULL
+                      AND schema_version=?
                     """,
-                    (record.candidate.model_digest, record.incumbent.role_generation),
+                    (
+                        record.candidate.model_digest,
+                        record.incumbent.role_generation,
+                        MODEL_EVIDENCE_SCHEMA_VERSION,
+                    ),
                 ).fetchall()
                 if {row[0] for row in provenance_rows} != {record.incumbent.model_digest}:
                     raise ValueError("activation-authority-changed")
@@ -1049,11 +1055,11 @@ def commit_model_activation_phase(
                                role_generation, model_digest, provenance_digest,
                                schema_version, payload
                         FROM model_evidence
-                        WHERE kind=?
+                        WHERE kind=? AND schema_version=?
                         ORDER BY timestamp_ms DESC, evidence_id DESC
                         LIMIT 1
                         """,
-                        (EvidenceKind.CONFIDENCE_DECISION.value,),
+                        (EvidenceKind.CONFIDENCE_DECISION.value, MODEL_EVIDENCE_SCHEMA_VERSION),
                     ).fetchone()
                     authority = (
                         None
@@ -1136,9 +1142,9 @@ def commit_model_rollback(
                 """
                 SELECT evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
                        model_digest, provenance_digest, schema_version, payload
-                FROM model_evidence WHERE schema_version IN (?, ?) ORDER BY id
+                FROM model_evidence WHERE schema_version=? ORDER BY id
                 """,
-                (1, MODEL_EVIDENCE_SCHEMA_VERSION),
+                (MODEL_EVIDENCE_SCHEMA_VERSION,),
             ).fetchall()
             records = tuple(
                 ModelEvidenceRecord.from_db_row(ModelEvidenceDbRow(*stored_row)) for stored_row in stored_rows
@@ -1227,6 +1233,251 @@ def read_model_activation(*, database_path: str | os.PathLike[str] | None = None
             return None
         row = _activation_state_row(connection)
     return None if row is None else ModelActivationState(*row)
+
+
+@dataclass(frozen=True, slots=True)
+class GreyLearningMigrationResult:
+    """The authority selected by one atomic grey-only migration."""
+
+    snapshot: dict[str, object]
+    source: str
+    reason: str | None
+
+
+def _migration_json_blob(connection: sqlite3.Connection, key: str):
+    row = connection.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+    if row is None:
+        return None
+    try:
+        return json.loads(row[0])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _migration_authority_snapshot(value, *, current_only):
+    from controller.mpc import GreySnapshotInvalid, migrate_grey_learning_snapshot
+
+    if not isinstance(value, dict) or value.get("model_kind") != "grey-box":
+        return None
+    snapshot = value.get("snapshot")
+    if current_only and (
+        not isinstance(snapshot, dict)
+        or snapshot.get("version") != 4
+        or value.get("model_schema") != 4
+    ):
+        return None
+    try:
+        return migrate_grey_learning_snapshot(snapshot)
+    except GreySnapshotInvalid:
+        return None
+
+
+def migrate_mpc_learning_authority(
+    *,
+    defaults,
+    activation_input_key: str | None = None,
+    database_path: str | os.PathLike[str] | None = None,
+) -> GreyLearningMigrationResult:
+    """Atomically converge the checkpoint and activation pointer on grey v4.
+
+    ``activation_input_key`` is an injected migration seam for legacy blob
+    installations. Normal startup omits it and migrates the Task 10 singleton.
+    Historical evidence rows are deliberately untouched.
+    """
+
+    from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
+    from controller.mpc import GreySnapshotInvalid, migrate_grey_learning_snapshot
+
+    if not isinstance(defaults, dict):
+        raise ValueError("defaults must be an object")
+    with _model_evidence_connection(database_path) as connection:
+        with datastore.transaction(connection) as conn:
+            controller_envelope = _migration_json_blob(conn, MODEL_STATE_KEY)
+            controller_snapshot = None
+            if (
+                isinstance(controller_envelope, dict)
+                and controller_envelope.get("version") == SCHEMA_VERSION
+                and isinstance(controller_envelope.get("models"), dict)
+            ):
+                controller_snapshot = controller_envelope["models"].get("mpc")
+            revision = (
+                controller_snapshot.get("revision", 0)
+                if isinstance(controller_snapshot, dict)
+                and isinstance(controller_snapshot.get("revision", 0), int)
+                and not isinstance(controller_snapshot.get("revision", 0), bool)
+                else 0
+            )
+
+            activation_document = (
+                _migration_json_blob(conn, activation_input_key)
+                if activation_input_key is not None
+                else None
+            )
+            if activation_input_key is None:
+                row = _activation_state_row(conn)
+                if row is not None:
+                    state = ModelActivationState(*row)
+
+                    def pair_authority(pair, fallback_json):
+                        if pair is None:
+                            try:
+                                decoded = json.loads(fallback_json)
+                            except (TypeError, ValueError, json.JSONDecodeError):
+                                return None
+                            return {
+                                "model_kind": (
+                                    decoded.get("model_kind", "grey-box")
+                                    if isinstance(decoded, dict)
+                                    else None
+                                ),
+                                "model_schema": decoded.get("version") if isinstance(decoded, dict) else None,
+                                "snapshot": decoded,
+                            }
+                        configuration = dict(pair.configuration)
+                        physical = {
+                            "C_c": configuration.get("C_c"),
+                            "h_amb": configuration.get("h_amb"),
+                            "T_amb": configuration.get("T_amb"),
+                            "theta": configuration.get("theta"),
+                            "n_delay": configuration.get("n_delay", configuration.get("delay_states")),
+                            "K_Q": configuration.get("K_Q"),
+                            "sigma": configuration.get("sigma"),
+                        }
+                        try:
+                            snapshot = migrate_grey_learning_snapshot(
+                                {
+                                    "version": 3,
+                                    "revision": max(revision, pair.role_generation),
+                                    "params": physical,
+                                    "rmse": None,
+                                    "samples": 0,
+                                    "band_c": [0.0, 0.0],
+                                    "nfev": None,
+                                }
+                            )
+                        except GreySnapshotInvalid:
+                            return None
+                        return {
+                            "model_kind": "grey-box",
+                            "model_schema": 4,
+                            "snapshot": snapshot,
+                            "pair": pair.to_dict(),
+                            "digest": pair.model_digest,
+                            "generation": pair.role_generation,
+                        }
+
+                    activation_document = {
+                        "active": pair_authority(state.active_pair, state.active_snapshot_json),
+                        "rollback": pair_authority(state.rollback_pair, state.rollback_snapshot_json),
+                    }
+
+            invalidated = False
+            selected = None
+            source = "defaults"
+            if isinstance(activation_document, dict):
+                for name in ("active", "rollback"):
+                    authority = activation_document.get(name)
+                    candidate = _migration_authority_snapshot(authority, current_only=True)
+                    if candidate is not None:
+                        selected = candidate
+                        source = name
+                        break
+                    if authority is not None:
+                        invalidated = True
+            if selected is None and controller_snapshot is not None:
+                try:
+                    selected = migrate_grey_learning_snapshot(controller_snapshot)
+                    source = "controller"
+                except GreySnapshotInvalid:
+                    invalidated = True
+            if selected is None:
+                selected = migrate_grey_learning_snapshot(
+                    {
+                        "version": 3,
+                        "revision": max(0, revision),
+                        "params": defaults,
+                        "rmse": None,
+                        "samples": 0,
+                        "band_c": [0.0, 0.0],
+                        "nfev": None,
+                    }
+                )
+                source = "defaults"
+                invalidated = True
+
+            reason = "schema-invalidated" if invalidated else None
+            models = (
+                dict(controller_envelope["models"])
+                if isinstance(controller_envelope, dict)
+                and isinstance(controller_envelope.get("models"), dict)
+                else {}
+            )
+            models["mpc"] = selected
+            controller_json = json.dumps(
+                {"version": SCHEMA_VERSION, "models": models},
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            conn.execute(
+                "INSERT INTO kv(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (MODEL_STATE_KEY, controller_json),
+            )
+
+            current = {
+                "model_kind": "grey-box",
+                "model_schema": 4,
+                "snapshot": selected,
+                "source": source,
+            }
+            if activation_input_key is not None:
+                migrated_activation = {
+                    **(activation_document if isinstance(activation_document, dict) else {}),
+                    "current": current,
+                    "candidate": None,
+                    "evidence_decision_id": None,
+                    "migration_reason": reason,
+                }
+                conn.execute(
+                    "INSERT INTO kv(key,value) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (
+                        activation_input_key,
+                        json.dumps(
+                            migrated_activation,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            allow_nan=False,
+                        ),
+                    ),
+                )
+            elif source not in ("active", "rollback"):
+                conn.execute("DELETE FROM model_activation_state WHERE singleton=1")
+            elif source == "rollback":
+                authority = activation_document.get("rollback")
+                pair_json = json.dumps(
+                    authority.get("pair"),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+                selected_json = json.dumps(selected, sort_keys=True, separators=(",", ":"))
+                conn.execute(
+                    """
+                    UPDATE model_activation_state
+                    SET active_snapshot_json=?, rollback_snapshot_json=?,
+                        evidence_decision_id='', phase='aborted', transaction_id=NULL,
+                        incumbent_pair_json=?, candidate_pair_json=NULL,
+                        rollback_pair_json=?, origin=NULL, policy=NULL,
+                        candidate_generation=NULL, candidate_digest=NULL,
+                        reason='schema-invalidated'
+                    WHERE singleton=1
+                    """,
+                    (selected_json, selected_json, pair_json, pair_json),
+                )
+
+    return GreyLearningMigrationResult(selected, source, reason)
 
 
 def reset_model_evidence(*, database_path: str | os.PathLike[str] | None = None) -> None:

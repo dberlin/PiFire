@@ -19,12 +19,14 @@ from common.datastore_accessors import (
 from common.model_evidence import (
     ActivationEvidence,
     AllocationEvidence,
+    CandidateAssessmentEvidence,
     CalibrationSummaryEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
     TimingDistributionEvidence,
+    FitLifecycleEvidence,
 )
 from common.model_evidence import MODEL_EVIDENCE_SCHEMA_VERSION
 
@@ -281,11 +283,70 @@ def test_v1_timing_row_reads_with_unavailable_new_measurements(ds) -> None:
 
     record = read_model_evidence(session_id="session-a")[0]
 
-    assert MODEL_EVIDENCE_SCHEMA_VERSION == 2
+    assert MODEL_EVIDENCE_SCHEMA_VERSION == 3
     assert record.schema_version == 1
     assert isinstance(record.payload, TimingDistributionEvidence)
     assert record.payload.p99_ms is None
     assert record.payload.hardware_provenance is None
+
+
+def test_current_grey_fit_and_candidate_evidence_round_trip_without_state_space_fields(ds):
+    fit = ModelEvidenceRecord(
+        evidence_id="fit-grey",
+        kind=EvidenceKind.FIT_LIFECYCLE,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=301,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        payload=FitLifecycleEvidence(
+            request_id="fit-request-a",
+            status="succeeded",
+            origin="passive-online",
+            policy="passive-auto",
+            window_id="window-a",
+        ),
+    )
+    assessment = ModelEvidenceRecord(
+        evidence_id="assessment-grey",
+        kind=EvidenceKind.CANDIDATE_ASSESSMENT,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=302,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        payload=CandidateAssessmentEvidence(
+            decision_id="decision-a",
+            origin="passive-online",
+            policy="passive-auto",
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=True,
+        ),
+    )
+
+    append_model_evidence((fit, assessment))
+    assert read_model_evidence(session_id="session-a")[-2:] == [fit, assessment]
+    assert "pole_magnitude" not in assessment.payload.__dataclass_fields__
+    assert "state_space" not in assessment.model_dump_json()
+
+
+def test_retired_schema_confidence_remains_audit_history_but_cannot_authorize_activation(ds):
+    retired = _confidence("retired-confidence", timestamp_ms=500).model_copy(
+        update={"schema_version": 2}
+    )
+    append_model_evidence((retired,))
+
+    with pytest.raises(ValueError, match="activation-authority-changed"):
+        commit_model_activation(_activation())
+
+    assert read_model_evidence(session_id="session-a")[-1] == retired
+    assert read_model_activation() is None
 
 
 def test_activation_commit_replaces_singleton_and_rolls_back_with_evidence(ds, tmp_path):

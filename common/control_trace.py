@@ -28,7 +28,7 @@ from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
 
-TRACE_SCHEMA_VERSION = 4
+TRACE_SCHEMA_VERSION = 5
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
@@ -59,6 +59,10 @@ class TraceEventKind(StrEnum):
     MODEL_EVALUATION = "model_evaluation"
     RECORDER_GAP = "recorder_gap"
     CALIBRATION = "calibration"
+    FIT_LIFECYCLE = "fit_lifecycle"
+    CANDIDATE_ASSESSMENT = "candidate_assessment"
+    ACTIVATION_LIFECYCLE = "activation_lifecycle"
+    LEARNING_FAILURE = "learning_failure"
 
 
 class ActuationMode(StrEnum):
@@ -921,6 +925,62 @@ class ModelEvaluationPayload:
         return self
 
 
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class GreyFitLifecyclePayload:
+    request_id: NonBlankString
+    status: Literal["queued", "running", "succeeded", "failed", "stale"]
+    origin: Literal["passive-online", "operator-calibration", "cook-refit"]
+    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"] | None
+    window_id: NonBlankString
+    error: NonBlankString | None = None
+    payload_type: Literal["fit_lifecycle"] = "fit_lifecycle"
+
+    @model_validator(mode="after")
+    def validate_failure(self) -> GreyFitLifecyclePayload:
+        if (self.status == "failed") != (self.error is not None):
+            raise ValueError("failed fit lifecycle requires exactly one error")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class GreyCandidateAssessmentPayload:
+    decision_id: NonBlankString
+    origin: Literal["passive-online", "operator-calibration", "cook-refit"]
+    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    fit_accepted: bool
+    identifiability_accepted: bool
+    native_build: Literal["not-run", "pending", "passed", "failed"]
+    native_dry_solve: Literal["not-run", "pending", "passed", "failed"]
+    target_timing: Literal["not-run", "pending", "passed", "failed"]
+    confidence_accepted: bool
+    rejection_reasons: tuple[NonBlankString, ...] = ()
+    payload_type: Literal["candidate_assessment"] = "candidate_assessment"
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class GreyActivationLifecyclePayload:
+    decision_id: NonBlankString
+    phase: Literal["prepared", "active", "aborted"]
+    origin: Literal["passive-online", "operator-calibration", "cook-refit"]
+    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    reason: NonBlankString | None = None
+    payload_type: Literal["activation_lifecycle"] = "activation_lifecycle"
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> GreyActivationLifecyclePayload:
+        if (self.phase == "aborted") != (self.reason is not None):
+            raise ValueError("aborted activation lifecycle requires exactly one reason")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class GreyLearningFailurePayload:
+    code: NonBlankString
+    detail: NonBlankString
+    terminal: bool
+    payload_type: Literal["learning_failure"] = "learning_failure"
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class RecorderGapPayload:
     lost_record_count: NonNegativeInt
@@ -959,6 +1019,10 @@ ControlTracePayload: TypeAlias = Annotated[
     | CalibrationTracePayload
     | ModelObservationPayload
     | ModelEvaluationPayload
+    | GreyFitLifecyclePayload
+    | GreyCandidateAssessmentPayload
+    | GreyActivationLifecyclePayload
+    | GreyLearningFailurePayload
     | RecorderGapPayload,
     Field(discriminator="payload_type"),
 ]
@@ -989,7 +1053,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2, 3, 4] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3, 4, 5] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -997,10 +1061,20 @@ class ControlTraceRecord(BaseModel):
         expected_event = _payload_event_kind(self.payload)
         if self.event_kind is not expected_event:
             raise ValueError("event_kind does not match payload_type")
-        if self.schema_version < TRACE_SCHEMA_VERSION and isinstance(
+        if self.schema_version < 4 and isinstance(
             self.payload, (CalibrationTracePayload, ModelObservationPayload, ModelEvaluationPayload)
         ):
             raise ValueError(f"trace schema version {self.schema_version} cannot contain canonical learning evidence")
+        if self.schema_version < TRACE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            (
+                GreyFitLifecyclePayload,
+                GreyCandidateAssessmentPayload,
+                GreyActivationLifecyclePayload,
+                GreyLearningFailurePayload,
+            ),
+        ):
+            raise ValueError(f"trace schema version {self.schema_version} cannot contain grey lifecycle evidence")
         if (
             self.schema_version == 2
             and isinstance(self.payload, ModelEventPayload)
@@ -1029,7 +1103,18 @@ class ControlTraceRecord(BaseModel):
         if isinstance(self.payload, AllocationPayload) and self.controller is not ControllerType.MPC:
             raise ValueError("allocation records are MPC-only")
         if (
-            isinstance(self.payload, (CalibrationTracePayload, ModelObservationPayload, ModelEvaluationPayload))
+            isinstance(
+                self.payload,
+                (
+                    CalibrationTracePayload,
+                    ModelObservationPayload,
+                    ModelEvaluationPayload,
+                    GreyFitLifecyclePayload,
+                    GreyCandidateAssessmentPayload,
+                    GreyActivationLifecyclePayload,
+                    GreyLearningFailurePayload,
+                ),
+            )
             and self.controller is not ControllerType.MPC
         ):
             raise ValueError("model learning records are MPC-only")
@@ -1126,4 +1211,12 @@ def _payload_event_kind(payload: ControlTracePayload) -> TraceEventKind:
         return TraceEventKind.MODEL_OBSERVATION
     if isinstance(payload, ModelEvaluationPayload):
         return TraceEventKind.MODEL_EVALUATION
+    if isinstance(payload, GreyFitLifecyclePayload):
+        return TraceEventKind.FIT_LIFECYCLE
+    if isinstance(payload, GreyCandidateAssessmentPayload):
+        return TraceEventKind.CANDIDATE_ASSESSMENT
+    if isinstance(payload, GreyActivationLifecyclePayload):
+        return TraceEventKind.ACTIVATION_LIFECYCLE
+    if isinstance(payload, GreyLearningFailurePayload):
+        return TraceEventKind.LEARNING_FAILURE
     return TraceEventKind.RECORDER_GAP

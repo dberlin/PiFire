@@ -131,13 +131,12 @@ _KELVIN = 273.15
 #: what the parameters mean. Bumped whenever either changes, which is not the
 #: same event as a parameter being recalibrated.
 #:
-#: 3  normalized combustion load: [q0..q_{n_delay-1}, T_c, d], input q in [0, 1]
+#: 3  migration input only: variable-delay grey snapshot with retired nested learners
+#: 4  fixed eight-delay grey-only adaptation record
 #:
-#: Persisted parameters calibrated against the former firing-rate scale would
-#: otherwise be interpreted as heat per normalized full-load unit. Both stored
-#: snapshots and policy artifacts carry this revision and are rejected rather
-#: than silently converted.
-MODEL_SCHEMA = 3
+#: Version 3 is interpreted only by the one-shot Task 11 migration.  Runtime
+#: restore and every current writer accept/emit version 4 exclusively.
+MODEL_SCHEMA = 4
 
 
 def _rad_loss(T_c, T_amb, sigma):

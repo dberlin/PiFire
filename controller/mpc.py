@@ -61,7 +61,13 @@ from controller.runtime.model_fitting import (
     TargetTimingEvidence,
     grey_config_digest,
 )
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FrameObservation
+from controller.model_learning.contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    FitStatus,
+    FrameObservation,
+    LearningStatus,
+)
 from controller.model_learning.activation import (
     ActivationManager,
     ActivationPhase,
@@ -112,6 +118,172 @@ _DEFAULTS = dict(
     est_r_meas=0.04,
     enable_online_adaptation=False,
 )
+
+
+_GREY_V4_SCHEMA = "pifire-grey-learning/v4"
+_GREY_V4_KEYS = frozenset(
+    (
+        "version",
+        "revision",
+        "schema",
+        "structure",
+        "active",
+        "challenger",
+        "window",
+        "evidence",
+        "origin",
+        "policy",
+        "identification",
+        "cook_refit",
+        "identities",
+        "activation",
+        "failure",
+    )
+)
+
+
+class GreySnapshotInvalid(ValueError):
+    """A persisted learning record that cannot authorize the fixed grey model."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _grey_snapshot_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise GreySnapshotInvalid(f"invalid-parameter:{name}")
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        raise GreySnapshotInvalid(f"invalid-parameter:{name}")
+    return normalized
+
+
+def _grey_snapshot_params(value):
+    from controller.model_promotion import PROMOTION_BOUNDS, n_delay_is_whole
+
+    if not isinstance(value, Mapping):
+        raise GreySnapshotInvalid("invalid-parameters")
+    parameters = {}
+    for name in Controller._MODEL_PARAM_KEYS:
+        normalized = _grey_snapshot_number(value.get(name), name)
+        lower, upper = PROMOTION_BOUNDS[name]
+        if not lower <= normalized <= upper:
+            raise GreySnapshotInvalid(f"out-of-bounds:{name}")
+        parameters[name] = normalized
+    if not n_delay_is_whole(parameters["n_delay"]) or int(parameters["n_delay"]) != 8:
+        raise GreySnapshotInvalid("incompatible-delay")
+    parameters["n_delay"] = 8
+    return parameters
+
+
+def _grey_snapshot_metadata(value):
+    if value is None:
+        return {"rmse": None, "samples": 0, "band_c": [0.0, 0.0], "nfev": None}
+    if not isinstance(value, Mapping):
+        raise GreySnapshotInvalid("invalid-metadata")
+    rmse = value.get("rmse")
+    if rmse is not None:
+        rmse = _grey_snapshot_number(rmse, "rmse")
+        if rmse < 0.0:
+            raise GreySnapshotInvalid("invalid-metadata:rmse")
+    samples = value.get("samples", 0)
+    if isinstance(samples, bool) or not isinstance(samples, int) or samples < 0:
+        raise GreySnapshotInvalid("invalid-metadata:samples")
+    band = value.get("band_c", (0.0, 0.0))
+    if (
+        isinstance(band, (str, bytes))
+        or not isinstance(band, (list, tuple))
+        or len(band) != 2
+    ):
+        raise GreySnapshotInvalid("invalid-metadata:band")
+    lower = _grey_snapshot_number(band[0], "band_c")
+    upper = _grey_snapshot_number(band[1], "band_c")
+    if lower > upper:
+        raise GreySnapshotInvalid("invalid-metadata:band")
+    nfev = value.get("nfev")
+    if nfev is not None and (
+        isinstance(nfev, bool) or not isinstance(nfev, int) or nfev < 0
+    ):
+        raise GreySnapshotInvalid("invalid-metadata:nfev")
+    return {"rmse": rmse, "samples": samples, "band_c": [lower, upper], "nfev": nfev}
+
+
+def _grey_parameters_digest(parameters):
+    return hashlib.sha256(
+        json.dumps(parameters, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _new_grey_learning_snapshot(*, revision, parameters, metadata):
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        raise GreySnapshotInvalid("invalid-revision")
+    owned_parameters = _grey_snapshot_params(parameters)
+    owned_metadata = _grey_snapshot_metadata(metadata)
+    digest = _grey_parameters_digest(owned_parameters)
+    return {
+        "version": MODEL_SCHEMA,
+        "revision": revision,
+        "schema": _GREY_V4_SCHEMA,
+        "structure": {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10},
+        "active": {"parameters": owned_parameters, "metadata": owned_metadata},
+        "challenger": None,
+        "window": None,
+        "evidence": {"eligible": 0, "rejected": 0, "confidence_decision_id": None},
+        "origin": None,
+        "policy": None,
+        "identification": {
+            "status": "identified" if owned_metadata["samples"] else "unidentified",
+        },
+        "cook_refit": {"status": "idle", "latest": None},
+        "identities": {
+            "active_digest": digest,
+            "active_generation": 0,
+            "candidate_digest": None,
+            "candidate_generation": None,
+            "rollback_digest": None,
+            "rollback_generation": None,
+        },
+        "activation": {
+            "phase": "aborted",
+            "pending_persistence": False,
+            "pending_swap": False,
+        },
+        "failure": None,
+    }
+
+
+def migrate_grey_learning_snapshot(snapshot):
+    """Own one compatible checkpoint as v4, accepting v3 only for migration."""
+
+    if not isinstance(snapshot, Mapping):
+        raise GreySnapshotInvalid("malformed-snapshot")
+    version = snapshot.get("version")
+    if version == 3:
+        metadata = {name: snapshot.get(name) for name in ("rmse", "samples", "band_c", "nfev")}
+        return _new_grey_learning_snapshot(
+            revision=snapshot.get("revision"),
+            parameters=snapshot.get("params"),
+            metadata=metadata,
+        )
+    if version != MODEL_SCHEMA:
+        raise GreySnapshotInvalid("incompatible-schema")
+    if set(snapshot) != _GREY_V4_KEYS or snapshot.get("schema") != _GREY_V4_SCHEMA:
+        raise GreySnapshotInvalid("malformed-v4")
+    structure = snapshot.get("structure")
+    if structure != {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10}:
+        raise GreySnapshotInvalid("incompatible-structure")
+    active = snapshot.get("active")
+    if not isinstance(active, Mapping):
+        raise GreySnapshotInvalid("missing-active-grey")
+    _grey_snapshot_params(active.get("parameters"))
+    _grey_snapshot_metadata(active.get("metadata"))
+    try:
+        owned = copy.deepcopy(dict(snapshot))
+        json.dumps(owned, allow_nan=False)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise GreySnapshotInvalid("malformed-v4") from error
+    return owned
 
 # One row per control period. At the 5 s default that is ~12 hours, which is
 # longer than any single cook; a longer one loses its beginning rather than
@@ -2410,6 +2582,91 @@ class Controller(ControllerBase):
                     self._learning_candidate_pair = None
         return delivery, payload
 
+    def _learning_live_status(self):
+        learning = self._learning
+        fit_status = FitStatus.IDLE
+        status = LearningStatus.COLLECTING
+        origin = self._learning_pending_origin
+        candidate_digest = None
+        candidate_generation = None
+        checks = {}
+        if self._activation_terminated_reason is not None:
+            status = LearningStatus.ERROR
+        elif self._active_activation_record is not None:
+            status = LearningStatus.ACTIVE
+        elif self._inert_activation is not None or self._prepared_pair_transitions:
+            status = LearningStatus.ACTIVATING
+        elif learning is not None:
+            request = getattr(learning, "_pending_request", None)
+            prepared = learning.prepared
+            handoff = learning.handoff
+            if request is not None:
+                fit_status = FitStatus.RUNNING if getattr(learning.worker, "busy", False) else FitStatus.QUEUED
+                status = LearningStatus.FITTING
+                origin = request.origin
+                candidate_generation = request.candidate_generation
+            elif self._learning_preparing:
+                fit_status = FitStatus.RUNNING
+                status = LearningStatus.FITTING
+            elif prepared is not None:
+                fit_status = FitStatus.SUCCEEDED
+                status = LearningStatus.EVALUATING
+                candidate_digest = prepared.candidate_digest
+                candidate_generation = prepared.candidate.request.candidate_generation
+                origin = prepared.candidate.request.origin
+                blockers = set(prepared.blockers)
+                checks = {
+                    "identifiability": "failed" if "identifiability" in blockers else "passed",
+                    "native_build": "passed" if prepared.candidate_pair is not None else "failed",
+                    "native_dry_solve": "passed" if prepared.dry_solve_finite else "failed",
+                    "target_timing": (
+                        "passed"
+                        if prepared.timing is not None and prepared.timing.accepted
+                        else "failed"
+                    ),
+                }
+            if handoff is not None:
+                status = handoff.status
+        active_descriptor = self._active_control_pair.descriptor
+        candidate_descriptor = (
+            self._inert_activation.candidate if self._inert_activation is not None else None
+        )
+        return {
+            "status": status.value,
+            "fit_status": fit_status.value,
+            "role_generation": active_descriptor.role_generation,
+            "candidate_generation": (
+                candidate_descriptor.candidate_generation
+                if candidate_descriptor is not None
+                else candidate_generation
+            ),
+            "checkpoint_digest": active_descriptor.model_digest,
+            "candidate_digest": (
+                candidate_descriptor.model_digest
+                if candidate_descriptor is not None
+                else candidate_digest
+            ),
+            "origin": None if origin is None else origin.value,
+            "checks": checks,
+            "activation_phase": (
+                self._inert_activation.phase.value
+                if self._inert_activation is not None
+                else self._active_activation_record.phase.value
+                if self._active_activation_record is not None
+                else "aborted"
+            ),
+            "pending_persistence": bool(self._prepared_pair_transitions),
+            "pending_swap": self._inert_activation is not None,
+            "failure": (
+                None
+                if self._activation_terminated_reason is None
+                else {
+                    "code": "activation-terminal",
+                    "detail": self._activation_terminated_reason,
+                }
+            ),
+        }
+
     def get_status(self):
         return {
             "set_point": _finite_float(getattr(self, "set_point", self._set_point_c)),
@@ -2449,6 +2706,7 @@ class Controller(ControllerBase):
             },
             "feasibility": None if self._last_feasibility is None else self._last_feasibility.as_status(),
             "adaptation": self._online_status(),
+            "learning": self._learning_live_status(),
             "activation": (
                 {
                     "active_kind": GREY_BOX_KIND,
@@ -2534,85 +2792,124 @@ class Controller(ControllerBase):
         }
 
     def get_model_snapshot(self):
-        """Return only the active grey physical model; Task 11 owns reports."""
-        if self._model_meta is None:
-            return None
-        snapshot = {
-            "version": self._MODEL_SCHEMA,
-            "revision": int(self._model_revision),
-            "params": {key: float(self.cfg[key]) for key in self._MODEL_PARAM_KEYS},
-            **self._model_meta,
-            "band_c": list(self._model_meta["band_c"]),
-        }
+        """Return the complete grey-only v4 checkpoint; process jobs stay live-only."""
+        metadata = (
+            {"rmse": None, "samples": 0, "band_c": [0.0, 0.0], "nfev": None}
+            if self._model_meta is None
+            else self._model_meta
+        )
         try:
+            snapshot = _new_grey_learning_snapshot(
+                revision=int(self._model_revision),
+                parameters={key: self.cfg[key] for key in self._MODEL_PARAM_KEYS},
+                metadata=metadata,
+            )
+            live = self._learning_live_status()
+            active = self._active_control_pair.descriptor
+            candidate = (
+                self._inert_activation.candidate
+                if self._inert_activation is not None
+                else None
+            )
+            rollback = (
+                self._rollback_control_pair.descriptor
+                if self._rollback_control_pair is not None
+                else None
+            )
+            learning = self._learning
+            prepared = None if learning is None else learning.prepared
+            if candidate is None and prepared is not None:
+                candidate_config = prepared.candidate.config
+                candidate_parameters = {
+                    key: getattr(candidate_config, key)
+                    for key in self._MODEL_PARAM_KEYS
+                }
+                snapshot["challenger"] = {
+                    "parameters": _grey_snapshot_params(candidate_parameters),
+                    "metadata": {
+                        "rmse": prepared.candidate.rmse_c,
+                        "samples": prepared.candidate.sample_count,
+                        "band_c": list(prepared.candidate.temperature_band_c),
+                        "nfev": prepared.candidate.nfev,
+                    },
+                }
+                snapshot["window"] = asdict(prepared.candidate.request.window)
+            snapshot["evidence"] = {
+                "eligible": int(self._online_eligible_updates),
+                "rejected": int(self._online_rejected_updates),
+                "confidence_decision_id": (
+                    None
+                    if self._active_activation_record is None
+                    else self._active_activation_record.decision_id
+                ),
+            }
+            snapshot["origin"] = live["origin"]
+            snapshot["policy"] = (
+                self._inert_activation.policy.value
+                if self._inert_activation is not None
+                else self._active_activation_record.policy.value
+                if self._active_activation_record is not None
+                else None
+            )
+            snapshot["identification"] = {
+                "status": "identified" if self._model_meta is not None else "unidentified",
+            }
+            snapshot["cook_refit"] = {
+                "status": "idle",
+                "latest": self._online_last_lifecycle_reason,
+            }
+            snapshot["identities"] = {
+                "active_digest": active.model_digest,
+                "active_generation": active.role_generation,
+                "candidate_digest": (
+                    candidate.model_digest
+                    if candidate is not None
+                    else live["candidate_digest"]
+                ),
+                "candidate_generation": (
+                    candidate.candidate_generation
+                    if candidate is not None
+                    else live["candidate_generation"]
+                ),
+                "rollback_digest": None if rollback is None else rollback.model_digest,
+                "rollback_generation": None if rollback is None else rollback.role_generation,
+            }
+            snapshot["activation"] = {
+                "phase": live["activation_phase"],
+                "pending_persistence": live["pending_persistence"],
+                "pending_swap": live["pending_swap"],
+            }
+            snapshot["failure"] = live["failure"]
             encoded = json.dumps(snapshot, allow_nan=False).encode()
-        except (TypeError, ValueError, OverflowError):
+        except (AttributeError, TypeError, ValueError, OverflowError):
             return None
         return snapshot if len(encoded) <= MAX_SNAPSHOT_BYTES else None
 
     def restore_model(self, snapshot):
-        from controller.model_promotion import PROMOTION_BOUNDS, n_delay_is_whole
-
-        if not isinstance(snapshot, dict):
-            return False
-        version = snapshot.get("version")
-        if version != self._MODEL_SCHEMA:
-            # Said out loud rather than refused quietly. A grill that has been
-            # learning for a season arrives here once after the upgrade, and
-            # the operator is owed the reason its model went back to the
-            # shipped defaults instead of finding it in the overshoot.
+        if not isinstance(snapshot, dict) or snapshot.get("version") != self._MODEL_SCHEMA:
+            version = snapshot.get("version") if isinstance(snapshot, dict) else None
             print(
-                f"[mpc] discarding a version {version!r} model snapshot: this controller "
-                f"stores version {self._MODEL_SCHEMA}, the single-lump model. The next "
-                "cook refits from scratch."
+                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "
+                f"accepts only grey schema {self._MODEL_SCHEMA}; version 3 is migration input only."
             )
             return False
-        params, revision = snapshot.get("params"), snapshot.get("revision")
-        if not isinstance(params, dict) or not isinstance(revision, int):
+        try:
+            owned = migrate_grey_learning_snapshot(snapshot)
+        except GreySnapshotInvalid as error:
+            print(f"[mpc] discarding an incompatible grey snapshot ({error.reason}).")
             return False
-        for key, (lo, hi) in PROMOTION_BOUNDS.items():
-            value = params.get(key)
-            try:
-                value = float(value)
-            except TypeError, ValueError:
-                return False
-            if not (lo <= value <= hi):
-                return False
-            # n_delay sizes the estimator's lag-state chain one whole state at
-            # a time, so a fractional count is nonsense even though it lies
-            # inside the numeric bounds above. Imports model_promotion's own
-            # predicate rather than re-deriving it, so the two cannot drift
-            # apart on what "whole" means.
-            if key == "n_delay" and not n_delay_is_whole(value):
-                return False
-        # n_delay is the one parameter here a refit never learns -- `fit_params`
-        # is handed the configured chain length and fits the rest against it --
-        # so a snapshot that disagrees came from an install the operator has
-        # since reconfigured. The whole record goes, not just the count:
-        # adopting it would override a setting the operator deliberately
-        # changed, and adopting the rest without it would put parameters fitted
-        # against one lag chain onto a different one, where the dead time they
-        # absorbed is not the dead time being solved. Refused out loud in the
-        # same shape as the schema mismatch above, and for the same reason: the
-        # operator is owed the reason the season's model went back to the
-        # shipped defaults.
+        active = owned["active"]
+        params = active["parameters"]
+        metadata = active["metadata"]
+        revision = owned["revision"]
         configured_n_delay = int(self.cfg["n_delay"])
-        snapshot_n_delay = int(float(params["n_delay"]))
-        if snapshot_n_delay != configured_n_delay:
-            print(
-                f"[mpc] discarding a model snapshot fitted at n_delay {snapshot_n_delay}: this "
-                f"controller is configured for {configured_n_delay} lag states, and a model fitted "
-                "against a different chain is not this model's parameters. The next cook refits "
-                "from scratch."
-            )
+        snapshot_n_delay = int(params["n_delay"])
+        if configured_n_delay != 8 or snapshot_n_delay != 8:
+            print("[mpc] discarding an incompatible grey snapshot (incompatible-delay).")
             return False
         merged = dict(self.cfg)
-        merged.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
-        # Snapshots historically serialize all physical parameters as floats,
-        # but the runtime delay is a structural state count.  Preserve that
-        # wire compatibility while restoring the operational config as an int
-        # before either grey-box adapter construction or estimator rebuild.
-        merged["n_delay"] = snapshot_n_delay
+        merged.update({key: params[key] for key in self._MODEL_PARAM_KEYS})
+        merged["n_delay"] = 8
         # The restored parameters have to reach the estimator, the horizon and
         # the policy, not just the config those three were sized from -- a
         # config-only restore leaves the season's learning inert and, where the
@@ -2621,7 +2918,10 @@ class Controller(ControllerBase):
         # committed so a build that fails leaves the controller solving the
         # model it already had.
         try:
-            rebuilt = self._build_for(merged, model_identified=bool(snapshot.get("grey_box_identified", True)))
+            rebuilt = self._build_for(
+                merged,
+                model_identified=owned["identification"]["status"] == "identified",
+            )
         except Exception as exc:
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
@@ -2646,24 +2946,15 @@ class Controller(ControllerBase):
         # store rejects a revision that does not advance, permanently.
         self._model_revision = revision
         self._model_meta = {
-            # Provenance only, exactly as in _adopt_model. None -- never 0.0,
-            # and never inf -- stands in for "unknown": 0.0 would read as a
-            # perfect fit and, wired into evaluate() as an incumbent_rmse,
-            # would permanently refuse any replacement, while inf is a float
-            # the store cannot persist at all (its validator encodes with
-            # allow_nan=False). evaluate() refuses a None incumbent_rmse
-            # outright, which is the honest answer for an error nobody
-            # measured.
-            "rmse": _optional_float(snapshot.get("rmse")),
-            "samples": int(snapshot.get("samples", 0)),
-            "band_c": [float(v) for v in snapshot.get("band_c", (0.0, 0.0))],
-            # Carried back across the store so the field means the same thing
-            # on both sides of it. A snapshot written before this field existed
-            # has no effort to report, which is None, not zero.
-            "nfev": _optional_int(snapshot.get("nfev")),
+            "rmse": metadata["rmse"],
+            "samples": metadata["samples"],
+            "band_c": list(metadata["band_c"]),
+            "nfev": metadata["nfev"],
         }
-        if not snapshot.get("grey_box_identified", True):
+        if owned["identification"]["status"] != "identified":
             self._model_meta = None
+        self._online_eligible_updates = owned["evidence"]["eligible"]
+        self._online_rejected_updates = owned["evidence"]["rejected"]
         if self._online_enabled:
             self._learning = self._build_learning()
         self._online_last_snapshot = None

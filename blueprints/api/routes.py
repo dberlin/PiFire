@@ -47,7 +47,7 @@ from controller.model_learning.activation import (
     OwnedGreyControlPair,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from controller.linear_mpc.report import build_evidence_artifact, current_evidence_report
+from controller.model_learning.report import backend_learning_report, build_learning_artifact
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from . import api_bp
 
@@ -178,9 +178,7 @@ def _api_get_probe_modules(settings, server_status):
 
 
 def _model_evidence_projection():
-    records = tuple(read_model_evidence())
-    report = current_evidence_report(records, activation_state=read_model_activation())
-    return report, records
+    return backend_learning_report()
 
 
 @api_bp.get("/model-evidence/report")
@@ -190,12 +188,7 @@ def api_model_evidence_report():
         report, _records = _model_evidence_projection()
     except (TypeError, ValueError) as exc:
         return jsonify({"error": "model-evidence-report-invalid", "detail": str(exc)}), 422
-    payload = report.to_dict()
-    payload["calibration"]["revision"] = max(
-        payload["calibration"]["revision"],
-        mpc_calibration_command_revision(),
-    )
-    return jsonify(payload), 200
+    return jsonify(report.as_dict()), 200
 
 
 @api_bp.get("/model-evidence/artifact")
@@ -203,7 +196,7 @@ def api_model_evidence_artifact():
     """Return canonical evidence bytes without granting model-state authority."""
     try:
         report, records = _model_evidence_projection()
-        artifact = build_evidence_artifact(report, records)
+        artifact = build_learning_artifact(report, records)
     except (TypeError, ValueError) as exc:
         return jsonify({"error": "model-evidence-artifact-invalid", "detail": str(exc)}), 422
     return Response(artifact, status=200, content_type="application/json; charset=utf-8")
@@ -310,6 +303,8 @@ def api_model_evidence_activate():
             raise ValueError("confidence decision is not ready-for-review")
         if projection["candidate"]["digest"] != activation_request.candidate_digest:
             raise ValueError("candidate-digest-changed")
+        if projection["candidate"].get("policy") != ActivationPolicy.OPERATOR_REVIEWED.value:
+            raise ValueError("manual activation requires operator-reviewed policy")
         if projection["decision_id"] != activation_request.decision_id:
             raise ValueError("stale-confidence-decision")
         checkpoint = _activation_checkpoint()

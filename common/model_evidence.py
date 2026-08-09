@@ -21,7 +21,7 @@ from pydantic.dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason, AmbientSource
 
-MODEL_EVIDENCE_SCHEMA_VERSION = 2
+MODEL_EVIDENCE_SCHEMA_VERSION = 3
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
@@ -37,6 +37,10 @@ class EvidenceKind(StrEnum):
     CALIBRATION_SUMMARY = "calibration_summary"
     FORECAST_ORIGIN = "forecast_origin"
     REFRESH_DIAGNOSTICS = "refresh_diagnostics"
+    FIT_LIFECYCLE = "fit_lifecycle"
+    CANDIDATE_ASSESSMENT = "candidate_assessment"
+    ACTIVATION_LIFECYCLE = "activation_lifecycle"
+    LEARNING_FAILURE = "learning_failure"
     TIMING_DISTRIBUTION = "timing_distribution"
     CONFIDENCE_DECISION = "confidence_decision"
     ACTIVATION = "activation"
@@ -202,6 +206,76 @@ class ForecastOriginEvidence:
         return self
 
 
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class FitLifecycleEvidence:
+    request_id: NonBlankString
+    status: Literal["queued", "running", "succeeded", "failed", "stale"]
+    origin: Literal["passive-online", "operator-calibration", "cook-refit"]
+    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"] | None
+    window_id: NonBlankString
+    error: NonBlankString | None = None
+    payload_type: Literal["fit_lifecycle"] = "fit_lifecycle"
+
+    @model_validator(mode="after")
+    def validate_failure(self) -> FitLifecycleEvidence:
+        if (self.status == "failed") != (self.error is not None):
+            raise ValueError("failed fit lifecycle requires exactly one error")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class CandidateAssessmentEvidence:
+    decision_id: NonBlankString
+    origin: Literal["passive-online", "operator-calibration", "cook-refit"]
+    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    fit_accepted: bool
+    identifiability_accepted: bool
+    native_build: Literal["not-run", "pending", "passed", "failed"]
+    native_dry_solve: Literal["not-run", "pending", "passed", "failed"]
+    target_timing: Literal["not-run", "pending", "passed", "failed"]
+    confidence_accepted: bool
+    rejection_reasons: tuple[NonBlankString, ...] = ()
+    payload_type: Literal["candidate_assessment"] = "candidate_assessment"
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> CandidateAssessmentEvidence:
+        accepted = (
+            self.fit_accepted
+            and self.identifiability_accepted
+            and self.native_build == "passed"
+            and self.native_dry_solve == "passed"
+            and self.target_timing == "passed"
+            and self.confidence_accepted
+        )
+        if accepted == bool(self.rejection_reasons):
+            raise ValueError("candidate assessment reasons must match its acceptance")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class ActivationLifecycleEvidence:
+    decision_id: NonBlankString
+    phase: Literal["prepared", "active", "aborted"]
+    origin: Literal["passive-online", "operator-calibration", "cook-refit"]
+    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    reason: NonBlankString | None = None
+    payload_type: Literal["activation_lifecycle"] = "activation_lifecycle"
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> ActivationLifecycleEvidence:
+        if (self.phase == "aborted") != (self.reason is not None):
+            raise ValueError("aborted activation lifecycle requires exactly one reason")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class LearningFailureEvidence:
+    code: NonBlankString
+    detail: NonBlankString
+    terminal: bool
+    payload_type: Literal["learning_failure"] = "learning_failure"
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class RefreshDiagnosticsEvidence:
     accepted: bool
@@ -312,6 +386,10 @@ ModelEvidencePayload: TypeAlias = Annotated[
     SessionSummaryEvidence
     | CalibrationSummaryEvidence
     | ForecastOriginEvidence
+    | FitLifecycleEvidence
+    | CandidateAssessmentEvidence
+    | ActivationLifecycleEvidence
+    | LearningFailureEvidence
     | RefreshDiagnosticsEvidence
     | TimingDistributionEvidence
     | ConfidenceDecisionEvidence
@@ -353,7 +431,7 @@ class ModelEvidenceRecord(BaseModel):
     role_generation: NonNegativeInt
     model_digest: Digest | None
     provenance_digest: Digest | None
-    schema_version: Literal[1, 2] = MODEL_EVIDENCE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3] = MODEL_EVIDENCE_SCHEMA_VERSION
     payload: ModelEvidencePayload
 
     @model_validator(mode="after")
@@ -361,6 +439,11 @@ class ModelEvidenceRecord(BaseModel):
         expected = EvidenceKind(self.payload.payload_type)
         if self.kind is not expected:
             raise ValueError("evidence kind does not match payload_type")
+        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            RefreshDiagnosticsEvidence,
+        ):
+            raise ValueError("retired refresh diagnostics cannot be current grey evidence")
         if isinstance(self.payload, ForecastOriginEvidence):
             if self.cook_id is None:
                 raise ValueError("forecast evidence requires cook identity")

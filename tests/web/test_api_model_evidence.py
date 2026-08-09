@@ -11,10 +11,10 @@ from common.datastore_accessors import (
     read_model_evidence,
 )
 from common.model_evidence import (
+    CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
-    RefreshDiagnosticsEvidence,
     RollbackEvidence,
 )
 from controller.model_learning.activation import (
@@ -52,39 +52,34 @@ def _record(evidence_id, payload, timestamp_ms):
     )
 
 
-def test_empty_report_route_returns_collecting_with_exact_missing_gates(client):
+def test_empty_report_route_surfaces_missing_authority_terminally(client):
     response = client.get("/api/model-evidence/report")
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["schema_version"] == 1
-    assert payload["status"] == "collecting"
+    assert payload["schema_version"] == 2
+    assert payload["status"] == "error"
+    assert payload["errors"] == ["checkpoint-missing"]
     assert payload["decision_id"] is None
     assert payload["candidate"]["digest"] is None
-    assert payload["missing_gates"] == [gate["name"] for gate in payload["gates"] if not gate["passed"]]
-    assert payload["blockers"] == [gate["reason"] for gate in payload["gates"] if gate["reason"] is not None]
 
 
-def test_report_route_reads_the_compact_ledger_without_changing_activation_state(client):
+def test_report_route_reads_current_grey_ledger_without_changing_activation_state(client):
     append_model_evidence(
         (
             _record(
-                "refresh-api",
-                RefreshDiagnosticsEvidence(
-                    accepted=False,
-                    reason="rank-deficient",
-                    full_rank=False,
-                    finite_diagnostics=True,
-                    covariance_finite=True,
-                ),
-                10,
-            ),
-            _record(
-                "decision-api",
-                ConfidenceDecisionEvidence(
+                "assessment-api",
+                CandidateAssessmentEvidence(
                     decision_id="decision-api-3",
-                    blocked=True,
-                    reason="identifiability",
+                    origin="operator-calibration",
+                    policy="operator-reviewed",
+                    fit_accepted=True,
+                    identifiability_accepted=False,
+                    native_build="passed",
+                    native_dry_solve="passed",
+                    target_timing="passed",
+                    confidence_accepted=False,
+                    rejection_reasons=("identifiability",),
                 ),
                 20,
             ),
@@ -97,58 +92,51 @@ def test_report_route_reads_the_compact_ledger_without_changing_activation_state
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["decision_id"] == "decision-api-3"
-    assert payload["candidate"] == {
-        "kind": "innovation-state-space",
-        "generation": 3,
-        "digest": _CANDIDATE,
-    }
-    assert payload["identifiability"]["reason"] == "rank-deficient"
+    assert payload["evidence"]["count"] == 1
+    assert payload["candidate"]["assessment"]["rejection_reasons"] == ["identifiability"]
     assert read_model_activation() == before
 
 
-def test_artifact_route_returns_the_canonical_report_and_only_referenced_records(client):
+def test_artifact_route_contains_the_identical_report_projection_and_revision(client):
     append_model_evidence(
         (
             _record(
-                "refresh-api",
-                RefreshDiagnosticsEvidence(accepted=False, reason="rank-deficient"),
-                10,
-            ),
-            _record(
-                "decision-api",
-                ConfidenceDecisionEvidence(
+                "assessment-api",
+                CandidateAssessmentEvidence(
                     decision_id="decision-api-3",
-                    blocked=True,
-                    reason="identifiability",
+                    origin="operator-calibration",
+                    policy="operator-reviewed",
+                    fit_accepted=True,
+                    identifiability_accepted=False,
+                    native_build="passed",
+                    native_dry_solve="passed",
+                    target_timing="passed",
+                    confidence_accepted=False,
+                    rejection_reasons=("identifiability",),
                 ),
                 20,
             ),
         )
     )
 
+    report_response = client.get("/api/model-evidence/report")
     response = client.get("/api/model-evidence/artifact")
     decoded = json.loads(response.data)
 
     assert response.status_code == 200
     assert response.mimetype == "application/json"
-    assert response.data == json.dumps(decoded, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-        "utf-8"
-    )
-    assert decoded["artifact_schema"] == "pifire-model-evidence/v1"
-    assert decoded["report"]["decision_id"] == "decision-api-3"
-    assert [record["evidence_id"] for record in decoded["records"]] == decoded["report"]["artifact_metadata"][
-        "evidence_ids"
-    ]
+    assert response.data == json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    assert decoded["artifact_schema"] == "pifire-grey-learning-report/v2"
+    assert decoded["report"] == report_response.get_json()
+    assert decoded["revision"] == decoded["report"]["revision"]
+    assert [record["evidence_id"] for record in decoded["records"]] == ["assessment-api"]
 
 
 def test_artifact_generation_failure_is_read_only_and_returns_an_explicit_error(client, monkeypatch):
-    valid = _record(
-        "invalid-api",
-        RefreshDiagnosticsEvidence(accepted=False, reason="rank-deficient"),
-        10,
-    )
-    invalid = valid.model_copy(update={"kind": EvidenceKind.FALLBACK})
-    monkeypatch.setattr(routes, "read_model_evidence", lambda: [invalid])
+    def fail_projection():
+        raise ValueError("corrupt authority")
+
+    monkeypatch.setattr(routes, "backend_learning_report", fail_projection)
     before = read_model_activation()
 
     response = client.get("/api/model-evidence/artifact")
@@ -156,13 +144,15 @@ def test_artifact_generation_failure_is_read_only_and_returns_an_explicit_error(
     assert response.status_code == 422
     assert response.get_json() == {
         "error": "model-evidence-artifact-invalid",
-        "detail": "invalid ledger record 'invalid-api'",
+        "detail": "corrupt authority",
     }
     assert read_model_activation() == before
 
 
 def test_report_route_exposes_the_accepted_calibration_command_high_water(client, monkeypatch):
-    monkeypatch.setattr(routes, "mpc_calibration_command_revision", lambda: 7)
+    from common import datastore_accessors
+
+    monkeypatch.setattr(datastore_accessors, "mpc_calibration_command_revision", lambda: 7)
 
     response = client.get("/api/model-evidence/report")
 
@@ -171,14 +161,23 @@ def test_report_route_exposes_the_accepted_calibration_command_high_water(client
 
 
 class _ReadyReport:
-    def __init__(self, candidate_digest: str, decision_id: str) -> None:
+    def __init__(
+        self,
+        candidate_digest: str,
+        decision_id: str,
+        policy: str = ActivationPolicy.OPERATOR_REVIEWED.value,
+    ) -> None:
         self._candidate_digest = candidate_digest
         self._decision_id = decision_id
+        self._policy = policy
 
     def to_dict(self):
         return {
             "status": "ready-for-review",
-            "candidate": {"digest": self._candidate_digest},
+            "candidate": {
+                "digest": self._candidate_digest,
+                "policy": self._policy,
+            },
             "decision_id": self._decision_id,
         }
 
@@ -345,6 +344,35 @@ def test_activate_route_requires_exact_body_digest_decision_and_operator_policy(
 
     assert malformed.status_code == 422
     assert stale.status_code == 409
+    assert read_model_activation() is None
+
+
+def test_activate_route_rejects_non_operator_reviewed_candidate_policy(client, monkeypatch):
+    incumbent, candidate, prepared, _confidence = _api_activation()
+    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
+    monkeypatch.setattr(
+        routes,
+        "_model_evidence_projection",
+        lambda: (
+            _ReadyReport(
+                candidate.model_digest,
+                prepared.decision_id,
+                ActivationPolicy.PASSIVE_AUTO.value,
+            ),
+            (),
+        ),
+    )
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": candidate.model_digest,
+            "decision_id": prepared.decision_id,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["detail"] == "manual activation requires operator-reviewed policy"
     assert read_model_activation() is None
 
 

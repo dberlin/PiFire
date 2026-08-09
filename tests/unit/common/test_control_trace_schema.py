@@ -18,6 +18,10 @@ from common.control_trace import (
     CalibrationEventType,
     CalibrationTracePayload,
     ControlTraceDbRow,
+    GreyActivationLifecyclePayload,
+    GreyCandidateAssessmentPayload,
+    GreyFitLifecyclePayload,
+    GreyLearningFailurePayload,
     CompletedOriginPayload,
     ControlTraceRecord,
     ControllerBranch,
@@ -58,6 +62,10 @@ def test_trace_enums_have_exact_members():
         TraceEventKind.MODEL_EVALUATION,
         TraceEventKind.CALIBRATION,
         TraceEventKind.RECORDER_GAP,
+        TraceEventKind.FIT_LIFECYCLE,
+        TraceEventKind.CANDIDATE_ASSESSMENT,
+        TraceEventKind.ACTIVATION_LIFECYCLE,
+        TraceEventKind.LEARNING_FAILURE,
     }
     assert set(ActuationMode) == {ActuationMode.FRAMED_PULSE}
     assert set(ResultStaleState) == {ResultStaleState.FRESH, ResultStaleState.STALE}
@@ -1007,7 +1015,7 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
 
 
 def test_schema_four_has_one_canonical_model_evidence_contract():
-    assert TRACE_SCHEMA_VERSION == 4
+    assert TRACE_SCHEMA_VERSION == 5
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
     assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
     assert "FAN_ASSIST" not in OutputSource.__members__
@@ -1016,6 +1024,70 @@ def test_schema_four_has_one_canonical_model_evidence_contract():
         replace(session, pulse_slot_seconds=None)
     with pytest.raises(ValidationError):
         replace(session, pulse_frame_seconds=None)
+
+
+@pytest.mark.parametrize(
+    ("kind", "payload"),
+    (
+        (
+            TraceEventKind.FIT_LIFECYCLE,
+            GreyFitLifecyclePayload(
+                request_id="request-grey",
+                status="running",
+                origin="passive-online",
+                policy="passive-auto",
+                window_id="window-grey",
+                error=None,
+            ),
+        ),
+        (
+            TraceEventKind.CANDIDATE_ASSESSMENT,
+            GreyCandidateAssessmentPayload(
+                decision_id="decision-grey",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+                fit_accepted=True,
+                identifiability_accepted=True,
+                native_build="passed",
+                native_dry_solve="passed",
+                target_timing="passed",
+                confidence_accepted=True,
+            ),
+        ),
+        (
+            TraceEventKind.ACTIVATION_LIFECYCLE,
+            GreyActivationLifecyclePayload(
+                decision_id="decision-grey",
+                phase="prepared",
+                origin="operator-calibration",
+                policy="operator-reviewed",
+            ),
+        ),
+        (
+            TraceEventKind.LEARNING_FAILURE,
+            GreyLearningFailurePayload(
+                code="fit-process-exit",
+                detail="worker exited before delivering the requested fit",
+                terminal=True,
+            ),
+        ),
+    ),
+)
+def test_schema_five_round_trips_grey_lifecycle_without_relabelled_state_space_fields(kind, payload):
+    record = ControlTraceRecord(
+        ts_ms=10,
+        session_id="session-grey",
+        cook_id="cook-grey",
+        controller=ControllerType.MPC,
+        event_kind=kind,
+        payload=payload,
+    )
+
+    restored = ControlTraceRecord.from_db_row(record.to_db_row())
+    assert restored == record
+    encoded = restored.model_dump_json()
+    assert "pole_magnitude" not in encoded
+    assert "state_space_refresh" not in encoded
 
 
 @pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP, ControllerType.MPC])
