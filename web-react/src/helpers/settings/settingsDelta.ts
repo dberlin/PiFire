@@ -19,6 +19,16 @@ export interface SettingsDelta {
  * partial is returned unchanged, so the common save stays the plain body every
  * other tab already sends.
  */
+/**
+ * Wrap a partial and the key paths to remove. With nothing to remove the
+ * partial is returned unchanged, so the common save stays the plain body every
+ * other tab already sends.
+ *
+ * The rule for callers: dropping a key from `setValues` is not a deletion --
+ * the backend's merge treats an absent key as silence, so the persisted value
+ * survives untouched. Any surface that removes a key from its own object
+ * before saving must name that key's full path here, in `deletePaths`.
+ */
 export function settingsDelta(setValues: object, deletePaths: string[][] = []): object {
   if (deletePaths.length === 0) return setValues;
   return {
