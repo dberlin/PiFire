@@ -18,6 +18,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 import time
+import threading
 
 import numpy as np
 
@@ -826,10 +827,19 @@ class Controller(ControllerBase):
         self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
         self._native_failure_diagnostics: SolverDiagnostics | None = None
         self._closed = False
+        self._learning_lock = threading.RLock()
+        self._learning_pending_origin: CandidateOrigin | None = None
+        self._learning_candidate_pair: CandidatePair | None = None
+        self._learning_pending_evaluation = None
         self._learning_session_id = "runtime"
         self._learning_cook_id = None
         self._learning_role_generation = self._model_revision
-        self._learning = self._build_learning() if self._online_enabled else None
+        try:
+            self._learning = self._build_learning() if self._online_enabled else None
+        except BaseException:
+            self._close_component(self.mpc)
+            self._close_component(self.estimator)
+            raise
 
     def _new_scheduled_arx(self):
         return ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0))
@@ -981,7 +991,7 @@ class Controller(ControllerBase):
         )
 
     def _build_learning(self):
-        return GreyLearningOrchestrator(
+        learning = GreyLearningOrchestrator(
             identity=self._learning_identity(),
             config=self.mpc.config,
             incumbent_pair=CandidatePair(self.estimator, self.mpc),
@@ -989,6 +999,12 @@ class Controller(ControllerBase):
             controller_factory=AcadosGreyBoxMPC,
             timing_probe=self._candidate_timing,
         )
+        try:
+            learning.start()
+        except BaseException:
+            self._close_component(learning)
+            raise
+        return learning
 
     def set_target(self, set_point):
         self.set_point = set_point
@@ -1696,31 +1712,96 @@ class Controller(ControllerBase):
             "lifecycle": lifecycle,
         }
 
+    @staticmethod
+    def _completed_forecast_evidence(value):
+        forecast = value.forecast
+        phase = forecast.phase if forecast.phase in {"heating", "coasting"} else (
+            "coasting" if value.observed_temperature_c <= forecast.challenger_prediction_c else "heating"
+        )
+        return ForecastOriginEvidence(
+            origin_sequence=value.origin_sequence,
+            origin_time_ms=int(forecast.origin_time_s * 1_000),
+            completion_time_ms=int(value.completion_time_s * 1_000),
+            horizon_steps=value.horizon_steps,
+            incumbent_digest=value.incumbent_digest,
+            challenger_digest=value.challenger_digest,
+            incumbent_prediction_c=forecast.incumbent_prediction_c,
+            challenger_prediction_c=forecast.challenger_prediction_c,
+            observed_temperature_c=value.observed_temperature_c,
+            incumbent_error_c=value.incumbent_error_c,
+            challenger_error_c=value.challenger_error_c,
+            temperature_band=value.temperature_band,
+            phase=phase,
+            ambient_source=value.ambient_source,
+            calibration_fit=value.calibration_fit,
+        )
+
+    @staticmethod
+    def _forecast_from_adapter(adapter, origin):
+        horizon = origin.horizon_steps
+        frame = origin.frame
+        predicted = adapter.forecast(
+            np.full(horizon, frame.realized_q, dtype=np.float64),
+            np.full(horizon, frame.ambient_c, dtype=np.float64),
+        )
+        return float(predicted[-1])
+
+    def _register_learning_forecasts(self, observation):
+        pair = self._learning_candidate_pair
+        if pair is None or self._learning is None:
+            return ()
+        pair.estimator.update(observation.realized_q, observation.temp_c)
+        incumbent = GreyBoxPredictionAdapter.from_controller(self)
+        candidate_config = dict(self.cfg)
+        for name in ("C_c", "h_amb", "T_amb", "theta", "K_Q", "sigma"):
+            candidate_config[name] = getattr(pair.controller.config, name)
+        challenger = GreyBoxPredictionAdapter.from_estimator(
+            pair.estimator,
+            config=candidate_config,
+        )
+        return self._learning.register_causal_forecasts(
+            observation,
+            incumbent_predict=lambda origin: self._forecast_from_adapter(incumbent, origin),
+            challenger_predict=lambda origin: self._forecast_from_adapter(challenger, origin),
+        )
+
     def observe_frame(self, observation):
-        """Dispatch passive and completed operator frames to Task 7."""
+        """Dispatch completed frames without running fit preparation on this worker."""
         if not isinstance(observation, FrameObservation):
             raise TypeError("observation must be a FrameObservation")
-        if self._learning is None:
-            return None
-        result = self._learning.observe_completed_frame(
-            observation,
-            identifiability=1.0,
-        )
-        reasons = tuple(result.history.reasons)
-        return {
-            "role_generation": observation.role_generation,
-            "eligible": bool(result.history.accepted),
-            "rejection_reasons": reasons,
-            "input_variance": 0.0,
-            "input_levels": 0,
-            "incumbent_innovation_c": None,
-            "challenger_innovation_c": None,
-            "effective_updates": len(self._learning.passive_history.observations)
-            if hasattr(self._learning, "passive_history")
-            else 0,
-            "model_digest": grey_config_digest(self.mpc.config),
-            "forecast_origin_evidence": tuple(result.completed_forecasts),
-        }
+        with self._learning_lock:
+            if self._learning is None:
+                return None
+            result = self._learning.observe_completed_frame(
+                observation,
+                identifiability=1.0,
+            )
+            request = getattr(result, "request", None)
+            if request is not None:
+                self._learning_pending_origin = request.origin
+            self._register_learning_forecasts(observation)
+            forecasts = tuple(
+                self._completed_forecast_evidence(value)
+                for value in result.completed_forecasts
+            )
+            reasons = tuple(result.history.reasons)
+            evaluation = self._learning_pending_evaluation
+            self._learning_pending_evaluation = None
+            return {
+                "role_generation": observation.role_generation,
+                "eligible": bool(result.history.accepted),
+                "rejection_reasons": reasons,
+                "input_variance": 0.0,
+                "input_levels": 0,
+                "incumbent_innovation_c": None,
+                "challenger_innovation_c": None,
+                "effective_updates": len(self._learning.passive_history.observations)
+                if hasattr(self._learning, "passive_history")
+                else 0,
+                "model_digest": grey_config_digest(self.mpc.config),
+                "forecast_origin_evidence": forecasts,
+                "learning_evaluation": evaluation,
+            }
 
     def observation_failure(self, observation, error):
         """Turn an isolated learning-hook failure into explicit frame evidence."""
@@ -1745,24 +1826,38 @@ class Controller(ControllerBase):
         self._learning_session_id = session_id
         self._learning_cook_id = cook_id
         self._learning_role_generation = int(role_generation)
-        if self._learning is not None:
-            self._learning.update_identity(
-                self._learning_identity(),
-                config=self.mpc.config,
-                incumbent_pair=CandidatePair(self.estimator, self.mpc),
-            )
+        with self._learning_lock:
+            if self._learning is not None:
+                self._learning.update_identity(
+                    self._learning_identity(),
+                    config=self.mpc.config,
+                    incumbent_pair=CandidatePair(self.estimator, self.mpc),
+                )
+                self._learning_pending_origin = None
+                self._learning_candidate_pair = None
 
-    def poll_learning_off_path(self, *, live_origin):
-        """Build/evaluate candidates only when called by the lifecycle worker."""
-        if self._learning is None:
-            return None, None
-        origin = live_origin if isinstance(live_origin, CandidateOrigin) else CandidateOrigin(live_origin)
-        delivery = self._learning.poll_fit_off_path(
-            live_identity=self._learning_identity(),
-            live_origin=origin,
-        )
-        evaluation = self._learning.evaluate_ready_off_path()
-        return delivery, evaluation
+    def poll_learning_off_path(self, *, live_origin=None):
+        """Drain and prepare fits only from the runner's lifecycle dispatcher."""
+        with self._learning_lock:
+            if self._learning is None:
+                return None, None
+            origin = self._learning_pending_origin if live_origin is None else live_origin
+            if origin is None:
+                return None, None
+            origin = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
+            delivery = self._learning.poll_fit_off_path(
+                live_identity=self._learning_identity(),
+                live_origin=origin,
+            )
+            if delivery is not None:
+                self._learning_pending_origin = None
+                prepared = getattr(delivery, "prepared", None)
+                if prepared is not None and prepared.accepted:
+                    self._learning_candidate_pair = prepared.candidate_pair
+            evaluation = self._learning.evaluate_ready_off_path()
+            if evaluation is not None:
+                self._learning_pending_evaluation = evaluation
+            return delivery, evaluation
 
     def get_status(self):
         return {

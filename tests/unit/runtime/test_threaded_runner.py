@@ -6,9 +6,15 @@ from dataclasses import replace
 
 
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.linear_mpc.contracts import FrameObservation
+from controller.model_learning.contracts import FrameObservation
 from common.control_trace import ActuationMode, ModelObservationPayload, ResultStaleState, TraceEventKind
-from common.model_evidence import EvidenceKind, FallbackEvidence, ModelEvidenceRecord, SessionSummaryEvidence
+from common.model_evidence import (
+    EvidenceKind,
+    FallbackEvidence,
+    ForecastOriginEvidence,
+    ModelEvidenceRecord,
+    SessionSummaryEvidence,
+)
 from controller.runtime.runner import (
     SyncControllerRunner,
     ThreadedControllerRunner,
@@ -18,6 +24,7 @@ from controller.runtime.runner import (
     build_runner,
 )
 from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
+from controller.model_learning.evaluation import CompletedForecastOrigin, ForecastOrigin
 
 
 def _frame(index: int) -> FrameObservation:
@@ -1674,3 +1681,188 @@ def test_threaded_stop_never_closes_a_core_under_a_live_timed_out_worker():
     runner._thread.join(timeout=2.0)
     assert not runner._thread.is_alive()
     assert core.closed == 1
+
+
+def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker():
+    class LearningCore(FakeCore):
+        def __init__(self):
+            super().__init__(period=0.001)
+            self.pending = False
+            self.submissions = 0
+            self.deliveries = 0
+            self.poll_threads = []
+            self.condition = threading.Condition()
+
+        def observe_frame(self, observation):
+            with self.condition:
+                if not self.pending:
+                    self.pending = True
+                    self.submissions += 1
+                    self.condition.notify_all()
+            return {
+                "role_generation": observation.role_generation,
+                "eligible": True,
+                "rejection_reasons": (),
+                "forecast_origin_evidence": (),
+            }
+
+        def poll_learning_off_path(self):
+            with self.condition:
+                self.poll_threads.append(threading.get_ident())
+                if self.pending:
+                    self.pending = False
+                    self.deliveries += 1
+                    self.condition.notify_all()
+
+        def wait_for(self, predicate):
+            with self.condition:
+                return self.condition.wait_for(predicate, timeout=2.0)
+
+    core = LearningCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.observe_frame(_frame(0))
+        assert core.wait_for(lambda: core.submissions == 1 and core.deliveries == 1)
+        runner.observe_frame(_frame(1))
+        assert core.wait_for(lambda: core.submissions == 2 and core.deliveries == 2)
+        assert core.poll_threads
+        assert all(ident != runner._thread.ident for ident in core.poll_threads)
+    finally:
+        runner.stop()
+
+
+def test_learning_process_starts_during_safe_construction_not_on_controller_worker(monkeypatch):
+    import controller.mpc as mpc_module
+
+    instances = []
+
+    class LazyLearning:
+        def __init__(self, **_kwargs):
+            self.start_thread = None
+            self.observed_thread = None
+            self.observed = threading.Event()
+            instances.append(self)
+
+        def start(self):
+            if self.start_thread is None:
+                self.start_thread = threading.get_ident()
+
+        def observe_completed_frame(self, _frame, *, identifiability):
+            if self.start_thread is None:
+                self.start()
+            self.observed_thread = threading.get_ident()
+            self.observed.set()
+            return type(
+                "Observation",
+                (),
+                {
+                    "history": type("History", (), {"accepted": True, "reasons": ()})(),
+                    "completed_forecasts": (),
+                    "request": None,
+                },
+            )()
+
+        def register_causal_forecasts(self, *_args, **_kwargs):
+            return ()
+
+        def poll_fit_off_path(self, **_kwargs):
+            return None
+
+        def evaluate_ready_off_path(self):
+            return None
+
+        def update_identity(self, *_args, **_kwargs):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(mpc_module, "GreyLearningOrchestrator", LazyLearning)
+    constructing_thread = threading.get_ident()
+    core = MpcController(
+        dict(MPC_DEFAULTS, enable_online_adaptation=True, control_period=0.001),
+        "C",
+        {"u_min": 0.1, "u_max": 0.9},
+    )
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.observe_frame(_frame(0))
+        assert instances[0].observed.wait(2.0), (
+            runner._thread.is_alive(),
+            runner.controller_state(),
+            tuple(runner._pending_observations),
+            core._learning is instances[0],
+            instances[0].start_thread,
+        )
+        assert instances[0].start_thread == constructing_thread
+        assert instances[0].observed_thread == runner._thread.ident
+    finally:
+        runner.stop()
+
+
+def test_real_completed_forecast_survives_controller_to_runner_evidence_drain():
+    completed = CompletedForecastOrigin(
+        forecast=ForecastOrigin(
+            origin_sequence=0,
+            origin_time_s=20.0,
+            horizon_steps=3,
+            role_generation=0,
+            candidate_generation=1,
+            incumbent_digest="a" * 64,
+            challenger_digest="b" * 64,
+            incumbent_prediction_c=99.0,
+            challenger_prediction_c=101.0,
+            temperature_band="below-target",
+            phase="heating",
+            ambient_source=_frame(0).ambient_source,
+            calibration_fit=False,
+        ),
+        completion_time_s=80.0,
+        observed_temperature_c=102.0,
+    )
+    learning = type(
+        "Learning",
+        (),
+        {
+            "observe_completed_frame": lambda self, _frame, *, identifiability: type(
+                "Observation",
+                (),
+                {
+                    "history": type("History", (), {"accepted": True, "reasons": ()})(),
+                    "completed_forecasts": (completed,),
+                    "request": None,
+                },
+            )(),
+            "register_causal_forecasts": lambda *_args, **_kwargs: (),
+            "update_identity": lambda *_args, **_kwargs: None,
+            "close": lambda self: None,
+        },
+    )()
+    core = MpcController(
+        dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
+        "C",
+        {"u_min": 0.1, "u_max": 0.9},
+    )
+    core._learning = learning
+    runner = ThreadedControllerRunner(core)
+    drained = []
+    try:
+        runner.bind_evidence_context(0, "session", "cook")
+        runner.observe_frame(_frame(3))
+
+        def collect():
+            drained.extend(runner.drain_observation_outcomes().envelopes)
+            return bool(drained)
+
+        assert _wait_for(collect)
+        assert drained[0].outcome.get("forecast_origin_evidence"), drained[0].outcome
+        forecast_records = [
+            record
+            for record in drained[0].evidence
+            if record.kind is EvidenceKind.FORECAST_ORIGIN
+        ]
+        assert len(forecast_records) == 1
+        assert isinstance(forecast_records[0].payload, ForecastOriginEvidence)
+        assert forecast_records[0].payload.observed_temperature_c == 102.0
+    finally:
+        runner.stop()

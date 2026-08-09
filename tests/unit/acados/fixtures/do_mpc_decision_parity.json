@@ -1,6 +1,20 @@
 {
   "schema": 1,
   "source": "reviewed do-mpc/IPOPT controller decisions frozen before the acados live cutover",
+  "provenance": {
+    "source_revision": "cd329fe72c7cec9b166f691aa7c4bc2078909d88",
+    "source_change_id": "kxkqznmtxuoqmxrnzzoopoywlppuksxo",
+    "backend": {
+      "do_mpc": "5.1.1",
+      "casadi": "3.7.2",
+      "solver": "IPOPT"
+    },
+    "capture_script": "tests/unit/acados/fixtures/capture_do_mpc_decision_parity.py",
+    "capture_script_sha256": "4b0ef9912b9b3e9b262a88af2a9ed24a50dfbbbffedbd1c9b99866f8618d9cd9",
+    "capture_command": "PYTHONPATH=<base-workspace> <venv>/bin/python <repo>/tests/unit/acados/fixtures/capture_do_mpc_decision_parity.py <repo>/tests/unit/acados/fixtures/do_mpc_decision_parity.json",
+    "raw_outputs_sha256": "170102f8867ad814ea43560cb898ed91a458a9ce98e61d594ca1f85a5a13e44f",
+    "review": "recaptured-from-immutable-base-and-reviewed-for-task-8"
+  },
   "config": {
     "C_c": 320.0,
     "h_amb": 0.5,
@@ -29,7 +43,7 @@
       "setpoint_c": 110.0,
       "q_previous": 0.3,
       "equilibrium_q": 0.0,
-      "do_mpc_first_q": 0.00007429498462599871
+      "do_mpc_first_q": 1.1434838243804033e-06
     },
     {
       "name": "near-target-reheat",
@@ -37,7 +51,7 @@
       "setpoint_c": 110.0,
       "q_previous": 0.45,
       "equilibrium_q": 0.0,
-      "do_mpc_first_q": 0.9999397229418189
+      "do_mpc_first_q": 0.9999472467736953
     },
     {
       "name": "overshoot-coast",
@@ -45,7 +59,7 @@
       "setpoint_c": 110.0,
       "q_previous": 0.6,
       "equilibrium_q": 0.0,
-      "do_mpc_first_q": 0.0
+      "do_mpc_first_q": 4.379407029602277e-05
     },
     {
       "name": "post-overshoot-recovery",
@@ -53,7 +67,7 @@
       "setpoint_c": 110.0,
       "q_previous": 0.4,
       "equilibrium_q": 0.0,
-      "do_mpc_first_q": 0.9999640253532852
+      "do_mpc_first_q": 0.9999598344873116
     }
   ]
 }

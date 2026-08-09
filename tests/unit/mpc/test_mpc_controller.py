@@ -4,11 +4,13 @@ import numpy as np
 import pytest
 
 import controller.mpc as mpc_module
-from common.control_trace import ActuationMode
+from common.control_trace import ActuationMode, AmbientSource
+from common.model_evidence import ForecastOriginEvidence
 from controller.acados import SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
 from controller.model_learning.contracts import FrameObservation
+from controller.model_learning.evaluation import CompletedForecastOrigin, ForecastOrigin
 
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
@@ -270,6 +272,61 @@ def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkey
     assert operator_outcome["eligible"] is True
     assert off_path[0][0] == "polled"
     assert off_path[1] == "evaluated"
+
+
+def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+    completed = CompletedForecastOrigin(
+        forecast=ForecastOrigin(
+            origin_sequence=1,
+            origin_time_s=20.0,
+            horizon_steps=3,
+            role_generation=0,
+            candidate_generation=1,
+            incumbent_digest="a" * 64,
+            challenger_digest="b" * 64,
+            incumbent_prediction_c=79.0,
+            challenger_prediction_c=81.0,
+            temperature_band="below-target",
+            phase="heating",
+            ambient_source=AmbientSource.CONFIGURED,
+            calibration_fit=False,
+        ),
+        completion_time_s=80.0,
+        observed_temperature_c=82.0,
+    )
+    controller._learning = SimpleNamespace(
+        observe_completed_frame=lambda _frame, *, identifiability: SimpleNamespace(
+            history=SimpleNamespace(accepted=True, reasons=()),
+            completed_forecasts=(completed,),
+            request=None,
+        ),
+        passive_history=SimpleNamespace(observations=()),
+        register_causal_forecasts=lambda *_args, **_kwargs: (),
+        close=lambda: None,
+    )
+
+    outcome = controller.observe_frame(_frame(sequence=4))
+
+    assert outcome["forecast_origin_evidence"] == (
+        ForecastOriginEvidence(
+            origin_sequence=1,
+            origin_time_ms=20_000,
+            completion_time_ms=80_000,
+            horizon_steps=3,
+            incumbent_digest="a" * 64,
+            challenger_digest="b" * 64,
+            incumbent_prediction_c=79.0,
+            challenger_prediction_c=81.0,
+            observed_temperature_c=82.0,
+            incumbent_error_c=3.0,
+            challenger_error_c=1.0,
+            temperature_band="below-target",
+            phase="heating",
+            ambient_source=AmbientSource.CONFIGURED,
+            calibration_fit=False,
+        ),
+    )
 
 
 def test_control_capabilities_and_status_remain_stable(monkeypatch):

@@ -132,6 +132,23 @@ def _freeze_evidence(
             rejection_reasons=rejection_reasons,
         ),
     )
+    records = tuple(
+        ModelEvidenceRecord(
+            evidence_id=(
+                f"{session_id}:forecast:{value.origin_sequence}:"
+                f"{value.horizon_steps}:{value.completion_time_ms}"
+            ),
+            kind=EvidenceKind.FORECAST_ORIGIN,
+            session_id=session_id,
+            cook_id=cook_id,
+            timestamp_ms=value.completion_time_ms,
+            role_generation=observation.role_generation,
+            model_digest=value.challenger_digest,
+            provenance_digest=value.incumbent_digest,
+            payload=value,
+        )
+        for value in values
+    )
     evaluation = outcome.get("evaluation_payload")
     refresh = outcome.get("refresh_diagnostics_evidence")
     decision_id = getattr(evaluation, "decision_id", None)
@@ -146,21 +163,7 @@ def _freeze_evidence(
         or evaluated_at_ms < 0
         or not isinstance(role_generation, int)
     ):
-        return (summary,)
-    records = tuple(
-        ModelEvidenceRecord(
-            evidence_id=f"{session_id}:{decision_id}:{value.origin_sequence}:{value.horizon_steps}:{value.completion_time_ms}",
-            kind=EvidenceKind.FORECAST_ORIGIN,
-            session_id=session_id,
-            cook_id=cook_id,
-            timestamp_ms=value.completion_time_ms,
-            role_generation=role_generation,
-            model_digest=value.challenger_digest,
-            provenance_digest=value.incumbent_digest,
-            payload=value,
-        )
-        for value in values
-    )
+        return (summary,) + records
     if not isinstance(refresh, RefreshDiagnosticsEvidence):
         return (summary,) + records
     return (
@@ -823,8 +826,13 @@ class ThreadedControllerRunner(ControllerRunner):
         self._wall_clock = wall_clock
         self._warning_callback = warning_callback
         self._stop_event = threading.Event()
+        self._learning_stop_event = threading.Event()
+        self._learning_condition = threading.Condition(self._lock)
+        self._learning_poll_core = None
         self._wait_for_period = self._stop_event.wait if wait_for_period is None else wait_for_period
+        self._learning_thread = threading.Thread(target=self._learning_loop, daemon=True)
         self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._learning_thread.start()
         self._thread.start()
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
@@ -887,6 +895,32 @@ class ThreadedControllerRunner(ControllerRunner):
             raise TypeError("controller activation events must be ModelEvidenceRecord")
         with self._lock:
             self._activation_events.extend(events)
+
+    def _learning_loop(self):
+        """Drain fitting results and prepare candidates away from control solves."""
+        while not self._learning_stop_event.is_set():
+            with self._learning_condition:
+                core = self._core
+                self._learning_poll_core = core
+            try:
+                poll = getattr(core, "poll_learning_off_path", None)
+                if callable(poll):
+                    poll()
+            except Exception:
+                # Learning is optional control evidence. A failed drain must not
+                # kill either the lifecycle dispatcher or the live controller.
+                pass
+            finally:
+                with self._learning_condition:
+                    if self._learning_poll_core is core:
+                        self._learning_poll_core = None
+                    self._learning_condition.notify_all()
+            self._learning_stop_event.wait(0.05)
+
+    def _wait_for_learning_release(self, core):
+        with self._learning_condition:
+            while self._learning_poll_core is core:
+                self._learning_condition.wait()
 
     def _loop(self):
         while True:
@@ -1033,6 +1067,7 @@ class ThreadedControllerRunner(ControllerRunner):
                         new_core.cancel_calibration(payload)
                 if handoff_output is not None:
                     new_core.set_output(handoff_output)
+                self._wait_for_learning_release(retired_core)
                 _close_core(retired_core)
                 continue
             for operation, payload in pending_calibrations:
@@ -1067,6 +1102,7 @@ class ThreadedControllerRunner(ControllerRunner):
                     if self._pending_observations:
                         continue
                     final_core = self._core
+                self._learning_thread.join()
                 _close_core(final_core)
                 return
             self._wait_for_period(self._control_period or 1.0)
@@ -1306,6 +1342,7 @@ class ThreadedControllerRunner(ControllerRunner):
     def stop(self):
         with self._lock:
             self._stop_event.set()
+            self._learning_stop_event.set()
             self._accept_observations = False
         close_wait = getattr(self._wait_for_period, "close", None)
         if callable(close_wait):
