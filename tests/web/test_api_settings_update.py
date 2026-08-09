@@ -270,3 +270,78 @@ def test_settings_update_table_save_flag_does_not_alter_stored_settings(client):
     assert without_flag["pwm"]["max_duty_cycle"] == baseline["pwm"]["max_duty_cycle"]
     # ...and the extra flag changed NOTHING about what was stored.
     assert with_flag == without_flag
+
+
+# --- The settings_delta envelope, over the wire -------------------------------
+#
+# common/settings_schema.py's settings_delta() and web-react's settingsDelta.ts
+# are the two ends of one contract, and every test either had covered only one
+# end: apply_settings_delta() was exercised directly, the React helper was
+# exercised against a stub. Nothing had ever put an envelope through the ROUTE,
+# which is the only place the two actually meet -- and the route rejected it.
+#
+# ControllerTab is the surface that sends one: selecting a controller drops any
+# persisted controller.config key the new selection does not declare, and a
+# dropped key has to be named in `delete` because the backend MERGES (an omitted
+# key is silence, not a removal).
+
+
+def test_settings_update_accepts_a_settings_delta_envelope(client):
+    """A delta that both assigns and deletes survives Layer 1.
+
+    The envelope's own members are not settings fields, so validating the raw
+    request body against PartialSettingsSchema reported three extra-input
+    errors -- `__settings_delta__`, `set` and `delete` -- and refused every
+    save carrying a deletion. Layer 1 has to see the payload the merge will
+    actually apply.
+    """
+    settings = read_settings()
+    settings["controller"]["config"].setdefault("pid_sp", {})["retired_option"] = 3
+    write_settings(settings)
+
+    body = {
+        "settings": {
+            "__settings_delta__": 1,
+            "set": {"controller": {"selected": "pid_sp"}},
+            "delete": [["controller", "config", "pid_sp", "retired_option"]],
+        },
+        "flags": ["controller_update"],
+    }
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["result"] == "success", resp.get_json()["message"]
+    stored = read_settings()
+    assert stored["controller"]["selected"] == "pid_sp"
+    assert "retired_option" not in stored["controller"]["config"]["pid_sp"]
+
+
+def test_settings_update_still_field_checks_inside_a_delta_envelope(client):
+    """Wrapping a bad value in an envelope must not smuggle it past Layer 1."""
+    body = {
+        "settings": {
+            "__settings_delta__": 1,
+            "set": {"pwm": {"update_time": "not-a-number"}},
+        },
+        "flags": [],
+    }
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    payload = resp.get_json()
+    assert payload["result"] == "error"
+    # The path names the field, not the envelope member that carried it.
+    assert [p["path"] for p in payload["errors"]] == ["pwm.update_time"]
+
+
+def test_settings_update_rejects_a_malformed_delta_envelope(client):
+    """A structurally-broken envelope is refused, not silently merged as a partial."""
+    body = {
+        "settings": {"__settings_delta__": 99, "set": {"pwm": {"update_time": 7}}},
+        "flags": [],
+    }
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    payload = resp.get_json()
+    assert payload["result"] == "error"
+    assert "__settings_delta__" in payload["message"]
+    assert read_settings()["pwm"]["update_time"] != 7

@@ -3192,7 +3192,7 @@
     }
   },
   ".pf-input#5": {
-    "x": 622,
+    "x": 621,
     "y": 567,
     "w": 91,
     "h": 36,
@@ -3234,7 +3234,7 @@
     }
   },
   ".pf-input#6": {
-    "x": 758,
+    "x": 756,
     "y": 567,
     "w": 80,
     "h": 36,
@@ -3360,7 +3360,7 @@
     }
   },
   ".pf-input#9": {
-    "x": 622,
+    "x": 621,
     "y": 616,
     "w": 91,
     "h": 36,
@@ -3402,7 +3402,7 @@
     }
   },
   ".pf-input#10": {
-    "x": 758,
+    "x": 756,
     "y": 616,
     "w": 80,
     "h": 36,
@@ -3528,7 +3528,7 @@
     }
   },
   ".pf-input#13": {
-    "x": 622,
+    "x": 621,
     "y": 665,
     "w": 91,
     "h": 36,
@@ -3570,7 +3570,7 @@
     }
   },
   ".pf-input#14": {
-    "x": 758,
+    "x": 756,
     "y": 665,
     "w": 80,
     "h": 36,
@@ -3654,7 +3654,7 @@
     }
   },
   ".pf-input#16": {
-    "x": 622,
+    "x": 621,
     "y": 714,
     "w": 91,
     "h": 36,
@@ -3696,7 +3696,7 @@
     }
   },
   ".pf-input#17": {
-    "x": 758,
+    "x": 756,
     "y": 714,
     "w": 80,
     "h": 36,
@@ -3794,7 +3794,7 @@
       "border-top-color": "rgb(244, 237, 226)",
       "border-top-style": "none",
       "border-top-left-radius": "999px",
-      "box-shadow": "none",
+      "box-shadow": "rgba(255, 255, 255, 0.12) 0px 0px 0px 1px inset",
       "opacity": "1",
       "font-family": "Barlow, \"Barlow Semi Condensed\", system-ui, -apple-system, sans-serif",
       "line-height": "24px",
@@ -3836,7 +3836,7 @@
       "border-top-color": "rgb(244, 237, 226)",
       "border-top-style": "none",
       "border-top-left-radius": "999px",
-      "box-shadow": "none",
+      "box-shadow": "rgba(255, 255, 255, 0.12) 0px 0px 0px 1px inset",
       "opacity": "1",
       "font-family": "Barlow, \"Barlow Semi Condensed\", system-ui, -apple-system, sans-serif",
       "line-height": "24px",
@@ -3878,7 +3878,7 @@
       "border-top-color": "rgb(244, 237, 226)",
       "border-top-style": "none",
       "border-top-left-radius": "999px",
-      "box-shadow": "none",
+      "box-shadow": "rgba(255, 255, 255, 0.12) 0px 0px 0px 1px inset",
       "opacity": "1",
       "font-family": "Barlow, \"Barlow Semi Condensed\", system-ui, -apple-system, sans-serif",
       "line-height": "24px",
@@ -3920,7 +3920,7 @@
       "border-top-color": "rgb(244, 237, 226)",
       "border-top-style": "none",
       "border-top-left-radius": "999px",
-      "box-shadow": "none",
+      "box-shadow": "rgba(255, 255, 255, 0.12) 0px 0px 0px 1px inset",
       "opacity": "1",
       "font-family": "Barlow, \"Barlow Semi Condensed\", system-ui, -apple-system, sans-serif",
       "line-height": "24px",
