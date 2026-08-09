@@ -123,6 +123,33 @@ export async function waitForBarlow(page: Page): Promise<void> {
   });
 }
 
+/** The instant every fidelity capture is taken at. Arbitrary, but fixed: the
+ *  geometry must not depend on when the suite ran. */
+const FIXED_TIME = new Date("2026-07-25T12:00:00Z");
+
+/**
+ * Pin the wall clock, so nothing measured here can move with the calendar.
+ * helpers/clock.ts's shared interval, useClock and demoDashAt's elapsed-seconds
+ * argument all read the date, and the dashboard header's clock changes width
+ * with it.
+ *
+ * `setFixedTime`, NOT `install` + `pauseAt`. Pausing stops the timer queue as
+ * well as the date, and react-query flushes every subscriber notification
+ * through `setTimeout(cb, 0)` -- query-core's notifyManager defaults its
+ * scheduler to `systemSetTimeoutZero`. With that queue stopped a page's fetch
+ * still resolves and its payload still reaches the cache, but no component is
+ * ever notified, so anything gated on `isPending` renders its loading branch
+ * until the test times out. Freezing the date alone leaves timers running and
+ * buys the same determinism.
+ *
+ * Every page that moves behind a query key inherits this, which is why it lives
+ * here rather than in one spec: /history, /admin, /metrics and both detail
+ * pages each broke silently as they were migrated.
+ */
+export async function freezeDate(page: Page): Promise<void> {
+  await page.clock.setFixedTime(FIXED_TIME);
+}
+
 export async function measureLandmarks(page: Page): Promise<LandmarkMap> {
   await waitForBarlow(page);
   return (await page.evaluate(() => {

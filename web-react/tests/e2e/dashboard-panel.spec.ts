@@ -4,6 +4,7 @@ import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
 } from "../../src/helpers/modelEvidence/types";
+import { freezeDate } from "./layoutBaseline";
 
 // 800x480 -- the grill's own screen.
 //
@@ -129,8 +130,7 @@ function evidenceReport(
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-  await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+  await freezeDate(page);
   await page.goto("/");
   await expect(page.locator('[data-pf="stage"]')).toBeVisible();
 });

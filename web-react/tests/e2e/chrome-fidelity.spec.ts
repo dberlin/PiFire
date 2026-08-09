@@ -3,6 +3,7 @@ import { stubApi } from "./apiFixtures";
 import {
   CAPTURING,
   compareStyles,
+  freezeDate,
   measureProbes,
   readStyleBaseline,
   writeStyleBaseline,
@@ -28,8 +29,7 @@ for (const viewport of [DESKTOP, PHONE]) {
     test.use({ viewport });
 
     test("conditional chrome resolves to the committed styles", async ({ page }) => {
-      await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-      await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+      await freezeDate(page);
       await stubApi(page);
       // The shell (not the wizard) so shell.css, dashboard.css, settings.css and
       // pellets.css are all loaded; wizard.css arrives through the /wizard

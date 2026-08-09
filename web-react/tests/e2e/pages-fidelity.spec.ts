@@ -4,6 +4,7 @@ import {
   baselinePath,
   CAPTURING,
   compareToBaseline,
+  freezeDate,
   measureSelectors,
   requireBaseline,
   writeBaseline,
@@ -68,12 +69,7 @@ for (const viewport of [DESKTOP, PHONE]) {
 
     for (const spec of PAGE_SPECS) {
       test(`${spec.name} matches the committed baseline`, async ({ page }) => {
-        // Freeze the clock BEFORE navigating so helpers/clock.ts's shared
-        // interval, useClock and demoDashAt's elapsed-seconds argument are all
-        // pinned. Without this the dashboard header's clock changes width
-        // between runs and the gate is flaky on its own reference.
-        await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-        await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+        await freezeDate(page);
         await stubApi(page);
         // Per-spec fixtures on top of the shared set. Registered AFTER stubApi
         // so a spec can override a shared route: Playwright runs handlers in
@@ -135,8 +131,7 @@ for (const viewport of [DESKTOP, PHONE]) {
     test.use({ viewport });
     for (const spec of PAGE_SPECS) {
       test(`${spec.name} does not scroll sideways`, async ({ page }) => {
-        await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-        await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+        await freezeDate(page);
         await stubApi(page);
         await spec.stubs?.(page);
         await page.goto(spec.path);

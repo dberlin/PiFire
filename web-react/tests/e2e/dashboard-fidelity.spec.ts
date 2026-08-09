@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   CAPTURING,
   compareToBaseline,
+  freezeDate,
   measureLandmarks,
   measureStageScale,
   requireBaseline,
@@ -28,10 +29,7 @@ const BASELINE = "tests/e2e/dashboard-layout-1280x720.json";
 const ARTIFACTS = "tests/e2e/artifacts";
 
 test("dashboard layout at 1280x720 matches the committed baseline", async ({ page }) => {
-  // Freeze the clock BEFORE navigating so helpers/clock.ts's shared interval,
-  // useClock and demoDashAt's elapsed-seconds argument are all pinned.
-  await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-  await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+  await freezeDate(page);
   await page.goto("/");
   await expect(page.locator('[data-pf="stage"]')).toBeVisible();
 
@@ -77,8 +75,7 @@ test("dashboard layout at 1280x720 matches the committed baseline", async ({ pag
 // resolution the whole dashboard is on screen, nothing scrolls, and the bottom
 // row of controls is fully visible rather than clipped.
 test("nothing is clipped or scrolled off a 1280x720 window", async ({ page }) => {
-  await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-  await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+  await freezeDate(page);
   await page.goto("/");
   await expect(page.locator('[data-pf="stage"]')).toBeVisible();
 

@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import { freezeDate } from "./layoutBaseline";
 
 // The other half of the reflow gate. dashboard-fidelity.spec.ts proves the
 // 1280x720 layout did not change; this proves something actually happens below
@@ -16,8 +17,7 @@ import { expect, test } from "@playwright/test";
 const ARTIFACTS = "tests/e2e/artifacts";
 
 test.beforeEach(async ({ page }) => {
-  await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-  await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+  await freezeDate(page);
   await page.goto("/");
   await expect(page.locator('[data-pf="stage"]')).toBeVisible();
 });

@@ -5,6 +5,7 @@ import {
   baselinePath,
   CAPTURING,
   compareToBaseline,
+  freezeDate,
   measureSelectors,
   readBaseline,
   writeBaseline,
@@ -123,8 +124,7 @@ for (const viewport of [DESKTOP, PHONE]) {
         );
       }
 
-      await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
-      await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
+      await freezeDate(page);
       await page.goto("/pellets");
       await expect(page.locator(PELLETS_SPEC.ready)).toBeVisible({ timeout: 20000 });
       // The pin, checked in the DOM rather than assumed from the POST: the name
