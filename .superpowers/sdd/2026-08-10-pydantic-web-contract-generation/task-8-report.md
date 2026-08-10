@@ -6,7 +6,11 @@ DONE — source and tests implemented; shared registration, generation, and comm
 
 Implementation commit: `cff915caeba5112bda99a4de79a83555c5b9d7b6` (`tyvpuyssktxwkxsswtntzqrpsqksvpol`)
 
-Report change: `qxmwwvxquoqytltsnytkypzlqqotwklw`
+Review fix commit: `3698076cc53a813d88b828a12294d038421b1cb6` (`kyutnyuykmmrnxrzyzszqvsyyormoxvp`)
+
+Initial report change: `qxmwwvxquoqytltsnytkypzlqqotwklw`
+
+Report update change: `uqrmrzywvsnlwlzoporumqrzyntyrpmo`
 
 ## Implemented
 
@@ -131,6 +135,14 @@ The serialized integration wave must generate and commit exactly:
 
 No registry, exporter, manifest, schema, or `*.gen.ts` path was edited by Task 8.
 
+## Static review remediation
+
+The required post-implementation review found three Important boundary regressions. Review fix commit `3698076cc53a813d88b828a12294d038421b1cb6` resolves all three:
+
+- Admin empty-object actions now distinguish an absent body from present malformed, falsy, or non-object JSON before factory reset or log deletion can execute.
+- Updater empty-object actions make the same distinction before status mutation or process launch.
+- Strict operation error details now retain the existing `log` member, preserving unknown log-family responses as JSON 404s rather than response-validation failures.
+
 ## Verification intentionally not run
 
 Per the concurrent-wave constraint, Task 8 did not run tests, formatters, linters, builds, typecheck, Playwright, or generation. The brief's focused commands remain unrun verbatim:
@@ -144,10 +156,11 @@ bun run gen:types:check
 bun run typecheck
 ```
 
-The new direct model suite must also be run after registration/generation:
+The new direct model suite and the strengthened log-view error regression must
+also be run after registration/generation:
 
 ```bash
-uv run pytest -q tests/unit/common/web_contracts/test_operations.py
+uv run pytest -q tests/unit/common/web_contracts/test_operations.py tests/web/test_api_admin_logs_view.py
 ```
 
 Static LSP diagnostics were clean for `common/web_contracts/operations.py` and the modified admin/update/tuner Python routes, aside from pre-existing informational hints about `os.system` and an intentionally ignored tuner chart-label return. Frontend execution/type diagnostics are intentionally deferred because the imported `operations.gen.ts` module does not exist until the serialized integration wave.
@@ -156,4 +169,4 @@ Static LSP diagnostics were clean for `common/web_contracts/operations.py` and t
 
 - Expected integration blocker: frontend compilation remains unavailable until the operations registry entry and generated files above are produced.
 - Behavioral verification is deliberately outstanding because execution was prohibited in this wave; the listed focused suites must be the integration wave's acceptance gate.
-- No other known Task 8 concern remains.
+- No Critical or Important static-review concern remains after review fix commit `3698076cc53a813d88b828a12294d038421b1cb6`.
