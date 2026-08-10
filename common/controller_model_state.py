@@ -51,6 +51,7 @@ from enum import Enum
 import logging
 import threading
 
+from common import datastore
 from common.datastore_accessors import read_generic_key, write_generic_key
 
 MODEL_STATE_KEY = "controller_model_state"
@@ -115,12 +116,19 @@ def _callback_identity(callback):
 def _shared_backend_state(reader, writer):
     reader_identity = _callback_identity(reader)
     writer_identity = _callback_identity(writer)
+    datastore_path = datastore.DB_PATH
     with _BACKEND_STATES_LOCK:
-        for saved_reader, saved_writer, state in _BACKEND_STATES:
-            if saved_reader is reader_identity and saved_writer is writer_identity:
+        for saved_reader, saved_writer, saved_path, state in _BACKEND_STATES:
+            if (
+                saved_reader is reader_identity
+                and saved_writer is writer_identity
+                and saved_path == datastore_path
+            ):
                 return state
         state = _BackendState()
-        _BACKEND_STATES.append((reader_identity, writer_identity, state))
+        _BACKEND_STATES.append(
+            (reader_identity, writer_identity, datastore_path, state)
+        )
         return state
 
 

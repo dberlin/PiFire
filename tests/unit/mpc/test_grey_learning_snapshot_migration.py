@@ -17,6 +17,7 @@ from common.datastore_accessors import (
 from controller.mpc import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.mpc_model import MODEL_SCHEMA
 from controller.model_learning.activation import GreyControlPairDescriptor, canonical_snapshot_digest
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.model_learning.report import backend_learning_report
 
 
@@ -262,6 +263,18 @@ def test_active_source_rewrites_snapshot_pointer_without_losing_singleton_identi
     assert state.incumbent_pair == active
     assert state.candidate_generation == 7
     assert state.candidate_digest == active.model_digest
+    assert result.snapshot["revision"] == active.role_generation
+    assert result.snapshot["identities"]["active_digest"] == active.model_digest
+    assert result.snapshot["identities"]["active_generation"] == active.role_generation
+    assert result.snapshot["evidence"]["confidence_decision_id"] == "decision-active"
+    assert result.snapshot["origin"] == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert result.snapshot["policy"] == ActivationPolicy.OPERATOR_REVIEWED.value
+    assert result.snapshot["activation"] == {
+        "phase": "prepared",
+        "pending_persistence": False,
+        "pending_swap": True,
+    }
+    assert canonical_snapshot_digest(state.active_pair.configuration) == result.snapshot["identities"]["active_digest"]
 
 
 def test_migration_invalidation_is_durable_and_surfaces_from_real_backend(ds):

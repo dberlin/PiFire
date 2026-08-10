@@ -535,8 +535,6 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     core._prepare_automatic_pair_activation(preparation, ActivationPolicy.PASSIVE_AUTO)
 
     assert [kind for kind, *_ in calls] == [
-        "evidence",
-        "evidence",
         "confidence",
         "phase",
         "evidence",

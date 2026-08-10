@@ -10,6 +10,7 @@ import logging
 import threading
 
 import pytest
+from common import datastore
 
 from common.controller_model_state import (
     MAX_SNAPSHOT_BYTES,
@@ -436,3 +437,15 @@ def test_round_trips_through_the_real_datastore_seam(ds):
     assert store.save("pid_sp", FOPDT) is True
     assert store.load("pid_sp") == FOPDT
     assert ControllerModelStore().load("pid_sp") == FOPDT
+
+
+def test_default_store_backend_identity_follows_repointed_datastore_path(ds, tmp_path):
+    first = ControllerModelStore()
+    assert first.save("mpc", {"revision": 3, "model": "first"}) is True
+
+    datastore._reset_for_tests(str(tmp_path / "second.db"))
+    datastore.init()
+
+    second = ControllerModelStore()
+    assert second.load("mpc") is None
+    assert second.save("mpc", {"revision": 0, "model": "second"}) is True

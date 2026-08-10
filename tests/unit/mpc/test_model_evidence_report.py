@@ -2,27 +2,30 @@
 
 from __future__ import annotations
 import json
+from types import SimpleNamespace
 
 
 import pytest
 
 from common.model_evidence import (
     CandidateAssessmentEvidence,
-    ActivationLifecycleEvidence,
     EvidenceKind,
-    FitLifecycleEvidence,
-    LearningFailureEvidence,
     ModelEvidenceRecord,
     RecorderGapEvidence,
     SchemaInvalidationEvidence,
 )
 from controller.model_learning import report as report_module
-from controller.model_learning.contracts import CandidateOrigin, CheckStatus, FitStatus, LearningStatus
+from controller.model_learning.contracts import (
+    CandidateOrigin,
+    FrameObservation,
+    CheckStatus,
+    FitRequest,
+    FitStatus,
+    FitWindowIdentity,
+    LearningStatus,
+)
 from common.control_trace import (
-    GreyActivationLifecyclePayload,
-    GreyCandidateAssessmentPayload,
-    GreyFitLifecyclePayload,
-    GreyLearningFailurePayload,
+    AmbientSource,
 )
 from common.controller_model_state import ControllerModelStore
 from common.datastore_accessors import read_control_trace_session, read_model_evidence
@@ -33,6 +36,7 @@ from controller.model_learning.report import (
     build_learning_report,
     current_learning_report,
 )
+from controller.runtime.model_fitting import grey_config_digest
 
 
 _CANDIDATE = "b" * 64
@@ -395,6 +399,37 @@ def test_manual_policy_comes_from_matching_current_candidate_assessment() -> Non
     assert payload["candidate"]["policy"] == "operator-reviewed"
 
 
+def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason() -> None:
+    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller._activation_terminated_reason = "native solver crashed"
+
+    checkpoint = controller.get_model_snapshot()
+    active_digest = checkpoint["identities"]["active_digest"]
+    live = controller._learning_live_status()
+    payload = build_learning_report(
+        (),
+        activation_state={
+            **_activation(phase="active"),
+            "incumbent_digest": active_digest,
+            "candidate_digest": active_digest,
+            "role_generation": 0,
+            "candidate_generation": 0,
+            "origin": None,
+        },
+        checkpoint=checkpoint,
+        live_status=live,
+        calibration_command_high_water=0,
+    ).as_dict()
+    assert live["failure"] == {
+        "code": "activation-terminal",
+        "detail": "native solver crashed",
+        "terminal": True,
+    }
+    assert payload["status"] == "error", payload["errors"]
+    assert payload["errors"] == ["activation-terminal"]
+    assert payload["failure"] == live["failure"]
+
+
 def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> None:
     missing = build_learning_report(
         (),
@@ -416,119 +451,284 @@ def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> No
     assert incompatible["errors"] == ["checkpoint-schema-invalid"]
 
 
-def test_production_grey_lifecycle_writers_persist_matching_evidence_trace_report_and_artifact(ds):
+def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_report(ds) -> None:
     controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
-    controller.bind_learning_identity("session-lifecycle", "cook-lifecycle", 0)
+    controller.bind_learning_identity("session-operator", "cook-operator", 0)
     incumbent = controller.active_control_pair.descriptor
-    candidate_digest = "b" * 64
-    events = (
-        (
-            FitLifecycleEvidence(
-                request_id="request-1",
-                status="succeeded",
-                origin="operator-calibration",
-                policy="operator-reviewed",
-                window_id="window-1",
-            ),
-            GreyFitLifecyclePayload(
-                request_id="request-1",
-                status="succeeded",
-                origin="operator-calibration",
-                policy="operator-reviewed",
-                window_id="window-1",
-            ),
-        ),
-        (
-            CandidateAssessmentEvidence(
-                decision_id="decision-1",
-                origin="operator-calibration",
-                policy="operator-reviewed",
-                fit_accepted=True,
-                identifiability_accepted=True,
-                native_build="passed",
-                native_dry_solve="passed",
-                target_timing="passed",
-                confidence_accepted=True,
-            ),
-            GreyCandidateAssessmentPayload(
-                decision_id="decision-1",
-                origin="operator-calibration",
-                policy="operator-reviewed",
-                fit_accepted=True,
-                identifiability_accepted=True,
-                native_build="passed",
-                native_dry_solve="passed",
-                target_timing="passed",
-                confidence_accepted=True,
-            ),
-        ),
-        (
-            ActivationLifecycleEvidence(
-                decision_id="decision-1",
-                phase="aborted",
-                origin="operator-calibration",
-                policy="operator-reviewed",
-                reason="native-dry-solve-failed",
-            ),
-            GreyActivationLifecyclePayload(
-                decision_id="decision-1",
-                phase="aborted",
-                origin="operator-calibration",
-                policy="operator-reviewed",
-                reason="native-dry-solve-failed",
-            ),
-        ),
-        (
-            LearningFailureEvidence(
-                code="native-dry-solve-failed",
-                detail="candidate failed finite dry solve",
-                terminal=True,
-            ),
-            GreyLearningFailurePayload(
-                code="native-dry-solve-failed",
-                detail="candidate failed finite dry solve",
-                terminal=True,
-            ),
+    native_config = controller.mpc.config
+    candidate_digest = grey_config_digest(native_config)
+    request = FitRequest(
+        request_id="operator-request",
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        candidate_generation=1,
+        window=FitWindowIdentity(
+            session_id="session-operator",
+            cook_id="cook-operator",
+            first_observation_sequence=3,
+            last_observation_sequence=9,
+            role_generation=0,
+            incumbent_digest=incumbent.model_digest,
+            configuration_digest="c" * 64,
         ),
     )
-    for offset, (evidence_payload, trace_payload) in enumerate(events):
-        controller._persist_grey_lifecycle(
-            evidence_payload,
-            trace_payload,
-            timestamp_ms=10 + offset,
-            role_generation=1,
-            model_digest=candidate_digest,
-            provenance_digest=incumbent.model_digest,
-        )
-    worker = controller._activation_persistence_worker
-    assert worker is not None
-    worker.flush_and_stop(timeout=2.0)
+    preparation = SimpleNamespace(
+        accepted=True,
+        candidate_digest=candidate_digest,
+        candidate_pair=SimpleNamespace(estimator=object(), controller=object()),
+        candidate=SimpleNamespace(
+            request=request,
+            config=native_config,
+            rmse_c=1.0,
+            sample_count=12,
+            temperature_band_c=(80.0, 120.0),
+            nfev=4,
+        ),
+        blockers=(),
+        dry_solve_finite=True,
+        timing=SimpleNamespace(accepted=True),
+    )
+    evaluation = SimpleNamespace(
+        decision_id="operator-decision",
+        accepted=True,
+        blockers=(),
+        role_generation=0,
+        candidate_generation=1,
+        incumbent_digest=incumbent.model_digest,
+        challenger_digest=candidate_digest,
+        completed_origins=(),
+    )
+
+    class _Learning:
+        prepared = preparation
+        handoff = None
+        _pending_request = None
+
+        def poll_fit_off_path(self, **_kwargs):
+            return None
+
+        def evaluate_ready_off_path(self):
+            return evaluation
+
+    controller._learning = _Learning()
+    controller._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
+    controller._poll_learning_off_path_locked(
+        live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
+    )
+
+    worker = getattr(controller, "_activation_persistence_worker", None)
+    if worker is not None:
+        worker.flush_and_stop(timeout=2.0)
     checkpoint = controller.get_model_snapshot()
-    checkpoint["challenger"] = {
-        "parameters": checkpoint["active"]["parameters"],
-        "metadata": checkpoint["active"]["metadata"],
-    }
-    checkpoint["origin"] = "operator-calibration"
-    checkpoint["policy"] = "operator-reviewed"
-    checkpoint["identities"]["candidate_digest"] = candidate_digest
-    checkpoint["identities"]["candidate_generation"] = 1
     assert ControllerModelStore().save("mpc", checkpoint) is True
+    report, records = backend_learning_report()
+    artifact = json.loads(build_learning_artifact(report, records))
+
+    assessments = [
+        record.payload
+        for record in records
+        if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT
+    ]
+    assert len(assessments) == 1
+    assert assessments[0].origin == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert assessments[0].policy == "operator-reviewed"
+    assert report.as_dict()["status"] == "ready-for-review", report.as_dict()
+    assert report.as_dict()["candidate"]["policy"] == "operator-reviewed"
+    assert artifact["report"] == report.as_dict()
+
+def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) -> None:
+    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller.bind_learning_identity("session-submit", "cook-submit", 0)
+    incumbent = controller.active_control_pair.descriptor
+    request = FitRequest(
+        request_id="request-submit",
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        candidate_generation=1,
+        window=FitWindowIdentity(
+            session_id="session-submit",
+            cook_id="cook-submit",
+            first_observation_sequence=1,
+            last_observation_sequence=7,
+            configuration_digest="c" * 64,
+            incumbent_digest=incumbent.model_digest,
+            role_generation=0,
+        ),
+    )
+
+    class _Learning:
+        _pending_request = None
+        prepared = None
+        handoff = None
+        passive_history = SimpleNamespace(observations=())
+
+        def observe_completed_frame(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                request=request,
+                history=SimpleNamespace(accepted=True, reasons=()),
+                completed_forecasts=(),
+            )
+
+    assert ControllerModelStore().save("mpc", controller.get_model_snapshot()) is True
+    controller._learning = _Learning()
+    controller._register_learning_forecasts = lambda _observation: ()
+    controller.observe_frame(
+        FrameObservation(
+            frame_start_s=25.0,
+            frame_end_s=50.0,
+            temp_c=90.0,
+            setpoint_c=120.0,
+            ambient_c=20.0,
+            requested_q=0.4,
+            realized_q=0.4,
+            requested_auger_duty=0.4,
+            delivered_on_s=10.0,
+            requested_fan_duty=0.5,
+            actual_fan_duty=0.5,
+            result_revision=1,
+            output_source="controller",
+            lid_open=False,
+            safety_inhibited=False,
+            manual_override=False,
+            stale=False,
+            skipped=False,
+            reset=False,
+            continuous=True,
+            role_generation=0,
+            observation_sequence=1,
+            ambient_source=AmbientSource.CONFIGURED,
+        )
+    )
+    worker = getattr(controller, "_activation_persistence_worker", None)
+    if worker is not None:
+        worker.flush_and_stop(timeout=2.0)
 
     report, records = backend_learning_report()
-    artifact = build_learning_artifact(report, records)
-    trace = read_control_trace_session("session-lifecycle")
+    artifact = json.loads(build_learning_artifact(report, records))
+    fits = [
+        record.payload
+        for record in records
+        if record.kind is EvidenceKind.FIT_LIFECYCLE
+    ]
+    trace = read_control_trace_session("session-submit")
 
-    assert {record.kind.value for record in records} >= {
-        "fit_lifecycle",
-        "candidate_assessment",
-        "activation_lifecycle",
-        "learning_failure",
-    }
-    assert {record.event_kind.value for record in trace} == {
-        "fit_lifecycle",
-        "candidate_assessment",
-        "activation_lifecycle",
-        "learning_failure",
-    }
-    assert report.as_dict()["status"] == "error"
-    assert json.loads(artifact)["report"] == report.as_dict()
+    assert [payload.status for payload in fits] == ["queued"]
+    assert [record.event_kind.value for record in trace] == ["fit_lifecycle"]
+    assert artifact["report"] == report.as_dict()
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_fit_status", "expected_rejection"),
+    (
+        ("fit-error", "failed", "fit-error"),
+        ("stale", "stale", None),
+        ("identifiability", "succeeded", "identifiability"),
+        ("preparation", "succeeded", "native-dry-solve-failed"),
+        ("success", "succeeded", None),
+    ),
+)
+def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
+    ds,
+    case,
+    expected_fit_status,
+    expected_rejection,
+) -> None:
+    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller.bind_learning_identity(f"session-{case}", f"cook-{case}", 0)
+    incumbent = controller.active_control_pair.descriptor
+    native_config = controller.mpc.config
+    candidate_digest = grey_config_digest(native_config)
+    request = FitRequest(
+        request_id=f"request-{case}",
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        candidate_generation=1,
+        window=FitWindowIdentity(
+            session_id=f"session-{case}",
+            cook_id=f"cook-{case}",
+            first_observation_sequence=2,
+            last_observation_sequence=8,
+            configuration_digest="c" * 64,
+            incumbent_digest=incumbent.model_digest,
+            role_generation=0,
+        ),
+    )
+    outcome = (
+        SimpleNamespace(request=request, detail="native fitter crashed")
+        if case == "fit-error"
+        else SimpleNamespace(request=request, config=native_config)
+    )
+    preparation = (
+        SimpleNamespace(
+            accepted=False,
+            candidate_digest=candidate_digest,
+            candidate_pair=None,
+            candidate=SimpleNamespace(request=request, config=native_config),
+            blockers=("native-dry-solve-failed",),
+            dry_solve_finite=False,
+            timing=SimpleNamespace(accepted=True),
+        )
+        if case == "preparation"
+        else None
+    )
+    delivery = SimpleNamespace(
+        message=SimpleNamespace(request=request, outcome=outcome),
+        stale_reasons=("role-generation-changed",) if case == "stale" else (),
+        preparation=preparation,
+        blockers=(
+            ("fit-error",)
+            if case == "fit-error"
+            else ("identifiability",)
+            if case == "identifiability"
+            else ()
+        ),
+    )
+
+    class _Learning:
+        prepared = preparation
+        handoff = None
+        _pending_request = request
+
+        def poll_fit_off_path(self, **_kwargs):
+            return delivery
+
+        def evaluate_ready_off_path(self):
+            return None
+
+    checkpoint = controller.get_model_snapshot()
+    assert ControllerModelStore().save("mpc", checkpoint) is True
+    controller._learning = _Learning()
+    controller._poll_learning_off_path_locked(
+        live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
+    )
+    worker = getattr(controller, "_activation_persistence_worker", None)
+    if worker is not None:
+        worker.flush_and_stop(timeout=2.0)
+
+    report, records = backend_learning_report()
+    artifact = json.loads(build_learning_artifact(report, records))
+    fits = [
+        record.payload
+        for record in records
+        if record.kind is EvidenceKind.FIT_LIFECYCLE
+    ]
+    assessments = [
+        record.payload
+        for record in records
+        if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT
+    ]
+    trace = read_control_trace_session(f"session-{case}")
+
+    assert fits[-1].status == expected_fit_status
+    assert report.as_dict()["fit"]["status"] == expected_fit_status
+    if case == "fit-error":
+        assert report.as_dict()["status"] == "error"
+        assert "native fitter crashed" in report.as_dict()["errors"]
+    if expected_rejection is None:
+        assert assessments == []
+    else:
+        assert expected_rejection in assessments[-1].rejection_reasons
+    assert {record.event_kind.value for record in trace} >= {"fit_lifecycle"}
+    assert artifact["report"] == report.as_dict()
+
+
+
+
+

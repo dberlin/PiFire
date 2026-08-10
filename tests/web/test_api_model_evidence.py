@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,10 +27,16 @@ from controller.model_learning.activation import (
     PreparedActivationRecord,
     canonical_snapshot_digest,
 )
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.model_learning.contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    FitRequest,
+    FitWindowIdentity,
+)
 from common.controller_model_state import ControllerModelStore
 
-from controller.mpc import migrate_grey_learning_snapshot
+from controller.mpc import Controller, _DEFAULTS, migrate_grey_learning_snapshot
+from controller.runtime.model_fitting import grey_config_digest
 
 _CANDIDATE = "c" * 64
 _INCUMBENT = "a" * 64
@@ -366,6 +373,113 @@ def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
     monkeypatch.setattr(routes, "_build_manual_candidate_pair", lambda _descriptor: pair)
     monkeypatch.setattr(routes, "_manual_candidate_dry_solve", lambda value: value is pair)
     return pair, estimator, solver
+
+
+def test_operator_evaluation_persists_real_report_consumed_by_actual_activation_route(
+    client,
+    monkeypatch,
+):
+    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller.bind_learning_identity("session-api-operator", None, 0)
+    incumbent = controller.active_control_pair.descriptor
+    native_config = controller.mpc.config
+    candidate_digest = grey_config_digest(native_config)
+    request = FitRequest(
+        request_id="request-api-operator",
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        candidate_generation=1,
+        window=FitWindowIdentity(
+            session_id="session-api-operator",
+            cook_id=None,
+            first_observation_sequence=4,
+            last_observation_sequence=10,
+            configuration_digest="c" * 64,
+            incumbent_digest=incumbent.model_digest,
+            role_generation=0,
+        ),
+    )
+    preparation = SimpleNamespace(
+        accepted=True,
+        candidate_digest=candidate_digest,
+        candidate_pair=SimpleNamespace(estimator=object(), controller=object()),
+        candidate=SimpleNamespace(
+            request=request,
+            config=native_config,
+            rmse_c=1.0,
+            sample_count=12,
+            temperature_band_c=(80.0, 120.0),
+            nfev=4,
+        ),
+        blockers=(),
+        dry_solve_finite=True,
+        timing=SimpleNamespace(accepted=True),
+    )
+    evaluation = SimpleNamespace(
+        decision_id="decision-api-operator",
+        accepted=True,
+        blockers=(),
+        role_generation=0,
+        candidate_generation=1,
+        incumbent_digest=incumbent.model_digest,
+        challenger_digest=candidate_digest,
+        completed_origins=(),
+    )
+
+    class _Learning:
+        prepared = preparation
+        handoff = None
+        _pending_request = None
+
+        def poll_fit_off_path(self, **_kwargs):
+            return None
+
+        def evaluate_ready_off_path(self):
+            return evaluation
+
+    controller._learning = _Learning()
+    controller._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
+    controller._poll_learning_off_path_locked(
+        live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
+    )
+    controller._activation_persistence_worker.flush_and_stop(timeout=2.0)
+    checkpoint = controller.get_model_snapshot()
+    assert ControllerModelStore().save("mpc", checkpoint) is True
+
+    configuration = {
+        name: getattr(native_config, name)
+        for name in native_config.__dataclass_fields__
+    }
+    candidate = GreyControlPairDescriptor(
+        model_digest=candidate_digest,
+        configuration=configuration,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=1,
+        role_generation=1,
+    )
+    pair = OwnedGreyControlPair(candidate, _ApiHandle(), _ApiHandle())
+    monkeypatch.setattr(
+        routes,
+        "_activation_checkpoint",
+        lambda: {
+            "active_pair": incumbent.to_dict(),
+            "candidate_pair": candidate.to_dict(),
+        },
+    )
+    monkeypatch.setattr(routes, "_build_manual_candidate_pair", lambda _descriptor: pair)
+    monkeypatch.setattr(routes, "_manual_candidate_dry_solve", lambda value: value is pair)
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": candidate_digest,
+            "decision_id": evaluation.decision_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["phase"] == "prepared"
+    assert read_model_activation().candidate_pair == candidate
 
 
 def test_activate_route_persists_only_prepared_after_exact_manual_validation(client, monkeypatch):

@@ -1309,6 +1309,7 @@ def migrate_mpc_learning_authority(
                 else 0
             )
 
+            state = None
             activation_document = (
                 _migration_json_blob(conn, activation_input_key)
                 if activation_input_key is not None
@@ -1348,7 +1349,7 @@ def migrate_mpc_learning_authority(
                             snapshot = migrate_grey_learning_snapshot(
                                 {
                                     "version": 3,
-                                    "revision": max(revision, pair.role_generation),
+                                    "revision": pair.role_generation,
                                     "params": physical,
                                     "rmse": None,
                                     "samples": 0,
@@ -1405,6 +1406,46 @@ def migrate_mpc_learning_authority(
                 )
                 source = "defaults"
                 invalidated = True
+
+            if source in ("active", "rollback") and isinstance(activation_document, dict):
+                selected_authority = activation_document.get(source)
+                selected_pair = (
+                    selected_authority.get("pair")
+                    if isinstance(selected_authority, dict)
+                    else None
+                )
+                if isinstance(selected_pair, dict):
+                    selected["revision"] = selected_pair["role_generation"]
+                    selected["identities"] = {
+                        "active_digest": selected_pair["model_digest"],
+                        "active_generation": selected_pair["role_generation"],
+                        "candidate_digest": None,
+                        "candidate_generation": None,
+                        "rollback_digest": None,
+                        "rollback_generation": None,
+                    }
+                    if (
+                        source == "active"
+                        and activation_input_key is None
+                        and state is not None
+                    ):
+                        selected["evidence"]["confidence_decision_id"] = state.evidence_decision_id
+                        selected["origin"] = state.origin
+                        selected["policy"] = state.policy
+                        selected["activation"] = {
+                            "phase": state.phase,
+                            "pending_persistence": False,
+                            "pending_swap": state.phase == "prepared",
+                        }
+                    else:
+                        selected["evidence"]["confidence_decision_id"] = None
+                        selected["origin"] = None
+                        selected["policy"] = None
+                        selected["activation"] = {
+                            "phase": "aborted",
+                            "pending_persistence": False,
+                            "pending_swap": False,
+                        }
 
             reason = "schema-invalidated" if invalidated else None
             models = (

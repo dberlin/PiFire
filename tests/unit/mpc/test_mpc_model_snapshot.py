@@ -176,8 +176,12 @@ def test_terminal_activation_failure_remains_visible_in_status_and_checkpoint():
     assert live["failure"] == {
         "code": "activation-terminal",
         "detail": "active-receipt-ambiguous",
+        "terminal": True,
     }
-    assert snapshot["failure"] == live["failure"]
+    assert snapshot["failure"] == {
+        "code": "activation-terminal",
+        "detail": "active-receipt-ambiguous",
+    }
 
 
 def test_v4_round_trip_is_exact_for_identified_and_default_snapshots():
@@ -243,4 +247,5 @@ def test_real_live_status_failure_overrides_prior_active_activation():
     assert live["failure"] == {
         "code": "activation-terminal",
         "detail": "native solver crashed",
+        "terminal": True,
     }

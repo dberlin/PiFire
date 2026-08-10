@@ -2553,6 +2553,12 @@ class Controller(ControllerBase):
             )
             if confidence_already_persisted:
                 self._persisted_activation_confidence_ids.discard(evaluation_decision_id)
+        if request is not None:
+            self._persist_fit_transition(
+                request,
+                status="queued",
+                model_digest=request.window.incumbent_digest,
+            )
         forecasts = tuple(
             self._completed_forecast_evidence(value)
             for value in result.completed_forecasts
@@ -2675,6 +2681,219 @@ class Controller(ControllerBase):
             self._activation_terminated_reason = f"learning lifecycle trace failed: {error}"
         return evidence
 
+    @staticmethod
+    def _policy_for_learning_origin(origin):
+        return {
+            CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
+            CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+            CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
+        }[origin]
+
+    def _persist_candidate_evaluation(self, evaluation, preparation):
+        request = getattr(getattr(preparation, "candidate", None), "request", None)
+        origin = getattr(request, "origin", None)
+        if not isinstance(origin, CandidateOrigin):
+            return None
+        policy = self._policy_for_learning_origin(origin)
+        blockers = tuple(getattr(evaluation, "blockers", ()))
+        candidate_pair = getattr(preparation, "candidate_pair", None)
+        timing = getattr(preparation, "timing", None)
+        fit_accepted = preparation is not None
+        identifiability_accepted = "identifiability" not in blockers
+        native_build = "passed" if candidate_pair is not None else "failed"
+        native_dry_solve = "passed" if bool(getattr(preparation, "dry_solve_finite", False)) else "failed"
+        target_timing = "passed" if bool(getattr(timing, "accepted", False)) else "failed"
+        confidence_accepted = bool(getattr(evaluation, "accepted", False)) and not blockers
+        reasons = list(blockers)
+        if native_build == "failed":
+            reasons.append("native-build-failed")
+        if native_dry_solve == "failed":
+            reasons.append("native-dry-solve-failed")
+        if target_timing == "failed":
+            reasons.append("target-timing-failed")
+        if not confidence_accepted and not reasons:
+            reasons.append("confidence-rejected")
+        assessment = CandidateAssessmentEvidence(
+            decision_id=evaluation.decision_id,
+            origin=origin.value,
+            policy=policy.value,
+            fit_accepted=fit_accepted,
+            identifiability_accepted=identifiability_accepted,
+            native_build=native_build,
+            native_dry_solve=native_dry_solve,
+            target_timing=target_timing,
+            confidence_accepted=confidence_accepted,
+            rejection_reasons=tuple(dict.fromkeys(reasons)),
+        )
+        timestamp_ms = max(
+            (
+                int(origin_record.completion_time_s * 1_000)
+                for origin_record in tuple(getattr(evaluation, "completed_origins", ()))
+            ),
+            default=time.time_ns() // 1_000_000,
+        )
+        persisted = self._persist_grey_lifecycle(
+            assessment,
+            GreyCandidateAssessmentPayload(
+                decision_id=assessment.decision_id,
+                origin=assessment.origin,
+                policy=assessment.policy,
+                fit_accepted=assessment.fit_accepted,
+                identifiability_accepted=assessment.identifiability_accepted,
+                native_build=assessment.native_build,
+                native_dry_solve=assessment.native_dry_solve,
+                target_timing=assessment.target_timing,
+                confidence_accepted=assessment.confidence_accepted,
+                rejection_reasons=assessment.rejection_reasons,
+            ),
+            timestamp_ms=timestamp_ms,
+            role_generation=evaluation.role_generation,
+            model_digest=evaluation.challenger_digest,
+            provenance_digest=evaluation.incumbent_digest,
+        )
+        if confidence_accepted:
+            confidence = ModelEvidenceRecord(
+                evidence_id=(
+                    f"activation-confidence:{evaluation.decision_id}:"
+                    f"{evaluation.role_generation}"
+                ),
+                kind=EvidenceKind.CONFIDENCE_DECISION,
+                session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
+                cook_id=getattr(self, "_learning_cook_id", None),
+                timestamp_ms=timestamp_ms,
+                role_generation=evaluation.role_generation,
+                model_digest=evaluation.challenger_digest,
+                provenance_digest=evaluation.incumbent_digest,
+                payload=ConfidenceDecisionEvidence(
+                    decision_id=evaluation.decision_id,
+                    blocked=False,
+                    reason=None,
+                ),
+            )
+            receipt = self._activation_persistence_channel().submit_activation_confidence(
+                confidence
+            )
+            if (
+                not receipt.accepted
+                or receipt.wait(2.0) is not True
+                or receipt.durable is not True
+            ):
+                raise RuntimeError("activation-confidence-not-durable")
+            persisted_ids = getattr(
+                self,
+                "_persisted_activation_confidence_ids",
+                None,
+            )
+            if persisted_ids is None:
+                persisted_ids = set()
+                self._persisted_activation_confidence_ids = persisted_ids
+            persisted_ids.add(evaluation.decision_id)
+        return persisted
+
+    def _persist_fit_transition(
+        self,
+        request,
+        *,
+        status,
+        model_digest,
+        error=None,
+    ):
+        policy = self._policy_for_learning_origin(request.origin)
+        window_id = (
+            f"{request.window.session_id}:"
+            f"{request.window.first_observation_sequence}:"
+            f"{request.window.last_observation_sequence}"
+        )
+        payload = FitLifecycleEvidence(
+            request_id=request.request_id,
+            status=status,
+            origin=request.origin.value,
+            policy=policy.value,
+            window_id=window_id,
+            error=error,
+        )
+        return self._persist_grey_lifecycle(
+            payload,
+            GreyFitLifecyclePayload(
+                request_id=payload.request_id,
+                status=payload.status,
+                origin=payload.origin,
+                policy=payload.policy,
+                window_id=payload.window_id,
+                error=payload.error,
+            ),
+            timestamp_ms=time.time_ns() // 1_000_000,
+            role_generation=request.window.role_generation,
+            model_digest=model_digest,
+            provenance_digest=request.window.incumbent_digest,
+        )
+
+    def _persist_rejected_candidate(
+        self,
+        request,
+        *,
+        model_digest,
+        reasons,
+        fit_accepted,
+        identifiability_accepted,
+        preparation=None,
+    ):
+        policy = self._policy_for_learning_origin(request.origin)
+        candidate_pair = getattr(preparation, "candidate_pair", None)
+        timing = getattr(preparation, "timing", None)
+        native_build = (
+            "passed"
+            if candidate_pair is not None
+            else "failed"
+            if preparation is not None
+            else "not-run"
+        )
+        native_dry_solve = (
+            "passed"
+            if preparation is not None and bool(getattr(preparation, "dry_solve_finite", False))
+            else "failed"
+            if preparation is not None
+            else "not-run"
+        )
+        target_timing = (
+            "passed"
+            if preparation is not None and bool(getattr(timing, "accepted", False))
+            else "failed"
+            if preparation is not None
+            else "not-run"
+        )
+        assessment = CandidateAssessmentEvidence(
+            decision_id=f"fit:{request.request_id}",
+            origin=request.origin.value,
+            policy=policy.value,
+            fit_accepted=fit_accepted,
+            identifiability_accepted=identifiability_accepted,
+            native_build=native_build,
+            native_dry_solve=native_dry_solve,
+            target_timing=target_timing,
+            confidence_accepted=False,
+            rejection_reasons=tuple(dict.fromkeys(reasons)),
+        )
+        return self._persist_grey_lifecycle(
+            assessment,
+            GreyCandidateAssessmentPayload(
+                decision_id=assessment.decision_id,
+                origin=assessment.origin,
+                policy=assessment.policy,
+                fit_accepted=assessment.fit_accepted,
+                identifiability_accepted=assessment.identifiability_accepted,
+                native_build=assessment.native_build,
+                native_dry_solve=assessment.native_dry_solve,
+                target_timing=assessment.target_timing,
+                confidence_accepted=assessment.confidence_accepted,
+                rejection_reasons=assessment.rejection_reasons,
+            ),
+            timestamp_ms=time.time_ns() // 1_000_000,
+            role_generation=request.window.role_generation,
+            model_digest=model_digest,
+            provenance_digest=request.window.incumbent_digest,
+        )
+
     def _prepare_automatic_pair_activation(self, preparation, policy):
         """Persist one passive candidate and expose it to the runner only after receipt."""
         from controller.runtime.runner import PreparedPairTransition
@@ -2754,91 +2973,8 @@ class Controller(ControllerBase):
             ),
             default=time.time_ns() // 1_000_000,
         )
-        window_session = getattr(
-            request.window,
-            "session_id",
-            getattr(self, "_learning_session_id", None) or "mpc-learning",
-        )
-        window_first = getattr(request.window, "first_observation_sequence", 0)
-        window_last = getattr(request.window, "last_observation_sequence", window_first)
-        window_id = f"{window_session}:{window_first}:{window_last}"
-        request_id = getattr(request, "request_id", f"fit:{decision_id}")
-        self._persist_grey_lifecycle(
-            FitLifecycleEvidence(
-                request_id=request_id,
-                status="succeeded",
-                origin=request.origin.value,
-                policy=policy.value,
-                window_id=window_id,
-            ),
-            GreyFitLifecyclePayload(
-                request_id=request_id,
-                status="succeeded",
-                origin=request.origin.value,
-                policy=policy.value,
-                window_id=window_id,
-            ),
-            timestamp_ms=evaluated_at_ms,
-            role_generation=evaluation_role_generation,
-            model_digest=challenger_digest,
-            provenance_digest=incumbent_digest,
-        )
-        assessment = CandidateAssessmentEvidence(
-            decision_id=decision_id,
-            origin=request.origin.value,
-            policy=policy.value,
-            fit_accepted=True,
-            identifiability_accepted=True,
-            native_build="passed",
-            native_dry_solve="passed",
-            target_timing="passed",
-            confidence_accepted=True,
-        )
-        self._persist_grey_lifecycle(
-            assessment,
-            GreyCandidateAssessmentPayload(
-                decision_id=assessment.decision_id,
-                origin=assessment.origin,
-                policy=assessment.policy,
-                fit_accepted=assessment.fit_accepted,
-                identifiability_accepted=assessment.identifiability_accepted,
-                native_build=assessment.native_build,
-                native_dry_solve=assessment.native_dry_solve,
-                target_timing=assessment.target_timing,
-                confidence_accepted=assessment.confidence_accepted,
-                rejection_reasons=assessment.rejection_reasons,
-            ),
-            timestamp_ms=evaluated_at_ms,
-            role_generation=evaluation_role_generation,
-            model_digest=challenger_digest,
-            provenance_digest=incumbent_digest,
-        )
-        confidence = ModelEvidenceRecord(
-            evidence_id=(
-                f"activation-confidence:{decision_id}:"
-                f"{evaluation_role_generation}"
-            ),
-            kind=EvidenceKind.CONFIDENCE_DECISION,
-            session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
-            cook_id=getattr(self, "_learning_cook_id", None),
-            timestamp_ms=evaluated_at_ms,
-            role_generation=evaluation_role_generation,
-            model_digest=challenger_digest,
-            provenance_digest=incumbent_digest,
-            payload=ConfidenceDecisionEvidence(
-                decision_id=decision_id,
-                blocked=False,
-                reason=None,
-            ),
-        )
-        confidence_receipt = worker.submit_activation_confidence(confidence)
-        if (
-            not confidence_receipt.accepted
-            or confidence_receipt.wait(2.0) is not True
-            or confidence_receipt.durable is not True
-        ):
-            owned_candidate.close()
-            raise RuntimeError("activation-confidence-not-durable")
+        # Evaluation completion persists confidence for normal handoff. Direct
+        # preparation tests and recovery callers still close the same durability gap.
         persisted_confidence = getattr(
             self,
             "_persisted_activation_confidence_ids",
@@ -2847,7 +2983,34 @@ class Controller(ControllerBase):
         if persisted_confidence is None:
             persisted_confidence = set()
             self._persisted_activation_confidence_ids = persisted_confidence
-        persisted_confidence.add(decision_id)
+        if decision_id not in persisted_confidence:
+            confidence = ModelEvidenceRecord(
+                evidence_id=(
+                    f"activation-confidence:{decision_id}:"
+                    f"{evaluation_role_generation}"
+                ),
+                kind=EvidenceKind.CONFIDENCE_DECISION,
+                session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
+                cook_id=getattr(self, "_learning_cook_id", None),
+                timestamp_ms=evaluated_at_ms,
+                role_generation=evaluation_role_generation,
+                model_digest=challenger_digest,
+                provenance_digest=incumbent_digest,
+                payload=ConfidenceDecisionEvidence(
+                    decision_id=decision_id,
+                    blocked=False,
+                    reason=None,
+                ),
+            )
+            confidence_receipt = worker.submit_activation_confidence(confidence)
+            if (
+                not confidence_receipt.accepted
+                or confidence_receipt.wait(2.0) is not True
+                or confidence_receipt.durable is not True
+            ):
+                owned_candidate.close()
+                raise RuntimeError("activation-confidence-not-durable")
+            persisted_confidence.add(decision_id)
         decision = manager.prepare(
             ActivationRequest(candidate_descriptor.model_digest, decision_id),
             candidate_descriptor,
@@ -2923,6 +3086,59 @@ class Controller(ControllerBase):
                 if prepared is not None and prepared.accepted:
                     self._learning_candidate_pair = prepared.candidate_pair
 
+        if delivery is not None and getattr(delivery, "message", None) is not None:
+            request = delivery.message.request
+            outcome = delivery.message.outcome
+            stale_reasons = tuple(getattr(delivery, "stale_reasons", ()))
+            delivery_blockers = tuple(getattr(delivery, "blockers", ()))
+            completed_config = getattr(outcome, "config", None)
+            candidate_digest = (
+                grey_config_digest(completed_config)
+                if isinstance(completed_config, GreyBoxMPCConfig)
+                else request.window.incumbent_digest
+            )
+            if "fit-error" in delivery_blockers:
+                detail = getattr(outcome, "detail", "fit-error")
+                self._persist_fit_transition(
+                    request,
+                    status="failed",
+                    model_digest=candidate_digest,
+                    error=detail,
+                )
+                self._persist_rejected_candidate(
+                    request,
+                    model_digest=candidate_digest,
+                    reasons=("fit-error",),
+                    fit_accepted=False,
+                    identifiability_accepted=False,
+                )
+            elif stale_reasons:
+                self._persist_fit_transition(
+                    request,
+                    status="stale",
+                    model_digest=candidate_digest,
+                )
+            else:
+                self._persist_fit_transition(
+                    request,
+                    status="succeeded",
+                    model_digest=candidate_digest,
+                )
+                preparation = getattr(delivery, "preparation", None)
+                if delivery_blockers or (
+                    preparation is not None and not bool(getattr(preparation, "accepted", False))
+                ):
+                    reasons = delivery_blockers or tuple(
+                        getattr(preparation, "blockers", ())
+                    ) or ("candidate-preparation-rejected",)
+                    self._persist_rejected_candidate(
+                        request,
+                        model_digest=candidate_digest,
+                        reasons=reasons,
+                        fit_accepted=True,
+                        identifiability_accepted="identifiability" not in reasons,
+                        preparation=preparation,
+                    )
         evaluation_started = time.monotonic()
         with self._learning_evaluation_lock:
             evaluation = learning.evaluate_ready_off_path()
@@ -2946,6 +3162,8 @@ class Controller(ControllerBase):
             "origin",
             None,
         )
+        if evaluation is not None:
+            self._persist_candidate_evaluation(evaluation, preparation)
         if (
             evaluation is not None
             and not blockers
@@ -3048,6 +3266,7 @@ class Controller(ControllerBase):
                 else {
                     "code": "activation-terminal",
                     "detail": self._activation_terminated_reason,
+                    "terminal": True,
                 }
             ),
         }
@@ -3206,7 +3425,11 @@ class Controller(ControllerBase):
             if candidate is None and prepared is not None:
                 candidate_config = prepared.candidate.config
                 candidate_parameters = {
-                    key: getattr(candidate_config, key)
+                    key: (
+                        getattr(candidate_config, "delay_states")
+                        if key == "n_delay"
+                        else getattr(candidate_config, key)
+                    )
                     for key in self._MODEL_PARAM_KEYS
                 }
                 snapshot["challenger"] = {
@@ -3264,7 +3487,14 @@ class Controller(ControllerBase):
                 "pending_persistence": live["pending_persistence"],
                 "pending_swap": live["pending_swap"],
             }
-            snapshot["failure"] = live["failure"]
+            snapshot["failure"] = (
+                None
+                if live["failure"] is None
+                else {
+                    "code": live["failure"]["code"],
+                    "detail": live["failure"]["detail"],
+                }
+            )
             encoded = json.dumps(snapshot, allow_nan=False).encode()
         except (AttributeError, TypeError, ValueError, OverflowError):
             return None

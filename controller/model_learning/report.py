@@ -275,6 +275,14 @@ def build_learning_report(
     failure = _latest_payload(current_records, LearningFailureEvidence)
     confidence = _latest_payload(current_records, ConfidenceDecisionEvidence)
     invalidation = _latest_payload(current_records, SchemaInvalidationEvidence)
+    if fit_payload is not None and fit_status == FitStatus.IDLE.value:
+        fit_status = FitStatus(fit_payload.status).value
+    if (
+        fit_payload is not None
+        and fit_payload.status == FitStatus.FAILED.value
+        and fit_payload.error is not None
+    ):
+        errors.append(fit_payload.error)
 
     pending_persistence = bool(live.get("pending_persistence", False))
     pending_swap = bool(live.get("pending_swap", False)) or phase == "prepared"
@@ -329,9 +337,13 @@ def build_learning_report(
         assessment_policy == ActivationPolicy.OPERATOR_REVIEWED.value
         and assessment is not None
         and not assessment.rejection_reasons
-        and status == LearningStatus.EVALUATING.value
+        and status in {
+            LearningStatus.COLLECTING.value,
+            LearningStatus.EVALUATING.value,
+        }
         and not errors
         and not schema_invalidated
+        and candidate_digest is not None
     ):
         status = LearningStatus.READY_FOR_REVIEW.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
