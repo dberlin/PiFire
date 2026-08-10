@@ -1377,11 +1377,12 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._revision = result.revision
                     self._output = result
                     self._model_snapshot = model
-                if result.consecutive_deadline_miss_count >= 2:
                     fallback = getattr(self._core, "activation_runtime_failure", None)
-                    if callable(fallback):
-                        fallback("deadline-threshold")
-                        self._capture_activation_events()
+                    if result.consecutive_deadline_miss_count >= 2 and callable(fallback):
+                        self._append_dispatch_locked(
+                            "activation",
+                            ("fallback", "deadline-threshold"),
+                        )
                 if transition is not None and self._warning_callback is not None:
                     self._warning_callback(transition)
             if stopping:

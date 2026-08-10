@@ -1043,6 +1043,74 @@ def test_role_transition_and_completed_frame_share_one_causal_fifo(operation, tr
         runner.stop()
 
 
+def test_deadline_fallback_waits_behind_frame_queued_during_the_solve():
+    class _Clock:
+        def __init__(self):
+            self.value = 0.0
+            self.lock = threading.Lock()
+
+        def __call__(self):
+            with self.lock:
+                return self.value
+
+        def advance(self, seconds):
+            with self.lock:
+                self.value += seconds
+
+    class _DeadlineCore(_OrderRecordingCore):
+        def __init__(self, clock):
+            super().__init__()
+            self.clock = clock
+            self.solve_count = 0
+            self.second_solve_entered = threading.Event()
+            self.release_second_solve = threading.Event()
+            self.role = 0
+            self.role_events = []
+
+        def update(self, temp):
+            self.solve_count += 1
+            if self.solve_count == 2:
+                self.second_solve_entered.set()
+                assert self.release_second_solve.wait(2.0)
+            if self.solve_count <= 2:
+                self.clock.advance(0.02)
+            return super().update(temp)
+
+        def observe_frame(self, observation):
+            self.role_events.append(("observation", observation.role_generation, self.role))
+            return {"eligible": False}
+
+        def activation_runtime_failure(self, reason):
+            self.role = 1
+            self.role_events.append(("fallback", reason, self.role))
+            return True
+
+    clock = _Clock()
+    core = _DeadlineCore(clock)
+    runner = ThreadedControllerRunner(
+        core,
+        monotonic_clock=clock,
+        wall_clock=clock,
+    )
+    try:
+        runner.submit(212.0)
+        assert core.second_solve_entered.wait(2.0)
+        submission = runner.complete_frame(
+            _output(ratio=0.2, timestamp=20.0),
+            _frame(0),
+        )
+        assert submission is not None
+        core.release_second_solve.set()
+        assert _wait_for(lambda: len(core.role_events) == 2)
+        assert core.role_events == [
+            ("observation", 0, 0),
+            ("fallback", "deadline-threshold", 1),
+        ]
+    finally:
+        core.release_second_solve.set()
+        runner.stop()
+
+
 def test_a_stalled_worker_bounds_the_backlog_and_counts_the_drops():
     runner, core = _threaded_runner_with_blocked_worker()
     try:
