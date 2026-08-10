@@ -139,6 +139,8 @@ type Value = string;
 type Items = _ScanItem[];
 type Title = string;
 type Groups = _ScanGroup[];
+type Email = string;
+type Password = string;
 type Label3 = string;
 type NumChannels = number;
 type Serial2 = string;
@@ -298,6 +300,11 @@ export interface ConfigOption {
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "EmptyWizardRequest".
+ */
+export interface EmptyWizardRequest {}
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "InstallLog".
  */
 export interface InstallLog {
@@ -396,6 +403,13 @@ export interface ProbeConfigField {
 export interface ProbeMap {
   probe_devices: ProbeDevices1;
   probe_info: ProbeInfo;
+}
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "ProbeMapRequest".
+ */
+export interface ProbeMapRequest {
+  probe_map: ProbeMap;
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
@@ -498,6 +512,14 @@ export interface _ScanGroup {
 export interface _ScanItem {
   label: Label2;
   value: Value;
+}
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "ThermoworksRequest".
+ */
+export interface ThermoworksRequest {
+  email?: Email;
+  password?: Password;
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema

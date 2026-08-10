@@ -86,7 +86,7 @@ from common.web_contracts.wizard import (
     _ProbeMapApplyData,
     _ProbeMapApplyResponse,
     _ProbeMapErrorResponse,
-    _ProbeMapRequest,
+    ProbeMapRequest,
 )
 from controller.model_learning.activation import (
     ActivationManager,
@@ -758,7 +758,6 @@ def _api_post_wled_test_profile(settings, request_json):
     import requests
 
     try:
-
         raw_address = request_json.get("device_address", "")
         if not isinstance(raw_address, str) or not raw_address.strip():
             payload = WledActionResponse(result="error", message="Device address is required")
@@ -837,7 +836,7 @@ def _api_post_probe_map(settings, request_json):
     Only after all four does anything get written.
     """
     try:
-        request_payload = _ProbeMapRequest.model_validate(request_json, strict=True)
+        request_payload = ProbeMapRequest.model_validate(request_json, strict=True)
     except ValidationError:
         response = _ProbeMapErrorResponse(result="error", message="bad_probe_map")
         return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 400

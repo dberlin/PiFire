@@ -1,12 +1,16 @@
 import type {
   BtRowsResult,
+  BusKindsValidationRequest,
   BusKindsValidationResponse,
+  EmptyWizardRequest,
   InstallLog,
   InstallStatus,
   ModuleValues,
+  ModuleValuesRequest,
   ProbeDevice,
   ScanRequest,
   ScanResult,
+  ThermoworksRequest,
   ThermoworksRowsResult,
   WizardDraftRequest,
   WizardFinishRequest,
@@ -50,7 +54,7 @@ export async function cancelWizard(baseUrl: string): Promise<boolean> {
   const r = await fetch(url(baseUrl, "cancel"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: "{}",
+    body: JSON.stringify({} satisfies EmptyWizardRequest),
   });
   return r.ok;
 }
@@ -72,7 +76,7 @@ export async function fetchModuleValues(
   const r = await fetch(url(baseUrl, "module-values"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ section, module }),
+    body: JSON.stringify({ section, module } satisfies ModuleValuesRequest),
   });
   if (!r.ok) throw new Error(`module-values failed: ${r.status}`);
   return r.json();
@@ -118,7 +122,7 @@ export async function scanBluetooth(baseUrl: string): Promise<BtRowsResult> {
   const r = await fetch(url(baseUrl, "scan/bluetooth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: "{}",
+    body: JSON.stringify({} satisfies EmptyWizardRequest),
   });
   return r.json();
 }
@@ -131,7 +135,7 @@ export async function scanThermoworks(
   const r = await fetch(url(baseUrl, "scan/thermoworks"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password } satisfies ThermoworksRequest),
   });
   return r.json();
 }
@@ -143,7 +147,7 @@ export async function validateBusKinds(
   const r = await fetch(url(baseUrl, "probes/validate-bus-kinds"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ probe_devices: probeDevices }),
+    body: JSON.stringify({ probe_devices: probeDevices } satisfies BusKindsValidationRequest),
   });
   return r.json();
 }

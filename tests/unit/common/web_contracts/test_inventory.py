@@ -8,14 +8,18 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from common.web_contracts.inventory import JSON_WEB_CONTRACT_INVENTORY, NON_JSON_WEB_TRANSPORTS
+from common.web_contracts.inventory import (
+    JSON_WEB_CONTRACT_INVENTORY,
+    NON_JSON_WEB_TRANSPORTS,
+    JsonWebContract,
+)
 from common.web_contracts.registry import WEB_CONTRACT_BUNDLES, WEB_ROOT_CONTRACTS
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 WEB_REACT_ROOT = REPOSITORY_ROOT / "web-react"
 SCHEMA_ROOT = WEB_REACT_ROOT / "schema" / "contracts"
 TYPESCRIPT_ROOT = WEB_REACT_ROOT / "src" / "helpers" / "contracts"
-FRONTEND_ENDPOINT_INVENTORY_PATH = WEB_REACT_ROOT / "src" / "helpers" / "jsonWebEndpoints.json"
+FRONTEND_TRANSPORT_EXTRACTOR = WEB_REACT_ROOT / "scripts" / "extractWebTransports.ts"
 APPROVED_NON_JSON_CATEGORIES = {
     "browser_file_handles",
     "downloaded_bytes",
@@ -76,6 +80,24 @@ def _typescript_exports(source: str) -> set[str]:
     return set(re.findall(r"^export (?:interface|type) ([A-Za-z_$][\w$]*)", source, re.MULTILINE))
 
 
+def _frontend_transports() -> dict[str, list[dict[str, object]]]:
+    completed = subprocess.run(
+        ["bun", str(FRONTEND_TRANSPORT_EXTRACTOR), "--json"],
+        cwd=WEB_REACT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def _normalized_endpoint_names(transport: str, name: str) -> set[tuple[str, str]]:
+    base = re.sub(r" \[[^]]+\]$", "", name)
+    optional = "[/<next_mode>]"
+    variants = [base.replace(optional, ""), base.replace(optional, "/<next_mode>")] if optional in base else [base]
+    return {(transport, re.sub(r"<[^>]+>", "<>", variant)) for variant in variants}
+
+
 def test_inventory_names_every_frontend_json_transport_once():
     keys = [(item.transport, item.name) for item in JSON_WEB_CONTRACT_INVENTORY]
     assert len(keys) == len(set(keys))
@@ -85,21 +107,59 @@ def test_inventory_names_every_frontend_json_transport_once():
     assert len(JSON_WEB_CONTRACT_INVENTORY) >= 50
 
 
-def test_python_inventory_exactly_matches_independent_frontend_endpoint_inventory():
-    frontend = json.loads(FRONTEND_ENDPOINT_INVENTORY_PATH.read_text())
+def test_python_inventory_exactly_matches_frontend_source_transports():
+    frontend = _frontend_transports()
     expected_json = {
-        (entry["transport"], entry["name"])
+        key
         for entry in frontend["json"]
+        for key in _normalized_endpoint_names(str(entry["transport"]), str(entry["name"]))
     }
     actual_json = {
-        (contract.transport, contract.name)
+        key
         for contract in JSON_WEB_CONTRACT_INVENTORY
+        for key in _normalized_endpoint_names(contract.transport, contract.name)
     }
     assert actual_json == expected_json
 
     approved = {item.name for item in NON_JSON_WEB_TRANSPORTS}
-    excluded_categories = {entry["category"] for entry in frontend["non_json"]}
+    excluded_categories = {str(entry["category"]) for entry in frontend["non_json"]}
     assert excluded_categories == approved
+    excluded_names = {str(entry["name"]) for entry in frontend["non_json"]}
+    assert "POST /api/files/cookfiles/assets/upload" in excluded_names
+    assert "POST /api/files/cookfiles/assets" not in excluded_names
+
+
+def test_frontend_json_post_bodies_have_concrete_request_model_ownership():
+    frontend = _frontend_transports()
+    contracts_by_endpoint: dict[tuple[str, str], list[JsonWebContract]] = {}
+    for contract in JSON_WEB_CONTRACT_INVENTORY:
+        for key in _normalized_endpoint_names(contract.transport, contract.name):
+            contracts_by_endpoint.setdefault(key, []).append(contract)
+
+    for entry in frontend["json"]:
+        body_fields = entry.get("body_fields")
+        if not str(entry["name"]).startswith("POST ") or body_fields is None:
+            continue
+        assert isinstance(body_fields, list)
+        assert all(isinstance(field, str) for field in body_fields)
+        keys = _normalized_endpoint_names(str(entry["transport"]), str(entry["name"]))
+        candidates: list[type[BaseModel]] = []
+        for key in keys:
+            for contract in contracts_by_endpoint.get(key, []):
+                if contract.request is not None:
+                    candidates.append(contract.request)
+        assert candidates, f"{entry['name']}: JSON body has no concrete request model"
+        expected_fields = set(body_fields)
+        matching: list[type[BaseModel]] = []
+        for model in candidates:
+            model_fields = model.model_fields
+            required_fields = {name for name, field in model_fields.items() if field.is_required()}
+            if expected_fields <= set(model_fields) and required_fields <= expected_fields:
+                matching.append(model)
+        assert matching, (
+            f"{entry['name']}: frontend fields={sorted(expected_fields)}; "
+            f"request models={[(model.__name__, sorted(model.model_fields)) for model in candidates]}"
+        )
 
 
 def test_every_inventory_model_has_exactly_one_registered_owner():
@@ -121,9 +181,7 @@ def test_every_bundle_has_committed_schema_generated_types_and_manifest_entry():
 
     manifest = json.loads((SCHEMA_ROOT / "manifest.json").read_text())
     expected_manifest = {
-        str(schema.relative_to(SCHEMA_ROOT, walk_up=True)): str(
-            typescript.relative_to(TYPESCRIPT_ROOT, walk_up=True)
-        )
+        str(schema.relative_to(SCHEMA_ROOT, walk_up=True)): str(typescript.relative_to(TYPESCRIPT_ROOT, walk_up=True))
         for schema, typescript in artifacts.values()
     }
     assert manifest == dict(sorted(expected_manifest.items()))

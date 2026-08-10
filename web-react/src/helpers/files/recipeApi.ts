@@ -10,6 +10,9 @@
 // no `comments` key.
 
 import type {
+  EmptyContentRequest,
+  FileAssetsRequest,
+  FileRequest,
   RecipeAsset,
   RecipeDetail,
   RecipeIndexedAssetAssignmentRequest,
@@ -199,18 +202,18 @@ export function setRecipeAssets(
  * scrubs metadata.image/thumbnail and every ingredient's/instruction's own
  * asset list server-side, so a refetch is all that is needed afterwards. */
 export const deleteRecipeAssets = (file: string, assets: string[], baseUrl = BASE_URL) =>
-  write<null>("recipes", "assets/delete", { file, assets }, baseUrl);
+  write<null>("recipes", "assets/delete", { file, assets } satisfies FileAssetsRequest, baseUrl);
 
 export const createRecipe = (baseUrl = BASE_URL) =>
-  write<{ filename: string }>("recipes", "create", {}, baseUrl);
+  write<{ filename: string }>("recipes", "create", {} satisfies EmptyContentRequest, baseUrl);
 
 export const deleteRecipe = (file: string, baseUrl = BASE_URL) =>
-  write<null>("recipes", "delete", { file }, baseUrl);
+  write<null>("recipes", "delete", { file } satisfies FileRequest, baseUrl);
 
 /** Starts a real cook. The endpoint answers 409 `not_stopped` unless the grill
  * is stopped, which surfaces here as a FileRequestError carrying that status. */
 export const runRecipe = (file: string, baseUrl = BASE_URL) =>
-  write<{ filename: string }>("recipes", "run", { file }, baseUrl);
+  write<{ filename: string }>("recipes", "run", { file } satisfies FileRequest, baseUrl);
 
 /** Multipart: the archive rides under the field name `recipe`, unlike
  * cookfileApi's `uploadCookFile`, which uses `file`. */

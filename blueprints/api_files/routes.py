@@ -34,9 +34,20 @@ from common.web_contracts.content import (
     CookFileAsset,
     CookFileAssetsData,
     CookFileChartData,
+    CookFileCommentAddRequest,
+    CookFileCommentAssetsRequest,
+    CookFileCommentDeleteRequest,
+    CookFileCommentUpdateRequest,
     CookFileComment,
     CookFileDetail,
     CookFileLabelData,
+    CookFileLabelRequest,
+    CookFileRecoverRequest,
+    CookFileThumbnailRequest,
+    CookFileTitleRequest,
+    EmptyContentRequest,
+    FileAssetsRequest,
+    FileRequest,
     FileListing,
     FilenameData,
     RecipeAsset,
@@ -240,7 +251,11 @@ def cookfile_upload():
 
 @api_files_bp.route("/cookfiles/delete", methods=["POST"])
 def cookfile_delete():
-    path, err = require_file(json_body().get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(FileRequest, json_body(), "file")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
     os.remove(path)
@@ -249,14 +264,14 @@ def cookfile_delete():
 
 @api_files_bp.route("/cookfiles/title", methods=["POST"])
 def cookfile_title():
-    body = json_body()
-    path, err = require_file(body.get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(CookFileTitleRequest, json_body(), "title")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
-    title = body.get("title")
-    if not isinstance(title, str):
-        return error("bad_request", 400, field="title")
-    status = cookfile_api.set_title(path, title)
+    status = cookfile_api.set_title(path, payload.title)
     if status != "OK":
         return cookfile_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200
@@ -264,16 +279,18 @@ def cookfile_title():
 
 @api_files_bp.route("/cookfiles/label", methods=["POST"])
 def cookfile_label():
-    body = json_body()
-    path, err = require_file(body.get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(CookFileLabelRequest, json_body(), "new_label")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
-    old_label, new_label = body.get("old_label"), body.get("new_label")
-    if not isinstance(old_label, str) or not old_label:
+    if not payload.old_label:
         return error("bad_request", 400, field="old_label")
-    if not isinstance(new_label, str) or not new_label.strip():
+    if not payload.new_label.strip():
         return error("bad_request", 400, field="new_label")
-    safe, problem = cookfile_api.rename_label(path, old_label, new_label)
+    safe, problem = cookfile_api.rename_label(path, payload.old_label, payload.new_label)
     if problem == "label_exists":
         return error("label_exists", 409)
     if problem:
@@ -284,49 +301,48 @@ def cookfile_label():
 
 @api_files_bp.route("/cookfiles/recover", methods=["POST"])
 def cookfile_recover():
-    body = json_body()
-    action = body.get("action")
-    if action not in ("upgrade", "repair"):
-        return error("bad_request", 400, field="action")
-    path, err = require_file(body.get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(CookFileRecoverRequest, json_body(), "action")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
-    status = cookfile_api.recover(path, action)
+    status = cookfile_api.recover(path, payload.action)
     if status != "OK":
         return cookfile_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200
-
-
-_COMMENT_ACTIONS = ("add", "update", "delete")
 
 
 @api_files_bp.route("/cookfiles/comments", methods=["POST"])
 def cookfile_comments():
     body = json_body()
     action = body.get("action")
-    if action not in _COMMENT_ACTIONS:
+    request_model = {
+        "add": CookFileCommentAddRequest,
+        "update": CookFileCommentUpdateRequest,
+        "delete": CookFileCommentDeleteRequest,
+    }.get(action)
+    if request_model is None:
         return error("bad_request", 400, field="action")
-    path, err = require_file(body.get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(request_model, body, "action")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
 
     if action == "add":
-        text = body.get("text")
-        if not isinstance(text, str):
-            return error("bad_request", 400, field="text")
-        entry, problem = cookfile_api.add_comment(path, text)
+        entry, problem = cookfile_api.add_comment(path, payload.text)
     elif action == "update":
-        text, cid = body.get("text"), body.get("id")
-        if not isinstance(cid, str) or not cid:
+        if not payload.id:
             return error("bad_request", 400, field="id")
-        if not isinstance(text, str):
-            return error("bad_request", 400, field="text")
-        entry, problem = cookfile_api.update_comment(path, cid, text)
+        entry, problem = cookfile_api.update_comment(path, payload.id, payload.text)
     else:
-        cid = body.get("id")
-        if not isinstance(cid, str) or not cid:
+        if not payload.id:
             return error("bad_request", 400, field="id")
-        status = cookfile_api.delete_comment(path, cid)
+        status = cookfile_api.delete_comment(path, payload.id)
         entry, problem = None, (None if status == "OK" else status)
 
     if problem == "comment_not_found":
@@ -339,17 +355,20 @@ def cookfile_comments():
 
 @api_files_bp.route("/cookfiles/comments/assets", methods=["POST"])
 def cookfile_comment_assets():
-    body = json_body()
-    path, err = require_file(body.get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(
+        CookFileCommentAssetsRequest,
+        json_body(),
+        "assets",
+    )
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
-    cid = body.get("id")
-    assets = body.get("assets")
-    if not isinstance(cid, str) or not cid:
+    if not payload.id:
         return error("bad_request", 400, field="id")
-    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
-        return error("bad_request", 400, field="assets")
-    stored, problem = cookfile_api.set_comment_assets(path, cid, assets)
+    stored, problem = cookfile_api.set_comment_assets(path, payload.id, payload.assets)
     if problem == "comment_not_found":
         return error("comment_not_found", 404)
     if problem:
@@ -373,14 +392,14 @@ def cookfile_asset_upload():
 
 @api_files_bp.route("/cookfiles/assets/delete", methods=["POST"])
 def cookfile_asset_delete():
-    body = json_body()
-    path, err = require_file(body.get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(FileAssetsRequest, json_body(), "assets")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
-    assets = body.get("assets")
-    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
-        return error("bad_request", 400, field="assets")
-    status = cookfile_api.delete_assets(path, assets)
+    status = cookfile_api.delete_assets(path, payload.assets)
     if status != "OK":
         return cookfile_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200
@@ -388,14 +407,16 @@ def cookfile_asset_delete():
 
 @api_files_bp.route("/cookfiles/thumbnail", methods=["POST"])
 def cookfile_thumbnail():
-    body = json_body()
-    path, err = require_file(body.get("file", ""), cookfile_folder())
+    payload, validation_err = _validated_request(CookFileThumbnailRequest, json_body(), "asset")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, cookfile_folder())
     if err:
         return err
-    asset = body.get("asset")
-    if not isinstance(asset, str) or not asset:
+    if not payload.asset:
         return error("bad_request", 400, field="asset")
-    status = cookfile_api.apply_thumbnail(path, asset)
+    status = cookfile_api.apply_thumbnail(path, payload.asset)
     if status == "unknown_asset":
         return error("bad_request", 400, field="asset")
     if status != "OK":
@@ -428,6 +449,9 @@ def recipe_create():
     """Flask's equivalent is `recipeedit` with an empty filename
     (blueprints/recipes/routes.py:136-147). The new file's bare name is
     returned so the client can navigate to it."""
+    _payload, validation_err = _validated_request(EmptyContentRequest, json_body(), "body")
+    if validation_err:
+        return validation_err
     path = create_recipefile()
     data = validated_content_json(FilenameData, {"filename": os.path.basename(path)})
     return jsonify(api_response("OK", None, data)), 200
@@ -459,7 +483,11 @@ def recipe_upload():
 
 @api_files_bp.route("/recipes/delete", methods=["POST"])
 def recipe_delete_file():
-    path, err = require_file(json_body().get("file", ""), recipe_folder())
+    payload, validation_err = _validated_request(FileRequest, json_body(), "file")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, recipe_folder())
     if err:
         return err
     os.remove(path)
@@ -478,7 +506,11 @@ def recipe_run():
     start_step and step are sent explicitly because _api_post_control
     deep-merges: a bare {filename} inherits the previous run's step.
     """
-    _struct, path, err = _load_recipe(json_body().get("file", ""))
+    payload, validation_err = _validated_request(FileRequest, json_body(), "file")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    _struct, path, err = _load_recipe(payload.file)
     if err:
         return err
     control = read_control()
@@ -753,14 +785,14 @@ def recipe_assets():
 
 @api_files_bp.route("/recipes/assets/delete", methods=["POST"])
 def recipe_asset_delete():
-    body = json_body()
-    path, err = require_file(body.get("file", ""), recipe_folder())
+    payload, validation_err = _validated_request(FileAssetsRequest, json_body(), "assets")
+    if validation_err:
+        return validation_err
+    assert payload is not None
+    path, err = require_file(payload.file, recipe_folder())
     if err:
         return err
-    assets = body.get("assets")
-    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
-        return error("bad_request", 400, field="assets")
-    status = recipes_api.delete_assets(path, assets)
+    status = recipes_api.delete_assets(path, payload.assets)
     if status != "OK":
         return recipes_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200

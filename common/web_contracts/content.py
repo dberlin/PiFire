@@ -51,6 +51,56 @@ class FilenameData(WireModel):
     filename: str
 
 
+class EmptyContentRequest(WireModel):
+    pass
+
+
+class FileRequest(WireModel):
+    file: str
+
+
+class FileAssetsRequest(FileRequest):
+    assets: list[str]
+
+
+class CookFileTitleRequest(FileRequest):
+    title: str
+
+
+class CookFileLabelRequest(FileRequest):
+    old_label: str
+    new_label: str
+
+
+class CookFileRecoverRequest(FileRequest):
+    action: Literal["upgrade", "repair"]
+
+
+class CookFileCommentAddRequest(FileRequest):
+    action: Literal["add"]
+    text: str
+
+
+class CookFileCommentUpdateRequest(FileRequest):
+    action: Literal["update"]
+    id: str
+    text: str
+
+
+class CookFileCommentDeleteRequest(FileRequest):
+    action: Literal["delete"]
+    id: str
+
+
+class CookFileCommentAssetsRequest(FileRequest):
+    id: str
+    assets: list[str]
+
+
+class CookFileThumbnailRequest(FileRequest):
+    asset: str
+
+
 class AssetNamesData(WireModel):
     assets: list[str]
 

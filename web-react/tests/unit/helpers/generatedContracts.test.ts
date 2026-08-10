@@ -1,8 +1,8 @@
-import { describe, expect, it } from "@rstest/core";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "@rstest/core";
 import ts from "typescript";
 
 const WEB_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -15,7 +15,6 @@ const LEGACY_MIRROR_NAMES: Record<string, true> = {
   TunerEnvelope: true,
   UpdateEnvelope: true,
 };
-
 
 function exportedDeclarationNames(source: string, filename: string): string[] {
   const kind = filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -55,7 +54,8 @@ function memberNames(members: ts.NodeArray<ts.TypeElement>): Set<string> {
   const names = new Set<string>();
   for (const member of members) {
     if (!ts.isPropertySignature(member) || member.name === undefined) continue;
-    if (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)) names.add(member.name.text);
+    if (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name))
+      names.add(member.name.text);
   }
   return names;
 }
@@ -106,9 +106,6 @@ function residualMirrors(root: string, ownedNames: ReadonlySet<string>): string[
       if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) {
         const name = statement.name.text;
         localDeclarations.add(name);
-        if (ownedNames.has(name) || LEGACY_MIRROR_NAMES[name]) {
-          residuals.add(`${relative(root, filename)}:${name}`);
-        }
       }
     }
 
@@ -177,10 +174,23 @@ describe("generated web contract ownership", () => {
     }
   });
 
-  it("allows a frontend-local view type", () => {
+  it("reports a generated-name declaration when it is used as a JSON wire body", () => {
     const root = mkdtempSync(join(tmpdir(), "pifire-contract-inventory-"));
     try {
-      writeFileSync(join(root, "local.ts"), "interface AdminPanelState { selected: boolean }");
+      writeFileSync(
+        join(root, "wire.ts"),
+        "interface AdminState { selected: boolean } async function read(response: Response) { return (await response.json()) as AdminState; }",
+      );
+      expect(residualMirrors(root, pythonOwnedNames())).toEqual(["wire.ts:AdminState"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows a same-name frontend-local view type outside wire use", () => {
+    const root = mkdtempSync(join(tmpdir(), "pifire-contract-inventory-"));
+    try {
+      writeFileSync(join(root, "local.ts"), "interface AdminState { selected: boolean }");
       expect(residualMirrors(root, pythonOwnedNames())).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -209,7 +219,7 @@ describe("generated web contract ownership", () => {
 
   it("keeps migrated helpers free of Python-owned interface and type declarations", () => {
     const residuals = residualMirrors(HELPERS_ROOT, pythonOwnedNames());
-    if (residuals.length > 0) throw new Error(`Python-owned contract mirrors:\n${residuals.join("\n")}`);
+    if (residuals.length > 0)
+      throw new Error(`Python-owned contract mirrors:\n${residuals.join("\n")}`);
   });
-
 });

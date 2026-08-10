@@ -15,12 +15,21 @@ import type {
   CookFileAsset,
   CookFileChartData,
   CookFileComment,
+  CookFileCommentAddRequest,
+  CookFileCommentAssetsRequest,
+  CookFileCommentDeleteRequest,
+  CookFileCommentUpdateRequest,
   CookFileDetail,
+  CookFileLabelRequest,
+  CookFileRecoverRequest,
+  CookFileThumbnailRequest,
+  CookFileTitleRequest,
+  FileAssetsRequest,
+  FileRequest,
 } from "../contracts/content.gen";
 import { postForm, read, write } from "./apiEnvelope";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
-
 
 export const fetchCookFileDetail = (file: string, baseUrl = BASE_URL) =>
   read<CookFileDetail>("cookfiles", "detail", file, baseUrl);
@@ -39,10 +48,10 @@ export const cookFileExportUrl = (file: string, kind: "data" | "events", baseUrl
   `${baseUrl}/api/files/cookfiles/export?file=${encodeURIComponent(file)}&kind=${kind}`;
 
 export const deleteCookFile = (file: string, baseUrl = BASE_URL) =>
-  write<null>("cookfiles", "delete", { file }, baseUrl);
+  write<null>("cookfiles", "delete", { file } satisfies FileRequest, baseUrl);
 
 export const setCookFileTitle = (file: string, title: string, baseUrl = BASE_URL) =>
-  write<null>("cookfiles", "title", { file, title }, baseUrl);
+  write<null>("cookfiles", "title", { file, title } satisfies CookFileTitleRequest, baseUrl);
 
 export const renameCookFileLabel = (
   file: string,
@@ -53,30 +62,55 @@ export const renameCookFileLabel = (
   write<{ new_label_safe: string }>(
     "cookfiles",
     "label",
-    { file, old_label: oldLabel, new_label: newLabel },
+    { file, old_label: oldLabel, new_label: newLabel } satisfies CookFileLabelRequest,
     baseUrl,
   );
 
 export const recoverCookFile = (file: string, action: "upgrade" | "repair", baseUrl = BASE_URL) =>
-  write<null>("cookfiles", "recover", { file, action }, baseUrl);
+  write<null>("cookfiles", "recover", { file, action } satisfies CookFileRecoverRequest, baseUrl);
 
 export const addCookFileComment = (file: string, text: string, baseUrl = BASE_URL) =>
-  write<CookFileComment>("cookfiles", "comments", { file, action: "add", text }, baseUrl);
+  write<CookFileComment>(
+    "cookfiles",
+    "comments",
+    { file, action: "add", text } satisfies CookFileCommentAddRequest,
+    baseUrl,
+  );
 
 export const updateCookFileComment = (file: string, id: string, text: string, baseUrl = BASE_URL) =>
-  write<CookFileComment>("cookfiles", "comments", { file, action: "update", id, text }, baseUrl);
+  write<CookFileComment>(
+    "cookfiles",
+    "comments",
+    { file, action: "update", id, text } satisfies CookFileCommentUpdateRequest,
+    baseUrl,
+  );
 
 export const deleteCookFileComment = (file: string, id: string, baseUrl = BASE_URL) =>
-  write<null>("cookfiles", "comments", { file, action: "delete", id }, baseUrl);
+  write<null>(
+    "cookfiles",
+    "comments",
+    { file, action: "delete", id } satisfies CookFileCommentDeleteRequest,
+    baseUrl,
+  );
 
 export const setCommentAssets = (file: string, id: string, assets: string[], baseUrl = BASE_URL) =>
-  write<{ assets: string[] }>("cookfiles", "comments/assets", { file, id, assets }, baseUrl);
+  write<{ assets: string[] }>(
+    "cookfiles",
+    "comments/assets",
+    { file, id, assets } satisfies CookFileCommentAssetsRequest,
+    baseUrl,
+  );
 
 export const deleteCookFileAssets = (file: string, assets: string[], baseUrl = BASE_URL) =>
-  write<null>("cookfiles", "assets/delete", { file, assets }, baseUrl);
+  write<null>("cookfiles", "assets/delete", { file, assets } satisfies FileAssetsRequest, baseUrl);
 
 export const setCookFileThumbnail = (file: string, asset: string, baseUrl = BASE_URL) =>
-  write<null>("cookfiles", "thumbnail", { file, asset }, baseUrl);
+  write<null>(
+    "cookfiles",
+    "thumbnail",
+    { file, asset } satisfies CookFileThumbnailRequest,
+    baseUrl,
+  );
 
 /** Multipart: the archive name rides as a form field and each image as a
  * repeated `assets` part, matching request.files.getlist("assets"). */

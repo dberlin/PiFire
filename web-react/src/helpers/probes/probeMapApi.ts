@@ -2,6 +2,7 @@ import type {
   Probe,
   ProbeDevice,
   ProbeMap,
+  ProbeMapRequest,
   ProbeModuleCatalog,
   ProbeProfile,
 } from "../contracts/wizard.gen";
@@ -46,7 +47,7 @@ export async function applyProbeMap(
     const res = await fetch(`${baseUrl}/api/probe_map`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ probe_map: probeMap }),
+      body: JSON.stringify({ probe_map: probeMap } satisfies ProbeMapRequest),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, message: explain(res.status, body) };

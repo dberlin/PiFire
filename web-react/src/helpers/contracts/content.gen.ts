@@ -54,7 +54,20 @@ type Edited = string;
 type Id1 = string;
 type Text = string;
 type Time = string;
-type Assets3 = CookFileAsset[];
+type Action = "add";
+type File = string;
+type Text1 = string;
+type Assets3 = string[];
+type File1 = string;
+type Id2 = string;
+type Action1 = "delete";
+type File2 = string;
+type Id3 = string;
+type Action2 = "update";
+type File3 = string;
+type Id4 = string;
+type Text2 = string;
+type Assets4 = CookFileAsset[];
 type Comments = CookFileComment[];
 type EventTotals = CookFileTotals | EmptyCookFileTotals;
 type Augerontime = string;
@@ -65,7 +78,7 @@ type AugerontimeC = string | 0;
 type EndtimeC = string | 0;
 type EstusageI1 = string;
 type EstusageM1 = string;
-type Id2 = string | number;
+type Id5 = string | number;
 type Mode1 = string;
 type StarttimeC = string | 0;
 type Timeinmode = string | 0;
@@ -73,7 +86,7 @@ type Events = CookFileEvent[];
 type Filename1 = string;
 type Endtime = string;
 type EndtimeEpoch = FiniteNumber | string;
-type Id3 = string;
+type Id6 = string;
 type Starttime = string;
 type StarttimeEpoch = FiniteNumber | string;
 type Thumbnail = string;
@@ -81,35 +94,47 @@ type Title = string;
 type Units = string;
 type Version = string;
 type NewLabelSafe = string;
+type File4 = string;
+type NewLabel = string;
+type OldLabel = string;
+type Action3 = "upgrade" | "repair";
+type File5 = string;
+type Asset = string;
+type File6 = string;
+type File7 = string;
+type Title1 = string;
+type Assets5 = string[];
+type File8 = string;
 type Errortype1 = ("version" | "asset" | "other") | null;
 type Message1 = string;
 type Status = number;
 type Filename2 = string;
 type Thumbnail1 = string;
-type Title1 = string;
+type Title2 = string;
 type Items = FileListItem[];
 type LastPage = number;
 type Page = number;
 type PerPage = number;
 type Reverse = boolean;
 type Total = number;
+type File9 = string;
 type Filename3 = string;
 type ChartData1 = HistoryDataset[];
 type Minutes = number;
 type TimeLabels1 = FiniteNumber[];
-type Assets4 = string[];
+type Assets6 = string[];
 type Name = string;
 type Quantity = string;
-type Assets5 = string[];
+type Assets7 = string[];
 type Ingredients = string[];
 type Step = number;
-type Text1 = string;
+type Text3 = string;
 type AugerontimeC1 = string;
 type EndtimeC1 = string | 0;
 type EstusageI2 = string;
 type EstusageM2 = string;
 type FanontimeC = string | null;
-type Id4 = string;
+type Id7 = string;
 type Mode2 = string;
 type PMode = number;
 type PelletBrandType = string;
@@ -120,9 +145,9 @@ type Timeinmode1 = string;
 type Metrics = MetricRecord[];
 type Units1 = "F" | "C";
 type Filename4 = string;
-type Id5 = string;
+type Id8 = string;
 type Type2 = string;
-type Assets6 = RecipeAsset[];
+type Assets8 = RecipeAsset[];
 type Ingredients1 = Ingredient[];
 type Instructions = Instruction[];
 type Message2 = string;
@@ -131,47 +156,47 @@ type Notify = boolean;
 type Pause = boolean;
 type Food = FiniteNumber[];
 type Steps = RecipeStep[];
-type Assets7 = RecipeAsset[];
+type Assets9 = RecipeAsset[];
 type Filename5 = string;
 type Author = string;
 type CookTime = number;
 type Description = string;
 type Difficulty = string;
 type FoodProbes = number;
-type Id6 = string;
+type Id9 = string;
 type Image = string;
 type PrepTime = number;
 type Rating = number;
 type Thumbnail2 = string;
-type Title2 = string;
+type Title3 = string;
 type Units2 = string;
 type Username = string;
 type Version1 = string;
-type Assets8 = string[];
-type File = string;
+type Assets10 = string[];
+type File10 = string;
 type Index = number;
 type Section = "ingredients" | "instructions";
-type Action = "add";
-type File1 = string;
-type Action1 = "delete";
-type File2 = string;
+type Action4 = "add";
+type File11 = string;
+type Action5 = "delete";
+type File12 = string;
 type Index1 = number;
-type Action2 = "update";
-type File3 = string;
+type Action6 = "update";
+type File13 = string;
 type Index2 = number;
 type Name1 = string;
 type Quantity1 = string;
-type Action3 = "add";
-type File4 = string;
-type Action4 = "delete";
-type File5 = string;
+type Action7 = "add";
+type File14 = string;
+type Action8 = "delete";
+type File15 = string;
 type Index3 = number;
-type Action5 = "update";
-type File6 = string;
+type Action9 = "update";
+type File16 = string;
 type Index4 = number;
 type Ingredients2 = string[];
 type Step1 = number;
-type Text2 = string;
+type Text4 = string;
 type Author1 = string;
 type CookTime1 = number;
 type Description1 = string;
@@ -179,20 +204,20 @@ type Difficulty1 = string;
 type FoodProbes1 = number;
 type PrepTime1 = number;
 type Rating1 = number;
-type Title3 = string;
+type Title4 = string;
 type Units3 = string;
-type File7 = string;
-type Assets9 = string[];
-type File8 = string;
+type File17 = string;
+type Assets11 = string[];
+type File18 = string;
 type Section1 = "splash";
-type Action6 = "delete";
-type File9 = string;
+type Action10 = "delete";
+type File19 = string;
 type Index5 = number;
-type Action7 = "insert";
-type File10 = string;
+type Action11 = "insert";
+type File20 = string;
 type Index6 = number;
-type Action8 = "update";
-type File11 = string;
+type Action12 = "update";
+type File21 = string;
 type Index7 = number;
 
 export interface PiFireContentWebContracts {
@@ -354,10 +379,47 @@ export interface CookFileComment {
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileCommentAddRequest".
+ */
+export interface CookFileCommentAddRequest {
+  action: Action;
+  file: File;
+  text: Text1;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileCommentAssetsRequest".
+ */
+export interface CookFileCommentAssetsRequest {
+  assets: Assets3;
+  file: File1;
+  id: Id2;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileCommentDeleteRequest".
+ */
+export interface CookFileCommentDeleteRequest {
+  action: Action1;
+  file: File2;
+  id: Id3;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileCommentUpdateRequest".
+ */
+export interface CookFileCommentUpdateRequest {
+  action: Action2;
+  file: File3;
+  id: Id4;
+  text: Text2;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "CookFileDetail".
  */
 export interface CookFileDetail {
-  assets: Assets3;
+  assets: Assets4;
   comments: Comments;
   event_totals: EventTotals;
   events: Events;
@@ -391,7 +453,7 @@ export interface CookFileEvent {
   endtime_c: EndtimeC;
   estusage_i: EstusageI1;
   estusage_m: EstusageM1;
-  id: Id2;
+  id: Id5;
   mode: Mode1;
   pellet_level_end: FiniteNumber;
   pellet_level_start: FiniteNumber;
@@ -425,7 +487,7 @@ interface Targets1 {
 export interface CookFileMetadata {
   endtime: Endtime;
   endtime_epoch: EndtimeEpoch;
-  id: Id3;
+  id: Id6;
   starttime: Starttime;
   starttime_epoch: StarttimeEpoch;
   thumbnail: Thumbnail;
@@ -443,6 +505,52 @@ export interface CookFileLabelData {
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileLabelRequest".
+ */
+export interface CookFileLabelRequest {
+  file: File4;
+  new_label: NewLabel;
+  old_label: OldLabel;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileRecoverRequest".
+ */
+export interface CookFileRecoverRequest {
+  action: Action3;
+  file: File5;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileThumbnailRequest".
+ */
+export interface CookFileThumbnailRequest {
+  asset: Asset;
+  file: File6;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "CookFileTitleRequest".
+ */
+export interface CookFileTitleRequest {
+  file: File7;
+  title: Title1;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "EmptyContentRequest".
+ */
+export interface EmptyContentRequest {}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "FileAssetsRequest".
+ */
+export interface FileAssetsRequest {
+  assets: Assets5;
+  file: File8;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "FileErrorDetail".
  */
 export interface FileErrorDetail {
@@ -457,7 +565,7 @@ export interface FileErrorDetail {
 export interface FileListItem {
   filename: Filename2;
   thumbnail: Thumbnail1;
-  title: Title1;
+  title: Title2;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -470,6 +578,13 @@ export interface FileListing {
   per_page: PerPage;
   reverse: Reverse;
   total: Total;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "FileRequest".
+ */
+export interface FileRequest {
+  file: File9;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -517,7 +632,7 @@ interface Targets2 {
  * via the `definition` "Ingredient".
  */
 export interface Ingredient {
-  assets: Assets4;
+  assets: Assets6;
   name: Name;
   quantity: Quantity;
   [k: string]: unknown | undefined;
@@ -527,10 +642,10 @@ export interface Ingredient {
  * via the `definition` "Instruction".
  */
 export interface Instruction {
-  assets: Assets5;
+  assets: Assets7;
   ingredients: Ingredients;
   step: Step;
-  text: Text1;
+  text: Text3;
   [k: string]: unknown | undefined;
 }
 /**
@@ -547,7 +662,7 @@ export interface MetricRecord {
   estusage_m: EstusageM2;
   fanontime: FiniteNumber;
   fanontime_c: FanontimeC;
-  id: Id4;
+  id: Id7;
   mode: Mode2;
   p_mode: PMode;
   pellet_brand_type: PelletBrandType;
@@ -576,7 +691,7 @@ export interface MetricsPayload {
  */
 export interface RecipeAsset {
   filename: Filename4;
-  id: Id5;
+  id: Id8;
   type: Type2;
   [k: string]: unknown | undefined;
 }
@@ -585,7 +700,7 @@ export interface RecipeAsset {
  * via the `definition` "RecipeAssetsData".
  */
 export interface RecipeAssetsData {
-  assets: Assets6;
+  assets: Assets8;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -624,7 +739,7 @@ export interface RecipeTriggerTemperatures {
  * via the `definition` "RecipeDetail".
  */
 export interface RecipeDetail {
-  assets: Assets7;
+  assets: Assets9;
   filename: Filename5;
   metadata: RecipeMetadata;
   recipe: RecipeBody;
@@ -639,12 +754,12 @@ export interface RecipeMetadata {
   description: Description;
   difficulty: Difficulty;
   food_probes: FoodProbes;
-  id: Id6;
+  id: Id9;
   image: Image;
   prep_time: PrepTime;
   rating: Rating;
   thumbnail: Thumbnail2;
-  title: Title2;
+  title: Title3;
   units: Units2;
   username: Username;
   version: Version1;
@@ -655,8 +770,8 @@ export interface RecipeMetadata {
  * via the `definition` "RecipeIndexedAssetAssignmentRequest".
  */
 export interface RecipeIndexedAssetAssignmentRequest {
-  assets: Assets8;
-  file: File;
+  assets: Assets10;
+  file: File10;
   index: Index;
   section: Section;
 }
@@ -665,16 +780,16 @@ export interface RecipeIndexedAssetAssignmentRequest {
  * via the `definition` "RecipeIngredientAddRequest".
  */
 export interface RecipeIngredientAddRequest {
-  action: Action;
-  file: File1;
+  action: Action4;
+  file: File11;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "RecipeIngredientDeleteRequest".
  */
 export interface RecipeIngredientDeleteRequest {
-  action: Action1;
-  file: File2;
+  action: Action5;
+  file: File12;
   index: Index1;
 }
 /**
@@ -682,8 +797,8 @@ export interface RecipeIngredientDeleteRequest {
  * via the `definition` "RecipeIngredientUpdateRequest".
  */
 export interface RecipeIngredientUpdateRequest {
-  action: Action2;
-  file: File3;
+  action: Action6;
+  file: File13;
   index: Index2;
   name: Name1;
   quantity: Quantity1;
@@ -693,16 +808,16 @@ export interface RecipeIngredientUpdateRequest {
  * via the `definition` "RecipeInstructionAddRequest".
  */
 export interface RecipeInstructionAddRequest {
-  action: Action3;
-  file: File4;
+  action: Action7;
+  file: File14;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "RecipeInstructionDeleteRequest".
  */
 export interface RecipeInstructionDeleteRequest {
-  action: Action4;
-  file: File5;
+  action: Action8;
+  file: File15;
   index: Index3;
 }
 /**
@@ -710,12 +825,12 @@ export interface RecipeInstructionDeleteRequest {
  * via the `definition` "RecipeInstructionUpdateRequest".
  */
 export interface RecipeInstructionUpdateRequest {
-  action: Action5;
-  file: File6;
+  action: Action9;
+  file: File16;
   index: Index4;
   ingredients: Ingredients2;
   step: Step1;
-  text: Text2;
+  text: Text4;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -729,7 +844,7 @@ export interface RecipeMetadataFields {
   food_probes?: FoodProbes1;
   prep_time?: PrepTime1;
   rating?: Rating1;
-  title?: Title3;
+  title?: Title4;
   units?: Units3;
 }
 /**
@@ -738,15 +853,15 @@ export interface RecipeMetadataFields {
  */
 export interface RecipeMetadataUpdateRequest {
   fields: RecipeMetadataFields;
-  file: File7;
+  file: File17;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "RecipeSplashAssetAssignmentRequest".
  */
 export interface RecipeSplashAssetAssignmentRequest {
-  assets: Assets9;
-  file: File8;
+  assets: Assets11;
+  file: File18;
   section: Section1;
 }
 /**
@@ -754,8 +869,8 @@ export interface RecipeSplashAssetAssignmentRequest {
  * via the `definition` "RecipeStepDeleteRequest".
  */
 export interface RecipeStepDeleteRequest {
-  action: Action6;
-  file: File9;
+  action: Action10;
+  file: File19;
   index: Index5;
 }
 /**
@@ -763,8 +878,8 @@ export interface RecipeStepDeleteRequest {
  * via the `definition` "RecipeStepInsertRequest".
  */
 export interface RecipeStepInsertRequest {
-  action: Action7;
-  file: File10;
+  action: Action11;
+  file: File20;
   index: Index6;
 }
 /**
@@ -772,8 +887,8 @@ export interface RecipeStepInsertRequest {
  * via the `definition` "RecipeStepUpdateRequest".
  */
 export interface RecipeStepUpdateRequest {
-  action: Action8;
-  file: File11;
+  action: Action12;
+  file: File21;
   index: Index7;
   step: RecipeStep;
 }

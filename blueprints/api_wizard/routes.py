@@ -53,8 +53,8 @@ from common.web_contracts.wizard import (
     WizardFinishRequest,
     WizardState,
     _ActionResponse,
-    _EmptyRequest,
-    _ThermoworksRequest,
+    EmptyWizardRequest,
+    ThermoworksRequest,
 )
 from . import api_wizard_bp
 
@@ -327,7 +327,7 @@ def wizard_cancel():
     api blueprint's `/api/<action>/<arg0>` catch-all (blueprints/api/routes.py:291)
     swallows POST /api/wizard/cancel and answers 415, not 404.
     """
-    _, error_response = _request_contract(_EmptyRequest)
+    _, error_response = _request_contract(EmptyWizardRequest)
     if error_response is not None:
         return error_response
     settings = read_settings()
@@ -655,7 +655,7 @@ def wizard_scan_bluetooth():
     """Bluetooth peripheral discovery for probe device forms. Hardware-mediated:
     routes scan_bluetooth through the control process (6s timeout). Mirrors
     blueprints/wizard/routes.py::_wizard_bt_scan but returns JSON rows."""
-    _, error_response = _request_contract(_EmptyRequest)
+    _, error_response = _request_contract(EmptyWizardRequest)
     if error_response is not None:
         return error_response
     rows = []
@@ -704,7 +704,7 @@ def wizard_scan_thermoworks():
     """ThermoWorks Cloud account discovery for the thermoworks_cloud device.
     Blocking network auth; distinguishes bad-creds from generic failure.
     Mirrors blueprints/wizard/routes.py::_wizard_thermoworks_discover."""
-    request_payload, error_response = _request_contract(_ThermoworksRequest)
+    request_payload, error_response = _request_contract(ThermoworksRequest)
     if error_response is not None:
         return error_response
     assert request_payload is not None

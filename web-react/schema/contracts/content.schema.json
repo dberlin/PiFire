@@ -221,6 +221,113 @@
       "title": "CookFileComment",
       "type": "object"
     },
+    "CookFileCommentAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "add",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "text"
+      ],
+      "title": "CookFileCommentAddRequest",
+      "type": "object"
+    },
+    "CookFileCommentAssetsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "id",
+        "assets"
+      ],
+      "title": "CookFileCommentAssetsRequest",
+      "type": "object"
+    },
+    "CookFileCommentDeleteRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "id"
+      ],
+      "title": "CookFileCommentDeleteRequest",
+      "type": "object"
+    },
+    "CookFileCommentUpdateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "id",
+        "text"
+      ],
+      "title": "CookFileCommentUpdateRequest",
+      "type": "object"
+    },
     "CookFileDetail": {
       "additionalProperties": false,
       "properties": {
@@ -389,6 +496,30 @@
       "title": "CookFileLabelData",
       "type": "object"
     },
+    "CookFileLabelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "new_label": {
+          "title": "New Label",
+          "type": "string"
+        },
+        "old_label": {
+          "title": "Old Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "old_label",
+        "new_label"
+      ],
+      "title": "CookFileLabelRequest",
+      "type": "object"
+    },
     "CookFileLabels": {
       "additionalProperties": true,
       "properties": {
@@ -490,6 +621,67 @@
       "title": "CookFileMetadata",
       "type": "object"
     },
+    "CookFileRecoverRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "upgrade",
+            "repair"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action"
+      ],
+      "title": "CookFileRecoverRequest",
+      "type": "object"
+    },
+    "CookFileThumbnailRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "asset": {
+          "title": "Asset",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "asset"
+      ],
+      "title": "CookFileThumbnailRequest",
+      "type": "object"
+    },
+    "CookFileTitleRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "title"
+      ],
+      "title": "CookFileTitleRequest",
+      "type": "object"
+    },
     "CookFileTotals": {
       "additionalProperties": false,
       "properties": {
@@ -527,10 +719,38 @@
       "title": "CookFileTotals",
       "type": "object"
     },
+    "EmptyContentRequest": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "EmptyContentRequest",
+      "type": "object"
+    },
     "EmptyCookFileTotals": {
       "additionalProperties": false,
       "properties": {},
       "title": "EmptyCookFileTotals",
+      "type": "object"
+    },
+    "FileAssetsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "assets"
+      ],
+      "title": "FileAssetsRequest",
       "type": "object"
     },
     "FileErrorDetail": {
@@ -638,6 +858,20 @@
         "total"
       ],
       "title": "FileListing",
+      "type": "object"
+    },
+    "FileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "FileRequest",
       "type": "object"
     },
     "FilenameData": {
@@ -1878,16 +2112,27 @@
     "CookFileAssetsData",
     "CookFileChartData",
     "CookFileComment",
+    "CookFileCommentAddRequest",
+    "CookFileCommentAssetsRequest",
+    "CookFileCommentDeleteRequest",
+    "CookFileCommentUpdateRequest",
     "CookFileDetail",
     "CookFileEvent",
     "CookFileLabelData",
+    "CookFileLabelRequest",
     "CookFileLabels",
     "CookFileMetadata",
+    "CookFileRecoverRequest",
+    "CookFileThumbnailRequest",
+    "CookFileTitleRequest",
     "CookFileTotals",
+    "EmptyContentRequest",
     "EmptyCookFileTotals",
+    "FileAssetsRequest",
     "FileErrorDetail",
     "FileListItem",
     "FileListing",
+    "FileRequest",
     "FilenameData",
     "FiniteNumber",
     "HistoryAnnotation",

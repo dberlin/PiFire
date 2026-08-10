@@ -266,16 +266,16 @@ class ProbeModuleCatalog(WireModel):
     requires_install: dict[str, bool]
 
 
-class _EmptyRequest(WireModel):
+class EmptyWizardRequest(WireModel):
     pass
 
 
-class _ThermoworksRequest(WireModel):
+class ThermoworksRequest(WireModel):
     email: str = ""
     password: str = ""
 
 
-class _ProbeMapRequest(WireModel):
+class ProbeMapRequest(WireModel):
     probe_map: ProbeMap
 
 

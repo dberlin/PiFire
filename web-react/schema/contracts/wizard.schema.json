@@ -142,6 +142,12 @@
       "title": "ConfigOption",
       "type": "object"
     },
+    "EmptyWizardRequest": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "EmptyWizardRequest",
+      "type": "object"
+    },
     "I2CBusValue": {
       "anyOf": [
         {
@@ -514,6 +520,19 @@
       "title": "ProbeMap",
       "type": "object"
     },
+    "ProbeMapRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "probe_map": {
+          "$ref": "#/$defs/ProbeMap"
+        }
+      },
+      "required": [
+        "probe_map"
+      ],
+      "title": "ProbeMapRequest",
+      "type": "object"
+    },
     "ProbeModuleCatalog": {
       "additionalProperties": false,
       "properties": {
@@ -842,6 +861,23 @@
         "settings"
       ],
       "title": "SettingsDependency",
+      "type": "object"
+    },
+    "ThermoworksRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "default": "",
+          "title": "Email",
+          "type": "string"
+        },
+        "password": {
+          "default": "",
+          "title": "Password",
+          "type": "string"
+        }
+      },
+      "title": "ThermoworksRequest",
       "type": "object"
     },
     "ThermoworksRow": {
@@ -1510,6 +1546,7 @@
     "BusKindsValidationResponse",
     "Config",
     "ConfigOption",
+    "EmptyWizardRequest",
     "I2CBusValue",
     "InstallLog",
     "InstallStatus",
@@ -1521,6 +1558,7 @@
     "ProbeDevice",
     "ProbeFieldType",
     "ProbeMap",
+    "ProbeMapRequest",
     "ProbeModuleCatalog",
     "ProbeModuleData",
     "ProbeProfile",
@@ -1529,6 +1567,7 @@
     "ScanRequest",
     "ScanResult",
     "SettingsDependency",
+    "ThermoworksRequest",
     "ThermoworksRow",
     "ThermoworksRowsResult",
     "WireScalar",
