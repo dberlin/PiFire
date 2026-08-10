@@ -89,7 +89,10 @@ Usage:
       --arm F3 --out docs/superpowers/experiments/_structure_compare_F3.json
 
   # F5 arm, from a workspace checked out at 282ee65c9309 with HEAD's
-  # controller_matrix.py and this file copied in. `--commit` is the checkout's
+  # tools/__init__.py, tools/experiments/__init__.py,
+  # tools/experiments/controller_matrix.py, and
+  # docs/superpowers/experiments/structure_compare.py copied to their matching
+  # historical-workspace paths. `--commit` is the checkout's
   # own commit id; it is recorded in the shard and printed in the table header,
   # so an arm label can be checked against the revision that produced it.
   /path/to/PiFire/.venv/bin/python \
