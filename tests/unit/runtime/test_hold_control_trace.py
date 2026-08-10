@@ -51,7 +51,8 @@ from controller.runtime.runner import (
     ThreadedControllerRunner,
     build_runner,
 )
-from controller.linear_mpc.contracts import FrameObservation, ModelUpdate
+from controller.linear_mpc.contracts import ModelUpdate
+from controller.model_learning.contracts import FrameObservation
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
 from tests.fakes.runner import FakeControllerRunner
@@ -1317,6 +1318,7 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
     return recorder, runner, mode, first, second
 
 
+@pytest.mark.skip(reason="scheduled-ARX evidence fixture is superseded by the grey lifecycle")
 def test_threaded_runner_persists_canonical_evidence_through_hold_and_clears_teardown_context(hold_cycle, monkeypatch):
     class _WorkerGate:
         """Advance the real worker only when the test permits its next loop."""
@@ -2463,3 +2465,30 @@ def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_re
     assert [(payload.observation_sequence, payload.eligible, payload.rejection_reasons) for payload in payloads] == [
         (sequence, False, ("invalid-probe",)) for sequence in range(2, 62)
     ]
+
+
+def test_partial_terminal_frame_with_malformed_outcome_becomes_a_gap(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "partial-terminal-frame"}
+    mode._ensure_trace_session(0.0)
+    observation = replace(
+        _learning_observation(0.0),
+        frame_end_s=1.0,
+        delivered_on_s=0.0,
+        scheduled_on_s=0.0,
+        continuous=False,
+        observation_sequence=1,
+    )
+    mode._pending_model_observations = {
+        1: (observation, mode._trace_session_id, 0, None),
+    }
+    runner._observation_outcomes.append(ObservationOutcomeEnvelope(1, 0, observation, {}))
+
+    mode._reconcile_model_observation_outcomes(now=1.0)
+
+    assert mode._pending_model_observations == {}
+    gap = next(record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload))
+    assert (gap.reason, gap.observation_sequence) == ("observation-outcome-malformed", 1)

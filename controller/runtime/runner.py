@@ -527,6 +527,18 @@ class ControllerRunner(ABC):
         return ()
     def submit_activation_confidence(self, record):
         return None
+    def stop_for_refit(self):
+        """Stop control ownership while retaining the joined core for teardown fitting."""
+        self.stop()
+
+    def finalize_cook_refit(self, outcome):
+        finalize = getattr(getattr(self, "_core", None), "finalize_cook_refit", None)
+        return False if not callable(finalize) else bool(finalize(outcome))
+
+    def finish_teardown(self):
+        """Release resources retained by stop_for_refit()."""
+
+
 
 
     @abstractmethod
@@ -562,6 +574,7 @@ class SyncControllerRunner(ControllerRunner):
         period = getattr(core, "get_control_period", lambda: None)()
         self._quality = _ResultQualityTracker(_control_period_seconds(period))
         self._stopped = False
+        self._retained_for_refit = False
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
@@ -661,8 +674,22 @@ class SyncControllerRunner(ControllerRunner):
     def runs_async(self) -> bool:
         return False
 
+    def stop_for_refit(self):
+        if self._stopped:
+            return
+        self._stopped = True
+        self._retained_for_refit = True
+
+    def finish_teardown(self):
+        if not self._retained_for_refit:
+            return
+        self._retained_for_refit = False
+        _close_core(self._core)
+
     def stop(self):
         if self._stopped:
+            if self._retained_for_refit:
+                self.finish_teardown()
             return
         self._stopped = True
         _close_core(self._core)
@@ -750,6 +777,12 @@ class SyncControllerRunner(ControllerRunner):
         """
         fn = getattr(self._core, "refit_from_cook", None)
         return fn() if fn is not None else None
+
+    def finalize_cook_refit(self, outcome):
+        finalize = getattr(self._core, "finalize_cook_refit", None)
+        return False if not callable(finalize) else bool(finalize(outcome))
+
+
 
     def controller_state(self):
         """A mutable, JSON-safe copy of the current status snapshot."""
@@ -907,6 +940,8 @@ class ThreadedControllerRunner(ControllerRunner):
         self._learning_condition = threading.Condition(self._lock)
         self._learning_poll_core = None
         self._wait_for_period = self._stop_event.wait if wait_for_period is None else wait_for_period
+        self._retain_core_for_refit = False
+        self._final_core_closed = False
         self._learning_thread = threading.Thread(target=self._learning_loop, daemon=True)
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._learning_thread.start()
@@ -1021,6 +1056,14 @@ class ThreadedControllerRunner(ControllerRunner):
                 pass
         with self._lock:
             self._mpc_activation_terminated = True
+
+    def _close_final_core(self) -> None:
+        with self._lock:
+            if self._final_core_closed:
+                return
+            self._final_core_closed = True
+            core = self._core
+        _close_core(core)
 
     def _compensate_pair_activation(
         self,
@@ -1281,10 +1324,11 @@ class ThreadedControllerRunner(ControllerRunner):
                 continue
             if not self._advance_pair_activation():
                 if stopping:
-                    with self._lock:
-                        final_core = self._core
                     self._learning_thread.join()
-                    _close_core(final_core)
+                    with self._lock:
+                        retain_core = self._retain_core_for_refit
+                    if not retain_core:
+                        self._close_final_core()
                     return
                 self._wait_for_period(self._control_period or 1.0)
                 continue
@@ -1319,9 +1363,10 @@ class ThreadedControllerRunner(ControllerRunner):
                 with self._lock:
                     if self._pending_observations:
                         continue
-                    final_core = self._core
+                    retain_core = self._retain_core_for_refit
                 self._learning_thread.join()
-                _close_core(final_core)
+                if not retain_core:
+                    self._close_final_core()
                 return
             self._wait_for_period(self._control_period or 1.0)
 
@@ -1589,7 +1634,19 @@ class ThreadedControllerRunner(ControllerRunner):
                 if refit_error is None:
                     raise
 
-    def stop(self):
+    def finalize_cook_refit(self, outcome):
+        if self._thread.is_alive():
+            raise RuntimeError("the controller worker did not stop; refusing to finalize behind it")
+        finalize = getattr(self._core, "finalize_cook_refit", None)
+        if not callable(finalize):
+            return False
+        finalized = bool(finalize(outcome))
+        model = _owned_model_snapshot(self._core.get_model_snapshot())
+        with self._lock:
+            self._model_snapshot = model
+        return finalized
+
+    def _stop_and_join(self) -> None:
         with self._lock:
             self._stop_event.set()
             self._learning_stop_event.set()
@@ -1603,6 +1660,27 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_observations.clear()
                 for sequence in tuple(self._accepted_observations):
                     self._terminalize_observation_locked(sequence, "runner-stop-timeout")
+
+    def stop_for_refit(self):
+        with self._lock:
+            self._retain_core_for_refit = True
+        self._stop_and_join()
+
+    def finish_teardown(self):
+        with self._lock:
+            self._retain_core_for_refit = False
+            worker_alive = self._thread.is_alive()
+        if not worker_alive:
+            self._close_final_core()
+
+
+
+    def stop(self):
+        with self._lock:
+            self._retain_core_for_refit = False
+        self._stop_and_join()
+        if not self._thread.is_alive():
+            self._close_final_core()
 
 
 FALLBACK_CONTROLLER = "pid"

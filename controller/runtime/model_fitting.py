@@ -399,6 +399,187 @@ class HistoryDecision:
     reasons: tuple[str, ...]
 
 
+class TeardownRefitOutcome(StrEnum):
+    DISABLED = "disabled"
+    INSUFFICIENT = "insufficient"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    READY_FOR_REVIEW = "ready-for-review"
+    ACCEPTED_NEXT_COOK = "accepted-next-cook"
+    CHECKPOINT_FAILURE = "checkpoint-failure"
+
+
+@dataclass(frozen=True, slots=True)
+class TeardownRefitResult:
+    outcome: TeardownRefitOutcome
+    reason: str
+    origin: Any
+    policy: Any
+    candidate_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+
+        if not isinstance(self.outcome, TeardownRefitOutcome):
+            object.__setattr__(self, "outcome", TeardownRefitOutcome(self.outcome))
+        if not isinstance(self.reason, str) or not self.reason.strip():
+            raise ValueError("reason must be non-blank")
+        if not isinstance(self.origin, CandidateOrigin):
+            object.__setattr__(self, "origin", CandidateOrigin(self.origin))
+        if not isinstance(self.policy, ActivationPolicy):
+            object.__setattr__(self, "policy", ActivationPolicy(self.policy))
+        if self.candidate_digest is not None:
+            value = self.candidate_digest
+            if (
+                not isinstance(value, str)
+                or len(value) != 64
+                or any(character not in "0123456789abcdef" for character in value)
+            ):
+                raise ValueError("candidate_digest must be a lowercase SHA-256 digest")
+
+    @property
+    def accepted(self) -> bool:
+        return self.outcome in {
+            TeardownRefitOutcome.READY_FOR_REVIEW,
+            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+        }
+
+    @classmethod
+    def insufficient(cls, reason: str) -> TeardownRefitResult:
+        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+
+        return cls(
+            TeardownRefitOutcome.INSUFFICIENT,
+            reason,
+            CandidateOrigin.COOK_REFIT,
+            ActivationPolicy.COOK_REFIT,
+        )
+
+    @classmethod
+    def rejected(cls, reason: str, *, origin: Any) -> TeardownRefitResult:
+        from controller.model_learning.contracts import (
+            ActivationPolicy,
+            CandidateOrigin,
+        )
+
+        resolved = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
+        policy = (
+            ActivationPolicy.OPERATOR_REVIEWED
+            if resolved is CandidateOrigin.OPERATOR_CALIBRATION
+            else ActivationPolicy.COOK_REFIT
+        )
+        return cls(TeardownRefitOutcome.REJECTED, reason, resolved, policy)
+
+    @classmethod
+    def failed(cls, reason: str, *, origin: Any) -> TeardownRefitResult:
+        from controller.model_learning.contracts import (
+            ActivationPolicy,
+            CandidateOrigin,
+        )
+
+        resolved = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
+        policy = (
+            ActivationPolicy.OPERATOR_REVIEWED
+            if resolved is CandidateOrigin.OPERATOR_CALIBRATION
+            else ActivationPolicy.COOK_REFIT
+        )
+        return cls(TeardownRefitOutcome.FAILED, reason, resolved, policy)
+
+    @classmethod
+    def ready_for_review(cls, reason: str, *, candidate_digest: str) -> TeardownRefitResult:
+        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+
+        return cls(
+            TeardownRefitOutcome.READY_FOR_REVIEW,
+            reason,
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            ActivationPolicy.OPERATOR_REVIEWED,
+            candidate_digest,
+        )
+
+    @classmethod
+    def accepted_next_cook(cls, reason: str, *, candidate_digest: str) -> TeardownRefitResult:
+        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+
+        return cls(
+            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+            reason,
+            CandidateOrigin.COOK_REFIT,
+            ActivationPolicy.COOK_REFIT,
+            candidate_digest,
+        )
+
+
+class TeardownGreyHistory:
+    """Complete bounded contiguous fit evidence, including applied probes."""
+
+    def __init__(self, *, role_generation: int, max_observations: int = MAX_FIT_OBSERVATIONS) -> None:
+        self.role_generation = _nonnegative_int(role_generation, "role_generation")
+        self.max_observations = _positive_int(max_observations, "max_observations")
+        if self.max_observations > MAX_FIT_OBSERVATIONS:
+            raise ValueError(f"max_observations must be bounded to {MAX_FIT_OBSERVATIONS}")
+        self._observations: deque[Any] = deque(maxlen=self.max_observations)
+
+    @property
+    def observations(self) -> tuple[Any, ...]:
+        return tuple(self._observations)
+
+    @property
+    def origin(self) -> Any:
+        from controller.model_learning.contracts import CandidateOrigin
+
+        return (
+            CandidateOrigin.OPERATOR_CALIBRATION
+            if any(
+                frame.calibration_fit
+                and frame.probe_valid
+                and not math.isclose(frame.probe_q, 0.0, rel_tol=0.0, abs_tol=1e-12)
+                for frame in self._observations
+            )
+            else CandidateOrigin.COOK_REFIT
+        )
+
+    def observe(self, frame: Any) -> HistoryDecision:
+        from controller.model_learning.contracts import FrameObservation
+
+        if not isinstance(frame, FrameObservation):
+            raise ValueError("frame must be a FrameObservation")
+        reason: str | None = None
+        if frame.manual_override or frame.output_source == "manual-override":
+            reason = "manual"
+        elif frame.lid_open:
+            reason = "lid-open"
+        elif frame.safety_inhibited:
+            reason = "safety"
+        elif frame.stale:
+            reason = "stale"
+        elif frame.skipped or frame.reset:
+            reason = "skipped-or-reset"
+        elif not frame.continuous:
+            reason = "discontinuity"
+        elif frame.role_generation != self.role_generation:
+            reason = "stale-generation"
+        elif frame.allocation_join_reason is not None:
+            reason = "unknown-actuation"
+        elif frame.output_source != "controller":
+            reason = "non-controller-output"
+        elif frame.calibration_fit and not frame.probe_valid:
+            reason = "invalid-probe"
+        if reason is not None:
+            self._observations.clear()
+            return HistoryDecision(False, (reason,))
+        if self._observations:
+            previous = self._observations[-1]
+            adjacent = (
+                frame.observation_sequence == previous.observation_sequence + 1
+                and math.isclose(frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9)
+            )
+            if not adjacent:
+                self._observations.clear()
+        self._observations.append(frame)
+        return HistoryDecision(True, ())
+
+
 class PassiveGreyHistory:
     """Bounded passive Hold evidence with explicit single-cause rejection."""
 

@@ -71,6 +71,10 @@ from controller.runtime.logic.pulse import (
 
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.model_persistence import ModelPersistenceWorker
+from controller.runtime.model_fitting import (
+    TeardownRefitOutcome,
+    TeardownRefitResult,
+)
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.model_promotion import ReachabilityState
 from controller.runtime.logic.fan import controller_fan_authority, start_fan
@@ -741,8 +745,13 @@ class HoldMode(ControlMode):
         if pending is None or not isinstance(pending[0], FrameObservation):
             self._pending_model_observations.pop(sequence, None)
             return
+        try:
+            rejected = self._rejected_model_observation(pending[0], reason)
+        except ValueError:
+            self._retire_pending_model_observation(sequence, reason)
+            return
         records: tuple[tuple[TraceEventKind, object], ...] = (
-            (TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(pending[0], reason)),
+            (TraceEventKind.MODEL_OBSERVATION, rejected),
         )
         if evaluation_payload is not None:
             records += ((TraceEventKind.MODEL_EVALUATION, evaluation_payload),)
@@ -1321,10 +1330,12 @@ class HoldMode(ControlMode):
         self._trace_pending_model_events.append((payload, timestamp_ms))
         self._flush_pending_model_events()
 
-    def _checkpoint_model(self, snapshot: dict[str, object]) -> None:
+    def _checkpoint_model(self, snapshot: dict[str, object]) -> bool:
         worker = self._persistence_worker
-        if worker is None or not worker.submit_checkpoint(self._controller_name, snapshot):
+        accepted = worker is not None and worker.submit_checkpoint(self._controller_name, snapshot)
+        if not accepted:
             self._learning_evidence_available = False
+        return bool(accepted)
 
     def _bind_runner_evidence_context(self, generation: int) -> None:
         bind = getattr(getattr(self, "_runner", None), "bind_evidence_context", None)
@@ -1833,6 +1844,8 @@ class HoldMode(ControlMode):
         self._pulse_observation_last_frame_key = None
         self._last_ptemp = None
         self._final_refit_done = False
+        self._final_checkpoint_done = False
+        self._final_refit_outcome = None
         self._activation_state_identity = None
         self._activation_lifecycle_evidence_id = None
         try:
@@ -2713,67 +2726,91 @@ class HoldMode(ControlMode):
             }
         return status
 
-    def _refit_model(self):
+    def _refit_model(self) -> tuple[TeardownRefitOutcome, object | None]:
         import control as _control
 
         try:
             config = self.settings["controller"].get("config", {})
             controller_config = config.get(self._controller_name, {})
-            if not (
-                controller_config.get("enable_identification") or controller_config.get("enable_online_adaptation")
-            ):
-                _control.eventLogger.info(
-                    "Model refit skipped at cook end: neither Learn This Grill nor Online Model Adaptation is enabled."
-                )
-                return
+            identification_enabled = controller_config.get("enable_identification") is True
         except Exception as error:
             _control.eventLogger.error(f"Model refit failed at cook end: {error}")
-            return
+            return TeardownRefitOutcome.DISABLED, None
+        if not identification_enabled:
+            _control.eventLogger.info("Model refit skipped at cook end: Learn This Grill is disabled.")
+            return TeardownRefitOutcome.DISABLED, None
 
-        verdict = None
-        refit_error = None
         try:
             verdict = self._runner.refit_from_cook()
         except Exception as error:
-            refit_error = error
             _control.eventLogger.error(f"Model refit failed at cook end: {error}")
-        else:
-            # The outcome only reached the control trace, so an operator reading
-            # the log could not tell a refit that ran and was rejected from one
-            # that never happened -- and every reason it can decline (too few
-            # samples, a worse fit, an online-adaptation checkpoint) is
-            # something they may want to act on.
-            reason = getattr(verdict, "reason", None) or "no reason recorded"
-            _control.eventLogger.info(
-                f"Model refit at cook end: {'adopted' if getattr(verdict, 'accepted', False) else 'not adopted'} "
-                f"({reason})."
-            )
-        finally:
-            try:
-                snapshot = self._runner.get_model_snapshot()
-                if snapshot is not None:
-                    self._clear_trace_session_model_authority()
-                    if refit_error is None:
-                        self._trace_model(ModelEventType.REFIT, "model refit completed", snapshot)
-                        if getattr(verdict, "accepted", False):
-                            self._trace_model(ModelEventType.ADOPT, "refit model adopted", snapshot)
-                        else:
-                            self._trace_model(ModelEventType.REJECT, "refit model rejected", snapshot)
-                    else:
-                        self._trace_model(
-                            ModelEventType.REFIT, "model checkpoint published after refit failure", snapshot
-                        )
-                        self._trace_model(ModelEventType.REJECT, f"model refit failed: {refit_error}", snapshot)
-                    if isinstance(snapshot, dict):
-                        self._checkpoint_model(snapshot)
-            except Exception as error:
-                _control.eventLogger.error(f"Model refit checkpoint persistence failed: {error}")
+            return TeardownRefitOutcome.FAILED, None
 
-    def _refit_model_once(self) -> None:
+        reason = getattr(verdict, "reason", None) or "no reason recorded"
+        outcome = getattr(verdict, "outcome", None)
+        if not isinstance(outcome, TeardownRefitOutcome):
+            if verdict is None:
+                outcome = TeardownRefitOutcome.INSUFFICIENT
+            elif getattr(verdict, "accepted", False):
+                origin = getattr(verdict, "origin", None)
+                outcome = (
+                    TeardownRefitOutcome.READY_FOR_REVIEW
+                    if getattr(origin, "value", origin) == "operator-calibration"
+                    else TeardownRefitOutcome.ACCEPTED_NEXT_COOK
+                )
+            else:
+                outcome = TeardownRefitOutcome.REJECTED
+        _control.eventLogger.info(
+            f"Model refit at cook end: {outcome.value} ({reason})."
+        )
+        return outcome, verdict
+
+    def _refit_model_once(self) -> tuple[TeardownRefitOutcome, object | None]:
         if self._final_refit_done:
-            return
+            return self._final_refit_outcome
         self._final_refit_done = True
-        self._refit_model()
+        self._final_refit_outcome = self._refit_model()
+        return self._final_refit_outcome
+
+    def _publish_final_checkpoint_once(
+        self,
+        outcome: TeardownRefitOutcome,
+        verdict: object | None,
+    ) -> bool:
+        if self._final_checkpoint_done:
+            return True
+        self._final_checkpoint_done = True
+        finalize = getattr(self._runner, "finalize_cook_refit", None)
+        if callable(finalize):
+            try:
+                finalize(outcome)
+            except Exception:
+                finalize = None
+        snapshot = self._runner.get_model_snapshot()
+        if not isinstance(snapshot, dict):
+            self._learning_evidence_available = False
+            if callable(finalize):
+                try:
+                    finalize(TeardownRefitOutcome.CHECKPOINT_FAILURE)
+                except Exception:
+                    pass
+            return False
+        self._clear_trace_session_model_authority()
+        self._trace_model(ModelEventType.REFIT, f"model refit outcome: {outcome.value}", snapshot)
+        if outcome in {
+            TeardownRefitOutcome.READY_FOR_REVIEW,
+            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+        }:
+            self._trace_model(ModelEventType.ADOPT, getattr(verdict, "reason", outcome.value), snapshot)
+        elif outcome is not TeardownRefitOutcome.DISABLED:
+            self._trace_model(ModelEventType.REJECT, getattr(verdict, "reason", outcome.value), snapshot)
+        accepted = self._checkpoint_model(snapshot)
+        if not accepted and callable(finalize):
+            try:
+                finalize(TeardownRefitOutcome.CHECKPOINT_FAILURE)
+            except Exception:
+                pass
+        return accepted
 
     def teardown(self, ptemp):
         first_trace_teardown = not self._trace_closed and (
@@ -2796,16 +2833,32 @@ class HoldMode(ControlMode):
         )
         try:
             if self._runner is not None:
-                self._runner.stop()
+                stop_for_refit = getattr(self._runner, "stop_for_refit", self._runner.stop)
+                stop_for_refit()
                 if getattr(self, "ctx", None) is not None:
                     self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
-                self._refit_model_once()
+                outcome, verdict = self._refit_model_once()
+                self._publish_final_checkpoint_once(outcome, verdict)
         finally:
             self._retire_runner_evidence_context(self._runner_configuration_revision)
             worker = self._persistence_worker
+            flushed = True
             if worker is not None:
-                worker.flush_and_stop()
+                flushed = worker.flush_and_stop() and not bool(getattr(worker, "failed", False))
                 self._persistence_worker = None
+            if not flushed and self._runner is not None:
+                finalize = getattr(self._runner, "finalize_cook_refit", None)
+                if callable(finalize):
+                    try:
+                        finalize(TeardownRefitOutcome.CHECKPOINT_FAILURE)
+                    except Exception:
+                        pass
+            finish_teardown = getattr(self._runner, "finish_teardown", None)
+            if callable(finish_teardown):
+                try:
+                    finish_teardown()
+                except Exception as error:
+                    self._trace_warning(f"Controller teardown close failed: {error}")
             if first_trace_teardown:
                 self._flush_pending_model_events()
                 self._trace_closed = True

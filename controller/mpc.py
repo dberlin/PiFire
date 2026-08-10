@@ -67,10 +67,18 @@ from controller.acados import (
 )
 from controller.runtime.model_fitting import (
     CandidatePair,
+    FitSubmission,
+    GreyFitError,
+    GreyFitJob,
+    GreyFitWorker,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
     TargetTimingEvidence,
+    TeardownGreyHistory,
+    TeardownRefitOutcome,
+    TeardownRefitResult,
     grey_config_digest,
+    prepare_candidate_off_path,
 )
 from controller.model_learning.contracts import (
     ActivationPolicy,
@@ -1276,6 +1284,16 @@ class Controller(ControllerBase):
         self._learning_session_id = "runtime"
         self._learning_cook_id = None
         self._learning_role_generation = self._model_revision
+        self._teardown_history = TeardownGreyHistory(
+            role_generation=self._learning_role_generation,
+            max_observations=_HISTORY_MAX,
+        )
+        self._cook_refit_outcome: TeardownRefitOutcome | None = None
+        self._cook_refit_finalized = False
+        self._teardown_candidate = None
+        self._teardown_candidate_descriptor: GreyControlPairDescriptor | None = None
+        self._teardown_fit_window: FitWindowIdentity | None = None
+        self._next_cook_descriptor: GreyControlPairDescriptor | None = None
         try:
             self._learning = self._build_learning() if self._online_enabled else None
         except BaseException:
@@ -2552,6 +2570,7 @@ class Controller(ControllerBase):
         """Dispatch completed frames without running fit preparation on this worker."""
         if not isinstance(observation, FrameObservation):
             raise TypeError("observation must be a FrameObservation")
+        self._teardown_history.observe(observation)
         with self._learning_lock:
             learning = self._learning
             preparing = self._learning_preparing
@@ -2632,6 +2651,11 @@ class Controller(ControllerBase):
             self._learning_session_id = session_id
             self._learning_cook_id = cook_id
             self._learning_role_generation = int(role_generation)
+            if self._teardown_history.role_generation != self._learning_role_generation:
+                self._teardown_history = TeardownGreyHistory(
+                    role_generation=self._learning_role_generation,
+                    max_observations=self._teardown_history.max_observations,
+                )
             with self._learning_lock:
                 learning = self._learning
             if learning is not None:
@@ -3430,7 +3454,7 @@ class Controller(ControllerBase):
     _MODEL_PARAM_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 
     def _adopt_model(self, params, *, rmse, samples, band_c, nfev=None):
-        """Take `params` into the running config and bump the revision.
+        """Take fitted parameters into the next-cook checkpoint.
 
         Only `_MODEL_PARAM_KEYS` cross into the config, so a fitter's own
         bookkeeping -- `converged`, `nfev` -- travels alongside a fit without
@@ -3442,7 +3466,6 @@ class Controller(ControllerBase):
         elsewhere.
         """
         self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
-        self._model_revision += 1
         self._model_meta = {
             # Provenance, not a comparison input: what this model achieved on
             # the cook it was fit from. model_promotion.evaluate() always
@@ -3494,14 +3517,17 @@ class Controller(ControllerBase):
                 metadata=metadata,
             )
             live = self._learning_live_status()
-            active = self._active_control_pair.descriptor
+            runtime_active = self._active_control_pair.descriptor
+            active = self._next_cook_descriptor or runtime_active
             candidate = (
                 self._inert_activation.candidate
                 if self._inert_activation is not None
                 else None
             )
             rollback = (
-                self._rollback_control_pair.descriptor
+                runtime_active
+                if self._next_cook_descriptor is not None
+                else self._rollback_control_pair.descriptor
                 if self._rollback_control_pair is not None
                 else None
             )
@@ -3532,6 +3558,31 @@ class Controller(ControllerBase):
                     "descriptor",
                     None,
                 )
+            elif candidate is None and self._teardown_candidate is not None:
+                candidate_config = self._teardown_candidate.config
+                candidate_parameters = {
+                    key: (
+                        candidate_config.delay_states
+                        if key == "n_delay"
+                        else getattr(candidate_config, key)
+                    )
+                    for key in self._MODEL_PARAM_KEYS
+                }
+                snapshot["challenger"] = {
+                    "parameters": _grey_snapshot_params(candidate_parameters),
+                    "metadata": {
+                        "rmse": self._teardown_candidate.rmse_c,
+                        "samples": self._teardown_candidate.sample_count,
+                        "band_c": list(self._teardown_candidate.temperature_band_c),
+                        "nfev": self._teardown_candidate.nfev,
+                    },
+                }
+                snapshot["window"] = (
+                    None
+                    if self._teardown_fit_window is None
+                    else asdict(self._teardown_fit_window)
+                )
+                candidate_descriptor = self._teardown_candidate_descriptor
             else:
                 candidate_descriptor = None
             snapshot["evidence"] = {
@@ -3543,9 +3594,22 @@ class Controller(ControllerBase):
                     else self._active_activation_record.decision_id
                 ),
             }
-            snapshot["origin"] = live["origin"]
+            teardown_origin = (
+                CandidateOrigin.OPERATOR_CALIBRATION
+                if self._teardown_candidate is not None
+                else CandidateOrigin.COOK_REFIT
+                if self._next_cook_descriptor is not None
+                else None
+            )
+            snapshot["origin"] = (
+                teardown_origin.value if teardown_origin is not None else live["origin"]
+            )
             snapshot["policy"] = (
-                self._inert_activation.policy.value
+                ActivationPolicy.OPERATOR_REVIEWED.value
+                if self._teardown_candidate is not None
+                else ActivationPolicy.COOK_REFIT.value
+                if self._next_cook_descriptor is not None
+                else self._inert_activation.policy.value
                 if self._inert_activation is not None
                 else self._active_activation_record.policy.value
                 if self._active_activation_record is not None
@@ -3554,9 +3618,29 @@ class Controller(ControllerBase):
             snapshot["identification"] = {
                 "status": "identified" if self._model_meta is not None else "unidentified",
             }
+            refit_status = (
+                "succeeded"
+                if self._cook_refit_outcome
+                in {
+                    TeardownRefitOutcome.READY_FOR_REVIEW,
+                    TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+                }
+                else "failed"
+                if self._cook_refit_outcome
+                in {
+                    TeardownRefitOutcome.REJECTED,
+                    TeardownRefitOutcome.FAILED,
+                    TeardownRefitOutcome.CHECKPOINT_FAILURE,
+                }
+                else "idle"
+            )
             snapshot["cook_refit"] = {
-                "status": "idle",
-                "latest": self._online_last_lifecycle_reason,
+                "status": refit_status,
+                "latest": (
+                    self._online_last_lifecycle_reason
+                    if self._cook_refit_outcome is None
+                    else self._cook_refit_outcome.value
+                ),
             }
             snapshot["identities"] = {
                 "active_digest": active.model_digest,
@@ -3564,11 +3648,15 @@ class Controller(ControllerBase):
                 "candidate_digest": (
                     candidate.model_digest
                     if candidate is not None
+                    else candidate_descriptor.model_digest
+                    if isinstance(candidate_descriptor, GreyControlPairDescriptor)
                     else live["candidate_digest"]
                 ),
                 "candidate_generation": (
                     candidate.candidate_generation
                     if candidate is not None
+                    else candidate_descriptor.candidate_generation
+                    if isinstance(candidate_descriptor, GreyControlPairDescriptor)
                     else live["candidate_generation"]
                 ),
                 "rollback_digest": None if rollback is None else rollback.model_digest,
@@ -3677,11 +3765,161 @@ class Controller(ControllerBase):
         return True
 
     def _online_teardown_checkpoint(self, verdict):
-        """Persist the learner exactly once for every refit teardown outcome."""
-        if self._online_enabled:
-            self._model_revision += 1
-            self.get_model_snapshot()
         return verdict
+
+    @staticmethod
+    def _close_prepared_candidate(preparation) -> None:
+        pair = getattr(preparation, "candidate_pair", None)
+        if pair is None:
+            return
+        Controller._close_component(getattr(pair, "controller", None))
+        Controller._close_component(getattr(pair, "estimator", None))
+
+    def _refit_completed_frames(self) -> TeardownRefitResult:
+        from controller.model_promotion import evaluate
+        from controller.update_mpc import fit_quality
+
+        frames = self._teardown_history.observations
+        origin = self._teardown_history.origin
+        if len(frames) < _REFIT_MIN_SAMPLES:
+            return TeardownRefitResult.insufficient(
+                f"only {len(frames)} samples; need {_REFIT_MIN_SAMPLES}"
+            )
+        identity = self._learning_identity()
+        window = identity.window(
+            frames[0].observation_sequence,
+            frames[-1].observation_sequence,
+        )
+        request_identity = {
+            "origin": origin.value,
+            "window": asdict(window),
+            "candidate_generation": identity.candidate_generation,
+        }
+        request = FitRequest(
+            request_id=hashlib.sha256(
+                json.dumps(request_identity, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+            origin=origin,
+            window=window,
+            candidate_generation=identity.candidate_generation,
+        )
+        with self._learning_lock:
+            learning = self._learning
+            self._learning = None
+            self._learning_pending_origin = None
+            self._learning_candidate_pair = None
+        self._close_component(learning)
+
+        worker = GreyFitWorker()
+        try:
+            worker.start()
+            if worker.submit(GreyFitJob(request, frames, self.mpc.config)) is not FitSubmission.ACCEPTED:
+                return TeardownRefitResult.failed("fitting worker was busy", origin=origin)
+            message = worker.receive(timeout_s=120.0)
+        except Exception as error:
+            return TeardownRefitResult.failed(f"fit failed: {error}", origin=origin)
+        finally:
+            worker.close()
+        if isinstance(message.outcome, GreyFitError):
+            return TeardownRefitResult.failed(
+                f"fit failed: {message.outcome.detail}",
+                origin=origin,
+            )
+        success = message.outcome
+        candidate_parameters = {
+            key: (
+                success.config.delay_states
+                if key == "n_delay"
+                else getattr(success.config, key)
+            )
+            for key in self._MODEL_PARAM_KEYS
+        }
+        incumbent = {key: float(self.cfg[key]) for key in self._MODEL_PARAM_KEYS}
+        times = np.array(
+            [frame.frame_end_s - frames[0].frame_end_s for frame in frames],
+            dtype=float,
+        )
+        temperatures = np.array([frame.temp_c for frame in frames], dtype=float)
+        realized = np.array(
+            [frame.realized_q for frame in frames[1:]] + [frames[-1].realized_q],
+            dtype=float,
+        )
+        incumbent_rmse, _ = fit_quality(
+            times,
+            temperatures,
+            realized,
+            incumbent,
+            T_amb=float(self.cfg["T_amb"]),
+        )
+        verdict = evaluate(
+            candidate_parameters,
+            incumbent,
+            candidate_rmse=success.rmse_c,
+            incumbent_rmse=incumbent_rmse,
+            identifiability=success.identifiability,
+        )
+        if not verdict.accepted:
+            return TeardownRefitResult.rejected(verdict.reason, origin=origin)
+        preparation = prepare_candidate_off_path(
+            success,
+            incumbent_pair=CandidatePair(self.estimator, self.mpc),
+            estimator_factory=self._candidate_estimator,
+            controller_factory=AcadosGreyBoxMPC,
+            timing_probe=self._candidate_timing,
+        )
+        if not preparation.accepted:
+            reason = ",".join(preparation.blockers) or "candidate-preparation-rejected"
+            return TeardownRefitResult.rejected(reason, origin=origin)
+        descriptor = GreyControlPairDescriptor(
+            model_digest=preparation.candidate_digest,
+            configuration={
+                name: getattr(success.config, name)
+                for name in success.config.__dataclass_fields__
+            },
+            estimator_kind=str(self.cfg["estimator"]),
+            solver_kind="acados-grey",
+            candidate_generation=identity.candidate_generation,
+            role_generation=identity.role_generation + 1,
+        )
+        self._teardown_fit_window = window
+        try:
+            if origin is CandidateOrigin.OPERATOR_CALIBRATION:
+                self._teardown_candidate = success
+                self._teardown_candidate_descriptor = descriptor
+                return TeardownRefitResult.ready_for_review(
+                    verdict.reason,
+                    candidate_digest=descriptor.model_digest,
+                )
+            self._adopt_model(
+                candidate_parameters,
+                rmse=success.rmse_c,
+                samples=success.sample_count,
+                band_c=success.temperature_band_c,
+                nfev=success.nfev,
+            )
+            self._next_cook_descriptor = descriptor
+            return TeardownRefitResult.accepted_next_cook(
+                verdict.reason,
+                candidate_digest=descriptor.model_digest,
+            )
+        finally:
+            self._close_prepared_candidate(preparation)
+
+    def finalize_cook_refit(self, outcome) -> bool:
+        normalized = (
+            outcome
+            if isinstance(outcome, TeardownRefitOutcome)
+            else TeardownRefitOutcome(outcome)
+        )
+        if self._cook_refit_finalized:
+            if normalized is not TeardownRefitOutcome.CHECKPOINT_FAILURE:
+                return False
+            self._cook_refit_outcome = normalized
+            return True
+        self._cook_refit_finalized = True
+        self._cook_refit_outcome = normalized
+        self._model_revision += 1
+        return True
 
     def cook_history(self):
         """The cook's (time_s, temp_c, Q_applied) rows, oldest first."""
@@ -3699,9 +3937,10 @@ class Controller(ControllerBase):
         """
         from controller.model_promotion import evaluate
         from controller.update_mpc import fit_params, fit_quality, identifiability
+        if history is None:
+            return self._refit_completed_frames()
 
-        if self._online_enabled and not bool(self.cfg.get("enable_identification", False)):
-            return self._online_teardown_checkpoint(_Verdict(False, "online adaptation checkpoint"))
+
 
         rows = list(history if history is not None else self._history)
         if len(rows) < _REFIT_MIN_SAMPLES:

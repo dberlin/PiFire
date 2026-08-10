@@ -147,6 +147,11 @@ class ModelPersistenceWorker:
         """Whether an evidence loss/failure has made confidence fail closed."""
         with self._condition:
             return self._evidence_blocked or self._failed
+    @property
+    def failed(self) -> bool:
+        with self._condition:
+            return self._failed
+
 
     def submit_checkpoint(self, name: str, snapshot: dict[str, object]) -> bool:
         """Copy a checkpoint and replace only its not-yet-written predecessor."""
