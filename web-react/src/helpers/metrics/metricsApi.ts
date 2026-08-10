@@ -4,6 +4,7 @@
 // there is no write here to get wrong.
 
 import type { MetricsPayload } from "../contracts/content.gen";
+import type { ApiEnvelope } from "../contracts/core.gen";
 import type { MetricsResult } from "./metricsTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
@@ -14,18 +15,14 @@ export async function fetchMetrics(baseUrl = BASE_URL): Promise<MetricsResult> {
     const res = await fetch(`${baseUrl}/api/metrics`);
     //  A body that is not JSON (a proxy's HTML 502, a dropped connection
     //  mid-stream) must not mask the status the caller renders.
-    const body = (await res.json().catch(() => ({}))) as {
-      result?: string;
-      message?: string;
-      data?: MetricsPayload | null;
-    };
+    const body = (await res.json().catch(() => ({}))) as Partial<ApiEnvelope>;
     return {
       //  The verdict is in the BODY, not the status: common/app.py's
       //  api_response envelope can carry "Error" under a 200.
       ok: res.ok && body.result === "OK",
       status: res.status,
       message: body.message ?? `HTTP ${res.status}`,
-      data: body.data ?? null,
+      data: (body.data as MetricsPayload | null | undefined) ?? null,
     };
   } catch (e) {
     return { ok: false, status: 0, message: (e as Error).message, data: null };

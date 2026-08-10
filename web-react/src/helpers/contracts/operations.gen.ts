@@ -1,103 +1,103 @@
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
-export type BootToMonitor = boolean;
-export type DebugMode = boolean;
-export type BootToMonitor1 = boolean;
-export type DebugMode1 = boolean;
-export type Pelletdb = string[];
-export type Settings = string[];
-export type Logs = string[];
-export type Mode = string;
+type BootToMonitor = boolean;
+type DebugMode = boolean;
+type BootToMonitor1 = boolean;
+type DebugMode1 = boolean;
+type Pelletdb = string[];
+type Settings = string[];
+type Logs = string[];
+type Mode = string;
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "Reading".
  */
 export type Reading = string | number;
-export type IpAddress = string;
-export type MacAddress = string;
-export type Architecture = string;
-export type Bits = string;
-export type Name = string;
-export type PrettyName = string;
-export type Version = string;
-export type VersionCodename = string;
-export type VersionId = string;
-export type Uptime = string;
+type IpAddress = string;
+type MacAddress = string;
+type Architecture = string;
+type Bits = string;
+type Name = string;
+type PrettyName = string;
+type Version = string;
+type VersionCodename = string;
+type VersionId = string;
+type Uptime = string;
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "FiniteNumber".
  */
-export type FiniteNumber = number;
-export type Ready = boolean;
-export type Samples = number;
-export type Probe = string;
-export type Reference = string;
+type FiniteNumber = number;
+type Ready = boolean;
+type Samples = number;
+type Probe = string;
+type Reference = string;
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "BackupKind".
  */
 export type BackupKind = "settings" | "pelletdb";
-export type Filename = string;
-export type File = string;
-export type File1 = string;
-export type Offset = number;
-export type Reset = boolean;
-export type Text = string;
-export type A = number;
-export type B = number;
-export type C = number;
-export type Chart = CoefficientPoint[];
-export type ChartOk = boolean;
+type Filename = string;
+type File = string;
+type File1 = string;
+type Offset = number;
+type Reset = boolean;
+type Text = string;
+type A = number;
+type B = number;
+type C = number;
+type Chart = CoefficientPoint[];
+type ChartOk = boolean;
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "Segment".
  */
 export type Segment = "High" | "Medium" | "Low";
-export type Points = TunerPoint[];
-export type Action = "factory_reset";
-export type Bytes = number;
-export type Members = string[];
-export type Stem = string;
-export type Removed = string[];
-export type Families = LogFamily[];
-export type Logs1 = string[];
+type Points = TunerPoint[];
+type Action = "factory_reset";
+type Bytes = number;
+type Members = string[];
+type Stem = string;
+type Removed = string[];
+type Families = LogFamily[];
+type Logs1 = string[];
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "MaintenanceAction".
  */
 export type MaintenanceAction = "clear_history" | "clear_events" | "clear_pelletdb" | "clear_pelletdb_log";
-export type ApplyTo = string | null;
-export type Name1 = string;
-export type Applied = string | null;
-export type Id = string;
+type ApplyTo = string | null;
+type Name1 = string;
+type Applied = string | null;
+type Id = string;
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "SystemAction".
  */
 export type SystemAction = "reboot" | "shutdown" | "restart";
-export type Probe1 = string;
-export type Tuning = boolean;
-export type Mode1 = string;
-export type Open = boolean;
-export type Restored = boolean;
-export type Open1 = boolean;
-export type Target = string;
-export type Behind = number;
-export type Current = string;
-export type Output = string;
-export type Started = boolean;
-export type Branch = string;
-export type Branches = string[];
-export type Detached = string | null;
-export type RemoteUrl = string;
-export type RemoteVersion = string;
-export type Version1 = string;
-export type WebUiBuildFailed = boolean;
-export type WebUiStale = boolean;
-export type Output1 = string;
-export type Percent = number;
-export type Status = string;
+type Probe1 = string;
+type Tuning = boolean;
+type Mode1 = string;
+type Open = boolean;
+type Restored = boolean;
+type Open1 = boolean;
+type Target = string;
+type Behind = number;
+type Current = string;
+type Output = string;
+type Started = boolean;
+type Branch = string;
+type Branches = string[];
+type Detached = string | null;
+type RemoteUrl = string;
+type RemoteVersion = string;
+type Version1 = string;
+type WebUiBuildFailed = boolean;
+type WebUiStale = boolean;
+type Output1 = string;
+type Percent = number;
+type Status = string;
 
 export interface PiFireOperationsWebContracts {
   [k: string]: unknown | undefined;
@@ -167,7 +167,7 @@ export interface CpuInfo {
   model: Reading;
   model_name: Reading;
 }
-export interface NetworkInfo {
+interface NetworkInfo {
   [k: string]: NetworkInterface | undefined;
 }
 /**

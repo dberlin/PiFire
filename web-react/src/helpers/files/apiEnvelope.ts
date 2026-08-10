@@ -6,7 +6,8 @@
 // {data, result, message} with result === "OK" on success. Read responses
 // are bare payloads with an HTTP status.
 
-import type { FileErrorDetail } from "../contracts/content.gen";
+import type { ContentErrorEnvelope, FileErrorDetail } from "../contracts/content.gen";
+import type { ApiEnvelope } from "../contracts/core.gen";
 import type { FileKind } from "./fileTypes";
 
 export class FileRequestError extends Error {
@@ -21,10 +22,7 @@ export class FileRequestError extends Error {
 export async function toError(res: Response): Promise<FileErrorDetail> {
   //  A 404 from a proxy (or an HTML error page) is not JSON. Never let a parse
   //  failure mask the status the caller has to branch on.
-  const body = (await res.json().catch(() => ({}))) as {
-    message?: string;
-    data?: { errortype?: FileErrorDetail["errortype"] };
-  };
+  const body = (await res.json().catch(() => ({}))) as Partial<ContentErrorEnvelope>;
   return {
     status: res.status,
     message: body.message ?? `HTTP ${res.status}`,
@@ -56,7 +54,7 @@ export async function write<T>(
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new FileRequestError(await toError(res));
-  const envelope = (await res.json()) as { result?: string; message?: string; data?: T };
+  const envelope = (await res.json()) as Partial<ApiEnvelope>;
   if (envelope.result !== "OK") {
     throw new FileRequestError({
       status: res.status,
@@ -80,7 +78,7 @@ export async function postForm<T>(
     body: form,
   });
   if (!res.ok) throw new FileRequestError(await toError(res));
-  const envelope = (await res.json()) as { result?: string; message?: string; data?: T };
+  const envelope = (await res.json()) as Partial<ApiEnvelope>;
   if (envelope.result !== "OK") {
     throw new FileRequestError({
       status: res.status,

@@ -1,13 +1,13 @@
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
-export type DecisionId = string;
+type DecisionId = string;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CandidateOrigin".
  */
 export type CandidateOrigin = "passive-online" | "operator-calibration" | "cook-refit";
-export type PayloadType = "activation_lifecycle";
+type PayloadType = "activation_lifecycle";
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ActivationPhase".
@@ -18,56 +18,56 @@ export type ActivationPhase = "prepared" | "active" | "aborted";
  * via the `definition` "ActivationPolicy".
  */
 export type ActivationPolicy = "passive-auto" | "operator-reviewed" | "cook-refit";
-export type Reason = string | null;
-export type ActiveSnapshotJson = string | null;
-export type CandidateDigest = string | null;
-export type CandidateGeneration = number | null;
-export type CandidatePairJson = string | null;
-export type ControllerConfigurationDigest = string | null;
-export type EvidenceDecisionId = string | null;
-export type IncumbentPairJson = string | null;
-export type PendingFrameBoundarySwap = boolean;
-export type PendingPersistence = boolean;
-export type Reason1 = string | null;
-export type RoleGeneration = number | null;
-export type RollbackPairJson = string | null;
-export type RollbackSnapshotJson = string | null;
-export type TransactionId = string | null;
-export type Digest = string | null;
-export type RoleGeneration1 = number | null;
+type Reason = string | null;
+type ActiveSnapshotJson = string | null;
+type CandidateDigest = string | null;
+type CandidateGeneration = number | null;
+type CandidatePairJson = string | null;
+type ControllerConfigurationDigest = string | null;
+type EvidenceDecisionId = string | null;
+type IncumbentPairJson = string | null;
+type PendingFrameBoundarySwap = boolean;
+type PendingPersistence = boolean;
+type Reason1 = string | null;
+type RoleGeneration = number | null;
+type RollbackPairJson = string | null;
+type RollbackSnapshotJson = string | null;
+type TransactionId = string | null;
+type Digest = string | null;
+type RoleGeneration1 = number | null;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "AmbientSource".
  */
 export type AmbientSource = "measured" | "manual" | "weather" | "configured";
-export type CommandHighWater = number;
-export type Revision = number;
-export type ConfidenceAccepted = boolean;
-export type DecisionId1 = string;
-export type FitAccepted = boolean;
-export type IdentifiabilityAccepted = boolean;
+type CommandHighWater = number;
+type Revision = number;
+type ConfidenceAccepted = boolean;
+type DecisionId1 = string;
+type FitAccepted = boolean;
+type IdentifiabilityAccepted = boolean;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CheckStatus".
  */
 export type CheckStatus = "not-run" | "pending" | "passed" | "failed";
-export type PayloadType1 = "candidate_assessment";
-export type RejectionReasons = string[];
-export type CandidateGeneration1 = number | null;
-export type Digest1 = string | null;
-export type FitQuality = number | null;
-export type Identifiability = number | null;
-export type ParameterDeltas = {
+type PayloadType1 = "candidate_assessment";
+type RejectionReasons = string[];
+type CandidateGeneration1 = number | null;
+type Digest1 = string | null;
+type FitQuality = number | null;
+type Identifiability = number | null;
+type ParameterDeltas = {
   [k: string]: (number | null) | undefined;
 } | null;
-export type CC = number;
-export type KQ = number;
-export type TAmb = number;
-export type HAmb = number;
-export type NDelay = 8;
-export type Sigma = number;
-export type Theta = number;
-export type RoleGeneration2 = number | null;
+type CC = number;
+type KQ = number;
+type TAmb = number;
+type HAmb = number;
+type NDelay = 8;
+type Sigma = number;
+type Theta = number;
+type RoleGeneration2 = number | null;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CookRefitAuthorization".
@@ -85,88 +85,88 @@ export type CookRefitOutcome =
   | "ready-for-review"
   | "accepted-next-cook"
   | "checkpoint-failure";
-export type FinalStatus = FitStatus | CookRefitOutcome;
+type FinalStatus = FitStatus | CookRefitOutcome;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "FitStatus".
  */
 export type FitStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "stale";
-export type NextCook = boolean;
-export type Name = string;
-export type Passed = boolean;
-export type Reason2 = string | null;
-export type AuditCount = number;
-export type Count = number;
-export type HighWater = [unknown, unknown] | null;
-export type RetiredExcluded = number;
+type NextCook = boolean;
+type Name = string;
+type Passed = boolean;
+type Reason2 = string | null;
+type AuditCount = number;
+type Count = number;
+type HighWater = [unknown, unknown] | null;
+type RetiredExcluded = number;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "FiniteNumber".
  */
-export type FiniteNumber = number;
-export type Error = string | null;
-export type RequestId = string | null;
-export type WindowId = string | null;
-export type ConfigurationDigest = string;
-export type CookId = string | null;
-export type FirstObservationSequence = number;
-export type IncumbentDigest = string;
-export type LastObservationSequence = number;
-export type RoleGeneration3 = number;
-export type SessionId = string;
-export type K = number;
-export type Form = "fopdt";
-export type IdentifiedAtF = number | null;
-export type Revision1 = number;
-export type Tau = number;
-export type Theta1 = number;
-export type K1 = number;
-export type Form1 = "fopdt";
-export type Tau1 = number;
-export type Theta2 = number;
-export type KI = number;
-export type C0 = number;
-export type Form2 = "ipdt";
-export type IdentifiedAtF1 = number | null;
-export type Revision2 = number;
-export type Theta3 = number;
-export type KI1 = number;
-export type C01 = number;
-export type Form3 = "ipdt";
-export type Theta4 = number;
-export type Code = string;
-export type Detail = string;
-export type PayloadType2 = "learning_failure" | null;
-export type Terminal = boolean;
-export type Accepted = false;
-export type ActiveKind = "grey-box";
-export type Detail1 = string;
-export type Error1 = "model-activation-rejected";
-export type Accepted1 = true;
-export type CandidateDigest1 = string;
-export type DecisionId2 = string;
-export type Phase = "prepared";
-export type RoleGeneration4 = number;
-export type TransactionId1 = string;
+type FiniteNumber = number;
+type Error = string | null;
+type RequestId = string | null;
+type WindowId = string | null;
+type ConfigurationDigest = string;
+type CookId = string | null;
+type FirstObservationSequence = number;
+type IncumbentDigest = string;
+type LastObservationSequence = number;
+type RoleGeneration3 = number;
+type SessionId = string;
+type K = number;
+type Form = "fopdt";
+type IdentifiedAtF = number | null;
+type Revision1 = number;
+type Tau = number;
+type Theta1 = number;
+type K1 = number;
+type Form1 = "fopdt";
+type Tau1 = number;
+type Theta2 = number;
+type KI = number;
+type C0 = number;
+type Form2 = "ipdt";
+type IdentifiedAtF1 = number | null;
+type Revision2 = number;
+type Theta3 = number;
+type KI1 = number;
+type C01 = number;
+type Form3 = "ipdt";
+type Theta4 = number;
+type Code = string;
+type Detail = string;
+type PayloadType2 = "learning_failure" | null;
+type Terminal = boolean;
+type Accepted = false;
+type ActiveKind = "grey-box";
+type Detail1 = string;
+type Error1 = "model-activation-rejected";
+type Accepted1 = true;
+type CandidateDigest1 = string;
+type DecisionId2 = string;
+type Phase = "prepared";
+type RoleGeneration4 = number;
+type TransactionId1 = string;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ModelActivationAcknowledgement".
  */
 export type ModelActivationAcknowledgement = ModelActivationAccepted | ModelActionRejected;
-export type CandidateDigest2 = string;
-export type DecisionId3 = string;
-export type Blockers = string[];
-export type DecisionId4 = string | null;
-export type Errors = string[];
-export type Gates = EvidenceGate[];
-export type ActiveDigest = string | null;
-export type ActiveGeneration = number | null;
-export type CandidateDigest3 = string | null;
-export type CandidateGeneration2 = number | null;
-export type RollbackDigest = string | null;
-export type RollbackGeneration = number | null;
-export type Revision3 = string;
-export type SchemaVersion = 2;
+type CandidateDigest2 = string;
+type DecisionId3 = string;
+type Blockers = string[];
+type DecisionId4 = string | null;
+type Errors = string[];
+type Gates = EvidenceGate[];
+type ActiveDigest = string | null;
+type ActiveGeneration = number | null;
+type CandidateDigest3 = string | null;
+type CandidateGeneration2 = number | null;
+type RollbackDigest = string | null;
+type RollbackGeneration = number | null;
+type Revision3 = string;
+type SchemaVersion = 2;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ModelEvidenceStatus".
@@ -182,67 +182,67 @@ export type ModelEvidenceStatus =
   | "fallback"
   | "error"
   | "schema-invalidated";
-export type Accepted2 = true;
-export type ActiveKind1 = "grey-box";
-export type DecisionId5 = string;
-export type Reason3 = string;
-export type RoleGeneration5 = number;
-export type RollbackDigest1 = string;
+type Accepted2 = true;
+type ActiveKind1 = "grey-box";
+type DecisionId5 = string;
+type Reason3 = string;
+type RoleGeneration5 = number;
+type RollbackDigest1 = string;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ModelRollbackAcknowledgement".
  */
 export type ModelRollbackAcknowledgement = ModelRollbackAccepted | ModelActionRejected;
-export type Reason4 = string;
+type Reason4 = string;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "MpcCalibrationAction".
  */
 export type MpcCalibrationAction = "start" | "pause" | "resume" | "stop" | "reset-progress";
-export type AmbientC = number;
-export type EmptyGrillConfirmed = boolean;
-export type PelletsConfirmed = boolean;
-export type Revision4 = number;
-export type Data = MpcCalibrationCommandResponseData | CommandResponseData | null;
-export type Message = string;
-export type Result = "OK" | "ERROR";
+type AmbientC = number;
+type EmptyGrillConfirmed = boolean;
+type PelletsConfirmed = boolean;
+type Revision4 = number;
+type Data = MpcCalibrationCommandResponseData | CommandResponseData | null;
+type Message = string;
+type Result = "OK" | "ERROR";
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpCheckpointModel".
  */
 export type PidSpCheckpointModel = FopdtPidSpCheckpoint | IpdtPidSpCheckpoint;
-export type Observed = number | null;
-export type Required = number;
+type Observed = number | null;
+type Required = number;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpGateValue".
  */
 export type PidSpGateValue = number | boolean;
-export type CandidatesPassing = number;
-export type Confirming = number | null;
-export type DistrustCount = number;
-export type DutySegments = number;
-export type TransitionSeen = boolean;
-export type Code1 = string;
-export type Detail2 = string;
-export type Terminal1 = boolean;
-export type Name1 = string;
-export type Passed1 = boolean;
-export type Unit = string | null;
-export type Controller = "pid_sp";
-export type Gates1 = PidSpLearningGate[];
-export type Live = boolean;
-export type Active = boolean;
-export type Disabled = boolean;
+type CandidatesPassing = number;
+type Confirming = number | null;
+type DistrustCount = number;
+type DutySegments = number;
+type TransitionSeen = boolean;
+type Code1 = string;
+type Detail2 = string;
+type Terminal1 = boolean;
+type Name1 = string;
+type Passed1 = boolean;
+type Unit = string | null;
+type Controller = "pid_sp";
+type Gates1 = PidSpLearningGate[];
+type Live = boolean;
+type Active = boolean;
+type Disabled = boolean;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpPredictorModel".
  */
 export type PidSpPredictorModel = FopdtPidSpPredictor | IpdtPidSpPredictor;
-export type ResidualStreak = number;
-export type Truncated = number;
-export type Revision5 = string;
-export type SchemaVersion1 = 1;
+type ResidualStreak = number;
+type Truncated = number;
+type Revision5 = string;
+type SchemaVersion1 = 1;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpLearningStatus".
@@ -354,7 +354,7 @@ export interface GreyParameters {
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CommandResponseData".
  */
-export interface CommandResponseData {}
+interface CommandResponseData {}
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CookRefitReport".
@@ -518,7 +518,7 @@ export interface ModelEvidenceReport {
   status: ModelEvidenceStatus;
   window: FitWindowIdentity | null;
 }
-export interface Checks {
+interface Checks {
   [k: string]: CheckStatus;
 }
 /**

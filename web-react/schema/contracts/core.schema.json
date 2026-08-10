@@ -884,5 +884,22 @@
       "type": "object"
     }
   },
-  "title": "PiFire core web contracts"
+  "title": "PiFire core web contracts",
+  "x-pifire-typescript-exports": [
+    "ApiEnvelope",
+    "CommandResponse",
+    "CommandResponseData",
+    "ControlHealthResponse",
+    "ControlHealthTimeoutData",
+    "DashSocketPayload",
+    "DismissWarningsRequest",
+    "DismissWarningsResponse",
+    "EmptyResponseData",
+    "OutputPayload",
+    "ProbeDataPayload",
+    "ProbeStatusPayload",
+    "RecipeStatusPayload",
+    "TimerPayload",
+    "WebUiBuildResponse"
+  ]
 }

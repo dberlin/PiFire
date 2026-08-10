@@ -1,0 +1,497 @@
+{
+  "json": [
+    {
+      "transport": "http",
+      "name": "GET /api/webui"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/sys/check_alive"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/dismiss_warnings"
+    },
+    {
+      "transport": "socketio",
+      "name": "socket_dash_data"
+    },
+    {
+      "transport": "socketio",
+      "name": "socket_pellet_data"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/mode/<mode>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/psp/<temperature>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/splus/<enabled>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/pmode/<value>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/mode/prime/<grams>[/<next_mode>]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/timer/start/<seconds>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/timer/start/<seconds>/<options>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/timer/pause"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/timer/stop"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/timer/shutdown/<enabled>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/timer/keep_warm/<enabled>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/cmd/<command>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/units/<units>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/manual/<output>/<action>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set/manual/pwm/<duty>"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/control"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/pellets"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/wled_discover"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wled_push_profiles"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wled_test_profile"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/settings"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/controller_metadata"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/get/mode"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/settings_update"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/model-evidence/report"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/pid-sp-learning/report"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/model-evidence/activate"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/model-evidence/rollback"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/set_mpc_calibration"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/wizard/state"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/draft"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/cancel"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/scan"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/module-values"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/finish"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/wizard/installstatus"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/wizard/installlog"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/scan/bluetooth"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/scan/thermoworks"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/wizard/probes/validate-bus-kinds"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/probe_modules"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/probe_map"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/cookfiles"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/recipes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/cookfiles/detail"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/cookfiles/chart"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/recipes/detail"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/delete"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/title"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/label"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/recover"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/comments"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/comments/assets"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/assets/delete"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/thumbnail"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/assets/delete"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/create"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/delete"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/run"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/metadata"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/ingredients [action=add]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/ingredients [action=update]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/ingredients [action=delete]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/instructions [action=add]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/instructions [action=update]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/instructions [action=delete]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/steps [action=insert]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/steps [action=update]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/steps [action=delete]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/assets [section=splash]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/assets [section=indexed]"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/history/chart"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/metrics"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/admin/state"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/system"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/factory-reset"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/maintenance"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/settings"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/admin/backups"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/backups/create"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/backups/restore"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/admin/logs"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/logs/delete"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/update/state"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/update/check"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/update/log"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/update/status"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/update/branches/refresh"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/update/branch"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/update/pull"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/update/upgrade"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/update/rebuild-web-ui"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/update/buildlog"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/tuner/session [open=true]"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/tuner/session [open=false]"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/tuner/tr"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/tuner/coefficients"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/tuner/profile"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/tuner/auto-status"
+    }
+  ],
+  "non_json": [
+    {
+      "transport": "browser",
+      "name": "File and FileSystemHandle objects",
+      "category": "browser_file_handles"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/cookfiles/download",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/cookfiles/export",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/files/recipes/download",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/admin/backups/download",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/admin/logs/download",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/update/buildlog/download",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/metrics/export",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/model-evidence/artifact",
+      "category": "downloaded_bytes"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/assets",
+      "category": "multipart_form_data"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/cookfiles/upload",
+      "category": "multipart_form_data"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/assets/upload",
+      "category": "multipart_form_data"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/files/recipes/upload",
+      "category": "multipart_form_data"
+    },
+    {
+      "transport": "http",
+      "name": "POST /api/admin/backups/upload",
+      "category": "multipart_form_data"
+    },
+    {
+      "transport": "http",
+      "name": "GET /api/admin/logs/view",
+      "category": "text_range_streams"
+    }
+  ]
+}

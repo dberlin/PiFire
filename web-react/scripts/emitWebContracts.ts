@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { compileFromFile } from "json-schema-to-typescript";
+import ts from "typescript";
 
 const SCHEMA_DIRECTORY = "schema/contracts";
 const TYPESCRIPT_DIRECTORY = "src/helpers/contracts";
@@ -16,6 +17,8 @@ const COMPILER_OPTIONS = {
   unreachableDefinitions: true,
 } as const;
 
+const TYPESCRIPT_EXPORTS_KEY = "x-pifire-typescript-exports";
+
 // json-schema-to-typescript 15.0.4 mis-emits recursive array aliases as
 // `Value | undefined[]` when strict index signatures are enabled. Keep strict
 // dictionaries everywhere else; these schemas retain valid recursive aliases.
@@ -26,6 +29,86 @@ const RECURSIVE_SCHEMA_NAMES: Record<string, true> = {
 
 function lfTerminated(output: string): string {
   return `${output.replace(/\r\n?/g, "\n").replace(/\n*$/, "")}\n`;
+}
+
+async function ownedTypeScriptExports(schemaPath: string): Promise<Set<string>> {
+  const schema = JSON.parse(await readFile(schemaPath, "utf8")) as Record<string, unknown>;
+  const configured = schema[TYPESCRIPT_EXPORTS_KEY];
+  if (
+    !Array.isArray(configured) ||
+    configured.some((name) => typeof name !== "string" || !/^[A-Za-z_$][\w$]*$/.test(name))
+  ) {
+    throw new Error(`${schemaPath} must contain a valid ${TYPESCRIPT_EXPORTS_KEY} array`);
+  }
+  return new Set(configured);
+}
+
+function exposeOwnedDeclarations(generated: string, owned: ReadonlySet<string>): string {
+  const sourceFile = ts.createSourceFile(
+    "contracts.gen.ts",
+    generated,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const declarations = new Map<
+    string,
+    ts.InterfaceDeclaration | ts.TypeAliasDeclaration
+  >();
+  for (const statement of sourceFile.statements) {
+    if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) {
+      declarations.set(statement.name.text, statement);
+    }
+  }
+
+  const roots = new Set(
+    [...declarations.keys()].filter((name) => /^PiFire[A-Za-z]+WebContracts$/.test(name)),
+  );
+  const required = new Set([...owned, ...roots]);
+  const pending = [...required];
+  while (pending.length > 0) {
+    const declaration = declarations.get(pending.pop()!);
+    if (!declaration) continue;
+    const visit = (node: ts.Node) => {
+      if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+        const dependency = node.typeName.text;
+        if (declarations.has(dependency) && !required.has(dependency)) {
+          required.add(dependency);
+          pending.push(dependency);
+        }
+      } else if (ts.isExpressionWithTypeArguments(node) && ts.isIdentifier(node.expression)) {
+        const dependency = node.expression.text;
+        if (declarations.has(dependency) && !required.has(dependency)) {
+          required.add(dependency);
+          pending.push(dependency);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(declaration, visit);
+  }
+
+  const bannerEnd = generated.indexOf("\n\n") + 2;
+  const sections = [generated.slice(0, bannerEnd)];
+  for (const statement of sourceFile.statements) {
+    if (
+      (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) &&
+      !required.has(statement.name.text)
+    ) {
+      continue;
+    }
+    const start = Math.max(statement.getFullStart(), bannerEnd);
+    let section = generated.slice(start, statement.end);
+    if (
+      (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) &&
+      !owned.has(statement.name.text) &&
+      !roots.has(statement.name.text)
+    ) {
+      section = section.replace(/^export (?=(?:interface|type) )/m, "");
+    }
+    sections.push(section);
+  }
+  return `${sections.join("").replace(/\n*$/, "")}\n`;
 }
 
 function resolveManifestPath(base: string, allowedRoot: string, path: string): string {
@@ -111,7 +194,10 @@ export async function emitWebContracts(check: boolean): Promise<boolean> {
     const compilerOptions = RECURSIVE_SCHEMA_NAMES[schema]
       ? { ...COMPILER_OPTIONS, strictIndexSignatures: false }
       : COMPILER_OPTIONS;
-    const generated = lfTerminated(await compileFromFile(schemaPath, compilerOptions));
+    const compiled = await compileFromFile(schemaPath, compilerOptions);
+    const generated = lfTerminated(
+      exposeOwnedDeclarations(compiled, await ownedTypeScriptExports(schemaPath)),
+    );
 
     if (!check) {
       await atomicWrite(outputPath, generated);

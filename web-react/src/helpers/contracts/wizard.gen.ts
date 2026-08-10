@@ -1,11 +1,11 @@
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
-export type Error = string | null;
-export type HwId = string;
-export type Info = string;
-export type Name = string;
-export type Rows = BtScanRow[];
+type Error = string | null;
+type HwId = string;
+type Info = string;
+type Name = string;
+type Rows = BtScanRow[];
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "WireValue".
@@ -35,139 +35,139 @@ export type I2CBusValue =
   | _FT232HBus
   | _MCP2221Bus
   | _IncompleteKernelBusNumber;
-export type Kind = "basic";
-export type BusNum = number;
-export type Kind1 = "kernel";
-export type Adapter = string;
-export type Kind2 = "kernel";
-export type Kind3 = "kernel";
-export type Serial = string;
-export type Kind4 = "ft232h";
-export type Url = string;
-export type Kind5 = "mcp2221";
-export type Serial1 = string;
-export type BusNum1 = null;
-export type Kind6 = "kernel";
-export type Device = string;
-export type Module = string;
-export type ModuleFilename = string;
-export type Ports = string[];
-export type ProbeDevices = ProbeDevice[];
-export type Detail = string;
-export type Ok = boolean;
-export type Hidden = boolean;
-export type ListLabels = string[];
-export type ListValues = WireValue[];
-export type OptionDescription = string;
-export type OptionFriendlyName = string;
-export type OptionName = string;
-export type OptionType = "list" | "string";
-export type Offset = number;
-export type Reset = boolean;
-export type Text = string;
-export type Output = string | null;
-export type Percent = number | null;
-export type Status = string | null;
+type Kind = "basic";
+type BusNum = number;
+type Kind1 = "kernel";
+type Adapter = string;
+type Kind2 = "kernel";
+type Kind3 = "kernel";
+type Serial = string;
+type Kind4 = "ft232h";
+type Url = string;
+type Kind5 = "mcp2221";
+type Serial1 = string;
+type BusNum1 = null;
+type Kind6 = "kernel";
+type Device = string;
+type Module = string;
+type ModuleFilename = string;
+type Ports = string[];
+type ProbeDevices = ProbeDevice[];
+type Detail = string;
+type Ok = boolean;
+type Hidden = boolean;
+type ListLabels = string[];
+type ListValues = WireValue[];
+type OptionDescription = string;
+type OptionFriendlyName = string;
+type OptionName = string;
+type OptionType = "list" | "string";
+type Offset = number;
+type Reset = boolean;
+type Text = string;
+type Output = string | null;
+type Percent = number | null;
+type Status = string | null;
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "ModuleSettingValue".
  */
 export type ModuleSettingValue = I2CBusValue | string | null;
-export type Module1 = string;
-export type Section = string;
-export type Device1 = string;
-export type Enabled = boolean;
-export type Label = string;
-export type Name1 = string;
-export type Port = string;
-export type Profile = ProbeProfile | _EmptyProbeProfile;
-export type A = number;
-export type B = number;
-export type C = number;
-export type Id = string;
-export type Name2 = string;
+type Module1 = string;
+type Section = string;
+type Device1 = string;
+type Enabled = boolean;
+type Label = string;
+type Name1 = string;
+type Port = string;
+type Profile = ProbeProfile | _EmptyProbeProfile;
+type A = number;
+type B = number;
+type C = number;
+type Id = string;
+type Name2 = string;
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "ProbeType".
  */
 export type ProbeType = "Primary" | "Food" | "Aux";
-export type Description = string;
-export type FriendlyName = string;
-export type Hidden1 = boolean;
-export type Label1 = string;
-export type ListLabels1 = string[];
-export type ListValues1 = WireValue[];
-export type Max = number | "";
-export type Min = number;
-export type Step = number;
+type Description = string;
+type FriendlyName = string;
+type Hidden1 = boolean;
+type Label1 = string;
+type ListLabels1 = string[];
+type ListValues1 = WireValue[];
+type Max = number | "";
+type Min = number;
+type Step = number;
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "ProbeFieldType".
  */
 export type ProbeFieldType =
   "list" | "int" | "float" | "string" | "i2c_bus" | "probes_list" | "bt_address" | "usb_serial_device";
-export type ProbeDevices1 = ProbeDevice[];
-export type ProbeInfo = Probe[];
-export type AptDependencies = string[];
-export type CommandList = string[][];
-export type Default = boolean;
-export type Description1 = string;
-export type Config2 = ProbeConfigField[];
-export type Ports1 = string[];
-export type Type = string;
-export type Filename = string;
-export type FriendlyName1 = string;
-export type Image = string;
-export type Notes = string;
-export type PyDependencies = string[];
-export type Default1 = I2CBusValue | string;
-export type Description2 = string;
-export type FriendlyName2 = string;
-export type Hidden2 = boolean;
-export type Pid = string | number | null;
-export type Settings1 = string[];
-export type Type1 = "usb_serial_device" | "mcp2221_serial" | "i2c_bus";
-export type Vid = string | number | null;
-export type Error1 = string | null;
-export type Rows1 = unknown[];
-export type Kind7 = string;
-export type Pid1 = string | number | null;
-export type Vid1 = string | number | null;
-export type Error2 = string | null;
-export type Label2 = string;
-export type Value = string;
-export type Items = _ScanItem[];
-export type Title = string;
-export type Groups = _ScanGroup[];
-export type Label3 = string;
-export type NumChannels = number;
-export type Serial2 = string;
-export type Type2 = string;
-export type Error3 = string | null;
-export type Rows2 = ThermoworksRow[];
-export type Clear = boolean;
-export type ProbesUnits = string;
-export type ProbesUnits1 = string;
-export type AptDependencies1 = string[];
-export type CommandList1 = string[][];
-export type Config3 = ConfigOption[];
-export type Default2 = boolean;
-export type Description3 = string;
-export type Filename1 = string;
-export type FriendlyName3 = string;
-export type Image1 = string;
-export type Notes1 = string;
-export type PyDependencies1 = string[];
+type ProbeDevices1 = ProbeDevice[];
+type ProbeInfo = Probe[];
+type AptDependencies = string[];
+type CommandList = string[][];
+type Default = boolean;
+type Description1 = string;
+type Config2 = ProbeConfigField[];
+type Ports1 = string[];
+type Type = string;
+type Filename = string;
+type FriendlyName1 = string;
+type Image = string;
+type Notes = string;
+type PyDependencies = string[];
+type Default1 = I2CBusValue | string;
+type Description2 = string;
+type FriendlyName2 = string;
+type Hidden2 = boolean;
+type Pid = string | number | null;
+type Settings1 = string[];
+type Type1 = "usb_serial_device" | "mcp2221_serial" | "i2c_bus";
+type Vid = string | number | null;
+type Error1 = string | null;
+type Rows1 = unknown[];
+type Kind7 = string;
+type Pid1 = string | number | null;
+type Vid1 = string | number | null;
+type Error2 = string | null;
+type Label2 = string;
+type Value = string;
+type Items = _ScanItem[];
+type Title = string;
+type Groups = _ScanGroup[];
+type Label3 = string;
+type NumChannels = number;
+type Serial2 = string;
+type Type2 = string;
+type Error3 = string | null;
+type Rows2 = ThermoworksRow[];
+type Clear = boolean;
+type ProbesUnits = string;
+type ProbesUnits1 = string;
+type AptDependencies1 = string[];
+type CommandList1 = string[][];
+type Config3 = ConfigOption[];
+type Default2 = boolean;
+type Description3 = string;
+type Filename1 = string;
+type FriendlyName3 = string;
+type Image1 = string;
+type Notes1 = string;
+type PyDependencies1 = string[];
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "WizardSection".
  */
 export type WizardSection = "grillplatform" | "display" | "distance" | "probes";
-export type ControlMode = string;
-export type FirstTimeSetup = boolean;
-export type HasDraft = boolean;
-export type ProbeProfiles = ProbeProfile[];
-export type ProbesUnits2 = string;
+type ControlMode = string;
+type FirstTimeSetup = boolean;
+type HasDraft = boolean;
+type ProbeProfiles = ProbeProfile[];
+type ProbesUnits2 = string;
 
 export interface PiFireWizardWebContracts {
   [k: string]: unknown | undefined;
@@ -214,14 +214,14 @@ export interface Config {
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "_BasicBus".
  */
-export interface _BasicBus {
+interface _BasicBus {
   kind?: Kind;
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "_KernelBusNumber".
  */
-export interface _KernelBusNumber {
+interface _KernelBusNumber {
   bus_num: BusNum;
   kind?: Kind1;
 }
@@ -229,7 +229,7 @@ export interface _KernelBusNumber {
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "_KernelAdapterName".
  */
-export interface _KernelAdapterName {
+interface _KernelAdapterName {
   adapter: Adapter;
   kind?: Kind2;
 }
@@ -237,7 +237,7 @@ export interface _KernelAdapterName {
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "_KernelSerialMatch".
  */
-export interface _KernelSerialMatch {
+interface _KernelSerialMatch {
   kind?: Kind3;
   serial: Serial;
 }
@@ -245,7 +245,7 @@ export interface _KernelSerialMatch {
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "_FT232hBus".
  */
-export interface _FT232HBus {
+interface _FT232HBus {
   kind?: Kind4;
   url?: Url;
 }
@@ -253,7 +253,7 @@ export interface _FT232HBus {
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "_MCP2221Bus".
  */
-export interface _MCP2221Bus {
+interface _MCP2221Bus {
   kind?: Kind5;
   serial?: Serial1;
 }
@@ -322,10 +322,10 @@ export interface ModuleValues {
   config: Config1;
   settings: Settings;
 }
-export interface Config1 {
+interface Config1 {
   [k: string]: WireValue;
 }
-export interface Settings {
+interface Settings {
   [k: string]: ModuleSettingValue;
 }
 /**
@@ -405,7 +405,7 @@ export interface ProbeModuleCatalog {
   modules: Modules;
   requires_install: RequiresInstall;
 }
-export interface Modules {
+interface Modules {
   [k: string]: ProbeModuleData;
 }
 /**
@@ -434,7 +434,7 @@ export interface _ProbeDeviceMetadata {
   ports: Ports1;
   type: Type;
 }
-export interface SettingsDependencies {
+interface SettingsDependencies {
   [k: string]: SettingsDependency;
 }
 /**
@@ -452,10 +452,10 @@ export interface SettingsDependency {
   type?: Type1;
   vid?: Vid;
 }
-export interface Options {
+interface Options {
   [k: string]: string;
 }
-export interface RequiresInstall {
+interface RequiresInstall {
   [k: string]: boolean;
 }
 /**
@@ -529,15 +529,15 @@ export interface WizardDraftRequest {
   selections?: Selections;
   settings_dep_values?: SettingsDepValues;
 }
-export interface DisplayConfig {
+interface DisplayConfig {
   [k: string]: {
     [k: string]: WireValue;
   };
 }
-export interface Selections {
+interface Selections {
   [k: string]: string | null;
 }
-export interface SettingsDepValues {
+interface SettingsDepValues {
   [k: string]: {
     [k: string]: ModuleSettingValue;
   };
@@ -553,15 +553,15 @@ export interface WizardFinishRequest {
   selections?: Selections1;
   settings_dep_values?: SettingsDepValues1;
 }
-export interface DisplayConfig1 {
+interface DisplayConfig1 {
   [k: string]: {
     [k: string]: WireValue;
   };
 }
-export interface Selections1 {
+interface Selections1 {
   [k: string]: string | null;
 }
-export interface SettingsDepValues1 {
+interface SettingsDepValues1 {
   [k: string]: {
     [k: string]: ModuleSettingValue;
   };
@@ -583,7 +583,7 @@ export interface WizardModuleData {
   py_dependencies?: PyDependencies1;
   settings_dependencies: SettingsDependencies1;
 }
-export interface SettingsDependencies1 {
+interface SettingsDependencies1 {
   [k: string]: SettingsDependency;
 }
 /**
@@ -603,10 +603,10 @@ export interface WizardState {
   selections: Selections2;
   settings_dep_values: SettingsDepValues2;
 }
-export interface BoardProbeMaps {
+interface BoardProbeMaps {
   [k: string]: ProbeMap;
 }
-export interface DisplayConfig2 {
+interface DisplayConfig2 {
   [k: string]: {
     [k: string]: WireValue;
   };
@@ -621,22 +621,22 @@ export interface _WizardModulesMetadata {
   grillplatform: Grillplatform;
   probes: Probes;
 }
-export interface Display {
+interface Display {
   [k: string]: WizardModuleData;
 }
-export interface Distance {
+interface Distance {
   [k: string]: WizardModuleData;
 }
-export interface Grillplatform {
+interface Grillplatform {
   [k: string]: WizardModuleData;
 }
-export interface Probes {
+interface Probes {
   [k: string]: ProbeModuleData;
 }
-export interface Selections2 {
+interface Selections2 {
   [k: string]: string | null;
 }
-export interface SettingsDepValues2 {
+interface SettingsDepValues2 {
   [k: string]: {
     [k: string]: ModuleSettingValue;
   };

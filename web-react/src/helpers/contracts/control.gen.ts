@@ -1,12 +1,12 @@
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
-export type AddAndLoad = boolean;
-export type BrandName = string;
-export type Comments = string;
-export type Rating = number;
-export type WoodType = string;
-export type Action = "add_profile";
+type AddAndLoad = boolean;
+type BrandName = string;
+type Comments = string;
+type Rating = number;
+type WoodType = string;
+type Action = "add_profile";
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "CommandRequest".
@@ -32,57 +32,57 @@ export type CommandRequest =
  * via the `definition` "GrillMode".
  */
 export type GrillMode = "startup" | "smoke" | "shutdown" | "stop" | "monitor" | "reignite" | "manual";
-export type Operation = "set_mode";
-export type Operation1 = "set_primary_setpoint";
+type Operation = "set_mode";
+type Operation1 = "set_primary_setpoint";
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "FiniteNumber".
  */
-export type FiniteNumber = number;
-export type Enabled = boolean;
-export type Operation2 = "set_smoke_plus";
-export type Operation3 = "set_p_mode";
-export type Value = number;
-export type Grams = number;
-export type NextMode = ("startup" | "monitor") | null;
-export type Operation4 = "prime";
-export type Operation5 = "timer_start";
-export type Operation6 = "timer_start_with_options";
-export type Keepwarm = boolean;
-export type Shutdown = boolean;
-export type Operation7 = "timer_pause";
-export type Operation8 = "timer_stop";
-export type Enabled1 = boolean;
-export type Operation9 = "timer_shutdown";
-export type Enabled2 = boolean;
-export type Operation10 = "timer_keep_warm";
+type FiniteNumber = number;
+type Enabled = boolean;
+type Operation2 = "set_smoke_plus";
+type Operation3 = "set_p_mode";
+type Value = number;
+type Grams = number;
+type NextMode = ("startup" | "monitor") | null;
+type Operation4 = "prime";
+type Operation5 = "timer_start";
+type Operation6 = "timer_start_with_options";
+type Keepwarm = boolean;
+type Shutdown = boolean;
+type Operation7 = "timer_pause";
+type Operation8 = "timer_stop";
+type Enabled1 = boolean;
+type Operation9 = "timer_shutdown";
+type Enabled2 = boolean;
+type Operation10 = "timer_keep_warm";
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "SystemCommand".
  */
 export type SystemCommand = "reboot" | "shutdown" | "restart";
-export type Operation11 = "system";
-export type Operation12 = "set_units";
-export type Units = "F" | "C";
-export type Action1 = "toggle" | "true" | "false";
-export type Operation13 = "manual_output";
+type Operation11 = "system";
+type Operation12 = "set_units";
+type Units = "F" | "C";
+type Action1 = "toggle" | "true" | "false";
+type Operation13 = "manual_output";
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "ManualOutput".
  */
 export type ManualOutput = "power" | "igniter" | "auger" | "fan";
-export type Duty = number;
-export type Operation14 = "manual_pwm";
-export type NotifyData = NotifyEntry[] | null;
-export type Condition = string | null;
-export type KeepWarm = boolean | null;
-export type Label = string;
-export type Reignite = boolean | null;
-export type Req = boolean;
-export type Shutdown1 = boolean;
-export type Triggered = boolean | null;
-export type Type = string;
-export type NotifyUpdates = NotifyUpdate[] | null;
+type Duty = number;
+type Operation14 = "manual_pwm";
+type NotifyData = NotifyEntry[] | null;
+type Condition = string | null;
+type KeepWarm = boolean | null;
+type Label = string;
+type Reignite = boolean | null;
+type Req = boolean;
+type Shutdown1 = boolean;
+type Triggered = boolean | null;
+type Type = string;
+type NotifyUpdates = NotifyUpdate[] | null;
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "JsonValue".
@@ -96,32 +96,32 @@ export type JsonValue =
       [k: string]: JsonValue;
     }
   | null;
-export type Label1 = string;
-export type Type1 = string;
-export type Control = "success" | "error";
-export type Message = string;
-export type Result = "success" | "error";
-export type Action2 = "delete_log";
-export type LogItem = string;
-export type Action3 = "delete_profile";
-export type Profile = string;
-export type Action4 = "edit_brands";
-export type DeleteBrand = string | null;
-export type DeleteWood = string | null;
-export type NewBrand = string | null;
-export type NewWood = string | null;
-export type BrandName1 = string;
-export type Comments1 = string;
-export type Profile1 = string;
-export type Rating1 = number;
-export type WoodType1 = string;
-export type Action5 = "edit_profile";
-export type Action6 = "edit_woods";
-export type Action7 = "hopper_check";
-export type Action8 = "load_profile";
-export type Data = NotifyEntry[];
-export type Message1 = string;
-export type Result1 = "OK" | "ERROR";
+type Label1 = string;
+type Type1 = string;
+type Control = "success" | "error";
+type Message = string;
+type Result = "success" | "error";
+type Action2 = "delete_log";
+type LogItem = string;
+type Action3 = "delete_profile";
+type Profile = string;
+type Action4 = "edit_brands";
+type DeleteBrand = string | null;
+type DeleteWood = string | null;
+type NewBrand = string | null;
+type NewWood = string | null;
+type BrandName1 = string;
+type Comments1 = string;
+type Profile1 = string;
+type Rating1 = number;
+type WoodType1 = string;
+type Action5 = "edit_profile";
+type Action6 = "edit_woods";
+type Action7 = "hopper_check";
+type Action8 = "load_profile";
+type Data = NotifyEntry[];
+type Message1 = string;
+type Result1 = "OK" | "ERROR";
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "PelletActionRequest".
@@ -135,52 +135,52 @@ export type PelletActionRequest =
   | EditPelletProfileRequest
   | DeletePelletProfileRequest
   | DeletePelletLogRequest;
-export type Data1 = null;
-export type Message2 = string | null;
-export type Result2 = "OK" | "Error";
-export type DateLoaded = string;
-export type EstUsage = number;
-export type HopperLevel = number;
-export type Pelletid = string;
-export type Brand = string;
-export type Comments2 = string;
-export type Rating2 = number;
-export type Wood = string;
-export type Brands = string[];
-export type Time = number;
-export type Deleted = boolean;
-export type Pelletid1 = string | null;
-export type SchemaVersion = number;
-export type Woods = string[];
-export type BrandName2 = string;
-export type Comments3 = string;
-export type Rating3 = number;
-export type WoodType2 = string;
-export type Uuid = string;
-export type Message3 = string | null;
-export type Result3 = "OK" | "Error";
-export type Uuid1 = string;
-export type Message4 = string;
-export type Profiles = WledProfileItem[] | null;
-export type Description = string;
-export type Name = string;
-export type Number = number;
-export type ProfilesPushed = number | null;
-export type Result4 = "success" | "error";
-export type Ip = string;
-export type LedCount = number | null;
-export type Mac = string | null;
-export type Name1 = string;
-export type Online = boolean | null;
-export type Port = number | null;
-export type Product = string | null;
-export type Version = string | null;
-export type Devices = WledDevice[];
-export type Message5 = string;
-export type Result5 = "success" | "error";
-export type DeviceAddress = string;
-export type DeviceAddress1 = string;
-export type ProfileNumber = number;
+type Data1 = null;
+type Message2 = string | null;
+type Result2 = "OK" | "Error";
+type DateLoaded = string;
+type EstUsage = number;
+type HopperLevel = number;
+type Pelletid = string;
+type Brand = string;
+type Comments2 = string;
+type Rating2 = number;
+type Wood = string;
+type Brands = string[];
+type Time = number;
+type Deleted = boolean;
+type Pelletid1 = string | null;
+type SchemaVersion = number;
+type Woods = string[];
+type BrandName2 = string;
+type Comments3 = string;
+type Rating3 = number;
+type WoodType2 = string;
+type Uuid = string;
+type Message3 = string | null;
+type Result3 = "OK" | "Error";
+type Uuid1 = string;
+type Message4 = string;
+type Profiles = WledProfileItem[] | null;
+type Description = string;
+type Name = string;
+type Number = number;
+type ProfilesPushed = number | null;
+type Result4 = "success" | "error";
+type Ip = string;
+type LedCount = number | null;
+type Mac = string | null;
+type Name1 = string;
+type Online = boolean | null;
+type Port = number | null;
+type Product = string | null;
+type Version = string | null;
+type Devices = WledDevice[];
+type Message5 = string;
+type Result5 = "success" | "error";
+type DeviceAddress = string;
+type DeviceAddress1 = string;
+type ProfileNumber = number;
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "_CommandRequestUnion".
@@ -401,7 +401,7 @@ export interface NotifyUpdate {
   label: Label1;
   type: Type1;
 }
-export interface Fields {
+interface Fields {
   [k: string]: JsonValue;
 }
 /**
@@ -550,7 +550,7 @@ export interface PelletDbSchema {
   schema_version?: SchemaVersion;
   woods: Woods;
 }
-export interface Archive {
+interface Archive {
   [k: string]: PelletProfile;
 }
 /**
@@ -570,7 +570,7 @@ export interface PelletProfile {
 export interface PelletLastUpdated {
   time: Time;
 }
-export interface Log {
+interface Log {
   [k: string]: PelletLogEntry;
 }
 /**
@@ -670,7 +670,7 @@ export interface WledPushProfilesRequest {
   device_address: DeviceAddress;
   profile_numbers?: ProfileNumbers;
 }
-export interface ProfileNumbers {
+interface ProfileNumbers {
   [k: string]: number;
 }
 /**

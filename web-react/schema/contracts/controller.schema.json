@@ -3471,5 +3471,29 @@
       "type": "object"
     }
   },
-  "title": "PiFire controller web contracts"
+  "title": "PiFire controller web contracts",
+  "x-pifire-typescript-exports": [
+    "BoolControllerOption",
+    "ControllerCatalog",
+    "ControllerConfigs",
+    "ControllerCycleRecommendation",
+    "ControllerDefinition",
+    "ControllerDependencies",
+    "ControllerMetadata",
+    "ControllerRecommendations",
+    "FloatControllerOption",
+    "IntControllerOption",
+    "ListControllerOption",
+    "ModeData",
+    "ModeResponse",
+    "MpcConfig",
+    "PidConfig",
+    "PidSpConfig",
+    "SaveFieldError",
+    "SettingsFlag",
+    "SettingsResponse",
+    "SettingsUpdateRequest",
+    "SettingsUpdateResponse",
+    "StringControllerOption"
+  ]
 }

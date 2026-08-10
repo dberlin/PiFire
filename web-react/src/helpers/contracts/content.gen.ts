@@ -1,199 +1,199 @@
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
-export type Assets = string[];
-export type Errortype = ("version" | "asset" | "other") | null;
-export type Field = string;
-export type Kind = string;
-export type Mode = string | null;
-export type Message = string;
-export type Result = "Error";
-export type Filename = string;
-export type Id = string;
-export type Type = string;
-export type Assets1 = CookFileAsset[];
-export type Bordercolor = string;
-export type Display = boolean;
-export type Backgroundcolor = string;
-export type Bordercolor1 = string;
-export type Color = string;
-export type Content = string;
-export type Enabled = boolean;
-export type Position = string;
-export type Type1 = string;
+type Assets = string[];
+type Errortype = ("version" | "asset" | "other") | null;
+type Field = string;
+type Kind = string;
+type Mode = string | null;
+type Message = string;
+type Result = "Error";
+type Filename = string;
+type Id = string;
+type Type = string;
+type Assets1 = CookFileAsset[];
+type Bordercolor = string;
+type Display = boolean;
+type Backgroundcolor = string;
+type Bordercolor1 = string;
+type Color = string;
+type Content = string;
+type Enabled = boolean;
+type Position = string;
+type Type1 = string;
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "FiniteNumber".
  */
 export type FiniteNumber = number;
-export type Backgroundcolor1 = string;
-export type Bordercapstyle = string;
-export type Bordercolor2 = string;
-export type Borderdash = FiniteNumber[];
-export type Borderjoinstyle = string;
-export type Data = HistoryPoint[];
-export type Fill = boolean;
-export type Hidden = boolean;
-export type Label = string;
-export type Pointbackgroundcolor = string;
-export type Pointbordercolor = string;
-export type Pointborderwidth = number;
-export type Pointhitradius = number;
-export type Pointhoverbackgroundcolor = string;
-export type Pointhoverbordercolor = string;
-export type Pointhoverborderwidth = number;
-export type Pointhoverradius = number;
-export type Pointradius = number;
-export type Pointstyle = string;
-export type Spangaps = boolean;
-export type ChartData = HistoryDataset[];
-export type TimeLabels = (FiniteNumber | string)[];
-export type Assets2 = string[];
-export type Date = string;
-export type Edited = string;
-export type Id1 = string;
-export type Text = string;
-export type Time = string;
-export type Assets3 = CookFileAsset[];
-export type Comments = CookFileComment[];
-export type EventTotals = CookFileTotals | EmptyCookFileTotals;
-export type Augerontime = string;
-export type Cooktime = string;
-export type EstusageI = string;
-export type EstusageM = string;
-export type AugerontimeC = string | 0;
-export type EndtimeC = string | 0;
-export type EstusageI1 = string;
-export type EstusageM1 = string;
-export type Id2 = string | number;
-export type Mode1 = string;
-export type StarttimeC = string | 0;
-export type Timeinmode = string | 0;
-export type Events = CookFileEvent[];
-export type Filename1 = string;
-export type Endtime = string;
-export type EndtimeEpoch = FiniteNumber | string;
-export type Id3 = string;
-export type Starttime = string;
-export type StarttimeEpoch = FiniteNumber | string;
-export type Thumbnail = string;
-export type Title = string;
-export type Units = string;
-export type Version = string;
-export type NewLabelSafe = string;
-export type Errortype1 = ("version" | "asset" | "other") | null;
-export type Message1 = string;
-export type Status = number;
-export type Filename2 = string;
-export type Thumbnail1 = string;
-export type Title1 = string;
-export type Items = FileListItem[];
-export type LastPage = number;
-export type Page = number;
-export type PerPage = number;
-export type Reverse = boolean;
-export type Total = number;
-export type Filename3 = string;
-export type ChartData1 = HistoryDataset[];
-export type Minutes = number;
-export type TimeLabels1 = FiniteNumber[];
-export type Assets4 = string[];
-export type Name = string;
-export type Quantity = string;
-export type Assets5 = string[];
-export type Ingredients = string[];
-export type Step = number;
-export type Text1 = string;
-export type AugerontimeC1 = string;
-export type EndtimeC1 = string | 0;
-export type EstusageI2 = string;
-export type EstusageM2 = string;
-export type FanontimeC = string | null;
-export type Id4 = string;
-export type Mode2 = string;
-export type PMode = number;
-export type PelletBrandType = string;
-export type SmartStartProfile = number;
-export type Smokeplus = boolean;
-export type StarttimeC1 = string;
-export type Timeinmode1 = string;
-export type Metrics = MetricRecord[];
-export type Units1 = "F" | "C";
-export type Filename4 = string;
-export type Id5 = string;
-export type Type2 = string;
-export type Assets6 = RecipeAsset[];
-export type Ingredients1 = Ingredient[];
-export type Instructions = Instruction[];
-export type Message2 = string;
-export type Mode3 = "Smoke" | "Hold" | "Startup" | "Shutdown";
-export type Notify = boolean;
-export type Pause = boolean;
-export type Food = FiniteNumber[];
-export type Steps = RecipeStep[];
-export type Assets7 = RecipeAsset[];
-export type Filename5 = string;
-export type Author = string;
-export type CookTime = number;
-export type Description = string;
-export type Difficulty = string;
-export type FoodProbes = number;
-export type Id6 = string;
-export type Image = string;
-export type PrepTime = number;
-export type Rating = number;
-export type Thumbnail2 = string;
-export type Title2 = string;
-export type Units2 = string;
-export type Username = string;
-export type Version1 = string;
-export type Assets8 = string[];
-export type File = string;
-export type Index = number;
-export type Section = "ingredients" | "instructions";
-export type Action = "add";
-export type File1 = string;
-export type Action1 = "delete";
-export type File2 = string;
-export type Index1 = number;
-export type Action2 = "update";
-export type File3 = string;
-export type Index2 = number;
-export type Name1 = string;
-export type Quantity1 = string;
-export type Action3 = "add";
-export type File4 = string;
-export type Action4 = "delete";
-export type File5 = string;
-export type Index3 = number;
-export type Action5 = "update";
-export type File6 = string;
-export type Index4 = number;
-export type Ingredients2 = string[];
-export type Step1 = number;
-export type Text2 = string;
-export type Author1 = string;
-export type CookTime1 = number;
-export type Description1 = string;
-export type Difficulty1 = string;
-export type FoodProbes1 = number;
-export type PrepTime1 = number;
-export type Rating1 = number;
-export type Title3 = string;
-export type Units3 = string;
-export type File7 = string;
-export type Assets9 = string[];
-export type File8 = string;
-export type Section1 = "splash";
-export type Action6 = "delete";
-export type File9 = string;
-export type Index5 = number;
-export type Action7 = "insert";
-export type File10 = string;
-export type Index6 = number;
-export type Action8 = "update";
-export type File11 = string;
-export type Index7 = number;
+type Backgroundcolor1 = string;
+type Bordercapstyle = string;
+type Bordercolor2 = string;
+type Borderdash = FiniteNumber[];
+type Borderjoinstyle = string;
+type Data = HistoryPoint[];
+type Fill = boolean;
+type Hidden = boolean;
+type Label = string;
+type Pointbackgroundcolor = string;
+type Pointbordercolor = string;
+type Pointborderwidth = number;
+type Pointhitradius = number;
+type Pointhoverbackgroundcolor = string;
+type Pointhoverbordercolor = string;
+type Pointhoverborderwidth = number;
+type Pointhoverradius = number;
+type Pointradius = number;
+type Pointstyle = string;
+type Spangaps = boolean;
+type ChartData = HistoryDataset[];
+type TimeLabels = (FiniteNumber | string)[];
+type Assets2 = string[];
+type Date = string;
+type Edited = string;
+type Id1 = string;
+type Text = string;
+type Time = string;
+type Assets3 = CookFileAsset[];
+type Comments = CookFileComment[];
+type EventTotals = CookFileTotals | EmptyCookFileTotals;
+type Augerontime = string;
+type Cooktime = string;
+type EstusageI = string;
+type EstusageM = string;
+type AugerontimeC = string | 0;
+type EndtimeC = string | 0;
+type EstusageI1 = string;
+type EstusageM1 = string;
+type Id2 = string | number;
+type Mode1 = string;
+type StarttimeC = string | 0;
+type Timeinmode = string | 0;
+type Events = CookFileEvent[];
+type Filename1 = string;
+type Endtime = string;
+type EndtimeEpoch = FiniteNumber | string;
+type Id3 = string;
+type Starttime = string;
+type StarttimeEpoch = FiniteNumber | string;
+type Thumbnail = string;
+type Title = string;
+type Units = string;
+type Version = string;
+type NewLabelSafe = string;
+type Errortype1 = ("version" | "asset" | "other") | null;
+type Message1 = string;
+type Status = number;
+type Filename2 = string;
+type Thumbnail1 = string;
+type Title1 = string;
+type Items = FileListItem[];
+type LastPage = number;
+type Page = number;
+type PerPage = number;
+type Reverse = boolean;
+type Total = number;
+type Filename3 = string;
+type ChartData1 = HistoryDataset[];
+type Minutes = number;
+type TimeLabels1 = FiniteNumber[];
+type Assets4 = string[];
+type Name = string;
+type Quantity = string;
+type Assets5 = string[];
+type Ingredients = string[];
+type Step = number;
+type Text1 = string;
+type AugerontimeC1 = string;
+type EndtimeC1 = string | 0;
+type EstusageI2 = string;
+type EstusageM2 = string;
+type FanontimeC = string | null;
+type Id4 = string;
+type Mode2 = string;
+type PMode = number;
+type PelletBrandType = string;
+type SmartStartProfile = number;
+type Smokeplus = boolean;
+type StarttimeC1 = string;
+type Timeinmode1 = string;
+type Metrics = MetricRecord[];
+type Units1 = "F" | "C";
+type Filename4 = string;
+type Id5 = string;
+type Type2 = string;
+type Assets6 = RecipeAsset[];
+type Ingredients1 = Ingredient[];
+type Instructions = Instruction[];
+type Message2 = string;
+type Mode3 = "Smoke" | "Hold" | "Startup" | "Shutdown";
+type Notify = boolean;
+type Pause = boolean;
+type Food = FiniteNumber[];
+type Steps = RecipeStep[];
+type Assets7 = RecipeAsset[];
+type Filename5 = string;
+type Author = string;
+type CookTime = number;
+type Description = string;
+type Difficulty = string;
+type FoodProbes = number;
+type Id6 = string;
+type Image = string;
+type PrepTime = number;
+type Rating = number;
+type Thumbnail2 = string;
+type Title2 = string;
+type Units2 = string;
+type Username = string;
+type Version1 = string;
+type Assets8 = string[];
+type File = string;
+type Index = number;
+type Section = "ingredients" | "instructions";
+type Action = "add";
+type File1 = string;
+type Action1 = "delete";
+type File2 = string;
+type Index1 = number;
+type Action2 = "update";
+type File3 = string;
+type Index2 = number;
+type Name1 = string;
+type Quantity1 = string;
+type Action3 = "add";
+type File4 = string;
+type Action4 = "delete";
+type File5 = string;
+type Index3 = number;
+type Action5 = "update";
+type File6 = string;
+type Index4 = number;
+type Ingredients2 = string[];
+type Step1 = number;
+type Text2 = string;
+type Author1 = string;
+type CookTime1 = number;
+type Description1 = string;
+type Difficulty1 = string;
+type FoodProbes1 = number;
+type PrepTime1 = number;
+type Rating1 = number;
+type Title3 = string;
+type Units3 = string;
+type File7 = string;
+type Assets9 = string[];
+type File8 = string;
+type Section1 = "splash";
+type Action6 = "delete";
+type File9 = string;
+type Index5 = number;
+type Action7 = "insert";
+type File10 = string;
+type Index6 = number;
+type Action8 = "update";
+type File11 = string;
+type Index7 = number;
 
 export interface PiFireContentWebContracts {
   [k: string]: unknown | undefined;
@@ -252,7 +252,7 @@ export interface CookFileChartData {
   probe_mapper: HistoryProbeMapper;
   time_labels: TimeLabels;
 }
-export interface Annotations {
+interface Annotations {
   [k: string]: HistoryAnnotation | undefined;
 }
 /**
@@ -330,13 +330,13 @@ export interface HistoryProbeMapper {
   targets: Targets;
   [k: string]: unknown | undefined;
 }
-export interface Primarysp {
+interface Primarysp {
   [k: string]: number | undefined;
 }
-export interface Probes {
+interface Probes {
   [k: string]: number | undefined;
 }
-export interface Targets {
+interface Targets {
   [k: string]: number | undefined;
 }
 /**
@@ -409,13 +409,13 @@ export interface CookFileLabels {
   targets: Targets1;
   [k: string]: unknown | undefined;
 }
-export interface Primarysp1 {
+interface Primarysp1 {
   [k: string]: string | undefined;
 }
-export interface Probes1 {
+interface Probes1 {
   [k: string]: string | undefined;
 }
-export interface Targets1 {
+interface Targets1 {
   [k: string]: string | undefined;
 }
 /**
@@ -490,7 +490,7 @@ export interface HistoryChartData {
   probe_mapper: HistoryProbeMapper;
   time_labels: TimeLabels1;
 }
-export interface Annotations1 {
+interface Annotations1 {
   [k: string]: HistoryAnnotation | undefined;
 }
 /**
@@ -503,13 +503,13 @@ export interface HistoryGraphLabels {
   targets: Targets2;
   [k: string]: unknown | undefined;
 }
-export interface Primarysp2 {
+interface Primarysp2 {
   [k: string]: string | undefined;
 }
-export interface Probes2 {
+interface Probes2 {
   [k: string]: string | undefined;
 }
-export interface Targets2 {
+interface Targets2 {
   [k: string]: string | undefined;
 }
 /**

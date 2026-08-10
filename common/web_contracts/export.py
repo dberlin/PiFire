@@ -16,6 +16,14 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_DIRECTORY = Path("web-react/schema/contracts")
 TYPESCRIPT_DIRECTORY = Path("web-react/src/helpers/contracts")
 MANIFEST_PATH = SCHEMA_DIRECTORY / "manifest.json"
+TYPESCRIPT_EXPORTS_KEY = "x-pifire-typescript-exports"
+TYPESCRIPT_DEFINITION_OWNER_OVERRIDES = {
+    "ProbeMap": "wizard",
+}
+ADDITIONAL_TYPESCRIPT_EXPORTS = {
+    "settings": ("AfterStartupMode", "Units"),
+    "wizard": ("Config",),
+}
 
 
 def _validate_output(base: Path, output: str, suffix: str, label: str) -> None:
@@ -110,14 +118,62 @@ def render_contract_artifacts(
         **{f"{bundle.name}.schema.json": bundle.typescript_output for bundle in ordered},
         **{root.schema_output: root.typescript_output for root in ordered_roots},
     }
+    rendered_schemas = {
+        **{
+            bundle.name: json.loads(render_bundle_schema(bundle))
+            for bundle in ordered
+        },
+        **{
+            root.name: json.loads(render_root_schema(root))
+            for root in ordered_roots
+        },
+    }
+
+    definition_owners: dict[str, str] = {}
+    # Direct root schemas own their dependency names before bundles that embed
+    # those roots (notably controller responses embedding SettingsSchema).
+    for root in ordered_roots:
+        title = rendered_schemas[root.name].get("title")
+        if isinstance(title, str) and title.isidentifier():
+            definition_owners[title] = root.name
+    for item in (*ordered_roots, *ordered):
+        for definition in rendered_schemas[item.name].get("$defs", {}):
+            definition_owners.setdefault(definition, item.name)
+    for definition, owner in TYPESCRIPT_DEFINITION_OWNER_OVERRIDES.items():
+        if definition not in definition_owners:
+            continue
+        if definition not in rendered_schemas[owner].get("$defs", {}):
+            raise ValueError(f"TypeScript definition owner {owner!r} does not define {definition!r}")
+        definition_owners[definition] = owner
+
+    for name, schema in rendered_schemas.items():
+        exports = set(ADDITIONAL_TYPESCRIPT_EXPORTS.get(name, ()))
+        exports.update(
+            definition
+            for definition in schema.get("$defs", {})
+            if definition_owners[definition] == name
+        )
+        title = schema.get("title")
+        if isinstance(title, str) and title.isidentifier():
+            exports.add(title)
+        schema[TYPESCRIPT_EXPORTS_KEY] = sorted(exports)
+
     artifacts = {
         MANIFEST_PATH: (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode(),
     }
     artifacts.update(
-        (SCHEMA_DIRECTORY / f"{bundle.name}.schema.json", render_bundle_schema(bundle).encode()) for bundle in ordered
+        (
+            SCHEMA_DIRECTORY / f"{bundle.name}.schema.json",
+            (json.dumps(rendered_schemas[bundle.name], indent=2, sort_keys=True, allow_nan=False) + "\n").encode(),
+        )
+        for bundle in ordered
     )
     artifacts.update(
-        (SCHEMA_DIRECTORY / root.schema_output, render_root_schema(root).encode()) for root in ordered_roots
+        (
+            SCHEMA_DIRECTORY / root.schema_output,
+            (json.dumps(rendered_schemas[root.name], indent=2, sort_keys=True, allow_nan=False) + "\n").encode(),
+        )
+        for root in ordered_roots
     )
     return artifacts
 

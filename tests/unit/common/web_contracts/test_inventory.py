@@ -15,6 +15,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 WEB_REACT_ROOT = REPOSITORY_ROOT / "web-react"
 SCHEMA_ROOT = WEB_REACT_ROOT / "schema" / "contracts"
 TYPESCRIPT_ROOT = WEB_REACT_ROOT / "src" / "helpers" / "contracts"
+FRONTEND_ENDPOINT_INVENTORY_PATH = WEB_REACT_ROOT / "src" / "helpers" / "jsonWebEndpoints.json"
 APPROVED_NON_JSON_CATEGORIES = {
     "browser_file_handles",
     "downloaded_bytes",
@@ -82,6 +83,23 @@ def test_inventory_names_every_frontend_json_transport_once():
     assert {item.transport for item in JSON_WEB_CONTRACT_INVENTORY} == {"http", "socketio"}
     assert {item.bundle for item in JSON_WEB_CONTRACT_INVENTORY} == EXPECTED_BUNDLES
     assert len(JSON_WEB_CONTRACT_INVENTORY) >= 50
+
+
+def test_python_inventory_exactly_matches_independent_frontend_endpoint_inventory():
+    frontend = json.loads(FRONTEND_ENDPOINT_INVENTORY_PATH.read_text())
+    expected_json = {
+        (entry["transport"], entry["name"])
+        for entry in frontend["json"]
+    }
+    actual_json = {
+        (contract.transport, contract.name)
+        for contract in JSON_WEB_CONTRACT_INVENTORY
+    }
+    assert actual_json == expected_json
+
+    approved = {item.name for item in NON_JSON_WEB_TRANSPORTS}
+    excluded_categories = {entry["category"] for entry in frontend["non_json"]}
+    assert excluded_categories == approved
 
 
 def test_every_inventory_model_has_exactly_one_registered_owner():
