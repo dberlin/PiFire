@@ -6,13 +6,16 @@
 //   bun scripts/gen-types.ts          -> writes each generated artifact
 //   bun scripts/gen-types.ts --check  -> compares each artifact's generated
 //                                        output against the committed file
-import { compileFromFile } from "json-schema-to-typescript";
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { compileFromFile } from "json-schema-to-typescript";
 import { emitControllerTypes } from "./emitControllerTypes";
 import { emitSettingsDefaults } from "./emitSettingsDefaults";
+import { emitWebContracts } from "./emitWebContracts";
 
 const SCHEMA_PATH = "schema/settings.schema.json";
 const CONTROLLERS_PATH = "../controller/controllers.json";
+const REPOSITORY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const BANNER_COMMENT =
   "/* eslint-disable */\n" +
   "// GENERATED from schema/settings.schema.json — do not edit. Regenerate: bun run gen:types";
@@ -39,9 +42,25 @@ const ARTIFACTS: Artifact[] = [
   },
 ];
 
+async function exportPydanticSchemas(check: boolean): Promise<void> {
+  const child = Bun.spawn(
+    ["uv", "run", "python", "-m", "common.web_contracts.export", check ? "--check" : "--write"],
+    {
+      cwd: REPOSITORY_ROOT,
+      stdout: "inherit",
+      stderr: "inherit",
+    },
+  );
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    throw new Error(`Pydantic web contract exporter exited with status ${exitCode}`);
+  }
+}
+
 async function main() {
   const check = process.argv.includes("--check");
   let stale = false;
+  await exportPydanticSchemas(check);
 
   for (const artifact of ARTIFACTS) {
     const output = await artifact.generate();
@@ -61,6 +80,8 @@ async function main() {
       console.log(`${artifact.out} is up to date.`);
     }
   }
+
+  if (!(await emitWebContracts(check))) stale = true;
 
   if (stale) process.exit(1);
 }

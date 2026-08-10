@@ -24,7 +24,7 @@
     "baseline:capture": "PF_CAPTURE=1 playwright test --project=fidelity-pages --project=fidelity-chrome --project=fidelity-pellets --project=fidelity",
     "lint": "biome check . && eslint .",
     "format": "biome format --write .",
-    "gen:types": "bun scripts/gen-types.ts",
+    "gen:types": "bun scripts/gen-types.ts --write",
     "gen:types:check": "bun scripts/gen-types.ts --check"
   },
   "dependencies": {
