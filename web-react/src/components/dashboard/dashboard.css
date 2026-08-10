@@ -222,6 +222,11 @@
   background: rgba(0, 0, 0, 0.6);
   place-items: center;
 }
+/* Portaled dialogs are no longer descendants of .pf-dash, so their explicit
+   fixed modifier must override the shared absolute card-modal scrim here. */
+.pf-modal-scrim-fixed {
+  @apply fixed z-30;
+}
 /* On the dashboard the scrim anchors to the viewport, not to .pf-dash.
    .pf-dash is min-height:720px, so on anything shorter its box runs past the
    bottom of the screen -- and an absolute scrim centres the dialog on THAT

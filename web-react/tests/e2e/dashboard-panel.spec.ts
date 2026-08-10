@@ -4,6 +4,7 @@ import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
 } from "../../src/helpers/modelEvidence/types";
+import type { PidSpLearningReport } from "../../src/helpers/pidSpLearning/types";
 import { freezeDate } from "./layoutBaseline";
 
 // 800x480 -- the grill's own screen.
@@ -180,6 +181,98 @@ function evidenceReport(
     blockers: [],
     errors: [],
     revision: `${status}-${roleGeneration}`,
+  };
+}
+
+function pidSpReport(): PidSpLearningReport {
+  const trusted = {
+    form: "ipdt" as const,
+    K_i: 0.043,
+    c0: -0.006,
+    theta: 18,
+    revision: 12,
+    identified_at_f: 250,
+  };
+  return {
+    schema_version: 1,
+    controller: "pid_sp",
+    status: "active",
+    live: true,
+    revision: "a".repeat(64),
+    gates: [
+      {
+        name: "accepted_samples",
+        passed: true,
+        observed: 480,
+        required: 360,
+        unit: null,
+      },
+      {
+        name: "accepted_duration",
+        passed: true,
+        observed: 960,
+        required: 900,
+        unit: "seconds",
+      },
+      {
+        name: "duty_standard_deviation",
+        passed: true,
+        observed: 0.19,
+        required: 0.15,
+        unit: null,
+      },
+      {
+        name: "duty_transition",
+        passed: true,
+        observed: true,
+        required: true,
+        unit: null,
+      },
+      {
+        name: "temperature_span",
+        passed: true,
+        observed: 23.5,
+        required: 18,
+        unit: "°F",
+      },
+    ],
+    confirmation: {
+      observed: 3,
+      required: 4,
+    },
+    identifier: {
+      accepted: 480,
+      accepted_seconds: 960,
+      duty_std: 0.19,
+      temp_span: 23.5,
+      transition_seen: true,
+      duty_segments: 7,
+      best_residual: 0.72,
+      runner_up_residual: 1.08,
+      candidates_passing: 2,
+      confirming: 3,
+      trusted,
+      distrust_count: 1,
+      distrust_ratio: 0.02,
+    },
+    predictor: {
+      active: true,
+      disabled: false,
+      x0: 249.8,
+      xd: 252.1,
+      residual_streak: 0,
+      truncated: 1,
+      model: trusted,
+    },
+    checkpoint: {
+      form: "ipdt",
+      K_i: 0.043,
+      c0: -0.006,
+      theta: 18,
+      revision: 11,
+      identified_at_f: 247,
+    },
+    failure: null,
   };
 }
 
@@ -472,6 +565,175 @@ test("one report trigger stays after Hopper and the full panel is reachable at b
     await finalSection.scrollIntoViewIfNeeded();
     await expect(finalSection).toBeVisible();
     await dialog.getByRole("button", { name: "Close MPC model learning" }).click();
+  }
+});
+
+test("PID-SP learning stays reachable and controller-authored at both target sizes", async ({
+  page,
+}) => {
+  await page.route("**/api/settings", (route) =>
+    route.fulfill({
+      json: {
+        settings: {
+          controller: { selected: "pid_sp", config: { pid_sp: {} } },
+          safety: { maxtemp: 600 },
+        },
+      },
+    }),
+  );
+  await page.route("**/api/pid-sp-learning/report", (route) =>
+    route.fulfill({ json: pidSpReport() }),
+  );
+
+  for (const viewport of [
+    { width: 800, height: 480 },
+    { width: 1280, height: 720 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.reload();
+
+    const rightColumn = page.locator('[data-pf="rightCol"]');
+    const hopper = page.locator(".pf-dash-hopper");
+    const trigger = page.getByRole("button", {
+      name: "PID-SP learning: active",
+    });
+    await trigger.scrollIntoViewIfNeeded();
+    await expect(trigger).toBeVisible();
+    await expect(rightColumn).toContainText("PID-SP learning: active");
+    expect(
+      await hopper.evaluate((node) => node.nextElementSibling?.textContent),
+    ).toContain("PID-SP learning: active");
+
+    const [rightColumnBox, triggerBox] = await Promise.all([
+      rightColumn.boundingBox(),
+      trigger.boundingBox(),
+    ]);
+    expect(rightColumnBox).not.toBeNull();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.x).toBeGreaterThanOrEqual(rightColumnBox!.x);
+    expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(
+      rightColumnBox!.x + rightColumnBox!.width,
+    );
+
+    const dashboardBefore = await page.locator('[data-pf="stage"]').innerText();
+    await trigger.click();
+
+    const dialog = page.getByRole("dialog", { name: "PID-SP model learning" });
+    const title = dialog.getByRole("heading", {
+      name: "PID-SP model learning",
+    });
+    const close = dialog.getByRole("button", {
+      name: "Close PID-SP model learning",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(title).toBeVisible();
+    await expect(close).toBeVisible();
+    await expect(
+      dialog.getByText("Trusted model: ipdt revision 12"),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText("Confirmation progress: 3 of 4"),
+    ).toBeVisible();
+
+    const dialogGeometry = await dialog.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        clientHeight: node.clientHeight,
+        scrollHeight: node.scrollHeight,
+        scrimPosition: getComputedStyle(node.parentElement!).position,
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(dialogGeometry.scrimPosition).toBe("fixed");
+    expect(dialogGeometry.left).toBeGreaterThanOrEqual(0);
+    expect(dialogGeometry.right).toBeLessThanOrEqual(
+      dialogGeometry.viewportWidth,
+    );
+    expect(dialogGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(dialogGeometry.bottom).toBeLessThanOrEqual(
+      dialogGeometry.viewportHeight,
+    );
+    expect(dialogGeometry.documentWidth).toBeLessThanOrEqual(
+      dialogGeometry.viewportWidth,
+    );
+
+    const gates = dialog
+      .getByRole("heading", { name: "Excitation gates" })
+      .locator("..");
+    await expect(
+      gates.getByRole("row", { name: /Accepted samples Met 480 360/ }),
+    ).toBeVisible();
+    const checkpoint = dialog
+      .getByRole("heading", { name: "Durable checkpoint" })
+      .locator("xpath=ancestor::section[1]");
+    await expect(
+      checkpoint.getByRole("row", { name: /K_i 0.043/ }),
+    ).toBeVisible();
+
+    if (viewport.width === 800) {
+      expect(dialogGeometry.scrollHeight).toBeGreaterThan(
+        dialogGeometry.clientHeight,
+      );
+      const pageScroller = page.locator(".pf-shell-main");
+      const pageScrollBefore = await pageScroller.evaluate(
+        (node) => node.scrollTop,
+      );
+      const dialogScrollTop = await dialog.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+        return node.scrollTop;
+      });
+      expect(dialogScrollTop).toBeGreaterThan(0);
+      expect(await pageScroller.evaluate((node) => node.scrollTop)).toBe(
+        pageScrollBefore,
+      );
+      const finalSection = dialog.getByRole("heading", {
+        name: "Predictor diagnostics",
+      });
+      await finalSection.scrollIntoViewIfNeeded();
+      await expect(finalSection).toBeVisible();
+      await expect(
+        dialog.getByText("Predictor model: ipdt revision 12"),
+      ).toBeVisible();
+      await close.scrollIntoViewIfNeeded();
+      await expect(close).toBeVisible();
+      await title.scrollIntoViewIfNeeded();
+      await expect(title).toBeVisible();
+    } else {
+      for (const section of [gates, checkpoint]) {
+        const columnHeaders = section.getByRole("columnheader");
+        expect(await columnHeaders.count()).toBe(4);
+        const boxes = await columnHeaders.evaluateAll((nodes) =>
+          nodes.map((node) => {
+            const rect = node.getBoundingClientRect();
+            return { x: rect.x, y: rect.y };
+          }),
+        );
+        expect(new Set(boxes.map(({ x }) => Math.round(x))).size).toBe(4);
+        expect(
+          Math.max(...boxes.map(({ y }) => y)) -
+            Math.min(...boxes.map(({ y }) => y)),
+        ).toBeLessThan(2);
+      }
+    }
+
+    await expect(
+      dialog.getByRole("button", { name: "Activate exact model" }),
+    ).toHaveCount(0);
+    await expect(
+      dialog.getByRole("button", { name: "Roll back to explicit owner" }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    expect(await page.locator('[data-pf="stage"]').innerText()).toBe(
+      dashboardBefore,
+    );
   }
 });
 
