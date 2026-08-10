@@ -274,6 +274,12 @@ uv run pytest -q tests/unit/common/web_contracts/test_operations.py tests/web/te
 
 Static LSP diagnostics were clean for `common/web_contracts/operations.py` and the modified admin/update/tuner Python routes, aside from pre-existing informational hints about `os.system` and an intentionally ignored tuner chart-label return. Frontend execution/type diagnostics were not run by Task 8; the serialized integration wave later supplied `operations.gen.ts` outside the Task 8 commits.
 
+Final static review of the idle-null source, generated contracts, frontend
+consumer, and evidence found no Critical or Important issue. It confirmed that
+all three JSON keys remain required, null is preserved explicitly, non-null
+wrong types remain strict, and the update page performs no numeric comparison
+or state replacement for an idle null percentage.
+
 ## Concerns
 
 - No Task 8 integration blocker is currently known; registry/generated artifacts are owned and supplied by the serialized integration wave.
