@@ -914,7 +914,9 @@ class ThreadedControllerRunner(ControllerRunner):
         self._terminal_drops_since_drain: collections.deque[ObservationTerminalDrop] = collections.deque()
         self._outcome_drops_since_drain = 0
         self._outcome_dropped_sequences = collections.deque(maxlen=60)
-        self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
+        self._pending_dispatches: collections.deque[tuple[str, object]] = collections.deque(
+            maxlen=_MAX_PENDING_OUTPUTS
+        )
         self._latest_delivered_output = None
         self._pending_dropped = 0
         self._pending_restore = None
@@ -926,9 +928,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pair_activation_ids: set[str] = set()
         self._mpc_activation_terminated = False
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
-        self._pending_completed_frames: collections.deque[
-            tuple[int, int, object, FrameObservation]
-        ] = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
+
 
         self._accepted_observations: dict[int, tuple[int, FrameObservation]] = {}
         self._inflight_observations: set[int] = set()
@@ -1199,31 +1199,14 @@ class ThreadedControllerRunner(ControllerRunner):
                 handoff_output = None
                 new_controller_type = None
                 retired_core = None
-                pending_outputs = list(self._pending_outputs)
-                self._pending_outputs.clear()
+                pending_dispatches = tuple(self._pending_dispatches)
+                self._pending_dispatches.clear()
                 restore = self._pending_restore
                 self._pending_restore = None
                 pending_calibrations = tuple(self._pending_calibrations)
                 self._pending_calibrations.clear()
                 pending_activations = tuple(self._pending_activations)
                 self._pending_activations.clear()
-                completed_frames = tuple(self._pending_completed_frames)
-                self._pending_completed_frames.clear()
-            for sequence, generation, applied, observation in completed_frames:
-                self._core.set_output(applied)
-                with self._lock:
-                    self._latest_delivered_output = applied
-                observe = getattr(self._core, "observe_frame", None)
-                try:
-                    outcome = None if observe is None else observe(observation)
-                except Exception as error:
-                    reject = getattr(self._core, "observation_failure", None)
-                    outcome = reject(observation, error) if callable(reject) else None
-                with self._lock:
-                    if outcome is None:
-                        self._terminalize_observation_locked(sequence, "runner-no-observation-outcome")
-                    else:
-                        self._complete_observation_locked(sequence, generation, observation, outcome)
 
             # A pending core is installed only after the old core has drained
             # the returned generation bound to the consuming core.
@@ -1255,12 +1238,27 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._core.set_target(target)
             # A command must reach the core before the temperature that command
             # caused, and in the order the auger saw it.
-            ordered_outputs = sorted(pending_outputs, key=lambda applied: applied.timestamp)
-            for applied in ordered_outputs:
+            for operation, payload in pending_dispatches:
+                if operation == "output":
+                    self._core.set_output(payload)
+                    with self._lock:
+                        self._latest_delivered_output = payload
+                    continue
+                sequence, generation, applied, observation = payload
                 self._core.set_output(applied)
-            if ordered_outputs:
                 with self._lock:
-                    self._latest_delivered_output = ordered_outputs[-1]
+                    self._latest_delivered_output = applied
+                observe = getattr(self._core, "observe_frame", None)
+                try:
+                    outcome = None if observe is None else observe(observation)
+                except Exception as error:
+                    reject = getattr(self._core, "observation_failure", None)
+                    outcome = reject(observation, error) if callable(reject) else None
+                with self._lock:
+                    if outcome is None:
+                        self._terminalize_observation_locked(sequence, "runner-no-observation-outcome")
+                    else:
+                        self._complete_observation_locked(sequence, generation, observation, outcome)
             # Learner calls must never hold _lock. Drain until a lock-protected
             # empty observation queue commits this iteration's temperature
             # update; an observation that wins the lock before that commit is
@@ -1537,11 +1535,27 @@ class ThreadedControllerRunner(ControllerRunner):
             self._warning_callback(transition)
         return state
 
+    def _append_dispatch_locked(self, operation: str, payload: object) -> None:
+        if len(self._pending_dispatches) == self._pending_dispatches.maxlen:
+            evicted_operation, evicted_payload = self._pending_dispatches.popleft()
+            if evicted_operation == "output":
+                self._pending_dropped += 1
+            else:
+                sequence, generation, _, observation = evicted_payload
+                self._accepted_observations.pop(sequence, None)
+                self._terminal_drops_since_drain.append(
+                    ObservationTerminalDrop(
+                        sequence,
+                        generation,
+                        observation,
+                        "runner-completed-frame-evicted",
+                    )
+                )
+        self._pending_dispatches.append((operation, payload))
+
     def set_output(self, applied):
         with self._lock:
-            if len(self._pending_outputs) == self._pending_outputs.maxlen:
-                self._pending_dropped += 1
-            self._pending_outputs.append(applied)
+            self._append_dispatch_locked("output", applied)
 
     def get_model_snapshot(self):
         with self._lock:
@@ -1577,18 +1591,7 @@ class ThreadedControllerRunner(ControllerRunner):
             sequence = self._observation_sequence
             generation = self._configuration_revision
             self._accepted_observations[sequence] = (generation, observation)
-            if len(self._pending_completed_frames) == self._pending_completed_frames.maxlen:
-                evicted_sequence, evicted_generation, _, _ = self._pending_completed_frames.popleft()
-                self._accepted_observations.pop(evicted_sequence, None)
-                self._terminal_drops_since_drain.append(
-                    ObservationTerminalDrop(
-                        evicted_sequence,
-                        evicted_generation,
-                        observation,
-                        "runner-completed-frame-evicted",
-                    )
-                )
-            self._pending_completed_frames.append((sequence, generation, applied, observation))
+            self._append_dispatch_locked("completed-frame", (sequence, generation, applied, observation))
             return ObservationSubmission(sequence, generation)
 
 
@@ -1712,9 +1715,11 @@ class ThreadedControllerRunner(ControllerRunner):
         if self._thread.is_alive():
             with self._lock:
                 self._pending_observations.clear()
-                while self._pending_completed_frames:
-                    sequence, _, _, _ = self._pending_completed_frames.popleft()
-                    self._terminalize_observation_locked(sequence, "runner-stop-timeout")
+                while self._pending_dispatches:
+                    operation, payload = self._pending_dispatches.popleft()
+                    if operation == "completed-frame":
+                        sequence, _, _, _ = payload
+                        self._terminalize_observation_locked(sequence, "runner-stop-timeout")
                 for sequence in tuple(self._accepted_observations):
                     self._terminalize_observation_locked(sequence, "runner-stop-timeout")
 

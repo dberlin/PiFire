@@ -812,11 +812,11 @@ def _wait_for(predicate, timeout=2.0):
     return False
 
 
-def test_applied_outputs_replay_in_timestamp_order_before_update():
+def test_applied_outputs_replay_in_submission_fifo_before_update():
     core = _OrderRecordingCore()
     runner = ThreadedControllerRunner(core)
     try:
-        # queue out of order; the worker must sort them
+        # Submission order is the actuator's causal order even if timestamps regress.
         runner.set_output(AppliedOutput(0.2, OutputSource.CONTROLLER, 20.0))
         runner.set_output(AppliedOutput(0.1, OutputSource.CONTROLLER, 10.0))
         runner.submit(212.0)
@@ -825,7 +825,7 @@ def test_applied_outputs_replay_in_timestamp_order_before_update():
             calls = list(core.calls)
         first_update = next(i for i, c in enumerate(calls) if c[0] == "update")
         reports = [c for c in calls[:first_update] if c[0] == "set_output"]
-        assert reports == [("set_output", 10.0), ("set_output", 20.0)]
+        assert reports == [("set_output", 20.0), ("set_output", 10.0)]
     finally:
         runner.stop()
 
@@ -946,18 +946,46 @@ def _drain_once(runner):
     assert core.entered.wait(2.0)  # the next update() call has begun and re-armed
 
 
+def test_completed_frame_does_not_overtake_older_output_dispatch():
+    class _BlockedDispatchCore(_BlockedWorkerCore):
+        def observe_frame(self, observation):
+            with self.lock:
+                self.calls.append(("observe_frame", observation.frame_end_s))
+            return {"eligible": False}
+
+    core = _BlockedDispatchCore()
+    runner = ThreadedControllerRunner(core)
+    runner.submit(212.0)
+    assert core.entered.wait(2.0)
+    try:
+        runner.set_output(_output(ratio=0.1, timestamp=10.0))
+        runner.complete_frame(_output(ratio=0.2, timestamp=20.0), _frame(0))
+        core.release()
+        assert _wait_for(lambda: ("observe_frame", 20.0) in core.calls)
+        with core.lock:
+            dispatches = [call for call in core.calls if call[0] in {"set_output", "observe_frame"}]
+        assert dispatches == [
+            ("set_output", 10.0),
+            ("set_output", 20.0),
+            ("observe_frame", 20.0),
+        ]
+    finally:
+        core.release()
+        runner.stop()
+
+
 def test_a_stalled_worker_bounds_the_backlog_and_counts_the_drops():
     runner, core = _threaded_runner_with_blocked_worker()
     try:
         for i in range(_MAX_PENDING_OUTPUTS + 50):
             runner.set_output(_output(ratio=0.3, timestamp=float(i)))
 
-        assert len(runner._pending_outputs) == _MAX_PENDING_OUTPUTS
+        assert len(runner._pending_dispatches) == _MAX_PENDING_OUTPUTS
         assert runner._pending_dropped == 50
         assert runner.controller_state()["pending_dropped"] == 50
 
         # the survivors are the newest, and the oldest are what went
-        oldest = min(a.timestamp for a in runner._pending_outputs)
+        oldest = min(payload.timestamp for operation, payload in runner._pending_dispatches if operation == "output")
         assert oldest == 50.0
     finally:
         core.release()
@@ -973,8 +1001,8 @@ def test_the_backlog_stays_bounded_after_a_drain():
 
         for i in range(_MAX_PENDING_OUTPUTS + 25):
             runner.set_output(_output(ratio=0.3, timestamp=float(100 + i)))
-        assert len(runner._pending_outputs) == _MAX_PENDING_OUTPUTS
-        assert isinstance(runner._pending_outputs, collections.deque)
+        assert len(runner._pending_dispatches) == _MAX_PENDING_OUTPUTS
+        assert isinstance(runner._pending_dispatches, collections.deque)
     finally:
         core.release()
         runner.stop()

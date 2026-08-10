@@ -41,6 +41,7 @@ class FakeControllerRunner:
         self.activation_events = []
         self.snapshot: dict[str, Any] | None = None
         self.observations = []
+        self.frame_completions = []
         self._observation_sequence = 0
         self._observation_outcomes = []
         self._terminal_drops_since_drain = deque()
@@ -138,6 +139,7 @@ class FakeControllerRunner:
         self.calls.append(("apply", applied))
 
     def complete_frame(self, applied, observation: FrameObservation):
+        self.frame_completions.append((applied, observation))
         self.set_output(applied)
         return self.observe_frame(observation)
 

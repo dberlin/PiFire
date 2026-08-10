@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from common.controller_model_state import CheckpointSaveOutcome
 
-from common.model_evidence import ConfidenceDecisionEvidence
+from common.model_evidence import CandidateAssessmentEvidence, ConfidenceDecisionEvidence
 from common.control_trace import ActuationMode
 
 from controller.applied_output import AppliedOutput, OutputSource
@@ -567,47 +567,40 @@ def test_final_checkpoint_failure_is_terminal_and_is_not_retried(hold_cycle):
 
 
 
-def test_checkpoint_queue_failure_retries_only_the_authoritative_failure_snapshot(hold_cycle):
+def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_and_close(hold_cycle):
+    runner = _FinalLifecycleRunner(
+        result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="d" * 64)
+    )
+
     class _Queue:
+        failed = False
+
         def __init__(self):
             self.attempts = []
 
         def submit_checkpoint(self, _name, snapshot):
+            runner.lifecycle.append(f"checkpoint:{snapshot['cook_refit']['latest']}")
             self.attempts.append(snapshot)
             return len(self.attempts) > 1
 
-    runner = _FinalLifecycleRunner(
-        result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="d" * 64)
-    )
+        def flush_and_stop(self):
+            runner.lifecycle.append("flush")
+            return True
+
     hold = _hold(hold_cycle, runner, identification=True)
     queue = _Queue()
     hold._persistence_worker = queue
 
-    assert hold._publish_final_checkpoint_once(
-        TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-        runner.refit_verdict,
-    ) is False
-    assert hold._final_checkpoint_done is False
-    assert hold._publish_final_checkpoint_once(
-        TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-        runner.refit_verdict,
-    ) is True
+    hold.teardown(225)
 
-    assert len(queue.attempts) == 2
-    assert (
-        runner.final_outcomes,
-        hold._final_checkpoint_outcome,
-        queue.attempts[-1]["cook_refit"]["latest"],
-    ) == (
-        [
-            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-            TeardownRefitOutcome.CHECKPOINT_FAILURE,
-            TeardownRefitOutcome.CHECKPOINT_FAILURE,
-        ],
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
+    assert [snapshot["cook_refit"]["latest"] for snapshot in queue.attempts] == [
+        "accepted-next-cook",
         "checkpoint-failure",
-    )
+    ]
     assert hold._final_checkpoint_done is True
+    assert hold._final_checkpoint_outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE
+    assert runner.lifecycle.index("checkpoint:checkpoint-failure") < runner.lifecycle.index("flush")
+    assert runner.lifecycle.index("flush") < runner.lifecycle.index("close")
 
 
 def test_finalize_exception_never_queues_a_stale_snapshot(hold_cycle):
@@ -839,8 +832,11 @@ def test_operator_teardown_candidate_persists_assessment_and_blocked_confidence_
     decision_id = controller._persist_operator_teardown_authority(window, descriptor)
 
     assert decision_id == f"teardown:session:cook:4:9:{'b' * 64}"
+    assert isinstance(persisted[0][0], CandidateAssessmentEvidence)
     assert persisted[0][0].decision_id == decision_id
     assert persisted[0][0].policy == "operator-reviewed"
+    assert persisted[0][0].confidence_accepted is True
+    assert persisted[0][0].rejection_reasons == ()
     assert submitted[0].payload == ConfidenceDecisionEvidence(
         decision_id=decision_id,
         blocked=True,

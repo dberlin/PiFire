@@ -1698,6 +1698,8 @@ class Controller(ControllerBase):
         self._inert_activation = None
         self._active_activation_record = None
         self._activation_output_authorized = True
+        self._model_revision = max(self._model_revision, record.candidate.role_generation + 1)
+        self._rotate_teardown_role_generation(self._model_revision)
         timestamp_ms = time.time_ns() // 1_000_000
         lifecycle = ActivationLifecycleEvidence(
             decision_id=record.decision_id,
@@ -1742,6 +1744,7 @@ class Controller(ControllerBase):
         self._rollback_control_pair = None
         self._failed_role_generations.add(failed.descriptor.role_generation)
         self._model_revision = max(self._model_revision, failed.descriptor.role_generation + 1)
+        self._rotate_teardown_role_generation(self._model_revision)
         try:
             failed.close()
         except Exception:
@@ -1954,6 +1957,7 @@ class Controller(ControllerBase):
             restored_generation = lifecycle.role_generation
             self._failed_role_generations.add(recovery.record.candidate.role_generation)
         self._model_revision = restored_generation
+        self._rotate_teardown_role_generation(self._model_revision)
         retired_active.close()
         if retired_rollback is not None:
             retired_rollback.close()
@@ -3801,8 +3805,8 @@ class Controller(ControllerBase):
             native_build="passed",
             native_dry_solve="passed",
             target_timing="passed",
-            confidence_accepted=False,
-            rejection_reasons=("operator-review-required",),
+            confidence_accepted=True,
+            rejection_reasons=(),
         )
         self._persist_grey_lifecycle(
             assessment,
@@ -3815,7 +3819,7 @@ class Controller(ControllerBase):
                 native_build="passed",
                 native_dry_solve="passed",
                 target_timing="passed",
-                confidence_accepted=False,
+                confidence_accepted=True,
                 rejection_reasons=assessment.rejection_reasons,
             ),
             timestamp_ms=timestamp_ms,

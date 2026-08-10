@@ -31,6 +31,7 @@ from controller.model_learning.activation import (
     recover_startup_activation,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.runtime.model_fitting import TeardownGreyHistory
 from controller.mpc import Controller as MpcController
 import controller.mpc as mpc_module
 from tests.unit.mpc.test_mpc_solver_options import CYCLE, _config as _mpc_config, _Estimator, _Solver
@@ -451,6 +452,7 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
     assert core.rollback_control_pair is None
     assert core.activation_output_authorized
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
+    assert core._teardown_history.role_generation == core._model_revision
 
 
 def _bare_mpc_pair_owner():
@@ -479,6 +481,8 @@ def _bare_mpc_pair_owner():
     core._activation_events = collections.deque()
     core._last_combustion_load = 0.35
     core._model_revision = 4
+    core._learning_role_generation = 4
+    core._teardown_history = TeardownGreyHistory(role_generation=4, max_observations=120)
     return core, incumbent, candidate, prepared
 
 
@@ -672,6 +676,7 @@ def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_rece
     assert core.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
     assert core.activation_output_authorized
     assert core.active_control_pair is candidate
+    assert core._teardown_history.role_generation == prepared.candidate.role_generation
 
 
 def test_post_activation_confidence_failure_restores_exact_pair_fences_generation_and_records_reason() -> None:
@@ -686,6 +691,7 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
     assert core.active_control_pair is incumbent
     assert candidate.estimator.closed == candidate.solver.closed == 1
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
+    assert core._teardown_history.role_generation == core._model_revision == 6
     events = core.drain_activation_events()
     assert len(events) == 1
     assert isinstance(events[0].payload, FallbackEvidence)
@@ -761,4 +767,5 @@ def test_operator_rollback_restores_only_the_recorded_in_memory_rollback_owner()
     assert core.active_control_pair is incumbent
     assert core.estimator is incumbent.estimator
     assert core.mpc is incumbent.solver
+    assert core._teardown_history.role_generation == core._model_revision == 6
     assert unrelated.estimator.closed == unrelated.solver.closed == 0

@@ -191,6 +191,7 @@ def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and
     assert terminal[0].ratio == 12.0 / 20.0
     assert terminal[1].ratio == terminal[2].ratio == 1.0
     assert terminal[3].ratio == 1.0
+
     applied = [payload for kind, payload in traces if kind is TraceEventKind.APPLIED_OUTPUT]
     assert [(item.interval_start_ms, item.interval_end_ms, item.realized_auger_duty) for item in applied] == [
         (2_000, 22_000, 12.0 / 20.0),
@@ -198,6 +199,24 @@ def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and
         (42_000, 62_000, 1.0),
         (62_000, 63_000, 1.0),
     ]
+def test_multiframe_catchup_pairs_each_exact_feedback_with_its_observation(hold_cycle):
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold._advance_framed_pulse(10.0, True, ptemp=200.0)
+    hold._advance_framed_pulse(63.0, True, ptemp=201.0)
+
+    assert [
+        (applied.timestamp, observation.frame_end_s, applied.ratio)
+        for applied, observation in runner.frame_completions
+    ] == [
+        (22.0, 22.0, 12.0 / 20.0),
+        (42.0, 42.0, 1.0),
+        (62.0, 62.0, 1.0),
+    ]
+
 
 
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
