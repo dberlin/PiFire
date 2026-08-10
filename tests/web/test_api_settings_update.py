@@ -101,6 +101,28 @@ def test_settings_update_rejects_unknown_flag(client):
     assert read_control().get("mode") is not True
 
 
+@pytest.mark.parametrize("flag", [{}, []])
+def test_settings_update_routes_unhashable_flag_items_through_request_validation(client, flag):
+    original_grill_name = read_settings()["globals"]["grill_name"]
+
+    response = client.post(
+        "/api/settings_update",
+        json={
+            "settings": {"globals": {"grill_name": "ShouldNotPersist"}},
+            "flags": [flag],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["result"] == "error"
+    assert payload["data"] == {}
+    assert len(payload["errors"]) == 1
+    assert payload["errors"][0]["path"] == "flags.0"
+    assert payload["message"] == (f"Settings update failed: flags.0: {payload['errors'][0]['message']}")
+    assert read_settings()["globals"]["grill_name"] == original_grill_name
+
+
 # ---------------------------------------------------------------------------
 # Two-layer rejection. Layer 1 (PartialSettingsSchema, on the raw
 # delta) catches a structurally- or type-bad delta before anything is

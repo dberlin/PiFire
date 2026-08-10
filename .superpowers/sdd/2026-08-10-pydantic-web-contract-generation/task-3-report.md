@@ -217,6 +217,43 @@ uv run pytest -q tests/web/test_api_settings_update.py tests/unit/common/test_se
 EXIT=0
 ```
 
+## Review fix round 2
+
+Unhashable flag item RED:
+
+```bash
+uv run pytest -q tests/web/test_api_settings_update.py::test_settings_update_routes_unhashable_flag_items_through_request_validation
+```
+
+```text
+2 failed with TypeError at blueprints/api/routes.py flag membership
+EXIT=1
+```
+
+Focused GREEN proving dict/list elements use Pydantic validation while an unknown string retains its dedicated envelope:
+
+```bash
+uv run pytest -q \
+  tests/web/test_api_settings_update.py::test_settings_update_routes_unhashable_flag_items_through_request_validation \
+  tests/web/test_api_settings_update.py::test_settings_update_rejects_unknown_flag
+```
+
+```text
+3 passed in 2.79s
+EXIT=0
+```
+
+Final directly affected route/request-contract suite:
+
+```bash
+uv run pytest -q tests/web/test_api_settings_update.py tests/unit/common/test_settings_schema.py
+```
+
+```text
+93 passed in 3.16s
+EXIT=0
+```
+
 ## Self-review
 
 `SettingsSchema` remains the canonical direct root at the established settings schema/type paths. A registered root contract now places it in the same deterministic manifest as the controller bundle, while the manifest compiler safely resolves only paths below `schema` and `src/helpers`. The handwritten controller emitter, its tests, the old settings-schema CLI exporter, handwritten frontend settings flags/options/catalog/errors, and every alias/re-export consumer were removed.

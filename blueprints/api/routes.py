@@ -539,7 +539,7 @@ def _api_post_settings_update(settings, request_json):
         request_json = {**request_json, "flags": raw_flags}
         if isinstance(raw_flags, list):
             for flag in raw_flags:
-                if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
+                if isinstance(flag, str) and flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
                     return _settings_update_response(
                         {
                             "result": "error",
