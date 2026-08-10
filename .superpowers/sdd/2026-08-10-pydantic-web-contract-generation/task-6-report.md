@@ -5,8 +5,9 @@
 DONE, with shared registry generation and command execution deferred by the concurrent-wave contract.
 
 Implementation commit: `1fb4d14491b1351765f22c73b56c8723ed8d8b6e` (`yxkoqyxqosusrwqzquvoomllttvsqzyk`)
+Review-fix commit: `055868c60780f4d631ed0b47a5f583da0fe1768a` (`stylxowu`)
 
-## Changed paths in the Task 6 implementation commit
+## Changed paths in the Task 6 commits
 
 Backend contracts, boundaries, and focused tests:
 
@@ -19,6 +20,7 @@ Backend contracts, boundaries, and focused tests:
 
 Frontend helpers and direct consumers:
 
+- `web-react/src/components/wizard/InstallProgress.tsx` (generated import initially captured with Task 8; Task 6's review fix makes nullable pre-install status safe)
 - `web-react/src/helpers/wizard/wizardTypes.ts`
 - `web-react/src/helpers/wizard/probeTypes.ts` (deleted after direct-consumer cutover)
 - `web-react/src/helpers/wizard/i2cBusTypes.ts`
@@ -76,9 +78,9 @@ Focused frontend tests and fixtures:
 - `web-react/tests/unit/helpers/wizard/wizardApi.test.ts`
 - `web-react/tests/unit/helpers/wizard/wizardState.test.ts`
 
-## Shared path deliberately excluded from the Task 6 commit
+## Cross-task path coordination
 
-- `web-react/src/components/wizard/InstallProgress.tsx`: contains the Task 6 `InstallStatus` generated import alongside Task 8's `SystemAction` generated import and was captured by the Task 8 owner.
+- `web-react/src/components/wizard/InstallProgress.tsx` initially combined Task 6's `InstallStatus` generated import with Task 8's `SystemAction` generated import. Task 8 captured that shared cutover; the Task 6 review-fix commit subsequently changed only the null-safe `InstallStatus` consumer behavior.
 
 ## Exact deferred registry integration
 
@@ -177,6 +179,7 @@ bunx rstest run tests/unit/components/wizard tests/unit/components/settings/tabs
 
 - Used LSP references before removing or replacing exported handwritten TypeScript wire types.
 - LSP diagnostics reported no errors in the Task 6 Python contract, wizard routes, wizard/probe helpers, components, or focused tests. The only wizard-route diagnostic was the pre-existing soft deprecation hint for `os.system`.
+- A focused code review found that the fresh-datastore install-status tuple contains three nulls. The review-fix commit makes those contract fields nullable, adds the uninitialized-response regression test, and treats a null percentage as zero in the polling UI.
 - Tests, formatting, linting, builds, typecheck, Playwright, and generation were intentionally not run, as required by the concurrent-wave contract.
 
 ## Concerns
