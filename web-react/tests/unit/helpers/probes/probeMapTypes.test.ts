@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ProbeModuleCatalog } from "../../../../src/helpers/probes/probeMapTypes";
+import type { ProbeModuleCatalog } from "../../../../src/helpers/contracts/wizard.gen";
 
 // Pinned against blueprints/api/routes.py::_api_get_probe_modules, which
 // returns api_response(data={"modules": ..., "requires_install": ...}) --

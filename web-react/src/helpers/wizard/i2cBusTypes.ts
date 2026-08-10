@@ -1,20 +1,12 @@
-/** The four I2C bus kinds, mirroring common/i2c_bus_config.py. Each variant
- *  carries only its own field, so switching kind replaces the object rather
- *  than leaving a value behind that the new kind cannot use. */
-export type I2cBusValue =
-  | { kind: "basic" }
-  /** `bus_num` is null while the operator has selected "Bus number" but not
-   *  typed one yet. JSON.stringify(NaN) is `null`, so an unfilled number has to
-   *  BE null or a saved draft reads back as something it was not written as. */
-  | { kind: "kernel"; bus_num: number | null }
-  | { kind: "kernel"; adapter: string }
-  | { kind: "kernel"; serial: string }
-  | { kind: "ft232h"; url: string }
-  | { kind: "mcp2221"; serial: string };
+import type { I2cBusValue } from "../contracts/wizard.gen";
+
+/** Helpers for the generated I2C bus union. Switching kind replaces the
+ * object rather than leaving a selector behind that the new kind cannot use. */
 
 export type KernelBy = "bus_num" | "adapter" | "serial";
+export type BusKind = NonNullable<I2cBusValue["kind"]>;
 
-export const BUS_KIND_LABELS: Record<I2cBusValue["kind"], string> = {
+export const BUS_KIND_LABELS: Record<BusKind, string> = {
   basic: "Basic (integrated I2C bus)",
   kernel: "Kernel (/dev/i2c-N adapter)",
   ft232h: "FT232H (USB)",
@@ -28,7 +20,7 @@ export const KERNEL_BY_LABELS: Record<KernelBy, string> = {
 };
 
 /** The empty value for a kind, used when the operator switches kinds. */
-export function emptyBus(kind: I2cBusValue["kind"], by: KernelBy = "adapter"): I2cBusValue {
+export function emptyBus(kind: BusKind, by: KernelBy = "adapter"): I2cBusValue {
   if (kind === "basic") return { kind: "basic" };
   if (kind === "ft232h") return { kind: "ft232h", url: "" };
   if (kind === "mcp2221") return { kind: "mcp2221", serial: "" };

@@ -1,4 +1,5 @@
-import type { WizardState, WizardWorking } from "../../../helpers/wizard/wizardTypes";
+import type { WizardState } from "../../../helpers/contracts/wizard.gen";
+import type { WizardWorking } from "../../../helpers/wizard/wizardTypes";
 import { DevicesCard } from "../probes/DevicesCard";
 import { PortsCard } from "../probes/PortsCard";
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { type I2cBusValue, i2cBusError } from "../../../../src/helpers/wizard/i2cBusTypes";
+import type { I2cBusValue } from "../../../../src/helpers/contracts/wizard.gen";
+import { i2cBusError } from "../../../../src/helpers/wizard/i2cBusTypes";
 
 describe("i2cBusError", () => {
   it("accepts a basic bus, which has nothing to fill in", () => {

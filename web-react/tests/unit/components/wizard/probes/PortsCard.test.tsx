@@ -1,7 +1,7 @@
 import { afterEach, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { PortsCard } from "../../../../../src/components/wizard/probes/PortsCard";
-import type { ProbeMap, ProbeProfile } from "../../../../../src/helpers/wizard/probeTypes";
+import type { ProbeMap, ProbeProfile } from "../../../../../src/helpers/contracts/wizard.gen";
 
 afterEach(cleanup);
 

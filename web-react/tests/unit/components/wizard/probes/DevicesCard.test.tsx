@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { DevicesCard } from "../../../../../src/components/wizard/probes/DevicesCard";
-import type { ProbeMap, ProbeModuleData } from "../../../../../src/helpers/wizard/probeTypes";
+import type { ProbeMap, ProbeModuleData } from "../../../../../src/helpers/contracts/wizard.gen";
 
 rs.mock("../../../../../src/helpers/wizard/wizardApi", () => ({
   validateBusKinds: rs.fn(async () => ({ ok: true })),

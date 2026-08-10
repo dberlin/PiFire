@@ -11,6 +11,7 @@ from common.datastore_accessors import (
 )
 from common.defaults import default_notify, default_probe_config
 from common.modes import Mode
+from common.web_contracts.wizard import ProbeMap, ProbeModuleCatalog
 
 PROFILE_ID = "TWPS00"
 
@@ -37,6 +38,8 @@ def test_probe_modules_lists_every_manifest_module(ds, client):
     assert ds18b20["filename"] == "ds18b20"
     assert ds18b20["device_specific"]["ports"] == ["DS0"]
     assert isinstance(ds18b20["device_specific"]["config"], list)
+    validated = ProbeModuleCatalog.model_validate(body["data"], strict=True)
+    assert validated.model_dump(mode="json", by_alias=True, exclude_unset=True) == body["data"]
 
 
 def test_probe_modules_flags_which_modules_need_the_wizard(ds, client):
@@ -219,6 +222,40 @@ def test_apply_rejects_a_malformed_map(ds, client):
         resp = client.post("/api/probe_map", json=bad)
         assert resp.status_code == 400, bad
         assert resp.get_json()["message"] == "bad_probe_map"
+
+
+def test_apply_rejects_invalid_nested_probe_contracts(ds, client):
+    _stop_mode()
+    malformed_maps = (
+        _map([{"device": "D1", "module": "prototype", "ports": [], "config": {}}]),
+        _map(
+            [_virtual_device()],
+            [
+                {
+                    **_probe("Grill", "VirtDev", "VIRT0"),
+                    "enabled": "true",
+                }
+            ],
+        ),
+        _map([_virtual_device()], [{**_probe("Grill", "VirtDev", "VIRT0"), "profile": None}]),
+    )
+
+    for malformed in malformed_maps:
+        response = client.post("/api/probe_map", json={"probe_map": malformed})
+        assert response.status_code == 400, malformed
+        assert response.get_json()["message"] == "bad_probe_map"
+
+
+def test_live_probe_map_round_trips_through_the_pydantic_contract(ds):
+    probe_map = ProbeMap.model_validate(
+        _map([_virtual_device()], [_probe("Grill", "VirtDev", "VIRT0")]),
+        strict=True,
+    )
+
+    assert probe_map.model_dump(mode="json", by_alias=True, exclude_unset=True) == _map(
+        [_virtual_device()],
+        [_probe("Grill", "VirtDev", "VIRT0")],
+    )
 
 
 """Ruling 6 (2026-07-26, docs/superpowers/backlogs/react-migration-backlog.md):

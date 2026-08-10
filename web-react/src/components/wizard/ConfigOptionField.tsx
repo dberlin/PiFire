@@ -1,4 +1,4 @@
-import type { ConfigOption } from "../../helpers/wizard/wizardTypes";
+import type { ConfigOption } from "../../helpers/contracts/wizard.gen";
 import { Field } from "../settings/fields/Field";
 
 export interface ConfigOptionFieldProps {

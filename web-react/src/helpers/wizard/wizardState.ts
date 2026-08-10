@@ -1,6 +1,10 @@
-import type { I2cBusValue } from "./i2cBusTypes";
-import type { ProbeMap } from "./probeTypes";
-import type { WizardSection, WizardState, WizardWorking } from "./wizardTypes";
+import type {
+  I2cBusValue,
+  ProbeMap,
+  WizardSection,
+  WizardState,
+} from "../contracts/wizard.gen";
+import type { WizardWorking } from "./wizardTypes";
 
 export function initialWorking(state: WizardState): WizardWorking {
   return {
@@ -65,12 +69,10 @@ function deepEqual(a: unknown, b: unknown): boolean {
     return false;
   }
   if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const ak = Object.keys(a as object);
-  const bk = Object.keys(b as object);
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
   if (ak.length !== bk.length) return false;
-  return ak.every((k) =>
-    deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
-  );
+  return ak.every((k) => deepEqual(Reflect.get(a, k), Reflect.get(b, k)));
 }
 
 export function setSectionDepValues(

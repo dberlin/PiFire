@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ModuleCard } from "../../../../src/components/wizard/ModuleCard";
-import type { I2cBusValue } from "../../../../src/helpers/wizard/i2cBusTypes";
+import type { I2cBusValue, WizardModuleData } from "../../../../src/helpers/contracts/wizard.gen";
 import { scan } from "../../../../src/helpers/wizard/wizardApi";
-import type { WizardModuleData } from "../../../../src/helpers/wizard/wizardTypes";
 
 rs.mock("../../../../src/helpers/wizard/wizardApi", () => ({
   scan: rs.fn().mockResolvedValue({ groups: [], error: null }),

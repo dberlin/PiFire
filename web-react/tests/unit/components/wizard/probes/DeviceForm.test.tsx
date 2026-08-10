@@ -1,7 +1,7 @@
 import { afterEach, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DeviceForm } from "../../../../../src/components/wizard/probes/DeviceForm";
-import type { ProbeModuleData } from "../../../../../src/helpers/wizard/probeTypes";
+import type { ProbeModuleData } from "../../../../../src/helpers/contracts/wizard.gen";
 
 afterEach(cleanup);
 

@@ -1,21 +1,25 @@
 import { useId, useState } from "react";
+import type {
+  I2cBusValue,
+  ScanResult,
+  SettingsDependency,
+} from "../../../helpers/contracts/wizard.gen";
 import {
   BUS_KIND_LABELS,
+  type BusKind,
   emptyBus,
-  type I2cBusValue,
   i2cBusError,
   KERNEL_BY_LABELS,
   type KernelBy,
   kernelBy,
 } from "../../../helpers/wizard/i2cBusTypes";
-import type { ScanResult, SettingsDependency } from "../../../helpers/wizard/wizardTypes";
 import { DiscoveryPanel } from "../DiscoveryPanel";
 
 export interface I2cBusFieldProps {
   dep: SettingsDependency;
   value: I2cBusValue;
   onChange: (value: I2cBusValue) => void;
-  onScan: (kind: I2cBusValue["kind"]) => Promise<ScanResult>;
+  onScan: (kind: BusKind) => Promise<ScanResult>;
 }
 
 /** The kernel discovery groups, keyed by the field each fills. Picking a row

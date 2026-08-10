@@ -10,12 +10,12 @@ import {
   setDisplayConfig,
   setSectionDepValues,
 } from "../../../../src/helpers/wizard/wizardState";
-import type { WizardState } from "../../../../src/helpers/wizard/wizardTypes";
+import type { ProbeMap, WizardState } from "../../../../src/helpers/contracts/wizard.gen";
 
 const base: WizardState = {
   modules_metadata: { grillplatform: {}, display: {}, distance: {}, probes: {} },
   selections: { grillplatform: "pcb_4.x.x", display: "ili9341b", distance: "none", probes: null },
-  settings_dep_values: { grillplatform: {}, display: {}, distance: {} } as never,
+  settings_dep_values: { grillplatform: {}, display: {}, distance: {} },
   display_config: { ili9341b: { rotation: 90 } },
   probe_map: { probe_devices: [], probe_info: [] },
   probe_profiles: [],
@@ -119,13 +119,13 @@ describe("wizardState", () => {
 });
 
 describe("wizardState grillplatform helpers", () => {
-  const boardA: import("../../../../src/helpers/wizard/probeTypes").ProbeMap = {
+  const boardA: ProbeMap = {
     probe_devices: [
       { device: "DA", module: "ads1115", module_filename: "ads1115", ports: ["ADC0"], config: {} },
     ],
     probe_info: [],
   };
-  const boardB: import("../../../../src/helpers/wizard/probeTypes").ProbeMap = {
+  const boardB: ProbeMap = {
     probe_devices: [
       { device: "DB", module: "ads1115", module_filename: "ads1115", ports: ["ADC1"], config: {} },
     ],
@@ -163,7 +163,7 @@ describe("wizardState grillplatform helpers", () => {
     // Same content as boardA, keys written in a different order. deepEqual must be
     // structural -- a JSON.stringify comparison would see these as different and
     // wrongly SKIP the reseed (preserving `reordered` instead of adopting boardB).
-    const reordered: import("../../../../src/helpers/wizard/probeTypes").ProbeMap = {
+    const reordered: ProbeMap = {
       probe_info: [],
       probe_devices: [
         {
@@ -180,7 +180,7 @@ describe("wizardState grillplatform helpers", () => {
   });
 
   test("reseedProbeMapForBoard preserves current when the user has edited it", () => {
-    const edited: import("../../../../src/helpers/wizard/probeTypes").ProbeMap = {
+    const edited: ProbeMap = {
       probe_devices: [
         { device: "EDITED", module: "m", module_filename: "m", ports: [], config: {} },
       ],

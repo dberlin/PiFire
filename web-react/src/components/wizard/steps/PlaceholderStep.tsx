@@ -1,4 +1,4 @@
-import type { WizardSection } from "../../../helpers/wizard/wizardTypes";
+import type { WizardSection } from "../../../helpers/contracts/wizard.gen";
 
 export interface PlaceholderStepProps {
   section: WizardSection;

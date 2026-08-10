@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { GrillPlatformStep } from "../../../../../src/components/wizard/steps/GrillPlatformStep";
-import type { ProbeMap } from "../../../../../src/helpers/wizard/probeTypes";
-import type { WizardState, WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
+import type { ProbeMap, WizardState } from "../../../../../src/helpers/contracts/wizard.gen";
+import type { WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
 
 const fetchModuleValues = rs.fn();
 rs.mock("../../../../../src/helpers/wizard/wizardApi", () => ({

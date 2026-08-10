@@ -1,7 +1,7 @@
 import { afterEach, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { PortForm } from "../../../../../src/components/wizard/probes/PortForm";
-import type { ProbeProfile } from "../../../../../src/helpers/wizard/probeTypes";
+import type { ProbeProfile } from "../../../../../src/helpers/contracts/wizard.gen";
 
 afterEach(cleanup);
 

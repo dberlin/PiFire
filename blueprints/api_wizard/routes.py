@@ -3,6 +3,7 @@ import hashlib
 import os
 
 from flask import jsonify, request
+from pydantic import ValidationError
 
 from blueprints.wizard.wizard import (
     get_settings_dependencies_values,
@@ -37,11 +38,56 @@ from common.usb_serial import discover_usb_serial_devices
 from probes.thermoworks_cloud import discover as _thermoworks_discover_impl
 from thermoworks_cloud import AuthenticationError
 
+from common.web_contracts.wizard import (
+    BusKindsValidationRequest,
+    BusKindsValidationResponse,
+    BtRowsResult,
+    InstallLog,
+    InstallStatus,
+    ModuleValues,
+    ModuleValuesRequest,
+    ScanRequest,
+    ScanResult,
+    ThermoworksRowsResult,
+    WizardDraftRequest,
+    WizardFinishRequest,
+    WizardState,
+    _ActionResponse,
+    _EmptyRequest,
+    _ThermoworksRequest,
+)
 from . import api_wizard_bp
 
 _SECTIONS = ["grillplatform", "display", "distance", "probes"]
 _DRAFT_KEY = "react_draft"  # marker key inside the wizard blob
 _STAMP_KEY = "manifest_fingerprint"  # which manifest shape a draft was written against
+
+
+def _contract_response(model, payload, status=200):
+    validated = model.model_validate(payload, strict=True)
+    return (
+        jsonify(validated.model_dump(mode="json", by_alias=True, exclude_unset=True)),
+        status,
+    )
+
+
+def _invalid_request():
+    return _contract_response(
+        _ActionResponse,
+        {"result": "error", "message": "invalid_request"},
+        400,
+    )
+
+
+def _request_contract(model):
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    try:
+        validated = model.model_validate(payload, strict=True)
+    except ValidationError:
+        return None, _invalid_request()
+    return validated, None
 
 
 def _thermoworks_discover(email, password):
@@ -137,7 +183,7 @@ def _build_state(settings, control):
     draft = _load_draft(wizard_data)
     has_draft = isinstance(draft, dict) and draft.get(_DRAFT_KEY) is True
 
-    if has_draft:
+    if has_draft and isinstance(draft, dict):
         selections = draft.get("selections", {})
         settings_dep_values = draft.get("settings_dep_values", {})
         display_config = draft.get("display_config", {})
@@ -210,18 +256,22 @@ def _build_state(settings, control):
 def wizard_state():
     settings = read_settings()
     control = read_control()
-    return jsonify(_build_state(settings, control)), 200
+    return _contract_response(WizardState, _build_state(settings, control))
 
 
 @api_wizard_bp.route("/draft", methods=["POST"])
 def wizard_draft():
-    payload = request.get_json(silent=True) or {}
+    request_payload, error_response = _request_contract(WizardDraftRequest)
+    if error_response is not None:
+        return error_response
+    assert request_payload is not None
+    payload = request_payload.model_dump(mode="json", by_alias=True, exclude_unset=True)
     wizard_data = read_wizard()
     info = _load_draft(wizard_data)
     if not isinstance(info, dict):
         info = {}
 
-    if payload.get("clear"):
+    if request_payload.clear:
         # Drop the draft marker + working keys only -- any other persisted
         # keys (e.g. probe_map from a prior /finish) are left alone. A
         # subsequent /state then recomputes selections from settings/defaults
@@ -234,7 +284,7 @@ def wizard_draft():
         info.pop("probes_units", None)
         info.pop(_STAMP_KEY, None)
         store_wizard_install_info(info)
-        return jsonify({"result": "success"}), 200
+        return _contract_response(_ActionResponse, {"result": "success"})
 
     info[_DRAFT_KEY] = True
     info["selections"] = payload.get("selections", {})
@@ -246,7 +296,7 @@ def wizard_draft():
     # cheaply and totally, whether this draft still applies.
     info[_STAMP_KEY] = _manifest_fingerprint(wizard_data)
     store_wizard_install_info(info)
-    return jsonify({"result": "success"}), 200
+    return _contract_response(_ActionResponse, {"result": "success"})
 
 
 @api_wizard_bp.route("/cancel", methods=["POST"])
@@ -277,10 +327,13 @@ def wizard_cancel():
     api blueprint's `/api/<action>/<arg0>` catch-all (blueprints/api/routes.py:291)
     swallows POST /api/wizard/cancel and answers 415, not 404.
     """
+    _, error_response = _request_contract(_EmptyRequest)
+    if error_response is not None:
+        return error_response
     settings = read_settings()
     settings["globals"]["first_time_setup"] = False
     write_settings(settings)
-    return jsonify({"result": "success"}), 200
+    return _contract_response(_ActionResponse, {"result": "success"})
 
 
 def _usb_serial_label(dev):
@@ -324,8 +377,11 @@ def wizard_scan():
         falsy check -- not a `.get(..., default)` missing-key check -- is
         needed for the label fallback)                 (common/usb_serial.py)
     """
-    payload = request.get_json(silent=True) or {}
-    kind = payload.get("kind")
+    request_payload, error_response = _request_contract(ScanRequest)
+    if error_response is not None:
+        return error_response
+    assert request_payload is not None
+    kind = request_payload.kind
     groups = []
     error = None
     try:
@@ -368,7 +424,7 @@ def wizard_scan():
                 }
             ]
         elif kind == "usb_serial":
-            devs = discover_usb_serial_devices(payload.get("vid"), payload.get("pid"))
+            devs = discover_usb_serial_devices(request_payload.vid, request_payload.pid)
             # Offer the STABLE alias as the value to save when the device has
             # one (common/usb_serial.py::_stable_device_path). The kernel name
             # this scan is built from -- /dev/ttyACM0 -- is assigned in USB
@@ -395,7 +451,7 @@ def wizard_scan():
     except Exception as e:  # discovery hits hardware libs; surface failures as a friendly error
         error = f"Scan failed: {e}"
         groups = []
-    return jsonify({"groups": groups, "error": error}), 200
+    return _contract_response(ScanResult, {"groups": groups, "error": error})
 
 
 @api_wizard_bp.route("/module-values", methods=["POST"])
@@ -409,22 +465,33 @@ def wizard_module_values():
     reproduces legacy behavior exactly. `config` is display-only and
     guarded with .get(module, {}) because a display module may never have been
     configured -- legacy indexes it unguarded and KeyErrors."""
-    payload = request.get_json(silent=True) or {}
-    section = payload.get("section")
-    module = payload.get("module")
+    request_payload, error_response = _request_contract(ModuleValuesRequest)
+    if error_response is not None:
+        return error_response
+    assert request_payload is not None
+    section = request_payload.section
+    module = request_payload.module
     if section not in ("grillplatform", "display", "distance"):
-        return jsonify({"result": "error", "message": "unknown_module"}), 400
+        return _contract_response(
+            _ActionResponse,
+            {"result": "error", "message": "unknown_module"},
+            400,
+        )
     wizard_data = read_wizard()
     module_data = wizard_data.get("modules", {}).get(section, {}).get(module)
     if not isinstance(module_data, dict):
-        return jsonify({"result": "error", "message": "unknown_module"}), 400
+        return _contract_response(
+            _ActionResponse,
+            {"result": "error", "message": "unknown_module"},
+            400,
+        )
     settings = read_settings()
     dep_values = get_settings_dependencies_values(settings, module_data)
     if section == "display":
         config = settings.get("display", {}).get("config", {}).get(module, {})
     else:
         config = {}
-    return jsonify({"settings": dep_values, "config": config}), 200
+    return _contract_response(ModuleValues, {"settings": dep_values, "config": config})
 
 
 def _wizard_install_info_from_payload(payload, existing):
@@ -507,9 +574,17 @@ def wizard_finish():
     settings = read_settings()
     control = read_control()
     if control.get("mode") != Mode.STOP:
-        return jsonify({"result": "error", "message": "system_active"}), 409
+        return _contract_response(
+            _ActionResponse,
+            {"result": "error", "message": "system_active"},
+            409,
+        )
 
-    payload = request.get_json(silent=True) or {}
+    request_payload, error_response = _request_contract(WizardFinishRequest)
+    if error_response is not None:
+        return error_response
+    assert request_payload is not None
+    payload = request_payload.model_dump(mode="json", by_alias=True, exclude_unset=True)
     wizard_data = read_wizard()
     existing = _load_draft(wizard_data)
     if not isinstance(existing, dict):
@@ -530,24 +605,35 @@ def wizard_finish():
         if not wizard_install_info["modules"].get(section, {}).get("profile_selected")
     ]
     if missing_sections:
-        return jsonify({"result": "error", "message": "missing_selection", "sections": missing_sections}), 400
+        return _contract_response(
+            _ActionResponse,
+            {"result": "error", "message": "missing_selection", "sections": missing_sections},
+            400,
+        )
 
     try:
         validate_bus_kinds(wizard_bus_kinds(wizard_install_info, wizard_data))
     except I2CBusConfigError as exc:
-        return jsonify({"result": "error", "message": "bus_conflict", "detail": str(exc)}), 422
+        return _contract_response(
+            _ActionResponse,
+            {"result": "error", "message": "bus_conflict", "detail": str(exc)},
+            422,
+        )
 
     store_wizard_install_info(wizard_install_info)
     set_wizard_install_status(0, "Starting Install...", "")
     python_exec = settings["globals"].get("python_exec", "python")
     os.system(f"{python_exec} wizard.py &")  # Kickoff Installation (mirrors _wizard_finish)
-    return jsonify({"result": "success"}), 200
+    return _contract_response(_ActionResponse, {"result": "success"})
 
 
 @api_wizard_bp.route("/installstatus", methods=["GET"])
 def wizard_installstatus():
     percent, status, output = get_wizard_install_status()
-    return jsonify({"percent": percent, "status": status, "output": output}), 200
+    return _contract_response(
+        InstallStatus,
+        {"percent": percent, "status": status, "output": output},
+    )
 
 
 @api_wizard_bp.route("/installlog", methods=["GET"])
@@ -561,7 +647,7 @@ def wizard_installlog():
     client asks for when it first opens the panel.
     """
     text, offset, reset = read_install_log(request.args.get("offset", type=int) or 0)
-    return jsonify({"text": text, "offset": offset, "reset": reset}), 200
+    return _contract_response(InstallLog, {"text": text, "offset": offset, "reset": reset})
 
 
 @api_wizard_bp.route("/scan/bluetooth", methods=["POST"])
@@ -569,6 +655,9 @@ def wizard_scan_bluetooth():
     """Bluetooth peripheral discovery for probe device forms. Hardware-mediated:
     routes scan_bluetooth through the control process (6s timeout). Mirrors
     blueprints/wizard/routes.py::_wizard_bt_scan but returns JSON rows."""
+    _, error_response = _request_contract(_EmptyRequest)
+    if error_response is not None:
+        return error_response
     rows = []
     error = None
     try:
@@ -586,7 +675,7 @@ def wizard_scan_bluetooth():
     except Exception as e:  # never 500 -- surface as a friendly banner
         error = f"Something bad happened: {e}"
         rows = []
-    return jsonify({"rows": rows, "error": error}), 200
+    return _contract_response(BtRowsResult, {"rows": rows, "error": error})
 
 
 @api_wizard_bp.route("/probes/validate-bus-kinds", methods=["POST"])
@@ -595,13 +684,19 @@ def wizard_probes_validate_bus_kinds():
     set only (settings=None) -- deliberately excludes the live fan/distance
     kinds so a mid-wizard edit doesn't false-positive against stale settings.
     The FULL cross-subsystem check still runs at /finish."""
-    payload = request.get_json(silent=True) or {}
-    probe_devices = payload.get("probe_devices") or []
+    request_payload, error_response = _request_contract(BusKindsValidationRequest)
+    if error_response is not None:
+        return error_response
+    assert request_payload is not None
+    probe_devices = request_payload.model_dump(mode="json", by_alias=True)["probe_devices"]
     try:
         validate_bus_kinds(configured_bus_kinds(None, {"probe_devices": probe_devices}))
     except I2CBusConfigError as exc:
-        return jsonify({"ok": False, "detail": str(exc)}), 200
-    return jsonify({"ok": True}), 200
+        return _contract_response(
+            BusKindsValidationResponse,
+            {"ok": False, "detail": str(exc)},
+        )
+    return _contract_response(BusKindsValidationResponse, {"ok": True})
 
 
 @api_wizard_bp.route("/scan/thermoworks", methods=["POST"])
@@ -609,13 +704,14 @@ def wizard_scan_thermoworks():
     """ThermoWorks Cloud account discovery for the thermoworks_cloud device.
     Blocking network auth; distinguishes bad-creds from generic failure.
     Mirrors blueprints/wizard/routes.py::_wizard_thermoworks_discover."""
-    payload = request.get_json(silent=True) or {}
-    email = payload.get("email", "")
-    password = payload.get("password", "")
+    request_payload, error_response = _request_contract(_ThermoworksRequest)
+    if error_response is not None:
+        return error_response
+    assert request_payload is not None
     rows = []
     error = None
     try:
-        rows = _thermoworks_discover(email, password)
+        rows = _thermoworks_discover(request_payload.email, request_payload.password)
         if rows == []:
             error = "No ThermoWorks Cloud devices found for this account."
     except AuthenticationError as e:
@@ -624,4 +720,4 @@ def wizard_scan_thermoworks():
     except Exception as e:
         error = f"Something bad happened: {e}"
         rows = []
-    return jsonify({"rows": rows, "error": error}), 200
+    return _contract_response(ThermoworksRowsResult, {"rows": rows, "error": error})

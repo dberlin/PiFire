@@ -8,7 +8,7 @@ import {
   editDevice,
   isVirtualDevice,
 } from "../../../../src/helpers/wizard/probeReducer";
-import type { ProbeMap, ProbeModuleData } from "../../../../src/helpers/wizard/probeTypes";
+import type { ProbeMap, ProbeModuleData } from "../../../../src/helpers/contracts/wizard.gen";
 
 const ADS_MODULE: ProbeModuleData = {
   friendly_name: "ADS1115 Adafruit",

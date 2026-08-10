@@ -1,7 +1,9 @@
-import type { I2cBusValue } from "../../../helpers/wizard/i2cBusTypes";
-import type { ProbeConfigField } from "../../../helpers/wizard/probeTypes";
+import type {
+  I2cBusValue,
+  ProbeConfigField,
+  SettingsDependency,
+} from "../../../helpers/contracts/wizard.gen";
 import { scan } from "../../../helpers/wizard/wizardApi";
-import type { SettingsDependency } from "../../../helpers/wizard/wizardTypes";
 import { I2cBusField } from "../fields/I2cBusField";
 import { SelectField } from "../fields/SelectField";
 import { UsbSerialPicker } from "../fields/UsbSerialPicker";

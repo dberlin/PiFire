@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DeviceConfigField } from "../../../../../src/components/wizard/probes/DeviceConfigField";
-import type { ProbeConfigField } from "../../../../../src/helpers/wizard/probeTypes";
+import type { ProbeConfigField } from "../../../../../src/helpers/contracts/wizard.gen";
 import { scan } from "../../../../../src/helpers/wizard/wizardApi";
 
 rs.mock("../../../../../src/helpers/wizard/wizardApi", () => ({

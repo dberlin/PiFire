@@ -1,5 +1,5 @@
 import { getProbeModules } from "./probeMapApi";
-import type { ProbeModuleCatalog } from "./probeMapTypes";
+import type { ProbeModuleCatalog } from "../contracts/wizard.gen";
 
 export const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

@@ -6,11 +6,10 @@ import {
   readLiveProbeMap,
   readLiveProfiles,
 } from "../../../helpers/probes/probeMapApi";
-import type { ProbeModuleCatalog } from "../../../helpers/probes/probeMapTypes";
+import type { ProbeMap, ProbeModuleCatalog } from "../../../helpers/contracts/wizard.gen";
 import { queryKeys } from "../../../helpers/query/keys";
 import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
-import type { ProbeMap } from "../../../helpers/wizard/probeTypes";
 import { DevicesCard } from "../../wizard/probes/DevicesCard";
 import { PortsCard } from "../../wizard/probes/PortsCard";
 import { Section } from "../fields/Section";

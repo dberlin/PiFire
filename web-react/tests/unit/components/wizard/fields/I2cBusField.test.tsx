@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I2cBusField } from "../../../../../src/components/wizard/fields/I2cBusField";
 import { allStylesheets, classesStylingButtons } from "../../../../../src/helpers/cssCoverage";
-import type { I2cBusValue } from "../../../../../src/helpers/wizard/i2cBusTypes";
+import type { I2cBusValue } from "../../../../../src/helpers/contracts/wizard.gen";
 
 const dep = { friendly_name: "I2C Bus", settings: [], type: "i2c_bus" as const };
-const noScan = () => Promise.resolve({ groups: [] });
+const noScan = () => Promise.resolve({ groups: [], error: null });
 
 function renderField(value: I2cBusValue, onChange = rs.fn()) {
   render(<I2cBusField dep={dep} value={value} onChange={onChange} onScan={noScan} />);

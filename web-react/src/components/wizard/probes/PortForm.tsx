@@ -1,4 +1,4 @@
-import type { ProbeProfile } from "../../../helpers/wizard/probeTypes";
+import type { ProbeProfile } from "../../../helpers/contracts/wizard.gen";
 
 const TYPE_OPTIONS = [
   { value: "Food", label: "Food Probe" },

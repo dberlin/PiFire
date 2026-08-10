@@ -1,13 +1,19 @@
-import type { BtScanRow, ProbeDevice, RowsResult, ThermoworksRow } from "./probeTypes";
 import type {
+  BtRowsResult,
+  BusKindsValidationResponse,
   InstallLog,
   InstallStatus,
   ModuleValues,
+  ProbeDevice,
+  ScanRequest,
   ScanResult,
+  ThermoworksRowsResult,
+  WizardDraftRequest,
+  WizardFinishRequest,
   WizardSection,
   WizardState,
-  WizardWorking,
-} from "./wizardTypes";
+} from "../contracts/wizard.gen";
+import type { WizardWorking } from "./wizardTypes";
 
 function url(baseUrl: string, path: string): string {
   return `${baseUrl}/api/wizard/${path}`;
@@ -15,14 +21,21 @@ function url(baseUrl: string, path: string): string {
 
 export async function getWizardState(baseUrl: string): Promise<WizardState> {
   const r = await fetch(url(baseUrl, "state"));
-  return (await r.json()) as WizardState;
+  return r.json();
 }
 
 export async function saveDraft(baseUrl: string, working: WizardWorking): Promise<boolean> {
+  const body: WizardDraftRequest = {
+    selections: working.selections,
+    settings_dep_values: working.settings_dep_values,
+    display_config: working.display_config,
+    probe_map: working.probe_map,
+    probes_units: working.probes_units,
+  };
   const r = await fetch(url(baseUrl, "draft"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(working),
+    body: JSON.stringify(body),
   });
   return r.ok;
 }
@@ -42,20 +55,13 @@ export async function cancelWizard(baseUrl: string): Promise<boolean> {
   return r.ok;
 }
 
-export async function scan(
-  baseUrl: string,
-  // vid/pid are passed through from the manifest as written ("0x2a19"); the
-  // backend coerces them to the int pyserial reports. Typing them as `number`
-  // here would have forced every caller to parse hex first, which is how they
-  // ended up being dropped entirely.
-  body: { kind: string; vid?: string | number | null; pid?: string | number | null },
-): Promise<ScanResult> {
+export async function scan(baseUrl: string, body: ScanRequest): Promise<ScanResult> {
   const r = await fetch(url(baseUrl, "scan"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return (await r.json()) as ScanResult;
+  return r.json();
 }
 
 export async function fetchModuleValues(
@@ -69,17 +75,24 @@ export async function fetchModuleValues(
     body: JSON.stringify({ section, module }),
   });
   if (!r.ok) throw new Error(`module-values failed: ${r.status}`);
-  return (await r.json()) as ModuleValues;
+  return r.json();
 }
 
 export async function finishWizard(
   baseUrl: string,
   working: WizardWorking,
 ): Promise<{ ok: boolean; status: number; message?: string; detail?: string }> {
+  const requestBody: WizardFinishRequest = {
+    selections: working.selections,
+    settings_dep_values: working.settings_dep_values,
+    display_config: working.display_config,
+    probe_map: working.probe_map,
+    probes_units: working.probes_units,
+  };
   const r = await fetch(url(baseUrl, "finish"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(working),
+    body: JSON.stringify(requestBody),
   });
   const body = await r.json().catch(() => ({}));
   // `detail` rides along with bus_conflict: common/i2c_bus.py raises full
@@ -90,47 +103,47 @@ export async function finishWizard(
 
 export async function getInstallStatus(baseUrl: string): Promise<InstallStatus> {
   const r = await fetch(url(baseUrl, "installstatus"));
-  return (await r.json()) as InstallStatus;
+  return r.json();
 }
 
 /** Everything the installer has logged since `offset` bytes. Offset 0 reads the
- *  whole of the current run, which is what makes opening the output panel late
- *  in an install show the install from its beginning. */
+ * whole of the current run, which is what makes opening the output panel late
+ * in an install show the install from its beginning. */
 export async function getInstallLog(baseUrl: string, offset: number): Promise<InstallLog> {
   const r = await fetch(`${url(baseUrl, "installlog")}?offset=${offset}`);
-  return (await r.json()) as InstallLog;
+  return r.json();
 }
 
-export async function scanBluetooth(baseUrl: string): Promise<RowsResult<BtScanRow>> {
+export async function scanBluetooth(baseUrl: string): Promise<BtRowsResult> {
   const r = await fetch(url(baseUrl, "scan/bluetooth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "{}",
   });
-  return (await r.json()) as RowsResult<BtScanRow>;
+  return r.json();
 }
 
 export async function scanThermoworks(
   baseUrl: string,
   email: string,
   password: string,
-): Promise<RowsResult<ThermoworksRow>> {
+): Promise<ThermoworksRowsResult> {
   const r = await fetch(url(baseUrl, "scan/thermoworks"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  return (await r.json()) as RowsResult<ThermoworksRow>;
+  return r.json();
 }
 
 export async function validateBusKinds(
   baseUrl: string,
   probeDevices: ProbeDevice[],
-): Promise<{ ok: boolean; detail?: string }> {
+): Promise<BusKindsValidationResponse> {
   const r = await fetch(url(baseUrl, "probes/validate-bus-kinds"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ probe_devices: probeDevices }),
   });
-  return (await r.json()) as { ok: boolean; detail?: string };
+  return r.json();
 }

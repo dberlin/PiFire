@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { fetchModuleValues } from "./wizardApi";
-import type { ModuleValues, WizardSection } from "./wizardTypes";
+import type { ModuleValues, WizardSection } from "../contracts/wizard.gen";
 
 export interface UseModuleSwitchParams {
   baseUrl: string;

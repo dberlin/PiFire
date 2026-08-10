@@ -6,6 +6,16 @@ import pytest
 from app import app as flask_app
 from common.common import WriteKind
 from common.datastore_accessors import read_settings, write_settings_store
+from common.web_contracts.wizard import (
+    BusKindsValidationResponse,
+    InstallLog,
+    InstallStatus,
+    ModuleValues,
+    RowsResult,
+    ScanResult,
+    WizardDraftRequest,
+    WizardState,
+)
 
 
 @pytest.fixture
@@ -1086,3 +1096,108 @@ def test_scan_kernel_offers_all_three_ways_to_address_an_adapter(client, monkeyp
 def test_scan_no_longer_answers_to_the_old_kind_name(client):
     body = client.post("/api/wizard/scan", json={"kind": "extended"}).get_json()
     assert body["groups"] == []
+
+
+
+def _assert_wire_round_trip(model, payload):
+    validated = model.model_validate(payload, strict=True)
+    assert validated.model_dump(mode="json", by_alias=True, exclude_unset=True) == payload
+
+
+def test_state_response_round_trips_through_the_wizard_contract(ds, client):
+    body = client.get("/api/wizard/state").get_json()
+
+    _assert_wire_round_trip(WizardState, body)
+
+
+@pytest.mark.parametrize(
+    "bus",
+    [
+        {"kind": "basic"},
+        {"kind": "kernel", "bus_num": 7},
+        {"kind": "kernel", "bus_num": None},
+        {"kind": "kernel", "adapter": "CP2112"},
+        {"kind": "kernel", "serial": "AB12"},
+        {"kind": "ft232h", "url": ""},
+        {"kind": "mcp2221", "serial": ""},
+    ],
+)
+def test_draft_contract_preserves_every_i2c_discriminator_variant(ds, client, bus):
+    payload = {
+        "settings_dep_values": {
+            "grillplatform": {
+                "i2c_bus": bus,
+            },
+        },
+    }
+
+    assert client.post("/api/wizard/draft", json=payload).status_code == 200
+    body = client.get("/api/wizard/state").get_json()
+    assert body["settings_dep_values"]["grillplatform"]["i2c_bus"] == bus
+    _assert_wire_round_trip(WizardState, body)
+
+
+def test_draft_contract_distinguishes_absent_empty_and_null_members(ds, client):
+    absent = client.post("/api/wizard/draft", json={})
+    assert absent.status_code == 200
+    assert client.get("/api/wizard/state").get_json()["settings_dep_values"] == {}
+
+    empty = client.post("/api/wizard/draft", json={"settings_dep_values": {}})
+    assert empty.status_code == 200
+    assert client.get("/api/wizard/state").get_json()["settings_dep_values"] == {}
+
+    null = client.post("/api/wizard/draft", json={"settings_dep_values": None})
+    assert null.status_code == 400
+    assert null.get_json()["message"] == "invalid_request"
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("draft", {"clear": "yes"}),
+        ("cancel", {"unexpected": True}),
+        ("scan", {"kind": 1}),
+        ("module-values", {"section": "display", "module": 1}),
+        ("finish", {"selections": []}),
+        ("scan/bluetooth", {"unexpected": True}),
+        ("probes/validate-bus-kinds", {"probe_devices": {}}),
+        ("scan/thermoworks", {"email": [], "password": "secret"}),
+    ],
+)
+def test_wizard_post_routes_reject_invalid_json_contracts(ds, client, path, payload):
+    response = client.post(f"/api/wizard/{path}", json=payload)
+
+    assert response.status_code == 400
+    assert response.get_json()["message"] == "invalid_request"
+
+
+def test_static_wizard_response_contracts_pin_null_and_omission():
+    _assert_wire_round_trip(
+        ScanResult,
+        {"groups": [{"title": "USB Serial Devices", "items": []}], "error": None},
+    )
+    _assert_wire_round_trip(
+        ModuleValues,
+        {"settings": {"device": None}, "config": {}},
+    )
+    _assert_wire_round_trip(
+        InstallStatus,
+        {"percent": 0, "status": "Starting Install...", "output": ""},
+    )
+    _assert_wire_round_trip(
+        InstallLog,
+        {"text": "", "offset": 0, "reset": False},
+    )
+    _assert_wire_round_trip(
+        RowsResult,
+        {"rows": [{"name": "IBBQ", "hw_id": "AA:BB", "info": ""}], "error": None},
+    )
+    _assert_wire_round_trip(BusKindsValidationResponse, {"ok": True})
+
+
+def test_draft_request_contract_rejects_non_finite_plugin_values():
+    with pytest.raises(ValueError):
+        WizardDraftRequest.model_validate(
+            {"display_config": {"display": {"brightness": float("nan")}}},
+            strict=True,
+        )

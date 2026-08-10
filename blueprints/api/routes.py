@@ -73,6 +73,7 @@ from common.web_contracts.settings import (
 )
 from common.web_contracts.wizard import (
     ProbeModuleCatalog,
+    _ProbeMapApplyData,
     _ProbeMapApplyResponse,
     _ProbeMapErrorResponse,
     _ProbeMapRequest,
@@ -838,7 +839,7 @@ def _api_post_probe_map(settings, request_json):
     response = _ProbeMapApplyResponse(
         result="success",
         message="Probe map applied.",
-        data={"probe_map": probe_map},
+        data=_ProbeMapApplyData(probe_map=request_payload.probe_map),
     )
     return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 200
 

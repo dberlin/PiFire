@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { DisplayStep } from "../../../../../src/components/wizard/steps/DisplayStep";
-import type { WizardState, WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
+import type { WizardState } from "../../../../../src/helpers/contracts/wizard.gen";
+import type { WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
 
 const fetchModuleValues = rs.fn();
 rs.mock("../../../../../src/helpers/wizard/wizardApi", () => ({

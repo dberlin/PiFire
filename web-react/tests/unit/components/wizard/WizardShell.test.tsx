@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import type { WizardState } from "../../../../src/helpers/wizard/wizardTypes";
+import type { WizardState } from "../../../../src/helpers/contracts/wizard.gen";
 import { testQueryClient } from "../../test-utils";
 
 const getWizardStateMock = rs.fn();

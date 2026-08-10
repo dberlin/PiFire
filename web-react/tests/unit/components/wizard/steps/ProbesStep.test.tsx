@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProbesStep } from "../../../../../src/components/wizard/steps/ProbesStep";
-import type { WizardState, WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
+import type { WizardState } from "../../../../../src/helpers/contracts/wizard.gen";
+import type { WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
 
 afterEach(cleanup);
 

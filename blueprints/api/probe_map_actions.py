@@ -36,19 +36,6 @@ def module_requires_install(module_data):
     )
 
 
-def valid_probe_map(probe_map):
-    """The outer shape only, matching common/settings_schema.py:229-234's
-    ProbeMap (probe_devices/probe_info are list[dict]; their contents are
-    driver-specific and stay loose)."""
-    if not isinstance(probe_map, dict):
-        return False
-    for key in ("probe_devices", "probe_info"):
-        value = probe_map.get(key)
-        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
-            return False
-    return True
-
-
 def unsupported_new_modules(new_map, live_map, manifest_modules):
     """Modules the caller is ADDING that this path cannot install.
 

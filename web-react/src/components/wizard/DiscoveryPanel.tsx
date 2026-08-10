@@ -1,4 +1,4 @@
-import type { ScanResult } from "../../helpers/wizard/wizardTypes";
+import type { ScanResult } from "../../helpers/contracts/wizard.gen";
 
 export interface DiscoveryPanelProps {
   result: ScanResult;

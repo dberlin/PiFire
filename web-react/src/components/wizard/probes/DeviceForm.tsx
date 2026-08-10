@@ -1,4 +1,4 @@
-import type { ProbeModuleData } from "../../../helpers/wizard/probeTypes";
+import type { ProbeModuleData } from "../../../helpers/contracts/wizard.gen";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { DeviceConfigField } from "./DeviceConfigField";
 

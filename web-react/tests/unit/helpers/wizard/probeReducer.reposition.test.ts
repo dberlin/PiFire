@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { editProbe } from "../../../../src/helpers/wizard/probeReducer";
-import type { ProbeMap, ProbeProfile } from "../../../../src/helpers/wizard/probeTypes";
+import type { ProbeMap, ProbeProfile } from "../../../../src/helpers/contracts/wizard.gen";
 
 const P: ProbeProfile[] = [];
 const aux = (label: string, device: string, port: string): ProbeMap["probe_info"][number] => ({

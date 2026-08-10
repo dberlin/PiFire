@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ThermoworksRow } from "../../../helpers/wizard/probeTypes";
+import type { ThermoworksRow } from "../../../helpers/contracts/wizard.gen";
 import { scanThermoworks } from "../../../helpers/wizard/wizardApi";
 
 export interface ThermoworksPickerProps {

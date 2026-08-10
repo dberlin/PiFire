@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import type { ScanResult, SettingsDependency } from "../../../helpers/wizard/wizardTypes";
+import type { ScanResult, SettingsDependency } from "../../../helpers/contracts/wizard.gen";
 import { DiscoveryPanel } from "../DiscoveryPanel";
 
 export interface UsbSerialPickerProps {

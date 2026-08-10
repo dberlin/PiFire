@@ -1,11 +1,11 @@
-import type { I2cBusValue } from "../../helpers/wizard/i2cBusTypes";
-import { scan } from "../../helpers/wizard/wizardApi";
-import { moduleImageUrl } from "../../helpers/wizard/wizardAssets";
 import type {
+  I2cBusValue,
   SettingsDependency,
   WizardModuleData,
   WizardSection,
-} from "../../helpers/wizard/wizardTypes";
+} from "../../helpers/contracts/wizard.gen";
+import { scan } from "../../helpers/wizard/wizardApi";
+import { moduleImageUrl } from "../../helpers/wizard/wizardAssets";
 import { ConfigOptionField } from "./ConfigOptionField";
 import { I2cBusField } from "./fields/I2cBusField";
 import { SelectField } from "./fields/SelectField";

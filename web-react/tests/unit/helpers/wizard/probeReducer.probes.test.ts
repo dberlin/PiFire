@@ -1,6 +1,6 @@
 import { expect, it } from "@rstest/core";
 import { addProbe, deleteProbe, editProbe } from "../../../../src/helpers/wizard/probeReducer";
-import type { ProbeMap, ProbeProfile } from "../../../../src/helpers/wizard/probeTypes";
+import type { ProbeMap, ProbeProfile } from "../../../../src/helpers/contracts/wizard.gen";
 
 const PROFILES: ProbeProfile[] = [{ A: 1, B: 2, C: 3, id: "PT-1000", name: "PT-1000" }];
 const dev = (device: string, ports: string[]): ProbeMap["probe_devices"][number] => ({

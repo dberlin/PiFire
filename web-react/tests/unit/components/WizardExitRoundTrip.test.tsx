@@ -12,7 +12,7 @@ import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 // exists to pin.
 import { queryClient } from "../../../src/helpers/query/queryClient";
 import type { ShellContext } from "../../../src/helpers/shellContext";
-import type { WizardState } from "../../../src/helpers/wizard/wizardTypes";
+import type { WizardState } from "../../../src/helpers/contracts/wizard.gen";
 
 // One fake PiFire settings store, shared by BOTH mocked API clients, because
 // the defect this file pins lives in the seam BETWEEN them: WizardShell's exit

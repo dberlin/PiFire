@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
-import type { WizardState } from "../../../../src/helpers/wizard/wizardTypes";
+import type { WizardState } from "../../../../src/helpers/contracts/wizard.gen";
 
 afterEach(() => {
   rs.resetAllMocks();
@@ -31,6 +31,13 @@ describe("wizardApi", () => {
     const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
     expect(call[0]).toContain("/api/wizard/draft");
     expect((call[1] as RequestInit).method).toBe("POST");
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({
+      selections: { grillplatform: "", display: "", distance: "", probes: "" },
+      settings_dep_values: { grillplatform: {}, display: {}, distance: {}, probes: {} },
+      display_config: {},
+      probe_map: { probe_devices: [], probe_info: [] },
+      probes_units: "F",
+    });
   });
 
   test("cancelWizard posts /api/wizard/cancel and returns ok status", async () => {
@@ -82,7 +89,9 @@ describe("wizardApi", () => {
       selections: {},
       settings_dep_values: {},
       display_config: {},
-    } as never);
+      probe_map: { probe_devices: [], probe_info: [] },
+      probes_units: "F",
+    });
     expect(r.ok).toBe(false);
     expect(r.status).toBe(409);
     expect(r.message).toBe("system_active");
@@ -99,7 +108,17 @@ describe("wizardApi", () => {
       selections: {},
       settings_dep_values: {},
       display_config: {},
-    } as never);
+      probe_map: { probe_devices: [], probe_info: [] },
+      probes_units: "F",
+    });
+    const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({
+      selections: {},
+      settings_dep_values: {},
+      display_config: {},
+      probe_map: { probe_devices: [], probe_info: [] },
+      probes_units: "F",
+    });
     expect(r.ok).toBe(true);
     expect(r.status).toBe(200);
     expect(r.message).toBeUndefined();

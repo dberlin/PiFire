@@ -1,20 +1,25 @@
+import type {
+  Probe,
+  ProbeDevice,
+  ProbeMap,
+  ProbeModuleCatalog,
+  ProbeProfile,
+} from "../contracts/wizard.gen";
 import type { SettingsSchema } from "../settings/settingsTypes.gen";
-import type { ProbeMap, ProbeProfile } from "../wizard/probeTypes";
-import type { ApplyProbeMapResult, ProbeModuleCatalog } from "./probeMapTypes";
+import type { ApplyProbeMapResult } from "./probeMapTypes";
 
 const EMPTY_MAP: ProbeMap = { probe_devices: [], probe_info: [] };
 
 export async function getProbeModules(baseUrl: string): Promise<ProbeModuleCatalog> {
   const res = await fetch(`${baseUrl}/api/probe_modules`);
   if (!res.ok) throw new Error(`GET /api/probe_modules failed: HTTP ${res.status}`);
-  const body = (await res.json()) as { data?: ProbeModuleCatalog };
+  const body = await res.json();
   return body.data ?? { modules: {}, requires_install: {} };
 }
 
 // The route's four rejection codes, turned into sentences here rather than in
 // the component: the codes are a backend contract and belong beside the client
-// that speaks it. `bus_conflict` carries its own already-readable detail
-// (common/i2c_bus.py raises full sentences), so it is passed through.
+// that speaks it. `bus_conflict` carries its own already-readable detail.
 function explain(
   status: number,
   body: { message?: string; detail?: string; modules?: string[] },
@@ -45,43 +50,107 @@ export async function applyProbeMap(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ probe_map: probeMap }),
     });
-    const body = (await res.json().catch(() => ({}))) as {
-      message?: string;
-      detail?: string;
-      modules?: string[];
-    };
+    const body = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, message: explain(res.status, body) };
     return { ok: true };
   } catch {
-    // The grill going unreachable mid-save must not throw past the tab.
     return { ok: false, message: "Could not reach PiFire. The probe configuration was not saved." };
   }
 }
 
-/** The generated Settings type models probe_map as all-optional
- *  (settingsTypes.gen.ts:510) because common/settings_schema.py:229-234 keeps
- *  the device/probe dicts loose. The reducer and both cards need the required
- *  shape from helpers/wizard/probeTypes. This is the ONE place that crossing
- *  happens, so no component ever has to hold both ProbeMap types at once.
- *
- *  The double cast is required, not lazy: the generated members are bare index
- *  signatures ({[k: string]: unknown}[]), which TS says do not "sufficiently
- *  overlap" the required shapes, so a single `as` is a compile error. Same
- *  crossing, same idiom as NotificationsTab.tsx:22. Narrowing it for real would
- *  mean validating every driver-specific device dict in the browser, which is
- *  exactly what common/settings_schema.py:229-234 deliberately declines to do
- *  on the server. */
-export function readLiveProbeMap(settings: SettingsSchema): ProbeMap {
-  const raw = settings?.probe_settings?.probe_map;
-  if (!raw) return EMPTY_MAP;
-  return {
-    probe_devices: (raw.probe_devices ?? []) as unknown as ProbeMap["probe_devices"],
-    probe_info: (raw.probe_info ?? []) as unknown as ProbeMap["probe_info"],
-  };
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-/** Live settings store probe_profiles keyed by id; PortForm's picker takes a
- *  list. Same flattening /api/wizard/state does (api_wizard/routes.py:129-130). */
+function isProbeProfile(value: unknown): value is ProbeProfile {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "A" in value &&
+    typeof value.A === "number" &&
+    Number.isFinite(value.A) &&
+    "B" in value &&
+    typeof value.B === "number" &&
+    Number.isFinite(value.B) &&
+    "C" in value &&
+    typeof value.C === "number" &&
+    Number.isFinite(value.C) &&
+    "id" in value &&
+    typeof value.id === "string" &&
+    "name" in value &&
+    typeof value.name === "string"
+  );
+}
+
+function isProbeDevice(value: unknown): value is ProbeDevice {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "device" in value &&
+    typeof value.device === "string" &&
+    "module" in value &&
+    typeof value.module === "string" &&
+    "module_filename" in value &&
+    typeof value.module_filename === "string" &&
+    "ports" in value &&
+    isStringArray(value.ports) &&
+    "config" in value &&
+    typeof value.config === "object" &&
+    value.config !== null &&
+    !Array.isArray(value.config)
+  );
+}
+
+function isProbe(value: unknown): value is Probe {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "label" in value &&
+    typeof value.label === "string" &&
+    "type" in value &&
+    (value.type === "Primary" || value.type === "Food" || value.type === "Aux") &&
+    "enabled" in value &&
+    typeof value.enabled === "boolean" &&
+    "device" in value &&
+    typeof value.device === "string" &&
+    "port" in value &&
+    typeof value.port === "string" &&
+    "profile" in value &&
+    typeof value.profile === "object" &&
+    value.profile !== null &&
+    !Array.isArray(value.profile) &&
+    (Object.keys(value.profile).length === 0 || isProbeProfile(value.profile))
+  );
+}
+
+function isProbeMap(value: unknown): value is ProbeMap {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "probe_devices" in value &&
+    Array.isArray(value.probe_devices) &&
+    value.probe_devices.every(isProbeDevice) &&
+    "probe_info" in value &&
+    Array.isArray(value.probe_info) &&
+    value.probe_info.every(isProbe)
+  );
+}
+
+/** Narrow the settings schema's intentionally loose plugin dictionaries once,
+ * at the boundary into the strict generated wizard contract. */
+export function readLiveProbeMap(settings: SettingsSchema): ProbeMap {
+  const raw = settings?.probe_settings?.probe_map;
+  return isProbeMap(raw) ? raw : EMPTY_MAP;
+}
+
+/** Live settings store probe profiles keyed by id; PortForm takes a list. */
 export function readLiveProfiles(settings: SettingsSchema): ProbeProfile[] {
-  return Object.values(settings?.probe_settings?.probe_profiles ?? {}) as unknown as ProbeProfile[];
+  return Object.values(settings?.probe_settings?.probe_profiles ?? {}).filter(isProbeProfile);
 }
