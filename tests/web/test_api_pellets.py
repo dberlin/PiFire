@@ -8,10 +8,9 @@ channel uses (their other pinning net is test_socketio_app_data.py).
 
 `GET /api/pellets` exists so a test can assert store state without trusting
 the UI it is testing, and so a client with no socket can cold-start. It is
-also the SHAPE PIN for web-react/src/helpers/pellets/pelletTypes.ts, which is
-hand-written (the pellet DB has no JSON schema, so `gen:types` cannot cover
-it). If you add a field to that TS file, add it to
-test_get_pellets_returns_full_database in the same commit.
+also the shape pin for `common.web_contracts.control.PelletDbSchema`, which
+generates `web-react/src/helpers/contracts/control.gen.ts`. If the Pydantic
+model gains a field, update this parity assertion in the same commit.
 
 See tests/web/conftest.py for the shared live_server harness.
 """
@@ -41,7 +40,7 @@ def test_get_pellets_returns_full_database(live_server, page):
     body = resp.json()
     assert body["result"] == "OK"
     pellets = body["data"]["pellets"]
-    # SHAPE PIN: helpers/pellets/pelletTypes.ts is hand-written against this.
+    # SHAPE PIN: PelletDbSchema is the Python-owned frontend contract.
     assert set(pellets) == {"schema_version", "current", "woods", "brands", "archive", "log", "lastupdated"}
     assert set(pellets["current"]) == {"pelletid", "hopper_level", "date_loaded", "est_usage"}
     any_profile = next(iter(pellets["archive"].values()))

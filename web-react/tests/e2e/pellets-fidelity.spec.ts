@@ -53,7 +53,7 @@ interface PelletDbShape {
   archive: Record<string, unknown>;
   current: { pelletid: string };
   /** timestamp -> profile id. An OBJECT, not an array: see
-   *  src/helpers/pellets/pelletTypes.ts and common/defaults.py. Counting it
+   *  src/helpers/contracts/control.gen.ts and common/defaults.py. Counting it
    *  with `.length` would silently record `undefined` on both sides of the
    *  comparison and drop the load log from the fingerprint entirely. */
   log: Record<string, string>;

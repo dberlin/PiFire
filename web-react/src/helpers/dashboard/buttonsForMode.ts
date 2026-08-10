@@ -1,5 +1,6 @@
-import type { CommandClient, CommandResult, ManualOutput } from "../command";
-import type { DashSocketPayload } from "../contracts/core.gen"
+import type { CommandClient, CommandResult } from "../command";
+import type { ManualOutput } from "../contracts/control.gen";
+import type { DashSocketPayload } from "../contracts/core.gen";
 
 export type ButtonAction =
   | { type: "command"; run(c: CommandClient): Promise<CommandResult> }

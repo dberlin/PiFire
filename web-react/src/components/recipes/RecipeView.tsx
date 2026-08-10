@@ -12,7 +12,7 @@ interface Props {
 }
 
 // `0` is the disabled sentinel for hold_temp and every trigger_temps member
-// (controller.py / recipeTypes.ts) -- never render it as the number "0".
+// (controller.py / contracts/content.gen.ts) -- never render it as the number "0".
 function formatTrigger(value: number, units: string): string {
   return value === 0 ? "—" : `${value}°${units}`;
 }

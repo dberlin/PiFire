@@ -4,6 +4,7 @@
 // second and is a pure GET by design -- see blueprints/api_tuner's docstring
 // for why the session and the reading are separate endpoints.
 
+import type { ApiEnvelope } from "../contracts/core.gen";
 import type {
   AutoStatus,
   AutoStatusRequest,
@@ -22,15 +23,10 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/tuner/${path}`;
 
-interface TunerEnvelope<T> {
-  result?: string;
-  message?: string;
-  data?: (T & { mode?: string; field?: string }) | null;
-}
 
 async function unpack<T>(res: Response): Promise<TunerResult<T>> {
-  const body: TunerEnvelope<T> = await res.json().catch(() => ({}));
-  const detail = body.data ?? null;
+  const body = (await res.json().catch(() => ({}))) as Partial<ApiEnvelope>;
+  const detail = (body.data ?? null) as (T & { mode?: string; field?: string }) | null;
   return {
     ok: res.ok && body.result === "OK",
     status: res.status,

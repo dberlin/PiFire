@@ -6,15 +6,12 @@
 // So there is no unpack() here -- the status line and Content-Range ARE the
 // protocol.
 
+import type { ApiEnvelope } from "../contracts/core.gen";
 import type { LogFamily, LogsMetadata } from "../contracts/operations.gen";
 import type { LogDelta } from "./logTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
-interface LogsMetadataEnvelope {
-  result?: string;
-  data?: LogsMetadata;
-}
 
 export function logViewUrl(stem: string, baseUrl = BASE_URL): string {
   return `${baseUrl}/api/admin/logs/view?log=${encodeURIComponent(stem)}`;
@@ -44,9 +41,9 @@ function totalFromContentRange(header: string | null): number | null {
  * tab beside it does not depend on this listing at all. */
 export async function fetchLogFamilies(baseUrl = BASE_URL): Promise<LogFamily[]> {
   const response = await fetch(`${baseUrl}/api/admin/logs`);
-  const body: LogsMetadataEnvelope = await response.json().catch(() => ({}));
+  const body = (await response.json().catch(() => ({}))) as Partial<ApiEnvelope>;
   if (!response.ok || body.result !== "OK") return [];
-  return body.data?.families ?? [];
+  return (body.data as LogsMetadata | undefined)?.families ?? [];
 }
 
 export async function fetchLogWhole(

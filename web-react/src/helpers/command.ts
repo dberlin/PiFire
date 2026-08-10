@@ -1,21 +1,17 @@
 import { postControl } from "./notify/notifyApi";
 import type { CommandResponse } from "./contracts/core.gen";
-import type { PrimeCommandRequest, TimerOptionsPayload } from "./contracts/control.gen";
+import type {
+  GrillMode,
+  ManualOutput,
+  PrimeCommandRequest,
+  SystemCommand,
+  TimerOptionsPayload,
+} from "./contracts/control.gen";
 
 // REST command client using PiFire's command grammar (common/api_commands.py
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
 // over the socket. Envelope: { result, message, data } (common/app.py api_response).
 
-export type GrillMode =
-  | "startup"
-  | "smoke"
-  | "shutdown"
-  | "stop"
-  | "monitor"
-  | "reignite"
-  | "manual";
-export type SystemCmd = "reboot" | "shutdown" | "restart";
-export type ManualOutput = "power" | "igniter" | "auger" | "fan";
 
 export interface CommandResult {
   ok: boolean;
@@ -76,7 +72,7 @@ export interface CommandClient {
   // use them) and command.ts is this app's map of that grammar.
   timerShutdown(on: boolean): Promise<CommandResult>;
   timerKeepWarm(on: boolean): Promise<CommandResult>;
-  system(cmd: SystemCmd): Promise<CommandResult>;
+  system(cmd: SystemCommand): Promise<CommandResult>;
   setUnits(units: "F" | "C"): Promise<CommandResult>;
   manualOutput(output: ManualOutput, action?: "toggle" | "true" | "false"): Promise<CommandResult>;
   manualPwm(duty: number): Promise<CommandResult>;

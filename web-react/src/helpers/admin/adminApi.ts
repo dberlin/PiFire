@@ -13,6 +13,7 @@
 // outcome (the grill is lit, so the reboot does not happen), and every caller
 // has to render the reason rather than escape past it.
 
+import type { ApiEnvelope } from "../contracts/core.gen";
 import type {
   AdminSettingsUpdate,
   AdminState,
@@ -38,11 +39,6 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/admin/${path}`;
 
-interface AdminEnvelope<T> {
-  result?: string;
-  message?: string;
-  data?: (T & { field?: string; mode?: string }) | null;
-}
 
 /** Unpack the envelope into an AdminResult, whatever the status.
  *
@@ -50,8 +46,8 @@ interface AdminEnvelope<T> {
  * mask the status the caller branches on, so the parse failure falls back to
  * the status rather than propagating. */
 async function unpack<T>(res: Response): Promise<AdminResult<T>> {
-  const body: AdminEnvelope<T> = await res.json().catch(() => ({}));
-  const detail = body.data ?? null;
+  const body = (await res.json().catch(() => ({}))) as Partial<ApiEnvelope>;
+  const detail = (body.data ?? null) as (T & { field?: string; mode?: string }) | null;
   return {
     ok: res.ok && body.result === "OK",
     status: res.status,

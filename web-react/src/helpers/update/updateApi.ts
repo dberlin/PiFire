@@ -6,6 +6,7 @@
 // rejected because the system is active) resolves to ok:false rather than
 // throwing, since callers render the reason instead of catching an escape.
 
+import type { ApiEnvelope } from "../contracts/core.gen";
 import type {
   BuildLog,
   UpdateBranchRequest,
@@ -21,11 +22,6 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/update/${path}`;
 
-interface UpdateEnvelope<T> {
-  result?: string;
-  message?: string;
-  data?: T | null;
-}
 
 /** Unpack the envelope into an UpdateResult, whatever the status.
  *
@@ -33,12 +29,12 @@ interface UpdateEnvelope<T> {
  * mask the status the caller branches on, so the parse failure falls back to
  * the status rather than propagating. */
 async function unpack<T>(res: Response): Promise<UpdateResult<T>> {
-  const body: UpdateEnvelope<T> = await res.json().catch(() => ({}));
+  const body = (await res.json().catch(() => ({}))) as Partial<ApiEnvelope>;
   return {
     ok: res.ok && body.result === "OK",
     status: res.status,
     message: body.message ?? `HTTP ${res.status}`,
-    data: body.data ?? null,
+    data: (body.data as T | null | undefined) ?? null,
   };
 }
 
