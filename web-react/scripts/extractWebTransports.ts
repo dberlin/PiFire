@@ -41,6 +41,32 @@ export function extractFrontendWebTransports(root = HELPERS_ROOT): {
   const nonJson = new Map<string, ExtractedWebTransport>();
   let hasBrowserFiles = false;
 
+  const sources = sourceFilesBelow(root).map((filename) => {
+    const source = readFileSync(filename, "utf8");
+    const sourceFile = ts.createSourceFile(
+      filename,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    return { filename, sourceFile };
+  });
+  const finiteTypeDomains = new Map<string, string[]>();
+  for (const { sourceFile } of sources) {
+    for (const statement of sourceFile.statements) {
+      if (!ts.isTypeAliasDeclaration(statement) || !ts.isUnionTypeNode(statement.type)) continue;
+      const values = statement.type.types.map((member) =>
+        ts.isLiteralTypeNode(member) && ts.isStringLiteral(member.literal)
+          ? member.literal.text
+          : null,
+      );
+      if (values.every((value): value is string => value !== null)) {
+        finiteTypeDomains.set(statement.name.text, values);
+      }
+    }
+  }
+
   const addJson = (method: string, path: string, bodyFields?: string[]) => {
     const cleanPath = path.split("?", 1)[0].replace(/\/{2,}/g, "/");
     if (!cleanPath.startsWith("/api/") || cleanPath.includes("<dynamic>")) return;
@@ -67,15 +93,7 @@ export function extractFrontendWebTransports(root = HELPERS_ROOT): {
     nonJson.set(entry.name, entry);
   };
 
-  for (const filename of sourceFilesBelow(root)) {
-    const source = readFileSync(filename, "utf8");
-    const sourceFile = ts.createSourceFile(
-      filename,
-      source,
-      ts.ScriptTarget.Latest,
-      true,
-      filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
+  for (const { filename, sourceFile } of sources) {
     const relativeName = relative(root, filename).replaceAll("\\", "/");
     const variables = new Map<string, ts.VariableDeclaration[]>();
     const constants = new Map<string, ts.Expression>();
@@ -216,41 +234,67 @@ export function extractFrontendWebTransports(root = HELPERS_ROOT): {
       );
       return method ? (literalText(method.initializer) ?? "GET") : "GET";
     };
-    const routeFromExpression = (expression: ts.Expression): string | null => {
+    const finiteValues = (expression: ts.Expression): string[] | null => {
+      const value = unwrap(expression);
+      if (!ts.isIdentifier(value)) return null;
+      for (let current: ts.Node | undefined = value.parent; current; current = current.parent) {
+        if (!ts.isFunctionLike(current)) continue;
+        const parameter = current.parameters.find(
+          (candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === value.text,
+        );
+        if (!parameter?.type || !ts.isTypeReferenceNode(parameter.type)) return null;
+        const typeName = ts.isIdentifier(parameter.type.typeName)
+          ? parameter.type.typeName.text
+          : null;
+        return typeName ? (finiteTypeDomains.get(typeName) ?? null) : null;
+      }
+      return null;
+    };
+    const routesFromExpression = (expression: ts.Expression): string[] => {
       const value = unwrap(expression);
       if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
         const start = value.text.indexOf("/api/");
-        return start >= 0 ? value.text.slice(start) : null;
+        return start >= 0 ? [value.text.slice(start)] : [];
       }
       if (ts.isTemplateExpression(value)) {
-        let rendered = value.head.text;
+        let rendered = [value.head.text];
         for (const span of value.templateSpans) {
-          const expressionPath = routeFromExpression(span.expression);
+          const nestedRoutes = routesFromExpression(span.expression);
           const queryFragment =
             ts.isIdentifier(span.expression) && span.expression.text === "qs" ? "" : null;
-          rendered += literalText(span.expression) ?? expressionPath ?? queryFragment ?? "<dynamic>";
-          rendered += span.literal.text;
+          const replacements = finiteValues(span.expression) ?? [
+            literalText(span.expression) ??
+              nestedRoutes[0] ??
+              queryFragment ??
+              "<dynamic>",
+          ];
+          rendered = rendered.flatMap((prefix) =>
+            replacements.map((replacement) => `${prefix}${replacement}${span.literal.text}`),
+          );
         }
-        const start = rendered.indexOf("/api/");
-        return start >= 0 ? rendered.slice(start) : null;
+        return [
+          ...new Set(
+            rendered.flatMap((route) => {
+              const start = route.indexOf("/api/");
+              return start >= 0 ? [route.slice(start)] : [];
+            }),
+          ),
+        ];
       }
       if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
         const helper = value.expression.text;
         const path = value.arguments[1] ? literalText(value.arguments[1]) : null;
-        if (!path) {
-          if (helper === "logViewUrl") return "/api/admin/logs/view";
-          return null;
-        }
+        if (!path) return helper === "logViewUrl" ? ["/api/admin/logs/view"] : [];
         if (helper === "url") {
-          if (relativeName === "admin/adminApi.ts") return `/api/admin/${path}`;
-          if (relativeName === "wizard/wizardApi.ts") return `/api/wizard/${path}`;
-          if (relativeName === "update/updateApi.ts") return `/api/update/${path}`;
-          if (relativeName === "tuner/tunerApi.ts") return `/api/tuner/${path}`;
+          if (relativeName === "admin/adminApi.ts") return [`/api/admin/${path}`];
+          if (relativeName === "wizard/wizardApi.ts") return [`/api/wizard/${path}`];
+          if (relativeName === "update/updateApi.ts") return [`/api/update/${path}`];
+          if (relativeName === "tuner/tunerApi.ts") return [`/api/tuner/${path}`];
         }
-        if (helper === "endpoint" || helper === "buildSettingsUrl") return `/api/${path}`;
-        if (helper === "logViewUrl") return "/api/admin/logs/view";
+        if (helper === "endpoint" || helper === "buildSettingsUrl") return [`/api/${path}`];
+        if (helper === "logViewUrl") return ["/api/admin/logs/view"];
       }
-      return null;
+      return [];
     };
     const fileRoute = (call: ts.CallExpression): string | null => {
       const kind = call.arguments[0] ? literalText(call.arguments[0]) : null;
@@ -273,8 +317,7 @@ export function extractFrontendWebTransports(root = HELPERS_ROOT): {
       if (ts.isCallExpression(node)) {
         const callee = node.expression.getText(sourceFile);
         if (callee === "fetch" && node.arguments[0]) {
-          const route = routeFromExpression(node.arguments[0]);
-          if (route) {
+          for (const route of routesFromExpression(node.arguments[0])) {
             const method = methodFromOptions(node.arguments[1]);
             if (route === "/api/admin/logs/view") addNonJson(method, route, "text_range_streams");
             else if (route.split("?", 1)[0].endsWith("/artifact")) {
@@ -345,10 +388,6 @@ export function extractFrontendWebTransports(root = HELPERS_ROOT): {
     };
     visit(sourceFile);
 
-    if (relativeName === "files/filesApi.ts") {
-      addJson("GET", "/api/files/cookfiles");
-      addJson("GET", "/api/files/recipes");
-    }
   }
 
   if (hasBrowserFiles) {

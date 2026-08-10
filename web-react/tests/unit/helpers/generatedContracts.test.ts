@@ -1,9 +1,10 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import ts from "typescript";
+import { extractFrontendWebTransports } from "../../../scripts/extractWebTransports";
 
 const WEB_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const HELPERS_ROOT = join(WEB_ROOT, "src/helpers");
@@ -192,6 +193,45 @@ describe("generated web contract ownership", () => {
     try {
       writeFileSync(join(root, "local.ts"), "interface AdminState { selected: boolean }");
       expect(residualMirrors(root, pythonOwnedNames())).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("derives finite file-listing endpoints from the URL template and FileKind domain", () => {
+    const root = mkdtempSync(join(tmpdir(), "pifire-transport-source-"));
+    const files = join(root, "files");
+    mkdirSync(files);
+    const fileTypes = join(files, "fileTypes.ts");
+    const filesApi = join(files, "filesApi.ts");
+    try {
+      writeFileSync(fileTypes, 'export type FileKind = "cookfiles" | "recipes";');
+      writeFileSync(
+        filesApi,
+        'import type { FileKind } from "./fileTypes"; async function fetchFileListing(kind: FileKind, baseUrl: string) { return fetch(`\u0024{baseUrl}/api/files/\u0024{kind}`); }',
+      );
+      const listingNames = () =>
+        extractFrontendWebTransports(root)
+          .json.map((entry) => entry.name)
+          .sort();
+      expect(listingNames()).toEqual(["GET /api/files/cookfiles", "GET /api/files/recipes"]);
+
+      writeFileSync(fileTypes, 'export type FileKind = "cookfiles" | "recipes" | "snapshots";');
+      expect(listingNames()).toEqual([
+        "GET /api/files/cookfiles",
+        "GET /api/files/recipes",
+        "GET /api/files/snapshots",
+      ]);
+
+      writeFileSync(
+        filesApi,
+        'import type { FileKind } from "./fileTypes"; async function fetchFileListing(kind: FileKind, baseUrl: string) { return fetch(`\u0024{baseUrl}/api/archive/\u0024{kind}`); }',
+      );
+      expect(listingNames()).toEqual([
+        "GET /api/archive/cookfiles",
+        "GET /api/archive/recipes",
+        "GET /api/archive/snapshots",
+      ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
