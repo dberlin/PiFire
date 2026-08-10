@@ -34,7 +34,7 @@ interface MpcLearningViewProps {
   units: TemperatureUnit;
   ambientC: number;
   /** Socket invalidation high-water. REST remains the only rendered authority. */
-  learningReportRevision?: number;
+  modelLearningRevision?: string | null;
 }
 
 class ReportRequestError extends Error {
@@ -92,7 +92,7 @@ function ActiveMpcLearningView({
   apiBase,
   units,
   ambientC,
-  learningReportRevision,
+  modelLearningRevision,
 }: MpcLearningViewProps) {
   const queryClient = useQueryClient();
   const queryKey = useMemo(
@@ -100,7 +100,7 @@ function ActiveMpcLearningView({
     [apiBase],
   );
   const requestGeneration = useRef(0);
-  const lastLearningReportRevision = useRef(learningReportRevision);
+  const lastModelLearningRevision = useRef(modelLearningRevision);
   const [actionError, setActionError] = useState<string | null>(null);
   const [emptyGrill, setEmptyGrill] = useState(false);
   const [pellets, setPellets] = useState(false);
@@ -162,8 +162,8 @@ function ActiveMpcLearningView({
   }, [refetch]);
 
   useEffect(() => {
-    if (lastLearningReportRevision.current === learningReportRevision) return;
-    lastLearningReportRevision.current = learningReportRevision;
+    if (lastModelLearningRevision.current === modelLearningRevision) return;
+    lastModelLearningRevision.current = modelLearningRevision;
     // Invalidate the observed query rather than creating a socket-owned report.
     // Cancel first even when the initial request has no data: React Query
     // otherwise deduplicates the invalidation onto that older promise.
@@ -171,7 +171,7 @@ function ActiveMpcLearningView({
     void queryClient
       .cancelQueries({ queryKey, exact: true })
       .then(() => queryClient.invalidateQueries({ queryKey, exact: true }));
-  }, [learningReportRevision, queryClient, queryKey]);
+  }, [modelLearningRevision, queryClient, queryKey]);
 
   useEffect(() => {
     const candidateDigest = report?.candidate.digest ?? null;

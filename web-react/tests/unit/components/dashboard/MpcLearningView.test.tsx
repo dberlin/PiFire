@@ -173,7 +173,7 @@ function renderPanel(
       selectedController="mpc"
       units="F"
       ambientC={20}
-      learningReportRevision={1}
+      modelLearningRevision="wire-1"
       {...props}
     />,
     {
@@ -265,7 +265,7 @@ describe("MpcLearningView", () => {
         jsonResponse({ detail: "projection unavailable" }, 503),
       )
       .mockResolvedValueOnce(jsonResponse({ ...REPORT, status: "active" }));
-    const view = renderPanel({ learningReportRevision: 10 });
+    const view = renderPanel({ modelLearningRevision: "wire-10" });
     expect(
       await screen.findByRole("button", { name: "MPC learning: evaluating" }),
     ).toBeVisible();
@@ -276,7 +276,7 @@ describe("MpcLearningView", () => {
         selectedController="mpc"
         units="F"
         ambientC={20}
-        learningReportRevision={11}
+        modelLearningRevision="wire-11"
       />,
     );
     const errorTrigger = await screen.findByRole("button", {
@@ -682,7 +682,7 @@ describe("MpcLearningView", () => {
       .mockResolvedValueOnce(
         jsonResponse({ ...REPORT, status: "active", revision: "new" }),
       );
-    const view = renderPanel({ learningReportRevision: 40 });
+    const view = renderPanel({ modelLearningRevision: "wire-40" });
 
     view.rerender(
       <MpcLearningView
@@ -690,7 +690,7 @@ describe("MpcLearningView", () => {
         selectedController="mpc"
         units="F"
         ambientC={20}
-        learningReportRevision={41}
+        modelLearningRevision="wire-41"
       />,
     );
     expect(
