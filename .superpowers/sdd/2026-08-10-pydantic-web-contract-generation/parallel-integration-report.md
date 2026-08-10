@@ -11,7 +11,7 @@ Source-wave commits integrated:
 - Task 5: `0e16235661e16e2f952b0c044eacc08d773115f3`
 - Task 6: `1fb4d14491b1351765f22c73b56c8723ed8d8b6e`, review fix `055868c60780f4d631ed0b47a5f583da0fe1768a`
 - Task 7: `1f8b4412` (the source report records the abbreviated commit ID)
-- Task 8: `cff915caeba5112bda99a4de79a83555c5b9d7b6`, review fix `3698076cc53a813d88b828a12294d038421b1cb6`
+- Task 8: `cff915caeba5112bda99a4de79a83555c5b9d7b6`, review fix `3698076cc53a813d88b828a12294d038421b1cb6`, branch-validation fix `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8`, evidence report `2cc28f5841909a85b49d668e750dc851eb17662d`
 
 Serialized integration/fix commit:
 
@@ -37,6 +37,7 @@ One `bun run gen:types` invocation wrote all registered schema, TypeScript, defa
 - Corrected content event empty-string literals and concurrent upload staging assertions so the tests enforce process-private temporary ownership rather than a predictable `/tmp` name.
 - Preserved generated optional dictionary semantics in content/operations consumers with source-level narrowing and explicit finite-entry filtering.
 - Corrected operations coefficient validation to require High/Medium/Low exactly once and made Pydantic error locations map to the public response field.
+- Validated updater branch-request JSON before settings reads or update discovery, so malformed, non-object, and extra-bearing requests cannot trigger discovery side effects.
 - The first browser attempts were invalid because no live PiFire backend was running. The canonical README commands (`uv run python control.py` and the gunicorn app) were started, `/api/current` was observed, and the complete 53-test focused invocation then passed. This was an environment prerequisite, not a product-code failure.
 
 ## Exact verification evidence
@@ -47,10 +48,10 @@ One `bun run gen:types` invocation wrote all registered schema, TypeScript, defa
 - `uv run pytest -q tests/web/test_api_wizard.py tests/web/test_api_probe_map.py` — **89 passed**.
 - `python -m pytest -q tests/web/test_api_files_listing.py tests/web/test_api_files_cookfile_read.py tests/web/test_api_files_cookfile_write.py tests/web/test_api_files_cookfile_comments.py tests/web/test_api_files_cookfile_assets.py tests/web/test_api_files_recipes_read.py tests/web/test_api_files_recipes_write.py tests/web/test_api_files_recipes_assets.py tests/web/test_api_history.py tests/web/test_api_metrics.py` — **246 passed**.
 - `python -m pytest -q tests/unit/common/web_contracts/test_content.py` — **5 passed**.
-- `uv run pytest -q tests/web/test_api_admin_system.py tests/web/test_api_admin_backups.py tests/web/test_api_admin_maintenance.py tests/web/test_api_admin_log_families.py tests/web/test_api_update.py tests/web/test_api_tuner.py tests/web/test_api_tuner_auto.py` — **148 passed**.
+- `uv run pytest -q tests/web/test_api_admin_system.py tests/web/test_api_admin_backups.py tests/web/test_api_admin_maintenance.py tests/web/test_api_admin_log_families.py tests/web/test_api_update.py tests/web/test_api_tuner.py tests/web/test_api_tuner_auto.py` — **151 passed** after the branch-validation fix.
 - `uv run pytest -q tests/unit/common/web_contracts/test_operations.py` — **11 passed**.
 
-Total executed focused Python assertions: **739 passed**.
+Total executed focused Python assertions: **742 passed**.
 
 ### Focused Rstest
 
@@ -144,6 +145,11 @@ Emitter and handwritten frontend consumers/tests:
 - `web-react/tests/unit/helpers/files/recipeApi.test.ts`
 - `web-react/tests/unit/helpers/probes/probeMapApi.test.ts`
 - `web-react/tests/unit/helpers/wizard/i2cBusTypes.test.ts`
+
+Subsequent Task 8 branch-validation fix:
+
+- `blueprints/api_update/routes.py`
+- `tests/web/test_api_update.py`
 
 Report path:
 
