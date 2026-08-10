@@ -155,3 +155,15 @@ import controller.mpc
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_snapshot_codec_is_not_reexported_from_the_live_controller_module():
+    retired_exports = (
+        "GreySnapshotInvalid",
+        "migrate_grey_learning_snapshot",
+        "normalize_grey_parameters",
+        "GREY_BOX_KIND",
+        "MODEL_PARAM_KEYS",
+    )
+
+    assert all(not hasattr(mpc_module, name) for name in retired_exports)

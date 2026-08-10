@@ -41,14 +41,7 @@ from controller.applied_output import FrameFeedbackDisposition
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import feasibility_report
 from controller.mpc_model import MODEL_SCHEMA, GreyBoxEKF, GreyBoxKF, steady_combustion_load
-from controller.mpc_snapshot import (
-    GREY_BOX_KIND,
-    MODEL_PARAM_KEYS,
-    GreySnapshotInvalid,
-    _new_grey_learning_snapshot,
-    migrate_grey_learning_snapshot,
-    normalize_grey_parameters,
-)
+from controller import mpc_snapshot as _snapshot
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
 from common.model_evidence import (
@@ -1829,7 +1822,7 @@ class Controller(ControllerBase):
             "feasibility": None if self._last_feasibility is None else self._last_feasibility.as_status(),
             "learning": self._learning_live_status(),
             "activation": {
-                "active_kind": GREY_BOX_KIND,
+                "active_kind": _snapshot.GREY_BOX_KIND,
                 "active_digest": self._active_control_pair.descriptor.model_digest,
                 "decision_id": (
                     None if self._active_activation_record is None else self._active_activation_record.decision_id
@@ -1838,7 +1831,7 @@ class Controller(ControllerBase):
                 "failed_digest": None,
                 "failed_generation": None,
                 "last_safe_command": _finite_float(self._last_combustion_load),
-                "fallback_kind": (GREY_BOX_KIND if self._activation_terminated_reason is not None else None),
+                "fallback_kind": (_snapshot.GREY_BOX_KIND if self._activation_terminated_reason is not None else None),
                 "fallback_reason": self._activation_terminated_reason,
             },
         }
@@ -1857,7 +1850,7 @@ class Controller(ControllerBase):
     #: so; the next cook refits from scratch, which is what a fresh install
     #: does anyway.
     _MODEL_SCHEMA = MODEL_SCHEMA
-    _MODEL_PARAM_KEYS = MODEL_PARAM_KEYS
+    _MODEL_PARAM_KEYS = _snapshot.MODEL_PARAM_KEYS
 
     def _adopt_model(self, params, *, rmse, samples, band_c, nfev=None):
         """Take fitted parameters into the next-cook checkpoint.
@@ -1896,7 +1889,7 @@ class Controller(ControllerBase):
             else self._model_meta
         )
         try:
-            snapshot = _new_grey_learning_snapshot(
+            snapshot = _snapshot._new_grey_learning_snapshot(
                 revision=int(self._model_revision),
                 parameters={key: self.cfg[key] for key in self._MODEL_PARAM_KEYS},
                 metadata=metadata,
@@ -1925,7 +1918,7 @@ class Controller(ControllerBase):
                     for key in self._MODEL_PARAM_KEYS
                 }
                 snapshot["challenger"] = {
-                    "parameters": normalize_grey_parameters(candidate_parameters),
+                    "parameters": _snapshot.normalize_grey_parameters(candidate_parameters),
                     "metadata": {
                         "rmse": prepared.candidate.rmse_c,
                         "samples": prepared.candidate.sample_count,
@@ -1946,7 +1939,7 @@ class Controller(ControllerBase):
                     for key in self._MODEL_PARAM_KEYS
                 }
                 snapshot["challenger"] = {
-                    "parameters": normalize_grey_parameters(candidate_parameters),
+                    "parameters": _snapshot.normalize_grey_parameters(candidate_parameters),
                     "metadata": {
                         "rmse": self._teardown_candidate.rmse_c,
                         "samples": self._teardown_candidate.sample_count,
@@ -2066,8 +2059,8 @@ class Controller(ControllerBase):
             )
             return False
         try:
-            owned = migrate_grey_learning_snapshot(snapshot)
-        except GreySnapshotInvalid as error:
+            owned = _snapshot.migrate_grey_learning_snapshot(snapshot)
+        except _snapshot.GreySnapshotInvalid as error:
             print(f"[mpc] discarding an incompatible grey snapshot ({error.reason}).")
             return False
         active = owned["active"]
