@@ -99,9 +99,9 @@ type RemoteVersion = string;
 type Version1 = string;
 type WebUiBuildFailed = boolean;
 type WebUiStale = boolean;
-type Output1 = string;
-type Percent = number;
-type Status = string;
+type Output1 = string | null;
+type Percent = number | null;
+type Status = string | null;
 
 export interface PiFireOperationsWebContracts {
   [k: string]: unknown | undefined;

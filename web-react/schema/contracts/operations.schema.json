@@ -962,16 +962,37 @@
       "additionalProperties": false,
       "properties": {
         "output": {
-          "title": "Output",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output"
         },
         "percent": {
-          "title": "Percent",
-          "type": "integer"
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Percent"
         },
         "status": {
-          "title": "Status",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
         }
       },
       "required": [
