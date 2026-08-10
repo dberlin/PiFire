@@ -219,3 +219,22 @@ Duration 248ms
 ```
 
 The backend now omits `identified_at_f` when a valid legacy/current checkpoint has no provenance. The retained strict decoder continues to reject a present `identified_at_f: null`.
+
+## Fix round 2: restore PID-SP status type import
+
+RED:
+
+```text
+uv run ruff check controller/pid_sp_learning.py
+F821 Undefined name `PidSpLearningStatus`
+```
+
+GREEN:
+
+```text
+uv run ruff check controller/pid_sp_learning.py
+All checks passed!
+
+uv run pytest -q tests/unit/controller/test_pid_sp_learning.py
+60 passed in 1.90s
+```

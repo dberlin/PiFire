@@ -17,6 +17,7 @@ from common.web_contracts.learning import (
     PidSpGateValue,
     PidSpLearningGate,
     PidSpLearningReport,
+    PidSpLearningStatus,
     PidSpLiveLearning,
     PidSpLiveLearningStatus,
 )
