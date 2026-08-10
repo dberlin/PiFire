@@ -62,12 +62,36 @@ def test_settings_update_empty_flags_sets_none(client):
     assert read_control()["settings_update"] is False
 
 
+@pytest.mark.parametrize("flags", [None, False, 0, "", {}])
+def test_settings_update_normalizes_legacy_falsy_flags_to_empty(client, flags):
+    ctrl = read_control()
+    ctrl["settings_update"] = False
+    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+
+    response = client.post(
+        "/api/settings_update",
+        json={"settings": {"globals": {"grill_name": "Falsy Flags"}}, "flags": flags},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["result"] == "success"
+    assert read_settings()["globals"]["grill_name"] == "Falsy Flags"
+    execute_control_writes()
+    assert read_control()["settings_update"] is False
+
+
 def test_settings_update_rejects_unknown_flag(client):
     original_grill_name = read_settings()["globals"]["grill_name"]
 
     body = {"settings": {"globals": {"grill_name": "ShouldNotPersist"}}, "flags": ["mode"]}
     resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
-    assert resp.get_json()["result"] == "error"
+    payload = resp.get_json()
+    assert payload == {
+        "result": "error",
+        "message": "Unknown flag: mode",
+        "errors": [],
+        "data": {},
+    }
 
     # Settings delta must NOT have been applied.
     assert read_settings()["globals"]["grill_name"] == original_grill_name

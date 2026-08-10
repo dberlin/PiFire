@@ -2,6 +2,7 @@ import json
 import math
 import logging
 import time
+from typing import get_args
 
 from pydantic import ValidationError
 from flask import Response, abort, jsonify, request
@@ -57,6 +58,7 @@ from common.web_contracts.settings import (
     ControllerCatalog,
     ModeResponse,
     SettingsResponse,
+    SettingsFlag,
     SettingsUpdateRequest,
     SettingsUpdateResponse,
 )
@@ -486,6 +488,9 @@ def _api_post_settings(settings, request_json):
         ), 201
 
 
+_SETTINGS_UPDATE_ALLOWED_FLAGS = frozenset(get_args(SettingsFlag.__value__))
+
+
 def _settings_update_response(payload: dict):
     response = SettingsUpdateResponse.model_validate(payload, strict=True)
     return jsonify(response.model_dump(mode="json", by_alias=True)), 200
@@ -529,6 +534,20 @@ def _api_post_settings_update(settings, request_json):
     flag, blocked controller selection, an unexpected exception) sends an
     empty list rather than an invented path.
     """
+    if isinstance(request_json, dict):
+        raw_flags = request_json.get("flags", []) or []
+        request_json = {**request_json, "flags": raw_flags}
+        if isinstance(raw_flags, list):
+            for flag in raw_flags:
+                if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
+                    return _settings_update_response(
+                        {
+                            "result": "error",
+                            "message": f"Unknown flag: {flag}",
+                            "errors": [],
+                            "data": {},
+                        }
+                    )
     try:
         update = SettingsUpdateRequest.model_validate(request_json, strict=True)
     except ValidationError as exc:

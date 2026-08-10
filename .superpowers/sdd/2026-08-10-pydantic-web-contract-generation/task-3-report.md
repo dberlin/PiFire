@@ -167,6 +167,56 @@ $ node node_modules/typescript7/bin/tsc -b
 EXIT=0
 ```
 
+## Review fix round 1
+
+Falsy flag normalization RED:
+
+```bash
+uv run pytest -q tests/web/test_api_settings_update.py::test_settings_update_normalizes_legacy_falsy_flags_to_empty
+```
+
+```text
+5 failed
+EXIT=1
+```
+
+Dedicated unknown-flag envelope RED:
+
+```bash
+uv run pytest -q tests/web/test_api_settings_update.py::test_settings_update_rejects_unknown_flag
+```
+
+```text
+1 failed in 2.57s
+EXIT=1
+```
+
+The failure showed the generic Pydantic `flags.0` error instead of `Unknown flag: mode` with an empty `errors` list.
+
+Focused GREEN for both reviewed behaviors:
+
+```bash
+uv run pytest -q \
+  tests/web/test_api_settings_update.py::test_settings_update_rejects_unknown_flag \
+  tests/web/test_api_settings_update.py::test_settings_update_normalizes_legacy_falsy_flags_to_empty
+```
+
+```text
+6 passed in 2.75s
+EXIT=0
+```
+
+Final directly affected route/request-contract suite:
+
+```bash
+uv run pytest -q tests/web/test_api_settings_update.py tests/unit/common/test_settings_schema.py
+```
+
+```text
+91 passed in 3.22s
+EXIT=0
+```
+
 ## Self-review
 
 `SettingsSchema` remains the canonical direct root at the established settings schema/type paths. A registered root contract now places it in the same deterministic manifest as the controller bundle, while the manifest compiler safely resolves only paths below `schema` and `src/helpers`. The handwritten controller emitter, its tests, the old settings-schema CLI exporter, handwritten frontend settings flags/options/catalog/errors, and every alias/re-export consumer were removed.
