@@ -98,21 +98,6 @@ export type ThroughId = number;
 export type Data2 = null;
 export type Message3 = string;
 export type Result3 = "OK" | "ERROR";
-export type DateLoaded = string;
-export type EstUsage = number;
-export type HopperLevel = number;
-export type Pelletid = string;
-export type Brand = string;
-export type Comments = string;
-export type Rating = number;
-export type Wood = string;
-export type Brands = string[];
-export type Time = number;
-export type Deleted = boolean;
-export type Pelletid1 = string | null;
-export type SchemaVersion = number;
-export type Woods = string[];
-export type Uuid1 = string;
 export type Build = string | null;
 
 export interface PiFireCoreWebContracts {
@@ -301,68 +286,6 @@ export interface DismissWarningsResponse {
   data?: Data2;
   message?: Message3;
   result: Result3;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "PelletCurrentPayload".
- */
-export interface PelletCurrentPayload {
-  date_loaded: DateLoaded;
-  est_usage: EstUsage;
-  hopper_level: HopperLevel;
-  pelletid: Pelletid;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "PelletDatabasePayload".
- */
-export interface PelletDatabasePayload {
-  archive: Archive;
-  brands: Brands;
-  current: PelletCurrentPayload;
-  lastupdated: PelletLastUpdatedPayload;
-  log: Log;
-  schema_version: SchemaVersion;
-  woods: Woods;
-}
-export interface Archive {
-  [k: string]: PelletProfilePayload | undefined;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "PelletProfilePayload".
- */
-export interface PelletProfilePayload {
-  brand: Brand;
-  comments: Comments;
-  rating: Rating;
-  wood: Wood;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "PelletLastUpdatedPayload".
- */
-export interface PelletLastUpdatedPayload {
-  time: Time;
-}
-export interface Log {
-  [k: string]: PelletLogEntryPayload | undefined;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "PelletLogEntryPayload".
- */
-export interface PelletLogEntryPayload {
-  deleted: Deleted;
-  pelletid: Pelletid1;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "PelletSocketPayload".
- */
-export interface PelletSocketPayload {
-  pellets: PelletDatabasePayload;
-  uuid: Uuid1;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema

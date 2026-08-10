@@ -293,7 +293,9 @@ def test_draft_with_only_recognized_probe_config_keys_survives(ds, client):
                 {
                     "device": "D1",
                     "module": "ads1115_adafruit",
+                    "module_filename": "ads1115_adafruit",
                     "config": {"i2c_bus": {"kind": "basic"}, "i2c_bus_addr": "0x48"},
+                    "ports": ["ADC0"],
                 }
             ],
             "probe_info": [],
@@ -751,6 +753,7 @@ def test_validate_bus_kinds_clean(ds, client):
         {
             "device": "D1",
             "module": "ads1115_adafruit",
+            "module_filename": "ads1115_adafruit",
             "config": {"i2c_bus": {"kind": "basic"}},
             "ports": ["ADC0"],
         }
@@ -774,7 +777,19 @@ def test_validate_bus_kinds_conflict(ds, client, monkeypatch):
     monkeypatch.setattr(wr, "validate_bus_kinds", _boom)
     resp = client.post(
         "/api/wizard/probes/validate-bus-kinds",
-        data=json.dumps({"probe_devices": [{"device": "D1", "config": {"i2c_bus": {"kind": "basic"}}}]}),
+        data=json.dumps(
+            {
+                "probe_devices": [
+                    {
+                        "device": "D1",
+                        "module": "ads1115_adafruit",
+                        "module_filename": "ads1115_adafruit",
+                        "config": {"i2c_bus": {"kind": "basic"}},
+                        "ports": ["ADC0"],
+                    }
+                ]
+            }
+        ),
         content_type="application/json",
     )
     body = resp.get_json()
@@ -800,6 +815,7 @@ def test_finish_rejects_a_real_basic_plus_ft232h_conflict(ds, client, monkeypatc
                 {
                     "device": "D1",
                     "module": "ads1115_adafruit",
+                    "module_filename": "ads1115_adafruit",
                     "config": {"i2c_bus": {"kind": "ft232h", "url": ""}},
                     "ports": ["ADC0"],
                 }
@@ -1105,7 +1121,6 @@ def test_scan_kernel_offers_all_three_ways_to_address_an_adapter(client, monkeyp
 def test_scan_no_longer_answers_to_the_old_kind_name(client):
     body = client.post("/api/wizard/scan", json={"kind": "extended"}).get_json()
     assert body["groups"] == []
-
 
 
 def _assert_wire_round_trip(model, payload):

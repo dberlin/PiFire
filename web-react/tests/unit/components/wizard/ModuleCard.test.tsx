@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ModuleCard } from "../../../../src/components/wizard/ModuleCard";
-import type { I2cBusValue, WizardModuleData } from "../../../../src/helpers/contracts/wizard.gen";
+import type {
+  Config,
+  I2CBusValue,
+  WizardModuleData,
+} from "../../../../src/helpers/contracts/wizard.gen";
 import { scan } from "../../../../src/helpers/wizard/wizardApi";
 
 rs.mock("../../../../src/helpers/wizard/wizardApi", () => ({
@@ -107,8 +111,8 @@ function baseProps() {
     section: "distance" as const,
     modules,
     selectedModule: null as string | null,
-    depValues: {} as Record<string, string | I2cBusValue | null>,
-    configValues: {} as Record<string, unknown>,
+    depValues: {} as Record<string, string | I2CBusValue | null>,
+    configValues: {} as Config,
     configSource: "none" as const,
     onSelectModule: rs.fn(),
     onDepChange: rs.fn(),
@@ -171,9 +175,9 @@ describe("ModuleCard", () => {
   it("renders the I2cBusField (with Discover button) for an i2c_bus dependency", async () => {
     const { scan } = await import("../../../../src/helpers/wizard/wizardApi");
     // The scan kind comes from the bus value's own `kind`, not from a paired
-    // field -- an I2cBusValue carries its kind, so there is nothing else to
+    // field -- an I2CBusValue carries its kind, so there is nothing else to
     // forward.
-    const bus: I2cBusValue = { kind: "kernel", adapter: "CP2112" };
+    const bus: I2CBusValue = { kind: "kernel", adapter: "CP2112" };
     render(
       <ModuleCard
         {...baseProps()}

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
+import type { RecipeStep } from "../../../../src/helpers/contracts/content.gen";
 import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 import {
   createRecipe,
@@ -141,7 +142,7 @@ const okEnvelope = (data: unknown = null) => ({
   json: async () => ({ result: "OK", data }),
 });
 
-const STEP = {
+const STEP: RecipeStep = {
   mode: "Hold",
   hold_temp: 225,
   timer: 0,

@@ -15,9 +15,9 @@ type ManualOutput = Literal["power", "igniter", "auger", "fan"]
 _JSON_VALUE_ADAPTER = TypeAdapter(JsonValue)
 
 
-
 class _JsonExtensibleWireModel(ExtensibleWireModel):
     """Strict extensible model; declared open members remain JSON values."""
+
     @model_validator(mode="after")
     def _extras_are_json_values(self) -> _JsonExtensibleWireModel:
         for value in (self.model_extra or {}).values():
@@ -169,7 +169,7 @@ class ControlPatchResponse(WireModel):
 #: The shape of the pellet database, independent of both the release version
 #: and the settings tree's shape version. Different shapes have independent
 #: migration histories.
-PELLETDB_SCHEMA_VERSION = 2
+PELLETDB_SCHEMA_VERSION = 3
 _EpochMsKey = Annotated[str, StringConstraints(pattern=r"^\d+$")]
 
 
@@ -326,8 +326,6 @@ class PelletActionResponse(WireModel):
     data: None = None
     result: Literal["OK", "Error"]
     message: str | None = None
-
-
 
 
 class PelletRestData(WireModel):

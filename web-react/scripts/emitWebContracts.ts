@@ -16,6 +16,14 @@ const COMPILER_OPTIONS = {
   unreachableDefinitions: true,
 } as const;
 
+// json-schema-to-typescript 15.0.4 mis-emits recursive array aliases as
+// `Value | undefined[]` when strict index signatures are enabled. Keep strict
+// dictionaries everywhere else; these schemas retain valid recursive aliases.
+const RECURSIVE_SCHEMA_NAMES: Record<string, true> = {
+  "control.schema.json": true,
+  "wizard.schema.json": true,
+};
+
 function lfTerminated(output: string): string {
   return `${output.replace(/\r\n?/g, "\n").replace(/\n*$/, "")}\n`;
 }
@@ -100,7 +108,10 @@ export async function emitWebContracts(check: boolean): Promise<boolean> {
   for (const [schema, output] of Object.entries(manifest)) {
     const schemaPath = resolveManifestPath(SCHEMA_DIRECTORY, "schema", schema);
     const outputPath = resolveManifestPath(TYPESCRIPT_DIRECTORY, "src/helpers", output);
-    const generated = lfTerminated(await compileFromFile(schemaPath, COMPILER_OPTIONS));
+    const compilerOptions = RECURSIVE_SCHEMA_NAMES[schema]
+      ? { ...COMPILER_OPTIONS, strictIndexSignatures: false }
+      : COMPILER_OPTIONS;
+    const generated = lfTerminated(await compileFromFile(schemaPath, compilerOptions));
 
     if (!check) {
       await atomicWrite(outputPath, generated);

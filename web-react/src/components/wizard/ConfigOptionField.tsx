@@ -1,9 +1,9 @@
-import type { ConfigOption } from "../../helpers/contracts/wizard.gen";
+import type { ConfigOption, WireValue } from "../../helpers/contracts/wizard.gen";
 import { Field } from "../settings/fields/Field";
 
 export interface ConfigOptionFieldProps {
   option: ConfigOption;
-  value: unknown;
+  value: WireValue | undefined;
   onChange: (next: string) => void;
 }
 

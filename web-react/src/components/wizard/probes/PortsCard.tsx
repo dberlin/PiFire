@@ -19,10 +19,22 @@ export interface PortsCardProps {
 interface FormState {
   mode: "add" | "edit";
   originalLabel: string;
-  values: { name: string; device_port: string; type: string; profile_id: string; enabled: string };
+  values: {
+    name: string;
+    device_port: string;
+    type: ProbeMap["probe_info"][number]["type"];
+    profile_id: string;
+    enabled: string;
+  };
 }
 
-const EMPTY = { name: "", device_port: "", type: "Food", profile_id: "", enabled: "true" };
+const EMPTY: FormState["values"] = {
+  name: "",
+  device_port: "",
+  type: "Food",
+  profile_id: "",
+  enabled: "true",
+};
 
 export function PortsCard({ probeMap, profiles, onChange }: PortsCardProps) {
   const [form, setForm] = useState<FormState | null>(null);
@@ -39,7 +51,7 @@ export function PortsCard({ probeMap, profiles, onChange }: PortsCardProps) {
         name: p.name,
         device_port: `${p.device}:${p.port}`,
         type: p.type,
-        profile_id: (p.profile as { id?: string }).id ?? "",
+        profile_id: "id" in p.profile ? p.profile.id : "",
         enabled: p.enabled ? "true" : "false",
       },
     });
@@ -60,7 +72,7 @@ export function PortsCard({ probeMap, profiles, onChange }: PortsCardProps) {
     const input = {
       name: form.values.name,
       devicePort: form.values.device_port,
-      type: form.values.type as ProbeMap["probe_info"][number]["type"],
+      type: form.values.type,
       profileId: form.values.profile_id,
       enabled: form.values.enabled === "true",
     };

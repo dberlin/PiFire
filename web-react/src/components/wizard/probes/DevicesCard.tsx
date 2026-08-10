@@ -6,7 +6,7 @@ import {
   deleteDevice,
   editDevice,
 } from "../../../helpers/wizard/probeReducer";
-import type { ProbeMap, ProbeModuleData } from "../../../helpers/contracts/wizard.gen";
+import type { Config, ProbeMap, ProbeModuleData } from "../../../helpers/contracts/wizard.gen";
 import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
@@ -25,15 +25,15 @@ interface FormState {
   module: string;
   originalName: string; // edit only
   name: string;
-  values: Record<string, unknown>;
+  values: Config;
 }
 
-function defaultsFor(mod: ProbeModuleData): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const f of mod.device_specific.config) {
-    out[f.label] = f.type === "probes_list" ? [] : (f.default ?? "");
+function defaultsFor(mod: ProbeModuleData): Config {
+  const output: Config = {};
+  for (const field of mod.device_specific.config) {
+    output[field.label] = field.type === "probes_list" ? [] : (field.default ?? "");
   }
-  return out;
+  return output;
 }
 
 export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCardProps) {

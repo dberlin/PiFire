@@ -120,7 +120,9 @@ export function CookFileMeta({ filename, metadata, labels, onChanged }: Props) {
       .finally(() => setSavingTitle(false));
   };
 
-  const probes = Object.entries(labels.probes);
+  const probes = Object.entries(labels.probes).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  );
 
   return (
     <div className="pf-cf-meta">

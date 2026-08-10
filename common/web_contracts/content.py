@@ -74,14 +74,14 @@ class CookFileMetadata(ExtensibleWireModel):
 class CookFileEvent(ExtensibleWireModel):
     id: str | int
     mode: str
-    starttime_c: str
-    endtime_c: str | int
-    augerontime_c: str
+    starttime_c: str | Literal[0]
+    endtime_c: str | Literal[0]
+    augerontime_c: str | Literal[0]
     estusage_m: str
     estusage_i: str
     pellet_level_start: FiniteNumber
     pellet_level_end: FiniteNumber
-    timeinmode: str
+    timeinmode: str | Literal[0]
 
 
 class CookFileTotals(WireModel):

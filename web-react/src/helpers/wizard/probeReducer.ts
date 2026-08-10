@@ -3,7 +3,9 @@ import type {
   ProbeDevice,
   ProbeMap,
   ProbeModuleData,
+  Config,
   ProbeProfile,
+  WireValue,
   ProbeType,
 } from "../contracts/wizard.gen";
 
@@ -15,6 +17,11 @@ export function alnum(s: string): string {
   return Array.from(s)
     .filter((c) => /[0-9A-Za-z]/.test(c))
     .join("");
+}
+
+function stringList(value: WireValue | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
 }
 
 // "virtual" in device["module"] -- a substring match on the module KEY,
@@ -43,7 +50,7 @@ export function addDevice(
     name: string;
     module: string;
     moduleData: ProbeModuleData;
-    config: Record<string, unknown>;
+    config: Config;
   },
 ): ReducerResult {
   const deviceName = alnum(input.name);
@@ -71,7 +78,7 @@ export function addDevice(
 
 export function editDevice(
   pm: ProbeMap,
-  input: { originalName: string; newName: string; config: Record<string, unknown> },
+  input: { originalName: string; newName: string; config: Config },
 ): ReducerResult {
   const newName = alnum(input.newName);
   if (input.newName === "")
@@ -118,7 +125,7 @@ export function deleteDevice(pm: ProbeMap, name: string): ProbeMap {
       // FIX 4: scrub the cascade-deleted probe labels out of any virtual
       // device's probes_list (legacy leaves them dangling).
       if (!isVirtualDevice(d)) return d;
-      const list = (d.config.probes_list as string[] | undefined) ?? [];
+      const list = stringList(d.config.probes_list);
       const scrubbed = list.filter((label) => !doomed.has(label));
       return scrubbed.length === list.length
         ? d
@@ -232,7 +239,7 @@ export function editProbe(
       ? pm.probe_devices
       : pm.probe_devices.map((d) => {
           if (!isVirtualDevice(d)) return d;
-          const list = (d.config.probes_list as string[] | undefined) ?? [];
+          const list = stringList(d.config.probes_list);
           if (!list.includes(originalLabel)) return d;
           return {
             ...d,
@@ -252,7 +259,7 @@ export function editProbe(
     // 3a: this probe IS a virtual device's output entry. Ensure its config
     // entry sorts after every one of that device's input probes.
     const owning = probe_devices.find((d) => isVirtualDevice(d) && d.device === probe.device);
-    const inputProbes = (owning?.config.probes_list as string[] | undefined) ?? [];
+    const inputProbes = stringList(owning?.config.probes_list);
     for (let i = info.length - 1; i >= 0; i--) {
       if (i === found) {
         // Own entry reached first (by index, not label) -- already correct.
@@ -270,11 +277,7 @@ export function editProbe(
     // Does this probe feed any virtual device? (mirrors the legacy
     // `in_virtual_device` list, routes.py:306)
     const consuming = probe_devices
-      .filter(
-        (d) =>
-          isVirtualDevice(d) &&
-          ((d.config.probes_list as string[] | undefined) ?? []).includes(probe.label),
-      )
+      .filter((d) => isVirtualDevice(d) && stringList(d.config.probes_list).includes(probe.label))
       .map((d) => d.device);
     if (consuming.length > 0) {
       // 3b: ensure this input's entry sorts before the consuming virtual entry.
@@ -320,7 +323,7 @@ export function deleteProbe(pm: ProbeMap, label: string): ReducerResult {
   }
   const probe_devices = pm.probe_devices.map((d) => {
     if (!isVirtualDevice(d)) return d;
-    const list = (d.config.probes_list as string[] | undefined) ?? [];
+    const list = stringList(d.config.probes_list);
     if (!list.includes(label)) return d;
     return { ...d, config: { ...d.config, probes_list: list.filter((l) => l !== label) } };
   });

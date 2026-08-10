@@ -8,8 +8,6 @@ import type {
 import type { SettingsSchema } from "../settings/settingsTypes.gen";
 import type { ApplyProbeMapResult } from "./probeMapTypes";
 
-const EMPTY_MAP: ProbeMap = { probe_devices: [], probe_info: [] };
-
 export async function getProbeModules(baseUrl: string): Promise<ProbeModuleCatalog> {
   const res = await fetch(`${baseUrl}/api/probe_modules`);
   if (!res.ok) throw new Error(`GET /api/probe_modules failed: HTTP ${res.status}`);
@@ -57,7 +55,6 @@ export async function applyProbeMap(
     return { ok: false, message: "Could not reach PiFire. The probe configuration was not saved." };
   }
 }
-
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -129,28 +126,31 @@ function isProbe(value: unknown): value is Probe {
   );
 }
 
-function isProbeMap(value: unknown): value is ProbeMap {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    "probe_devices" in value &&
-    Array.isArray(value.probe_devices) &&
-    value.probe_devices.every(isProbeDevice) &&
-    "probe_info" in value &&
-    Array.isArray(value.probe_info) &&
-    value.probe_info.every(isProbe)
-  );
-}
-
 /** Narrow the settings schema's intentionally loose plugin dictionaries once,
  * at the boundary into the strict generated wizard contract. */
 export function readLiveProbeMap(settings: SettingsSchema): ProbeMap {
   const raw = settings?.probe_settings?.probe_map;
-  return isProbeMap(raw) ? raw : EMPTY_MAP;
+  const rawDevices = raw?.probe_devices ?? [];
+  const rawProbes = raw?.probe_info ?? [];
+  const probeDevices: ProbeDevice[] = [];
+  const probeInfo: Probe[] = [];
+  for (const value of rawDevices) {
+    if (isProbeDevice(value)) probeDevices.push(value);
+  }
+  for (const value of rawProbes) {
+    if (isProbe(value)) probeInfo.push(value);
+  }
+  return {
+    probe_devices: probeDevices.length === rawDevices.length ? probeDevices : [],
+    probe_info: probeInfo.length === rawProbes.length ? probeInfo : [],
+  };
 }
 
 /** Live settings store probe profiles keyed by id; PortForm takes a list. */
 export function readLiveProfiles(settings: SettingsSchema): ProbeProfile[] {
-  return Object.values(settings?.probe_settings?.probe_profiles ?? {}).filter(isProbeProfile);
+  const profiles: ProbeProfile[] = [];
+  for (const value of Object.values(settings?.probe_settings?.probe_profiles ?? {})) {
+    if (isProbeProfile(value)) profiles.push(value);
+  }
+  return profiles;
 }

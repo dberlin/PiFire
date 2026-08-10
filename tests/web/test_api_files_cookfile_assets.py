@@ -75,15 +75,24 @@ def _upload(client, name, asset_name="shot.png", payload=None, mimetype="image/p
     )
 
 
-def test_asset_upload_runs_the_real_pillow_pipeline(client, folders):
+def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch):
     """add_asset rotates, thumbnails and resizes with real Pillow
     (file_mgmt/media.py:26-61). Not mocked -- a mocked pipeline would not catch
     a thumbnail that never lands in the archive."""
+    import blueprints.api_files.cookfile_api as cookfile_api
+
     history_dir, _ = folders
     name = write_cookfile(history_dir, "AssetUp-Cook")
+    real_mkdtemp = tempfile.mkdtemp
+    staging_paths = []
 
-    tmp_root = tempfile.gettempdir()
-    staging_before = {n for n in os.listdir(tmp_root) if n.startswith("pifire-upload-")}
+    def tracked_mkdtemp(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        if kwargs.get("prefix") == "pifire-upload-":
+            staging_paths.append(path)
+        return path
+
+    monkeypatch.setattr(cookfile_api.tempfile, "mkdtemp", tracked_mkdtemp)
 
     resp = _upload(client, name)
     assert resp.status_code == 200
@@ -99,11 +108,10 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders):
     assert f"assets/thumbs/{arc}" in members
     assert _read_member(history_dir, name, "assets")[0]["filename"] == arc
 
-    # No per-request staging dir survives, and no predictable /tmp/pifire/{id}
-    # path is created. That predictable path was removed a while ago, but a
-    # stale /tmp/pifire may still exist on a dev box, so this checks the
-    # per-cook entry rather than the parent directory.
-    assert {n for n in os.listdir(tmp_root) if n.startswith("pifire-upload-")} == staging_before
+    # This request's private staging directory is removed even when other
+    # xdist workers are creating their own upload directories concurrently.
+    assert staging_paths
+    assert all(not os.path.exists(path) for path in staging_paths)
     parent_id = _read_member(history_dir, name, "metadata")["id"]
     assert not os.path.exists(f"/tmp/pifire/{parent_id}")
 

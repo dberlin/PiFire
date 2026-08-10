@@ -1,0 +1,1506 @@
+{
+  "$defs": {
+    "BtRowsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/BtScanRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows",
+        "error"
+      ],
+      "title": "BtRowsResult",
+      "type": "object"
+    },
+    "BtScanRow": {
+      "additionalProperties": false,
+      "properties": {
+        "hw_id": {
+          "title": "Hw Id",
+          "type": "string"
+        },
+        "info": {
+          "title": "Info",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "hw_id",
+        "info"
+      ],
+      "title": "BtScanRow",
+      "type": "object"
+    },
+    "BusKindsValidationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "probe_devices": {
+          "items": {
+            "$ref": "#/$defs/ProbeDevice"
+          },
+          "title": "Probe Devices",
+          "type": "array"
+        }
+      },
+      "title": "BusKindsValidationRequest",
+      "type": "object"
+    },
+    "BusKindsValidationResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "BusKindsValidationResponse",
+      "type": "object"
+    },
+    "ConfigOption": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/WireValue",
+          "default": null
+        },
+        "hidden": {
+          "default": false,
+          "title": "Hidden",
+          "type": "boolean"
+        },
+        "list_labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "List Labels",
+          "type": "array"
+        },
+        "list_values": {
+          "items": {
+            "$ref": "#/$defs/WireValue"
+          },
+          "title": "List Values",
+          "type": "array"
+        },
+        "option_description": {
+          "default": "",
+          "title": "Option Description",
+          "type": "string"
+        },
+        "option_friendly_name": {
+          "title": "Option Friendly Name",
+          "type": "string"
+        },
+        "option_name": {
+          "title": "Option Name",
+          "type": "string"
+        },
+        "option_type": {
+          "enum": [
+            "list",
+            "string"
+          ],
+          "title": "Option Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_name",
+        "option_friendly_name",
+        "option_type"
+      ],
+      "title": "ConfigOption",
+      "type": "object"
+    },
+    "I2CBusValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_BasicBus"
+        },
+        {
+          "$ref": "#/$defs/_KernelBusNumber"
+        },
+        {
+          "$ref": "#/$defs/_KernelAdapterName"
+        },
+        {
+          "$ref": "#/$defs/_KernelSerialMatch"
+        },
+        {
+          "$ref": "#/$defs/_FT232hBus"
+        },
+        {
+          "$ref": "#/$defs/_MCP2221Bus"
+        },
+        {
+          "$ref": "#/$defs/_IncompleteKernelBusNumber"
+        }
+      ]
+    },
+    "InstallLog": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "reset": {
+          "title": "Reset",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "offset",
+        "reset"
+      ],
+      "title": "InstallLog",
+      "type": "object"
+    },
+    "InstallStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output"
+        },
+        "percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Percent"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      },
+      "required": [
+        "percent",
+        "status",
+        "output"
+      ],
+      "title": "InstallStatus",
+      "type": "object"
+    },
+    "ModuleSettingValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/I2CBusValue"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ModuleValues": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WireValue"
+          },
+          "title": "Config",
+          "type": "object"
+        },
+        "settings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ModuleSettingValue"
+          },
+          "title": "Settings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "settings",
+        "config"
+      ],
+      "title": "ModuleValues",
+      "type": "object"
+    },
+    "ModuleValuesRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "default": "",
+          "title": "Module",
+          "type": "string"
+        },
+        "section": {
+          "default": "",
+          "title": "Section",
+          "type": "string"
+        }
+      },
+      "title": "ModuleValuesRequest",
+      "type": "object"
+    },
+    "Probe": {
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "port": {
+          "title": "Port",
+          "type": "string"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeProfile"
+            },
+            {
+              "$ref": "#/$defs/_EmptyProbeProfile"
+            }
+          ],
+          "title": "Profile"
+        },
+        "type": {
+          "$ref": "#/$defs/ProbeType"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "type",
+        "enabled",
+        "device",
+        "port",
+        "profile"
+      ],
+      "title": "Probe",
+      "type": "object"
+    },
+    "ProbeConfigField": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/WireValue",
+          "default": null
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "friendly_name": {
+          "title": "Friendly Name",
+          "type": "string"
+        },
+        "hidden": {
+          "default": false,
+          "title": "Hidden",
+          "type": "boolean"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "list_labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "List Labels",
+          "type": "array"
+        },
+        "list_values": {
+          "items": {
+            "$ref": "#/$defs/WireValue"
+          },
+          "title": "List Values",
+          "type": "array"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "const": "",
+              "type": "string"
+            }
+          ],
+          "default": "",
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "default": 0,
+          "title": "Min"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "default": 1,
+          "title": "Step"
+        },
+        "type": {
+          "$ref": "#/$defs/ProbeFieldType"
+        }
+      },
+      "required": [
+        "label",
+        "friendly_name",
+        "type"
+      ],
+      "title": "ProbeConfigField",
+      "type": "object"
+    },
+    "ProbeDevice": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WireValue"
+          },
+          "title": "Config",
+          "type": "object"
+        },
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "module": {
+          "title": "Module",
+          "type": "string"
+        },
+        "module_filename": {
+          "title": "Module Filename",
+          "type": "string"
+        },
+        "ports": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ports",
+          "type": "array"
+        }
+      },
+      "required": [
+        "device",
+        "module",
+        "module_filename",
+        "ports",
+        "config"
+      ],
+      "title": "ProbeDevice",
+      "type": "object"
+    },
+    "ProbeFieldType": {
+      "enum": [
+        "list",
+        "int",
+        "float",
+        "string",
+        "i2c_bus",
+        "probes_list",
+        "bt_address",
+        "usb_serial_device"
+      ],
+      "type": "string"
+    },
+    "ProbeMap": {
+      "additionalProperties": false,
+      "properties": {
+        "probe_devices": {
+          "items": {
+            "$ref": "#/$defs/ProbeDevice"
+          },
+          "title": "Probe Devices",
+          "type": "array"
+        },
+        "probe_info": {
+          "items": {
+            "$ref": "#/$defs/Probe"
+          },
+          "title": "Probe Info",
+          "type": "array"
+        }
+      },
+      "required": [
+        "probe_devices",
+        "probe_info"
+      ],
+      "title": "ProbeMap",
+      "type": "object"
+    },
+    "ProbeModuleCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "modules": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProbeModuleData"
+          },
+          "title": "Modules",
+          "type": "object"
+        },
+        "requires_install": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Requires Install",
+          "type": "object"
+        }
+      },
+      "required": [
+        "modules",
+        "requires_install"
+      ],
+      "title": "ProbeModuleCatalog",
+      "type": "object"
+    },
+    "ProbeModuleData": {
+      "additionalProperties": false,
+      "properties": {
+        "apt_dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Apt Dependencies",
+          "type": "array"
+        },
+        "command_list": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Command List",
+          "type": "array"
+        },
+        "default": {
+          "default": false,
+          "title": "Default",
+          "type": "boolean"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "device_specific": {
+          "$ref": "#/$defs/_ProbeDeviceMetadata"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "friendly_name": {
+          "title": "Friendly Name",
+          "type": "string"
+        },
+        "image": {
+          "default": "",
+          "title": "Image",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "py_dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Py Dependencies",
+          "type": "array"
+        },
+        "settings_dependencies": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SettingsDependency"
+          },
+          "title": "Settings Dependencies",
+          "type": "object"
+        }
+      },
+      "required": [
+        "friendly_name",
+        "filename",
+        "device_specific"
+      ],
+      "title": "ProbeModuleData",
+      "type": "object"
+    },
+    "ProbeProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "A": {
+          "title": "A",
+          "type": "number"
+        },
+        "B": {
+          "title": "B",
+          "type": "number"
+        },
+        "C": {
+          "title": "C",
+          "type": "number"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "A",
+        "B",
+        "C",
+        "id",
+        "name"
+      ],
+      "title": "ProbeProfile",
+      "type": "object"
+    },
+    "ProbeType": {
+      "enum": [
+        "Primary",
+        "Food",
+        "Aux"
+      ],
+      "type": "string"
+    },
+    "RowsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "rows": {
+          "items": {},
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows",
+        "error"
+      ],
+      "title": "RowsResult",
+      "type": "object"
+    },
+    "ScanRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "",
+          "title": "Kind",
+          "type": "string"
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pid"
+        },
+        "vid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vid"
+        }
+      },
+      "title": "ScanRequest",
+      "type": "object"
+    },
+    "ScanResult": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/_ScanGroup"
+          },
+          "title": "Groups",
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups",
+        "error"
+      ],
+      "title": "ScanResult",
+      "type": "object"
+    },
+    "SettingsDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/I2CBusValue"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "",
+          "title": "Default"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "friendly_name": {
+          "title": "Friendly Name",
+          "type": "string"
+        },
+        "hidden": {
+          "default": false,
+          "title": "Hidden",
+          "type": "boolean"
+        },
+        "options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Options",
+          "type": "object"
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pid"
+        },
+        "settings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Settings",
+          "type": "array"
+        },
+        "type": {
+          "default": "i2c_bus",
+          "enum": [
+            "usb_serial_device",
+            "mcp2221_serial",
+            "i2c_bus"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "vid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vid"
+        }
+      },
+      "required": [
+        "friendly_name",
+        "settings"
+      ],
+      "title": "SettingsDependency",
+      "type": "object"
+    },
+    "ThermoworksRow": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "num_channels": {
+          "minimum": 0,
+          "title": "Num Channels",
+          "type": "integer"
+        },
+        "serial": {
+          "title": "Serial",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "type",
+        "serial",
+        "num_channels"
+      ],
+      "title": "ThermoworksRow",
+      "type": "object"
+    },
+    "ThermoworksRowsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/ThermoworksRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows",
+        "error"
+      ],
+      "title": "ThermoworksRowsResult",
+      "type": "object"
+    },
+    "WireScalar": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "WireValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WireScalar"
+        },
+        {
+          "$ref": "#/$defs/I2CBusValue"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/WireValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/WireValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "WizardDraftRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clear": {
+          "default": false,
+          "title": "Clear",
+          "type": "boolean"
+        },
+        "display_config": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/WireValue"
+            },
+            "type": "object"
+          },
+          "title": "Display Config",
+          "type": "object"
+        },
+        "probe_map": {
+          "$ref": "#/$defs/ProbeMap"
+        },
+        "probes_units": {
+          "default": "F",
+          "title": "Probes Units",
+          "type": "string"
+        },
+        "selections": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/WizardSection"
+          },
+          "title": "Selections",
+          "type": "object"
+        },
+        "settings_dep_values": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ModuleSettingValue"
+            },
+            "type": "object"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/WizardSection"
+          },
+          "title": "Settings Dep Values",
+          "type": "object"
+        }
+      },
+      "title": "WizardDraftRequest",
+      "type": "object"
+    },
+    "WizardFinishRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "display_config": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/WireValue"
+            },
+            "type": "object"
+          },
+          "title": "Display Config",
+          "type": "object"
+        },
+        "probe_map": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeMap"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "probes_units": {
+          "default": "",
+          "title": "Probes Units",
+          "type": "string"
+        },
+        "selections": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/WizardSection"
+          },
+          "title": "Selections",
+          "type": "object"
+        },
+        "settings_dep_values": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ModuleSettingValue"
+            },
+            "type": "object"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/WizardSection"
+          },
+          "title": "Settings Dep Values",
+          "type": "object"
+        }
+      },
+      "title": "WizardFinishRequest",
+      "type": "object"
+    },
+    "WizardModuleData": {
+      "additionalProperties": false,
+      "properties": {
+        "apt_dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Apt Dependencies",
+          "type": "array"
+        },
+        "command_list": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Command List",
+          "type": "array"
+        },
+        "config": {
+          "items": {
+            "$ref": "#/$defs/ConfigOption"
+          },
+          "title": "Config",
+          "type": "array"
+        },
+        "default": {
+          "default": false,
+          "title": "Default",
+          "type": "boolean"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "filename": {
+          "default": "",
+          "title": "Filename",
+          "type": "string"
+        },
+        "friendly_name": {
+          "title": "Friendly Name",
+          "type": "string"
+        },
+        "image": {
+          "default": "",
+          "title": "Image",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "py_dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Py Dependencies",
+          "type": "array"
+        },
+        "settings_dependencies": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SettingsDependency"
+          },
+          "title": "Settings Dependencies",
+          "type": "object"
+        }
+      },
+      "required": [
+        "friendly_name",
+        "settings_dependencies"
+      ],
+      "title": "WizardModuleData",
+      "type": "object"
+    },
+    "WizardSection": {
+      "enum": [
+        "grillplatform",
+        "display",
+        "distance",
+        "probes"
+      ],
+      "type": "string"
+    },
+    "WizardState": {
+      "additionalProperties": false,
+      "properties": {
+        "board_probe_maps": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProbeMap"
+          },
+          "title": "Board Probe Maps",
+          "type": "object"
+        },
+        "control_mode": {
+          "title": "Control Mode",
+          "type": "string"
+        },
+        "display_config": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/WireValue"
+            },
+            "type": "object"
+          },
+          "title": "Display Config",
+          "type": "object"
+        },
+        "first_time_setup": {
+          "title": "First Time Setup",
+          "type": "boolean"
+        },
+        "has_draft": {
+          "title": "Has Draft",
+          "type": "boolean"
+        },
+        "modules_metadata": {
+          "$ref": "#/$defs/_WizardModulesMetadata"
+        },
+        "probe_map": {
+          "$ref": "#/$defs/ProbeMap"
+        },
+        "probe_profiles": {
+          "items": {
+            "$ref": "#/$defs/ProbeProfile"
+          },
+          "title": "Probe Profiles",
+          "type": "array"
+        },
+        "probes_units": {
+          "title": "Probes Units",
+          "type": "string"
+        },
+        "selections": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/WizardSection"
+          },
+          "title": "Selections",
+          "type": "object"
+        },
+        "settings_dep_values": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ModuleSettingValue"
+            },
+            "type": "object"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/WizardSection"
+          },
+          "title": "Settings Dep Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "modules_metadata",
+        "selections",
+        "settings_dep_values",
+        "display_config",
+        "probe_map",
+        "probe_profiles",
+        "probes_units",
+        "board_probe_maps",
+        "control_mode",
+        "first_time_setup",
+        "has_draft"
+      ],
+      "title": "WizardState",
+      "type": "object"
+    },
+    "_BasicBus": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "basic",
+          "default": "basic",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "_BasicBus",
+      "type": "object"
+    },
+    "_EmptyProbeProfile": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "_EmptyProbeProfile",
+      "type": "object"
+    },
+    "_FT232hBus": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ft232h",
+          "default": "ft232h",
+          "title": "Kind",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "title": "_FT232hBus",
+      "type": "object"
+    },
+    "_IncompleteKernelBusNumber": {
+      "additionalProperties": false,
+      "description": "The one intentionally incomplete bus value a saved wizard draft carries.",
+      "properties": {
+        "bus_num": {
+          "title": "Bus Num",
+          "type": "null"
+        },
+        "kind": {
+          "const": "kernel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "bus_num"
+      ],
+      "title": "_IncompleteKernelBusNumber",
+      "type": "object"
+    },
+    "_KernelAdapterName": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "minLength": 1,
+          "title": "Adapter",
+          "type": "string"
+        },
+        "kind": {
+          "const": "kernel",
+          "default": "kernel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "adapter"
+      ],
+      "title": "_KernelAdapterName",
+      "type": "object"
+    },
+    "_KernelBusNumber": {
+      "additionalProperties": false,
+      "properties": {
+        "bus_num": {
+          "minimum": 0,
+          "title": "Bus Num",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "kernel",
+          "default": "kernel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bus_num"
+      ],
+      "title": "_KernelBusNumber",
+      "type": "object"
+    },
+    "_KernelSerialMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "kernel",
+          "default": "kernel",
+          "title": "Kind",
+          "type": "string"
+        },
+        "serial": {
+          "minLength": 1,
+          "title": "Serial",
+          "type": "string"
+        }
+      },
+      "required": [
+        "serial"
+      ],
+      "title": "_KernelSerialMatch",
+      "type": "object"
+    },
+    "_MCP2221Bus": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "mcp2221",
+          "default": "mcp2221",
+          "title": "Kind",
+          "type": "string"
+        },
+        "serial": {
+          "default": "",
+          "title": "Serial",
+          "type": "string"
+        }
+      },
+      "title": "_MCP2221Bus",
+      "type": "object"
+    },
+    "_ProbeDeviceMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "items": {
+            "$ref": "#/$defs/ProbeConfigField"
+          },
+          "title": "Config",
+          "type": "array"
+        },
+        "ports": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ports",
+          "type": "array"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ports",
+        "type",
+        "config"
+      ],
+      "title": "_ProbeDeviceMetadata",
+      "type": "object"
+    },
+    "_ScanGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/_ScanItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "items"
+      ],
+      "title": "_ScanGroup",
+      "type": "object"
+    },
+    "_ScanItem": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "title": "_ScanItem",
+      "type": "object"
+    },
+    "_WizardModulesMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "display": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WizardModuleData"
+          },
+          "title": "Display",
+          "type": "object"
+        },
+        "distance": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WizardModuleData"
+          },
+          "title": "Distance",
+          "type": "object"
+        },
+        "grillplatform": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WizardModuleData"
+          },
+          "title": "Grillplatform",
+          "type": "object"
+        },
+        "probes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProbeModuleData"
+          },
+          "title": "Probes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "grillplatform",
+        "display",
+        "distance",
+        "probes"
+      ],
+      "title": "_WizardModulesMetadata",
+      "type": "object"
+    }
+  },
+  "title": "PiFire wizard web contracts"
+}

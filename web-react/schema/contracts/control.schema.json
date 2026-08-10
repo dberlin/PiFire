@@ -1,0 +1,1573 @@
+{
+  "$defs": {
+    "AddPelletProfileData": {
+      "additionalProperties": false,
+      "properties": {
+        "add_and_load": {
+          "title": "Add And Load",
+          "type": "boolean"
+        },
+        "brand_name": {
+          "title": "Brand Name",
+          "type": "string"
+        },
+        "comments": {
+          "title": "Comments",
+          "type": "string"
+        },
+        "rating": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Rating",
+          "type": "integer"
+        },
+        "wood_type": {
+          "title": "Wood Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "brand_name",
+        "wood_type",
+        "rating",
+        "comments",
+        "add_and_load"
+      ],
+      "title": "AddPelletProfileData",
+      "type": "object"
+    },
+    "AddPelletProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "add_profile",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/AddPelletProfileData"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "AddPelletProfileRequest",
+      "type": "object"
+    },
+    "CommandRequest": {
+      "$ref": "#/$defs/_CommandRequestUnion",
+      "title": "CommandRequest"
+    },
+    "ControlPatchRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "notify_data": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/NotifyEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notify Data"
+        },
+        "notify_updates": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/NotifyUpdate"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notify Updates"
+        }
+      },
+      "title": "ControlPatchRequest",
+      "type": "object"
+    },
+    "ControlPatchResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "control": {
+          "enum": [
+            "success",
+            "error"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "success",
+            "error"
+          ],
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "control",
+        "result",
+        "message"
+      ],
+      "title": "ControlPatchResponse",
+      "type": "object"
+    },
+    "DeletePelletLogRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete_log",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/PelletLogReference"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "DeletePelletLogRequest",
+      "type": "object"
+    },
+    "DeletePelletProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete_profile",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/PelletProfileReference"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "DeletePelletProfileRequest",
+      "type": "object"
+    },
+    "EditPelletBrandsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "edit_brands",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/PelletVocabularyEdit"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "EditPelletBrandsRequest",
+      "type": "object"
+    },
+    "EditPelletProfileData": {
+      "additionalProperties": false,
+      "properties": {
+        "brand_name": {
+          "title": "Brand Name",
+          "type": "string"
+        },
+        "comments": {
+          "title": "Comments",
+          "type": "string"
+        },
+        "profile": {
+          "title": "Profile",
+          "type": "string"
+        },
+        "rating": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Rating",
+          "type": "integer"
+        },
+        "wood_type": {
+          "title": "Wood Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "brand_name",
+        "wood_type",
+        "rating",
+        "comments",
+        "profile"
+      ],
+      "title": "EditPelletProfileData",
+      "type": "object"
+    },
+    "EditPelletProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "edit_profile",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/EditPelletProfileData"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "EditPelletProfileRequest",
+      "type": "object"
+    },
+    "EditPelletWoodsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "edit_woods",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/PelletVocabularyEdit"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "EditPelletWoodsRequest",
+      "type": "object"
+    },
+    "EmptyPelletActionData": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "EmptyPelletActionData",
+      "type": "object"
+    },
+    "FiniteNumber": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "GrillMode": {
+      "enum": [
+        "startup",
+        "smoke",
+        "shutdown",
+        "stop",
+        "monitor",
+        "reignite",
+        "manual"
+      ],
+      "type": "string"
+    },
+    "HopperCheckRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "hopper_check",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/EmptyPelletActionData"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "HopperCheckRequest",
+      "type": "object"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "LoadPelletProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "load_profile",
+          "title": "Action",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/PelletProfileReference"
+        }
+      },
+      "required": [
+        "action",
+        "data"
+      ],
+      "title": "LoadPelletProfileRequest",
+      "type": "object"
+    },
+    "ManualOutput": {
+      "enum": [
+        "power",
+        "igniter",
+        "auger",
+        "fan"
+      ],
+      "type": "string"
+    },
+    "ManualOutputCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "default": "toggle",
+          "enum": [
+            "toggle",
+            "true",
+            "false"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "operation": {
+          "const": "manual_output",
+          "title": "Operation",
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/ManualOutput"
+        }
+      },
+      "required": [
+        "operation",
+        "output"
+      ],
+      "title": "ManualOutputCommandRequest",
+      "type": "object"
+    },
+    "ManualPwmCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "duty": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Duty",
+          "type": "integer"
+        },
+        "operation": {
+          "const": "manual_pwm",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "duty"
+      ],
+      "title": "ManualPwmCommandRequest",
+      "type": "object"
+    },
+    "NotifyEntry": {
+      "additionalProperties": true,
+      "properties": {
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        },
+        "eta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "keep_warm": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Warm"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "reignite": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reignite"
+        },
+        "req": {
+          "title": "Req",
+          "type": "boolean"
+        },
+        "shutdown": {
+          "title": "Shutdown",
+          "type": "boolean"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "triggered": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Triggered"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "type",
+        "req",
+        "shutdown"
+      ],
+      "title": "NotifyEntry",
+      "type": "object"
+    },
+    "NotifyListResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/$defs/NotifyEntry"
+          },
+          "title": "Data",
+          "type": "array"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "OK",
+            "ERROR"
+          ],
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result",
+        "message",
+        "data"
+      ],
+      "title": "NotifyListResponse",
+      "type": "object"
+    },
+    "NotifyUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "type",
+        "fields"
+      ],
+      "title": "NotifyUpdate",
+      "type": "object"
+    },
+    "PelletActionRequest": {
+      "$ref": "#/$defs/_PelletActionUnion",
+      "title": "PelletActionRequest"
+    },
+    "PelletActionResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "default": null,
+          "title": "Data",
+          "type": "null"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "result": {
+          "enum": [
+            "OK",
+            "Error"
+          ],
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "PelletActionResponse",
+      "type": "object"
+    },
+    "PelletCurrent": {
+      "additionalProperties": false,
+      "properties": {
+        "date_loaded": {
+          "title": "Date Loaded",
+          "type": "string"
+        },
+        "est_usage": {
+          "title": "Est Usage",
+          "type": "number"
+        },
+        "hopper_level": {
+          "title": "Hopper Level",
+          "type": "integer"
+        },
+        "pelletid": {
+          "title": "Pelletid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pelletid",
+        "hopper_level",
+        "date_loaded",
+        "est_usage"
+      ],
+      "title": "PelletCurrent",
+      "type": "object"
+    },
+    "PelletDbSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "archive": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PelletProfile"
+          },
+          "title": "Archive",
+          "type": "object"
+        },
+        "brands": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Brands",
+          "type": "array"
+        },
+        "current": {
+          "$ref": "#/$defs/PelletCurrent"
+        },
+        "lastupdated": {
+          "$ref": "#/$defs/PelletLastUpdated"
+        },
+        "log": {
+          "patternProperties": {
+            "^\\d+$": {
+              "$ref": "#/$defs/PelletLogEntry"
+            }
+          },
+          "title": "Log",
+          "type": "object"
+        },
+        "schema_version": {
+          "default": 3,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "woods": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Woods",
+          "type": "array"
+        }
+      },
+      "required": [
+        "current",
+        "archive",
+        "log",
+        "brands",
+        "woods",
+        "lastupdated"
+      ],
+      "title": "PelletDbSchema",
+      "type": "object"
+    },
+    "PelletLastUpdated": {
+      "additionalProperties": false,
+      "properties": {
+        "time": {
+          "title": "Time",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "time"
+      ],
+      "title": "PelletLastUpdated",
+      "type": "object"
+    },
+    "PelletLogEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "deleted": {
+          "title": "Deleted",
+          "type": "boolean"
+        },
+        "pelletid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pelletid"
+        }
+      },
+      "required": [
+        "pelletid",
+        "deleted"
+      ],
+      "title": "PelletLogEntry",
+      "type": "object"
+    },
+    "PelletLogReference": {
+      "additionalProperties": false,
+      "properties": {
+        "log_item": {
+          "title": "Log Item",
+          "type": "string"
+        }
+      },
+      "required": [
+        "log_item"
+      ],
+      "title": "PelletLogReference",
+      "type": "object"
+    },
+    "PelletProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "brand": {
+          "title": "Brand",
+          "type": "string"
+        },
+        "comments": {
+          "title": "Comments",
+          "type": "string"
+        },
+        "rating": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Rating",
+          "type": "integer"
+        },
+        "wood": {
+          "title": "Wood",
+          "type": "string"
+        }
+      },
+      "required": [
+        "brand",
+        "wood",
+        "rating",
+        "comments"
+      ],
+      "title": "PelletProfile",
+      "type": "object"
+    },
+    "PelletProfileFields": {
+      "additionalProperties": false,
+      "properties": {
+        "brand_name": {
+          "title": "Brand Name",
+          "type": "string"
+        },
+        "comments": {
+          "title": "Comments",
+          "type": "string"
+        },
+        "rating": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Rating",
+          "type": "integer"
+        },
+        "wood_type": {
+          "title": "Wood Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "brand_name",
+        "wood_type",
+        "rating",
+        "comments"
+      ],
+      "title": "PelletProfileFields",
+      "type": "object"
+    },
+    "PelletProfileReference": {
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "title": "Profile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "title": "PelletProfileReference",
+      "type": "object"
+    },
+    "PelletRestData": {
+      "additionalProperties": false,
+      "properties": {
+        "pellets": {
+          "$ref": "#/$defs/PelletDbSchema"
+        },
+        "uuid": {
+          "title": "Uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uuid",
+        "pellets"
+      ],
+      "title": "PelletRestData",
+      "type": "object"
+    },
+    "PelletRestResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/PelletRestData"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "result": {
+          "enum": [
+            "OK",
+            "Error"
+          ],
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "result"
+      ],
+      "title": "PelletRestResponse",
+      "type": "object"
+    },
+    "PelletSocketPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "pellets": {
+          "$ref": "#/$defs/PelletDbSchema"
+        },
+        "uuid": {
+          "title": "Uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uuid",
+        "pellets"
+      ],
+      "title": "PelletSocketPayload",
+      "type": "object"
+    },
+    "PelletVocabularyEdit": {
+      "additionalProperties": false,
+      "properties": {
+        "delete_brand": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delete Brand"
+        },
+        "delete_wood": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delete Wood"
+        },
+        "new_brand": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Brand"
+        },
+        "new_wood": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Wood"
+        }
+      },
+      "title": "PelletVocabularyEdit",
+      "type": "object"
+    },
+    "PrimeCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "grams": {
+          "minimum": 0,
+          "title": "Grams",
+          "type": "integer"
+        },
+        "next_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GrillMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operation": {
+          "const": "prime",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "grams"
+      ],
+      "title": "PrimeCommandRequest",
+      "type": "object"
+    },
+    "SetModeCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/GrillMode"
+        },
+        "operation": {
+          "const": "set_mode",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "mode"
+      ],
+      "title": "SetModeCommandRequest",
+      "type": "object"
+    },
+    "SetPModeCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "set_p_mode",
+          "title": "Operation",
+          "type": "string"
+        },
+        "value": {
+          "maximum": 9,
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation",
+        "value"
+      ],
+      "title": "SetPModeCommandRequest",
+      "type": "object"
+    },
+    "SetPrimarySetpointCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "set_primary_setpoint",
+          "title": "Operation",
+          "type": "string"
+        },
+        "temperature": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "operation",
+        "temperature"
+      ],
+      "title": "SetPrimarySetpointCommandRequest",
+      "type": "object"
+    },
+    "SetSmokePlusCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "operation": {
+          "const": "set_smoke_plus",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "enabled"
+      ],
+      "title": "SetSmokePlusCommandRequest",
+      "type": "object"
+    },
+    "SetUnitsCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "set_units",
+          "title": "Operation",
+          "type": "string"
+        },
+        "units": {
+          "enum": [
+            "F",
+            "C"
+          ],
+          "title": "Units",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "units"
+      ],
+      "title": "SetUnitsCommandRequest",
+      "type": "object"
+    },
+    "SystemCommand": {
+      "enum": [
+        "reboot",
+        "shutdown",
+        "restart"
+      ],
+      "type": "string"
+    },
+    "SystemCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/SystemCommand"
+        },
+        "operation": {
+          "const": "system",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "command"
+      ],
+      "title": "SystemCommandRequest",
+      "type": "object"
+    },
+    "TimerKeepWarmCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "operation": {
+          "const": "timer_keep_warm",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "enabled"
+      ],
+      "title": "TimerKeepWarmCommandRequest",
+      "type": "object"
+    },
+    "TimerOptionsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "keepWarm": {
+          "title": "Keepwarm",
+          "type": "boolean"
+        },
+        "shutdown": {
+          "title": "Shutdown",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "shutdown",
+        "keepWarm"
+      ],
+      "title": "TimerOptionsPayload",
+      "type": "object"
+    },
+    "TimerPauseCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "timer_pause",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "TimerPauseCommandRequest",
+      "type": "object"
+    },
+    "TimerShutdownCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "operation": {
+          "const": "timer_shutdown",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "enabled"
+      ],
+      "title": "TimerShutdownCommandRequest",
+      "type": "object"
+    },
+    "TimerStartCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "timer_start",
+          "title": "Operation",
+          "type": "string"
+        },
+        "seconds": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "operation",
+        "seconds"
+      ],
+      "title": "TimerStartCommandRequest",
+      "type": "object"
+    },
+    "TimerStartWithOptionsCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "timer_start_with_options",
+          "title": "Operation",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/TimerOptionsPayload"
+        },
+        "seconds": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "operation",
+        "seconds",
+        "options"
+      ],
+      "title": "TimerStartWithOptionsCommandRequest",
+      "type": "object"
+    },
+    "TimerStopCommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "timer_stop",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "TimerStopCommandRequest",
+      "type": "object"
+    },
+    "WledActionResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "profiles": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profiles"
+        },
+        "profiles_pushed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profiles Pushed"
+        },
+        "result": {
+          "enum": [
+            "success",
+            "error"
+          ],
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result",
+        "message"
+      ],
+      "title": "WledActionResponse",
+      "type": "object"
+    },
+    "WledDevice": {
+      "additionalProperties": true,
+      "properties": {
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "led_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Led Count"
+        },
+        "mac": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mac"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "online": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Online"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        },
+        "product": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name",
+        "ip"
+      ],
+      "title": "WledDevice",
+      "type": "object"
+    },
+    "WledDiscoverResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "devices": {
+          "items": {
+            "$ref": "#/$defs/WledDevice"
+          },
+          "title": "Devices",
+          "type": "array"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "success",
+            "error"
+          ],
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result",
+        "message",
+        "devices"
+      ],
+      "title": "WledDiscoverResponse",
+      "type": "object"
+    },
+    "WledPushProfilesRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "device_address": {
+          "title": "Device Address",
+          "type": "string"
+        },
+        "profile_numbers": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Profile Numbers",
+          "type": "object"
+        }
+      },
+      "required": [
+        "device_address"
+      ],
+      "title": "WledPushProfilesRequest",
+      "type": "object"
+    },
+    "WledTestProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "device_address": {
+          "title": "Device Address",
+          "type": "string"
+        },
+        "profile_number": {
+          "default": 1,
+          "title": "Profile Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "device_address"
+      ],
+      "title": "WledTestProfileRequest",
+      "type": "object"
+    },
+    "_CommandRequestUnion": {
+      "discriminator": {
+        "mapping": {
+          "manual_output": "#/$defs/ManualOutputCommandRequest",
+          "manual_pwm": "#/$defs/ManualPwmCommandRequest",
+          "prime": "#/$defs/PrimeCommandRequest",
+          "set_mode": "#/$defs/SetModeCommandRequest",
+          "set_p_mode": "#/$defs/SetPModeCommandRequest",
+          "set_primary_setpoint": "#/$defs/SetPrimarySetpointCommandRequest",
+          "set_smoke_plus": "#/$defs/SetSmokePlusCommandRequest",
+          "set_units": "#/$defs/SetUnitsCommandRequest",
+          "system": "#/$defs/SystemCommandRequest",
+          "timer_keep_warm": "#/$defs/TimerKeepWarmCommandRequest",
+          "timer_pause": "#/$defs/TimerPauseCommandRequest",
+          "timer_shutdown": "#/$defs/TimerShutdownCommandRequest",
+          "timer_start": "#/$defs/TimerStartCommandRequest",
+          "timer_start_with_options": "#/$defs/TimerStartWithOptionsCommandRequest",
+          "timer_stop": "#/$defs/TimerStopCommandRequest"
+        },
+        "propertyName": "operation"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SetModeCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/SetPrimarySetpointCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/SetSmokePlusCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/SetPModeCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/PrimeCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/TimerStartCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/TimerStartWithOptionsCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/TimerPauseCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/TimerStopCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/TimerShutdownCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/TimerKeepWarmCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/SetUnitsCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/ManualOutputCommandRequest"
+        },
+        {
+          "$ref": "#/$defs/ManualPwmCommandRequest"
+        }
+      ]
+    },
+    "_PelletActionUnion": {
+      "discriminator": {
+        "mapping": {
+          "add_profile": "#/$defs/AddPelletProfileRequest",
+          "delete_log": "#/$defs/DeletePelletLogRequest",
+          "delete_profile": "#/$defs/DeletePelletProfileRequest",
+          "edit_brands": "#/$defs/EditPelletBrandsRequest",
+          "edit_profile": "#/$defs/EditPelletProfileRequest",
+          "edit_woods": "#/$defs/EditPelletWoodsRequest",
+          "hopper_check": "#/$defs/HopperCheckRequest",
+          "load_profile": "#/$defs/LoadPelletProfileRequest"
+        },
+        "propertyName": "action"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LoadPelletProfileRequest"
+        },
+        {
+          "$ref": "#/$defs/HopperCheckRequest"
+        },
+        {
+          "$ref": "#/$defs/EditPelletBrandsRequest"
+        },
+        {
+          "$ref": "#/$defs/EditPelletWoodsRequest"
+        },
+        {
+          "$ref": "#/$defs/AddPelletProfileRequest"
+        },
+        {
+          "$ref": "#/$defs/EditPelletProfileRequest"
+        },
+        {
+          "$ref": "#/$defs/DeletePelletProfileRequest"
+        },
+        {
+          "$ref": "#/$defs/DeletePelletLogRequest"
+        }
+      ]
+    }
+  },
+  "title": "PiFire control web contracts"
+}

@@ -6,7 +6,7 @@ from common.schema_digest import shape_digest
 
 #: Regenerate with:
 #:   uv run python -m common.schema_digest common.web_contracts.control:PelletDbSchema
-PELLETDB_SHAPE_DIGEST = "59fcceaa5042afd8bd36d22b9849526a2aca5de802d5f94550656a8e5e1a21c9"
+PELLETDB_SHAPE_DIGEST = "3b8813708c3b7f28bf96bedcba7165c9ad0b5c05cfa5815032bedb98ceb6ea67"
 
 _MESSAGE = """The modeled pellet-database shape changed. Two things to do:
 

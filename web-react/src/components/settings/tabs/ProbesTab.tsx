@@ -39,7 +39,7 @@ function blockedModules(
 
 export function ProbesTab() {
   const { settings, mode } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
-  const catalog = useLoaderData() as ProbeModuleCatalog;
+  const catalog = useLoaderData<ProbeModuleCatalog>();
   const revalidator = useRevalidator();
   const queryClient = useQueryClient();
 

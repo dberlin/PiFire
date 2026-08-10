@@ -112,9 +112,16 @@ describe("readLiveProbeMap / readLiveProfiles", () => {
   });
 
   it("defaults each half independently when only one is present", () => {
-    const settings = { probe_settings: { probe_map: { probe_devices: [{ device: "A" }] } } };
+    const device = {
+      device: "A",
+      module: "prototype",
+      module_filename: "prototype",
+      ports: [],
+      config: {},
+    };
+    const settings = { probe_settings: { probe_map: { probe_devices: [device] } } };
     expect(readLiveProbeMap(settings as never)).toEqual({
-      probe_devices: [{ device: "A" }],
+      probe_devices: [device],
       probe_info: [],
     });
   });

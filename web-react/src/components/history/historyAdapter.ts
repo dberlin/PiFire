@@ -28,8 +28,10 @@ export interface ChartInput {
  * dataset). Callers render an empty state for that instead of mounting a
  * chart over nothing.
  */
-export function hasPlottableHistory(data: HistoryChartData): boolean {
-  return data.time_labels.length > 0 && data.chart_data.some((ds) => ds.data.length > 0);
+export function hasPlottableHistory(
+  data: Pick<HistoryChartData, "time_labels" | "chart_data">,
+): boolean {
+  return data.time_labels.length > 0 && data.chart_data.some((dataset) => dataset.data.length > 0);
 }
 
 /**
@@ -56,7 +58,9 @@ function valuesFor(dataset: HistoryDataset, length: number): (number | null)[] {
  * Settings, and HistoryChart has no per-series visibility toggle to defer the
  * decision to.
  */
-export function toChartInput(data: HistoryChartData): ChartInput {
+export function toChartInput(
+  data: Pick<HistoryChartData, "time_labels" | "chart_data">,
+): ChartInput {
   const times = data.time_labels.map((ms) => ms / MS_PER_SECOND);
   const series = data.chart_data
     .filter((ds) => !ds.hidden)

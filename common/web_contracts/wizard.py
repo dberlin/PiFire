@@ -10,7 +10,6 @@ from .base import FiniteFloat, WireModel
 
 
 type WireScalar = FiniteFloat | int | bool | str
-type WireValue = WireScalar | None | list[WireValue] | dict[str, WireValue]
 type WizardSection = Literal["grillplatform", "display", "distance", "probes"]
 type ProbeType = Literal["Primary", "Food", "Aux"]
 type ProbeFieldType = Literal[
@@ -32,8 +31,9 @@ class _IncompleteKernelBusNumber(WireModel):
     bus_num: None
 
 
-type I2cBusValue = I2CBusConfig | _IncompleteKernelBusNumber
-type ModuleSettingValue = I2cBusValue | str | None
+type I2CBusValue = I2CBusConfig | _IncompleteKernelBusNumber
+type WireValue = WireScalar | I2CBusValue | None | list[WireValue] | dict[str, WireValue]
+type ModuleSettingValue = I2CBusValue | str | None
 
 
 class SettingsDependency(WireModel):
@@ -41,7 +41,7 @@ class SettingsDependency(WireModel):
     description: str = ""
     type: Literal["usb_serial_device", "mcp2221_serial", "i2c_bus"] = "i2c_bus"
     options: dict[str, str] = Field(default_factory=dict)
-    default: I2cBusValue | str = ""
+    default: I2CBusValue | str = ""
     vid: str | int | None = None
     pid: str | int | None = None
     hidden: bool = False

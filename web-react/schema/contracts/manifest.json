@@ -1,6 +1,10 @@
 {
   "../settings.schema.json": "../settings/settingsTypes.gen.ts",
+  "content.schema.json": "content.gen.ts",
+  "control.schema.json": "control.gen.ts",
   "controller.schema.json": "../settings/controllerTypes.gen.ts",
   "core.schema.json": "core.gen.ts",
-  "learning.schema.json": "learning.gen.ts"
+  "learning.schema.json": "learning.gen.ts",
+  "operations.schema.json": "operations.gen.ts",
+  "wizard.schema.json": "wizard.gen.ts"
 }

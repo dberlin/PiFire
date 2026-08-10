@@ -189,7 +189,9 @@ function EditableStepRow({
         label="Mode"
         value={draft.mode}
         options={MODE_OPTIONS}
-        onChange={(v) => set("mode", v)}
+        onChange={(value) => {
+          if (value === "Smoke" || value === "Hold") set("mode", value);
+        }}
       />
 
       {draft.mode === "Hold" && (

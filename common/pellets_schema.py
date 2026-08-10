@@ -28,7 +28,6 @@ from common.common import write_log
 from common.web_contracts import control as control_contracts
 
 
-
 def _migrate_pellets_to_v2(pelletdb: dict) -> bool:
     """Carry a version 1 database to version 2. Idempotent.
 
@@ -86,11 +85,17 @@ def _migrate_pellets_to_v2(pelletdb: dict) -> bool:
     return changed
 
 
+def _migrate_pellets_to_v3(pelletdb: dict) -> bool:
+    """Record finite usage enforcement; valid JSON cannot store non-finite numbers."""
+    return False
+
+
 #: The shape migrations, in ascending order, as (target_version, migration).
 #: A step's number is the version the database is AT once it has run; each
 #: callable mutates in place and returns True if it changed anything.
 _PELLET_MIGRATIONS = [
     (2, _migrate_pellets_to_v2),
+    (3, _migrate_pellets_to_v3),
 ]
 
 

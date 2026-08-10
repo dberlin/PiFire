@@ -71,7 +71,7 @@ def validate_json(model, *, fallback_field=None):
         return model.model_validate(json_body(), strict=True), None
     except ValidationError as exc:
         location = exc.errors()[0]["loc"]
-        field = next((part for part in reversed(location) if isinstance(part, str)), fallback_field)
+        field = next((part for part in location if isinstance(part, str)), fallback_field)
         return None, error("bad_request", 400, field=field or fallback_field)
 
 
@@ -185,10 +185,7 @@ def tuner_coefficients():
     if payload is None:
         assert invalid is not None
         return invalid
-    by_segment = {
-        point.segment: (float(point.temp), float(point.trohms))
-        for point in payload.points
-    }
+    by_segment = {point.segment: (float(point.temp), float(point.trohms)) for point in payload.points}
 
     units = read_settings()["globals"]["units"]
     (high_t, high_r) = by_segment["High"]

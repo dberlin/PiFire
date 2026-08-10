@@ -1,4 +1,4 @@
-import type { ProbeDataPayload } from "../contracts/core.gen"
+import type { ProbeDataPayload } from "../contracts/core.gen";
 import type { NotifyUpdate } from "../contracts/control.gen";
 import { postNotifyUpdates } from "./notifyApi";
 
@@ -41,7 +41,7 @@ export function readTargetEdit(probe: ProbeDataPayload): TargetEdit {
 // whatever the user set. (Flask's cancelNotify, dash_default.js:807-813, clears
 // every entry sharing the label and wipes the limit alerts as a side effect;
 // that is not ported.)
-export function targetEditFields(edit: TargetEdit): Record<string, unknown> {
+export function targetEditFields(edit: TargetEdit): NotifyUpdate["fields"] {
   if (!edit.enabled) return { req: false, target: 0, shutdown: false, keep_warm: false };
   return {
     req: true,
@@ -150,7 +150,7 @@ export function limitEditFields(
   kind: LimitKind,
   edit: LimitEdit,
   currentTemp: number,
-): Record<string, unknown> {
+): NotifyUpdate["fields"] {
   const condition = LIMIT_CONDITION[kind];
   if (!edit.enabled) {
     return {

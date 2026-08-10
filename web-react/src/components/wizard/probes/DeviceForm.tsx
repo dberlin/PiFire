@@ -1,16 +1,16 @@
-import type { ProbeModuleData } from "../../../helpers/contracts/wizard.gen";
+import type { Config, ProbeModuleData, WireValue } from "../../../helpers/contracts/wizard.gen";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { DeviceConfigField } from "./DeviceConfigField";
 
 export interface DeviceFormProps {
   mode: "add" | "edit";
   moduleData: ProbeModuleData;
-  values: Record<string, unknown>;
+  values: Config;
   nameValue: string;
   availableProbes: string[];
   baseUrl: string;
   onNameChange: (name: string) => void;
-  onFieldChange: (label: string, value: unknown) => void;
+  onFieldChange: (label: string, value: WireValue) => void;
   onSubmit: () => void;
   onCancel: () => void;
   error: string | null;

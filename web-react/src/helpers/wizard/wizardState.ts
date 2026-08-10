@@ -1,8 +1,10 @@
 import type {
-  I2cBusValue,
+  Config,
+  ModuleSettingValue,
   ProbeMap,
   WizardSection,
   WizardState,
+  WireValue,
 } from "../contracts/wizard.gen";
 import type { WizardWorking } from "./wizardTypes";
 
@@ -28,7 +30,7 @@ export function setDepValue(
   w: WizardWorking,
   section: WizardSection,
   key: string,
-  value: string | I2cBusValue | null,
+  value: ModuleSettingValue,
 ): WizardWorking {
   return {
     ...w,
@@ -39,7 +41,7 @@ export function setDepValue(
   };
 }
 
-export function displayConfigFor(w: WizardWorking, module: string): Record<string, unknown> {
+export function displayConfigFor(w: WizardWorking, module: string): Config {
   return w.display_config[module] ?? {};
 }
 
@@ -47,7 +49,7 @@ export function setDisplayConfig(
   w: WizardWorking,
   module: string,
   optionName: string,
-  value: unknown,
+  value: WireValue,
 ): WizardWorking {
   return {
     ...w,
@@ -78,7 +80,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 export function setSectionDepValues(
   w: WizardWorking,
   section: WizardSection,
-  values: Record<string, string | I2cBusValue | null>,
+  values: Record<string, ModuleSettingValue>,
 ): WizardWorking {
   return {
     ...w,

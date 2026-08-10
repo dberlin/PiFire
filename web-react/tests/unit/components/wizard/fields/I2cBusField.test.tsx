@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I2cBusField } from "../../../../../src/components/wizard/fields/I2cBusField";
 import { allStylesheets, classesStylingButtons } from "../../../../../src/helpers/cssCoverage";
-import type { I2cBusValue } from "../../../../../src/helpers/contracts/wizard.gen";
+import type { I2CBusValue } from "../../../../../src/helpers/contracts/wizard.gen";
 
 const dep = { friendly_name: "I2C Bus", settings: [], type: "i2c_bus" as const };
 const noScan = () => Promise.resolve({ groups: [], error: null });
 
-function renderField(value: I2cBusValue, onChange = rs.fn()) {
+function renderField(
+  value: I2CBusValue & { kind: NonNullable<I2CBusValue["kind"]> },
+  onChange = rs.fn(),
+) {
   render(<I2cBusField dep={dep} value={value} onChange={onChange} onScan={noScan} />);
   return onChange;
 }
@@ -79,6 +82,7 @@ describe("I2cBusField", () => {
             groups: [
               { title: "By Adapter Name", items: [{ value: "CP2112", label: "CP2112 (bus 7)" }] },
             ],
+            error: null,
           })
         }
       />,
@@ -103,6 +107,7 @@ describe("I2cBusField", () => {
                 items: [{ value: "7", label: "CP2112 SMBus Bridge (bus 7)" }],
               },
             ],
+            error: null,
           })
         }
       />,
@@ -127,6 +132,7 @@ describe("I2cBusField", () => {
                 items: [{ value: "AB12", label: "CP2112 SMBus Bridge [AB12]" }],
               },
             ],
+            error: null,
           })
         }
       />,
@@ -151,6 +157,7 @@ describe("I2cBusField", () => {
                 items: [{ value: "ftdi://ftdi:232h:FT9/1", label: "FT232H #1" }],
               },
             ],
+            error: null,
           })
         }
       />,
@@ -170,6 +177,7 @@ describe("I2cBusField", () => {
         onScan={() =>
           Promise.resolve({
             groups: [{ title: "MCP2221 Devices", items: [{ value: "XY99", label: "XY99" }] }],
+            error: null,
           })
         }
       />,

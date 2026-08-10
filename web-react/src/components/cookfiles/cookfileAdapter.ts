@@ -1,8 +1,4 @@
-import type {
-  CookFileChartData,
-  HistoryAnnotation,
-  HistoryChartData,
-} from "../../helpers/contracts/content.gen";
+import type { CookFileChartData, HistoryAnnotation } from "../../helpers/contracts/content.gen";
 import { type ChartInput, hasPlottableHistory, toChartInput } from "../history/historyAdapter";
 
 /**
@@ -28,20 +24,16 @@ export function toCookChartInput(data: CookFileChartData): ChartInput | null {
   if (times.length === 0) return null;
   if (!hasNumericTimes(times)) return null;
 
-  const asHistory = {
-    time_labels: times as number[],
-    chart_data: data.chart_data,
-  } as HistoryChartData;
-
-  if (!hasPlottableHistory(asHistory)) return null;
-  return toChartInput(asHistory);
+  const chartData = { time_labels: times, chart_data: data.chart_data };
+  if (!hasPlottableHistory(chartData)) return null;
+  return toChartInput(chartData);
 }
 
 /** Whether every x value is a finite number. False means a pre-v1.5 archive
  * carrying display strings, which the caller reports as "needs repair" rather
  * than as "no data". */
-export function hasNumericTimes(times: unknown[]): boolean {
-  return times.every((t) => typeof t === "number" && Number.isFinite(t));
+export function hasNumericTimes(times: (number | string)[]): times is number[] {
+  return times.every((time) => typeof time === "number" && Number.isFinite(time));
 }
 
 /** Annotations arrive as a DICT keyed `event_<n>` (common/app.py
@@ -49,11 +41,16 @@ export function hasNumericTimes(times: unknown[]): boolean {
  * x axis is epoch SECONDS -- the same conversion toChartInput does for the
  * data, applied to the markers so they land on the right samples. */
 export function toChartAnnotations(
-  annotations: Record<string, HistoryAnnotation>,
+  annotations: CookFileChartData["annotations"],
 ): HistoryAnnotation[] {
-  return Object.values(annotations).map((a) => ({
-    ...a,
-    xMin: a.xMin / 1000,
-    xMax: a.xMax / 1000,
-  }));
+  const converted: HistoryAnnotation[] = [];
+  for (const annotation of Object.values(annotations)) {
+    if (annotation === undefined) continue;
+    converted.push({
+      ...annotation,
+      xMin: annotation.xMin / 1000,
+      xMax: annotation.xMax / 1000,
+    });
+  }
+  return converted;
 }

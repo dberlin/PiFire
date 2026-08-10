@@ -1,9 +1,11 @@
 import type {
-  I2cBusValue,
+  I2CBusValue,
+  Config,
   SettingsDependency,
   WizardModuleData,
   WizardSection,
 } from "../../helpers/contracts/wizard.gen";
+import { type BusKind, isI2CBusValue } from "../../helpers/wizard/i2cBusTypes";
 import { scan } from "../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../helpers/wizard/wizardAssets";
 import { ConfigOptionField } from "./ConfigOptionField";
@@ -17,11 +19,11 @@ export interface ModuleCardProps {
   section: WizardSection;
   modules: Record<string, WizardModuleData>;
   selectedModule: string | null;
-  depValues: Record<string, string | I2cBusValue | null>;
-  configValues: Record<string, unknown>;
+  depValues: Record<string, string | I2CBusValue | null>;
+  configValues: Config;
   configSource: WizardConfigSource;
   onSelectModule: (moduleName: string) => void;
-  onDepChange: (key: string, value: string | I2cBusValue) => void;
+  onDepChange: (key: string, value: string | I2CBusValue) => void;
   onConfigChange: (optionName: string, value: string) => void;
   baseUrl: string;
   disabled?: boolean;
@@ -47,9 +49,9 @@ export function ModuleCard({
     const rawValue = depValues[key];
 
     if (dep.type === "i2c_bus") {
-      const bus = (
-        typeof rawValue === "object" && rawValue !== null ? rawValue : { kind: "basic" }
-      ) as I2cBusValue;
+      const bus: I2CBusValue & { kind: BusKind } = isI2CBusValue(rawValue)
+        ? rawValue
+        : { kind: "basic" };
       return (
         <I2cBusField
           key={key}

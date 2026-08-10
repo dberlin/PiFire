@@ -1,4 +1,8 @@
-import type { CookFileEvent, CookFileTotals } from "../../helpers/contracts/content.gen";
+import type {
+  CookFileDetail,
+  CookFileEvent,
+  CookFileTotals,
+} from "../../helpers/contracts/content.gen";
 import { cookFileExportUrl } from "../../helpers/files/cookfileApi";
 
 // The events table, its totals row, and a per-event disclosure.
@@ -21,7 +25,7 @@ interface Props {
    * fewer than two events, because prepare_event_totals indexes events[-2]
    * unconditionally. The Flask page 500s on such a file; this one renders the
    * rows it has and omits the totals. */
-  totals: CookFileTotals | Record<string, never>;
+  totals: CookFileDetail["event_totals"];
   /** metadata.units -- "F" or "C". */
   units: string;
 }

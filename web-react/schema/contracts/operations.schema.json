@@ -1,0 +1,987 @@
+{
+  "$defs": {
+    "AdminSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "boot_to_monitor": {
+          "title": "Boot To Monitor",
+          "type": "boolean"
+        },
+        "debug_mode": {
+          "title": "Debug Mode",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "debug_mode",
+        "boot_to_monitor"
+      ],
+      "title": "AdminSettings",
+      "type": "object"
+    },
+    "AdminSettingsUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "boot_to_monitor": {
+          "default": null,
+          "title": "Boot To Monitor",
+          "type": "boolean"
+        },
+        "debug_mode": {
+          "default": null,
+          "title": "Debug Mode",
+          "type": "boolean"
+        }
+      },
+      "title": "AdminSettingsUpdate",
+      "type": "object"
+    },
+    "AdminState": {
+      "additionalProperties": false,
+      "properties": {
+        "backups": {
+          "$ref": "#/$defs/BackupListing"
+        },
+        "logs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Logs",
+          "type": "array"
+        },
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/AdminSettings"
+        },
+        "system": {
+          "$ref": "#/$defs/SystemInfo"
+        }
+      },
+      "required": [
+        "system",
+        "settings",
+        "backups",
+        "logs",
+        "mode"
+      ],
+      "title": "AdminState",
+      "type": "object"
+    },
+    "AutoStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "current_temp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_tr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "high_temp": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "high_tr": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "low_temp": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "low_tr": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "medium_temp": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "medium_tr": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "samples": {
+          "minimum": 0,
+          "title": "Samples",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "current_tr",
+        "current_temp",
+        "high_tr",
+        "high_temp",
+        "medium_tr",
+        "medium_temp",
+        "low_tr",
+        "low_temp",
+        "samples",
+        "ready"
+      ],
+      "title": "AutoStatus",
+      "type": "object"
+    },
+    "AutoStatusRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "probe": {
+          "minLength": 1,
+          "title": "Probe",
+          "type": "string"
+        },
+        "reference": {
+          "minLength": 1,
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "probe",
+        "reference"
+      ],
+      "title": "AutoStatusRequest",
+      "type": "object"
+    },
+    "BackupCreateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/BackupKind"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "BackupCreateRequest",
+      "type": "object"
+    },
+    "BackupCreated": {
+      "additionalProperties": false,
+      "properties": {
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename"
+      ],
+      "title": "BackupCreated",
+      "type": "object"
+    },
+    "BackupKind": {
+      "enum": [
+        "settings",
+        "pelletdb"
+      ],
+      "type": "string"
+    },
+    "BackupListing": {
+      "additionalProperties": false,
+      "properties": {
+        "pelletdb": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Pelletdb",
+          "type": "array"
+        },
+        "settings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Settings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "settings",
+        "pelletdb"
+      ],
+      "title": "BackupListing",
+      "type": "object"
+    },
+    "BackupRestoreRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/BackupKind"
+        }
+      },
+      "required": [
+        "kind",
+        "file"
+      ],
+      "title": "BackupRestoreRequest",
+      "type": "object"
+    },
+    "BackupRestored": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/BackupKind"
+        }
+      },
+      "required": [
+        "kind",
+        "file"
+      ],
+      "title": "BackupRestored",
+      "type": "object"
+    },
+    "BuildLog": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "reset": {
+          "title": "Reset",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "offset",
+        "reset"
+      ],
+      "title": "BuildLog",
+      "type": "object"
+    },
+    "CoefficientPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "y": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "CoefficientPoint",
+      "type": "object"
+    },
+    "Coefficients": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "number"
+        },
+        "b": {
+          "title": "B",
+          "type": "number"
+        },
+        "c": {
+          "title": "C",
+          "type": "number"
+        },
+        "chart": {
+          "items": {
+            "$ref": "#/$defs/CoefficientPoint"
+          },
+          "title": "Chart",
+          "type": "array"
+        },
+        "chart_ok": {
+          "title": "Chart Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "c",
+        "chart",
+        "chart_ok"
+      ],
+      "title": "Coefficients",
+      "type": "object"
+    },
+    "CoefficientsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "points": {
+          "items": {
+            "$ref": "#/$defs/TunerPoint"
+          },
+          "title": "Points",
+          "type": "array"
+        }
+      },
+      "required": [
+        "points"
+      ],
+      "title": "CoefficientsRequest",
+      "type": "object"
+    },
+    "CpuInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "cores": {
+          "$ref": "#/$defs/Reading"
+        },
+        "frequency": {
+          "$ref": "#/$defs/Reading"
+        },
+        "hardware": {
+          "$ref": "#/$defs/Reading"
+        },
+        "model": {
+          "$ref": "#/$defs/Reading"
+        },
+        "model_name": {
+          "$ref": "#/$defs/Reading"
+        }
+      },
+      "required": [
+        "hardware",
+        "model",
+        "model_name",
+        "cores",
+        "frequency"
+      ],
+      "title": "CpuInfo",
+      "type": "object"
+    },
+    "EmptyOperationRequest": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "EmptyOperationRequest",
+      "type": "object"
+    },
+    "FactoryResetResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "factory_reset",
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "FactoryResetResponse",
+      "type": "object"
+    },
+    "FiniteNumber": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "HardwareInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "available_ram": {
+          "$ref": "#/$defs/Reading"
+        },
+        "cpu_info": {
+          "$ref": "#/$defs/CpuInfo"
+        },
+        "total_ram": {
+          "$ref": "#/$defs/Reading"
+        }
+      },
+      "required": [
+        "total_ram",
+        "available_ram",
+        "cpu_info"
+      ],
+      "title": "HardwareInfo",
+      "type": "object"
+    },
+    "LogFamily": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "members": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "stem": {
+          "title": "Stem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stem",
+        "members",
+        "bytes"
+      ],
+      "title": "LogFamily",
+      "type": "object"
+    },
+    "LogsDeleted": {
+      "additionalProperties": false,
+      "properties": {
+        "removed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Removed",
+          "type": "array"
+        }
+      },
+      "required": [
+        "removed"
+      ],
+      "title": "LogsDeleted",
+      "type": "object"
+    },
+    "LogsMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "families": {
+          "items": {
+            "$ref": "#/$defs/LogFamily"
+          },
+          "title": "Families",
+          "type": "array"
+        },
+        "logs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Logs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "logs",
+        "families"
+      ],
+      "title": "LogsMetadata",
+      "type": "object"
+    },
+    "MaintenanceAction": {
+      "enum": [
+        "clear_history",
+        "clear_events",
+        "clear_pelletdb",
+        "clear_pelletdb_log"
+      ],
+      "type": "string"
+    },
+    "MaintenanceActionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/MaintenanceAction"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "MaintenanceActionRequest",
+      "type": "object"
+    },
+    "MaintenanceActionResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/MaintenanceAction"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "MaintenanceActionResponse",
+      "type": "object"
+    },
+    "NetworkInterface": {
+      "additionalProperties": false,
+      "properties": {
+        "ip_address": {
+          "title": "Ip Address",
+          "type": "string"
+        },
+        "mac_address": {
+          "title": "Mac Address",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip_address",
+        "mac_address"
+      ],
+      "title": "NetworkInterface",
+      "type": "object"
+    },
+    "OsInfo": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "The guaranteed display fields plus intentionally open /etc/os-release data.",
+      "properties": {
+        "ARCHITECTURE": {
+          "title": "Architecture",
+          "type": "string"
+        },
+        "BITS": {
+          "title": "Bits",
+          "type": "string"
+        },
+        "NAME": {
+          "title": "Name",
+          "type": "string"
+        },
+        "PRETTY_NAME": {
+          "title": "Pretty Name",
+          "type": "string"
+        },
+        "VERSION": {
+          "title": "Version",
+          "type": "string"
+        },
+        "VERSION_CODENAME": {
+          "title": "Version Codename",
+          "type": "string"
+        },
+        "VERSION_ID": {
+          "title": "Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "PRETTY_NAME",
+        "NAME",
+        "VERSION",
+        "VERSION_ID",
+        "VERSION_CODENAME",
+        "ARCHITECTURE",
+        "BITS"
+      ],
+      "title": "OsInfo",
+      "type": "object"
+    },
+    "ProfileInput": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "apply_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Apply To"
+        },
+        "b": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "c": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "a",
+        "b",
+        "c"
+      ],
+      "title": "ProfileInput",
+      "type": "object"
+    },
+    "Reading": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "SavedProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "applied": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Applied"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "applied"
+      ],
+      "title": "SavedProfile",
+      "type": "object"
+    },
+    "Segment": {
+      "enum": [
+        "High",
+        "Medium",
+        "Low"
+      ],
+      "type": "string"
+    },
+    "SystemAction": {
+      "enum": [
+        "reboot",
+        "shutdown",
+        "restart"
+      ],
+      "type": "string"
+    },
+    "SystemActionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/SystemAction"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "SystemActionRequest",
+      "type": "object"
+    },
+    "SystemActionResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/SystemAction"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "SystemActionResponse",
+      "type": "object"
+    },
+    "SystemInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "hardware_info": {
+          "$ref": "#/$defs/HardwareInfo"
+        },
+        "network_info": {
+          "additionalProperties": {
+            "$ref": "#/$defs/NetworkInterface"
+          },
+          "title": "Network Info",
+          "type": "object"
+        },
+        "os_info": {
+          "$ref": "#/$defs/OsInfo"
+        },
+        "uptime": {
+          "title": "Uptime",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uptime",
+        "os_info",
+        "network_info",
+        "hardware_info"
+      ],
+      "title": "SystemInfo",
+      "type": "object"
+    },
+    "TrReading": {
+      "additionalProperties": false,
+      "properties": {
+        "probe": {
+          "title": "Probe",
+          "type": "string"
+        },
+        "trohms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tuning": {
+          "title": "Tuning",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "probe",
+        "trohms",
+        "tuning"
+      ],
+      "title": "TrReading",
+      "type": "object"
+    },
+    "TunerPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "segment": {
+          "$ref": "#/$defs/Segment"
+        },
+        "temp": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "trohms": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "segment",
+        "temp",
+        "trohms"
+      ],
+      "title": "TunerPoint",
+      "type": "object"
+    },
+    "TunerSession": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "open": {
+          "title": "Open",
+          "type": "boolean"
+        },
+        "restored": {
+          "title": "Restored",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "open",
+        "mode",
+        "restored"
+      ],
+      "title": "TunerSession",
+      "type": "object"
+    },
+    "TunerSessionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "open": {
+          "title": "Open",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "open"
+      ],
+      "title": "TunerSessionRequest",
+      "type": "object"
+    },
+    "UpdateBranchRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "title": "UpdateBranchRequest",
+      "type": "object"
+    },
+    "UpdateCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "behind": {
+          "title": "Behind",
+          "type": "integer"
+        },
+        "current": {
+          "title": "Current",
+          "type": "string"
+        }
+      },
+      "required": [
+        "current",
+        "behind"
+      ],
+      "title": "UpdateCheck",
+      "type": "object"
+    },
+    "UpdateLog": {
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "title": "Output",
+          "type": "string"
+        }
+      },
+      "required": [
+        "output"
+      ],
+      "title": "UpdateLog",
+      "type": "object"
+    },
+    "UpdateStarted": {
+      "additionalProperties": false,
+      "properties": {
+        "started": {
+          "title": "Started",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "started"
+      ],
+      "title": "UpdateStarted",
+      "type": "object"
+    },
+    "UpdateState": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "title": "Branch",
+          "type": "string"
+        },
+        "branches": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Branches",
+          "type": "array"
+        },
+        "detached": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Detached"
+        },
+        "remote_url": {
+          "title": "Remote Url",
+          "type": "string"
+        },
+        "remote_version": {
+          "title": "Remote Version",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "web_ui_build_failed": {
+          "title": "Web Ui Build Failed",
+          "type": "boolean"
+        },
+        "web_ui_stale": {
+          "title": "Web Ui Stale",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "branch",
+        "detached",
+        "branches",
+        "remote_url",
+        "remote_version",
+        "web_ui_stale",
+        "web_ui_build_failed"
+      ],
+      "title": "UpdateState",
+      "type": "object"
+    },
+    "UpdateStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "title": "Output",
+          "type": "string"
+        },
+        "percent": {
+          "title": "Percent",
+          "type": "integer"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "percent",
+        "status",
+        "output"
+      ],
+      "title": "UpdateStatus",
+      "type": "object"
+    }
+  },
+  "title": "PiFire operations web contracts"
+}

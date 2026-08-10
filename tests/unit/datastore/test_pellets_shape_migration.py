@@ -1,8 +1,7 @@
 """The pellet database's own stamp, on the same terms as the settings tree's.
 
-Two versions and two digests, one per blob, because the whole point is that
-each shape moves on its own schedule -- coupling them would mean bumping one
-to migrate the other.
+One version and digest per persisted blob, because each shape moves on its own
+schedule rather than coupling unrelated migrations.
 """
 
 import copy
@@ -36,6 +35,16 @@ def test_an_unstamped_database_ends_stamped_current(ds):
     datastore._upgrade_pellets_in_store()
 
     assert read_pellets_store()["schema_version"] == PELLETDB_SCHEMA_VERSION
+
+
+def test_v3_shape_step_requires_no_data_rewrite():
+    db = copy.deepcopy(default_pellets())
+    before = copy.deepcopy(db)
+    migrate = dict(pellets_schema._PELLET_MIGRATIONS).get(3)
+
+    assert migrate is not None
+    assert migrate(db) is False
+    assert db == before
 
 
 def test_a_current_database_runs_no_step(ds, monkeypatch):

@@ -46,10 +46,10 @@ COMMAND_REQUESTS = (
 )
 
 
-@pytest.mark.parametrize("request", COMMAND_REQUESTS)
-def test_command_request_union_covers_command_client_path_grammar(request):
-    parsed = TypeAdapter(CommandRequest).validate_python(request, strict=True)
-    assert parsed.root.operation == request["operation"]
+@pytest.mark.parametrize("payload", COMMAND_REQUESTS)
+def test_command_request_union_covers_command_client_path_grammar(payload):
+    parsed = TypeAdapter(CommandRequest).validate_python(payload, strict=True)
+    assert parsed.root.operation == payload["operation"]
 
 
 def test_command_request_union_is_discriminated_by_operation():
@@ -58,7 +58,7 @@ def test_command_request_union_is_discriminated_by_operation():
 
 
 @pytest.mark.parametrize(
-    ("request", "field"),
+    ("payload", "field"),
     (
         ({"operation": "set_primary_setpoint", "temperature": True}, "temperature"),
         ({"operation": "set_p_mode", "value": True}, "value"),
@@ -67,9 +67,9 @@ def test_command_request_union_is_discriminated_by_operation():
         ({"operation": "manual_pwm", "duty": True}, "duty"),
     ),
 )
-def test_command_numeric_fields_reject_booleans(request, field):
+def test_command_numeric_fields_reject_booleans(payload, field):
     with pytest.raises(ValidationError) as exc:
-        TypeAdapter(CommandRequest).validate_python(request, strict=True)
+        TypeAdapter(CommandRequest).validate_python(payload, strict=True)
     assert field in str(exc.value)
 
 
@@ -118,17 +118,13 @@ def test_control_patch_preserves_sparse_rfc7396_members_and_notify_updates():
     patch = ControlPatchRequest.model_validate(
         {
             "recipe": {"step_data": {"pause": False}},
-            "notify_updates": [
-                {"label": "Probe 1", "type": "probe", "fields": {"req": True, "target": 203}}
-            ],
+            "notify_updates": [{"label": "Probe 1", "type": "probe", "fields": {"req": True, "target": 203}}],
         },
         strict=True,
     )
     assert patch.model_dump(mode="json", exclude_unset=True) == {
         "recipe": {"step_data": {"pause": False}},
-        "notify_updates": [
-            {"label": "Probe 1", "type": "probe", "fields": {"req": True, "target": 203}}
-        ],
+        "notify_updates": [{"label": "Probe 1", "type": "probe", "fields": {"req": True, "target": 203}}],
     }
 
 

@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { adminErrorText, fetchAdminState } from "../../helpers/admin/adminApi";
 import type { AdminResult } from "../../helpers/admin/adminTypes";
-import type { AdminState, Reading } from "../../helpers/contracts/operations.gen";
+import type { AdminState, NetworkInterface, Reading } from "../../helpers/contracts/operations.gen";
 import { queryKeys } from "../../helpers/query/keys";
 import { ApiError, unwrap } from "../../helpers/query/unwrap";
 import "./admin.css";
@@ -67,7 +67,9 @@ function Fact({ label, value }: { label: string; value: string }) {
 function SystemInfo({ state }: { state: AdminState }) {
   const { system } = state;
   const cpu = system.hardware_info.cpu_info;
-  const interfaces = Object.entries(system.network_info);
+  const interfaces = Object.entries(system.network_info).filter(
+    (entry): entry is [string, NetworkInterface] => entry[1] !== undefined,
+  );
 
   return (
     // The heading id deliberately carries no `pf-` prefix: cssCoverage's

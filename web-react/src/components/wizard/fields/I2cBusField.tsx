@@ -1,15 +1,17 @@
 import { useId, useState } from "react";
 import type {
-  I2cBusValue,
+  I2CBusValue,
   ScanResult,
   SettingsDependency,
 } from "../../../helpers/contracts/wizard.gen";
 import {
   BUS_KIND_LABELS,
+  BUS_KINDS,
   type BusKind,
   emptyBus,
   i2cBusError,
   KERNEL_BY_LABELS,
+  KERNEL_BY_OPTIONS,
   type KernelBy,
   kernelBy,
 } from "../../../helpers/wizard/i2cBusTypes";
@@ -17,8 +19,8 @@ import { DiscoveryPanel } from "../DiscoveryPanel";
 
 export interface I2cBusFieldProps {
   dep: SettingsDependency;
-  value: I2cBusValue;
-  onChange: (value: I2cBusValue) => void;
+  value: I2CBusValue & { kind: BusKind };
+  onChange: (value: I2CBusValue & { kind: BusKind }) => void;
   onScan: (kind: BusKind) => Promise<ScanResult>;
 }
 
@@ -78,9 +80,12 @@ export function I2cBusField({ dep, value, onChange, onScan }: I2cBusFieldProps) 
         id={kindId}
         className="pf-input"
         value={value.kind}
-        onChange={(e) => onChange(emptyBus(e.target.value as I2cBusValue["kind"], by))}
+        onChange={(event) => {
+          const kind = BUS_KINDS.find((candidate) => candidate === event.target.value);
+          if (kind) onChange(emptyBus(kind, by));
+        }}
       >
-        {(Object.keys(BUS_KIND_LABELS) as I2cBusValue["kind"][]).map((kind) => (
+        {BUS_KINDS.map((kind) => (
           <option key={kind} value={kind}>
             {BUS_KIND_LABELS[kind]}
           </option>
@@ -89,7 +94,7 @@ export function I2cBusField({ dep, value, onChange, onScan }: I2cBusFieldProps) 
 
       {value.kind === "kernel" && (
         <fieldset className="pf-i2c-bus-kernel">
-          {(Object.keys(KERNEL_BY_LABELS) as KernelBy[]).map((option) => (
+          {KERNEL_BY_OPTIONS.map((option) => (
             <label key={option}>
               <input
                 type="radio"

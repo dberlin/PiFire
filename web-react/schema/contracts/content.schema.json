@@ -1,0 +1,1853 @@
+{
+  "$defs": {
+    "AssetNamesData": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "assets"
+      ],
+      "title": "AssetNamesData",
+      "type": "object"
+    },
+    "ContentErrorData": {
+      "additionalProperties": true,
+      "properties": {
+        "errortype": {
+          "anyOf": [
+            {
+              "enum": [
+                "version",
+                "asset",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Errortype"
+        },
+        "field": {
+          "default": "",
+          "title": "Field",
+          "type": "string"
+        },
+        "kind": {
+          "default": "",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
+        }
+      },
+      "title": "ContentErrorData",
+      "type": "object"
+    },
+    "ContentErrorEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "result": {
+          "const": "Error",
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "result",
+        "message"
+      ],
+      "title": "ContentErrorEnvelope",
+      "type": "object"
+    },
+    "CookFileAsset": {
+      "additionalProperties": true,
+      "properties": {
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "filename",
+        "type"
+      ],
+      "title": "CookFileAsset",
+      "type": "object"
+    },
+    "CookFileAssetsData": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/CookFileAsset"
+          },
+          "title": "Assets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "assets"
+      ],
+      "title": "CookFileAssetsData",
+      "type": "object"
+    },
+    "CookFileChartData": {
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/HistoryAnnotation"
+          },
+          "title": "Annotations",
+          "type": "object"
+        },
+        "chart_data": {
+          "items": {
+            "$ref": "#/$defs/HistoryDataset"
+          },
+          "title": "Chart Data",
+          "type": "array"
+        },
+        "probe_mapper": {
+          "$ref": "#/$defs/HistoryProbeMapper"
+        },
+        "time_labels": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FiniteNumber"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Time Labels",
+          "type": "array"
+        }
+      },
+      "required": [
+        "time_labels",
+        "chart_data",
+        "probe_mapper",
+        "annotations"
+      ],
+      "title": "CookFileChartData",
+      "type": "object"
+    },
+    "CookFileComment": {
+      "additionalProperties": true,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "date": {
+          "title": "Date",
+          "type": "string"
+        },
+        "edited": {
+          "title": "Edited",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "time": {
+          "title": "Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "date",
+        "time",
+        "edited",
+        "assets"
+      ],
+      "title": "CookFileComment",
+      "type": "object"
+    },
+    "CookFileDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/CookFileAsset"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "comments": {
+          "items": {
+            "$ref": "#/$defs/CookFileComment"
+          },
+          "title": "Comments",
+          "type": "array"
+        },
+        "event_totals": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CookFileTotals"
+            },
+            {
+              "$ref": "#/$defs/EmptyCookFileTotals"
+            }
+          ],
+          "title": "Event Totals"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/CookFileEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "graph_labels": {
+          "$ref": "#/$defs/CookFileLabels"
+        },
+        "metadata": {
+          "$ref": "#/$defs/CookFileMetadata"
+        }
+      },
+      "required": [
+        "filename",
+        "metadata",
+        "graph_labels",
+        "events",
+        "event_totals",
+        "comments",
+        "assets"
+      ],
+      "title": "CookFileDetail",
+      "type": "object"
+    },
+    "CookFileEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "augerontime_c": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "const": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Augerontime C"
+        },
+        "endtime_c": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "const": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Endtime C"
+        },
+        "estusage_i": {
+          "title": "Estusage I",
+          "type": "string"
+        },
+        "estusage_m": {
+          "title": "Estusage M",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "Id"
+        },
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "pellet_level_end": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "pellet_level_start": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "starttime_c": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "const": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Starttime C"
+        },
+        "timeinmode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "const": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Timeinmode"
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "starttime_c",
+        "endtime_c",
+        "augerontime_c",
+        "estusage_m",
+        "estusage_i",
+        "pellet_level_start",
+        "pellet_level_end",
+        "timeinmode"
+      ],
+      "title": "CookFileEvent",
+      "type": "object"
+    },
+    "CookFileLabelData": {
+      "additionalProperties": false,
+      "properties": {
+        "new_label_safe": {
+          "title": "New Label Safe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "new_label_safe"
+      ],
+      "title": "CookFileLabelData",
+      "type": "object"
+    },
+    "CookFileLabels": {
+      "additionalProperties": true,
+      "properties": {
+        "primarysp": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Primarysp",
+          "type": "object"
+        },
+        "probes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Probes",
+          "type": "object"
+        },
+        "targets": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Targets",
+          "type": "object"
+        }
+      },
+      "required": [
+        "probes",
+        "targets",
+        "primarysp"
+      ],
+      "title": "CookFileLabels",
+      "type": "object"
+    },
+    "CookFileMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "endtime": {
+          "title": "Endtime",
+          "type": "string"
+        },
+        "endtime_epoch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Endtime Epoch"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "starttime": {
+          "title": "Starttime",
+          "type": "string"
+        },
+        "starttime_epoch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Starttime Epoch"
+        },
+        "thumbnail": {
+          "title": "Thumbnail",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "units": {
+          "title": "Units",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "units",
+        "thumbnail",
+        "id",
+        "version",
+        "starttime",
+        "endtime",
+        "starttime_epoch",
+        "endtime_epoch"
+      ],
+      "title": "CookFileMetadata",
+      "type": "object"
+    },
+    "CookFileTotals": {
+      "additionalProperties": false,
+      "properties": {
+        "augerontime": {
+          "title": "Augerontime",
+          "type": "string"
+        },
+        "cooktime": {
+          "title": "Cooktime",
+          "type": "string"
+        },
+        "estusage_i": {
+          "title": "Estusage I",
+          "type": "string"
+        },
+        "estusage_m": {
+          "title": "Estusage M",
+          "type": "string"
+        },
+        "pellet_level_end": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "pellet_level_start": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "augerontime",
+        "estusage_m",
+        "estusage_i",
+        "cooktime",
+        "pellet_level_start",
+        "pellet_level_end"
+      ],
+      "title": "CookFileTotals",
+      "type": "object"
+    },
+    "EmptyCookFileTotals": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "EmptyCookFileTotals",
+      "type": "object"
+    },
+    "FileErrorDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "errortype": {
+          "anyOf": [
+            {
+              "enum": [
+                "version",
+                "asset",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Errortype"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "status": {
+          "minimum": 0,
+          "title": "Status",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "status",
+        "message",
+        "errortype"
+      ],
+      "title": "FileErrorDetail",
+      "type": "object"
+    },
+    "FileListItem": {
+      "additionalProperties": false,
+      "properties": {
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "thumbnail": {
+          "title": "Thumbnail",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "title",
+        "thumbnail"
+      ],
+      "title": "FileListItem",
+      "type": "object"
+    },
+    "FileListing": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/FileListItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "last_page": {
+          "exclusiveMinimum": 0,
+          "title": "Last Page",
+          "type": "integer"
+        },
+        "page": {
+          "exclusiveMinimum": 0,
+          "title": "Page",
+          "type": "integer"
+        },
+        "per_page": {
+          "exclusiveMinimum": 0,
+          "title": "Per Page",
+          "type": "integer"
+        },
+        "reverse": {
+          "title": "Reverse",
+          "type": "boolean"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "page",
+        "last_page",
+        "per_page",
+        "reverse",
+        "total"
+      ],
+      "title": "FileListing",
+      "type": "object"
+    },
+    "FilenameData": {
+      "additionalProperties": false,
+      "properties": {
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename"
+      ],
+      "title": "FilenameData",
+      "type": "object"
+    },
+    "FiniteNumber": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "HistoryAnnotation": {
+      "additionalProperties": true,
+      "properties": {
+        "borderColor": {
+          "title": "Bordercolor",
+          "type": "string"
+        },
+        "borderWidth": {
+          "$ref": "#/$defs/FiniteNumber",
+          "default": 2
+        },
+        "display": {
+          "default": true,
+          "title": "Display",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HistoryAnnotationLabel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "xMax": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "xMin": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "type",
+        "xMin",
+        "xMax",
+        "borderColor"
+      ],
+      "title": "HistoryAnnotation",
+      "type": "object"
+    },
+    "HistoryAnnotationLabel": {
+      "additionalProperties": true,
+      "properties": {
+        "backgroundColor": {
+          "default": "",
+          "title": "Backgroundcolor",
+          "type": "string"
+        },
+        "borderColor": {
+          "default": "",
+          "title": "Bordercolor",
+          "type": "string"
+        },
+        "color": {
+          "default": "",
+          "title": "Color",
+          "type": "string"
+        },
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "position": {
+          "default": "end",
+          "title": "Position",
+          "type": "string"
+        },
+        "rotation": {
+          "$ref": "#/$defs/FiniteNumber",
+          "default": 0
+        }
+      },
+      "title": "HistoryAnnotationLabel",
+      "type": "object"
+    },
+    "HistoryChartData": {
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/HistoryAnnotation"
+          },
+          "title": "Annotations",
+          "type": "object"
+        },
+        "chart_data": {
+          "items": {
+            "$ref": "#/$defs/HistoryDataset"
+          },
+          "title": "Chart Data",
+          "type": "array"
+        },
+        "graph_labels": {
+          "$ref": "#/$defs/HistoryGraphLabels"
+        },
+        "minutes": {
+          "exclusiveMinimum": 0,
+          "title": "Minutes",
+          "type": "integer"
+        },
+        "probe_mapper": {
+          "$ref": "#/$defs/HistoryProbeMapper"
+        },
+        "time_labels": {
+          "items": {
+            "$ref": "#/$defs/FiniteNumber"
+          },
+          "title": "Time Labels",
+          "type": "array"
+        }
+      },
+      "required": [
+        "time_labels",
+        "chart_data",
+        "probe_mapper",
+        "graph_labels",
+        "annotations",
+        "minutes"
+      ],
+      "title": "HistoryChartData",
+      "type": "object"
+    },
+    "HistoryDataset": {
+      "additionalProperties": true,
+      "properties": {
+        "backgroundColor": {
+          "default": "",
+          "title": "Backgroundcolor",
+          "type": "string"
+        },
+        "borderCapStyle": {
+          "default": "butt",
+          "title": "Bordercapstyle",
+          "type": "string"
+        },
+        "borderColor": {
+          "default": "",
+          "title": "Bordercolor",
+          "type": "string"
+        },
+        "borderDash": {
+          "items": {
+            "$ref": "#/$defs/FiniteNumber"
+          },
+          "title": "Borderdash",
+          "type": "array"
+        },
+        "borderDashOffset": {
+          "$ref": "#/$defs/FiniteNumber",
+          "default": 0.0
+        },
+        "borderJoinStyle": {
+          "default": "miter",
+          "title": "Borderjoinstyle",
+          "type": "string"
+        },
+        "data": {
+          "items": {
+            "$ref": "#/$defs/HistoryPoint"
+          },
+          "title": "Data",
+          "type": "array"
+        },
+        "fill": {
+          "default": false,
+          "title": "Fill",
+          "type": "boolean"
+        },
+        "hidden": {
+          "default": false,
+          "title": "Hidden",
+          "type": "boolean"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "lineTension": {
+          "$ref": "#/$defs/FiniteNumber",
+          "default": 0.1
+        },
+        "pointBackgroundColor": {
+          "default": "#fff",
+          "title": "Pointbackgroundcolor",
+          "type": "string"
+        },
+        "pointBorderColor": {
+          "default": "",
+          "title": "Pointbordercolor",
+          "type": "string"
+        },
+        "pointBorderWidth": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Pointborderwidth",
+          "type": "integer"
+        },
+        "pointHitRadius": {
+          "default": 10,
+          "minimum": 0,
+          "title": "Pointhitradius",
+          "type": "integer"
+        },
+        "pointHoverBackgroundColor": {
+          "default": "",
+          "title": "Pointhoverbackgroundcolor",
+          "type": "string"
+        },
+        "pointHoverBorderColor": {
+          "default": "",
+          "title": "Pointhoverbordercolor",
+          "type": "string"
+        },
+        "pointHoverBorderWidth": {
+          "default": 2,
+          "minimum": 0,
+          "title": "Pointhoverborderwidth",
+          "type": "integer"
+        },
+        "pointHoverRadius": {
+          "default": 10,
+          "minimum": 0,
+          "title": "Pointhoverradius",
+          "type": "integer"
+        },
+        "pointRadius": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Pointradius",
+          "type": "integer"
+        },
+        "pointStyle": {
+          "default": "line",
+          "title": "Pointstyle",
+          "type": "string"
+        },
+        "spanGaps": {
+          "default": false,
+          "title": "Spangaps",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "data"
+      ],
+      "title": "HistoryDataset",
+      "type": "object"
+    },
+    "HistoryGraphLabels": {
+      "additionalProperties": true,
+      "properties": {
+        "primarysp": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Primarysp",
+          "type": "object"
+        },
+        "probes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Probes",
+          "type": "object"
+        },
+        "targets": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Targets",
+          "type": "object"
+        }
+      },
+      "required": [
+        "probes",
+        "targets",
+        "primarysp"
+      ],
+      "title": "HistoryGraphLabels",
+      "type": "object"
+    },
+    "HistoryPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "y": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "HistoryPoint",
+      "type": "object"
+    },
+    "HistoryProbeMapper": {
+      "additionalProperties": true,
+      "properties": {
+        "primarysp": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Primarysp",
+          "type": "object"
+        },
+        "probes": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Probes",
+          "type": "object"
+        },
+        "targets": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Targets",
+          "type": "object"
+        }
+      },
+      "required": [
+        "probes",
+        "targets",
+        "primarysp"
+      ],
+      "title": "HistoryProbeMapper",
+      "type": "object"
+    },
+    "Ingredient": {
+      "additionalProperties": true,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "quantity",
+        "assets"
+      ],
+      "title": "Ingredient",
+      "type": "object"
+    },
+    "Instruction": {
+      "additionalProperties": true,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "ingredients": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ingredients",
+          "type": "array"
+        },
+        "step": {
+          "title": "Step",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "ingredients",
+        "assets",
+        "step"
+      ],
+      "title": "Instruction",
+      "type": "object"
+    },
+    "MetricRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "auger_cycle_time": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "augerontime": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "augerontime_c": {
+          "title": "Augerontime C",
+          "type": "string"
+        },
+        "endtime": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "endtime_c": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "const": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Endtime C"
+        },
+        "estusage_i": {
+          "title": "Estusage I",
+          "type": "string"
+        },
+        "estusage_m": {
+          "title": "Estusage M",
+          "type": "string"
+        },
+        "fanontime": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "fanontime_c": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fanontime C"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "p_mode": {
+          "title": "P Mode",
+          "type": "integer"
+        },
+        "pellet_brand_type": {
+          "title": "Pellet Brand Type",
+          "type": "string"
+        },
+        "pellet_level_end": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "pellet_level_start": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "primary_setpoint": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "smart_start_profile": {
+          "title": "Smart Start Profile",
+          "type": "integer"
+        },
+        "smokeplus": {
+          "title": "Smokeplus",
+          "type": "boolean"
+        },
+        "starttime": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "starttime_c": {
+          "title": "Starttime C",
+          "type": "string"
+        },
+        "startup_temp": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "timeinmode": {
+          "title": "Timeinmode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "starttime",
+        "starttime_c",
+        "endtime",
+        "endtime_c",
+        "timeinmode",
+        "mode",
+        "augerontime",
+        "augerontime_c",
+        "estusage_m",
+        "estusage_i",
+        "fanontime",
+        "fanontime_c",
+        "smokeplus",
+        "primary_setpoint",
+        "smart_start_profile",
+        "startup_temp",
+        "p_mode",
+        "auger_cycle_time",
+        "pellet_level_start",
+        "pellet_level_end",
+        "pellet_brand_type"
+      ],
+      "title": "MetricRecord",
+      "type": "object"
+    },
+    "MetricsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "augerrate": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/$defs/MetricRecord"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "units": {
+          "enum": [
+            "F",
+            "C"
+          ],
+          "title": "Units",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metrics",
+        "units",
+        "augerrate"
+      ],
+      "title": "MetricsPayload",
+      "type": "object"
+    },
+    "RecipeAsset": {
+      "additionalProperties": true,
+      "properties": {
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "filename",
+        "type"
+      ],
+      "title": "RecipeAsset",
+      "type": "object"
+    },
+    "RecipeAssetAssignmentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Index"
+        },
+        "section": {
+          "enum": [
+            "splash",
+            "ingredients",
+            "instructions"
+          ],
+          "title": "Section",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "section",
+        "assets"
+      ],
+      "title": "RecipeAssetAssignmentRequest",
+      "type": "object"
+    },
+    "RecipeAssetsData": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/RecipeAsset"
+          },
+          "title": "Assets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "assets"
+      ],
+      "title": "RecipeAssetsData",
+      "type": "object"
+    },
+    "RecipeBody": {
+      "additionalProperties": true,
+      "properties": {
+        "ingredients": {
+          "items": {
+            "$ref": "#/$defs/Ingredient"
+          },
+          "title": "Ingredients",
+          "type": "array"
+        },
+        "instructions": {
+          "items": {
+            "$ref": "#/$defs/Instruction"
+          },
+          "title": "Instructions",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/RecipeStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ingredients",
+        "instructions",
+        "steps"
+      ],
+      "title": "RecipeBody",
+      "type": "object"
+    },
+    "RecipeDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/RecipeAsset"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/RecipeMetadata"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeBody"
+        }
+      },
+      "required": [
+        "filename",
+        "metadata",
+        "recipe",
+        "assets"
+      ],
+      "title": "RecipeDetail",
+      "type": "object"
+    },
+    "RecipeIngredientAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "add",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action"
+      ],
+      "title": "RecipeIngredientAddRequest",
+      "type": "object"
+    },
+    "RecipeIngredientDeleteRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "index"
+      ],
+      "title": "RecipeIngredientDeleteRequest",
+      "type": "object"
+    },
+    "RecipeIngredientUpdateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "index",
+        "name",
+        "quantity"
+      ],
+      "title": "RecipeIngredientUpdateRequest",
+      "type": "object"
+    },
+    "RecipeInstructionAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "add",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action"
+      ],
+      "title": "RecipeInstructionAddRequest",
+      "type": "object"
+    },
+    "RecipeInstructionDeleteRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "index"
+      ],
+      "title": "RecipeInstructionDeleteRequest",
+      "type": "object"
+    },
+    "RecipeInstructionUpdateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "ingredients": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ingredients",
+          "type": "array"
+        },
+        "step": {
+          "title": "Step",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "index",
+        "text",
+        "ingredients",
+        "step"
+      ],
+      "title": "RecipeInstructionUpdateRequest",
+      "type": "object"
+    },
+    "RecipeMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
+        "cook_time": {
+          "title": "Cook Time",
+          "type": "integer"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "difficulty": {
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "food_probes": {
+          "title": "Food Probes",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "image": {
+          "title": "Image",
+          "type": "string"
+        },
+        "prep_time": {
+          "title": "Prep Time",
+          "type": "integer"
+        },
+        "rating": {
+          "title": "Rating",
+          "type": "integer"
+        },
+        "thumbnail": {
+          "title": "Thumbnail",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "units": {
+          "title": "Units",
+          "type": "string"
+        },
+        "username": {
+          "title": "Username",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "username",
+        "id",
+        "title",
+        "description",
+        "image",
+        "thumbnail",
+        "units",
+        "prep_time",
+        "cook_time",
+        "rating",
+        "difficulty",
+        "version",
+        "food_probes"
+      ],
+      "title": "RecipeMetadata",
+      "type": "object"
+    },
+    "RecipeMetadataFields": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "cook_time": {
+          "default": 0,
+          "title": "Cook Time",
+          "type": "integer"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "difficulty": {
+          "default": "",
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "food_probes": {
+          "default": 0,
+          "title": "Food Probes",
+          "type": "integer"
+        },
+        "prep_time": {
+          "default": 0,
+          "title": "Prep Time",
+          "type": "integer"
+        },
+        "rating": {
+          "default": 0,
+          "title": "Rating",
+          "type": "integer"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "units": {
+          "default": "",
+          "title": "Units",
+          "type": "string"
+        }
+      },
+      "title": "RecipeMetadataFields",
+      "type": "object"
+    },
+    "RecipeMetadataUpdateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/RecipeMetadataFields"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "fields"
+      ],
+      "title": "RecipeMetadataUpdateRequest",
+      "type": "object"
+    },
+    "RecipeStep": {
+      "additionalProperties": true,
+      "properties": {
+        "hold_temp": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "Smoke",
+            "Hold",
+            "Startup",
+            "Shutdown"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "notify": {
+          "title": "Notify",
+          "type": "boolean"
+        },
+        "pause": {
+          "title": "Pause",
+          "type": "boolean"
+        },
+        "timer": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "trigger_temps": {
+          "$ref": "#/$defs/RecipeTriggerTemperatures"
+        }
+      },
+      "required": [
+        "mode",
+        "hold_temp",
+        "timer",
+        "notify",
+        "message",
+        "pause",
+        "trigger_temps"
+      ],
+      "title": "RecipeStep",
+      "type": "object"
+    },
+    "RecipeStepDeleteRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "index"
+      ],
+      "title": "RecipeStepDeleteRequest",
+      "type": "object"
+    },
+    "RecipeStepInsertRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "insert",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "index"
+      ],
+      "title": "RecipeStepInsertRequest",
+      "type": "object"
+    },
+    "RecipeStepUpdateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "step": {
+          "$ref": "#/$defs/RecipeStep"
+        }
+      },
+      "required": [
+        "file",
+        "action",
+        "index",
+        "step"
+      ],
+      "title": "RecipeStepUpdateRequest",
+      "type": "object"
+    },
+    "RecipeTriggerTemperatures": {
+      "additionalProperties": false,
+      "properties": {
+        "food": {
+          "items": {
+            "$ref": "#/$defs/FiniteNumber"
+          },
+          "title": "Food",
+          "type": "array"
+        },
+        "primary": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "primary",
+        "food"
+      ],
+      "title": "RecipeTriggerTemperatures",
+      "type": "object"
+    }
+  },
+  "title": "PiFire content web contracts"
+}

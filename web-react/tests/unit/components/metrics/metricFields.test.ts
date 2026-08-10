@@ -92,7 +92,13 @@ describe("metricRows", () => {
   it("shows an em dash for a mode that has not ended", () => {
     //  What the server really sends for a running mode: endtime 0, endtime_c
     //  the NUMBER 0, and timeinmode the string "Active".
-    const running = { ...BASE, mode: "Smoke", endtime: 0, endtime_c: 0, timeinmode: "Active" };
+    const running: MetricRecord = {
+      ...BASE,
+      mode: "Smoke",
+      endtime: 0,
+      endtime_c: 0,
+      timeinmode: "Active",
+    };
     const rows = metricRows(running, "F");
     expect(rows.find((r) => r.label === "End Time")).toEqual({
       label: "End Time",

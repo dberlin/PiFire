@@ -59,6 +59,7 @@ class NetworkInterface(WireModel):
 
 class OsInfo(ExtensibleWireModel):
     """The guaranteed display fields plus intentionally open /etc/os-release data."""
+
     __pydantic_extra__: dict[str, str] = Field(init=False)
     PRETTY_NAME: str
     NAME: str
@@ -251,11 +252,11 @@ class CoefficientPoint(WireModel):
 
 
 class CoefficientsRequest(WireModel):
-    points: Annotated[list[TunerPoint], Field(min_length=3, max_length=3)]
+    points: list[TunerPoint]
 
     @model_validator(mode="after")
     def _require_each_segment_once(self) -> Self:
-        if {point.segment for point in self.points} != {"High", "Medium", "Low"}:
+        if len(self.points) != 3 or {point.segment for point in self.points} != {"High", "Medium", "Low"}:
             raise ValueError("points must contain High, Medium, and Low exactly once")
         return self
 

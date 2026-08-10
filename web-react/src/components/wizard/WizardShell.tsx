@@ -62,7 +62,7 @@ export function WizardError() {
 }
 
 export function WizardShell() {
-  const state = useLoaderData() as WizardState;
+  const state = useLoaderData<WizardState>();
   const [working, setWorking] = useState<WizardWorking>(() => initialWorking(state));
   const [step, setStep] = useState(0);
   const [finishState, setFinishState] = useState<FinishResult | null>(null);

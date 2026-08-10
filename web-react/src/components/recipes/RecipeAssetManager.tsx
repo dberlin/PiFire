@@ -2,11 +2,15 @@ import { useId, useState } from "react";
 import {
   assetUrl,
   deleteRecipeAssets,
-  type RecipeAssetSection,
   setRecipeAssets,
   uploadRecipeAssets,
 } from "../../helpers/files/recipeApi";
-import type { Ingredient, Instruction, RecipeAsset } from "../../helpers/contracts/content.gen";
+import type {
+  Ingredient,
+  Instruction,
+  RecipeAsset,
+  RecipeAssetAssignmentRequest,
+} from "../../helpers/contracts/content.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 // The recipe's asset library: upload, delete-from-archive, and attaching a
@@ -37,7 +41,7 @@ interface Props {
 }
 
 interface Picking {
-  section: Extract<RecipeAssetSection, "ingredients" | "instructions">;
+  section: Extract<RecipeAssetAssignmentRequest["section"], "ingredients" | "instructions">;
   index: number;
   label: string;
   selected: string[];

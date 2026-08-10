@@ -1,9 +1,11 @@
 import type {
-  I2cBusValue,
+  I2CBusValue,
   ProbeConfigField,
+  WireValue,
   SettingsDependency,
 } from "../../../helpers/contracts/wizard.gen";
 import { scan } from "../../../helpers/wizard/wizardApi";
+import { type BusKind, isI2CBusValue } from "../../../helpers/wizard/i2cBusTypes";
 import { I2cBusField } from "../fields/I2cBusField";
 import { SelectField } from "../fields/SelectField";
 import { UsbSerialPicker } from "../fields/UsbSerialPicker";
@@ -12,11 +14,11 @@ import { ThermoworksPicker } from "./ThermoworksPicker";
 
 export interface DeviceConfigFieldProps {
   field: ProbeConfigField;
-  value: unknown;
-  allValues: Record<string, unknown>;
+  value: WireValue | undefined;
+  allValues: Record<string, WireValue>;
   availableProbes: string[];
   baseUrl: string;
-  onChange: (label: string, value: unknown) => void;
+  onChange: (label: string, value: WireValue) => void;
 }
 
 export function DeviceConfigField({
@@ -27,7 +29,7 @@ export function DeviceConfigField({
   baseUrl,
   onChange,
 }: DeviceConfigFieldProps) {
-  const set = (v: unknown) => onChange(field.label, v);
+  const set = (value: WireValue) => onChange(field.label, value);
 
   // device_serial: hidden in the manifest but always shown because it hosts
   // the Test Connection button (§6 special case).
@@ -89,7 +91,9 @@ export function DeviceConfigField({
       );
     }
     case "probes_list": {
-      const selected = (value as string[] | undefined) ?? [];
+      const selected = Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : [];
       return (
         <label className="pf-field">
           <span className="pf-field-label">{field.friendly_name}</span>
@@ -109,9 +113,7 @@ export function DeviceConfigField({
       );
     }
     case "i2c_bus": {
-      const bus = (
-        typeof value === "object" && value !== null ? value : { kind: "basic" }
-      ) as I2cBusValue;
+      const bus: I2CBusValue & { kind: BusKind } = isI2CBusValue(value) ? value : { kind: "basic" };
       return (
         <I2cBusField
           dep={dep}

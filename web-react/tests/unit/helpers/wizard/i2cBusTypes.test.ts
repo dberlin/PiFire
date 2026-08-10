@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { I2cBusValue } from "../../../../src/helpers/contracts/wizard.gen";
+import type { I2CBusValue } from "../../../../src/helpers/contracts/wizard.gen";
 import { i2cBusError } from "../../../../src/helpers/wizard/i2cBusTypes";
 
 describe("i2cBusError", () => {
@@ -12,7 +12,7 @@ describe("i2cBusError", () => {
   });
 
   it("survives a JSON round trip, the way a saved draft does", () => {
-    const unfilled: I2cBusValue = { kind: "kernel", bus_num: null };
+    const unfilled: I2CBusValue = { kind: "kernel", bus_num: null };
     expect(JSON.parse(JSON.stringify(unfilled))).toEqual(unfilled);
   });
 
