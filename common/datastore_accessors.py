@@ -1256,7 +1256,7 @@ def _migration_json_blob(connection: sqlite3.Connection, key: str):
 
 
 def _migration_authority_snapshot(value, *, current_only):
-    from controller.mpc import GreySnapshotInvalid, migrate_grey_learning_snapshot
+    from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 
     if not isinstance(value, dict) or value.get("model_kind") != "grey-box":
         return None
@@ -1287,7 +1287,7 @@ def migrate_mpc_learning_authority(
     """
 
     from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
-    from controller.mpc import GreySnapshotInvalid, migrate_grey_learning_snapshot
+    from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 
     if not isinstance(defaults, dict):
         raise ValueError("defaults must be an object")

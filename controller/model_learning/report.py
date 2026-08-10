@@ -113,7 +113,7 @@ def _pair_digest(activation: Mapping[str, object], name: str):
             return digest if isinstance(digest, str) else None
     return None
 def _validated_checkpoint(checkpoint: dict[str, object]) -> dict[str, object]:
-    from controller.mpc import migrate_grey_learning_snapshot
+    from controller.mpc_snapshot import migrate_grey_learning_snapshot
 
     return migrate_grey_learning_snapshot(checkpoint)
 

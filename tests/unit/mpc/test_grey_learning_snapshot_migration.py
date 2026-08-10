@@ -14,7 +14,7 @@ from common.datastore_accessors import (
     read_model_activation,
     read_model_evidence,
 )
-from controller.mpc import GreySnapshotInvalid, migrate_grey_learning_snapshot
+from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.mpc_model import MODEL_SCHEMA
 from controller.model_learning.activation import GreyControlPairDescriptor, canonical_snapshot_digest
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
@@ -159,7 +159,6 @@ def test_atomic_authority_migration_matrix(ds, activation, controller, expected_
     assert migration["evidence_decision_id"] is None
 
 
-
 def test_real_activation_singleton_rolls_back_to_compatible_grey_atomically(ds):
     _seed_controller(_v3(theta=47.0))
     rollback_config = {
@@ -284,14 +283,13 @@ def test_migration_invalidation_is_durable_and_surfaces_from_real_backend(ds):
     report, records = backend_learning_report()
 
     invalidations = [
-        record
-        for record in records
-        if record.kind.value == "schema_invalidation" and record.schema_version == 3
+        record for record in records if record.kind.value == "schema_invalidation" and record.schema_version == 3
     ]
     assert result.reason == "schema-invalidated"
     assert len(invalidations) == 1
     assert report.as_dict()["status"] == "schema-invalidated"
     assert _stored_controller() == result.snapshot
+
 
 def test_atomic_migration_rolls_back_checkpoint_and_activation_pointer_together(ds):
     original = _v3()

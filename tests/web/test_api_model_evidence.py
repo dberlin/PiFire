@@ -37,7 +37,8 @@ from controller.model_learning.contracts import (
 )
 from common.controller_model_state import ControllerModelStore
 
-from controller.mpc import Controller, _DEFAULTS, migrate_grey_learning_snapshot
+from controller.mpc import Controller, _DEFAULTS
+from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_fitting import grey_config_digest
 
 _CANDIDATE = "c" * 64

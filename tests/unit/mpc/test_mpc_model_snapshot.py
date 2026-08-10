@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from controller.mpc import GreySnapshotInvalid, _DEFAULTS, Controller, migrate_grey_learning_snapshot
+from controller.mpc import _DEFAULTS, Controller
+from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
 
 from controller.runtime.model_fitting import TeardownRefitOutcome
