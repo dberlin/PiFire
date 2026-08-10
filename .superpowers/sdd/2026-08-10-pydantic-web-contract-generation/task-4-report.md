@@ -238,3 +238,30 @@ All checks passed!
 uv run pytest -q tests/unit/controller/test_pid_sp_learning.py
 60 passed in 1.90s
 ```
+
+## Fix round 3: complete the activation report contract
+
+Source commit: `5f9260b6e7ed` (`lvkptwzr`)
+
+Generated artifacts commit: `b9cdbd0b03a1` (`lswvwuqm`)
+
+RED:
+
+```text
+uv run pytest -q tests/unit/mpc/test_model_evidence_report.py
+32 failed: ActivationReport rejected decision_id and incumbent_digest as extra fields
+```
+
+GREEN:
+
+```text
+uv run pytest -q tests/unit/mpc/test_model_evidence_report.py
+42 passed in 2.42s
+
+bun run gen:types:check
+Pydantic web contract artifacts are up to date.
+src/helpers/settings/settingsDefaults.gen.ts is up to date.
+Generated web contract TypeScript is up to date.
+```
+
+`ActivationReport` now owns the `decision_id` and `incumbent_digest` members already emitted by the authoritative model-evidence projection. The generated learning schema and TypeScript contract were regenerated from that corrected Pydantic source.
