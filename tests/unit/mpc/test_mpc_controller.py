@@ -12,11 +12,17 @@ from controller.acados import SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
 from controller.model_learning.contracts import FrameObservation
-from controller.model_learning.evaluation import CompletedForecastOrigin, EvaluationDecision, ForecastOrigin, HorizonScore
+from controller.model_learning.evaluation import (
+    CompletedForecastOrigin,
+    EvaluationDecision,
+    ForecastOrigin,
+    HorizonScore,
+)
 
 from controller.runtime.model_fitting import (
     CandidatePair,
     FitSubmission,
+    GreyFitMessage,
     GreyFitSuccess,
     GreyLearningOrchestrator,
     TargetTimingEvidence,
@@ -143,6 +149,22 @@ def test_success_estimates_from_realized_load_and_uses_first_valid_native_comman
     assert trace.applied_combustion_load == 0.5
 
 
+def test_native_roundoff_at_command_bounds_is_clipped_not_rejected(monkeypatch):
+    result = _solve(
+        5,
+        -1e-12,
+        sequence_residual=np.array([-1e-12, 0.0, 0.5, 1.0, 1.0 + 1e-12]),
+        diagnostics=_diagnostics(constraint_residual=1e-12),
+    )
+    controller, _estimator, _solver = _make(monkeypatch, results=[result])
+
+    output = controller.update(72.0)
+
+    assert controller._last_combustion_load == 0.0
+    assert output["cycle_ratio"] == 0.0
+    assert controller.trace_diagnostics().failure_state is MpcFailureState.SUCCESS
+
+
 @pytest.mark.parametrize(
     "invalid",
     [
@@ -157,9 +179,7 @@ def test_success_estimates_from_realized_load_and_uses_first_valid_native_comman
     ids=["length", "residual-length", "nonfinite-q", "bounds", "objective", "status", "diagnostics"],
 )
 def test_every_malformed_native_result_holds_the_last_safe_load(monkeypatch, invalid):
-    controller, _estimator, _solver = _make(
-        monkeypatch, results=[_solve(5, 0.6), invalid]
-    )
+    controller, _estimator, _solver = _make(monkeypatch, results=[_solve(5, 0.6), invalid])
     controller.update(72.0)
 
     output = controller.update(73.0)
@@ -184,9 +204,7 @@ def test_structured_solver_failure_holds_and_preserves_diagnostics(monkeypatch):
         warm_started=True,
     )
     error = SolverError("native solve failed", diagnostics)
-    controller, _estimator, _solver = _make(
-        monkeypatch, results=[_solve(5, 0.7), error]
-    )
+    controller, _estimator, _solver = _make(monkeypatch, results=[_solve(5, 0.7), error])
     controller.update(70.0)
     controller.update(71.0)
 
@@ -259,10 +277,12 @@ def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkey
     controller, _estimator, _solver = _make(monkeypatch)
     seen = []
     orchestrator = SimpleNamespace(
-        observe_completed_frame=lambda frame, *, identifiability: seen.append((frame, identifiability))
-        or SimpleNamespace(
-            history=SimpleNamespace(accepted=True, reasons=()),
-            completed_forecasts=(),
+        observe_completed_frame=lambda frame, *, identifiability: (
+            seen.append((frame, identifiability))
+            or SimpleNamespace(
+                history=SimpleNamespace(accepted=True, reasons=()),
+                completed_forecasts=(),
+            )
         ),
         poll_fit_off_path=lambda **kwargs: ("polled", kwargs),
         evaluate_ready_off_path=lambda: None,
@@ -528,7 +548,8 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
 
         def receive(self, *, timeout_s):
             assert timeout_s == 0.0
-            return SimpleNamespace(
+            return GreyFitMessage(
+                request=self.job.request,
                 outcome=GreyFitSuccess(
                     request=self.job.request,
                     config=replace(self.job.config, C_c=900.0, K_Q=700.0, theta=75.0),
@@ -541,7 +562,15 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
                         self.job.observations[-1].temp_c,
                     ),
                     nfev=4,
-                )
+                ),
+                worker_start_method="spawn",
+                worker_thread_environment=(
+                    ("OMP_NUM_THREADS", "1"),
+                    ("OPENBLAS_NUM_THREADS", "1"),
+                    ("MKL_NUM_THREADS", "1"),
+                    ("VECLIB_MAXIMUM_THREADS", "1"),
+                    ("NUMEXPR_NUM_THREADS", "1"),
+                ),
             )
 
         def close(self):
@@ -635,9 +664,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
     _delivery, evaluation = controller.poll_learning_off_path()
 
     assert isinstance(evaluation, ModelEvaluationPayload)
-    assert evaluation.rejection_reasons == tuple(
-        f"challenger-horizon-{horizon}" for horizon in (3, 15, 45, 90, 180)
-    )
+    assert evaluation.rejection_reasons == tuple(f"challenger-horizon-{horizon}" for horizon in (3, 15, 45, 90, 180))
     assert learning.prepared is None
     assert first_candidate.closed is True
 

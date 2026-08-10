@@ -29,7 +29,6 @@ PROMOTION = ROOT / "controller" / "model_promotion.py"
 UPDATE = ROOT / "controller" / "update_mpc.py"
 MPC = ROOT / "controller" / "mpc.py"
 MODEL = ROOT / "controller" / "mpc_model.py"
-NET = ROOT / "controller" / "mpc_net.py"
 
 NODES = [
     "tests/unit/mpc/test_model_promotion.py",
@@ -37,7 +36,6 @@ NODES = [
     "tests/unit/mpc/test_mpc_controller.py",
     "tests/unit/mpc/test_mpc_model.py",
     "tests/unit/mpc/test_mpc_model_snapshot.py",
-    "tests/unit/mpc/test_mpc_net.py",
     "tests/unit/mpc/test_mpc_ekf.py",
 ]
 
@@ -176,19 +174,6 @@ MUTATIONS = [
         "        steps = 1",
     ),
     (
-        "M29 the do-mpc model keeps a firepot state the estimators do not",
-        MODEL,
-        '    q = [model.set_variable("_x", f"q{i}") for i in range(n_delay)]\n'
-        '    T_c = model.set_variable("_x", "T_c")\n'
-        '    d = model.set_variable("_x", "d")\n'
-        '    combustion_residual = model.set_variable("_u", "combustion_residual")',
-        '    q = [model.set_variable("_x", f"q{i}") for i in range(n_delay)]\n'
-        '    model.set_variable("_x", "T_f")\n'
-        '    T_c = model.set_variable("_x", "T_c")\n'
-        '    d = model.set_variable("_x", "d")\n'
-        '    combustion_residual = model.set_variable("_u", "combustion_residual")',
-    ),
-    (
         "M30 the Kalman state vector keeps the slot the firepot used to hold",
         MODEL,
         "        n = n_delay + 2\n        iTc, iD = n_delay, n_delay + 1\n\n        A = np.zeros((n, n))\n"
@@ -218,44 +203,24 @@ MUTATIONS = [
     (
         "M33 the snapshot schema never moves with the model",
         MODEL,
+        "MODEL_SCHEMA = 4",
         "MODEL_SCHEMA = 3",
-        "MODEL_SCHEMA = 2",
     ),
     (
         "M34 restore_model takes a snapshot of any version",
         MPC,
-        "        if version != self._MODEL_SCHEMA:",
+        '        if not isinstance(snapshot, dict) or snapshot.get("version") != self._MODEL_SCHEMA:',
         "        if False:",
     ),
     (
         "M35 restore_model refuses an old snapshot without saying so",
         MPC,
         "            print(\n"
-        '                f"[mpc] discarding a version {version!r} model snapshot: this controller "\n'
-        '                f"stores version {self._MODEL_SCHEMA}, the single-lump model. The next "\n'
-        '                "cook refits from scratch."\n'
+        '                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "\n'
+        '                f"accepts only grey schema {self._MODEL_SCHEMA}; version 3 is migration input only."\n'
         "            )\n"
         "            return False",
         "            return False",
-    ),
-    # ---- the net artifact guard -------------------------------------------
-    (
-        "M36 the net width check is gone, so a stale artifact loads",
-        NET,
-        "        if self.input_dim != self.expected_input_dim(cfg):\n            return False",
-        "        if False:\n            return False",
-    ),
-    (
-        "M37 the net reads the disturbance from the wrong state slot",
-        NET,
-        "        disturbance = x[self.n_delay + 1]",
-        "        disturbance = x[self.n_delay + 2]",
-    ),
-    (
-        "M38 the expected width still counts a firepot slot",
-        NET,
-        '        return int(cfg["n_delay"]) + 4',
-        '        return int(cfg["n_delay"]) + 5',
     ),
     # ---- retired settings keys --------------------------------------------
     (
@@ -269,19 +234,6 @@ MUTATIONS = [
         MPC,
         "    retired = [k for k in _RETIRED_PARAMS if k in cfg]",
         "    retired = list(_RETIRED_PARAMS)",
-    ),
-    # ---- the model-structure version the artifact and snapshot key on ------
-    (
-        "M41 the net's structure check is gone, leaving only the width",
-        NET,
-        "        if self.model_schema != MODEL_SCHEMA:\n            return False",
-        "        if False:\n            return False",
-    ),
-    (
-        "M42 an artifact with no declared structure is assumed current",
-        NET,
-        "_LEGACY_SCHEMA = 1",
-        "_LEGACY_SCHEMA = 2",
     ),
     (
         "M43 the snapshot counts its own schema instead of sharing the model's",
@@ -311,8 +263,11 @@ MUTATIONS = [
     (
         "M47 the counter never clears, so a healthy policy reads as frozen",
         MPC,
-        "            self._consecutive_policy_failures = 0\n            self._last_solve_failed = False",
-        "            self._last_solve_failed = False",
+        "            if self._consecutive_policy_failures:\n"
+        '                print(f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)")\n'
+        "            self._consecutive_policy_failures = 0",
+        "            if self._consecutive_policy_failures:\n"
+        '                print(f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)")',
     ),
     # ---- the deadtime chain length ----------------------------------------
     (

@@ -10,6 +10,7 @@ import pytest
 
 from controller.mpc import GreySnapshotInvalid, _DEFAULTS, Controller, migrate_grey_learning_snapshot
 from controller.model_learning.activation import ActivationPhase
+from controller.runtime.model_fitting import TeardownRefitOutcome
 
 
 CURRENT_SCHEMA = 4
@@ -99,6 +100,7 @@ def test_revision_advances_on_adoption_and_restored_revision_is_carried_forward(
 
     assert restored.restore_model(snapshot) is True
     restored._adopt_model(PARAMS, rmse=1.2, samples=500, band_c=(90.0, 210.0))
+    assert restored.finalize_cook_refit(TeardownRefitOutcome.ACCEPTED_NEXT_COOK) is True
     assert restored.get_model_snapshot()["revision"] == 43
 
 
@@ -194,7 +196,6 @@ def test_v4_round_trip_is_exact_for_identified_and_default_snapshots():
         restored = _controller()
         assert restored.restore_model(snapshot) is True
         assert restored.get_model_snapshot() == snapshot
-
 
 
 @pytest.mark.parametrize(

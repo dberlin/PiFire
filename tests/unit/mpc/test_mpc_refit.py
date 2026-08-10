@@ -106,7 +106,7 @@ def test_a_refit_moves_the_model_toward_the_grill_that_produced_the_cook(accepte
 
 
 def test_a_refit_records_the_band_it_learned_in(accepted_refit):
-    lo, hi = accepted_refit.snapshot["band_c"]
+    lo, hi = accepted_refit.snapshot["active"]["metadata"]["band_c"]
     assert lo < hi
     assert hi > 200.0  # the synthetic cook is a high-temperature run
 
@@ -116,21 +116,20 @@ def test_too_few_samples_is_refused_without_fitting():
     v = c.refit_from_cook([(0.0, 20.0, 50.0), (5.0, 21.0, 50.0)])
     assert v.accepted is False
     assert "sample" in v.reason.lower()
-    assert c.get_model_snapshot() is None
+    assert c.get_model_snapshot()["identification"] == {"status": "unidentified"}
 
 
-def test_a_refit_uses_the_live_history_when_given_none():
+def test_a_refit_without_explicit_history_uses_completed_frames_not_solver_samples():
     c = _c()
     c.set_target(110.0)
     for _ in range(3):
         c.update(100.0)
-    assert c.refit_from_cook().accepted is False  # too short to accept, but must not raise
 
-    # A refused short history alone would read the same whether the live
-    # history was consulted or an empty list was, so drive one that can be fit.
-    live = _c()
-    live._history.extend(_synthetic_cook())
-    assert live.refit_from_cook().accepted is True
+    verdict = c.refit_from_cook()
+
+    assert verdict.accepted is False
+    assert "0 samples" in verdict.reason
+    assert len(c.cook_history()) == 3
 
 
 def test_an_uninformative_cook_is_refused_because_it_determines_nothing():
@@ -596,7 +595,7 @@ def test_a_solve_that_ran_out_of_evaluations_is_refused(monkeypatch):
     v = c.refit_from_cook(_synthetic_cook())
     assert v.accepted is False
     assert "converge" in v.reason
-    assert c.get_model_snapshot() is None
+    assert c.get_model_snapshot()["identification"] == {"status": "unidentified"}
 
 
 def test_a_converged_solve_is_not_by_itself_a_promotion(monkeypatch):
@@ -687,7 +686,7 @@ def test_a_solve_that_diverged_is_refused_before_anything_is_measured_on_it(monk
 
     assert verdict.accepted is False
     assert "converge" in verdict.reason
-    assert c.get_model_snapshot() is None
+    assert c.get_model_snapshot()["identification"] == {"status": "unidentified"}
     # Nothing was scored at all -- neither the candidate nor the incumbent.
     assert scored == []
 
@@ -751,11 +750,13 @@ def test_solver_bookkeeping_never_becomes_part_of_the_model():
     assert "converged" not in c.cfg
     assert "nfev" not in c.cfg
     snapshot = c.get_model_snapshot()
-    assert set(snapshot["params"]) == set(Controller._MODEL_PARAM_KEYS)
-    assert "converged" not in snapshot["params"]
-    assert "nfev" not in snapshot["params"]
+    parameters = snapshot["active"]["parameters"]
+    metadata = snapshot["active"]["metadata"]
+    assert set(parameters) == set(Controller._MODEL_PARAM_KEYS)
+    assert "converged" not in parameters
+    assert "nfev" not in parameters
     # Provenance, beside the model rather than inside it.
-    assert snapshot["nfev"] > 0
+    assert metadata["nfev"] > 0
     # The store persists this verbatim, and rejects anything json cannot carry.
     json.dumps(snapshot, allow_nan=False)
 
@@ -765,10 +766,10 @@ def test_unrecorded_solver_effort_is_none_rather_than_zero():
     c = _c()
     c.refit_from_cook(_synthetic_cook())
     snapshot = c.get_model_snapshot()
-    snapshot.pop("nfev")
+    snapshot["active"]["metadata"]["nfev"] = None
     restored = _c()
     assert restored.restore_model(snapshot) is True
-    assert restored.get_model_snapshot()["nfev"] is None
+    assert restored.get_model_snapshot()["active"]["metadata"]["nfev"] is None
 
 
 def test_an_unmeasured_error_is_none_and_survives_the_store(model_store):
@@ -777,11 +778,11 @@ def test_an_unmeasured_error_is_none_and_survives_the_store(model_store):
     c = _c()
     c.refit_from_cook(_synthetic_cook())
     snapshot = c.get_model_snapshot()
-    snapshot.pop("rmse")
+    snapshot["active"]["metadata"]["rmse"] = None
     restored = _c()
     assert restored.restore_model(snapshot) is True
     out = restored.get_model_snapshot()
-    assert out["rmse"] is None
+    assert out["active"]["metadata"]["rmse"] is None
     restored.set_target(110.0)
     assert restored.get_status()["model"]["rmse"] is None
     # The store's own validator, not a re-implementation of it.
@@ -791,7 +792,7 @@ def test_an_unmeasured_error_is_none_and_survives_the_store(model_store):
         dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4),
         {k: float(restored.cfg[k]) for k in Controller._MODEL_PARAM_KEYS},
         candidate_rmse=1.0,
-        incumbent_rmse=out["rmse"],
+        incumbent_rmse=out["active"]["metadata"]["rmse"],
         # Clear of the floor: what is being pinned is the missing incumbent
         # error, not whether the record determined the candidate.
         identifiability=2.0,
@@ -806,6 +807,6 @@ def test_the_snapshot_does_not_alias_the_running_model():
     c = _c()
     c.refit_from_cook(_synthetic_cook())
     snapshot = c.get_model_snapshot()
-    band = list(snapshot["band_c"])
-    snapshot["band_c"][0] = -999.0
-    assert c.get_model_snapshot()["band_c"] == band
+    band = list(snapshot["active"]["metadata"]["band_c"])
+    snapshot["active"]["metadata"]["band_c"][0] = -999.0
+    assert c.get_model_snapshot()["active"]["metadata"]["band_c"] == band

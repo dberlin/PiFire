@@ -5,7 +5,7 @@ import pytest
 from common.controller_model_state import CheckpointSaveOutcome
 from common.control_trace import ResultStaleState, TraceEventKind
 from common.model_evidence import EvidenceKind
-from controller.linear_mpc.calibration import CalibrationDecision, CalibrationProgress
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_allocator import allocate
 from controller.runtime.runner import ControllerUpdateResult
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
@@ -199,6 +199,8 @@ def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and
         (42_000, 62_000, 1.0),
         (62_000, 63_000, 1.0),
     ]
+
+
 def test_multiframe_catchup_pairs_each_exact_feedback_with_its_observation(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
@@ -209,14 +211,12 @@ def test_multiframe_catchup_pairs_each_exact_feedback_with_its_observation(hold_
     hold._advance_framed_pulse(63.0, True, ptemp=201.0)
 
     assert [
-        (applied.timestamp, observation.frame_end_s, applied.ratio)
-        for applied, observation in runner.frame_completions
+        (applied.timestamp, observation.frame_end_s, applied.ratio) for applied, observation in runner.frame_completions
     ] == [
         (22.0, 22.0, 12.0 / 20.0),
         (42.0, 42.0, 1.0),
         (62.0, 62.0, 1.0),
     ]
-
 
 
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):

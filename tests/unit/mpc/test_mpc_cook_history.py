@@ -1,5 +1,8 @@
 """The controller keeps the record its own refit will consume."""
 
+from types import SimpleNamespace
+
+
 import numpy as np
 import pytest
 
@@ -23,6 +26,26 @@ CONFIG = dict(
     est_r_meas=0.04,
 )
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
+
+
+def _stub_native_solver(monkeypatch, controller):
+    horizon = int(controller.cfg["n_horizon"])
+    result = SimpleNamespace(
+        sequence_q=np.full(horizon, 0.5),
+        sequence_residual=np.zeros(horizon),
+        objective=1.0,
+        diagnostics=SimpleNamespace(
+            status=0,
+            backend_status=0,
+            iterations=1,
+            solve_time_s=0.0,
+            objective=1.0,
+            kkt_residual=0.0,
+            constraint_residual=0.0,
+            warm_started=True,
+        ),
+    )
+    monkeypatch.setattr(type(controller.mpc), "solve", lambda self, state, **kwargs: result)
 
 
 def test_history_records_one_row_per_update():
@@ -49,7 +72,7 @@ def test_history_is_bounded(monkeypatch):
     """Only the deque's bound is under test here, not the NLP -- the solve is
     stubbed to keep _HISTORY_MAX-scale runs fast."""
     c = Controller(dict(CONFIG), "C", dict(CYCLE))
-    monkeypatch.setattr(c.mpc, "make_step", lambda x: np.array([[0.5]]))
+    _stub_native_solver(monkeypatch, c)
     c.set_target(110.0)
     for _ in range(_HISTORY_MAX + 50):
         c.update(100.0)
@@ -60,7 +83,7 @@ def test_history_keeps_the_most_recent_rows_when_it_overflows(monkeypatch):
     """Only the deque's overflow order is under test here, not the NLP -- see
     test_history_is_bounded for why the solve is stubbed."""
     c = Controller(dict(CONFIG), "C", dict(CYCLE))
-    monkeypatch.setattr(c.mpc, "make_step", lambda x: np.array([[0.5]]))
+    _stub_native_solver(monkeypatch, c)
     c.set_target(110.0)
     for i in range(_HISTORY_MAX + 10):
         c.update(100.0 + i * 1e-3)

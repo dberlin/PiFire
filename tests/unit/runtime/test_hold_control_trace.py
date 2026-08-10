@@ -29,15 +29,6 @@ from common.datastore_accessors import read_control_trace_session
 from common import datastore
 from controller.applied_output import OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
-from controller.linear_mpc.adaptation import (
-    CompletedOrigin,
-    EvaluationDecision,
-    EvaluationRejectionReason,
-    HorizonScore,
-    ObservationOutcome,
-    OnlineAdaptation,
-    UpdateGate,
-)
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.mpc_allocator import allocate
 from controller.mpc import Controller
@@ -50,7 +41,6 @@ from controller.runtime.runner import (
     ThreadedControllerRunner,
     build_runner,
 )
-from controller.linear_mpc.contracts import ModelUpdate
 from controller.model_learning.contracts import FrameObservation
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
@@ -1241,8 +1231,6 @@ def _promotion_outcome(*, frame_end_ms):
     return outcome
 
 
-
-
 def _learning_observation(frame_start_s):
     return FrameObservation(
         frame_start_s,
@@ -1282,8 +1270,6 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
         2: (second, mode._trace_session_id, 0, None),
     }
     return recorder, runner, mode, first, second
-
-
 
 
 def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_outcomes(hold_cycle, monkeypatch):

@@ -667,8 +667,7 @@ def _matches_completed_rmse(errors: Sequence[float], reported: float | None) -> 
 
 
 CompletedOriginEvidence: TypeAlias = Annotated[CompletedOriginPayload, BeforeValidator(_completed_origin_payload)]
-
-
+HorizonScoreEvidence: TypeAlias = Annotated[HorizonScorePayload, BeforeValidator(_horizon_score_payload)]
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -751,8 +750,6 @@ class ModelEvaluationPayload:
         return self
 
 
-
-
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class GreyFitLifecyclePayload:
     request_id: NonBlankString
@@ -807,6 +804,8 @@ class GreyLearningFailurePayload:
     detail: NonBlankString
     terminal: bool
     payload_type: Literal["learning_failure"] = "learning_failure"
+
+
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class RecorderGapPayload:
     lost_record_count: NonNegativeInt

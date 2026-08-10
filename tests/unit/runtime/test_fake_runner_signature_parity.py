@@ -6,7 +6,7 @@ a TypeError unrelated to the behaviour under test.
 
 import inspect
 
-from controller.linear_mpc.contracts import FrameObservation
+from controller.model_learning.contracts import FrameObservation
 from controller.runtime.runner import ControllerRunner, SyncControllerRunner, ThreadedControllerRunner
 from tests.fakes.runner import FakeControllerRunner
 

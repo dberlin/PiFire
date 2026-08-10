@@ -1,5 +1,4 @@
-import builtins
-import importlib
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -126,25 +125,33 @@ def test_fresh_default_model_has_no_residual_regularization(monkeypatch):
     controller.close()
 
 
-def test_loading_the_live_mpc_module_does_not_import_retired_policy_stacks(monkeypatch):
-    forbidden = (
-        "do_mpc",
-        "casadi",
-        "controller.mpc_net",
-        "controller.linear_mpc.arx",
-        "controller.linear_mpc.state_space",
-        "controller.linear_mpc.policy",
+def test_loading_the_live_mpc_module_does_not_import_retired_policy_stacks():
+    code = """
+import builtins
+
+forbidden = (
+    "do_mpc",
+    "casadi",
+    "controller.mpc_net",
+    "controller.linear_mpc.arx",
+    "controller.linear_mpc.state_space",
+    "controller.linear_mpc.policy",
+)
+original_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if any(name == item or name.startswith(item + ".") for item in forbidden):
+        raise AssertionError(f"retired live import: {name}")
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+import controller.mpc
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    original_import = builtins.__import__
 
-    def guarded_import(name, *args, **kwargs):
-        if any(name == item or name.startswith(item + ".") for item in forbidden):
-            raise AssertionError(f"retired live import: {name}")
-        return original_import(name, *args, **kwargs)
-
-    for name in tuple(sys.modules):
-        if any(name == item or name.startswith(item + ".") for item in forbidden):
-            monkeypatch.delitem(sys.modules, name, raising=False)
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-    reloaded = importlib.reload(mpc_module)
-    assert reloaded.Controller
+    assert result.returncode == 0, result.stderr

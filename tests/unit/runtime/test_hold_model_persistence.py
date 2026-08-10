@@ -27,7 +27,7 @@ from common.model_evidence import (
     RollbackEvidence,
 )
 
-from controller.linear_mpc.activation import canonical_snapshot_digest
+from controller.model_learning.activation import canonical_snapshot_digest
 from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.runner import (
@@ -159,8 +159,6 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
     assert runner.restored[0]["version"] == 4
 
 
-
-
 def _pair_phase_state(phase: ActivationPhase = ActivationPhase.PREPARED):
     incumbent_config = {"schema": "pifire-grey-box-model/v4", "theta": 50.0}
     candidate_config = {"schema": "pifire-grey-box-model/v4", "theta": 40.0}
@@ -221,9 +219,7 @@ def _pair_phase_state(phase: ActivationPhase = ActivationPhase.PREPARED):
     "phase",
     (ActivationPhase.PREPARED, ActivationPhase.ACTIVE, ActivationPhase.ABORTED),
 )
-def test_setup_routes_new_prepared_pair_authority_without_legacy_activation_evidence(
-    hold_cycle, monkeypatch, phase
-):
+def test_setup_routes_new_prepared_pair_authority_without_legacy_activation_evidence(hold_cycle, monkeypatch, phase):
     from controller.runtime.modes import hold as hold_module
 
     persisted, _record = _pair_phase_state(phase)
@@ -686,6 +682,7 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
         old_worker.flush_and_stop(timeout=1.0)
         new_worker.flush_and_stop(timeout=1.0)
 
+
 class _CrashRecoveryEstimator:
     created = []
 
@@ -698,6 +695,7 @@ class _CrashRecoveryEstimator:
 
     def close(self):
         self.closed += 1
+
 
 class _CrashRecoverySolver:
     created = []
@@ -769,7 +767,6 @@ class _CrashRecoveryRunnerGate:
         with self._condition:
             self._open = True
             self._condition.notify_all()
-
 
 
 @pytest.mark.parametrize(
@@ -869,15 +866,10 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     incumbent_pair = first_core.active_control_pair
     incumbent = incumbent_pair.descriptor
     candidate_controller_config = dict(first_core.cfg)
-    candidate_controller_config["theta"] = (
-        float(candidate_controller_config["theta"]) + 1.0
-    )
-    candidate_estimator, candidate_solver = first_core._build_for(
-        candidate_controller_config
-    )
+    candidate_controller_config["theta"] = float(candidate_controller_config["theta"]) + 1.0
+    candidate_estimator, candidate_solver = first_core._build_for(candidate_controller_config)
     candidate_configuration = {
-        name: getattr(candidate_solver.config, name)
-        for name in candidate_solver.config.__dataclass_fields__
+        name: getattr(candidate_solver.config, name) for name in candidate_solver.config.__dataclass_fields__
     }
     candidate_digest = mpc_module.grey_config_digest(candidate_solver.config)
     assert grey_snapshot_digest(candidate_configuration) == candidate_digest
@@ -906,10 +898,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     prepared_write_release = threading.Event()
 
     def persist_activation_phase(record, expected):
-        if (
-            crash_boundary == "before-prepared-receipt"
-            and record.phase is ActivationPhase.PREPARED
-        ):
+        if crash_boundary == "before-prepared-receipt" and record.phase is ActivationPhase.PREPARED:
             prepared_write_started.set()
             if not prepared_write_release.wait(timeout=5.0):
                 raise TimeoutError("prepared write was not released")
@@ -1017,9 +1006,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         "after-confidence-fallback-receipt",
         "after-operator-rollback-receipt",
     ):
-        assert first_core.authorize_candidate_pair(
-            prepared.transition(ActivationPhase.ACTIVE)
-        )
+        assert first_core.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
     if durable_phase is ActivationPhase.ABORTED:
         assert first_core.compensate_candidate_pair(
             candidate_pair,
@@ -1077,14 +1064,10 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         first_boundary_gate.release()
         assert first_boundary_gate.wait_for_arrivals(2)
 
-    expected_precrash_pair = (
-        candidate_pair if precrash_owner == "candidate" else incumbent_pair
-    )
+    expected_precrash_pair = candidate_pair if precrash_owner == "candidate" else incumbent_pair
     assert first_core.active_control_pair is expected_precrash_pair
     assert first_core.activation_output_authorized is precrash_authorized
-    assert (
-        first_core.rollback_control_pair is incumbent_pair
-    ) is precrash_has_rollback
+    assert (first_core.rollback_control_pair is incumbent_pair) is precrash_has_rollback
     precrash_authority = read_model_activation(database_path=database_path)
     if durable_phase is None:
         assert precrash_authority is None
@@ -1106,10 +1089,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         candidate_pair.estimator,
         candidate_pair.solver,
     )
-    assert all(
-        type(handle.closed) is int and handle.closed == 1
-        for handle in first_runtime_handles
-    )
+    assert all(type(handle.closed) is int and handle.closed == 1 for handle in first_runtime_handles)
 
     monkeypatch.setattr(
         hold_module,
@@ -1143,11 +1123,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     runner = ThreadedControllerRunner(core, wait_for_period=restart_gate)
     assert restart_gate.wait_for_arrivals(1)
     hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
-    expected = (
-        candidate
-        if durable_phase is ActivationPhase.ACTIVE and lifecycle_kind is None
-        else incumbent
-    )
+    expected = candidate if durable_phase is ActivationPhase.ACTIVE and lifecycle_kind is None else incumbent
     try:
         hold.setup()
         restart_solve_offset = len(_CrashRecoverySolver.solve_order)
@@ -1161,9 +1137,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         assert core.active_control_pair.descriptor == expected
         assert core.estimator is core.active_control_pair.estimator
         assert core.mpc is core.active_control_pair.solver
-        assert _CrashRecoverySolver.solve_order[restart_solve_offset:] == [
-            core.active_control_pair.solver
-        ]
+        assert _CrashRecoverySolver.solve_order[restart_solve_offset:] == [core.active_control_pair.solver]
         assert core.mpc.calls
         assert not runner.mpc_activation_terminated
 

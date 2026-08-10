@@ -758,9 +758,7 @@ class HoldMode(ControlMode):
         except ValueError:
             self._retire_pending_model_observation(sequence, reason)
             return
-        records: tuple[tuple[TraceEventKind, object], ...] = (
-            (TraceEventKind.MODEL_OBSERVATION, rejected),
-        )
+        records: tuple[tuple[TraceEventKind, object], ...] = ((TraceEventKind.MODEL_OBSERVATION, rejected),)
         if evaluation_payload is not None:
             records += ((TraceEventKind.MODEL_EVALUATION, evaluation_payload),)
         self._pending_model_observations[sequence] = (*pending[:3], records)
@@ -788,8 +786,7 @@ class HoldMode(ControlMode):
         confidence = tuple(
             record
             for record in compact_batch
-            if isinstance(record, ModelEvidenceRecord)
-            and record.kind is EvidenceKind.CONFIDENCE_DECISION
+            if isinstance(record, ModelEvidenceRecord) and record.kind is EvidenceKind.CONFIDENCE_DECISION
         )
         ordinary = tuple(record for record in compact_batch if record not in confidence)
         submit_confidence = getattr(self._runner, "submit_activation_confidence", None)
@@ -838,9 +835,7 @@ class HoldMode(ControlMode):
             self._persist_controller_evidence(evidence)
             observation = delivered
             evaluation_payload = outcome.get("evaluation_payload")
-            evaluation_payload = (
-                evaluation_payload if isinstance(evaluation_payload, ModelEvaluationPayload) else None
-            )
+            evaluation_payload = evaluation_payload if isinstance(evaluation_payload, ModelEvaluationPayload) else None
             try:
                 if observation.allocation_join_reason is not None:
                     self._queue_rejected_model_observation(
@@ -866,9 +861,7 @@ class HoldMode(ControlMode):
                     or observation.reset
                     or not observation.continuous
                 ):
-                    self._queue_rejected_model_observation(
-                        sequence, "observation-gate-mismatch", evaluation_payload
-                    )
+                    self._queue_rejected_model_observation(sequence, "observation-gate-mismatch", evaluation_payload)
                     continue
                 output_source = (
                     OutputSource(observation.output_source) if observation.output_source != "unknown" else None
@@ -931,9 +924,7 @@ class HoldMode(ControlMode):
                     continuous=observation.continuous,
                 )
             except KeyError, TypeError, ValueError:
-                self._queue_rejected_model_observation(
-                    sequence, "observation-outcome-malformed", evaluation_payload
-                )
+                self._queue_rejected_model_observation(sequence, "observation-outcome-malformed", evaluation_payload)
                 continue
             records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
             if evaluation_payload is not None:
@@ -1034,9 +1025,7 @@ class HoldMode(ControlMode):
                 calibration_action=completed_calibration_action,
                 calibration_generation=completed_calibration_generation,
                 feedback_disposition=(
-                    FrameFeedbackDisposition.DISCARDED
-                    if frame.skipped
-                    else FrameFeedbackDisposition.COMPLETE
+                    FrameFeedbackDisposition.DISCARDED if frame.skipped else FrameFeedbackDisposition.COMPLETE
                 ),
                 dispatch=observation is None,
                 record_trace=False,
@@ -1071,10 +1060,7 @@ class HoldMode(ControlMode):
                     feedback_disposition=FrameFeedbackDisposition.PROGRESS,
                     dispatch=not bool(decision.completed_frames),
                 )
-                if decision.completed_frames:
-                    controller.trace_interval_result_revision = controller.pulse_frame_result_revision
-                    controller.trace_prior_output_source = controller.pulse_frame_output_source
-                elif (
+                if (
                     controller.pulse_frame_result_revision > 0
                     and controller.trace_interval_result_revision == 0
                     and controller.trace_prior_output_source is OutputSource.SEED
@@ -1161,9 +1147,7 @@ class HoldMode(ControlMode):
                 calibration_action=completed_calibration_action,
                 calibration_generation=completed_calibration_generation,
                 feedback_disposition=(
-                    FrameFeedbackDisposition.DISCARDED
-                    if completed.skipped
-                    else FrameFeedbackDisposition.COMPLETE
+                    FrameFeedbackDisposition.DISCARDED if completed.skipped else FrameFeedbackDisposition.COMPLETE
                 ),
                 dispatch=captured is None,
             )
@@ -1787,9 +1771,7 @@ class HoldMode(ControlMode):
                     interval_end_ms=int(frame.ended_at_s * 1_000),
                     realized_auger_duty=ratio,
                     realized_combustion_load=realized_load if trace_sample_complete else None,
-                    actual_fan_duty=(
-                        controller.pulse_frame_applied_fan_duty if controller.controls_fan else None
-                    ),
+                    actual_fan_duty=(controller.pulse_frame_applied_fan_duty if controller.controls_fan else None),
                     sample_complete=trace_sample_complete,
                     output_source=trace_source,
                 ),
@@ -1955,11 +1937,7 @@ class HoldMode(ControlMode):
                 try:
                     from controller.mpc import _DEFAULTS as mpc_defaults
 
-                    selected_config = (
-                        self.settings.get("controller", {})
-                        .get("config", {})
-                        .get("mpc", {})
-                    )
+                    selected_config = self.settings.get("controller", {}).get("config", {}).get("mpc", {})
                     defaults = dict(mpc_defaults)
                     if isinstance(selected_config, Mapping):
                         defaults.update(selected_config)
@@ -2811,9 +2789,7 @@ class HoldMode(ControlMode):
                 )
             else:
                 outcome = TeardownRefitOutcome.REJECTED
-        _control.eventLogger.info(
-            f"Model refit at cook end: {outcome.value} ({reason})."
-        )
+        _control.eventLogger.info(f"Model refit at cook end: {outcome.value} ({reason}).")
         return outcome, verdict
 
     def _refit_model_once(self) -> tuple[TeardownRefitOutcome, object | None]:
@@ -2897,7 +2873,7 @@ class HoldMode(ControlMode):
                 now,
                 decision.delivered_on_s,
                 ptemp=ptemp,
-                dispatch=False,
+                dispatch=not bool(decision.completed_frames),
             )
         self._reset_framed_pulse(
             PulseResetReason.MODE_CHANGE,

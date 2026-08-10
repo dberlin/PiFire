@@ -6,6 +6,7 @@ The active controller owns one EKF/KF estimator and one native solver.  The
 configured control period is estimator/runner cadence; the prediction model is
 the fixed 25-second, eight-delay generated map.
 """
+
 from __future__ import annotations
 
 
@@ -78,6 +79,7 @@ from controller.runtime.model_fitting import (
 from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
+    FitRequest,
     FitStatus,
     FitWindowIdentity,
     FrameObservation,
@@ -136,6 +138,8 @@ _DEFAULTS = dict(
 
 
 _GREY_V4_SCHEMA = "pifire-grey-learning/v4"
+_NATIVE_BOUND_TOLERANCE = 1e-6
+
 _GREY_V4_KEYS = frozenset(
     (
         "version",
@@ -208,20 +212,14 @@ def _grey_snapshot_metadata(value):
     if isinstance(samples, bool) or not isinstance(samples, int) or samples < 0:
         raise GreySnapshotInvalid("invalid-metadata:samples")
     band = value.get("band_c", (0.0, 0.0))
-    if (
-        isinstance(band, (str, bytes))
-        or not isinstance(band, (list, tuple))
-        or len(band) != 2
-    ):
+    if isinstance(band, (str, bytes)) or not isinstance(band, (list, tuple)) or len(band) != 2:
         raise GreySnapshotInvalid("invalid-metadata:band")
     lower = _grey_snapshot_number(band[0], "band_c")
     upper = _grey_snapshot_number(band[1], "band_c")
     if lower > upper:
         raise GreySnapshotInvalid("invalid-metadata:band")
     nfev = value.get("nfev")
-    if nfev is not None and (
-        isinstance(nfev, bool) or not isinstance(nfev, int) or nfev < 0
-    ):
+    if nfev is not None and (isinstance(nfev, bool) or not isinstance(nfev, int) or nfev < 0):
         raise GreySnapshotInvalid("invalid-metadata:nfev")
     return {"rmse": rmse, "samples": samples, "band_c": [lower, upper], "nfev": nfev}
 
@@ -282,11 +280,7 @@ def _grey_v4_snapshot(snapshot):
     revision = _grey_v4_nonnegative_int(snapshot.get("revision"), "invalid-revision")
     active = _grey_v4_model(snapshot.get("active"), "invalid-active")
     challenger_value = snapshot.get("challenger")
-    challenger = (
-        None
-        if challenger_value is None
-        else _grey_v4_model(challenger_value, "invalid-challenger")
-    )
+    challenger = None if challenger_value is None else _grey_v4_model(challenger_value, "invalid-challenger")
     window_value = snapshot.get("window")
     if window_value is None:
         window = None
@@ -380,9 +374,7 @@ def _grey_v4_snapshot(snapshot):
         )
         generation_value = identities_value[f"{role}_generation"]
         generation = (
-            None
-            if generation_value is None
-            else _grey_v4_nonnegative_int(generation_value, "invalid-identities")
+            None if generation_value is None else _grey_v4_nonnegative_int(generation_value, "invalid-identities")
         )
         if (digest is None) != (generation is None):
             raise GreySnapshotInvalid("invalid-identities")
@@ -506,6 +498,7 @@ def migrate_grey_learning_snapshot(snapshot):
         raise GreySnapshotInvalid("incompatible-structure")
     return _grey_v4_snapshot(snapshot)
 
+
 # One row per control period. At the 5 s default that is ~12 hours, which is
 # longer than any single cook; a longer one loses its beginning rather than
 # its end, and the end is what describes the grill's current state. This is
@@ -562,8 +555,6 @@ def _finite_float(value):
     return value if math.isfinite(value) else None
 
 
-
-
 def _optional_float(value):
     """Cast to a finite float, or None when there is no number to report."""
     try:
@@ -571,38 +562,6 @@ def _optional_float(value):
     except TypeError, ValueError:
         return None
     return value if math.isfinite(value) else None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def _sanitized_copy(mapping):
@@ -615,15 +574,6 @@ def _sanitized_copy(mapping):
     `mapping` itself may be a live settings dict a consumer must not reach.
     """
     return {key: (_finite_float(value) if isinstance(value, float) else value) for key, value in mapping.items()}
-
-
-
-
-
-
-
-
-
 
 
 _PHYSICAL_PARAMS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
@@ -665,8 +615,6 @@ def _warn_about_model(cfg):
             "[mpc] model is uncalibrated (every thermal parameter is still the shipped default). "
             "Expect large overshoot until you fit this grill with controller/update_mpc.py."
         )
-
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -752,10 +700,7 @@ class Controller(ControllerBase):
         self._trace_allocation: AllocationResult | None = None
         self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
         self.estimator, self.mpc = self._build_for(cfg)
-        live_configuration = {
-            name: getattr(self.mpc.config, name)
-            for name in self.mpc.config.__dataclass_fields__
-        }
+        live_configuration = {name: getattr(self.mpc.config, name) for name in self.mpc.config.__dataclass_fields__}
         live_descriptor = GreyControlPairDescriptor(
             model_digest=canonical_snapshot_digest(live_configuration),
             configuration=live_configuration,
@@ -809,18 +754,6 @@ class Controller(ControllerBase):
             self._close_component(self.mpc)
             self._close_component(self.estimator)
             raise
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
 
     def _build_for(self, cfg, *, model_identified=None):
         """Build one complete estimator/native-solver pair or leave no owner."""
@@ -970,51 +903,11 @@ class Controller(ControllerBase):
         return True
 
     @staticmethod
-    def _linear_certificate_rejection(solve, config):
-        """Return the precise controller-boundary certificate rejection reason."""
-        try:
-            sequence = np.asarray(solve.sequence_q, dtype=float)
-            objective = float(solve.objective)
-            kkt = float(solve.kkt_residual)
-            iterations = solve.iterations
-            condition = float(solve.hessian_condition)
-        except AttributeError, TypeError, ValueError:
-            return "invalid-linear-certificate"
-        if (
-            sequence.shape != (config.horizon_steps,)
-            or not np.isfinite(sequence).all()
-            or not np.all((0.0 <= sequence) & (sequence <= 1.0))
-            or not math.isfinite(objective)
-            or not isinstance(iterations, int)
-            or isinstance(iterations, bool)
-            or iterations < 0
-            or not math.isfinite(condition)
-            or condition < 1.0
-        ):
-            return "invalid-linear-certificate"
-        if not math.isfinite(kkt) or not 0.0 <= kkt <= config.tolerance:
-            return "invalid-kkt-certificate"
-        return None
-
-    @staticmethod
-    def _valid_linear_solve(solve, config):
-        """Compatibility predicate for callers/tests needing a boolean."""
-        return Controller._linear_certificate_rejection(solve, config) is None
-
-    @staticmethod
     def _normalized_forecast_failure(error):
         """Normalize model-library finite-value errors to the lifecycle reason."""
         if isinstance(error, (ValueError, FloatingPointError, RuntimeError)) and "finite" in str(error).lower():
             return ValueError("non-finite-forecast")
         return error
-
-    
-
-    
-
-    
-
-    
 
     @property
     def active_control_pair(self) -> OwnedGreyControlPair:
@@ -1173,8 +1066,7 @@ class Controller(ControllerBase):
             self._activation_events.append(
                 ModelEvidenceRecord(
                     evidence_id=(
-                        f"fallback:{failed.descriptor.role_generation}:"
-                        f"{timestamp_ms}:{failed.descriptor.model_digest}"
+                        f"fallback:{failed.descriptor.role_generation}:{timestamp_ms}:{failed.descriptor.model_digest}"
                     ),
                     kind=EvidenceKind.FALLBACK,
                     session_id="mpc-runtime-activation",
@@ -1235,14 +1127,9 @@ class Controller(ControllerBase):
 
     def submit_activation_confidence(self, record: ModelEvidenceRecord):
         """Queue confidence on the same FIFO that owns activation phases."""
-        if (
-            not isinstance(record, ModelEvidenceRecord)
-            or record.kind is not EvidenceKind.CONFIDENCE_DECISION
-        ):
+        if not isinstance(record, ModelEvidenceRecord) or record.kind is not EvidenceKind.CONFIDENCE_DECISION:
             raise TypeError("activation confidence must be confidence-decision evidence")
         return self._activation_persistence_channel().submit_activation_confidence(record)
-
-    
 
     def _build_pair_from_descriptor(
         self,
@@ -1276,6 +1163,7 @@ class Controller(ControllerBase):
             self._close_component(estimator)
             raise ValueError("restored pair configuration digest changed")
         return OwnedGreyControlPair(descriptor, estimator, solver)
+
     def restore_activation(self, persisted, records):
         """Converge startup before authorizing the pair selected by durable authority."""
         records = tuple(records)
@@ -1301,8 +1189,7 @@ class Controller(ControllerBase):
                     or (
                         isinstance(record.payload, FallbackEvidence)
                         and record.payload.failed_digest == recovery.record.candidate.model_digest
-                        and record.payload.failed_generation
-                        == recovery.record.candidate.role_generation
+                        and record.payload.failed_generation == recovery.record.candidate.role_generation
                     )
                 ),
                 key=lambda record: (record.timestamp_ms, record.evidence_id),
@@ -1328,9 +1215,7 @@ class Controller(ControllerBase):
         self.mpc = restored.solver
         self._inert_activation = None
         self._active_activation_record = (
-            recovery.record
-            if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None
-            else None
+            recovery.record if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None else None
         )
         self._activation_output_authorized = True
         restored_generation = recovery.restore.role_generation
@@ -1361,18 +1246,13 @@ class Controller(ControllerBase):
         self._activation_events.clear()
         return events
 
-
-    
-
-    
-
-    
-
     @staticmethod
     def _completed_forecast_evidence(value):
         forecast = value.forecast
-        phase = forecast.phase if forecast.phase in {"heating", "coasting"} else (
-            "coasting" if value.observed_temperature_c <= forecast.challenger_prediction_c else "heating"
+        phase = (
+            forecast.phase
+            if forecast.phase in {"heating", "coasting"}
+            else ("coasting" if value.observed_temperature_c <= forecast.challenger_prediction_c else "heating")
         )
         return ForecastOriginEvidence(
             origin_sequence=value.origin_sequence,
@@ -1415,20 +1295,12 @@ class Controller(ControllerBase):
             )
             for origin in completed
         )
-        evaluated_at_s = (
-            max(origin.completion_time_s for origin in completed)
-            if completed
-            else time.monotonic()
-        )
+        evaluated_at_s = max(origin.completion_time_s for origin in completed) if completed else time.monotonic()
         incumbent_score = (
-            math.sqrt(sum(origin.incumbent_error_c**2 for origin in completed) / len(completed))
-            if completed
-            else None
+            math.sqrt(sum(origin.incumbent_error_c**2 for origin in completed) / len(completed)) if completed else None
         )
         challenger_score = (
-            math.sqrt(sum(origin.challenger_error_c**2 for origin in completed) / len(completed))
-            if completed
-            else None
+            math.sqrt(sum(origin.challenger_error_c**2 for origin in completed) / len(completed)) if completed else None
         )
         return ModelEvaluationPayload(
             decision_id=decision.decision_id,
@@ -1445,14 +1317,10 @@ class Controller(ControllerBase):
             sample_count=len(raw_origins),
             prospective_digest=None,
             window_start_ms=(
-                min(origin.origin_time_ms for origin in raw_origins)
-                if raw_origins
-                else int(evaluated_at_s * 1_000)
+                min(origin.origin_time_ms for origin in raw_origins) if raw_origins else int(evaluated_at_s * 1_000)
             ),
             window_end_ms=(
-                max(origin.completion_time_ms for origin in raw_origins)
-                if raw_origins
-                else int(evaluated_at_s * 1_000)
+                max(origin.completion_time_ms for origin in raw_origins) if raw_origins else int(evaluated_at_s * 1_000)
             ),
             incumbent_digest=decision.incumbent_digest,
             challenger_digest=decision.challenger_digest,
@@ -1536,10 +1404,7 @@ class Controller(ControllerBase):
                 status="queued",
                 model_digest=request.window.incumbent_digest,
             )
-        forecasts = tuple(
-            self._completed_forecast_evidence(value)
-            for value in result.completed_forecasts
-        )
+        forecasts = tuple(self._completed_forecast_evidence(value) for value in result.completed_forecasts)
         reasons = tuple(result.history.reasons)
         return {
             "role_generation": observation.role_generation,
@@ -1593,7 +1458,7 @@ class Controller(ControllerBase):
         with self._learning_lifecycle_lock:
             self._learning_session_id = session_id
             self._learning_cook_id = cook_id
-            del role_generation
+            self._rotate_teardown_role_generation(role_generation)
             with self._learning_lock:
                 learning = self._learning
             if learning is not None:
@@ -1626,10 +1491,7 @@ class Controller(ControllerBase):
         session_id = getattr(self, "_learning_session_id", None) or "mpc-learning"
         cook_id = getattr(self, "_learning_cook_id", None)
         evidence = ModelEvidenceRecord(
-            evidence_id=(
-                f"{session_id}:{evidence_payload.payload_type}:"
-                f"{timestamp_ms}:{role_generation}"
-            ),
+            evidence_id=(f"{session_id}:{evidence_payload.payload_type}:{timestamp_ms}:{role_generation}"),
             kind=EvidenceKind(evidence_payload.payload_type),
             session_id=session_id,
             cook_id=cook_id,
@@ -1679,8 +1541,7 @@ class Controller(ControllerBase):
     def _persist_reviewed_candidate_checkpoint(self, evaluation, preparation):
         request = getattr(getattr(preparation, "candidate", None), "request", None)
         if (
-            getattr(request, "origin", None)
-            is not CandidateOrigin.OPERATOR_CALIBRATION
+            getattr(request, "origin", None) is not CandidateOrigin.OPERATOR_CALIBRATION
             or not bool(getattr(evaluation, "accepted", False))
             or tuple(getattr(evaluation, "blockers", ()))
         ):
@@ -1693,8 +1554,7 @@ class Controller(ControllerBase):
         if (
             evaluation.incumbent_digest != active_descriptor.model_digest
             or evaluation.challenger_digest != candidate_descriptor.model_digest
-            or evaluation.candidate_generation
-            != candidate_descriptor.candidate_generation
+            or evaluation.candidate_generation != candidate_descriptor.candidate_generation
         ):
             raise RuntimeError("reviewed-candidate-identity-changed")
         persisted = getattr(self, "_reviewed_checkpoint_decision_ids", None)
@@ -1726,7 +1586,6 @@ class Controller(ControllerBase):
             self._model_revision = previous_revision
             raise RuntimeError("reviewed-candidate-checkpoint-not-durable")
         persisted.add(evaluation.decision_id)
-
 
     def _persist_candidate_evaluation(self, evaluation, preparation):
         persisted_ids = getattr(
@@ -1798,10 +1657,7 @@ class Controller(ControllerBase):
             provenance_digest=evaluation.incumbent_digest,
         )
         confidence = ModelEvidenceRecord(
-            evidence_id=(
-                f"activation-confidence:{evaluation.decision_id}:"
-                f"{evaluation.role_generation}"
-            ),
+            evidence_id=(f"activation-confidence:{evaluation.decision_id}:{evaluation.role_generation}"),
             kind=EvidenceKind.CONFIDENCE_DECISION,
             session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
             cook_id=getattr(self, "_learning_cook_id", None),
@@ -1815,14 +1671,8 @@ class Controller(ControllerBase):
                 reason=None if confidence_accepted else reasons[0],
             ),
         )
-        receipt = self._activation_persistence_channel().submit_activation_confidence(
-            confidence
-        )
-        if (
-            not receipt.accepted
-            or receipt.wait(2.0) is not True
-            or receipt.durable is not True
-        ):
+        receipt = self._activation_persistence_channel().submit_activation_confidence(confidence)
+        if not receipt.accepted or receipt.wait(2.0) is not True or receipt.durable is not True:
             raise RuntimeError("activation-confidence-not-durable")
         persisted_ids = getattr(
             self,
@@ -1886,13 +1736,7 @@ class Controller(ControllerBase):
         policy = self._policy_for_learning_origin(request.origin)
         candidate_pair = getattr(preparation, "candidate_pair", None)
         timing = getattr(preparation, "timing", None)
-        native_build = (
-            "passed"
-            if candidate_pair is not None
-            else "failed"
-            if preparation is not None
-            else "not-run"
-        )
+        native_build = "passed" if candidate_pair is not None else "failed" if preparation is not None else "not-run"
         native_dry_solve = (
             "passed"
             if preparation is not None and bool(getattr(preparation, "dry_solve_finite", False))
@@ -1951,10 +1795,7 @@ class Controller(ControllerBase):
         native_config = getattr(candidate_result, "config", None)
         if candidate_pair is None or request is None or native_config is None:
             raise ValueError("candidate preparation is incomplete")
-        configuration = {
-            name: getattr(native_config, name)
-            for name in native_config.__dataclass_fields__
-        }
+        configuration = {name: getattr(native_config, name) for name in native_config.__dataclass_fields__}
         candidate_descriptor = GreyControlPairDescriptor(
             model_digest=canonical_snapshot_digest(configuration),
             configuration=configuration,
@@ -2006,16 +1847,12 @@ class Controller(ControllerBase):
             or tuple(getattr(evaluation, "blockers", ()))
             or challenger_digest != candidate_descriptor.model_digest
             or evaluation_candidate_generation != candidate_descriptor.candidate_generation
-            or evaluation_role_generation
-            != self._active_control_pair.descriptor.role_generation
+            or evaluation_role_generation != self._active_control_pair.descriptor.role_generation
         ):
             owned_candidate.close()
             raise RuntimeError("activation-confidence-changed")
         evaluated_at_ms = max(
-            (
-                int(origin.completion_time_s * 1_000)
-                for origin in tuple(getattr(evaluation, "completed_origins", ()))
-            ),
+            (int(origin.completion_time_s * 1_000) for origin in tuple(getattr(evaluation, "completed_origins", ()))),
             default=time.time_ns() // 1_000_000,
         )
         # Evaluation completion persists confidence for normal handoff. Direct
@@ -2030,10 +1867,7 @@ class Controller(ControllerBase):
             self._persisted_activation_confidence_ids = persisted_confidence
         if decision_id not in persisted_confidence:
             confidence = ModelEvidenceRecord(
-                evidence_id=(
-                    f"activation-confidence:{decision_id}:"
-                    f"{evaluation_role_generation}"
-                ),
+                evidence_id=(f"activation-confidence:{decision_id}:{evaluation_role_generation}"),
                 kind=EvidenceKind.CONFIDENCE_DECISION,
                 session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
                 cook_id=getattr(self, "_learning_cook_id", None),
@@ -2170,12 +2004,12 @@ class Controller(ControllerBase):
                     model_digest=candidate_digest,
                 )
                 preparation = getattr(delivery, "preparation", None)
-                if delivery_blockers or (
-                    preparation is not None and not bool(getattr(preparation, "accepted", False))
-                ):
-                    reasons = delivery_blockers or tuple(
-                        getattr(preparation, "blockers", ())
-                    ) or ("candidate-preparation-rejected",)
+                if delivery_blockers or (preparation is not None and not bool(getattr(preparation, "accepted", False))):
+                    reasons = (
+                        delivery_blockers
+                        or tuple(getattr(preparation, "blockers", ()))
+                        or ("candidate-preparation-rejected",)
+                    )
                     self._persist_rejected_candidate(
                         request,
                         model_digest=candidate_digest,
@@ -2225,9 +2059,7 @@ class Controller(ControllerBase):
         with self._learning_lock:
             if learning is self._learning and payload is not None:
                 self._learning_pending_evaluation = payload
-                self._learning_pending_confidence_accepted = bool(
-                    getattr(evaluation, "accepted", False)
-                )
+                self._learning_pending_confidence_accepted = bool(getattr(evaluation, "accepted", False))
                 if blockers:
                     self._learning_candidate_pair = None
         return delivery, payload
@@ -2270,31 +2102,23 @@ class Controller(ControllerBase):
                     "native_build": "passed" if prepared.candidate_pair is not None else "failed",
                     "native_dry_solve": "passed" if prepared.dry_solve_finite else "failed",
                     "target_timing": (
-                        "passed"
-                        if prepared.timing is not None and prepared.timing.accepted
-                        else "failed"
+                        "passed" if prepared.timing is not None and prepared.timing.accepted else "failed"
                     ),
                 }
             if handoff is not None:
                 status = handoff.status
         active_descriptor = self._active_control_pair.descriptor
-        candidate_descriptor = (
-            self._inert_activation.candidate if self._inert_activation is not None else None
-        )
+        candidate_descriptor = self._inert_activation.candidate if self._inert_activation is not None else None
         return {
             "status": status.value,
             "fit_status": fit_status.value,
             "role_generation": active_descriptor.role_generation,
             "candidate_generation": (
-                candidate_descriptor.candidate_generation
-                if candidate_descriptor is not None
-                else candidate_generation
+                candidate_descriptor.candidate_generation if candidate_descriptor is not None else candidate_generation
             ),
             "checkpoint_digest": active_descriptor.model_digest,
             "candidate_digest": (
-                candidate_descriptor.model_digest
-                if candidate_descriptor is not None
-                else candidate_digest
+                candidate_descriptor.model_digest if candidate_descriptor is not None else candidate_digest
             ),
             "origin": None if origin is None else origin.value,
             "checks": checks,
@@ -2361,17 +2185,13 @@ class Controller(ControllerBase):
                 "active_kind": GREY_BOX_KIND,
                 "active_digest": self._active_control_pair.descriptor.model_digest,
                 "decision_id": (
-                    None
-                    if self._active_activation_record is None
-                    else self._active_activation_record.decision_id
+                    None if self._active_activation_record is None else self._active_activation_record.decision_id
                 ),
                 "role_generation": self._active_control_pair.descriptor.role_generation,
                 "failed_digest": None,
                 "failed_generation": None,
                 "last_safe_command": _finite_float(self._last_combustion_load),
-                "fallback_kind": (
-                    GREY_BOX_KIND if self._activation_terminated_reason is not None else None
-                ),
+                "fallback_kind": (GREY_BOX_KIND if self._activation_terminated_reason is not None else None),
                 "fallback_reason": self._activation_terminated_reason,
             },
         }
@@ -2421,8 +2241,6 @@ class Controller(ControllerBase):
             "nfev": None if nfev is None else int(nfev),
         }
 
-    
-
     def get_model_snapshot(self):
         """Return the complete grey-only v4 checkpoint; process jobs stay live-only."""
         metadata = (
@@ -2439,11 +2257,7 @@ class Controller(ControllerBase):
             live = self._learning_live_status()
             runtime_active = self._active_control_pair.descriptor
             active = self._next_cook_descriptor or runtime_active
-            candidate = (
-                self._inert_activation.candidate
-                if self._inert_activation is not None
-                else None
-            )
+            candidate = self._inert_activation.candidate if self._inert_activation is not None else None
             rollback = (
                 runtime_active
                 if self._next_cook_descriptor is not None
@@ -2481,11 +2295,7 @@ class Controller(ControllerBase):
             elif candidate is None and self._teardown_candidate is not None:
                 candidate_config = self._teardown_candidate.config
                 candidate_parameters = {
-                    key: (
-                        candidate_config.delay_states
-                        if key == "n_delay"
-                        else getattr(candidate_config, key)
-                    )
+                    key: (candidate_config.delay_states if key == "n_delay" else getattr(candidate_config, key))
                     for key in self._MODEL_PARAM_KEYS
                 }
                 snapshot["challenger"] = {
@@ -2497,11 +2307,7 @@ class Controller(ControllerBase):
                         "nfev": self._teardown_candidate.nfev,
                     },
                 }
-                snapshot["window"] = (
-                    None
-                    if self._teardown_fit_window is None
-                    else asdict(self._teardown_fit_window)
-                )
+                snapshot["window"] = None if self._teardown_fit_window is None else asdict(self._teardown_fit_window)
                 candidate_descriptor = self._teardown_candidate_descriptor
             else:
                 candidate_descriptor = None
@@ -2523,9 +2329,7 @@ class Controller(ControllerBase):
                 if self._next_cook_descriptor is not None
                 else None
             )
-            snapshot["origin"] = (
-                teardown_origin.value if teardown_origin is not None else live["origin"]
-            )
+            snapshot["origin"] = teardown_origin.value if teardown_origin is not None else live["origin"]
             snapshot["policy"] = (
                 ActivationPolicy.OPERATOR_REVIEWED.value
                 if self._teardown_candidate is not None
@@ -2558,11 +2362,7 @@ class Controller(ControllerBase):
             )
             snapshot["cook_refit"] = {
                 "status": refit_status,
-                "latest": (
-                    None
-                    if self._cook_refit_outcome is None
-                    else self._cook_refit_outcome.value
-                ),
+                "latest": (None if self._cook_refit_outcome is None else self._cook_refit_outcome.value),
             }
             snapshot["identities"] = {
                 "active_digest": active.model_digest,
@@ -2606,7 +2406,7 @@ class Controller(ControllerBase):
                 else None
             )
             encoded = json.dumps(snapshot, allow_nan=False).encode()
-        except (AttributeError, TypeError, ValueError, OverflowError):
+        except AttributeError, TypeError, ValueError, OverflowError:
             return None
         return snapshot if len(encoded) <= MAX_SNAPSHOT_BYTES else None
 
@@ -2685,8 +2485,6 @@ class Controller(ControllerBase):
         self.get_model_snapshot()
         return True
 
-    
-
     @staticmethod
     def _close_prepared_candidate(preparation) -> None:
         pair = getattr(preparation, "candidate_pair", None)
@@ -2763,9 +2561,7 @@ class Controller(ControllerBase):
         frames = self._teardown_history.observations
         origin = self._teardown_history.origin
         if len(frames) < _REFIT_MIN_SAMPLES:
-            return TeardownRefitResult.insufficient(
-                f"only {len(frames)} samples; need {_REFIT_MIN_SAMPLES}"
-            )
+            return TeardownRefitResult.insufficient(f"only {len(frames)} samples; need {_REFIT_MIN_SAMPLES}")
         identity = self._learning_identity()
         window = identity.window(
             frames[0].observation_sequence,
@@ -2808,11 +2604,7 @@ class Controller(ControllerBase):
             )
         success = message.outcome
         candidate_parameters = {
-            key: (
-                success.config.delay_states
-                if key == "n_delay"
-                else getattr(success.config, key)
-            )
+            key: (success.config.delay_states if key == "n_delay" else getattr(success.config, key))
             for key in self._MODEL_PARAM_KEYS
         }
         incumbent = {key: float(self.cfg[key]) for key in self._MODEL_PARAM_KEYS}
@@ -2853,10 +2645,7 @@ class Controller(ControllerBase):
             return TeardownRefitResult.rejected(reason, origin=origin)
         descriptor = GreyControlPairDescriptor(
             model_digest=preparation.candidate_digest,
-            configuration={
-                name: getattr(success.config, name)
-                for name in success.config.__dataclass_fields__
-            },
+            configuration={name: getattr(success.config, name) for name in success.config.__dataclass_fields__},
             estimator_kind=str(self.cfg["estimator"]),
             solver_kind="acados-grey",
             candidate_generation=identity.candidate_generation,
@@ -2888,11 +2677,7 @@ class Controller(ControllerBase):
             self._close_prepared_candidate(preparation)
 
     def finalize_cook_refit(self, outcome) -> bool:
-        normalized = (
-            outcome
-            if isinstance(outcome, TeardownRefitOutcome)
-            else TeardownRefitOutcome(outcome)
-        )
+        normalized = outcome if isinstance(outcome, TeardownRefitOutcome) else TeardownRefitOutcome(outcome)
         if self._cook_refit_finalized:
             if normalized is not TeardownRefitOutcome.CHECKPOINT_FAILURE:
                 return False
@@ -2919,10 +2704,9 @@ class Controller(ControllerBase):
         """
         from controller.model_promotion import evaluate
         from controller.update_mpc import fit_params, fit_quality, identifiability
+
         if history is None:
             return self._refit_completed_frames()
-
-
 
         rows = list(history if history is not None else self._history)
         if len(rows) < _REFIT_MIN_SAMPLES:
@@ -3246,7 +3030,7 @@ class Controller(ControllerBase):
             or residual.shape != (horizon,)
             or not np.isfinite(sequence).all()
             or not np.isfinite(residual).all()
-            or not np.all((0.0 <= sequence) & (sequence <= 1.0))
+            or not np.all((-_NATIVE_BOUND_TOLERANCE <= sequence) & (sequence <= 1.0 + _NATIVE_BOUND_TOLERANCE))
             or not math.isfinite(objective)
             or diagnostics.status != 0
             or diagnostics.backend_status != 0
@@ -3258,7 +3042,7 @@ class Controller(ControllerBase):
         ):
             raise ValueError("native grey-box result is malformed")
         self._native_failure_diagnostics = None
-        return float(sequence[0])
+        return float(np.clip(sequence[0], 0.0, 1.0))
 
     def update(self, current):
         if not self._activation_output_authorized:

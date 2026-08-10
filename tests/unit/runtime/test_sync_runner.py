@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.linear_mpc.contracts import FrameObservation
+from controller.model_learning.contracts import FrameObservation
 from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner, build_runner, _build_core
 from common.control_trace import ActuationMode, ResultStaleState
 from tests.fakes.runner import FakeControllerRunner
