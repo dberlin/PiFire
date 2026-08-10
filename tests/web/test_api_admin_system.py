@@ -165,6 +165,19 @@ def test_factory_reset_restores_defaults_and_restarts(hazard):
     assert_nothing_hazardous_ran(hazard)
 
 
+@pytest.mark.parametrize("body", ["null", "false", "0", '""', "[]", "{"])
+def test_factory_reset_rejects_present_non_object_or_malformed_json(hazard, body):
+    resp = hazard["client"].post(
+        "/api/admin/factory-reset",
+        data=body,
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 400
+    assert hazard["calls"] == []
+    assert_nothing_hazardous_ran(hazard)
+
+
 def test_factory_reset_clears_the_pellet_database(hazard):
     """Pre-SQLite this was `os.system("rm pelletdb.json")`; removing that dead
     line preserved a reset that kept every profile. Clearing is the ruling.

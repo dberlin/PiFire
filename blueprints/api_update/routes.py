@@ -61,7 +61,8 @@ def _error(message, status, **data):
 
 def _json_request(model):
     try:
-        return model.model_validate(request.get_json(silent=True) or {}, strict=True), None
+        body = {} if not request.get_data(cache=True) else request.get_json(silent=True)
+        return model.model_validate(body, strict=True), None
     except ValidationError:
         return None, _error("bad_request", 400)
 

@@ -68,6 +68,22 @@ def test_log_metadata_endpoint_exposes_families_without_streamed_text(ds, logdir
     assert "text" not in families["events"]
 
 
+def test_delete_logs_rejects_a_present_invalid_json_body(ds, monkeypatch):
+    calls = []
+    monkeypatch.setattr(admin_api, "delete_logs", lambda: calls.append("delete") or [])
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        resp = client.post(
+            "/api/admin/logs/delete",
+            data="{",
+            content_type="application/json",
+        )
+
+    assert resp.status_code == 400
+    assert calls == []
+
+
 #  ---- stitching -------------------------------------------------------------
 
 

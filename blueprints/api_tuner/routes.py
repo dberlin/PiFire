@@ -12,7 +12,6 @@ Monitor: tuning during a cook would fight the controller for the probes.
 """
 
 from flask import jsonify, request
-from werkzeug.exceptions import BadRequest
 
 from pydantic import ValidationError
 
@@ -64,10 +63,7 @@ def error(message, status, **data):
 
 
 def json_body():
-    try:
-        return request.get_json(silent=True) or {}
-    except BadRequest:
-        return {}
+    return request.get_json(silent=True)
 
 
 def validate_json(model, *, fallback_field=None):

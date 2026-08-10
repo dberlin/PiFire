@@ -160,6 +160,18 @@ def test_session_rejects_extra_json_members(ds, client):
     assert resp.get_json()["data"]["field"] == "extra"
 
 
+@pytest.mark.parametrize("body", ["null", "{"])
+def test_session_rejects_present_non_object_or_malformed_json(ds, client, body):
+    resp = client.post(
+        "/api/tuner/session",
+        data=body,
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "open"
+
+
 def test_the_generic_api_catchall_does_not_swallow_this_path(ds, client):
     """blueprints/api registers /api/<action>/<arg0> for GET and POST, which
     matches /api/tuner/session. See blueprints/api_admin/routes.py's docstring

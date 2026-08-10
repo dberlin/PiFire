@@ -15,7 +15,6 @@ import io
 import os
 
 from flask import current_app, jsonify, request, send_file
-from werkzeug.exceptions import BadRequest
 from werkzeug.utils import secure_filename
 
 from pydantic import ValidationError
@@ -98,15 +97,14 @@ def error(message, status, **data):
 
 
 def json_body():
-    """request.json, or {} for a body that is absent or not JSON.
+    """Return {} only for a genuinely absent body; preserve present JSON values.
 
-    A form-encoded body is deliberately not supported: one shape, one parser, so
-    there is no second path a client can reach a write through.
+    Malformed, non-JSON, and non-object bodies remain invalid model inputs
+    instead of being collapsed into the empty-object contract.
     """
-    try:
-        return request.get_json(silent=True) or {}
-    except BadRequest:
+    if not request.get_data(cache=True):
         return {}
+    return request.get_json(silent=True)
 
 
 def validate_json(model, *, fallback_field=None):

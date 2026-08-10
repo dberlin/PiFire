@@ -59,6 +59,7 @@ def test_unknown_family_is_404(env):
     resp = env["client"].get("/api/admin/logs/view?log=nosuch")
     assert resp.status_code == 404
     assert resp.get_json()["message"] == "not_found"
+    assert resp.get_json()["data"] == {"log": "nosuch"}
 
 
 def test_a_path_shaped_family_is_404(env, tmp_path):

@@ -48,6 +48,7 @@ class _OperationErrorData(_SparseWireModel):
     field: str | SkipJsonSchema[None] = None
     mode: str | None = None
     branches: list[str] | SkipJsonSchema[None] = None
+    log: str | SkipJsonSchema[None] = None
     detail: str | SkipJsonSchema[None] = None
 
 

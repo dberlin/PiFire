@@ -199,6 +199,35 @@ def test_change_branch_rejects_extra_json_members(ds, client, monkeypatch):
     assert fired == []
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["/branches/refresh", "/pull", "/rebuild-web-ui", "/upgrade"],
+)
+@pytest.mark.parametrize("body", ["null", "{"])
+def test_mutations_reject_present_invalid_json_before_side_effects(
+    ds,
+    client,
+    monkeypatch,
+    path,
+    body,
+):
+    ur, fired = _neutralize(monkeypatch)
+    status_updates = []
+    monkeypatch.setattr(ur, "set_updater_install_status", lambda *args: status_updates.append(args))
+    _set_real_hw(True)
+    _set_mode(Mode.STOP)
+
+    resp = client.post(
+        f"/api/update{path}",
+        data=body,
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 400
+    assert status_updates == []
+    assert fired == []
+
+
 def test_pull_is_blocked_unless_stopped(ds, client, monkeypatch):
     ur, fired = _neutralize(monkeypatch)
     monkeypatch.setattr(ur, "get_branch", lambda: ("main", ""))
