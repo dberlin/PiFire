@@ -97,6 +97,42 @@ describe("LearningDialog", () => {
     expect(close).toHaveFocus();
   });
 
+  it("includes native selects and textareas in forward and reverse focus traversal", async () => {
+    renderDialog({
+      children: (
+        <>
+          <label htmlFor="learning-strategy">Learning strategy</label>
+          <select id="learning-strategy" defaultValue="balanced">
+            <option value="balanced">Balanced</option>
+          </select>
+          <textarea aria-label="Operator note" />
+        </>
+      ),
+    });
+    await openDialog();
+    const close = screen.getByRole("button", {
+      name: "Close PID-SP adaptation evidence",
+    });
+    const strategy = screen.getByRole("combobox", {
+      name: "Learning strategy",
+    });
+    const note = screen.getByRole("textbox", { name: "Operator note" });
+
+    await userEvent.tab();
+    expect(strategy).toHaveFocus();
+    await userEvent.tab();
+    expect(note).toHaveFocus();
+    await userEvent.tab();
+    expect(close).toHaveFocus();
+
+    await userEvent.tab({ shift: true });
+    expect(note).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    expect(strategy).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    expect(close).toHaveFocus();
+  });
+
   it("marks loading as busy without removing prior content", async () => {
     renderDialog({ loading: true });
     const trigger = screen.getByRole("button", {
