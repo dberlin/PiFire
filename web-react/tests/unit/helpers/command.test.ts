@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { buildCommandUrl, createCommand } from "../../../src/helpers/command";
-import type { CommandResponse } from "../../../src/helpers/contracts/core.gen";
 import type { TimerOptionsPayload } from "../../../src/helpers/contracts/control.gen";
+import type { CommandResponse } from "../../../src/helpers/contracts/core.gen";
 
 const OK_COMMAND_RESPONSE = {
   result: "OK",
@@ -97,12 +97,12 @@ describe("createCommand issues the right URLs", () => {
     expect(url()).toBe("/api/set/mode/prime/20");
   });
   it("prime rejects modes the backend silently maps to Stop", () => {
-    if (false) {
-      // @ts-expect-error smoke is not a recognized post-prime mode.
-      createCommand("").prime(20, "smoke");
-      // @ts-expect-error manual is not a recognized post-prime mode.
-      createCommand("").prime(20, "manual");
-    }
+    const command = createCommand("");
+    // @ts-expect-error smoke is not a recognized post-prime mode.
+    const smoke: NonNullable<Parameters<typeof command.prime>[1]> = "smoke";
+    // @ts-expect-error manual is not a recognized post-prime mode.
+    const manual: NonNullable<Parameters<typeof command.prime>[1]> = "manual";
+    expect([smoke, manual]).toEqual(["smoke", "manual"]);
   });
   it("system → cmd grammar", async () => {
     await createCommand("").system("reboot");
