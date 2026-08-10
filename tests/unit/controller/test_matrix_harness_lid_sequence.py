@@ -1,12 +1,9 @@
 """Pins lid preemption in controller_matrix.py's framed scheduler path."""
 
-import os
 import sys
 import types
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-
-import docs.superpowers.experiments.controller_matrix as controller_matrix
+import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
 from controller.applied_output import OutputSource
 

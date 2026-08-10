@@ -6,15 +6,12 @@ pulse / 20 s frame scheduler.  These probes use a non-thermal plant so the
 recorded commands expose scheduler timing directly.
 """
 
-import os
 import sys
 import types
 
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-
-import docs.superpowers.experiments.controller_matrix as controller_matrix
+import tools.experiments.controller_matrix as controller_matrix
 
 PULSE_FRAME_S = 20
 PULSE_S = 2

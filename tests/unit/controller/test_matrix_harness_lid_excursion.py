@@ -17,14 +17,9 @@ misrepresenting how long production surrenders control. Each has its own
 negative control below.
 """
 
-import os
-import sys
-
 import numpy as np
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-
-import docs.superpowers.experiments.controller_matrix as controller_matrix
+import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
 from controller.grill_sim import GrillSim
 

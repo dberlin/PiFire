@@ -108,10 +108,12 @@ import statistics
 import sys
 import time
 from multiprocessing import Pool
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from docs.superpowers.experiments.controller_matrix import SCENARIOS, run_scenario  # noqa: E402
+import tools.experiments.controller_matrix as controller_matrix  # noqa: E402
+from tools.experiments.controller_matrix import SCENARIOS, run_scenario  # noqa: E402
 
 SCENARIO = "steady_325"
 SETPOINT_F = 325.0
@@ -341,9 +343,8 @@ def main(argv=None):
 
     from controller import mpc
 
-    harness = os.path.join(os.path.dirname(os.path.abspath(__file__)), "controller_matrix.py")
-    with open(harness, "rb") as f:
-        harness_sha = hashlib.sha256(f.read()).hexdigest()
+    harness = Path(controller_matrix.__file__).resolve()
+    harness_sha = hashlib.sha256(harness.read_bytes()).hexdigest()
 
     started = time.perf_counter()
     rows = _run(args.arm, args.seeds, args.workers, args.cooks)

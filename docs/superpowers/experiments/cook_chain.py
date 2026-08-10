@@ -27,7 +27,7 @@ from multiprocessing import Pool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from docs.superpowers.experiments.controller_matrix import SCENARIOS, _refit_after_cook, run_scenario  # noqa: E402
+from tools.experiments.controller_matrix import SCENARIOS, _refit_after_cook, run_scenario  # noqa: E402
 
 PLANT = "MAKGrillSim"
 SCENARIO_NAMES = ("steady_225", "steady_350", "steady_450")

@@ -22,7 +22,7 @@ import importlib
 
 import pytest
 
-from docs.superpowers.experiments.controller_matrix import SCENARIOS, run_scenario
+from tools.experiments.controller_matrix import SCENARIOS, run_scenario
 
 
 @pytest.mark.parametrize("scenario_name", ["steady_225", "step_225_275"])

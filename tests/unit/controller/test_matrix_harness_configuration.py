@@ -14,7 +14,7 @@ import types
 import pytest
 
 import common.defaults as defaults
-import docs.superpowers.experiments.controller_matrix as matrix
+import tools.experiments.controller_matrix as matrix
 from common.control_trace import ActuationMode
 from controller.applied_output import OutputSource
 from controller.runtime.logic.pulse import PulseScheduler as ProductionPulseScheduler

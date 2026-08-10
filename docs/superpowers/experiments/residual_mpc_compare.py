@@ -25,7 +25,7 @@ sys.path.insert(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
 )
 
-from docs.superpowers.experiments.controller_matrix import (  # noqa: E402
+from tools.experiments.controller_matrix import (  # noqa: E402
     SCENARIOS,
     run_scenario,
 )

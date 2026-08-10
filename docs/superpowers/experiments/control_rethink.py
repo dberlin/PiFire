@@ -329,7 +329,7 @@ def _mpc_run(arg):
     import io
 
     seed, cycle_data = arg
-    from docs.superpowers.experiments import controller_matrix as cm
+    import tools.experiments.controller_matrix as cm
 
     # mpc.py prints an uncalibrated-model banner on construction; it belongs in
     # the record but not in the middle of a table.
