@@ -19,6 +19,7 @@ import zipfile
 
 import pytest
 from PIL import Image
+from common.web_contracts.content import CookFileAsset
 
 from tests.web.archive_builders import write_cookfile
 
@@ -87,6 +88,7 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders):
     resp = _upload(client, name)
     assert resp.status_code == 200
     stored = resp.get_json()["data"]["assets"]
+    assert [CookFileAsset.model_validate(asset, strict=True).model_dump(mode="json") for asset in stored] == stored
     assert len(stored) == 1 and stored[0]["type"] == "png"
 
     with zipfile.ZipFile(history_dir + name) as archive:

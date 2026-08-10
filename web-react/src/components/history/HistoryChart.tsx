@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
-import type { HistoryAnnotation } from "../../helpers/history/historyApi";
+import type { HistoryAnnotation } from "../../helpers/contracts/content.gen";
 import { annotationPlugin } from "./annotationPlugin";
 import "./historyChart.css";
 import { shouldResetScales } from "./scaleReset";

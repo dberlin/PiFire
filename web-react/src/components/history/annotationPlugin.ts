@@ -1,5 +1,5 @@
 import type uPlot from "uplot";
-import type { HistoryAnnotation } from "../../helpers/history/historyApi";
+import type { HistoryAnnotation } from "../../helpers/contracts/content.gen";
 
 /**
  * Draw mode-change markers as vertical rules with a caption.

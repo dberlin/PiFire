@@ -22,6 +22,7 @@ from flask import jsonify, send_file
 from common.app import api_response, prepare_metrics_csv
 from common.common import process_metrics
 from common.datastore_accessors import read_all_metrics, read_settings
+from common.web_contracts.content import MetricsPayload, validated_content_json
 
 from . import api_metrics_bp
 
@@ -49,17 +50,15 @@ def metrics_listing():
     assumption behind every pellet-usage estimate on the page.
     """
     settings = read_settings()
-    return jsonify(
-        api_response(
-            "OK",
-            None,
-            {
-                "metrics": processed_metrics(settings),
-                "units": settings["globals"]["units"],
-                "augerrate": settings["globals"]["augerrate"],
-            },
-        )
-    ), 200
+    data = validated_content_json(
+        MetricsPayload,
+        {
+            "metrics": processed_metrics(settings),
+            "units": settings["globals"]["units"],
+            "augerrate": settings["globals"]["augerrate"],
+        },
+    )
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_metrics_bp.route("/export", methods=["GET"])

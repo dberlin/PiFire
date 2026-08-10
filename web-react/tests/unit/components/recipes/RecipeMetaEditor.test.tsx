@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import * as actualRecipeApi from "../../../../src/helpers/files/recipeApi" with {
   rstest: "importActual",
 };
-import type { RecipeMetadata, RecipeStep } from "../../../../src/helpers/files/recipeTypes";
+import type {
+  RecipeMetadata,
+  RecipeStep,
+} from "../../../../src/helpers/contracts/content.gen";
 
 const saveRecipeMetadataMock = rs.fn();
 rs.mock("../../../../src/helpers/files/recipeApi", () => ({

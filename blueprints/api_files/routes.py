@@ -27,6 +27,33 @@ from common.control_delta import control_delta
 from common.datastore_accessors import read_control, write_control
 from common.file_browser import browse_files, resolve_managed_file
 from common.modes import Mode
+from common.web_contracts.content import (
+    AssetNamesData,
+    ContentErrorEnvelope,
+    CookFileAsset,
+    CookFileAssetsData,
+    CookFileChartData,
+    CookFileComment,
+    CookFileDetail,
+    CookFileLabelData,
+    FileListing,
+    FilenameData,
+    RecipeAssetAssignmentRequest,
+    RecipeAsset,
+    RecipeAssetsData,
+    RecipeDetail,
+    RecipeIngredientAddRequest,
+    RecipeIngredientDeleteRequest,
+    RecipeIngredientUpdateRequest,
+    RecipeInstructionAddRequest,
+    RecipeInstructionDeleteRequest,
+    RecipeInstructionUpdateRequest,
+    RecipeStep,
+    RecipeStepDeleteRequest,
+    RecipeStepInsertRequest,
+    RecipeStepUpdateRequest,
+    validated_content_json,
+)
 from file_mgmt.recipes import create_recipefile
 
 from . import api_files_bp, cookfile_api, recipes_api
@@ -47,7 +74,8 @@ _PER_PAGE_CHOICES = (5, 10, 25, 50, 100)
 
 def error(message, status, **data):
     """Uniform error envelope: {"result":"Error","message":...,"data":{...}}."""
-    return jsonify(api_response("Error", message, data or None)), status
+    payload = api_response("Error", message, data or None)
+    return jsonify(validated_content_json(ContentErrorEnvelope, payload)), status
 
 
 def _int_arg(name, default, *, minimum=1, choices=None):
@@ -134,7 +162,8 @@ def file_listing(kind):
 
     reverse = request.args.get("reverse", "true").lower() != "false"
     folder = current_app.config[folder_key]
-    return jsonify(browse_files(folder, extension, page=page, per_page=per_page, reverse=reverse)), 200
+    payload = browse_files(folder, extension, page=page, per_page=per_page, reverse=reverse)
+    return jsonify(validated_content_json(FileListing, payload)), 200
 
 
 @api_files_bp.route("/cookfiles/detail", methods=["GET"])
@@ -143,7 +172,8 @@ def cookfile_detail():
     struct, _path, err = _load_cookfile(name)
     if err:
         return err
-    return jsonify(cookfile_api.detail_payload(struct, name)), 200
+    payload = cookfile_api.detail_payload(struct, name)
+    return jsonify(validated_content_json(CookFileDetail, payload)), 200
 
 
 @api_files_bp.route("/cookfiles/chart", methods=["GET"])
@@ -152,7 +182,8 @@ def cookfile_chart():
     struct, _path, err = _load_cookfile(name)
     if err:
         return err
-    return jsonify(cookfile_api.chart_payload(struct)), 200
+    payload = cookfile_api.chart_payload(struct)
+    return jsonify(validated_content_json(CookFileChartData, payload)), 200
 
 
 @api_files_bp.route("/cookfiles/download", methods=["GET"])
@@ -190,7 +221,8 @@ def cookfile_upload():
     if err:
         return err
     storage.save(path)
-    return jsonify(api_response("OK", None, {"filename": safe_name})), 200
+    data = validated_content_json(FilenameData, {"filename": safe_name})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/cookfiles/delete", methods=["POST"])
@@ -233,7 +265,8 @@ def cookfile_label():
         return error("label_exists", 409)
     if problem:
         return cookfile_api.unreadable(problem, error)
-    return jsonify(api_response("OK", None, {"new_label_safe": safe})), 200
+    data = validated_content_json(CookFileLabelData, {"new_label_safe": safe})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/cookfiles/recover", methods=["POST"])
@@ -287,7 +320,8 @@ def cookfile_comments():
         return error("comment_not_found", 404)
     if problem:
         return cookfile_api.unreadable(problem, error)
-    return jsonify(api_response("OK", None, entry)), 200
+    data = None if entry is None else validated_content_json(CookFileComment, entry)
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/cookfiles/comments/assets", methods=["POST"])
@@ -307,7 +341,8 @@ def cookfile_comment_assets():
         return error("comment_not_found", 404)
     if problem:
         return cookfile_api.unreadable(problem, error)
-    return jsonify(api_response("OK", None, {"assets": stored})), 200
+    data = validated_content_json(AssetNamesData, {"assets": stored})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/cookfiles/assets/upload", methods=["POST"])
@@ -318,7 +353,9 @@ def cookfile_asset_upload():
     added, problem = cookfile_api.upload_assets(path, request.files.getlist("assets"))
     if problem:
         return error(problem, 400, field="assets")
-    return jsonify(api_response("OK", None, {"assets": added})), 200
+    assets = [validated_content_json(CookFileAsset, asset) for asset in added]
+    data = validated_content_json(CookFileAssetsData, {"assets": assets})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/cookfiles/assets/delete", methods=["POST"])
@@ -369,7 +406,8 @@ def recipe_detail():
     struct, _path, err = _load_recipe(name)
     if err:
         return err
-    return jsonify(recipes_api.detail_payload(struct, name)), 200
+    payload = recipes_api.detail_payload(struct, name)
+    return jsonify(validated_content_json(RecipeDetail, payload)), 200
 
 
 @api_files_bp.route("/recipes/create", methods=["POST"])
@@ -378,7 +416,8 @@ def recipe_create():
     (blueprints/recipes/routes.py:136-147). The new file's bare name is
     returned so the client can navigate to it."""
     path = create_recipefile()
-    return jsonify(api_response("OK", None, {"filename": os.path.basename(path)})), 200
+    data = validated_content_json(FilenameData, {"filename": os.path.basename(path)})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/recipes/download", methods=["GET"])
@@ -401,7 +440,8 @@ def recipe_upload():
     if err:
         return err
     storage.save(path)
-    return jsonify(api_response("OK", None, {"filename": safe_name})), 200
+    data = validated_content_json(FilenameData, {"filename": safe_name})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/recipes/delete", methods=["POST"])
@@ -445,7 +485,8 @@ def recipe_run():
         WriteKind.DELTA,
         origin="api-files",
     )
-    return jsonify(api_response("OK", None, {"filename": os.path.basename(path)})), 200
+    data = validated_content_json(FilenameData, {"filename": os.path.basename(path)})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/recipes/metadata", methods=["POST"])
@@ -473,6 +514,10 @@ def recipe_ingredients():
         return err
     action = body.get("action")
     if action == "add":
+        RecipeIngredientAddRequest.model_validate(
+            {"file": body.get("file"), "action": action},
+            strict=True,
+        )
         status = recipes_api.add_ingredient(path)
     elif action == "update":
         index = body.get("index")
@@ -483,12 +528,26 @@ def recipe_ingredients():
             return error("bad_request", 400, field="name")
         if not isinstance(quantity, str):
             return error("bad_request", 400, field="quantity")
-        status = recipes_api.update_ingredient(path, index, name, quantity)
+        mutation = RecipeIngredientUpdateRequest.model_validate(
+            {
+                "file": body.get("file"),
+                "action": action,
+                "index": index,
+                "name": name,
+                "quantity": quantity,
+            },
+            strict=True,
+        )
+        status = recipes_api.update_ingredient(path, mutation.index, mutation.name, mutation.quantity)
     elif action == "delete":
         index = body.get("index")
         if not isinstance(index, int) or isinstance(index, bool):
             return error("bad_request", 400, field="index")
-        status = recipes_api.delete_ingredient(path, index)
+        mutation = RecipeIngredientDeleteRequest.model_validate(
+            {"file": body.get("file"), "action": action, "index": index},
+            strict=True,
+        )
+        status = recipes_api.delete_ingredient(path, mutation.index)
     else:
         return error("bad_request", 400, field="action")
     if status == "bad_index":
@@ -506,6 +565,10 @@ def recipe_instructions():
         return err
     action = body.get("action")
     if action == "add":
+        RecipeInstructionAddRequest.model_validate(
+            {"file": body.get("file"), "action": action},
+            strict=True,
+        )
         status = recipes_api.add_instruction(path)
     elif action == "update":
         index = body.get("index")
@@ -518,12 +581,33 @@ def recipe_instructions():
             return error("bad_request", 400, field="ingredients")
         if not isinstance(step, int) or isinstance(step, bool):
             return error("bad_request", 400, field="step")
-        status = recipes_api.update_instruction(path, index, text, ingredients, step)
+        mutation = RecipeInstructionUpdateRequest.model_validate(
+            {
+                "file": body.get("file"),
+                "action": action,
+                "index": index,
+                "text": text,
+                "ingredients": ingredients,
+                "step": step,
+            },
+            strict=True,
+        )
+        status = recipes_api.update_instruction(
+            path,
+            mutation.index,
+            mutation.text,
+            mutation.ingredients,
+            mutation.step,
+        )
     elif action == "delete":
         index = body.get("index")
         if not isinstance(index, int) or isinstance(index, bool):
             return error("bad_request", 400, field="index")
-        status = recipes_api.delete_instruction(path, index)
+        mutation = RecipeInstructionDeleteRequest.model_validate(
+            {"file": body.get("file"), "action": action, "index": index},
+            strict=True,
+        )
+        status = recipes_api.delete_instruction(path, mutation.index)
     else:
         return error("bad_request", 400, field="action")
     if status == "bad_index":
@@ -577,15 +661,18 @@ def _validated_step_fields(body):
     food = trigger_temps.get("food")
     if not isinstance(food, list) or not all(isinstance(t, int) and not isinstance(t, bool) for t in food):
         return None, error("bad_request", 400, field="trigger_temps")
-    fields = {
-        "mode": mode,
-        "message": message,
-        "hold_temp": hold_temp,
-        "timer": timer,
-        "notify": notify,
-        "pause": pause,
-        "trigger_temps": {"primary": primary, "food": food},
-    }
+    fields = validated_content_json(
+        RecipeStep,
+        {
+            "mode": mode,
+            "message": message,
+            "hold_temp": hold_temp,
+            "timer": timer,
+            "notify": notify,
+            "pause": pause,
+            "trigger_temps": {"primary": primary, "food": food},
+        },
+    )
     return fields, None
 
 
@@ -600,14 +687,30 @@ def recipe_steps():
     if not isinstance(index, int) or isinstance(index, bool):
         return error("bad_request", 400, field="index")
     if action == "insert":
-        status = recipes_api.insert_step(path, index)
+        mutation = RecipeStepInsertRequest.model_validate(
+            {"file": body.get("file"), "action": action, "index": index},
+            strict=True,
+        )
+        status = recipes_api.insert_step(path, mutation.index)
     elif action == "update":
         fields, err = _validated_step_fields(body)
         if err:
             return err
-        status = recipes_api.update_step(path, index, fields)
+        mutation = RecipeStepUpdateRequest.model_validate(
+            {"file": body.get("file"), "action": action, "index": index, "step": fields},
+            strict=True,
+        )
+        status = recipes_api.update_step(
+            path,
+            mutation.index,
+            mutation.step.model_dump(mode="json", exclude_unset=True),
+        )
     elif action == "delete":
-        status = recipes_api.delete_step(path, index)
+        mutation = RecipeStepDeleteRequest.model_validate(
+            {"file": body.get("file"), "action": action, "index": index},
+            strict=True,
+        )
+        status = recipes_api.delete_step(path, mutation.index)
     else:
         return error("bad_request", 400, field="action")
     if status == "bad_index":
@@ -627,7 +730,9 @@ def recipe_asset_upload():
     added, problem = recipes_api.upload_assets(path, request.files.getlist("assets"))
     if problem:
         return error(problem, 400, field="assets")
-    return jsonify(api_response("OK", None, {"assets": added})), 200
+    assets = [validated_content_json(RecipeAsset, asset) for asset in added]
+    data = validated_content_json(RecipeAssetsData, {"assets": assets})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/recipes/assets", methods=["POST"])
@@ -652,12 +757,25 @@ def recipe_assets():
         index = body.get("index")
         if not isinstance(index, int) or isinstance(index, bool):
             return error("bad_request", 400, field="index")
-    stored, problem = recipes_api.set_assets(path, section, index, assets)
+    mutation_payload = {
+        "file": body.get("file"),
+        "section": section,
+        "assets": assets,
+        **({} if index is None else {"index": index}),
+    }
+    mutation = RecipeAssetAssignmentRequest.model_validate(mutation_payload, strict=True)
+    stored, problem = recipes_api.set_assets(
+        path,
+        mutation.section,
+        mutation.index,
+        mutation.assets,
+    )
     if problem == "bad_index":
         return error("bad_request", 400, field="index")
     if problem:
         return recipes_api.unreadable(problem, error)
-    return jsonify(api_response("OK", None, {"assets": stored})), 200
+    data = validated_content_json(AssetNamesData, {"assets": stored})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_files_bp.route("/recipes/assets/delete", methods=["POST"])

@@ -6,16 +6,8 @@
 // {data, result, message} with result === "OK" on success. Read responses
 // are bare payloads with an HTTP status.
 
+import type { FileErrorDetail } from "../contracts/content.gen";
 import type { FileKind } from "./fileTypes";
-
-/** The 4xx/5xx body shape both kinds of endpoint share. `errortype` is only
- * ever populated by the cookfile detail endpoint's 422 (version/asset/other
- * repair prompt); every other endpoint leaves it null. */
-export interface FileErrorDetail {
-  status: number;
-  message: string;
-  errortype: "version" | "asset" | "other" | null;
-}
 
 export class FileRequestError extends Error {
   readonly detail: FileErrorDetail;

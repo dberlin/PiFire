@@ -1,9 +1,8 @@
 import { useState } from "react";
+import type { CookFileLabels, CookFileMetadata } from "../../helpers/contracts/content.gen";
+import { FileRequestError } from "../../helpers/files/apiEnvelope";
 import {
   assetThumbUrl,
-  type CookFileLabels,
-  type CookFileMetadata,
-  CookFileRequestError,
   cookFileDownloadUrl,
   cookFileExportUrl,
   renameCookFileLabel,
@@ -28,7 +27,7 @@ interface Props {
 }
 
 function friendlyLabelError(err: unknown): string {
-  if (err instanceof CookFileRequestError && err.detail.status === 409) {
+  if (err instanceof FileRequestError && err.detail.status === 409) {
     return "That label already exists in this cook file.";
   }
   return err instanceof Error ? err.message : "Rename failed.";

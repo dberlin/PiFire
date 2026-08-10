@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type {
+  CookFileLabels,
+  CookFileMetadata,
+} from "../../../../src/helpers/contracts/content.gen";
+import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 // The URL builders and CookFileRequestError stay REAL so the download hrefs and
 // the 409 branch are asserted against the shipped contract, not a stub of it.
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };
-import type { CookFileLabels, CookFileMetadata } from "../../../../src/helpers/files/cookfileApi";
 
 const setCookFileTitleMock = rs.fn();
 const renameCookFileLabelMock = rs.fn();
@@ -17,7 +21,7 @@ rs.mock("../../../../src/helpers/files/cookfileApi", () => ({
 }));
 
 const { CookFileMeta } = await import("../../../../src/components/cookfiles/CookFileMeta");
-const { CookFileRequestError } = actualCookfileApi;
+
 
 const METADATA: CookFileMetadata = {
   title: "Sunday Brisket",
@@ -126,7 +130,7 @@ describe("CookFileMeta", () => {
   it("a 409 says the label already exists, distinct from a generic failure", async () => {
     const user = userEvent.setup();
     renameCookFileLabelMock.mockRejectedValue(
-      new CookFileRequestError({ status: 409, message: "label_exists", errortype: null }),
+      new FileRequestError({ status: 409, message: "label_exists", errortype: null }),
     );
     mount();
 
@@ -140,7 +144,7 @@ describe("CookFileMeta", () => {
   it("a non-409 rename failure reports the server message", async () => {
     const user = userEvent.setup();
     renameCookFileLabelMock.mockRejectedValue(
-      new CookFileRequestError({ status: 422, message: "Error: Unspecified", errortype: "other" }),
+      new FileRequestError({ status: 422, message: "Error: Unspecified", errortype: "other" }),
     );
     mount();
 

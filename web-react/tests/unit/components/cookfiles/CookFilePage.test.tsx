@@ -3,10 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
+import type { CookFileDetail } from "../../../../src/helpers/contracts/content.gen";
+import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };
-import type { CookFileDetail } from "../../../../src/helpers/files/cookfileApi";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { testQueryClient } from "../../test-utils";
 
@@ -45,7 +46,7 @@ rs.mock("../../../../src/components/cookfiles/CookFileMeta", () => ({
 }));
 
 const { CookFilePage } = await import("../../../../src/components/cookfiles/CookFilePage");
-const { CookFileRequestError } = actualCookfileApi;
+
 
 const DETAIL: CookFileDetail = {
   filename: "Sunday Brisket.pifire",
@@ -109,7 +110,7 @@ describe("CookFilePage", () => {
 
   it("a 422 with errortype version offers Attempt Conversion", async () => {
     fetchCookFileDetailMock.mockRejectedValue(
-      new CookFileRequestError({
+      new FileRequestError({
         status: 422,
         message: "WARNING: Older cookfile version format! ",
         errortype: "version",
@@ -124,7 +125,7 @@ describe("CookFilePage", () => {
     "a 422 with errortype %s offers Attempt Repair",
     async (errortype) => {
       fetchCookFileDetailMock.mockRejectedValue(
-        new CookFileRequestError({ status: 422, message: "Error: broken", errortype }),
+        new FileRequestError({ status: 422, message: "Error: broken", errortype }),
       );
       mount();
       expect(await screen.findByRole("button", { name: "Attempt Repair" })).toBeInTheDocument();
@@ -135,7 +136,7 @@ describe("CookFilePage", () => {
   it("recovering calls the matching action and refetches on success", async () => {
     const user = userEvent.setup();
     fetchCookFileDetailMock.mockRejectedValueOnce(
-      new CookFileRequestError({ status: 422, message: "old", errortype: "version" }),
+      new FileRequestError({ status: 422, message: "old", errortype: "version" }),
     );
     mount();
 
@@ -150,10 +151,10 @@ describe("CookFilePage", () => {
   it("a failed recovery keeps the prompt and reports why", async () => {
     const user = userEvent.setup();
     fetchCookFileDetailMock.mockRejectedValue(
-      new CookFileRequestError({ status: 422, message: "old", errortype: "version" }),
+      new FileRequestError({ status: 422, message: "old", errortype: "version" }),
     );
     recoverCookFileMock.mockRejectedValue(
-      new CookFileRequestError({ status: 422, message: "Repair failed.", errortype: "other" }),
+      new FileRequestError({ status: 422, message: "Repair failed.", errortype: "other" }),
     );
     mount();
 
@@ -163,7 +164,7 @@ describe("CookFilePage", () => {
 
   it("a 404 says the file is missing and offers no recovery", async () => {
     fetchCookFileDetailMock.mockRejectedValue(
-      new CookFileRequestError({ status: 404, message: "not_found", errortype: null }),
+      new FileRequestError({ status: 404, message: "not_found", errortype: null }),
     );
     mount();
     expect(await screen.findByText(/not in the history folder/)).toBeInTheDocument();
@@ -196,7 +197,7 @@ describe("CookFilePage", () => {
 
   it("surfaces the 422 errortype the repair prompt branches on", async () => {
     fetchCookFileDetailMock.mockRejectedValue(
-      new CookFileRequestError({ status: 422, message: "old version", errortype: "version" }),
+      new FileRequestError({ status: 422, message: "old version", errortype: "version" }),
     );
     mount("cook.pifire");
     await waitFor(() => expect(screen.getByText(/old version/)).toBeVisible());
@@ -209,7 +210,7 @@ describe("CookFilePage", () => {
     // repair branch specifically.
     fetchCookFileDetailMock
       .mockRejectedValueOnce(
-        new CookFileRequestError({ status: 422, message: "old version", errortype: "asset" }),
+        new FileRequestError({ status: 422, message: "old version", errortype: "asset" }),
       )
       .mockResolvedValue(DETAIL);
     recoverCookFileMock.mockResolvedValue({ ok: true });
@@ -234,7 +235,7 @@ describe("CookFilePage", () => {
     queryClient.setQueryData(queryKeys.cookfileChart(filename), { seeded: true });
 
     fetchCookFileDetailMock.mockRejectedValueOnce(
-      new CookFileRequestError({ status: 422, message: "old", errortype: "asset" }),
+      new FileRequestError({ status: 422, message: "old", errortype: "asset" }),
     );
     recoverCookFileMock.mockResolvedValue({ ok: true });
     mount(filename, queryClient);

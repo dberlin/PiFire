@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { EventsTable } from "../../../../src/components/cookfiles/EventsTable";
-import type { CookFileEvent, CookFileTotals } from "../../../../src/helpers/files/cookfileApi";
+import type {
+  CookFileEvent,
+  CookFileTotals,
+} from "../../../../src/helpers/contracts/content.gen";
 
 afterEach(cleanup);
 

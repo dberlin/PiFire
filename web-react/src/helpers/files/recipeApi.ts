@@ -9,43 +9,46 @@
 // is a bare payload with an HTTP status -- and unlike CookFileDetail, it has
 // no `comments` key.
 
+import type {
+  RecipeAsset,
+  RecipeAssetAssignmentRequest,
+  RecipeDetail,
+  RecipeIngredientAddRequest,
+  RecipeIngredientDeleteRequest,
+  RecipeIngredientUpdateRequest,
+  RecipeInstructionAddRequest,
+  RecipeInstructionDeleteRequest,
+  RecipeInstructionUpdateRequest,
+  RecipeMetadataFields,
+  RecipeMetadataUpdateRequest,
+  RecipeStep,
+  RecipeStepDeleteRequest,
+  RecipeStepInsertRequest,
+  RecipeStepUpdateRequest,
+} from "../contracts/content.gen";
 import { postForm, read, write } from "./apiEnvelope";
-import type { RecipeAsset, RecipeDetail, RecipeMetadata, RecipeStep } from "./recipeTypes";
-
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export const fetchRecipeDetail = (file: string, baseUrl = BASE_URL) =>
   read<RecipeDetail>("recipes", "detail", file, baseUrl);
 
-/** A whole-metadata patch, same shape recipes_api.py's set_metadata() accepts
- * -- an unknown key is refused with 400 `data.field`, so this is typed as a
- * subset of RecipeMetadata rather than a bare Record. */
-export type RecipeMetadataFields = Partial<
-  Pick<
-    RecipeMetadata,
-    | "title"
-    | "author"
-    | "description"
-    | "difficulty"
-    | "units"
-    | "prep_time"
-    | "cook_time"
-    | "rating"
-    | "food_probes"
-  >
->;
 
 export const saveRecipeMetadata = (
   file: string,
   fields: RecipeMetadataFields,
   baseUrl = BASE_URL,
-) => write<null>("recipes", "metadata", { file, fields }, baseUrl);
+) => {
+  const body: RecipeMetadataUpdateRequest = { file, fields };
+  return write<null>("recipes", "metadata", body, baseUrl);
+};
 
 /** Appends a blank ingredient row (recipes_api.py's add_ingredient) -- there
  * is nothing to name it yet, so the caller refetches and edits the new row
  * in place via updateIngredient. */
-export const addIngredient = (file: string, baseUrl = BASE_URL) =>
-  write<null>("recipes", "ingredients", { file, action: "add" }, baseUrl);
+export const addIngredient = (file: string, baseUrl = BASE_URL) => {
+  const body: RecipeIngredientAddRequest = { file, action: "add" };
+  return write<null>("recipes", "ingredients", body, baseUrl);
+};
 
 /** Renames/requantifies ingredient `index`. A rename cascades server-side
  * into every instruction that names the OLD value -- refetch the whole
@@ -56,18 +59,24 @@ export const updateIngredient = (
   name: string,
   quantity: string,
   baseUrl = BASE_URL,
-) =>
-  write<null>("recipes", "ingredients", { file, action: "update", index, name, quantity }, baseUrl);
+) => {
+  const body: RecipeIngredientUpdateRequest = { file, action: "update", index, name, quantity };
+  return write<null>("recipes", "ingredients", body, baseUrl);
+};
 
 /** Deletes ingredient `index`. The server also strips this ingredient's name
  * out of every instruction that referenced it, so a refetch is required to
  * see the true post-delete instruction list. */
-export const deleteIngredient = (file: string, index: number, baseUrl = BASE_URL) =>
-  write<null>("recipes", "ingredients", { file, action: "delete", index }, baseUrl);
+export const deleteIngredient = (file: string, index: number, baseUrl = BASE_URL) => {
+  const body: RecipeIngredientDeleteRequest = { file, action: "delete", index };
+  return write<null>("recipes", "ingredients", body, baseUrl);
+};
 
 /** Appends a blank instruction row (recipes_api.py's add_instruction). */
-export const addInstruction = (file: string, baseUrl = BASE_URL) =>
-  write<null>("recipes", "instructions", { file, action: "add" }, baseUrl);
+export const addInstruction = (file: string, baseUrl = BASE_URL) => {
+  const body: RecipeInstructionAddRequest = { file, action: "add" };
+  return write<null>("recipes", "instructions", body, baseUrl);
+};
 
 /** Replaces instruction `index` wholesale: text, the ingredient NAME list,
  * and its program step. `ingredients` must be names present in this
@@ -81,16 +90,22 @@ export const updateInstruction = (
   ingredients: string[],
   step: number,
   baseUrl = BASE_URL,
-) =>
-  write<null>(
-    "recipes",
-    "instructions",
-    { file, action: "update", index, text, ingredients, step },
-    baseUrl,
-  );
+) => {
+  const body: RecipeInstructionUpdateRequest = {
+    file,
+    action: "update",
+    index,
+    text,
+    ingredients,
+    step,
+  };
+  return write<null>("recipes", "instructions", body, baseUrl);
+};
 
-export const deleteInstruction = (file: string, index: number, baseUrl = BASE_URL) =>
-  write<null>("recipes", "instructions", { file, action: "delete", index }, baseUrl);
+export const deleteInstruction = (file: string, index: number, baseUrl = BASE_URL) => {
+  const body: RecipeInstructionDeleteRequest = { file, action: "delete", index };
+  return write<null>("recipes", "instructions", body, baseUrl);
+};
 
 /** Inserts a new default step at `index` -- POSITIONAL (recipes_api.py's
  * insert_step, matching Flask's own stepAdd), not appended: `index ==
@@ -98,8 +113,10 @@ export const deleteInstruction = (file: string, index: number, baseUrl = BASE_UR
  * later step down one. There is no separate append endpoint, which is why
  * the editor always calls this with an explicit index rather than offering a
  * single trailing "Add step" button. */
-export const insertStep = (file: string, index: number, baseUrl = BASE_URL) =>
-  write<null>("recipes", "steps", { file, action: "insert", index }, baseUrl);
+export const insertStep = (file: string, index: number, baseUrl = BASE_URL) => {
+  const body: RecipeStepInsertRequest = { file, action: "insert", index };
+  return write<null>("recipes", "steps", body, baseUrl);
+};
 
 /** Replaces step `index` wholesale. `0` is the disabled sentinel for
  * hold_temp and every trigger_temps member -- a legal value, not a missing
@@ -107,17 +124,16 @@ export const insertStep = (file: string, index: number, baseUrl = BASE_URL) =>
  * trigger_temps.food must carry exactly one entry per the recipe's current
  * food_probes count; a mismatch is refused with 400 `data.field ==
  * "trigger_temps"`. */
-export const updateStep = (file: string, index: number, step: RecipeStep, baseUrl = BASE_URL) =>
-  write<null>("recipes", "steps", { file, action: "update", index, step }, baseUrl);
+export const updateStep = (file: string, index: number, step: RecipeStep, baseUrl = BASE_URL) => {
+  const body: RecipeStepUpdateRequest = { file, action: "update", index, step };
+  return write<null>("recipes", "steps", body, baseUrl);
+};
 
-export const deleteStep = (file: string, index: number, baseUrl = BASE_URL) =>
-  write<null>("recipes", "steps", { file, action: "delete", index }, baseUrl);
+export const deleteStep = (file: string, index: number, baseUrl = BASE_URL) => {
+  const body: RecipeStepDeleteRequest = { file, action: "delete", index };
+  return write<null>("recipes", "steps", body, baseUrl);
+};
 
-/** Sections a recipe's assets can be assigned to (recipes_api.py's
- * set_assets). `splash` sets/clears metadata.image and metadata.thumbnail
- * TOGETHER and ignores `index`; `ingredients`/`instructions` replace item
- * `index`'s own asset list. */
-export type RecipeAssetSection = "splash" | "ingredients" | "instructions";
 
 /** Multipart: adds one or more images to the recipe's asset pool WITHOUT
  * attaching them to any section -- attaching is a separate whole-list write
@@ -142,17 +158,19 @@ export async function uploadRecipeAssets(
  * `ingredients`/`instructions` and must be omitted for `splash`. */
 export const setRecipeAssets = (
   file: string,
-  section: RecipeAssetSection,
+  section: RecipeAssetAssignmentRequest["section"],
   assets: string[],
   index?: number,
   baseUrl = BASE_URL,
-) =>
-  write<{ assets: string[] }>(
-    "recipes",
-    "assets",
-    { file, section, assets, ...(index === undefined ? {} : { index }) },
-    baseUrl,
-  );
+) => {
+  const body: RecipeAssetAssignmentRequest = {
+    file,
+    section,
+    assets,
+    ...(index === undefined ? {} : { index }),
+  };
+  return write<{ assets: string[] }>("recipes", "assets", body, baseUrl);
+};
 
 /** Deletes assets from the recipe archive outright. remove_assets already
  * scrubs metadata.image/thumbnail and every ingredient's/instruction's own

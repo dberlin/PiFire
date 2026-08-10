@@ -11,6 +11,7 @@ import zipfile
 
 import pytest
 from PIL import Image
+from common.web_contracts.content import RecipeAsset
 
 from tests.web.archive_builders import write_recipe
 
@@ -82,6 +83,7 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders):
     resp = _upload(client, name)
     assert resp.status_code == 200
     stored = resp.get_json()["data"]["assets"]
+    assert [RecipeAsset.model_validate(asset, strict=True).model_dump(mode="json") for asset in stored] == stored
     assert len(stored) == 1 and stored[0]["type"] == "png"
 
     with zipfile.ZipFile(recipe_dir + name) as archive:

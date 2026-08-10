@@ -1,4 +1,4 @@
-import type { CookFileEvent, CookFileTotals } from "../../helpers/files/cookfileApi";
+import type { CookFileEvent, CookFileTotals } from "../../helpers/contracts/content.gen";
 import { cookFileExportUrl } from "../../helpers/files/cookfileApi";
 
 // The events table, its totals row, and a per-event disclosure.

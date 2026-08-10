@@ -6,7 +6,7 @@ import {
   setRecipeAssets,
   uploadRecipeAssets,
 } from "../../helpers/files/recipeApi";
-import type { Ingredient, Instruction, RecipeAsset } from "../../helpers/files/recipeTypes";
+import type { Ingredient, Instruction, RecipeAsset } from "../../helpers/contracts/content.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 // The recipe's asset library: upload, delete-from-archive, and attaching a

@@ -6,7 +6,7 @@ import { useRef } from "react";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };
-import type { CookFileChartData } from "../../../../src/helpers/files/cookfileApi";
+import type { CookFileChartData } from "../../../../src/helpers/contracts/content.gen";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { flushObservers, testQueryClient } from "../../test-utils";
 

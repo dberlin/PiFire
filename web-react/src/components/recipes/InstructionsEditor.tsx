@@ -4,7 +4,7 @@ import {
   deleteInstruction,
   updateInstruction,
 } from "../../helpers/files/recipeApi";
-import type { Ingredient, Instruction, RecipeStep } from "../../helpers/files/recipeTypes";
+import type { Ingredient, Instruction, RecipeStep } from "../../helpers/contracts/content.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 // recipes_api.py's update_instruction rejects any ingredient name that is not

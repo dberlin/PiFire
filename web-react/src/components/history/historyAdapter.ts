@@ -1,4 +1,4 @@
-import type { HistoryChartData, HistoryDataset } from "../../helpers/history/historyApi";
+import type { HistoryChartData, HistoryDataset } from "../../helpers/contracts/content.gen";
 import type { ChartSeries } from "./HistoryChart";
 
 /**

@@ -4,7 +4,7 @@ import {
   toChartAnnotations,
   toCookChartInput,
 } from "../../../../src/components/cookfiles/cookfileAdapter";
-import type { CookFileChartData } from "../../../../src/helpers/files/cookfileApi";
+import type { CookFileChartData } from "../../../../src/helpers/contracts/content.gen";
 
 function payload(overrides: Partial<CookFileChartData> = {}): CookFileChartData {
   return {

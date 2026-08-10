@@ -1,4 +1,5 @@
 import pytest
+from common.web_contracts.content import RecipeDetail
 
 from tests.web.archive_builders import write_recipe
 
@@ -26,6 +27,8 @@ def test_detail_returns_the_four_editable_sections(client, folders):
     resp = client.get(f"/api/files/recipes/detail?file={name}")
     assert resp.status_code == 200
     body = resp.get_json()
+    validated = RecipeDetail.model_validate(body, strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body
     assert body["metadata"]["title"] == "Brisket"
     assert body["recipe"]["ingredients"][0]["name"] == "Brisket"
     assert body["recipe"]["instructions"][0]["ingredients"] == ["Brisket"]

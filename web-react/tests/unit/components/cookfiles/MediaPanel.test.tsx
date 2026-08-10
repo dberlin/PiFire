@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };
-import type { CookFileAsset } from "../../../../src/helpers/files/cookfileApi";
+import type { CookFileAsset } from "../../../../src/helpers/contracts/content.gen";
 
 const uploadCookFileAssetsMock = rs.fn();
 const deleteCookFileAssetsMock = rs.fn();

@@ -12,7 +12,7 @@ import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" w
 import * as actualFilesApi from "../../../../src/helpers/files/filesApi" with {
   rstest: "importActual",
 };
-import type { FileListing } from "../../../../src/helpers/files/fileTypes";
+import type { FileListing } from "../../../../src/helpers/contracts/content.gen";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { testQueryClient } from "../../test-utils";
 

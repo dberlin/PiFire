@@ -1,13 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
+import type { FileListing } from "../../helpers/contracts/content.gen";
 import {
   cookFileDownloadUrl,
   deleteCookFile,
   uploadCookFile,
 } from "../../helpers/files/cookfileApi";
 import { fetchFileListing, thumbnailUrl } from "../../helpers/files/filesApi";
-import { type FileListing, PER_PAGE_CHOICES } from "../../helpers/files/fileTypes";
+import { PER_PAGE_CHOICES } from "../../helpers/files/fileTypes";
 import { queryKeys } from "../../helpers/query/keys";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 

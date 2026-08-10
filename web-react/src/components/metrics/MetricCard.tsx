@@ -1,4 +1,4 @@
-import type { MetricRecord } from "../../helpers/metrics/metricsTypes";
+import type { MetricRecord } from "../../helpers/contracts/content.gen";
 import { metricRows, modeAccent } from "./metricFields";
 import "./metrics.css";
 

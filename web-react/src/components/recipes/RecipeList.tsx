@@ -1,7 +1,8 @@
 import { useEffect, useId, useState } from "react";
 import { Link, useNavigate } from "react-router";
+import type { FileListing } from "../../helpers/contracts/content.gen";
 import { fetchFileListing, thumbnailUrl } from "../../helpers/files/filesApi";
-import { type FileListing, PER_PAGE_CHOICES } from "../../helpers/files/fileTypes";
+import { PER_PAGE_CHOICES } from "../../helpers/files/fileTypes";
 import {
   createRecipe,
   deleteRecipe,

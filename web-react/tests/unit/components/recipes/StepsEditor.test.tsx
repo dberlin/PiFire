@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import * as actualRecipeApi from "../../../../src/helpers/files/recipeApi" with {
   rstest: "importActual",
 };
-import type { RecipeStep } from "../../../../src/helpers/files/recipeTypes";
+import type { RecipeStep } from "../../../../src/helpers/contracts/content.gen";
 
 const insertStepMock = rs.fn();
 const updateStepMock = rs.fn();

@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import * as actualRecipeApi from "../../../../src/helpers/files/recipeApi" with {
   rstest: "importActual",
 };
-import type { Ingredient, Instruction } from "../../../../src/helpers/files/recipeTypes";
+import type {
+  Ingredient,
+  Instruction,
+} from "../../../../src/helpers/contracts/content.gen";
 
 const addIngredientMock = rs.fn();
 const updateIngredientMock = rs.fn();

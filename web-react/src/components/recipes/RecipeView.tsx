@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef } from "react";
+import type { RecipeDetail, RecipeStep } from "../../helpers/contracts/content.gen";
 import { FALLBACK_THUMB } from "../../helpers/files/fileTypes";
 import { assetUrl } from "../../helpers/files/recipeApi";
-import type { RecipeDetail, RecipeStep } from "../../helpers/files/recipeTypes";
 
 interface Props {
   detail: RecipeDetail;

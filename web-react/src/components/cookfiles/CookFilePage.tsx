@@ -1,12 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router";
-import {
-  type CookFileError,
-  CookFileRequestError,
-  fetchCookFileDetail,
-  recoverCookFile,
-} from "../../helpers/files/cookfileApi";
+import type { FileErrorDetail } from "../../helpers/contracts/content.gen";
+import { FileRequestError } from "../../helpers/files/apiEnvelope";
+import { fetchCookFileDetail, recoverCookFile } from "../../helpers/files/cookfileApi";
 import { queryKeys } from "../../helpers/query/keys";
 import { CommentList } from "./CommentList";
 import { CookFileChart } from "./CookFileChart";
@@ -24,8 +21,8 @@ import { MediaPanel } from "./MediaPanel";
 // calls its endpoint and then asks the page to refetch, so a title edit does
 // not blow away an open comment editor.
 
-function toDetail(err: unknown): CookFileError {
-  if (err instanceof CookFileRequestError) return err.detail;
+function toDetail(err: unknown): FileErrorDetail {
+  if (err instanceof FileRequestError) return err.detail;
   return {
     status: 0,
     message: err instanceof Error ? err.message : "Request failed",
@@ -39,7 +36,7 @@ export function CookFilePage() {
   // A failed Attempt Repair/Conversion reports its OWN error (e.g. "Repair
   // failed."), not the stale one that sent the user to the button in the
   // first place. Cleared at the start of every attempt.
-  const [recoverError, setRecoverError] = useState<CookFileError | null>(null);
+  const [recoverError, setRecoverError] = useState<FileErrorDetail | null>(null);
 
   const { data, isPending, error } = useQuery({
     queryKey: queryKeys.cookfileDetail(filename),

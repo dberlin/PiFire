@@ -7,6 +7,7 @@ change the grill. See docs/superpowers/plans/2026-07-28-react-metrics-page.md.
 import pytest
 
 from app import app as flask_app
+from common.web_contracts.content import MetricsPayload
 
 START = 1_700_000_000_000
 
@@ -42,6 +43,8 @@ def test_listing_is_empty_when_nothing_has_been_recorded(ds, client):
 
     flush_metrics()
     body = client.get("/api/metrics").get_json()
+    validated = MetricsPayload.model_validate(body["data"], strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body["data"]
     assert body["result"] == "OK"
     assert body["data"]["metrics"] == []
 
@@ -53,6 +56,8 @@ def test_listing_returns_the_processed_record(ds, client):
     seed()
 
     body = client.get("/api/metrics").get_json()
+    validated = MetricsPayload.model_validate(body["data"], strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body["data"]
     (record,) = body["data"]["metrics"]
 
     assert record["mode"] == "Smoke"

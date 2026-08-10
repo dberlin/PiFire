@@ -18,6 +18,7 @@ There is no DOM involved, so there is nothing playwright buys.
 import json
 
 import pytest
+from common.web_contracts.content import ContentErrorEnvelope, FileListing
 
 from tests.web.archive_builders import write_cookfile, write_recipe
 
@@ -40,6 +41,8 @@ def test_cookfiles_listing_returns_json_with_titles(client, folders):
     resp = client.get("/api/files/cookfiles?page=1&per_page=10&reverse=false")
     assert resp.status_code == 200
     body = resp.get_json()
+    validated = FileListing.model_validate(body, strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body
     names = [i["filename"] for i in body["items"]]
     assert "AAA-Cook.pifire" in names and "BBB-Cook.pifire" in names
     titles = {i["filename"]: i["title"] for i in body["items"]}
@@ -117,6 +120,8 @@ def test_bad_query_parameters_are_400_and_name_the_field(client, folders, query,
     resp = client.get(f"/api/files/cookfiles?{query}")
     assert resp.status_code == 400
     body = resp.get_json()
+    validated = ContentErrorEnvelope.model_validate(body, strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body
     assert body["result"] == "Error"
     assert body["message"] == "bad_request"
     assert body["data"]["field"] == field

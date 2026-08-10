@@ -1,6 +1,7 @@
 import pytest
 
 from app import app as flask_app
+from common.web_contracts.content import HistoryChartData
 
 
 @pytest.fixture
@@ -14,6 +15,8 @@ def test_chart_returns_the_series_payload(ds, client):
     resp = client.get("/api/history/chart?minutes=10")
     assert resp.status_code == 200
     body = resp.get_json()
+    validated = HistoryChartData.model_validate(body, strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body
     assert set(body) >= {"time_labels", "chart_data", "probe_mapper", "annotations", "minutes"}
     assert body["minutes"] == 10
     assert isinstance(body["chart_data"], list)

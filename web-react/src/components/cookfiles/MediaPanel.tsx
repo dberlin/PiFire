@@ -1,8 +1,8 @@
 import { useId, useState } from "react";
+import type { CookFileAsset } from "../../helpers/contracts/content.gen";
 import {
   assetThumbUrl,
   assetUrl,
-  type CookFileAsset,
   deleteCookFileAssets,
   setCookFileThumbnail,
   uploadCookFileAssets,

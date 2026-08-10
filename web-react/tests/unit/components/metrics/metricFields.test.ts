@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { metricRows, modeAccent } from "../../../../src/components/metrics/metricFields";
-import type { MetricRecord } from "../../../../src/helpers/metrics/metricsTypes";
+import type { MetricRecord } from "../../../../src/helpers/contracts/content.gen";
 
 //  A 90-second span, so timeinmode takes the minute form. Exactly 60 000 ms
 //  would read "60 s" -- process_metrics' branch is `if seconds > 60`.

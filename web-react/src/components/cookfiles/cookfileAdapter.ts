@@ -1,5 +1,8 @@
-import type { CookFileChartData } from "../../helpers/files/cookfileApi";
-import type { HistoryAnnotation, HistoryChartData } from "../../helpers/history/historyApi";
+import type {
+  CookFileChartData,
+  HistoryAnnotation,
+  HistoryChartData,
+} from "../../helpers/contracts/content.gen";
 import { type ChartInput, hasPlottableHistory, toChartInput } from "../history/historyAdapter";
 
 /**

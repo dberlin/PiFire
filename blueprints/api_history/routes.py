@@ -5,6 +5,7 @@ from flask import jsonify, request
 from common.app import prepare_annotations
 from common.datastore_accessors import read_settings
 from file_mgmt.cookfile import prepare_chartdata
+from common.web_contracts.content import HistoryChartData, validated_content_json
 
 from . import api_history_bp
 
@@ -45,4 +46,4 @@ def history_chart():
     )
     payload["annotations"] = prepare_annotations(time.time() - minutes * 60)
     payload["minutes"] = minutes
-    return jsonify(payload), 200
+    return jsonify(validated_content_json(HistoryChartData, payload)), 200

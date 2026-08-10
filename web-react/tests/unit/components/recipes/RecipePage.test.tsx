@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
-import type { RecipeDetail } from "../../../../src/helpers/files/recipeTypes";
+import type { RecipeDetail } from "../../../../src/helpers/contracts/content.gen";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 import { testQueryClient } from "../../test-utils";

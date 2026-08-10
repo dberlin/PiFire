@@ -1,4 +1,5 @@
-import { FALLBACK_THUMB, type FileKind, type FileListing } from "./fileTypes";
+import type { FileListing } from "../contracts/content.gen";
+import { FALLBACK_THUMB, type FileKind } from "./fileTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

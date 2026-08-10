@@ -12,6 +12,7 @@ Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 """
 
 import pytest
+from common.web_contracts.content import CookFileChartData, CookFileDetail
 
 from tests.web.archive_builders import write_cookfile
 
@@ -33,6 +34,8 @@ def test_detail_returns_metadata_events_and_comments(client, folders):
     resp = client.get(f"/api/files/cookfiles/detail?file={name}")
     assert resp.status_code == 200
     body = resp.get_json()
+    validated = CookFileDetail.model_validate(body, strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body
     assert body["filename"] == name
     assert body["metadata"]["title"] == "Detail-Cook"
     assert body["metadata"]["units"] == "F"
@@ -109,6 +112,8 @@ def test_chart_returns_the_full_graph_payload(client, folders):
     resp = client.get(f"/api/files/cookfiles/chart?file={name}")
     assert resp.status_code == 200
     body = resp.get_json()
+    validated = CookFileChartData.model_validate(body, strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == body
     assert set(body) == {"time_labels", "chart_data", "probe_mapper", "annotations"}
     assert body["chart_data"][0]["label"] == "Grill"
     assert body["probe_mapper"]["probes"] == {"grill1": 0}

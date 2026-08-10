@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { MemoryRouter } from "react-router";
-import type { HistoryChartData } from "../../../../src/helpers/history/historyApi";
+import type { HistoryChartData } from "../../../../src/helpers/contracts/content.gen";
 import { testQueryClient } from "../../test-utils";
 
 // Counts chart INSTANCES (mounts), not renders -- see the stub below.

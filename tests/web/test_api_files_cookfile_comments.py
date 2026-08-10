@@ -9,6 +9,7 @@ Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 """
 
 import pytest
+from common.web_contracts.content import CookFileComment
 
 from tests.web.archive_builders import write_cookfile
 
@@ -47,6 +48,8 @@ def test_comment_lifecycle_add_update_delete(client, folders):
     added = client.post(URL, json={"file": name, "action": "add", "text": "First light"})
     assert added.status_code == 200
     data = added.get_json()["data"]
+    validated = CookFileComment.model_validate(data, strict=True)
+    assert validated.model_dump(mode="json", exclude_unset=True) == data
     cid = data["id"]
     assert data["text"] == "First light"
     assert data["edited"] == ""

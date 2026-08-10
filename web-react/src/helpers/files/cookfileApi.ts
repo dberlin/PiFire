@@ -11,114 +11,16 @@
 // helpers/pellets/pelletsApi.ts speaks. Read responses (detail, chart) are
 // bare payloads with an HTTP status, matching /api/history/chart.
 
-import type { HistoryAnnotation, HistoryDataset, HistoryProbeMapper } from "../history/historyApi";
-import {
-  FileRequestError as CookFileRequestError,
-  type FileErrorDetail,
-  postForm,
-  read,
-  write,
-} from "./apiEnvelope";
+import type {
+  CookFileAsset,
+  CookFileChartData,
+  CookFileComment,
+  CookFileDetail,
+} from "../contracts/content.gen";
+import { postForm, read, write } from "./apiEnvelope";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
-/** A cook file's metadata.json, plus the two epoch fields the endpoint adds.
- *
- * `starttime`/`endtime` are HH:MM:SS display strings (the Flask template can
- * only ever show a time of day — common/app.py:289-290 overwrites the epochs
- * in place). `*_epoch` are the raw millisecond epochs, kept so a client can
- * render a date. */
-export interface CookFileMetadata {
-  title: string;
-  units: string;
-  thumbnail: string;
-  id: string;
-  version: string;
-  starttime: string;
-  endtime: string;
-  starttime_epoch: number;
-  endtime_epoch: number;
-}
-
-/** One row of events.json. The `_c` fields were computed at cook time by
- * process_metrics (common/common.py) and stored — they are not recomputed
- * on read. */
-export interface CookFileEvent {
-  id: number;
-  mode: string;
-  starttime_c: string;
-  endtime_c: string;
-  augerontime_c: string;
-  estusage_m: string;
-  estusage_i: string;
-  pellet_level_start: number;
-  pellet_level_end: number;
-  timeinmode: string;
-}
-
-export interface CookFileTotals {
-  augerontime: string;
-  estusage_m: string;
-  estusage_i: string;
-  cooktime: string;
-  pellet_level_start: number;
-  pellet_level_end: number;
-}
-
-export interface CookFileComment {
-  id: string;
-  text: string;
-  date: string;
-  time: string;
-  edited: string;
-  assets: string[];
-}
-
-export interface CookFileAsset {
-  id: string;
-  filename: string;
-  type: string;
-}
-
-/** Probe key -> display label, per series role. The rename table edits
- * `probes` only, which is all the Flask table offers
- * (cookfile/index.html:162). */
-export interface CookFileLabels {
-  probes: Record<string, string>;
-  targets: Record<string, string>;
-  primarysp: Record<string, string>;
-}
-
-export interface CookFileDetail {
-  filename: string;
-  metadata: CookFileMetadata;
-  graph_labels: CookFileLabels;
-  events: CookFileEvent[];
-  /** Empty when the cook has fewer than two events: prepare_event_totals
-   * indexes events[-2] unconditionally, so the endpoint reports nothing
-   * rather than 500ing on a truncated cook. */
-  event_totals: CookFileTotals | Record<string, never>;
-  comments: CookFileComment[];
-  assets: CookFileAsset[];
-}
-
-/** GET /api/files/cookfiles/chart. Structurally a subset of HistoryChartData:
- * no `graph_labels`, no `minutes`. `time_labels` is `unknown[]` on purpose —
- * live history always writes numeric epochs, but an upgraded or hand-built
- * cook file can carry "12:00:00" strings, and a string divided by 1000 is NaN,
- * which uPlot renders as nothing at all. cookfileAdapter guards it. */
-export interface CookFileChartData {
-  time_labels: unknown[];
-  chart_data: HistoryDataset[];
-  probe_mapper: HistoryProbeMapper;
-  annotations: Record<string, HistoryAnnotation>;
-}
-
-/** The 422 body: the file opened but would not load. `errortype` drives the
- * repair/convert prompt, exactly as cookfile/cferror.html branches on it. */
-export type CookFileError = FileErrorDetail;
-
-export { CookFileRequestError };
 
 export const fetchCookFileDetail = (file: string, baseUrl = BASE_URL) =>
   read<CookFileDetail>("cookfiles", "detail", file, baseUrl);

@@ -8,7 +8,7 @@ import type {
   Ingredient,
   Instruction,
   RecipeStep,
-} from "../../../../src/helpers/files/recipeTypes";
+} from "../../../../src/helpers/contracts/content.gen";
 
 const addInstructionMock = rs.fn();
 const updateInstructionMock = rs.fn();

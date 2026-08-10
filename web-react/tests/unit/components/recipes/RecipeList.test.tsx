@@ -8,7 +8,7 @@ import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router";
 import * as actualFilesApi from "../../../../src/helpers/files/filesApi" with {
   rstest: "importActual",
 };
-import type { FileListing } from "../../../../src/helpers/files/fileTypes";
+import type { FileListing } from "../../../../src/helpers/contracts/content.gen";
 import * as actualRecipeApi from "../../../../src/helpers/files/recipeApi" with {
   rstest: "importActual",
 };

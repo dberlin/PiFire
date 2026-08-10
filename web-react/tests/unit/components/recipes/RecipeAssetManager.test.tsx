@@ -8,7 +8,7 @@ import type {
   Ingredient,
   Instruction,
   RecipeAsset,
-} from "../../../../src/helpers/files/recipeTypes";
+} from "../../../../src/helpers/contracts/content.gen";
 
 const uploadRecipeAssetsMock = rs.fn();
 const deleteRecipeAssetsMock = rs.fn();

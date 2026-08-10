@@ -3,7 +3,8 @@
 // Two GETs and nothing else -- blueprints/api_metrics registers no POST, so
 // there is no write here to get wrong.
 
-import type { MetricsPayload, MetricsResult } from "./metricsTypes";
+import type { MetricsPayload } from "../contracts/content.gen";
+import type { MetricsResult } from "./metricsTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

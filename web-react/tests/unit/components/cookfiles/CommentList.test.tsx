@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };
-import type { CookFileAsset, CookFileComment } from "../../../../src/helpers/files/cookfileApi";
+import type {
+  CookFileAsset,
+  CookFileComment,
+} from "../../../../src/helpers/contracts/content.gen";
 
 const addCookFileCommentMock = rs.fn();
 const updateCookFileCommentMock = rs.fn();

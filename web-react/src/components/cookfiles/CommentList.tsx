@@ -1,10 +1,9 @@
 import { useState } from "react";
+import type { CookFileAsset, CookFileComment } from "../../helpers/contracts/content.gen";
 import {
   addCookFileComment,
   assetThumbUrl,
   assetUrl,
-  type CookFileAsset,
-  type CookFileComment,
   deleteCookFileComment,
   setCommentAssets,
   updateCookFileComment,

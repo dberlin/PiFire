@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
+import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 import {
   addCookFileComment,
   assetThumbUrl,
   assetUrl,
-  CookFileRequestError,
   cookFileDownloadUrl,
   cookFileExportUrl,
   deleteCookFile,
@@ -148,15 +148,15 @@ describe("cookfileApi writes", () => {
     await expect(addCookFileComment("X.pifire", "hi", "")).rejects.toThrow("rejected by server");
   });
 
-  test("a write surfaces a 409 as a CookFileRequestError with its status", async () => {
+  test("a write surfaces a 409 as a FileRequestError with its status", async () => {
     mockFetch({
       ok: false,
       status: 409,
       json: async () => ({ result: "Error", message: "label_exists", data: null }),
     });
     const failure = await renameCookFileLabel("X.pifire", "a", "b", "").catch((err) => err);
-    expect(failure).toBeInstanceOf(CookFileRequestError);
-    expect((failure as CookFileRequestError).detail).toEqual({
+    expect(failure).toBeInstanceOf(FileRequestError);
+    expect((failure as FileRequestError).detail).toEqual({
       status: 409,
       message: "label_exists",
       errortype: null,
