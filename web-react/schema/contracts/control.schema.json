@@ -475,8 +475,16 @@
           "type": "boolean"
         },
         "shutdown": {
-          "title": "Shutdown",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shutdown"
         },
         "target": {
           "anyOf": [
@@ -509,8 +517,7 @@
       "required": [
         "label",
         "type",
-        "req",
-        "shutdown"
+        "req"
       ],
       "title": "NotifyEntry",
       "type": "object"

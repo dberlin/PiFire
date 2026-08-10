@@ -134,7 +134,7 @@ class NotifyEntry(_JsonExtensibleWireModel):
     label: str
     type: str
     req: bool
-    shutdown: bool
+    shutdown: bool | None = None
     keep_warm: bool | None = None
     reignite: bool | None = None
     target: FiniteNumber | None = None

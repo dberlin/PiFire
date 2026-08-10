@@ -79,7 +79,7 @@ type KeepWarm = boolean | null;
 type Label = string;
 type Reignite = boolean | null;
 type Req = boolean;
-type Shutdown1 = boolean;
+type Shutdown1 = boolean | null;
 type Triggered = boolean | null;
 type Type = string;
 type NotifyUpdates = NotifyUpdate[] | null;
@@ -386,7 +386,7 @@ export interface NotifyEntry {
   label: Label;
   reignite?: Reignite;
   req: Req;
-  shutdown: Shutdown1;
+  shutdown?: Shutdown1;
   target?: FiniteNumber | null;
   triggered?: Triggered;
   type: Type;
