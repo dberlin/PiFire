@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 import sys
 from pathlib import Path
 
@@ -76,12 +77,19 @@ def _is_sys_path(node: ast.expr) -> bool:
     )
 
 
-def _sys_path_target(node: ast.expr) -> str | None:
+def _sys_path_targets(node: ast.expr) -> Iterator[str]:
     if _is_sys_path(node):
-        return "sys.path"
+        yield "sys.path"
+        return
     if isinstance(node, ast.Subscript) and _is_sys_path(node.value):
-        return ast.unparse(node)
-    return None
+        yield ast.unparse(node)
+        return
+    if isinstance(node, ast.Starred):
+        yield from _sys_path_targets(node.value)
+        return
+    if isinstance(node, (ast.Tuple, ast.List)):
+        for element in node.elts:
+            yield from _sys_path_targets(element)
 
 
 def _mutates_sys_path(path: Path) -> list[str]:
@@ -94,18 +102,18 @@ def _mutates_sys_path(path: Path) -> list[str]:
                 violations.append(f"{relative_path}:{node.lineno}:sys.path.{node.func.attr}")
         elif isinstance(node, ast.Assign):
             for target in node.targets:
-                if action := _sys_path_target(target):
+                for action in _sys_path_targets(target):
                     violations.append(f"{relative_path}:{node.lineno}:{action} =")
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            if action := _sys_path_target(node.target):
+            for action in _sys_path_targets(node.target):
                 violations.append(f"{relative_path}:{node.lineno}:{action} =")
         elif isinstance(node, ast.AugAssign):
-            if _sys_path_target(node.target):
+            if next(_sys_path_targets(node.target), None) is not None:
                 action = f"{ast.unparse(node.target)} {AUGMENTED_OPERATOR_TOKENS[type(node.op)]}"
                 violations.append(f"{relative_path}:{node.lineno}:{action}")
         elif isinstance(node, ast.Delete):
             for target in node.targets:
-                if action := _sys_path_target(target):
+                for action in _sys_path_targets(target):
                     violations.append(f"{relative_path}:{node.lineno}:del {action}")
     return violations
 
@@ -195,6 +203,76 @@ def test_direct_sys_path_deletion_is_reported(
     path = _write_probe(tmp_path, "probe.py", f"import sys\n{statement}\n")
 
     assert _mutates_sys_path(path) == [f"probe.py:2:{action}"]
+
+
+@pytest.mark.parametrize(
+    ("statement", "actions"),
+    [
+        ("sys.path, marker = ([], None)", ["sys.path ="]),
+        ('[marker, sys.path[0]] = [None, "probe"]', ["sys.path[0] ="]),
+        (
+            '(marker, [sys.path[:]]) = (None, [["probe"]])',
+            ["sys.path[:] ="],
+        ),
+        ("marker, *sys.path = [None]", ["sys.path ="]),
+        (
+            '(sys.path, [sys.path[0]]) = ([], ["probe"])',
+            ["sys.path =", "sys.path[0] ="],
+        ),
+    ],
+)
+def test_unpacking_sys_path_assignment_is_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    statement: str,
+    actions: list[str],
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    path = _write_probe(tmp_path, "probe.py", f"import sys\n{statement}\n")
+
+    assert _mutates_sys_path(path) == [f"probe.py:2:{action}" for action in actions]
+
+
+@pytest.mark.parametrize(
+    ("statement", "action"),
+    [
+        ("del (sys.path, marker)", "del sys.path"),
+        ("del [marker, sys.path[0]]", "del sys.path[0]"),
+        ("del (marker, [sys.path[:]])", "del sys.path[:]"),
+    ],
+)
+def test_unpacking_sys_path_deletion_is_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    statement: str,
+    action: str,
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    path = _write_probe(tmp_path, "probe.py", f"import sys\n{statement}\n")
+
+    assert _mutates_sys_path(path) == [f"probe.py:2:{action}"]
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "sys.paths, marker = ([], None)",
+        '[marker, paths[0]] = [None, "probe"]',
+        '(marker, [paths[:]]) = (None, [["probe"]])',
+        "marker, *paths = [None]",
+        "del (marker, [paths[0]])",
+        "(marker, paths) = (None, sys.path)",
+    ],
+)
+def test_unrelated_unpacking_is_not_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    statement: str,
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    path = _write_probe(tmp_path, "probe.py", f"import sys\n{statement}\n")
+
+    assert _mutates_sys_path(path) == []
 
 
 @pytest.mark.parametrize(
