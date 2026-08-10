@@ -87,8 +87,8 @@ _TAU_DEADBAND = 0.10
 #: nothing at all.
 #:
 #: The interval this sits inside is bounded at both ends by real records, each
-#: measured by docs/superpowers/experiments/promotion_signal.py with its output
-#: committed as _promotion_signal.txt beside it (Section 9):
+#: measured by tools/experiments/promotion_signal.py with its output committed
+#: as docs/superpowers/experiments/_promotion_signal.txt (Section 9):
 #:
 #:     lower  0.261203   generic/steady_hold/3600s, n=721 -- the strongest
 #:                       record that still determines nothing, so the floor must

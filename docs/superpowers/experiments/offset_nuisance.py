@@ -135,7 +135,7 @@ from controller.mpc import _REFIT_INIT, _REFIT_MIN_SAMPLES  # noqa: E402
 from controller.mpc_model import simulate_grey_box  # noqa: E402
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR  # noqa: E402
 from controller.update_mpc import _DIVERGED, _FREE, _LOWER_BOUND, _MAX_NFEV, _SIM_KEYS  # noqa: E402
-from docs.superpowers.experiments import promotion_signal as ps  # noqa: E402
+from tools.experiments import promotion_signal as ps  # noqa: E402
 
 #: The three arms, in the order every table prints them.
 ARMS = ("A_shipped", "B_offset", "C_free_amb")

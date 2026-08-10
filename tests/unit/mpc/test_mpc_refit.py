@@ -13,7 +13,7 @@ from common.controller_model_state import ControllerModelStore
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR, PROMOTION_BOUNDS, evaluate
 from controller.mpc import _DEFAULTS, _HISTORY_MAX, _REFIT_INIT, Controller
 from controller.mpc_model import simulate_grey_box
-from docs.superpowers.experiments import promotion_signal
+from tools.experiments import promotion_signal
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
 #: h_amb matches the shipped default rather than differing from it: `_FREE`
