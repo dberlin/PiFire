@@ -101,7 +101,7 @@ let fetchMock: FetchMock;
 beforeEach(() => {
   fetchMock = rs.fn(async (input) => {
     if (String(input).endsWith("/api/model-evidence/report")) {
-      return jsonResponse(mpcReport("collecting", "mpc-initial"));
+      return jsonResponse(mpcReport("collecting", "a".repeat(64)));
     }
     if (String(input).endsWith("/api/pid-sp-learning/report")) {
       return jsonResponse(pidSpReport("b".repeat(64)));
@@ -197,7 +197,7 @@ describe("LearningPanel", () => {
     expect(await screen.findByRole("button", { name: "PID-SP learning: idle" })).toBeVisible();
 
     await act(async () => {
-      oldMpc.resolve(jsonResponse(mpcReport("collecting", "mpc-late")));
+      oldMpc.resolve(jsonResponse(mpcReport("collecting", "c".repeat(64))));
       await Promise.resolve();
     });
     expect(screen.getByRole("button", { name: "PID-SP learning: idle" })).toBeVisible();
@@ -208,7 +208,7 @@ describe("LearningPanel", () => {
     const oldPidSp = deferredResponse();
     fetchMock.mockImplementation((input) => {
       if (String(input).endsWith("/api/pid-sp-learning/report")) return oldPidSp.promise;
-      return Promise.resolve(jsonResponse(mpcReport("active", "mpc-new")));
+      return Promise.resolve(jsonResponse(mpcReport("active", "d".repeat(64))));
     });
     const view = renderPanel("pid_sp");
 
@@ -228,7 +228,7 @@ describe("LearningPanel", () => {
     const newBase = deferredResponse();
     fetchMock.mockImplementation((input) => {
       if (String(input).startsWith("/new")) return newBase.promise;
-      return Promise.resolve(jsonResponse(mpcReport("active", "old-base")));
+      return Promise.resolve(jsonResponse(mpcReport("active", "e".repeat(64))));
     });
     const view = renderPanel("mpc", { apiBase: "/old" });
     expect(await screen.findByRole("button", { name: "MPC learning: active" })).toBeVisible();
@@ -247,7 +247,7 @@ describe("LearningPanel", () => {
       }
       mpcRequests += 1;
       return mpcRequests === 1
-        ? Promise.resolve(jsonResponse(mpcReport("active", "first-mount")))
+        ? Promise.resolve(jsonResponse(mpcReport("active", "f".repeat(64))))
         : remount.promise;
     });
     const view = renderPanel("mpc");

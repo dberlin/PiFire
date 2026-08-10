@@ -31,6 +31,12 @@ const ARTIFACTS = "tests/e2e/artifacts";
 const EXACT_DIGEST = "b".repeat(64);
 const EXACT_DECISION = "review-exact";
 
+const fixtureDigest = (value: string) =>
+  Array.from(value, (character) => character.charCodeAt(0).toString(16))
+    .join("")
+    .padEnd(64, "0")
+    .slice(0, 64);
+
 function evidenceReport(
   status: ModelEvidenceStatus,
   digest: string,
@@ -180,7 +186,7 @@ function evidenceReport(
       : [],
     blockers: [],
     errors: [],
-    revision: `${status}-${roleGeneration}`,
+    revision: fixtureDigest(`${status}-${roleGeneration}`),
   };
 }
 

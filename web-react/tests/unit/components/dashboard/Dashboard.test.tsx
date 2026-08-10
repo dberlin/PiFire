@@ -108,7 +108,7 @@ function dashboardLearningReport(
     gates: [],
     blockers: [],
     errors: [],
-    revision: `report-${roleGeneration}`,
+    revision: `${roleGeneration}`.padStart(64, "e"),
   };
 }
 
