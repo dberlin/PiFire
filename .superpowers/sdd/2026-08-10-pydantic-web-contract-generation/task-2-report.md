@@ -5,6 +5,7 @@
 DONE
 
 Implementation commit: `47fe3c5ed68b13330bf90aa12efea165f30c2f44` (`tnwzokqovrtnsqlskonrkrpwvmukoork`)
+Aggregate fixture-fix commit: `901b1e8da316125b08f80f467729144bb9afac9b` (`wmzqkyoskorrzlyspsuqoysupwntvsus`)
 
 ## Changed paths
 
@@ -19,6 +20,7 @@ Backend and generated contract paths:
 - `tests/web/test_socket_dash_payload_fields.py`
 - `tests/web/test_socket_probe_staleness.py`
 - `tests/web/test_spa_caching.py`
+- `tests/web/test_control_liveness_not_sticky.py`
 - `web-react/schema/contracts/core.schema.json`
 - `web-react/schema/contracts/manifest.json`
 - `web-react/src/helpers/contracts/core.gen.ts`
@@ -122,6 +124,17 @@ TS2307 at all five new generated-contract imports
 EXIT=1
 ```
 
+Aggregate verification exposed one additional RED in a legacy liveness test fixture:
+
+```bash
+uv run pytest -q tests/web/test_control_liveness_not_sticky.py
+```
+
+```text
+5 failed, 2 passed
+DashSocketPayload rejected the fixture's empty probe dictionaries with 105 missing-field errors.
+```
+
 ## GREEN evidence
 
 Final required backend command:
@@ -163,6 +176,16 @@ bunx rstest run tests/unit/components/pellets/CurrentLoadCard.test.tsx tests/uni
 5 files passed, 52 tests passed in 1.74s
 ```
 
+The liveness fixture was corrected to build representative probe dictionaries through the real `_get_probe_structure` producer, without weakening production validation:
+
+```bash
+uv run pytest -q tests/web/test_control_liveness_not_sticky.py
+```
+
+```text
+7 passed in 4.78s
+```
+
 ## Generated drift and typecheck
 
 ```bash
@@ -188,6 +211,7 @@ EXIT=0
 LSP references were collected before renaming the exported `LiveState`, `ProbeData`, `ProbeStatus`, and pellet DTO symbols. Every direct caller was migrated to generated names and imports; no compatibility alias or re-export remains. Socket dash and pellet producers, the web-build endpoint, dismiss-warnings endpoint, control-health response, ordinary command responses, and the specialized MPC calibration response now construct/validate Pydantic models and serialize with JSON aliases. Probe extras remain allowed only on the two explicitly extensible models, absent status members remain absent while explicit nulls survive, and all numeric wire fields reject non-finite floats.
 
 A final reviewer found two Important issues: the always-emitted nullable `modelLearningRevision` was initially generated as optional, and the specialized calibration response remained handwritten. Both were corrected, regenerated, and reverified. No Critical or Important finding remains.
+Aggregate verification then found one legacy liveness mock returning invalid empty probe objects. The test now uses the real probe-structure producer; its focused RED/GREEN is recorded above and production validation remains strict.
 
 ## Concerns
 
