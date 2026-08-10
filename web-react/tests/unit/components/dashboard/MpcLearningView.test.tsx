@@ -1,8 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type Mock,
+  rs,
+} from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MpcLearningPanel } from "../../../../src/components/dashboard/MpcLearningPanel";
+import { MpcLearningView } from "../../../../src/components/dashboard/learning/MpcLearningView";
 import type {
   CookRefitOutcome,
   ModelEvidenceReport,
@@ -139,7 +147,9 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>;
+type FetchMock = Mock<
+  (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+>;
 let fetchMock: FetchMock;
 
 beforeEach(() => {
@@ -153,10 +163,12 @@ afterEach(() => {
   rs.useRealTimers();
 });
 
-function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningPanel>> = {}) {
+function renderPanel(
+  props: Partial<React.ComponentProps<typeof MpcLearningView>> = {},
+) {
   const queryClient = testQueryClient();
   return render(
-    <MpcLearningPanel
+    <MpcLearningView
       apiBase=""
       selectedController="mpc"
       units="F"
@@ -166,14 +178,18 @@ function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningPanel
     />,
     {
       wrapper: ({ children }: React.PropsWithChildren) => (
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
       ),
     },
   );
 }
 
 async function openPanel() {
-  await userEvent.click(await screen.findByRole("button", { name: /MPC learning:/i }));
+  await userEvent.click(
+    await screen.findByRole("button", { name: /MPC learning:/i }),
+  );
   return screen.findByRole("dialog", { name: "MPC model learning" });
 }
 
@@ -202,19 +218,42 @@ function passiveReport(status: ModelEvidenceStatus): ModelEvidenceReport {
   };
 }
 
-describe("MpcLearningPanel", () => {
+describe("MpcLearningView", () => {
   it("does not request or render learning authority for a non-MPC controller", () => {
     renderPanel({ selectedController: "pid" });
 
-    expect(screen.queryByRole("button", { name: /MPC learning/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /MPC learning/i }),
+    ).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("supplies the shared-shell labels and keeps every calibration action", async () => {
+    renderPanel();
+
+    expect(
+      await screen.findByRole("button", { name: "MPC learning: evaluating" }),
+    ).toBeVisible();
+    const dialog = await openPanel();
+    expect(dialog).toHaveAccessibleName("MPC model learning");
+    for (const action of [
+      "Start calibration",
+      "Pause calibration",
+      "Resume calibration",
+      "Stop calibration",
+      "Reset calibration progress",
+    ]) {
+      expect(screen.getByRole("button", { name: action })).toBeVisible();
+    }
   });
 
   it("shows an explicit loading state while the first report is pending", async () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
     renderPanel();
 
-    const trigger = screen.getByRole("button", { name: "MPC learning: loading" });
+    const trigger = screen.getByRole("button", {
+      name: "MPC learning: loading",
+    });
     await userEvent.click(trigger);
     expect(screen.getByText("Loading model evidence…")).toBeVisible();
   });
@@ -222,13 +261,17 @@ describe("MpcLearningPanel", () => {
   it("renders loading, stale-data error, and retry states without replacing prior authority", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(REPORT))
-      .mockResolvedValueOnce(jsonResponse({ detail: "projection unavailable" }, 503))
+      .mockResolvedValueOnce(
+        jsonResponse({ detail: "projection unavailable" }, 503),
+      )
       .mockResolvedValueOnce(jsonResponse({ ...REPORT, status: "active" }));
     const view = renderPanel({ learningReportRevision: 10 });
-    expect(await screen.findByRole("button", { name: "MPC learning: evaluating" })).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: "MPC learning: evaluating" }),
+    ).toBeVisible();
 
     view.rerender(
-      <MpcLearningPanel
+      <MpcLearningView
         apiBase=""
         selectedController="mpc"
         units="F"
@@ -236,12 +279,18 @@ describe("MpcLearningPanel", () => {
         learningReportRevision={11}
       />,
     );
-    const errorTrigger = await screen.findByRole("button", { name: "MPC learning: error" });
+    const errorTrigger = await screen.findByRole("button", {
+      name: "MPC learning: error",
+    });
     await userEvent.click(errorTrigger);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("projection unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "projection unavailable",
+    );
     expect(screen.getByText(CANDIDATE_DIGEST, { exact: true })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Retry evidence report" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Retry evidence report" }),
+    );
     expect(await screen.findByText("Active", { exact: true })).toBeVisible();
   });
 
@@ -271,7 +320,14 @@ describe("MpcLearningPanel", () => {
     },
   );
 
-  it.each(["idle", "queued", "running", "succeeded", "failed", "stale"] as const)(
+  it.each([
+    "idle",
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "stale",
+  ] as const)(
     "renders fit status %s without deriving it from the top-level state",
     async (fitStatus) => {
       fetchMock.mockResolvedValue(
@@ -292,7 +348,8 @@ describe("MpcLearningPanel", () => {
         .closest("section");
       expect(fit).not.toBeNull();
       expect(fit!).toHaveTextContent(`Status: ${fitStatus}`);
-      if (fitStatus === "failed") expect(fit!).toHaveTextContent("native fitter failed");
+      if (fitStatus === "failed")
+        expect(fit!).toHaveTextContent("native fitter failed");
     },
   );
 
@@ -312,7 +369,9 @@ describe("MpcLearningPanel", () => {
     expect(dialog).toHaveTextContent("Native build: passed");
     expect(dialog).toHaveTextContent("Native dry solve: passed");
     expect(dialog).toHaveTextContent("Target timing: passed");
-    expect(dialog).toHaveTextContent("Ambient provenance: not reported by backend");
+    expect(dialog).toHaveTextContent(
+      "Ambient provenance: not reported by backend",
+    );
     expect(dialog).toHaveTextContent("Durable phase: prepared");
     expect(dialog).toHaveTextContent("Persistence pending: yes");
     expect(dialog).toHaveTextContent("Frame-boundary swap pending: yes");
@@ -343,7 +402,9 @@ describe("MpcLearningPanel", () => {
         });
       }
       return jsonResponse(
-        accepted ? { ...REPORT, calibration: { revision: 5, command_high_water: 5 } } : REPORT,
+        accepted
+          ? { ...REPORT, calibration: { revision: 5, command_high_water: 5 } }
+          : REPORT,
       );
     });
     renderPanel();
@@ -352,14 +413,20 @@ describe("MpcLearningPanel", () => {
     const start = screen.getByRole("button", { name: "Start calibration" });
     expect(start).toBeDisabled();
     await userEvent.click(
-      screen.getByLabelText("The grill is empty, with normal grates and drip tray installed."),
+      screen.getByLabelText(
+        "The grill is empty, with normal grates and drip tray installed.",
+      ),
     );
     await userEvent.click(
-      screen.getByLabelText("Sufficient pellets are loaded for the calibration run."),
+      screen.getByLabelText(
+        "Sufficient pellets are loaded for the calibration run.",
+      ),
     );
     expect(start).toBeEnabled();
     await userEvent.click(start);
-    expect(await screen.findByText("Accepted command high-water: 5")).toBeVisible();
+    expect(
+      await screen.findByText("Accepted command high-water: 5"),
+    ).toBeVisible();
   });
 
   it.each([
@@ -380,28 +447,40 @@ describe("MpcLearningPanel", () => {
         authorization,
         next_cook: nextCook,
       };
-      fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, cook_refit: cookRefit }));
+      fetchMock.mockResolvedValue(
+        jsonResponse({ ...REPORT, cook_refit: cookRefit }),
+      );
       renderPanel();
       await openPanel();
 
-      const section = screen.getByRole("heading", { name: "Cook refit" }).closest("section");
+      const section = screen
+        .getByRole("heading", { name: "Cook refit" })
+        .closest("section");
       expect(section).not.toBeNull();
       expect(section!).toHaveTextContent(`Final outcome: ${latest}`);
       expect(section!).toHaveTextContent(`Authorization: ${authorization}`);
-      expect(section!).toHaveTextContent(`Next cook: ${nextCook ? "yes" : "no"}`);
+      expect(section!).toHaveTextContent(
+        `Next cook: ${nextCook ? "yes" : "no"}`,
+      );
     },
   );
 
   it("never exposes reviewed activation controls for passive automatic authority", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(passiveReport("ready-for-review")));
+    fetchMock.mockResolvedValue(
+      jsonResponse(passiveReport("ready-for-review")),
+    );
     renderPanel();
     await openPanel();
 
-    expect(screen.queryByLabelText("Type the exact candidate digest")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Type the exact candidate digest"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText("Type the exact confidence decision ID"),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Activate exact model" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Activate exact model" }),
+    ).not.toBeInTheDocument();
   });
 
   it("requires the exact reviewed digest and decision and posts only those serialized names", async () => {
@@ -440,15 +519,22 @@ describe("MpcLearningPanel", () => {
     renderPanel();
     await openPanel();
 
-    const activate = screen.getByRole("button", { name: "Activate exact model" });
+    const activate = screen.getByRole("button", {
+      name: "Activate exact model",
+    });
     expect(activate).toBeDisabled();
     await userEvent.type(
       screen.getByLabelText("Type the exact candidate digest"),
       CANDIDATE_DIGEST,
     );
-    await userEvent.type(screen.getByLabelText("Type the exact confidence decision ID"), "wrong");
+    await userEvent.type(
+      screen.getByLabelText("Type the exact confidence decision ID"),
+      "wrong",
+    );
     expect(activate).toBeDisabled();
-    await userEvent.clear(screen.getByLabelText("Type the exact confidence decision ID"));
+    await userEvent.clear(
+      screen.getByLabelText("Type the exact confidence decision ID"),
+    );
     await userEvent.type(
       screen.getByLabelText("Type the exact confidence decision ID"),
       DECISION_ID,
@@ -456,7 +542,9 @@ describe("MpcLearningPanel", () => {
     expect(activate).toBeEnabled();
     await userEvent.click(activate);
 
-    expect(await screen.findByText("Activating", { exact: true })).toBeVisible();
+    expect(
+      await screen.findByText("Activating", { exact: true }),
+    ).toBeVisible();
   });
 
   it("shows rollback only for an explicit active rollback owner and posts the reason", async () => {
@@ -468,11 +556,16 @@ describe("MpcLearningPanel", () => {
     const fallback = {
       ...active,
       status: "fallback" as const,
-      activation: { ...active.activation, reason: "operator requested rollback" },
+      activation: {
+        ...active.activation,
+        reason: "operator requested rollback",
+      },
     };
     fetchMock.mockImplementation(async (input, init) => {
       if (String(input).endsWith("/api/model-evidence/rollback")) {
-        expect(JSON.parse(String(init?.body))).toEqual({ reason: "active-solve-failed" });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          reason: "active-solve-failed",
+        });
         return jsonResponse({
           accepted: true,
           active_kind: "grey-box",
@@ -490,20 +583,31 @@ describe("MpcLearningPanel", () => {
     renderPanel();
     await openPanel();
 
-    await userEvent.type(screen.getByLabelText("Required rollback reason"), "active-solve-failed");
-    await userEvent.click(screen.getByRole("button", { name: "Roll back to explicit owner" }));
+    await userEvent.type(
+      screen.getByLabelText("Required rollback reason"),
+      "active-solve-failed",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Roll back to explicit owner" }),
+    );
     expect(await screen.findByText("Fallback", { exact: true })).toBeVisible();
 
     cleanup();
     fetchMock.mockResolvedValue(
       jsonResponse({
         ...active,
-        identities: { ...active.identities, rollback_digest: null, rollback_generation: null },
+        identities: {
+          ...active.identities,
+          rollback_digest: null,
+          rollback_generation: null,
+        },
       }),
     );
     renderPanel();
     await openPanel();
-    expect(screen.queryByLabelText("Required rollback reason")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Required rollback reason"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders rejected assessment, fallback reason, fit failure, and structured terminal failure", async () => {
@@ -511,7 +615,11 @@ describe("MpcLearningPanel", () => {
       jsonResponse({
         ...REPORT,
         status: "fallback",
-        fit: { ...REPORT.fit, status: "failed", error: "optimizer-nonconvergence" },
+        fit: {
+          ...REPORT.fit,
+          status: "failed",
+          error: "optimizer-nonconvergence",
+        },
         candidate: {
           ...REPORT.candidate,
           assessment: {
@@ -521,7 +629,11 @@ describe("MpcLearningPanel", () => {
             rejection_reasons: ["identifiability", "target-timing"],
           },
         },
-        activation: { ...REPORT.activation, phase: "aborted", reason: "swap-compensated" },
+        activation: {
+          ...REPORT.activation,
+          phase: "aborted",
+          reason: "swap-compensated",
+        },
         blockers: ["identifiability", "target-timing"],
         errors: ["activation-terminal"],
         failure: {
@@ -539,13 +651,19 @@ describe("MpcLearningPanel", () => {
     expect(alert).toHaveTextContent("native solver crashed");
     expect(alert).toHaveTextContent("terminal");
     expect(
-      screen.getByRole("heading", { name: "Fit and evidence window" }).closest("section"),
+      screen
+        .getByRole("heading", { name: "Fit and evidence window" })
+        .closest("section"),
     ).toHaveTextContent("optimizer-nonconvergence");
     expect(
-      screen.getByRole("heading", { name: "Readiness and rejection" }).closest("section"),
+      screen
+        .getByRole("heading", { name: "Readiness and rejection" })
+        .closest("section"),
     ).toHaveTextContent("identifiability");
     expect(
-      screen.getByRole("heading", { name: "Activation and swap" }).closest("section"),
+      screen
+        .getByRole("heading", { name: "Activation and swap" })
+        .closest("section"),
     ).toHaveTextContent("swap-compensated");
   });
 
@@ -561,11 +679,13 @@ describe("MpcLearningPanel", () => {
             );
           }),
       )
-      .mockResolvedValueOnce(jsonResponse({ ...REPORT, status: "active", revision: "new" }));
+      .mockResolvedValueOnce(
+        jsonResponse({ ...REPORT, status: "active", revision: "new" }),
+      );
     const view = renderPanel({ learningReportRevision: 40 });
 
     view.rerender(
-      <MpcLearningPanel
+      <MpcLearningView
         apiBase=""
         selectedController="mpc"
         units="F"
@@ -573,30 +693,42 @@ describe("MpcLearningPanel", () => {
         learningReportRevision={41}
       />,
     );
-    expect(await screen.findByRole("button", { name: "MPC learning: active" })).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: "MPC learning: active" }),
+    ).toBeVisible();
 
     await act(async () => {
-      resolveFirst?.(jsonResponse({ ...REPORT, status: "collecting", revision: "old" }));
+      resolveFirst?.(
+        jsonResponse({ ...REPORT, status: "collecting", revision: "old" }),
+      );
       await Promise.resolve();
     });
-    expect(screen.getByRole("button", { name: "MPC learning: active" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "MPC learning: active" }),
+    ).toBeVisible();
   });
 
   it("recovers through the five-second poll after a failed projection", async () => {
     rs.useFakeTimers();
     fetchMock
-      .mockResolvedValueOnce(jsonResponse({ detail: "temporarily unavailable" }, 503))
+      .mockResolvedValueOnce(
+        jsonResponse({ detail: "temporarily unavailable" }, 503),
+      )
       .mockResolvedValueOnce(jsonResponse(REPORT));
     renderPanel();
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
-    expect(screen.getByRole("button", { name: "MPC learning: error" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "MPC learning: error" }),
+    ).toBeVisible();
 
     await act(async () => {
       await rs.advanceTimersByTimeAsync(5_000);
       await rs.advanceTimersByTimeAsync(1);
     });
-    expect(screen.getByRole("button", { name: "MPC learning: evaluating" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "MPC learning: evaluating" }),
+    ).toBeVisible();
   });
 });
