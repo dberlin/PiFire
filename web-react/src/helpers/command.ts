@@ -1,5 +1,3 @@
-import { postControl } from "./notify/notifyApi";
-import type { CommandResponse } from "./contracts/core.gen";
 import type {
   GrillMode,
   ManualOutput,
@@ -7,18 +5,18 @@ import type {
   SystemCommand,
   TimerOptionsPayload,
 } from "./contracts/control.gen";
+import type { CommandResponse } from "./contracts/core.gen";
+import { postControl } from "./notify/notifyApi";
 
 // REST command client using PiFire's command grammar (common/api_commands.py
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
 // over the socket. Envelope: { result, message, data } (common/app.py api_response).
-
 
 export interface CommandResult {
   ok: boolean;
   message: string;
   data?: unknown;
 }
-
 
 export interface CommandClient {
   setMode(mode: GrillMode): Promise<CommandResult>;

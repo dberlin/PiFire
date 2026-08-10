@@ -3,10 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { useShellState } from "../../../../src/helpers/shellContext";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 // The shell owns the app's ONE live-state subscription (useLiveState opens a
 // socket per call), so it is mocked here rather than connected: these tests are

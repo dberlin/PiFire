@@ -2,9 +2,9 @@ import type {
   Config,
   ModuleSettingValue,
   ProbeMap,
+  WireValue,
   WizardSection,
   WizardState,
-  WireValue,
 } from "../contracts/wizard.gen";
 import type { WizardWorking } from "./wizardTypes";
 

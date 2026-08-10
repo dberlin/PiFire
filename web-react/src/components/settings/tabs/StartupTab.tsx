@@ -2,11 +2,11 @@ import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { hasDcFan } from "../../../helpers/settings/platform";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type {
   AfterStartupMode,
+  SettingsSchema,
   SmartStartProfile,
 } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";

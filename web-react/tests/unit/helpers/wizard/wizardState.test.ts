@@ -1,4 +1,5 @@
 import { describe, expect, it, test } from "@rstest/core";
+import type { ProbeMap, WizardState } from "../../../../src/helpers/contracts/wizard.gen";
 import {
   displayConfigFor,
   EMPTY_PROBE_MAP,
@@ -10,7 +11,6 @@ import {
   setDisplayConfig,
   setSectionDepValues,
 } from "../../../../src/helpers/wizard/wizardState";
-import type { ProbeMap, WizardState } from "../../../../src/helpers/contracts/wizard.gen";
 
 const base: WizardState = {
   modules_metadata: { grillplatform: {}, display: {}, distance: {}, probes: {} },

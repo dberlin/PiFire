@@ -17,12 +17,12 @@ import type { ApiEnvelope } from "../contracts/core.gen";
 import type {
   AdminSettingsUpdate,
   AdminState,
-  BackupCreateRequest,
   BackupCreated,
+  BackupCreateRequest,
   BackupKind,
   BackupListing,
-  BackupRestoreRequest,
   BackupRestored,
+  BackupRestoreRequest,
   FactoryResetResponse,
   LogsDeleted,
   LogsMetadata,
@@ -38,7 +38,6 @@ import type { AdminResult } from "./adminTypes";
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/admin/${path}`;
-
 
 /** Unpack the envelope into an AdminResult, whatever the status.
  *
@@ -201,8 +200,7 @@ export const fetchLogs = (baseUrl = BASE_URL) => get<LogsMetadata>(baseUrl, "log
 /** Delete every .log. Answers with the names that actually went -- Flask ran
  * `rm logs/*.log` inside a bare `except:`, where a failure was indistinguishable
  * from success, so the caller should render this list rather than assume. */
-export const deleteLogs = (baseUrl = BASE_URL) =>
-  post<LogsDeleted>(baseUrl, "logs/delete", {});
+export const deleteLogs = (baseUrl = BASE_URL) => post<LogsDeleted>(baseUrl, "logs/delete", {});
 
 /** Href for the zip of every log. Same anchor reasoning as backupDownloadUrl. */
 export const logsDownloadUrl = (baseUrl = BASE_URL) => url(baseUrl, "logs/download");

@@ -1,12 +1,12 @@
 import { useOutletContext } from "react-router";
 import { readSelected } from "../../../helpers/settings/controllerSelection";
+import type { ControllerCatalog } from "../../../helpers/settings/controllerTypes.gen";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { hasDcFan } from "../../../helpers/settings/platform";
-import type { ControllerCatalog } from "../../../helpers/settings/controllerTypes.gen";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";

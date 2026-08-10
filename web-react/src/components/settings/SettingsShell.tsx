@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
 import { readAccent } from "../../helpers/settings/accent";
-import { hasDcFan } from "../../helpers/settings/platform";
 import type { ControllerCatalog } from "../../helpers/settings/controllerTypes.gen";
-import type { SettingsSchema } from "../../helpers/settings/settingsTypes.gen";
+import { hasDcFan } from "../../helpers/settings/platform";
 import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";
+import type { SettingsSchema } from "../../helpers/settings/settingsTypes.gen";
 import { useAppPrefs } from "../AppPrefs";
 
 const SETTINGS_TABS = [

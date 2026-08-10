@@ -1,3 +1,4 @@
+import type { ModuleValues, WizardState } from "../../../helpers/contracts/wizard.gen";
 import { useModuleSwitch } from "../../../helpers/wizard/useModuleSwitch";
 import {
   displayConfigFor,
@@ -6,7 +7,6 @@ import {
   setDisplayConfig,
   setSectionDepValues,
 } from "../../../helpers/wizard/wizardState";
-import type { ModuleValues, WizardState } from "../../../helpers/contracts/wizard.gen";
 import type { WizardWorking } from "../../../helpers/wizard/wizardTypes";
 import { ModuleCard } from "../ModuleCard";
 

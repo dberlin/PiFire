@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import { createCommand } from "../../../../src/helpers/command";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 
 // ---------------------------------------------------------------------------
 // A model of the control-write seam, so the bar's BUTTON SEQUENCES can be

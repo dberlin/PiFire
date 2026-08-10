@@ -23,7 +23,6 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/tuner/${path}`;
 
-
 async function unpack<T>(res: Response): Promise<TunerResult<T>> {
   const body = (await res.json().catch(() => ({}))) as Partial<ApiEnvelope>;
   const detail = (body.data ?? null) as (T & { mode?: string; field?: string }) | null;

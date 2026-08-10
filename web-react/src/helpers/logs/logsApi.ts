@@ -12,7 +12,6 @@ import type { LogDelta } from "./logTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
-
 export function logViewUrl(stem: string, baseUrl = BASE_URL): string {
   return `${baseUrl}/api/admin/logs/view?log=${encodeURIComponent(stem)}`;
 }

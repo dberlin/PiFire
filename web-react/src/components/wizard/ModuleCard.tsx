@@ -1,6 +1,6 @@
 import type {
-  I2CBusValue,
   Config,
+  I2CBusValue,
   SettingsDependency,
   WizardModuleData,
   WizardSection,

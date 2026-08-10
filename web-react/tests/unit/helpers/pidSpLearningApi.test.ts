@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
+import type { PidSpLearningReport } from "../../../src/helpers/contracts/learning.gen";
 import {
   fetchPidSpLearningReport,
   parsePidSpLearningReport,
 } from "../../../src/helpers/pidSpLearning/pidSpLearningApi";
-import type { PidSpLearningReport } from "../../../src/helpers/contracts/learning.gen";
 
 const FOPDT = {
   form: "fopdt" as const,

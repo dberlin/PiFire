@@ -18,13 +18,7 @@ const PAD = 8;
  * plausible-looking but upside-down curve, which is why that inversion has its
  * own test.
  */
-export function TunerChart({
-  chart,
-  chartOk,
-}: {
-  chart: Coefficients["chart"];
-  chartOk: boolean;
-}) {
+export function TunerChart({ chart, chartOk }: { chart: Coefficients["chart"]; chartOk: boolean }) {
   if (!chartOk || chart.length === 0) {
     return (
       <p className="pf-tuner-chart-empty" role="status">

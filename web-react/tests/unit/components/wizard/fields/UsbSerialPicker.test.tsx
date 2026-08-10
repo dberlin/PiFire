@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { UsbSerialPicker } from "../../../../../src/components/wizard/fields/UsbSerialPicker";
-import { scan } from "../../../../../src/helpers/wizard/wizardApi";
 import type { SettingsDependency } from "../../../../../src/helpers/contracts/wizard.gen";
+import { scan } from "../../../../../src/helpers/wizard/wizardApi";
 
 rs.mock("../../../../../src/helpers/wizard/wizardApi", () => ({
   scan: rs.fn(),

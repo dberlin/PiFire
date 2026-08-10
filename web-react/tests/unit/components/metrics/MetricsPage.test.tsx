@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { screen, waitFor } from "@testing-library/react";
+import type { MetricsPayload } from "../../../../src/helpers/contracts/content.gen";
 import * as actualMetricsApi from "../../../../src/helpers/metrics/metricsApi" with {
   rstest: "importActual",
 };
-import type { MetricsPayload } from "../../../../src/helpers/contracts/content.gen";
 import type { MetricsResult } from "../../../../src/helpers/metrics/metricsTypes";
 import { renderWithQuery } from "../../test-utils";
 

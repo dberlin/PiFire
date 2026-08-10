@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
+import type { FileListing } from "../../../../src/helpers/contracts/content.gen";
 // The two pure helpers this component also uses -- thumbnailUrl and
 // cookFileDownloadUrl -- are kept REAL, so the URL contract the server enforces
 // is asserted here rather than restated by a stub.
@@ -12,7 +13,6 @@ import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" w
 import * as actualFilesApi from "../../../../src/helpers/files/filesApi" with {
   rstest: "importActual",
 };
-import type { FileListing } from "../../../../src/helpers/contracts/content.gen";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { testQueryClient } from "../../test-utils";
 

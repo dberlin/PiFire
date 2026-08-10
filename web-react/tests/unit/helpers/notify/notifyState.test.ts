@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
+import type { ProbeDataPayload } from "../../../../src/helpers/contracts/core.gen";
 import {
   type LimitEdit,
   limitEditFields,
@@ -13,7 +14,6 @@ import {
   targetEditFields,
   targetRange,
 } from "../../../../src/helpers/notify/notifyState";
-import type { ProbeDataPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const ON: TargetEdit = { enabled: true, target: 203, action: "keepWarm" };
 const LIMIT_OFF: LimitEdit = { enabled: false, target: 0, action: "none" };

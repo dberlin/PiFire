@@ -9,13 +9,12 @@ import {
   mpcFanPending,
 } from "../../../helpers/settings/mpcFan";
 import { hasDcFan } from "../../../helpers/settings/platform";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import {
   type SettingsDraftContext,
   useSettingsDraft,
 } from "../../../helpers/settings/settingsDrafts";
-import type { PwmProfile } from "../../../helpers/settings/settingsTypes.gen";
+import type { PwmProfile, SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";

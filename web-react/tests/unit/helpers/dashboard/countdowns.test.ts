@@ -1,15 +1,18 @@
 import { describe, expect, it } from "@rstest/core";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import {
   lidCountdown,
   modeCountdown,
   recipeLabel,
 } from "../../../../src/helpers/dashboard/countdowns";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const NOW = 1_700_000_000;
 
-const at = (over: Partial<DashSocketPayload> = {}): DashSocketPayload => ({ ...FIXTURE_DASH, ...over });
+const at = (over: Partial<DashSocketPayload> = {}): DashSocketPayload => ({
+  ...FIXTURE_DASH,
+  ...over,
+});
 
 const inRecipe = (over: Partial<DashSocketPayload> = {}): DashSocketPayload =>
   at({ recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true }, ...over });

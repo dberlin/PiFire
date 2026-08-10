@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { queryKeys } from "./query/keys";
 import type { WebUiBuildResponse } from "./contracts/core.gen";
+import { queryKeys } from "./query/keys";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

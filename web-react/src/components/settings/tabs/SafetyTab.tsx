@@ -1,8 +1,8 @@
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";

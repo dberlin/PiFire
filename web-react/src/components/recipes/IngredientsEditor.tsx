@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { addIngredient, deleteIngredient, updateIngredient } from "../../helpers/files/recipeApi";
 import type { Ingredient, Instruction } from "../../helpers/contracts/content.gen";
+import { addIngredient, deleteIngredient, updateIngredient } from "../../helpers/files/recipeApi";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 // recipes_api.py's cascade: renaming ingredient `index` rewrites its OLD name

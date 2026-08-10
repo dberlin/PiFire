@@ -6,7 +6,7 @@ import {
   type CommandResult,
   createCommand,
 } from "../../../../src/helpers/command";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 
 const OK: CommandResult = { ok: true, message: "" };
 

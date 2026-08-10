@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { saveProfile, tunerErrorText } from "../../helpers/tuner/tunerApi";
 import type { ProfileInput, SavedProfile } from "../../helpers/contracts/operations.gen";
+import { saveProfile, tunerErrorText } from "../../helpers/tuner/tunerApi";
 import "./tuner.css";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

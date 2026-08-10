@@ -1,7 +1,7 @@
 import type {
   AddPelletProfileData,
-  EditPelletProfileData,
   EditPelletBrandsRequest,
+  EditPelletProfileData,
   EditPelletWoodsRequest,
   PelletActionRequest,
   PelletActionResponse,
@@ -47,8 +47,7 @@ async function post(baseUrl: string, request: PelletActionRequest): Promise<Pell
 
 export const loadProfile = (baseUrl: string, profile: string) =>
   post(baseUrl, { action: "load_profile", data: { profile } });
-export const hopperCheck = (baseUrl: string) =>
-  post(baseUrl, { action: "hopper_check", data: {} });
+export const hopperCheck = (baseUrl: string) => post(baseUrl, { action: "hopper_check", data: {} });
 export const editBrands = (baseUrl: string, data: EditPelletBrandsRequest["data"]) =>
   post(baseUrl, { action: "edit_brands", data });
 export const editWoods = (baseUrl: string, data: EditPelletWoodsRequest["data"]) =>

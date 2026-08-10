@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import type { CommandClient, CommandResult } from "../../../src/helpers/command";
+import type { WizardState } from "../../../src/helpers/contracts/wizard.gen";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 // The module-singleton client, NOT testQueryClient(): WizardShell's exit
 // handler invalidates settingsRoot on that exact singleton (the same one
@@ -12,7 +13,6 @@ import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 // exists to pin.
 import { queryClient } from "../../../src/helpers/query/queryClient";
 import type { ShellContext } from "../../../src/helpers/shellContext";
-import type { WizardState } from "../../../src/helpers/contracts/wizard.gen";
 
 // One fake PiFire settings store, shared by BOTH mocked API clients, because
 // the defect this file pins lives in the seam BETWEEN them: WizardShell's exit

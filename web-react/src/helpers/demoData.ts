@@ -1,5 +1,5 @@
+import type { DashSocketPayload } from "./contracts/core.gen";
 import { FIXTURE_DASH } from "./fixture";
-import type { DashSocketPayload } from "./contracts/core.gen"
 
 // Live demo simulator: produces an evolving LiveState so the UI animates without
 // a real PiFire. Models a "Hold at 225°F" cook — primary eases up to setpoint

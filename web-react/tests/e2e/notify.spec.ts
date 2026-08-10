@@ -14,7 +14,6 @@ import { API, ensureStopped, monitorProbeReadings } from "./helpers";
 // an afterEach that runs even when the assertions fail. Nothing in this file
 // ever writes `shutdown: true`.
 
-
 async function getNotify(request: APIRequestContext): Promise<NotifyEntry[]> {
   const res = await request.get(`${API}/api/get/notify`);
   expect(res.ok()).toBe(true);

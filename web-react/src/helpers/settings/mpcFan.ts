@@ -1,6 +1,6 @@
 import { hasDcFan } from "./platform";
-import type { SettingsSchema } from "./settingsTypes.gen";
 import type { SettingsDrafts } from "./settingsDrafts";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 /** The controller key whose allocator emits a fan duty. */
 const MPC = "mpc";

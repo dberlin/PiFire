@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CommandClient, CommandResult } from "../../helpers/command";
+import type { DashSocketPayload } from "../../helpers/contracts/core.gen";
 import {
   type ButtonAction,
   buttonsForMode,
@@ -7,7 +8,6 @@ import {
   type MenuItem,
 } from "../../helpers/dashboard/buttonsForMode";
 import { applySettings } from "../../helpers/settings/settingsApi";
-import type { DashSocketPayload } from "../../helpers/contracts/core.gen"
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmAction } from "./ConfirmAction";
 import { PwmEntry } from "./PwmEntry";

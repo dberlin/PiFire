@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { settingsDelta } from "../../../helpers/settings/settingsDelta";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { SecretField } from "../fields/SecretField";

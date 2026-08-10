@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { PelletProfileFields } from "../../helpers/contracts/control.gen";
 import {
   addProfile,
   deleteLog,
@@ -10,7 +11,6 @@ import {
   loadProfile,
   type PelletActionResult,
 } from "../../helpers/pellets/pelletsApi";
-import type { PelletProfileFields } from "../../helpers/contracts/control.gen";
 import { useShellState } from "../../helpers/shellContext";
 import { CurrentLoadCard } from "./CurrentLoadCard";
 import { PelletLog } from "./PelletLog";

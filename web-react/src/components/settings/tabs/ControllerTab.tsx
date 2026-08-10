@@ -1,13 +1,13 @@
 import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
 import { readSelected } from "../../../helpers/settings/controllerSelection";
+import type { ControllerCatalog } from "../../../helpers/settings/controllerTypes.gen";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { MPC_FAN_CONFLICT_MESSAGE, mpcFanConflict } from "../../../helpers/settings/mpcFan";
-import type { ControllerCatalog } from "../../../helpers/settings/controllerTypes.gen";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { settingsDelta } from "../../../helpers/settings/settingsDelta";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import type { SaveStatus } from "../../../helpers/settings/useSaveSettings";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";

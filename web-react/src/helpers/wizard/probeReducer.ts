@@ -1,12 +1,12 @@
 import type {
+  Config,
   Probe,
   ProbeDevice,
   ProbeMap,
   ProbeModuleData,
-  Config,
   ProbeProfile,
-  WireValue,
   ProbeType,
+  WireValue,
 } from "../contracts/wizard.gen";
 
 export type ReducerResult = { ok: true; probeMap: ProbeMap } | { ok: false; error: string };

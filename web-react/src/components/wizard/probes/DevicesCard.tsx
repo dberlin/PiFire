@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { Config, ProbeMap, ProbeModuleData } from "../../../helpers/contracts/wizard.gen";
 import {
   addDevice,
   alnum,
@@ -6,7 +7,6 @@ import {
   deleteDevice,
   editDevice,
 } from "../../../helpers/wizard/probeReducer";
-import type { Config, ProbeMap, ProbeModuleData } from "../../../helpers/contracts/wizard.gen";
 import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";

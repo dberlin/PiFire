@@ -47,7 +47,6 @@ rs.mock("../../../../src/components/cookfiles/CookFileMeta", () => ({
 
 const { CookFilePage } = await import("../../../../src/components/cookfiles/CookFilePage");
 
-
 const DETAIL: CookFileDetail = {
   filename: "Sunday Brisket.pifire",
   metadata: {

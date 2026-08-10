@@ -1,5 +1,5 @@
-import type { ProbeDataPayload } from "../contracts/core.gen";
 import type { NotifyUpdate } from "../contracts/control.gen";
+import type { ProbeDataPayload } from "../contracts/core.gen";
 import { postNotifyUpdates } from "./notifyApi";
 
 // The backend runs `if shutdown: ... elif keep_warm: ...`

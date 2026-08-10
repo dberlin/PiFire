@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type { ControlHealthResponse } from "../../../../src/helpers/contracts/core.gen";
+import { recheckControl } from "../../../../src/helpers/dashboard/controlHealth";
 import {
   clampSetpoint,
   deriveControlAlive,
   setpointRange,
 } from "../../../../src/helpers/dashboard/health";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { ControlHealthResponse } from "../../../../src/helpers/contracts/core.gen";
-import { recheckControl } from "../../../../src/helpers/dashboard/controlHealth";
 
 afterEach(() => {
   rs.unstubAllGlobals();

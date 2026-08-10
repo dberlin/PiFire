@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook } from "@testing-library/react";
-import type { PelletDbSchema } from "../../../src/helpers/contracts/control.gen"
-import type { DashSocketPayload } from "../../../src/helpers/contracts/core.gen"
+import type { PelletDbSchema } from "../../../src/helpers/contracts/control.gen";
+import type { DashSocketPayload } from "../../../src/helpers/contracts/core.gen";
 import { useLiveState } from "../../../src/helpers/useLiveState";
 
 const PELLET_DB: PelletDbSchema = {
@@ -79,7 +79,11 @@ describe("useLiveState (live mode)", () => {
 
   it("the first socket_dash_data frame replaces the live state and flips phase to live", () => {
     const { result } = renderHook(() => useLiveState());
-    const frame: DashSocketPayload = { ...result.current.live, currentMode: "Hold", smokePlus: true };
+    const frame: DashSocketPayload = {
+      ...result.current.live,
+      currentMode: "Hold",
+      smokePlus: true,
+    };
 
     act(() => handlers.socket_dash_data(frame));
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import { deriveTimer, formatRemaining } from "../../../../src/helpers/timer/timerState";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 type Timer = DashSocketPayload["timer"];
 

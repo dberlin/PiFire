@@ -22,7 +22,6 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/update/${path}`;
 
-
 /** Unpack the envelope into an UpdateResult, whatever the status.
  *
  * A body that is not JSON (a proxy's HTML 404, a dropped connection) must not

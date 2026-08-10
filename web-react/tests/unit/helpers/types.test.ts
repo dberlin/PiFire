@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 import type { DashSocketPayload } from "../../../src/helpers/contracts/core.gen";
+import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 
 const CONTRACT_DASH: DashSocketPayload = FIXTURE_DASH;
 

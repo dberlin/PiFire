@@ -5,9 +5,9 @@ import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { Dashboard } from "../../../../src/components/dashboard/Dashboard";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import { FIT_QUERY } from "../../../../src/helpers/dashboard/hooks";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 import { testQueryClient } from "../../test-utils";
 
 afterEach(cleanup);

@@ -1,11 +1,11 @@
 import type {
   I2CBusValue,
   ProbeConfigField,
-  WireValue,
   SettingsDependency,
+  WireValue,
 } from "../../../helpers/contracts/wizard.gen";
-import { scan } from "../../../helpers/wizard/wizardApi";
 import { type BusKind, isI2CBusValue } from "../../../helpers/wizard/i2cBusTypes";
+import { scan } from "../../../helpers/wizard/wizardApi";
 import { I2cBusField } from "../fields/I2cBusField";
 import { SelectField } from "../fields/SelectField";
 import { UsbSerialPicker } from "../fields/UsbSerialPicker";

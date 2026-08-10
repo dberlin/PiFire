@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 
 const OK: CommandResult = { ok: true, message: "" };
 

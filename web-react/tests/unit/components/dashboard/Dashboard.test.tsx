@@ -5,17 +5,17 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
+import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
   PidSpLearningReport,
 } from "../../../../src/helpers/contracts/learning.gen";
-import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
+import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 // renderRoute() mounts AppPrefsProvider, which now reads settings itself
 // (AppPrefs.tsx) -- unmocked, that call would land on the same global `fetch`

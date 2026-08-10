@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { logDownloadUrl } from "../../helpers/logs/logsApi";
 import type { LogFamily } from "../../helpers/contracts/operations.gen";
+import { logDownloadUrl } from "../../helpers/logs/logsApi";
 import { LogViewer } from "./LogViewer";
 
 function formatBytes(bytes: number): string {

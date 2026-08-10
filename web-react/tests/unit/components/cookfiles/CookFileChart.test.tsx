@@ -3,10 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
+import type { CookFileChartData } from "../../../../src/helpers/contracts/content.gen";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };
-import type { CookFileChartData } from "../../../../src/helpers/contracts/content.gen";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { flushObservers, testQueryClient } from "../../test-utils";
 

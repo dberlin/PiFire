@@ -1,4 +1,3 @@
-
 export type FileKind = "cookfiles" | "recipes";
 
 /** The per-page choices the server whitelists (blueprints/api_files/routes.py

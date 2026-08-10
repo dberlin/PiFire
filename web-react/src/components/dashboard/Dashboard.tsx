@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
+import type { DashSocketPayload, ProbeDataPayload } from "../../helpers/contracts/core.gen";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
@@ -11,10 +12,6 @@ import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/n
 import { queryKeys } from "../../helpers/query/keys";
 import { saveAccent } from "../../helpers/settings/accent";
 import { getSettings } from "../../helpers/settings/settingsApi";
-import type {
-  DashSocketPayload,
-  ProbeDataPayload,
-} from "../../helpers/contracts/core.gen";
 import type { AccentName } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { ActionMenu, type MenuItem } from "./ActionMenu";

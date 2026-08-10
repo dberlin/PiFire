@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
-import { deleteStep, insertStep, updateStep } from "../../helpers/files/recipeApi";
 import type { RecipeStep } from "../../helpers/contracts/content.gen";
+import { deleteStep, insertStep, updateStep } from "../../helpers/files/recipeApi";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { NumberField } from "../settings/fields/NumberField";
 import { Select } from "../settings/fields/Select";

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { saveRecipeMetadata } from "../../helpers/files/recipeApi";
 import type { RecipeMetadata, RecipeStep } from "../../helpers/contracts/content.gen";
+import { saveRecipeMetadata } from "../../helpers/files/recipeApi";
 import type { SaveStatus } from "../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { NumberField } from "../settings/fields/NumberField";

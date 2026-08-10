@@ -1,15 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useLoaderData, useOutletContext, useRevalidator } from "react-router";
+import type { ProbeMap, ProbeModuleCatalog } from "../../../helpers/contracts/wizard.gen";
 import {
   applyProbeMap,
   readLiveProbeMap,
   readLiveProfiles,
 } from "../../../helpers/probes/probeMapApi";
-import type { ProbeMap, ProbeModuleCatalog } from "../../../helpers/contracts/wizard.gen";
 import { queryKeys } from "../../../helpers/query/keys";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { DevicesCard } from "../../wizard/probes/DevicesCard";
 import { PortsCard } from "../../wizard/probes/PortsCard";
 import { Section } from "../fields/Section";

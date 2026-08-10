@@ -1,5 +1,5 @@
-import { getWizardState } from "./wizardApi";
 import type { WizardState } from "../contracts/wizard.gen";
+import { getWizardState } from "./wizardApi";
 
 export const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

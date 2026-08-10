@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import type { UpdateCheck } from "../../helpers/contracts/operations.gen";
 import { behindText } from "../../helpers/update/behindText";
 import { fetchUpdateCheck } from "../../helpers/update/updateApi";
-import type { UpdateCheck } from "../../helpers/contracts/operations.gen";
 
 export function SystemUpdateCard() {
   const [check, setCheck] = useState<UpdateCheck | null>(null);

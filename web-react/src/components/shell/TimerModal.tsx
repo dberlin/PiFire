@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { CommandClient } from "../../helpers/command";
-import type { DashSocketPayload } from "../../helpers/contracts/core.gen"
+import type { DashSocketPayload } from "../../helpers/contracts/core.gen";
 import "./shell.css";
 
 // Ported from templates/_macro_timer.html:31-67 -- hours 0-23, minutes 0-59,

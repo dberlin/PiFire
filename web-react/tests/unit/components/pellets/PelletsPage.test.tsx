@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { PelletDbSchema } from "../../../../src/helpers/contracts/control.gen"
+import type { PelletDbSchema } from "../../../../src/helpers/contracts/control.gen";
 
 const useShellStateMock = rs.fn();
 rs.mock("../../../../src/helpers/shellContext", () => ({
@@ -63,7 +63,10 @@ const DB: PelletDbSchema = {
   lastupdated: { time: 1785000000 },
 };
 
-function mount(pellets: PelletDbSchema | null, live: { hopperLevel: number; tempUnits: "F" | "C" }) {
+function mount(
+  pellets: PelletDbSchema | null,
+  live: { hopperLevel: number; tempUnits: "F" | "C" },
+) {
   useShellStateMock.mockReturnValue({ live, pellets });
   render(<PelletsPage />);
 }

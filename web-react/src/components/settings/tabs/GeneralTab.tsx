@@ -3,9 +3,9 @@ import { accentPath, readAccent, storedAccentName } from "../../../helpers/setti
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { SettingsPath } from "../../../helpers/settings/paths";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import type { AccentName } from "../../../helpers/types";
 import { useAppPrefs } from "../../AppPrefs";

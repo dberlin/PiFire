@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
+import type { ProbeStatusPayload } from "../../../../src/helpers/contracts/core.gen";
 import { batteryBadge, connectionBadge } from "../../../../src/helpers/dashboard/probeStatus";
-import type { ProbeStatusPayload } from "../../../../src/helpers/contracts/core.gen"
 
 describe("connectionBadge", () => {
   it("is null when the probe has no `connected` key at all", () => {

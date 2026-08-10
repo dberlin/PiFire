@@ -22,7 +22,6 @@ rs.mock("../../../../src/helpers/files/cookfileApi", () => ({
 
 const { CookFileMeta } = await import("../../../../src/components/cookfiles/CookFileMeta");
 
-
 const METADATA: CookFileMetadata = {
   title: "Sunday Brisket",
   units: "F",

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
+import type {
+  DashSocketPayload,
+  ProbeDataPayload,
+} from "../../../../src/helpers/contracts/core.gen";
 import { deriveView, staleLabel } from "../../../../src/helpers/dashboard/deriveView";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { DashSocketPayload, ProbeDataPayload } from "../../../../src/helpers/contracts/core.gen"
 
 // probeCard()'s existing fields (targetStr / tgtColor / barPct / barColor) are
 // covered through components/dashboard/ProbeCard.test.tsx, which renders them.
@@ -130,7 +133,10 @@ describe("probeCard etaStr", () => {
 // left pill reads AUGER DUTY everywhere else -- a pill that must never open a
 // P-Mode picker.
 describe("deriveView.pModeEditable", () => {
-  const at = (over: Partial<DashSocketPayload>): DashSocketPayload => ({ ...FIXTURE_DASH, ...over });
+  const at = (over: Partial<DashSocketPayload>): DashSocketPayload => ({
+    ...FIXTURE_DASH,
+    ...over,
+  });
 
   it("is editable in Smoke", () => {
     expect(deriveView(at({ currentMode: "Smoke" })).pModeEditable).toBe(true);
@@ -176,7 +182,10 @@ describe("deriveView.pModeEditable", () => {
 // duties instead. The attached display makes the same swap on the same
 // condition (display/qml/screens/DashScreen.qml).
 describe("duty pills", () => {
-  const at = (over: Partial<DashSocketPayload>): DashSocketPayload => ({ ...FIXTURE_DASH, ...over });
+  const at = (over: Partial<DashSocketPayload>): DashSocketPayload => ({
+    ...FIXTURE_DASH,
+    ...over,
+  });
 
   it("shows P-mode and Smoke+ in Smoke, and only there", () => {
     const view = deriveView(at({ currentMode: "Smoke", pMode: 3, smokePlus: true }));

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { dismissWarnings } from "../../../../src/helpers/shell/warningsApi";
 import type {
   DismissWarningsRequest,
   DismissWarningsResponse,
 } from "../../../../src/helpers/contracts/core.gen";
+import { dismissWarnings } from "../../../../src/helpers/shell/warningsApi";
 
 afterEach(() => {
   rs.restoreAllMocks();
@@ -11,20 +11,16 @@ afterEach(() => {
 
 describe("dismissWarnings", () => {
   it("posts the high-water mark and resolves true on success", async () => {
-    const fetchMock = rs
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify(
-            {
-              result: "OK",
-              message: "Warnings dismissed.",
-              data: null,
-            } satisfies DismissWarningsResponse,
-          ),
-          { status: 200 },
-        ),
-      );
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          result: "OK",
+          message: "Warnings dismissed.",
+          data: null,
+        } satisfies DismissWarningsResponse),
+        { status: 200 },
+      ),
+    );
     await expect(dismissWarnings(7)).resolves.toBe(true);
     const [url, init] = fetchMock.mock.calls[0];
     // Pin the seam: a wrong path or verb answers 404/405, which this client maps

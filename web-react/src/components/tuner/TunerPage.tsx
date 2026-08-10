@@ -1,11 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSettings } from "../../helpers/settings/useSettings";
-import {
-  computeCoefficients,
-  fetchAutoStatus,
-  fetchTr,
-  tunerErrorText,
-} from "../../helpers/tuner/tunerApi";
 import type {
   AutoStatus,
   Coefficients,
@@ -13,6 +6,13 @@ import type {
   TrReading,
   TunerPoint,
 } from "../../helpers/contracts/operations.gen";
+import { useSettings } from "../../helpers/settings/useSettings";
+import {
+  computeCoefficients,
+  fetchAutoStatus,
+  fetchTr,
+  tunerErrorText,
+} from "../../helpers/tuner/tunerApi";
 import { useTunerSession } from "../../helpers/tuner/useTunerSession";
 import { AutoTuneCard } from "./AutoTuneCard";
 import { ProfileForm } from "./ProfileForm";

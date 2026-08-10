@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNow } from "../../helpers/clock";
 import type { CommandClient } from "../../helpers/command";
+import type { DashSocketPayload } from "../../helpers/contracts/core.gen";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
-import type { DashSocketPayload } from "../../helpers/contracts/core.gen"
 import { TimerModal } from "./TimerModal";
 import "./shell.css";
 

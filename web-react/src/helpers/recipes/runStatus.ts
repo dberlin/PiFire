@@ -8,7 +8,7 @@
 // recipeStatus.filename is the BARE running filename (blueprints/mobile/
 // socket_io.py:330-336 strips the path), which is exactly what useParams gives
 // this page, so a plain string compare is enough -- no path normalisation.
-import type { DashSocketPayload } from "../contracts/core.gen"
+import type { DashSocketPayload } from "../contracts/core.gen";
 
 export interface RecipeRunView {
   /** True only when a recipe IS running and it is THIS file. */
@@ -25,7 +25,10 @@ export interface RecipeRunView {
   canRun: boolean;
 }
 
-export function deriveRunView(status: DashSocketPayload["recipeStatus"], filename: string): RecipeRunView {
+export function deriveRunView(
+  status: DashSocketPayload["recipeStatus"],
+  filename: string,
+): RecipeRunView {
   const active = status.recipeMode && status.filename === filename;
   return {
     active,

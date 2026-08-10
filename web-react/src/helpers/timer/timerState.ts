@@ -8,7 +8,7 @@
 // These functions never read the clock. `nowSeconds` is a parameter so callers
 // tick it themselves and tests stay deterministic.
 
-import type { DashSocketPayload } from "../contracts/core.gen"
+import type { DashSocketPayload } from "../contracts/core.gen";
 
 export type TimerState = "stopped" | "running" | "paused";
 
