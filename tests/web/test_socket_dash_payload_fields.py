@@ -10,6 +10,9 @@ fixture: a field renamed or dropped here would leave that fixture green and the
 real modal falling back to a fixed ceiling with nothing failing.
 """
 
+import pytest
+
+
 from common.datastore_accessors import (
     flush_current,
     init_status,
@@ -72,13 +75,28 @@ def test_the_limit_is_not_the_gauge_ceiling(ds):
     assert data["primaryProbe"]["maxTemp"] != 412
 
 
-
-def test_payload_carries_only_the_model_learning_invalidation_revision(ds, monkeypatch):
+@pytest.mark.parametrize(
+    ("controller_name", "revision"),
+    [("mpc", "mpc-revision-17"), ("pid_sp", "pid-sp-revision-23")],
+)
+def test_payload_dispatches_the_learning_revision_from_the_selected_controller(
+    ds, monkeypatch, controller_name, revision
+):
     from blueprints.mobile import socket_io
 
-    monkeypatch.setattr(socket_io, "learning_report_revision", lambda: "revision-17")
+    dispatched: list[str] = []
+
+    def controller_revision(selected):
+        dispatched.append(selected)
+        return revision
+
+    monkeypatch.setattr(socket_io, "controller_learning_report_revision", controller_revision)
+    settings = read_settings()
+    settings["controller"]["selected"] = controller_name
+    write_settings(settings)
 
     data = _dash_data()
 
-    assert data["modelLearningRevision"] == "revision-17"
+    assert dispatched == [controller_name]
+    assert data["modelLearningRevision"] == revision
     assert "modelLearningReport" not in data
