@@ -50,6 +50,7 @@ from common.control_trace import ControllerBranch
 from controller.base import PidSpTraceDiagnostics
 from controller.fopdt_identifier import FOPDTIdentifier
 from controller.pid_base import PIDControllerBase
+from controller.pid_sp_learning import build_pid_sp_live_learning
 from controller.smith_predictor import SmithPredictor
 from grillplat.actuator_capabilities import AUGER_TIMING
 
@@ -131,6 +132,8 @@ class Controller(PIDControllerBase):
         self.predictor.record_output(applied)
 
     def get_status(self):
+        identifier = self.identifier.status()
+        predictor = self.predictor.status()
         return {
             "p": self.p,
             "i": self.i,
@@ -142,8 +145,9 @@ class Controller(PIDControllerBase):
             "feed_forward": self.feed_forward,
             "selected_temp": self._selected,
             "last_selected": self.last,
-            "identifier": self.identifier.status(),
-            "predictor": self.predictor.status(),
+            "identifier": identifier,
+            "predictor": predictor,
+            "learning": build_pid_sp_live_learning(identifier, predictor),
         }
 
     def get_model_snapshot(self):

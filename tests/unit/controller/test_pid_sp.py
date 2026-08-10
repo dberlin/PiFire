@@ -518,6 +518,96 @@ def test_an_untrusted_controller_offers_nothing_to_persist(clock):
     assert _controller("pid_sp", clock).get_model_snapshot() is None
 
 
+def test_get_status_projects_one_identifier_and_predictor_snapshot(clock, monkeypatch):
+    sp = _controller("pid_sp", clock)
+    identifier = {
+        "accepted": 0,
+        "accepted_seconds": 0.0,
+        "duty_std": 0.0,
+        "temp_span": 0.0,
+        "transition_seen": False,
+        "duty_segments": 0,
+        "best_residual": 0.0,
+        "runner_up_residual": 0.0,
+        "candidates_passing": 0,
+        "confirming": None,
+        "trusted": None,
+        "distrust_count": 0,
+        "distrust_ratio": 0.0,
+    }
+    predictor = {
+        "active": False,
+        "disabled": False,
+        "x0": 0.0,
+        "xd": 0.0,
+        "residual_streak": 0,
+        "truncated": 0,
+        "model": None,
+    }
+    calls = {"identifier": 0, "predictor": 0}
+
+    def identifier_status():
+        calls["identifier"] += 1
+        return identifier
+
+    def predictor_status():
+        calls["predictor"] += 1
+        return predictor
+
+    monkeypatch.setattr(sp.identifier, "status", identifier_status)
+    monkeypatch.setattr(sp.predictor, "status", predictor_status)
+
+    status = sp.get_status()
+
+    assert calls == {"identifier": 1, "predictor": 1}
+    assert status["identifier"] is identifier
+    assert status["predictor"] is predictor
+    assert status["learning"] == {
+        "schema_version": 1,
+        "controller": "pid_sp",
+        "status": "collecting",
+        "identifier": identifier,
+        "predictor": predictor,
+        "gates": [
+            {
+                "name": "accepted_samples",
+                "passed": False,
+                "observed": 0,
+                "required": 25,
+                "unit": "samples",
+            },
+            {
+                "name": "accepted_duration",
+                "passed": False,
+                "observed": 0.0,
+                "required": 500.0,
+                "unit": "seconds",
+            },
+            {
+                "name": "duty_standard_deviation",
+                "passed": False,
+                "observed": 0.0,
+                "required": 0.05,
+                "unit": "ratio",
+            },
+            {
+                "name": "duty_transition",
+                "passed": False,
+                "observed": False,
+                "required": True,
+                "unit": None,
+            },
+            {
+                "name": "temperature_span",
+                "passed": False,
+                "observed": 0.0,
+                "required": 15.0,
+                "unit": "°F",
+            },
+        ],
+    }
+
+
 def test_get_status_survives_the_mqtt_encoder(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
