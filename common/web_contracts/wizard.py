@@ -212,9 +212,9 @@ class ScanResult(WireModel):
 
 
 class InstallStatus(WireModel):
-    percent: FiniteFloat | int
-    status: str
-    output: str
+    percent: FiniteFloat | int | None
+    status: str | None
+    output: str | None
 
 
 class InstallLog(WireModel):

@@ -50,14 +50,15 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
       getInstallStatus(baseUrl).then((next) => {
         if (cancelled) return;
         setStatus(next);
-        if (isFailure(next.percent)) {
+        const percent = next.percent ?? 0;
+        if (isFailure(percent)) {
           window.clearInterval(id);
           // Opened for them rather than offered: the installer has already
           // logged what went wrong, and the transcript is where it says so.
           setShowOutput(true);
-        } else if (next.percent > 100) {
+        } else if (percent > 100) {
           window.clearInterval(id);
-          if (next.percent === REBOOT_REQUIRED_PERCENT) {
+          if (percent === REBOOT_REQUIRED_PERCENT) {
             setRebootRequired(true);
           } else {
             onDoneRef.current("restart");
@@ -113,8 +114,9 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
     );
   }
 
-  const failed = isFailure(status.percent);
-  const percent = Math.min(Math.max(status.percent, 0), 100);
+  const currentPercent = status.percent ?? 0;
+  const failed = isFailure(currentPercent);
+  const percent = Math.min(Math.max(currentPercent, 0), 100);
   const barClassName = prefersReducedMotion()
     ? "pf-install-progress-bar pf-install-progress-bar-reduced-motion"
     : "pf-install-progress-bar";

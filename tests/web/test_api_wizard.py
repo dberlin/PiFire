@@ -1038,6 +1038,15 @@ def test_usb_serial_scan_passes_vid_pid_through_to_discovery(ds, client, monkeyp
     assert seen == {"vid": "0x2a19", "pid": "0x0c0c"}
 
 
+def test_installstatus_before_any_install_preserves_null_fields(ds, client):
+    response = client.get("/api/wizard/installstatus")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body == {"percent": None, "status": None, "output": None}
+    assert InstallStatus.model_validate(body, strict=True).model_dump(mode="json") == body
+
+
 def test_installlog_serves_the_current_run_incrementally(ds, client, monkeypatch):
     """The panel behind "Show output" polls this while an install runs. It reads
     the log file rather than the install-status blob, because that blob holds one
