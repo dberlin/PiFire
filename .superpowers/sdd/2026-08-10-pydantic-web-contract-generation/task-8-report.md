@@ -8,9 +8,13 @@ Implementation commit: `cff915caeba5112bda99a4de79a83555c5b9d7b6` (`tyvpuyssktxw
 
 Review fix commit: `3698076cc53a813d88b828a12294d038421b1cb6` (`kyutnyuykmmrnxrzyzszqvsyyormoxvp`)
 
+Branch validation fix commit: `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8` (`mnxosvtxqsmzrwxryrlzoxvqrnwyrrlp`)
+
 Initial report change: `qxmwwvxquoqytltsnytkypzlqqotwklw`
 
 Report update change: `uqrmrzywvsnlwlzoporumqrzyntyrpmo`
+
+Evidence report change: `srtlxlwmswxpynmnxxkxllsllomnvzlp`
 
 ## Implemented
 
@@ -143,9 +147,54 @@ The required post-implementation review found three Important boundary regressio
 - Updater empty-object actions make the same distinction before status mutation or process launch.
 - Strict operation error details now retain the existing `log` member, preserving unknown log-family responses as JSON 404s rather than response-validation failures.
 
-## Verification intentionally not run
+## Review fix round 2
 
-Per the concurrent-wave constraint, Task 8 did not run tests, formatters, linters, builds, typecheck, Playwright, or generation. The brief's focused commands remain unrun verbatim:
+Branch request validation RED:
+
+```bash
+uv run pytest -q tests/web/test_api_update.py::test_change_branch_rejects_invalid_json_before_update_discovery
+```
+
+```text
+FFFF                                                                     [100%]
+Expected {"data": null, "result": "Error", "message": "bad_request"}.
+Received {"data": {"branches": ["main", "dev"]}, "result": "Error", "message": "invalid_branch"}.
+4 failed in 3.37s
+EXIT=1
+```
+
+The failure also recorded `get_update_data(settings)` for every invalid request,
+proving malformed, non-object, and extra-bearing input reached branch discovery.
+
+After returning the `_json_request(UpdateBranchRequest)` validation response
+before reading settings or calling `get_update_data`, focused GREEN:
+
+```bash
+uv run pytest -q tests/web/test_api_update.py::test_change_branch_rejects_invalid_json_before_update_discovery
+```
+
+```text
+4 passed in 3.46s
+EXIT=0
+```
+
+Full focused updater route suite:
+
+```bash
+uv run pytest -q tests/web/test_api_update.py
+```
+
+```text
+38 passed in 3.71s
+EXIT=0
+```
+
+## Verification
+
+The initial concurrent wave intentionally did not run tests, formatters, linters,
+builds, typecheck, Playwright, or generation. Review fix round 2 subsequently
+ran only the focused updater commands recorded above. The brief's combined
+commands otherwise remain unrun verbatim:
 
 ```bash
 uv run pytest -q tests/web/test_api_admin_system.py tests/web/test_api_admin_backups.py tests/web/test_api_admin_maintenance.py tests/web/test_api_admin_log_families.py tests/web/test_api_update.py tests/web/test_api_tuner.py tests/web/test_api_tuner_auto.py
@@ -163,10 +212,10 @@ also be run after registration/generation:
 uv run pytest -q tests/unit/common/web_contracts/test_operations.py tests/web/test_api_admin_logs_view.py
 ```
 
-Static LSP diagnostics were clean for `common/web_contracts/operations.py` and the modified admin/update/tuner Python routes, aside from pre-existing informational hints about `os.system` and an intentionally ignored tuner chart-label return. Frontend execution/type diagnostics are intentionally deferred because the imported `operations.gen.ts` module does not exist until the serialized integration wave.
+Static LSP diagnostics were clean for `common/web_contracts/operations.py` and the modified admin/update/tuner Python routes, aside from pre-existing informational hints about `os.system` and an intentionally ignored tuner chart-label return. Frontend execution/type diagnostics were not run by Task 8; the serialized integration wave later supplied `operations.gen.ts` outside the Task 8 commits.
 
 ## Concerns
 
-- Expected integration blocker: frontend compilation remains unavailable until the operations registry entry and generated files above are produced.
-- Behavioral verification is deliberately outstanding because execution was prohibited in this wave; the listed focused suites must be the integration wave's acceptance gate.
-- No Critical or Important static-review concern remains after review fix commit `3698076cc53a813d88b828a12294d038421b1cb6`.
+- No Task 8 integration blocker is currently known; registry/generated artifacts are owned and supplied by the serialized integration wave.
+- Behavioral verification remains outstanding for the acceptance commands other than the now-green focused updater suite.
+- No Critical or Important static-review concern from rounds 1–2 remains after fix commits `3698076cc53a813d88b828a12294d038421b1cb6` and `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8`.
