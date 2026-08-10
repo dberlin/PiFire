@@ -3,7 +3,8 @@ import { readSelected } from "../../../helpers/settings/controllerSelection";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { hasDcFan } from "../../../helpers/settings/platform";
-import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
+import type { ControllerCatalog } from "../../../helpers/settings/controllerTypes.gen";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -37,7 +38,7 @@ type WorkMode = {
   };
 };
 
-function readWorkMode(s: Settings): WorkMode {
+function readWorkMode(s: SettingsSchema): WorkMode {
   const cd = s.cycle_data ?? {};
   const sp = s.smoke_plus ?? {};
   const kw = s.keep_warm ?? {};
@@ -73,9 +74,9 @@ export function WorkModeTab() {
   // reads -- a query here would be a second request for data already in hand,
   // and would let the two tabs disagree about it.
   const { settings, controllerMeta } = useOutletContext<{
-    settings: Settings;
+    settings: SettingsSchema;
     mode: string;
-    controllerMeta: ControllerMetadata | null;
+    controllerMeta: ControllerCatalog | null;
   }>();
   const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
@@ -116,9 +117,9 @@ export function WorkModeTab() {
     // Object.entries widens its key to string, which erases exactly the fact
     // these loops depend on: every key of `v.<section>` is a field of the
     // matching settings section.
-    type CycleDataKey = keyof NonNullable<Settings["cycle_data"]>;
-    type SmokePlusKey = keyof NonNullable<Settings["smoke_plus"]>;
-    type KeepWarmKey = keyof NonNullable<Settings["keep_warm"]>;
+    type CycleDataKey = keyof NonNullable<SettingsSchema["cycle_data"]>;
+    type SmokePlusKey = keyof NonNullable<SettingsSchema["smoke_plus"]>;
+    type KeepWarmKey = keyof NonNullable<SettingsSchema["keep_warm"]>;
     for (const k of Object.keys(v.cycle_data) as CycleDataKey[]) {
       d = setPath(d, `cycle_data.${k}`, v.cycle_data[k]);
     }

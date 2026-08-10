@@ -2,7 +2,7 @@ import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { hasDcFan } from "../../../helpers/settings/platform";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type {
@@ -48,7 +48,7 @@ type Startup = {
   start_to_hold_prompt: boolean;
 };
 
-function readStartup(s: Settings): Startup {
+function readStartup(s: SettingsSchema): Startup {
   const sh = s.shutdown ?? {};
   const st = s.startup ?? {};
   const ss = st.smartstart ?? {};
@@ -87,7 +87,7 @@ function readStartup(s: Settings): Startup {
 }
 
 export function StartupTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { settings } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
   const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("startup", readStartup);

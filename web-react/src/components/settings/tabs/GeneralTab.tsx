@@ -3,7 +3,7 @@ import { accentPath, readAccent, storedAccentName } from "../../../helpers/setti
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import type { SettingsPath } from "../../../helpers/settings/paths";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -29,7 +29,7 @@ type General = {
   sleep_timeout: number;
 };
 
-function readGeneral(s: Settings): General {
+function readGeneral(s: SettingsSchema): General {
   return {
     grill_name: s.globals?.grill_name ?? SETTINGS_DEFAULTS.globals.grill_name,
     accent_theme: storedAccentName(readAccent(s)),
@@ -39,7 +39,7 @@ function readGeneral(s: Settings): General {
 
 export function GeneralTab() {
   const { save, saving, status, errors } = useSaveSettings();
-  const { settings } = useOutletContext<{ settings: Settings }>();
+  const { settings } = useOutletContext<{ settings: SettingsSchema }>();
   const { setAccent } = useAppPrefs();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("general", readGeneral);

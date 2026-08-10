@@ -7,11 +7,11 @@ import {
   saveAccent,
   storedAccentName,
 } from "../../../../src/helpers/settings/accent";
-import type { Settings } from "../../../../src/helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../../src/helpers/settings/settingsTypes.gen";
 
 // The helpers take a whole Settings; these fixtures carry only the keys under
 // test, which is why each is cast rather than spread over a full default tree.
-const partial = (s: object) => s as Settings;
+const partial = (s: object) => s as SettingsSchema;
 
 const withDisplay = (accent?: string) =>
   partial({
@@ -67,7 +67,8 @@ describe("saveAccent", () => {
     const calls: { url: string; body: unknown }[] = [];
     rs.spyOn(globalThis, "fetch").mockImplementation((async (url: string, init?: RequestInit) => {
       calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
-      const payload = init?.method === "POST" ? { result: "success" } : withDisplay("Ember");
+      const payload =
+        init?.method === "POST" ? { result: "success" } : { settings: withDisplay("Ember") };
       return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -85,7 +86,7 @@ describe("saveAccent", () => {
 
   it("reports failure rather than throwing when there is no display module", async () => {
     rs.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ modules: {} }), {
+      new Response(JSON.stringify({ settings: { modules: {} } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -105,7 +106,8 @@ describe("saveAccent", () => {
   it("invalidates the shared settings entry so other readers see the new accent", async () => {
     queryClient.setQueryData(queryKeys.settings, { modules: { display: "ili9341" } });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (_url: string, init?: RequestInit) => {
-      const payload = init?.method === "POST" ? { result: "success" } : withDisplay("Ember");
+      const payload =
+        init?.method === "POST" ? { result: "success" } : { settings: withDisplay("Ember") };
       return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -120,7 +122,9 @@ describe("saveAccent", () => {
     queryClient.setQueryData(queryKeys.settings, { modules: { display: "ili9341" } });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (_url: string, init?: RequestInit) => {
       const payload =
-        init?.method === "POST" ? { result: "error", message: "no" } : withDisplay("Ember");
+        init?.method === "POST"
+          ? { result: "error", message: "no" }
+          : { settings: withDisplay("Ember") };
       return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },

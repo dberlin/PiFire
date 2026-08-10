@@ -5,7 +5,7 @@ import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import type { CommandClient, CommandResult } from "../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 import { queryKeys } from "../../../src/helpers/query/keys";
-import type { Settings } from "../../../src/helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../src/helpers/settings/settingsTypes.gen";
 import type { ShellContext } from "../../../src/helpers/shellContext";
 import { testQueryClient } from "../test-utils";
 
@@ -25,7 +25,7 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue(OK);
 });
 
-const OK: Partial<Settings> = { globals: { first_time_setup: false } };
+const OK: Partial<SettingsSchema> = { globals: { first_time_setup: false } };
 const COMMAND_OK: CommandResult = { ok: true, message: "" };
 
 function stubCommand(): CommandClient {

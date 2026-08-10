@@ -1,3 +1,5 @@
 {
+  "../settings.schema.json": "../settings/settingsTypes.gen.ts",
+  "controller.schema.json": "../settings/controllerTypes.gen.ts",
   "core.schema.json": "core.gen.ts"
 }

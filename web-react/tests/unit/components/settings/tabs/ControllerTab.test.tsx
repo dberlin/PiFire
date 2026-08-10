@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { ControllerTab } from "../../../../../src/components/settings/tabs/ControllerTab";
-import type { ControllerMetadata } from "../../../../../src/helpers/settings/settingsApi";
+import type { ControllerCatalog } from "../../../../../src/helpers/settings/controllerTypes.gen";
 import { renderRoute } from "../../../test-utils";
 
 const NEURAL_WARNING_REGEX = /pre-trained neural policy|full optimisation until it is retrained/i;
@@ -24,10 +24,19 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+const definitionFields = {
+  attributions: [],
+  author: "Test",
+  contributors: [],
+  image: "test.png",
+  link: "",
+  module_name: "test",
+};
 
-const controllerMeta: ControllerMetadata = {
+const controllerMeta: ControllerCatalog = {
   metadata: {
     pid: {
+      ...definitionFields,
       friendly_name: "PID Standard",
       description: "The standard PID controller for PiFire.",
       config: [
@@ -70,6 +79,7 @@ const controllerMeta: ControllerMetadata = {
       ],
     },
     pid_sp: {
+      ...definitionFields,
       friendly_name: "PID Smith Predictor",
       description: "PID with a Smith Predictor.",
       config: [
@@ -85,6 +95,7 @@ const controllerMeta: ControllerMetadata = {
       ],
     },
     mpc: {
+      ...definitionFields,
       friendly_name: "Model Predictive Control (MPC)",
       description: "Experimental MPC controller.",
       config: [
@@ -133,7 +144,7 @@ const controllerMeta: ControllerMetadata = {
   },
 };
 
-function makeContext(overrides: Partial<{ controllerMeta: ControllerMetadata | null }> = {}) {
+function makeContext(overrides: Partial<{ controllerMeta: ControllerCatalog | null }> = {}) {
   return {
     settings: { controller: { selected: "pid", config: { pid: { PB: 55 } } } },
     mode: "Stop",
@@ -312,9 +323,10 @@ describe("ControllerTab", () => {
   });
 
   it("preserves the original numeric type for list options whose list_values are numbers", async () => {
-    const numericListMeta: ControllerMetadata = {
+    const numericListMeta: ControllerCatalog = {
       metadata: {
         dummy: {
+          ...definitionFields,
           friendly_name: "Dummy",
           description: "",
           config: [
@@ -369,9 +381,10 @@ describe("ControllerTab", () => {
   // real granularity is 1e-10 got the browser's default step of 1 and its
   // spinner became useless.
   it("forwards option_step to the NumberField", () => {
-    const metaWithStep: ControllerMetadata = {
+    const metaWithStep: ControllerCatalog = {
       metadata: {
         pid: {
+          ...definitionFields,
           friendly_name: "PID Standard",
           description: "",
           config: [
@@ -416,6 +429,8 @@ describe("ControllerTab", () => {
 // Runtime behaviour is unchanged and is covered by the cases above.
 import type { ControllerConfigs } from "../../../../../src/helpers/settings/controllerTypes.gen";
 
+type MpcConfig = NonNullable<ControllerConfigs["mpc"]>;
+
 describe("generated controller config types", () => {
   it("includes the retained PID and PID-SP option sets", () => {
     const pid: ControllerConfigs["pid"] = { PB: 60, Td: 45, Ti: 180, center: 0.5 };
@@ -432,12 +447,12 @@ describe("generated controller config types", () => {
   });
 
   it("constrains the retained estimator to EKF or KF", () => {
-    const ekf: ControllerConfigs["mpc"]["estimator"] = "ekf";
-    const kf: ControllerConfigs["mpc"]["estimator"] = "kf";
+    const ekf: MpcConfig["estimator"] = "ekf";
+    const kf: MpcConfig["estimator"] = "kf";
     expect([ekf, kf]).toEqual(["ekf", "kf"]);
 
     // @ts-expect-error -- MHE is retired from the generated settings contract.
-    const mhe: ControllerConfigs["mpc"]["estimator"] = "mhe";
+    const mhe: MpcConfig["estimator"] = "mhe";
     expect(mhe).toBeTruthy();
   });
 });

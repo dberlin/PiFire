@@ -3,20 +3,21 @@ import { queryKeys } from "../query/keys";
 import type { AccentName } from "../types";
 import { setPath } from "./delta";
 import type { SettingsPath } from "./paths";
-import { applySettings, getSettings, type Settings } from "./settingsApi";
+import { applySettings, getSettings } from "./settingsApi";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 // One accent covers the whole appliance. This is the key display/qtapp.py's
 // _accent_fn reads once a second, so a change here reaches the attached screen
 // as well as the browser. It is held per display module because that is where
 // the display's own configuration lives.
-export function accentPath(s: Settings): string | null {
+export function accentPath(s: SettingsSchema): string | null {
   const module = s.modules?.display;
   return module ? `display.config.${module}.accent_theme` : null;
 }
 
 // The store spells these "Ember" / "Ice" / "Crimson" (display/qml/Theme.qml);
 // the app spells them lowercase.
-export function readAccent(s: Settings): AccentName {
+export function readAccent(s: SettingsSchema): AccentName {
   const module = s.modules?.display;
   const stored = module ? s.display?.config?.[module]?.accent_theme : undefined;
   const name = typeof stored === "string" ? stored.toLowerCase() : "ember";

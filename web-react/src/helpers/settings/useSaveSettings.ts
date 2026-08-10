@@ -2,7 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
 import { queryKeys } from "../query/keys";
-import { applySettings, type SaveFieldError, type SettingsFlag } from "./settingsApi";
+import type { SaveFieldError, SettingsFlag } from "./controllerTypes.gen";
+import { applySettings } from "./settingsApi";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

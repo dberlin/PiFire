@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "../query/keys";
-import { getSettings, type Settings } from "./settingsApi";
+import { getSettings } from "./settingsApi";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -16,7 +17,7 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
  * behaviour those call sites already had.
  */
 export function useSettings() {
-  return useQuery<Settings>({
+  return useQuery<SettingsSchema>({
     queryKey: queryKeys.settings,
     queryFn: () => getSettings(BASE_URL),
   });

@@ -1,5 +1,5 @@
 import { Link, useOutletContext } from "react-router";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { Section } from "../fields/Section";
 
 const DASH = "—";
@@ -16,7 +16,7 @@ function orDash(v: unknown): string {
 // Editing them here would be silently overwritten by the next wizard run, so
 // this tab summarises and links out instead.
 export function PlatformTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { settings } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
   const platform = settings.platform ?? {};
   const outputs = platform.outputs ?? {};
 

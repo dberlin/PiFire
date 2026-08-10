@@ -1,4 +1,4 @@
-import type { SaveFieldError } from "./settingsApi";
+import type { SaveFieldError } from "./controllerTypes.gen";
 
 /** The backend's message for one settings path, or null if it did not reject it. */
 export function errorFor(errors: SaveFieldError[], path: string): string | null {

@@ -8,7 +8,7 @@ import {
 } from "../../../helpers/probes/probeMapApi";
 import type { ProbeModuleCatalog } from "../../../helpers/probes/probeMapTypes";
 import { queryKeys } from "../../../helpers/query/keys";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { ProbeMap } from "../../../helpers/wizard/probeTypes";
 import { DevicesCard } from "../../wizard/probes/DevicesCard";
@@ -39,7 +39,7 @@ function blockedModules(
 }
 
 export function ProbesTab() {
-  const { settings, mode } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { settings, mode } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
   const catalog = useLoaderData() as ProbeModuleCatalog;
   const revalidator = useRevalidator();
   const queryClient = useQueryClient();

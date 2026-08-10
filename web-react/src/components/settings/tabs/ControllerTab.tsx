@@ -4,7 +4,8 @@ import { readSelected } from "../../../helpers/settings/controllerSelection";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { MPC_FAN_CONFLICT_MESSAGE, mpcFanConflict } from "../../../helpers/settings/mpcFan";
-import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
+import type { ControllerCatalog } from "../../../helpers/settings/controllerTypes.gen";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { settingsDelta } from "../../../helpers/settings/settingsDelta";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { SaveStatus } from "../../../helpers/settings/useSaveSettings";
@@ -23,19 +24,23 @@ type ControllerValues = Record<string, number | boolean | string>;
 
 function deriveValues(
   selected: string,
-  settings: Settings,
-  meta: ControllerMetadata | null,
+  settings: SettingsSchema,
+  meta: ControllerCatalog | null,
 ): ControllerValues {
-  if (!meta || !selected || !meta.metadata[selected]) return {};
+  const definition = meta?.metadata[selected];
+  if (!definition) return {};
   const saved = settings.controller?.config?.[selected] ?? {};
   // Start from whatever is persisted, including any key the current metadata
   // no longer declares (a controller's option set can change between saves);
   // the loop below overwrites every declared key with its coerced value.
-  const out: ControllerValues = { ...saved };
-  for (const opt of meta.metadata[selected].config) {
+  const out: ControllerValues = {};
+  for (const [name, value] of Object.entries(saved)) {
+    if (value !== undefined) out[name] = value;
+  }
+  for (const opt of definition.config) {
     if (opt.option_type === "bool") {
-      out[opt.option_name] =
-        typeof saved[opt.option_name] === "boolean" ? saved[opt.option_name] : !!opt.option_default;
+      const value = saved[opt.option_name];
+      out[opt.option_name] = typeof value === "boolean" ? value : !!opt.option_default;
     } else if (opt.option_type === "float" || opt.option_type === "int") {
       const v = saved[opt.option_name];
       out[opt.option_name] =
@@ -56,9 +61,9 @@ function deriveValues(
 
 export function ControllerTab() {
   const { settings, controllerMeta } = useOutletContext<{
-    settings: Settings;
+    settings: SettingsSchema;
     mode: string;
-    controllerMeta: ControllerMetadata | null;
+    controllerMeta: ControllerCatalog | null;
   }>();
   const { save, saving, status, errors } = useSaveSettings();
 
@@ -68,7 +73,7 @@ export function ControllerTab() {
   // changing the selection re-derives them in the same update rather than in a
   // second render-phase adjustment.
   const read = useCallback(
-    (s: Settings) => {
+    (s: SettingsSchema) => {
       const selected = readSelected(s, controllerMeta);
       return { selected, values: deriveValues(selected, s, controllerMeta) };
     },
@@ -173,7 +178,7 @@ export function ControllerTab() {
           value={selected}
           options={Object.entries(controllerMeta.metadata).map(([key, c]) => ({
             value: key,
-            label: c.friendly_name,
+            label: c!.friendly_name,
           }))}
           onChange={(v) => setSelected(v)}
           path="controller.selected"

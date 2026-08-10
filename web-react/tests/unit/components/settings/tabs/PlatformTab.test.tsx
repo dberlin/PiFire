@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, screen } from "@testing-library/react";
 import { PlatformTab } from "../../../../../src/components/settings/tabs/PlatformTab";
-import type { Settings } from "../../../../../src/helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../../../src/helpers/settings/settingsTypes.gen";
 import { renderRoute } from "../../../test-utils";
 
 afterEach(cleanup);
@@ -19,7 +19,7 @@ describe("PlatformTab", () => {
           real_hw: true,
           outputs: { auger: 14, fan: 15, igniter: 18, power: 4, dc_fan: 26, pwm: 13 },
         },
-      } as Settings,
+      } as SettingsSchema,
       mode: "Stop",
     });
 
@@ -34,7 +34,7 @@ describe("PlatformTab", () => {
   });
 
   it("links to the setup wizard", () => {
-    renderRoute(<PlatformTab />, { settings: { platform: {} } as Settings, mode: "Stop" });
+    renderRoute(<PlatformTab />, { settings: { platform: {} } as SettingsSchema, mode: "Stop" });
     expect(screen.getByRole("link", { name: /configure in setup wizard/i })).toHaveAttribute(
       "href",
       "/wizard",
@@ -42,7 +42,7 @@ describe("PlatformTab", () => {
   });
 
   it("renders placeholders when platform settings are absent", () => {
-    renderRoute(<PlatformTab />, { settings: {} as Settings, mode: "Stop" });
+    renderRoute(<PlatformTab />, { settings: {} as SettingsSchema, mode: "Stop" });
     expect(screen.getByText("Grill Platform")).toBeInTheDocument();
     // AC Fan is the falsy-dc_fan rendering; must not throw on a missing section
     expect(screen.getByText("AC Fan")).toBeInTheDocument();

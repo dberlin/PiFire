@@ -1,7 +1,7 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { ProbeChartConfig } from "../../../helpers/settings/settingsTypes.gen";
@@ -68,7 +68,7 @@ function computeLabelPrefixes(probeConfig: ProbeConfig): Record<string, string> 
   return prefixes;
 }
 
-function readHistory(s: Settings): History {
+function readHistory(s: SettingsSchema): History {
   const hp = s.history_page ?? {};
   const g = s.globals ?? {};
   return {
@@ -78,12 +78,12 @@ function readHistory(s: Settings): History {
     clearhistoryonstart: !!hp.clearhistoryonstart,
     autorefresh: hp.autorefresh === "on",
     ext_data: !!g.ext_data,
-    probeConfig: structuredClone(hp.probe_config ?? {}),
+    probeConfig: structuredClone(hp.probe_config ?? {}) as ProbeConfig,
   };
 }
 
 export function HistoryTab() {
-  const { mode } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { mode } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
   const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("history", readHistory);

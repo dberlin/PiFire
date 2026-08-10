@@ -9,7 +9,7 @@ import {
   mpcFanPending,
 } from "../../../helpers/settings/mpcFan";
 import { hasDcFan } from "../../../helpers/settings/platform";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import {
   type SettingsDraftContext,
@@ -35,7 +35,7 @@ type Pwm = {
   profiles: Record<string, number>[];
 };
 
-function readPwm(settings: Settings): Pwm {
+function readPwm(settings: SettingsSchema): Pwm {
   const p = settings.pwm ?? {};
   return {
     pwm_control: !!p.pwm_control,
@@ -127,7 +127,7 @@ export function PwmTab() {
     // Object.entries widens its key to string, which erases exactly the fact
     // this loop depends on: every key of `clamped` (bar `profiles`) is a
     // field of settings.pwm with a matching value type.
-    type PwmKey = keyof NonNullable<Settings["pwm"]>;
+    type PwmKey = keyof NonNullable<SettingsSchema["pwm"]>;
     const scalarKeys = (Object.keys(clamped) as PwmKey[]).filter(
       (k) => k !== "profiles",
     ) as Exclude<PwmKey, "profiles">[];

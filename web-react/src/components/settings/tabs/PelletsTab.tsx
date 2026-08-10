@@ -1,7 +1,8 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
-import type { Settings, SettingsFlag } from "../../../helpers/settings/settingsApi";
+import type { SettingsFlag } from "../../../helpers/settings/controllerTypes.gen";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -20,7 +21,7 @@ type Pellets = {
   prime_ignition: boolean;
 };
 
-function readPellets(s: Settings): Pellets {
+function readPellets(s: SettingsSchema): Pellets {
   const pl = s.pelletlevel ?? {};
   const gl = s.globals ?? {};
   return {
@@ -35,7 +36,7 @@ function readPellets(s: Settings): Pellets {
 }
 
 export function PelletsTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { settings } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
   const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("pellets", readPellets);

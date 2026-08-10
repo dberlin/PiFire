@@ -1,5 +1,5 @@
 /* eslint-disable */
-// GENERATED from schema/settings.schema.json — do not edit. Regenerate: bun run gen:types
+// GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
 export type Selected = string;
 export type Lidopendetectenabled = boolean;
@@ -160,10 +160,10 @@ export type Ce1 = number;
 export type SystemType = string;
 export type Triggerlevel = string;
 export type ProbeDevices = {
-  [k: string]: unknown;
+  [k: string]: unknown | undefined;
 }[];
 export type ProbeInfo = {
-  [k: string]: unknown;
+  [k: string]: unknown | undefined;
 }[];
 export type Frequency = number;
 export type MaxDutyCycle = number;
@@ -241,9 +241,11 @@ export interface ControllerSettings {
   selected?: Selected;
 }
 export interface Config {
-  [k: string]: {
-    [k: string]: number | boolean | string;
-  };
+  [k: string]:
+    | {
+        [k: string]: (number | boolean | string) | undefined;
+      }
+    | undefined;
 }
 export interface CycleData {
   LidOpenDetectEnabled?: Lidopendetectenabled;
@@ -259,9 +261,11 @@ export interface Dashboard {
   dashboards?: Dashboards;
 }
 export interface Dashboards {
-  [k: string]: {
-    [k: string]: unknown;
-  };
+  [k: string]:
+    | {
+        [k: string]: unknown | undefined;
+      }
+    | undefined;
 }
 export interface DisplaySettings {
   config?: Config1;
@@ -269,9 +273,11 @@ export interface DisplaySettings {
   sleep_timeout?: SleepTimeout;
 }
 export interface Config1 {
-  [k: string]: {
-    [k: string]: unknown;
-  };
+  [k: string]:
+    | {
+        [k: string]: unknown | undefined;
+      }
+    | undefined;
 }
 export interface GlobalSettings {
   augerrate?: Augerrate;
@@ -297,8 +303,12 @@ export interface HistoryPage {
   probe_config?: ProbeConfig;
 }
 export interface ProbeConfig {
-  [k: string]: ProbeChartConfig;
+  [k: string]: ProbeChartConfig | undefined;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "ProbeChartConfig".
+ */
 export interface ProbeChartConfig {
   bg_color: BgColor;
   bg_color_setpoint?: BgColorSetpoint;
@@ -316,6 +326,10 @@ export interface KeepWarm {
   s_plus?: SPlus;
   temp?: Temp;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "LastUpdated".
+ */
 export interface LastUpdated {
   time: Time;
 }
@@ -366,7 +380,7 @@ export interface OneSignalService {
   uuid: Uuid;
 }
 export interface Devices {
-  [k: string]: unknown;
+  [k: string]: unknown | undefined;
 }
 export interface PushbulletService {
   APIKey?: Apikey1;
@@ -467,25 +481,49 @@ export interface _DistanceDeviceConfig {
   i2c_bus?: I2CBus;
   trig?: Trig;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_BasicBus".
+ */
 export interface _BasicBus {
   kind?: Kind;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_KernelBusNumber".
+ */
 export interface _KernelBusNumber {
   bus_num: BusNum;
   kind?: Kind1;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_KernelAdapterName".
+ */
 export interface _KernelAdapterName {
   adapter: Adapter;
   kind?: Kind2;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_KernelSerialMatch".
+ */
 export interface _KernelSerialMatch {
   kind?: Kind3;
   serial: Serial;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_FT232hBus".
+ */
 export interface _FT232HBus {
   kind?: Kind4;
   url?: Url1;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_MCP2221Bus".
+ */
 export interface _MCP2221Bus {
   kind?: Kind5;
   serial?: Serial1;
@@ -539,9 +577,11 @@ export interface ProbeMap {
   probe_info?: ProbeInfo;
 }
 export interface ProbeProfiles {
-  [k: string]: {
-    [k: string]: unknown;
-  };
+  [k: string]:
+    | {
+        [k: string]: unknown | undefined;
+      }
+    | undefined;
 }
 export interface PwmSettings {
   frequency?: Frequency;
@@ -552,6 +592,10 @@ export interface PwmSettings {
   temp_range_list?: TempRangeList;
   update_time?: UpdateTime;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "PwmProfile".
+ */
 export interface PwmProfile {
   duty_cycle: DutyCycle;
 }
@@ -571,6 +615,10 @@ export interface SafetySettings {
   reigniteretries?: Reigniteretries;
   startup_check?: StartupCheck;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "ServerInfo".
+ */
 export interface ServerInfo {
   uuid: Uuid1;
 }
@@ -601,6 +649,10 @@ export interface SmartStart {
   profiles?: Profiles1;
   temp_range_list?: TempRangeList1;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "SmartStartProfile".
+ */
 export interface SmartStartProfile {
   augerontime: Augerontime;
   p_mode: PMode;
@@ -611,9 +663,496 @@ export interface StartToMode {
   primary_setpoint?: PrimarySetpoint;
   start_to_hold_prompt?: StartToHoldPrompt;
 }
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "Versions".
+ */
 export interface Versions {
   build: Build;
   cookfile: Cookfile;
   recipe: Recipe1;
   server: Server;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "AppriseService".
+ */
+export interface AppriseService1 {
+  enabled?: Enabled1;
+  locations?: Locations;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "ControllerSettings".
+ */
+export interface ControllerSettings1 {
+  config?: Config;
+  selected?: Selected;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "CycleData".
+ */
+export interface CycleData1 {
+  LidOpenDetectEnabled?: Lidopendetectenabled;
+  LidOpenPauseTime?: Lidopenpausetime;
+  LidOpenThreshold?: Lidopenthreshold;
+  PMode?: Pmode;
+  SmokeOffCycleTime?: Smokeoffcycletime;
+  SmokeOnCycleTime?: Smokeoncycletime;
+  u_max?: UMax;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "Dashboard".
+ */
+export interface Dashboard1 {
+  current?: Current;
+  dashboards?: Dashboards;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "DisplaySettings".
+ */
+export interface DisplaySettings1 {
+  config?: Config1;
+  selected?: Selected1;
+  sleep_timeout?: SleepTimeout;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "GlobalSettings".
+ */
+export interface GlobalSettings1 {
+  augerrate?: Augerrate;
+  boot_to_monitor?: BootToMonitor;
+  debug_mode?: DebugMode;
+  disp_rotation?: DispRotation;
+  ext_data?: ExtData;
+  first_time_setup?: FirstTimeSetup;
+  grill_name?: GrillName;
+  prime_ignition?: PrimeIgnition;
+  python_exec?: PythonExec;
+  units?: Units;
+  updated_message?: UpdatedMessage;
+  uv?: Uv;
+  venv?: Venv;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "HistoryPage".
+ */
+export interface HistoryPage1 {
+  autorefresh?: Autorefresh;
+  clearhistoryonstart?: Clearhistoryonstart;
+  datapoints?: Datapoints;
+  fidelity_degrees?: FidelityDegrees;
+  minutes?: Minutes;
+  probe_config?: ProbeConfig;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "IftttService".
+ */
+export interface IftttService1 {
+  APIKey?: Apikey;
+  enabled?: Enabled2;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "InfluxdbService".
+ */
+export interface InfluxdbService1 {
+  bucket?: Bucket;
+  enabled?: Enabled3;
+  org?: Org;
+  token?: Token;
+  url?: Url;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "KeepWarm".
+ */
+export interface KeepWarm1 {
+  s_plus?: SPlus;
+  temp?: Temp;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "Modules".
+ */
+export interface Modules1 {
+  display?: Display;
+  dist?: Dist;
+  grillplat?: Grillplat;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "MqttService".
+ */
+export interface MqttService1 {
+  broker?: Broker;
+  enabled?: Enabled4;
+  homeassistant_autodiscovery_topic?: HomeassistantAutodiscoveryTopic;
+  id?: Id;
+  password?: Password;
+  port?: Port;
+  update_sec?: UpdateSec;
+  username?: Username;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "NotifyServices".
+ */
+export interface NotifyServices1 {
+  apprise?: AppriseService;
+  ifttt?: IftttService;
+  influxdb?: InfluxdbService;
+  mqtt?: MqttService;
+  onesignal?: OneSignalService;
+  pushbullet?: PushbulletService;
+  pushover?: PushoverService;
+  wled?: WledService;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "OneSignalService".
+ */
+export interface OneSignalService1 {
+  app_id?: AppId;
+  devices?: Devices;
+  enabled?: Enabled5;
+  uuid: Uuid;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "PelletLevel".
+ */
+export interface PelletLevel1 {
+  empty?: Empty;
+  full?: Full;
+  warning_enabled?: WarningEnabled;
+  warning_level?: WarningLevel;
+  warning_time?: WarningTime;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "Platform".
+ */
+export interface Platform1 {
+  buttonslevel?: Buttonslevel;
+  current?: Current1;
+  dc_fan?: DcFan;
+  devices?: _DevicesConfig;
+  fan_controller?: _FanControllerConfig;
+  ft232h?: _FT232HConfig;
+  inputs?: _InputsConfig;
+  mcp2221?: _MCP2221Config;
+  numato?: _NumatoConfig;
+  outputs?: _OutputsConfig;
+  real_hw?: RealHw;
+  standalone?: Standalone;
+  system?: _SystemConfig;
+  system_type?: SystemType;
+  triggerlevel?: Triggerlevel;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "ProbeMap".
+ */
+export interface ProbeMap1 {
+  probe_devices?: ProbeDevices;
+  probe_info?: ProbeInfo;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "ProbeSettings".
+ */
+export interface ProbeSettings1 {
+  probe_map?: ProbeMap;
+  probe_profiles?: ProbeProfiles;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "PushbulletService".
+ */
+export interface PushbulletService1 {
+  APIKey?: Apikey1;
+  PublicURL?: Publicurl;
+  enabled?: Enabled6;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "PushoverService".
+ */
+export interface PushoverService1 {
+  APIKey?: Apikey2;
+  PublicURL?: Publicurl1;
+  UserKeys?: Userkeys;
+  enabled?: Enabled7;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "PwmSettings".
+ */
+export interface PwmSettings1 {
+  frequency?: Frequency;
+  max_duty_cycle?: MaxDutyCycle;
+  min_duty_cycle?: MinDutyCycle;
+  profiles?: Profiles;
+  pwm_control?: PwmControl;
+  temp_range_list?: TempRangeList;
+  update_time?: UpdateTime;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "Recipe".
+ */
+export interface Recipe2 {
+  probe_map?: RecipeProbeMap;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "RecipeProbeMap".
+ */
+export interface RecipeProbeMap1 {
+  food?: Food;
+  primary?: Primary;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "SafetySettings".
+ */
+export interface SafetySettings1 {
+  allow_manual_changes?: AllowManualChanges;
+  manual_override_time?: ManualOverrideTime;
+  maxstartuptemp?: Maxstartuptemp;
+  maxtemp?: Maxtemp;
+  minstartuptemp?: Minstartuptemp;
+  reigniteretries?: Reigniteretries;
+  startup_check?: StartupCheck;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "ShutdownSettings".
+ */
+export interface ShutdownSettings1 {
+  auto_power_off?: AutoPowerOff;
+  shutdown_duration?: ShutdownDuration;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "SmartStart".
+ */
+export interface SmartStart1 {
+  enabled?: Enabled10;
+  exit_temp?: ExitTemp;
+  profiles?: Profiles1;
+  temp_range_list?: TempRangeList1;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "SmokePlus".
+ */
+export interface SmokePlus1 {
+  duty_cycle?: DutyCycle1;
+  enabled?: Enabled9;
+  fan_ramp?: FanRamp;
+  max_temp?: MaxTemp;
+  min_temp?: MinTemp;
+  off_time?: OffTime;
+  on_time?: OnTime;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "StartToMode".
+ */
+export interface StartToMode1 {
+  after_startup_mode?: AfterStartupMode;
+  primary_setpoint?: PrimarySetpoint;
+  start_to_hold_prompt?: StartToHoldPrompt;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "StartupSettings".
+ */
+export interface StartupSettings1 {
+  duration?: Duration;
+  prime_on_startup?: PrimeOnStartup;
+  pwm_duty_cycle?: PwmDutyCycle;
+  smartstart?: SmartStart;
+  start_to_mode?: StartToMode;
+  startup_exit_temp?: StartupExitTemp;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "WledEventPresets".
+ */
+export interface WledEventPresets1 {
+  Grill_Error?: GrillError;
+  Pellet_Level_Low?: PelletLevelLow;
+  Recipe_Next?: RecipeNext;
+  Temp_Achieved?: TempAchieved;
+  Timer_Expired?: TimerExpired;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "WledModePresets".
+ */
+export interface WledModePresets1 {
+  Hold?: Hold;
+  Prime?: Prime;
+  Reignite?: Reignite;
+  Shutdown?: Shutdown;
+  Smoke?: Smoke;
+  Startup?: Startup;
+  Stop?: Stop;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "WledProfileNumbers".
+ */
+export interface WledProfileNumbers1 {
+  booting?: Booting;
+  cooking?: Cooking;
+  cooldown?: Cooldown;
+  error_fault?: ErrorFault;
+  idle?: Idle;
+  low_pellets?: LowPellets;
+  night_mode?: NightMode;
+  overshoot_alarm?: OvershootAlarm;
+  preheat?: Preheat;
+  probe_alarm?: ProbeAlarm;
+  target_reached?: TargetReached;
+  timer_done?: TimerDone;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "WledService".
+ */
+export interface WledService1 {
+  device_address?: DeviceAddress;
+  enabled?: Enabled8;
+  event_presets?: WledEventPresets;
+  mode_presets?: WledModePresets;
+  notify_duration?: NotifyDuration;
+  profile_numbers?: WledProfileNumbers;
+  suggested_config?: WledSuggestedConfig;
+  use_profiles?: UseProfiles;
+  use_suggested_presets?: UseSuggestedPresets;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "WledSuggestedConfig".
+ */
+export interface WledSuggestedConfig1 {
+  cooking_color?: CookingColor;
+  idle_brightness?: IdleBrightness;
+  led_count?: LedCount;
+  night_mode?: NightMode1;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_DevicesConfig".
+ */
+export interface _DevicesConfig1 {
+  display?: _DisplayDeviceConfig;
+  distance?: _DistanceDeviceConfig;
+  input?: _InputDeviceConfig;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_DisplayDeviceConfig".
+ */
+export interface _DisplayDeviceConfig1 {
+  dc?: Dc;
+  led?: Led;
+  rst?: Rst;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_DistanceDeviceConfig".
+ */
+export interface _DistanceDeviceConfig1 {
+  address?: Address;
+  device?: Device;
+  echo?: Echo;
+  i2c_bus?: I2CBus;
+  trig?: Trig;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_FT232hConfig".
+ */
+export interface _FT232HConfig1 {
+  url?: Url2;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_FanControllerConfig".
+ */
+export interface _FanControllerConfig1 {
+  address?: Address1;
+  chip?: Chip;
+  i2c_bus?: I2CBus1;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_InputDeviceConfig".
+ */
+export interface _InputDeviceConfig1 {
+  down_dt?: DownDt;
+  enter_sw?: EnterSw;
+  up_clk?: UpClk;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_InputsConfig".
+ */
+export interface _InputsConfig1 {
+  selector?: Selector;
+  shutdown?: Shutdown1;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_MCP2221Config".
+ */
+export interface _MCP2221Config1 {
+  serial?: Serial2;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_NumatoConfig".
+ */
+export interface _NumatoConfig1 {
+  baudrate?: Baudrate;
+  device?: Device1;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_OutputsConfig".
+ */
+export interface _OutputsConfig1 {
+  auger?: Auger;
+  dc_fan?: DcFan1;
+  fan?: Fan;
+  igniter?: Igniter;
+  power?: Power;
+  pwm?: Pwm;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_SPI0Config".
+ */
+export interface _SPI0Config1 {
+  CE0?: Ce0;
+  CE1?: Ce1;
+}
+/**
+ * This interface was referenced by `SettingsSchema`'s JSON-Schema
+ * via the `definition` "_SystemConfig".
+ */
+export interface _SystemConfig1 {
+  "1WIRE"?: Wire;
+  SPI0?: _SPI0Config;
 }

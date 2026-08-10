@@ -1,6 +1,6 @@
 import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
-import type { Settings } from "./settingsApi";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 /**
  * Where a settings tab's in-progress edit lives while the user is somewhere
@@ -39,7 +39,7 @@ export type SettingsDraftStore = {
 };
 
 /** The Outlet context every settings tab reads. */
-export type SettingsDraftContext = { settings: Settings } & SettingsDraftStore;
+export type SettingsDraftContext = { settings: SettingsSchema } & SettingsDraftStore;
 
 /**
  * Owns the draft map. Call it in the component that outlives the tabs
@@ -75,7 +75,7 @@ export function useSettingsDraftStore(settings: unknown): SettingsDraftStore {
  * used whenever there is no draft -- so an untouched tab always shows what the
  * server last returned, with no copy of it kept anywhere.
  */
-export function useSettingsDraft<T>(key: string, read: (settings: Settings) => T) {
+export function useSettingsDraft<T>(key: string, read: (settings: SettingsSchema) => T) {
   const { settings, drafts, setDrafts } = useOutletContext<SettingsDraftContext>();
   const entry = drafts[key];
   const value = entry ? (entry.value as T) : read(settings);

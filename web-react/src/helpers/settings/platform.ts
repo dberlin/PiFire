@@ -1,4 +1,4 @@
-import type { Settings } from "./settingsApi";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 /**
  * Does this build drive a PWM-controlled DC fan?
@@ -12,6 +12,6 @@ import type { Settings } from "./settingsApi";
  * DERIVES `dc_fan` for `x86_numato` / `ft232h_relay` (see PlatformTab's note),
  * so a missing field means the wizard concluded there is no DC fan.
  */
-export function hasDcFan(settings: Settings): boolean {
+export function hasDcFan(settings: SettingsSchema): boolean {
   return !!settings.platform?.dc_fan;
 }

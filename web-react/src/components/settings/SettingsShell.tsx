@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
 import { readAccent } from "../../helpers/settings/accent";
 import { hasDcFan } from "../../helpers/settings/platform";
-import type { ControllerMetadata, Settings } from "../../helpers/settings/settingsApi";
+import type { ControllerCatalog } from "../../helpers/settings/controllerTypes.gen";
+import type { SettingsSchema } from "../../helpers/settings/settingsTypes.gen";
 import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";
 import { useAppPrefs } from "../AppPrefs";
 
@@ -25,9 +26,9 @@ const SETTINGS_TABS = [
 
 export function SettingsShell() {
   const { settings, mode, controllerMeta } = useLoaderData() as {
-    settings: Settings;
+    settings: SettingsSchema;
     mode: string;
-    controllerMeta: ControllerMetadata | null;
+    controllerMeta: ControllerCatalog | null;
   };
   const navigate = useNavigate();
   // A deep link into /settings never passes the dashboard, so this is the other

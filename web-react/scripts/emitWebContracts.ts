@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { compileFromFile } from "json-schema-to-typescript";
 
 const SCHEMA_DIRECTORY = "schema/contracts";
@@ -20,6 +20,20 @@ function lfTerminated(output: string): string {
   return `${output.replace(/\r\n?/g, "\n").replace(/\n*$/, "")}\n`;
 }
 
+function resolveManifestPath(base: string, allowedRoot: string, path: string): string {
+  const destination = resolve(base, path);
+  const fromAllowedRoot = relative(resolve(allowedRoot), destination);
+  if (
+    fromAllowedRoot === "" ||
+    fromAllowedRoot === ".." ||
+    fromAllowedRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+    isAbsolute(fromAllowedRoot)
+  ) {
+    throw new Error(`Manifest path escapes ${allowedRoot}: ${path}`);
+  }
+  return destination;
+}
+
 async function readManifest(): Promise<Record<string, string>> {
   const parsed: unknown = JSON.parse(await readFile(MANIFEST_PATH, "utf8"));
   if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
@@ -30,13 +44,13 @@ async function readManifest(): Promise<Record<string, string>> {
   for (const [schema, output] of entries) {
     if (
       typeof output !== "string" ||
-      schema !== schema.split(/[\\/]/).at(-1) ||
-      output !== output.split(/[\\/]/).at(-1) ||
       !schema.endsWith(".schema.json") ||
       !output.endsWith(".gen.ts")
     ) {
       throw new Error(`Invalid web contract manifest entry: ${schema} -> ${String(output)}`);
     }
+    resolveManifestPath(SCHEMA_DIRECTORY, "schema", schema);
+    resolveManifestPath(TYPESCRIPT_DIRECTORY, "src/helpers", output);
   }
   entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   return Object.fromEntries(entries) as Record<string, string>;
@@ -76,12 +90,16 @@ async function filesBelow(directory: string): Promise<Set<string>> {
 
 export async function emitWebContracts(check: boolean): Promise<boolean> {
   const manifest = await readManifest();
-  const expectedPaths = new Set(Object.values(manifest).map((output) => join(TYPESCRIPT_DIRECTORY, output)));
+  const expectedPaths = new Set(
+    Object.values(manifest).map((output) =>
+      resolveManifestPath(TYPESCRIPT_DIRECTORY, "src/helpers", output),
+    ),
+  );
   let stale = false;
 
   for (const [schema, output] of Object.entries(manifest)) {
-    const schemaPath = join(SCHEMA_DIRECTORY, schema);
-    const outputPath = join(TYPESCRIPT_DIRECTORY, output);
+    const schemaPath = resolveManifestPath(SCHEMA_DIRECTORY, "schema", schema);
+    const outputPath = resolveManifestPath(TYPESCRIPT_DIRECTORY, "src/helpers", output);
     const generated = lfTerminated(await compileFromFile(schemaPath, COMPILER_OPTIONS));
 
     if (!check) {
@@ -104,6 +122,7 @@ export async function emitWebContracts(check: boolean): Promise<boolean> {
   }
 
   const unexpectedPaths = [...(await filesBelow(TYPESCRIPT_DIRECTORY))]
+    .map((path) => resolve(path))
     .filter((path) => !expectedPaths.has(path))
     .sort();
   for (const unexpectedPath of unexpectedPaths) {

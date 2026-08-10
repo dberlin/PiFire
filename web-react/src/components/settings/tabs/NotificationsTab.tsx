@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { settingsDelta } from "../../../helpers/settings/settingsDelta";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -25,7 +25,7 @@ type NotifyServicesState = Record<string, NotifyService>;
 // from Notifications and back unmounts and remounts this component, and only
 // state held in the draft store survives that trip. A plain useState here
 // would forget a queued delete exactly the way the bug this fixes forgot it.
-function readNotify(s: Settings): { ns: NotifyServicesState; removedDeviceIds: string[] } {
+function readNotify(s: SettingsSchema): { ns: NotifyServicesState; removedDeviceIds: string[] } {
   return {
     ns: structuredClone(s.notify_services ?? {}) as unknown as NotifyServicesState,
     removedDeviceIds: [],

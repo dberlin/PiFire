@@ -1,4 +1,4 @@
-import type { Settings } from "../settings/settingsApi";
+import type { SettingsSchema } from "../settings/settingsTypes.gen";
 import type { ProbeMap, ProbeProfile } from "../wizard/probeTypes";
 import type { ApplyProbeMapResult, ProbeModuleCatalog } from "./probeMapTypes";
 
@@ -71,7 +71,7 @@ export async function applyProbeMap(
  *  mean validating every driver-specific device dict in the browser, which is
  *  exactly what common/settings_schema.py:229-234 deliberately declines to do
  *  on the server. */
-export function readLiveProbeMap(settings: Settings): ProbeMap {
+export function readLiveProbeMap(settings: SettingsSchema): ProbeMap {
   const raw = settings?.probe_settings?.probe_map;
   if (!raw) return EMPTY_MAP;
   return {
@@ -82,6 +82,6 @@ export function readLiveProbeMap(settings: Settings): ProbeMap {
 
 /** Live settings store probe_profiles keyed by id; PortForm's picker takes a
  *  list. Same flattening /api/wizard/state does (api_wizard/routes.py:129-130). */
-export function readLiveProfiles(settings: Settings): ProbeProfile[] {
+export function readLiveProfiles(settings: SettingsSchema): ProbeProfile[] {
   return Object.values(settings?.probe_settings?.probe_profiles ?? {}) as unknown as ProbeProfile[];
 }

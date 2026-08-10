@@ -1,12 +1,8 @@
 import { queryKeys } from "../query/keys";
 import { queryClient } from "../query/queryClient";
-import {
-  type ControllerMetadata,
-  getControllerMetadata,
-  getMode,
-  getSettings,
-  type Settings,
-} from "./settingsApi";
+import type { ControllerCatalog } from "./controllerTypes.gen";
+import { getControllerMetadata, getMode, getSettings } from "./settingsApi";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -29,9 +25,9 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 // cold-cache failure does -- which is what keeps SettingsError reachable on
 // every navigation, not only the first.
 export async function settingsLoader(): Promise<{
-  settings: Settings;
+  settings: SettingsSchema;
   mode: string;
-  controllerMeta: ControllerMetadata | null;
+  controllerMeta: ControllerCatalog | null;
 }> {
   const [settings, mode, controllerMeta] = await Promise.all([
     queryClient.fetchQuery({

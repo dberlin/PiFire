@@ -27,6 +27,13 @@ from common.settings_schema import (
     SettingsSchema,
     Versions,
 )
+from common.web_contracts.settings import (
+    ModeResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
+    SettingsUpdateResponse,
+)
+from common.web_contracts.registry import WEB_ROOT_CONTRACTS
 
 
 def assert_parity(settings: dict) -> None:
@@ -38,6 +45,57 @@ def assert_parity(settings: dict) -> None:
 
 def test_default_settings_round_trips():
     assert_parity(default_settings())
+
+
+def test_settings_response_validates_the_live_settings_envelope():
+    payload = {"settings": default_settings()}
+
+    response = SettingsResponse.model_validate(payload, strict=True)
+
+    assert response.model_dump(mode="json", by_alias=True) == payload
+
+
+def test_settings_update_request_preserves_sparse_merge_patch_and_flags():
+    payload = {
+        "settings": {"notify_services": {"onesignal": {"devices": {"retired": None}}}},
+        "flags": ["settings_update", "controller_update"],
+    }
+
+    request = SettingsUpdateRequest.model_validate(payload)
+
+    assert request.model_dump(mode="json") == payload
+
+
+def test_settings_update_request_rejects_unknown_flags():
+    with pytest.raises(ValidationError):
+        SettingsUpdateRequest.model_validate({"settings": {}, "flags": ["mode"]})
+
+
+def test_settings_update_responses_validate_success_and_field_errors():
+    settings = default_settings()
+    success = {
+        "result": "success",
+        "message": "Settings updated.",
+        "errors": [],
+        "data": settings,
+    }
+    rejected = {
+        "result": "error",
+        "message": "Settings update failed: safety.maxtemp: Input should be a valid integer",
+        "errors": [{"path": "safety.maxtemp", "message": "Input should be a valid integer"}],
+        "data": {},
+    }
+
+    assert SettingsUpdateResponse.model_validate(success, strict=True).model_dump(mode="json", by_alias=True) == success
+    assert (
+        SettingsUpdateResponse.model_validate(rejected, strict=True).model_dump(mode="json", by_alias=True) == rejected
+    )
+
+
+def test_mode_response_preserves_the_command_envelope():
+    payload = {"result": "OK", "message": "", "data": {"mode": "Stop"}}
+
+    assert ModeResponse.model_validate(payload, strict=True).model_dump(mode="json") == payload
 
 
 def test_extra_keys_rejected_by_raw_model_validate():
@@ -190,22 +248,27 @@ def test_migrated_ancient_settings_round_trip(_migration_env):
 
 # ---------------------------------------------------------------------------
 # Drift test: schema committed to web-react/schema/settings.schema.json
-# must match export_schema() at all times. Flags unintended schema drift.
+# must match SettingsSchema directly at all times. Flags unintended schema drift.
 # ---------------------------------------------------------------------------
 
 
 from pathlib import Path
 
-from common.settings_schema import export_schema
-
 SCHEMA_PATH = Path(__file__).resolve().parents[3] / "web-react" / "schema" / "settings.schema.json"
 
 
 def test_committed_schema_is_current():
-    """Fails when models changed but web-react/schema/settings.schema.json
-    wasn't regenerated (uv run python -m common.settings_schema > ...)."""
+    """Fails when the registered exporter has not regenerated settings schema."""
     committed = json.loads(SCHEMA_PATH.read_text())
-    assert committed == export_schema()
+    assert committed == SettingsSchema.model_json_schema()
+
+
+def test_settings_schema_is_registered_at_its_established_direct_root_path():
+    artifact = next(item for item in WEB_ROOT_CONTRACTS if item.name == "settings")
+
+    assert artifact.model is SettingsSchema
+    assert artifact.schema_output == "../settings.schema.json"
+    assert artifact.typescript_output == "../settings/settingsTypes.gen.ts"
 
 
 # ---------------------------------------------------------------------------

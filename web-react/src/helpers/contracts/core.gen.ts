@@ -125,7 +125,7 @@ export type Uuid1 = string;
 export type Build = string | null;
 
 export interface PiFireCoreWebContracts {
-  [k: string]: unknown;
+  [k: string]: unknown | undefined;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
@@ -247,7 +247,7 @@ export interface ProbeDataPayload {
   targetShutdown: Targetshutdown;
   temp: Temp;
   title: Title;
-  [k: string]: unknown;
+  [k: string]: unknown | undefined;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
@@ -261,7 +261,7 @@ export interface ProbeStatusPayload {
   error?: Error;
   lastReadingAge?: Lastreadingage;
   lastTemp?: Lasttemp;
-  [k: string]: unknown;
+  [k: string]: unknown | undefined;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema

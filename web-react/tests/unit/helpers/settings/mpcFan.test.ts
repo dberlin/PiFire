@@ -1,13 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
 import { mpcFanConflict, mpcFanPending } from "../../../../src/helpers/settings/mpcFan";
-import type { Settings } from "../../../../src/helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../../src/helpers/settings/settingsTypes.gen";
 
-const dcFan = (pwmControl: boolean, fanInput: boolean): Settings =>
+const dcFan = (pwmControl: boolean, fanInput: boolean): SettingsSchema =>
   ({
     platform: { dc_fan: true },
     pwm: { pwm_control: pwmControl },
     controller: { selected: "mpc", config: { mpc: { enable_fan_input: fanInput } } },
-  }) as unknown as Settings;
+  }) as unknown as SettingsSchema;
 
 describe("mpcFanConflict", () => {
   it("fires when MPC owns the fan but PWM control is off", () => {
@@ -35,7 +35,7 @@ describe("mpcFanConflict", () => {
   });
 
   it("does not fire on an AC-fan build", () => {
-    const ac = { ...dcFan(false, true), platform: { dc_fan: false } } as unknown as Settings;
+    const ac = { ...dcFan(false, true), platform: { dc_fan: false } } as unknown as SettingsSchema;
     expect(mpcFanConflict({ selected: "mpc", enableFanInput: true, settings: ac })).toBe(false);
   });
 });

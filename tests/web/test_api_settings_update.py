@@ -119,6 +119,18 @@ def test_settings_update_rejects_structurally_bad_delta_layer1(client):
     assert read_settings() == before
 
 
+def test_settings_update_rejects_a_non_object_request_settings_member(client):
+    before = read_settings()
+
+    resp = client.post("/api/settings_update", json={"settings": [], "flags": []})
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["result"] == "error"
+    assert payload["errors"][0]["path"] == "settings"
+    assert read_settings() == before
+
+
 # ---------------------------------------------------------------------------
 # Layer 1's PartialSettingsSchema.model_validate(...,
 # strict=True) inherits SettingsSchema's cross-field model_validators

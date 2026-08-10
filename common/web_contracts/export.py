@@ -10,12 +10,22 @@ from pathlib import Path
 
 from pydantic.json_schema import models_json_schema
 
-from .registry import ContractBundle, WEB_CONTRACT_BUNDLES
+from .registry import ContractBundle, RootContract, WEB_CONTRACT_BUNDLES, WEB_ROOT_CONTRACTS
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_DIRECTORY = Path("web-react/schema/contracts")
 TYPESCRIPT_DIRECTORY = Path("web-react/src/helpers/contracts")
 MANIFEST_PATH = SCHEMA_DIRECTORY / "manifest.json"
+
+
+def _validate_output(base: Path, output: str, suffix: str, label: str) -> None:
+    path = Path(output)
+    if path.is_absolute() or not output.endswith(suffix):
+        raise ValueError(f"invalid {label}: {output!r}")
+    try:
+        (base / path).resolve().relative_to(base.parent.resolve())
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes {base.parent}: {output!r}") from exc
 
 
 def _ordered_bundles(bundles: Iterable[ContractBundle]) -> tuple[ContractBundle, ...]:
@@ -32,10 +42,37 @@ def _ordered_bundles(bundles: Iterable[ContractBundle]) -> tuple[ContractBundle,
     for bundle in ordered:
         if not bundle.name or Path(bundle.name).name != bundle.name:
             raise ValueError(f"invalid web contract bundle name: {bundle.name!r}")
-        if Path(bundle.typescript_output).name != bundle.typescript_output or not bundle.typescript_output.endswith(
-            ".gen.ts"
-        ):
-            raise ValueError(f"invalid web contract TypeScript output: {bundle.typescript_output!r}")
+        _validate_output(
+            TYPESCRIPT_DIRECTORY,
+            bundle.typescript_output,
+            ".gen.ts",
+            "web contract TypeScript output",
+        )
+    return ordered
+
+
+def _ordered_roots(roots: Iterable[RootContract]) -> tuple[RootContract, ...]:
+    ordered = tuple(roots)
+    names = tuple(root.name for root in ordered)
+    if names != tuple(sorted(names)):
+        raise ValueError("web root contracts must be sorted by name")
+    if len(names) != len(set(names)):
+        raise ValueError("web root contract names must be unique")
+    for root in ordered:
+        if not root.name or Path(root.name).name != root.name:
+            raise ValueError(f"invalid web root contract name: {root.name!r}")
+        _validate_output(
+            SCHEMA_DIRECTORY,
+            root.schema_output,
+            ".schema.json",
+            "web root schema output",
+        )
+        _validate_output(
+            TYPESCRIPT_DIRECTORY,
+            root.typescript_output,
+            ".gen.ts",
+            "web root TypeScript output",
+        )
     return ordered
 
 
@@ -47,17 +84,40 @@ def render_bundle_schema(bundle: ContractBundle) -> str:
     return json.dumps(schema, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
 
+def render_root_schema(root: RootContract) -> str:
+    return (
+        json.dumps(
+            root.model.model_json_schema(mode="serialization"),
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n"
+    )
+
+
 def render_contract_artifacts(
-    bundles: Iterable[ContractBundle] = WEB_CONTRACT_BUNDLES,
+    bundles: Iterable[ContractBundle] | None = None,
+    roots: Iterable[RootContract] | None = None,
 ) -> dict[Path, bytes]:
-    ordered = _ordered_bundles(bundles)
-    manifest = {f"{bundle.name}.schema.json": bundle.typescript_output for bundle in ordered}
+    if bundles is None:
+        ordered = _ordered_bundles(WEB_CONTRACT_BUNDLES)
+        ordered_roots = _ordered_roots(WEB_ROOT_CONTRACTS if roots is None else roots)
+    else:
+        ordered = _ordered_bundles(bundles)
+        ordered_roots = _ordered_roots(() if roots is None else roots)
+    manifest = {
+        **{f"{bundle.name}.schema.json": bundle.typescript_output for bundle in ordered},
+        **{root.schema_output: root.typescript_output for root in ordered_roots},
+    }
     artifacts = {
         MANIFEST_PATH: (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode(),
     }
     artifacts.update(
-        (SCHEMA_DIRECTORY / f"{bundle.name}.schema.json", render_bundle_schema(bundle).encode())
-        for bundle in ordered
+        (SCHEMA_DIRECTORY / f"{bundle.name}.schema.json", render_bundle_schema(bundle).encode()) for bundle in ordered
+    )
+    artifacts.update(
+        (SCHEMA_DIRECTORY / root.schema_output, render_root_schema(root).encode()) for root in ordered_roots
     )
     return artifacts
 
@@ -82,12 +142,22 @@ def _files_below(directory: Path) -> set[Path]:
     return {path for path in directory.rglob("*") if path.is_file()}
 
 
-def _expected_typescript_paths(root: Path, bundles: Sequence[ContractBundle]) -> set[Path]:
-    return {root / TYPESCRIPT_DIRECTORY / bundle.typescript_output for bundle in bundles}
+def _expected_typescript_paths(
+    root: Path,
+    bundles: Sequence[ContractBundle],
+    roots: Sequence[RootContract],
+) -> set[Path]:
+    outputs = [bundle.typescript_output for bundle in bundles]
+    outputs.extend(item.typescript_output for item in roots)
+    return {(root / TYPESCRIPT_DIRECTORY / output).resolve() for output in outputs}
 
 
-def _write_artifacts(root: Path, bundles: tuple[ContractBundle, ...]) -> None:
-    artifacts = render_contract_artifacts(bundles)
+def _write_artifacts(
+    root: Path,
+    bundles: tuple[ContractBundle, ...],
+    roots: tuple[RootContract, ...],
+) -> None:
+    artifacts = render_contract_artifacts(bundles, roots)
     for relative_path, content in artifacts.items():
         _atomic_write(root / relative_path, content)
         print(f"Wrote {relative_path}")
@@ -101,8 +171,12 @@ def _write_artifacts(root: Path, bundles: tuple[ContractBundle, ...]) -> None:
     (root / TYPESCRIPT_DIRECTORY).mkdir(parents=True, exist_ok=True)
 
 
-def _check_artifacts(root: Path, bundles: tuple[ContractBundle, ...]) -> bool:
-    artifacts = render_contract_artifacts(bundles)
+def _check_artifacts(
+    root: Path,
+    bundles: tuple[ContractBundle, ...],
+    roots: tuple[RootContract, ...],
+) -> bool:
+    artifacts = render_contract_artifacts(bundles, roots)
     stale = False
 
     expected_schema_paths = {root / relative_path for relative_path in artifacts}
@@ -123,11 +197,12 @@ def _check_artifacts(root: Path, bundles: tuple[ContractBundle, ...]) -> bool:
         print(f"unexpected: {unexpected.relative_to(root)}", file=sys.stderr)
         stale = True
 
-    expected_typescript_paths = _expected_typescript_paths(root, bundles)
-    for missing in sorted(expected_typescript_paths - _files_below(root / TYPESCRIPT_DIRECTORY)):
+    expected_typescript_paths = _expected_typescript_paths(root, bundles, roots)
+    for missing in sorted(path for path in expected_typescript_paths if not path.is_file()):
         print(f"missing: {missing.relative_to(root)}", file=sys.stderr)
         stale = True
-    for unexpected in sorted(_files_below(root / TYPESCRIPT_DIRECTORY) - expected_typescript_paths):
+    contract_typescript_paths = _files_below(root / TYPESCRIPT_DIRECTORY)
+    for unexpected in sorted(contract_typescript_paths - expected_typescript_paths):
         print(f"unexpected: {unexpected.relative_to(root)}", file=sys.stderr)
         stale = True
 
@@ -140,19 +215,25 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     root: Path = REPOSITORY_ROOT,
-    bundles: Iterable[ContractBundle] = WEB_CONTRACT_BUNDLES,
+    bundles: Iterable[ContractBundle] | None = None,
+    roots: Iterable[RootContract] | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(description="Export Pydantic web contracts")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true", help="write generated schema artifacts")
     mode.add_argument("--check", action="store_true", help="check committed generated artifacts")
     arguments = parser.parse_args(argv)
-    ordered = _ordered_bundles(bundles)
+    if bundles is None:
+        ordered = _ordered_bundles(WEB_CONTRACT_BUNDLES)
+        ordered_roots = _ordered_roots(WEB_ROOT_CONTRACTS if roots is None else roots)
+    else:
+        ordered = _ordered_bundles(bundles)
+        ordered_roots = _ordered_roots(() if roots is None else roots)
 
     if arguments.write:
-        _write_artifacts(root, ordered)
+        _write_artifacts(root, ordered, ordered_roots)
         return 0
-    return 0 if _check_artifacts(root, ordered) else 1
+    return 0 if _check_artifacts(root, ordered, ordered_roots) else 1
 
 
 if __name__ == "__main__":

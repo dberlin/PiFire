@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useOutletContext, useRevalidator } from "react-router";
 import { createCommand } from "../../../helpers/command";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
@@ -13,7 +13,7 @@ const UNIT_OPTIONS = [
 ];
 
 export function UnitsTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { settings } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
   const revalidator = useRevalidator();
   const [units, setUnits] = useState<"F" | "C">(settings.globals?.units === "C" ? "C" : "F");
   const [pending, setPending] = useState<"F" | "C" | null>(null);

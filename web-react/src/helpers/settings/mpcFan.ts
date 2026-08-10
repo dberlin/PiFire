@@ -1,5 +1,5 @@
 import { hasDcFan } from "./platform";
-import type { Settings } from "./settingsApi";
+import type { SettingsSchema } from "./settingsTypes.gen";
 import type { SettingsDrafts } from "./settingsDrafts";
 
 /** The controller key whose allocator emits a fan duty. */
@@ -28,7 +28,7 @@ type ControllerDraft = { selected?: unknown; values?: Record<string, unknown> };
  * saved, so the draft store is consulted first and saved settings are the
  * fallback. Read-only: the PWM tab never writes the Controller tab's draft.
  */
-export function mpcFanPending(settings: Settings, drafts: SettingsDrafts): boolean {
+export function mpcFanPending(settings: SettingsSchema, drafts: SettingsDrafts): boolean {
   const draft = drafts.controller?.value as ControllerDraft | undefined;
   if (draft && typeof draft.selected === "string") {
     return draft.selected === MPC && !!draft.values?.enable_fan_input;
@@ -51,7 +51,7 @@ export function mpcFanConflict({
 }: {
   selected: string;
   enableFanInput: boolean;
-  settings: Settings;
+  settings: SettingsSchema;
 }): boolean {
   if (selected !== MPC || !enableFanInput) return false;
   if (!hasDcFan(settings)) return false;

@@ -27,6 +27,26 @@ from .core import (
     TimerPayload,
     WebUiBuildResponse,
 )
+from .settings import (
+    BoolControllerOption,
+    ControllerCatalog,
+    ControllerConfigs,
+    ControllerDefinition,
+    ControllerMetadata,
+    FloatControllerOption,
+    IntControllerOption,
+    ListControllerOption,
+    ModeResponse,
+    MpcConfig,
+    PidConfig,
+    PidSpConfig,
+    SaveFieldError,
+    SettingsResponse,
+    SettingsUpdateRequest,
+    SettingsUpdateResponse,
+    StringControllerOption,
+)
+from common.settings_schema import SettingsSchema
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,9 +56,40 @@ class ContractBundle:
     typescript_output: str
 
 
+@dataclass(frozen=True, slots=True)
+class RootContract:
+    name: str
+    model: type[BaseModel]
+    schema_output: str
+    typescript_output: str
+
+
 # Keep this explicit and sorted by bundle name. Contract additions must be
 # reviewable registrations rather than side effects of module discovery.
 WEB_CONTRACT_BUNDLES: tuple[ContractBundle, ...] = (
+    ContractBundle(
+        name="controller",
+        models=(
+            BoolControllerOption,
+            ControllerCatalog,
+            ControllerConfigs,
+            ControllerDefinition,
+            ControllerMetadata,
+            FloatControllerOption,
+            IntControllerOption,
+            ListControllerOption,
+            ModeResponse,
+            MpcConfig,
+            PidConfig,
+            PidSpConfig,
+            SaveFieldError,
+            SettingsResponse,
+            SettingsUpdateRequest,
+            SettingsUpdateResponse,
+            StringControllerOption,
+        ),
+        typescript_output="../settings/controllerTypes.gen.ts",
+    ),
     ContractBundle(
         name="core",
         models=(
@@ -68,5 +119,15 @@ WEB_CONTRACT_BUNDLES: tuple[ContractBundle, ...] = (
             WebUiBuildResponse,
         ),
         typescript_output="core.gen.ts",
+    ),
+)
+
+
+WEB_ROOT_CONTRACTS: tuple[RootContract, ...] = (
+    RootContract(
+        name="settings",
+        model=SettingsSchema,
+        schema_output="../settings.schema.json",
+        typescript_output="../settings/settingsTypes.gen.ts",
     ),
 )

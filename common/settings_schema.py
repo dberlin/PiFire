@@ -28,7 +28,6 @@ NEW constraint must trace the same way.
 """
 
 import copy
-import json
 from types import UnionType
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
@@ -1168,11 +1167,3 @@ def validate_settings_tree(settings: dict, *, persisted: bool = True) -> dict:
 # notify_services.onesignal.uuid) to be present. ERROR-QUALITY nicety, not
 # the enforcement mechanism -- validate_settings_tree() above is that.
 PartialSettingsSchema = create_partial_model(SettingsSchema, recursive=True)
-
-
-def export_schema() -> dict:
-    return SettingsSchema.model_json_schema()
-
-
-if __name__ == "__main__":
-    print(json.dumps(export_schema(), indent=2, sort_keys=True))

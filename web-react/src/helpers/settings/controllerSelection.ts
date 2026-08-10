@@ -1,8 +1,9 @@
-import type { ControllerMetadata, Settings } from "./settingsApi";
+import type { ControllerCatalog } from "./controllerTypes.gen";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 /** The catalog's first controller — what an install falls back to when
  *  `controller.selected` names one this build does not ship. */
-function firstControllerKey(meta: ControllerMetadata | null): string {
+function firstControllerKey(meta: ControllerCatalog | null): string {
   if (!meta) return "";
   return Object.keys(meta.metadata)[0] ?? "";
 }
@@ -18,7 +19,7 @@ function firstControllerKey(meta: ControllerMetadata | null): string {
  * controller's options) and WorkModeTab (which offers its recommended u_max),
  * because the two tabs must agree on what "selected" means.
  */
-export function readSelected(settings: Settings, meta: ControllerMetadata | null): string {
+export function readSelected(settings: SettingsSchema, meta: ControllerCatalog | null): string {
   const sel = settings.controller?.selected;
   if (typeof sel === "string" && meta?.metadata[sel]) return sel;
   return firstControllerKey(meta);

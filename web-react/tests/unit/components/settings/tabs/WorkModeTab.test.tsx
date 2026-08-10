@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { WorkModeTab } from "../../../../../src/components/settings/tabs/WorkModeTab";
-import type { ControllerMetadata } from "../../../../../src/helpers/settings/settingsApi";
+import type { ControllerCatalog } from "../../../../../src/helpers/settings/controllerTypes.gen";
 import { renderRoute } from "../../../test-utils";
 
 const saveMock = rs.fn().mockResolvedValue(true);
@@ -24,6 +24,15 @@ beforeEach(() => {
 });
 
 // Field associates its <label> to the control via htmlFor/id, so
+const definitionFields = {
+  attributions: [],
+  author: "Test",
+  contributors: [],
+  image: "test.png",
+  link: "",
+  module_name: "test",
+};
+
 // getByLabelText(field) resolves the input directly.
 function inputFor(label: string): HTMLInputElement {
   return screen.getByLabelText(label) as HTMLInputElement;
@@ -362,15 +371,17 @@ describe("WorkModeTab", () => {
     // from "reads the first controller" from "hardcodes 0.9". These values are
     // fabricated and distinct per controller so that distinction is testable,
     // and `pid` is deliberately declared FIRST while `mpc` is the selection.
-    const perControllerMeta: ControllerMetadata = {
+    const perControllerMeta: ControllerCatalog = {
       metadata: {
         pid: {
+          ...definitionFields,
           friendly_name: "PID Standard",
           description: "",
           config: [],
           recommendations: { cycle: { cycle_ratio_max: 0.7 } },
         },
         mpc: {
+          ...definitionFields,
           friendly_name: "MPC",
           description: "",
           config: [],
@@ -379,7 +390,7 @@ describe("WorkModeTab", () => {
       },
     };
 
-    const contextFor = (controllerMeta: ControllerMetadata | null) => ({
+    const contextFor = (controllerMeta: ControllerCatalog | null) => ({
       settings: {
         platform: { dc_fan: true },
         cycle_data: { u_max: 0.5 },
@@ -441,12 +452,13 @@ describe("WorkModeTab", () => {
         contextFor({
           metadata: {
             pid: {
+              ...definitionFields,
               friendly_name: "PID Standard",
               description: "",
               config: [],
               recommendations: { cycle: { cycle_ratio_max: 0.7 } },
             },
-            mpc: { friendly_name: "MPC", description: "", config: [] },
+            mpc: { ...definitionFields, friendly_name: "MPC", description: "", config: [] },
           },
         }),
       );
@@ -469,7 +481,7 @@ describe("WorkModeTab", () => {
               recommendations: { cycle: { cycle_ratio_max: null } },
             },
           },
-        } as unknown as ControllerMetadata),
+        } as unknown as ControllerCatalog),
       );
 
       expect(screen.queryByTitle(RECOMMEND_TITLE)).toBeNull();

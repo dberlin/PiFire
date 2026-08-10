@@ -39,7 +39,12 @@ from common.i2c_bus import (
 )
 from common.modes import Mode
 from common.server_status import get_server_status
-from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings_pairs
+from common.settings_schema import (
+    SettingsValidationError,
+    apply_settings_delta,
+    format_validation_pairs,
+    validate_partial_settings_pairs,
+)
 from common.controller_deps import guard_controller_selection
 from common.web_contracts.core import (
     CommandResponse,
@@ -47,6 +52,13 @@ from common.web_contracts.core import (
     DismissWarningsRequest,
     DismissWarningsResponse,
     MpcCalibrationCommandResponse,
+)
+from common.web_contracts.settings import (
+    ControllerCatalog,
+    ModeResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
+    SettingsUpdateResponse,
 )
 from controller.model_learning.activation import (
     ActivationManager,
@@ -86,7 +98,8 @@ def _build_current_status(settings, control, display, probe_status):
 
 
 def _api_get_settings(settings, server_status):
-    return jsonify({"settings": settings}), 201
+    payload = SettingsResponse.model_validate({"settings": settings}, strict=True)
+    return jsonify(payload.model_dump(mode="json", by_alias=True)), 201
 
 
 def _api_get_server(settings, server_status):
@@ -162,7 +175,11 @@ def _api_get_wled_discover(settings, server_status):
 
 
 def _api_get_controller_metadata(settings, server_status):
-    return jsonify(read_generic_json("./controller/controllers.json")), 201
+    payload = ControllerCatalog.model_validate(
+        read_generic_json("./controller/controllers.json"),
+        strict=True,
+    )
+    return jsonify(payload.model_dump(mode="json", by_alias=True)), 201
 
 
 def _api_get_probe_modules(settings, server_status):
@@ -469,12 +486,9 @@ def _api_post_settings(settings, request_json):
         ), 201
 
 
-_SETTINGS_UPDATE_ALLOWED_FLAGS = {
-    "settings_update",
-    "controller_update",
-    "distance_update",
-    "probe_profile_update",
-}
+def _settings_update_response(payload: dict):
+    response = SettingsUpdateResponse.model_validate(payload, strict=True)
+    return jsonify(response.model_dump(mode="json", by_alias=True)), 200
 
 
 def _api_post_settings_update(settings, request_json):
@@ -483,10 +497,10 @@ def _api_post_settings_update(settings, request_json):
     control loop re-reads. Mirrors save_settings_and_flag_update.
     body: { "settings": <partial settings dict>, "flags": ["settings_update", ...] }
 
-    `flags` is restricted to _SETTINGS_UPDATE_ALLOWED_FLAGS -- an unknown flag
-    (e.g. a typo'd "mode") would otherwise be set as control[flag] = True,
-    clobbering unrelated control keys, so requests with any unknown flag are
-    rejected outright without writing settings or control.
+    `flags` is validated by SettingsUpdateRequest against the Pydantic-owned
+    SettingsFlag literal. An unknown flag (for example a typo'd "mode") would
+    otherwise be set as control[flag] = True and clobber unrelated control
+    keys, so the request is rejected before writing settings or control.
 
     Two-layer rejection:
       1. The DELTA itself is FIELD-level strict-validated against
@@ -515,23 +529,32 @@ def _api_post_settings_update(settings, request_json):
     flag, blocked controller selection, an unexpected exception) sends an
     empty list rather than an invented path.
     """
-    delta = request_json.get("settings", {})
-    flags = request_json.get("flags", []) or []
-    for flag in flags:
-        if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
-            return jsonify({"result": "error", "message": f"Unknown flag: {flag}", "errors": [], "data": {}}), 200
-
+    try:
+        update = SettingsUpdateRequest.model_validate(request_json, strict=True)
+    except ValidationError as exc:
+        pairs = format_validation_pairs(exc)
+        message = "; ".join(f"{pair['path']}: {pair['message']}" for pair in pairs)
+        return _settings_update_response(
+            {
+                "result": "error",
+                "message": f"Settings update failed: {message}",
+                "errors": pairs,
+                "data": {},
+            }
+        )
+    delta = update.settings
+    flags = update.flags
     layer1_pairs = validate_partial_settings_pairs(delta)
     if layer1_pairs:
         message = "; ".join(f"{p['path']}: {p['message']}" for p in layer1_pairs)
-        return jsonify(
+        return _settings_update_response(
             {
                 "result": "error",
                 "message": f"Settings update failed: {message}",
                 "errors": layer1_pairs,
                 "data": {},
             }
-        ), 200
+        )
 
     try:
         settings = apply_settings_delta(settings, delta)
@@ -543,22 +566,36 @@ def _api_post_settings_update(settings, request_json):
         # background install; see common/controller_deps.py.
         blocked = guard_controller_selection(settings)
         if blocked:
-            return jsonify({"result": "error", "message": blocked, "errors": [], "data": {}}), 200
+            return _settings_update_response({"result": "error", "message": blocked, "errors": [], "data": {}})
         control = read_control()
         save_settings_and_flag_update(settings, control, *flags, origin="api")
-        return jsonify({"result": "success", "message": "Settings updated.", "errors": [], "data": settings}), 200
+        return _settings_update_response(
+            {
+                "result": "success",
+                "message": "Settings updated.",
+                "errors": [],
+                "data": settings,
+            }
+        )
     except SettingsValidationError as exc:
         message = "; ".join(exc.errors)
-        return jsonify(
+        return _settings_update_response(
             {
                 "result": "error",
                 "message": f"Settings update failed: {message}",
                 "errors": exc.pairs,
                 "data": {},
             }
-        ), 200
+        )
     except Exception as e:
-        return jsonify({"result": "error", "message": f"Settings update failed: {e}", "errors": [], "data": {}}), 200
+        return _settings_update_response(
+            {
+                "result": "error",
+                "message": f"Settings update failed: {e}",
+                "errors": [],
+                "data": {},
+            }
+        )
 
 
 def _api_post_control(settings, request_json):
@@ -834,6 +871,12 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
             )
         elif action == "sys" and arg0 == "check_alive":
             data = ControlHealthResponse.model_validate(data, strict=True).model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=False,
+            )
+        elif action == "get" and arg0 == "mode":
+            data = ModeResponse.model_validate(data, strict=True).model_dump(
                 mode="json",
                 by_alias=True,
                 exclude_none=False,

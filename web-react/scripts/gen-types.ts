@@ -8,33 +8,17 @@
 //                                        output against the committed file
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { compileFromFile } from "json-schema-to-typescript";
-import { emitControllerTypes } from "./emitControllerTypes";
 import { emitSettingsDefaults } from "./emitSettingsDefaults";
 import { emitWebContracts } from "./emitWebContracts";
 
 const SCHEMA_PATH = "schema/settings.schema.json";
-const CONTROLLERS_PATH = "../controller/controllers.json";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const BANNER_COMMENT =
-  "/* eslint-disable */\n" +
-  "// GENERATED from schema/settings.schema.json — do not edit. Regenerate: bun run gen:types";
-
 interface Artifact {
   out: string;
   generate: () => Promise<string>;
 }
 
 const ARTIFACTS: Artifact[] = [
-  {
-    out: "src/helpers/settings/settingsTypes.gen.ts",
-    generate: () => compileFromFile(SCHEMA_PATH, { bannerComment: BANNER_COMMENT }),
-  },
-  {
-    out: "src/helpers/settings/controllerTypes.gen.ts",
-    generate: async () =>
-      emitControllerTypes(JSON.parse(await readFile(CONTROLLERS_PATH, "utf8"))),
-  },
   {
     out: "src/helpers/settings/settingsDefaults.gen.ts",
     generate: async () =>

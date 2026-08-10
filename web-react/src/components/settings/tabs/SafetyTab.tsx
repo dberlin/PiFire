@@ -1,6 +1,6 @@
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
-import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -18,7 +18,7 @@ type Safety = {
   allow_manual_changes: boolean;
   manual_override_time: number;
 };
-function readSafety(s: Settings): Safety {
+function readSafety(s: SettingsSchema): Safety {
   const x = s.safety ?? {};
   return {
     minstartuptemp: x.minstartuptemp ?? SETTINGS_DEFAULTS.safety.minstartuptemp,
@@ -41,7 +41,7 @@ export function SafetyTab() {
     let d: object = {};
     // Object.entries widens its key to string, which erases exactly the fact
     // this loop depends on: every key of `v` is a field of settings.safety.
-    type SafetyKey = keyof NonNullable<Settings["safety"]>;
+    type SafetyKey = keyof NonNullable<SettingsSchema["safety"]>;
     for (const k of Object.keys(v) as SafetyKey[]) d = setPath(d, `safety.${k}`, v[k]);
     // _settings_safety does a bare write — no control flag
     if (await save(d, [])) markSaved();
