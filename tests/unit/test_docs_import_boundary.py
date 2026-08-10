@@ -28,9 +28,7 @@ IGNORED_PARTS = frozenset(
 
 def _sources() -> list[Path]:
     return sorted(
-        path
-        for path in ROOT.rglob("*.py")
-        if not any(part in IGNORED_PARTS for part in path.relative_to(ROOT).parts)
+        path for path in ROOT.rglob("*.py") if not any(part in IGNORED_PARTS for part in path.relative_to(ROOT).parts)
     )
 
 
