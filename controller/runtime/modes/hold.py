@@ -2746,6 +2746,9 @@ class HoldMode(ControlMode):
             "lid_open_endtime": self.state.lid.expires,
             "actuation_mode": self._actuation_mode.value,
         }
+        learning = self._runner_status().get("learning")
+        if isinstance(learning, Mapping):
+            status["learning"] = dict(learning)
         if self._pulse_scheduler is not None:
             status["pulse"] = {
                 "slot_seconds": self._pulse_scheduler.timing.pulse_s,

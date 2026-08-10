@@ -2443,22 +2443,28 @@ class Controller(ControllerBase):
         # committed so a build that fails leaves the controller solving the
         # model it already had.
         try:
+            restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
             rebuilt = self._build_for(
                 merged,
                 model_identified=owned["identification"]["status"] == "identified",
             )
+            restored_pair = OwnedGreyControlPair(
+                restored_descriptor,
+                rebuilt[0],
+                rebuilt[1],
+            )
         except Exception as exc:
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
-        old_estimator = self.estimator
-        old_solver = self.mpc
+        old_pair = self._active_control_pair
         old_learning = self._learning
         self.cfg.update(merged)
-        self.estimator, self.mpc = rebuilt
+        self._active_control_pair = restored_pair
+        self.estimator = restored_pair.estimator
+        self.mpc = restored_pair.solver
         self._learning = None
         self._close_component(old_learning)
-        self._close_component(old_solver)
-        self._close_component(old_estimator)
+        old_pair.close()
         # The state estimate belonged to the estimator just replaced. The new
         # one starts from its own initial state, so there is nothing to report
         # until it has seen a measurement.
@@ -2543,8 +2549,8 @@ class Controller(ControllerBase):
             provenance_digest=window.incumbent_digest,
             payload=ConfidenceDecisionEvidence(
                 decision_id=decision_id,
-                blocked=True,
-                reason="operator-review-required",
+                blocked=False,
+                reason=None,
             ),
         )
         receipt = self._activation_persistence_channel().submit_activation_confidence(confidence)

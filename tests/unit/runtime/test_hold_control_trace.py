@@ -1519,6 +1519,27 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     ]
 
 
+def test_hold_status_fragment_publishes_live_learning_state(hold_cycle):
+    class _Runner(FakeControllerRunner):
+        def controller_state(self):
+            return {
+                "learning": {
+                    "status": "fitting",
+                    "fit_status": "running",
+                    "role_generation": 7,
+                }
+            }
+
+    mode = hold_cycle(_Runner(), controller="mpc")
+    mode.setup()
+
+    assert mode.status_fragment()["learning"] == {
+        "status": "fitting",
+        "fit_status": "running",
+        "role_generation": 7,
+    }
+
+
 def test_framed_learning_trace_uses_generation_latched_with_pulse_frame(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
 

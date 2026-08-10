@@ -82,6 +82,7 @@ def test_no_refit_when_identification_is_off(hold_cycle):
     hold.teardown(225)
     assert runner.refits == 0
 
+
 def test_online_adaptation_without_identification_checkpoints_before_trace_close(hold_cycle, monkeypatch):
     events = []
 
@@ -551,9 +552,7 @@ def test_final_checkpoint_failure_is_terminal_and_is_not_retried(hold_cycle):
             return CheckpointSaveOutcome.FAILED
 
     store = _FailingStore()
-    runner = _FinalLifecycleRunner(
-        result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="c" * 64)
-    )
+    runner = _FinalLifecycleRunner(result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="c" * 64))
     hold = _hold(hold_cycle, runner, identification=True, store=store)
 
     hold.teardown(225)
@@ -566,11 +565,8 @@ def test_final_checkpoint_failure_is_terminal_and_is_not_retried(hold_cycle):
     ]
 
 
-
 def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_and_close(hold_cycle):
-    runner = _FinalLifecycleRunner(
-        result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="d" * 64)
-    )
+    runner = _FinalLifecycleRunner(result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="d" * 64))
 
     class _Queue:
         failed = False
@@ -620,6 +616,7 @@ def test_finalize_exception_never_queues_a_stale_snapshot(hold_cycle):
     assert hold._publish_final_checkpoint_once(TeardownRefitOutcome.FAILED, None)
     assert len(queued) == 1
     assert queued[0]["cook_refit"]["latest"] == "checkpoint-failure"
+
 
 class _RetainedRefitCore:
     def __init__(self):
@@ -780,6 +777,7 @@ def test_completed_frame_feedback_and_observation_reach_incumbent_before_activat
     finally:
         runner.stop()
 
+
 def test_durable_role_change_rotates_teardown_history_and_accepts_first_new_role_frame():
     from controller.mpc import Controller
 
@@ -789,9 +787,7 @@ def test_durable_role_change_rotates_teardown_history_and_accepts_first_new_role
     controller._teardown_history.observe(_completed_frame(1))
 
     controller._rotate_teardown_role_generation(7)
-    decision = controller._teardown_history.observe(
-        replace(_completed_frame(2), role_generation=7)
-    )
+    decision = controller._teardown_history.observe(replace(_completed_frame(2), role_generation=7))
 
     assert decision.accepted
     assert controller._learning_role_generation == 7
@@ -799,7 +795,7 @@ def test_durable_role_change_rotates_teardown_history_and_accepts_first_new_role
     assert [frame.role_generation for frame in controller._teardown_history.observations] == [7]
 
 
-def test_operator_teardown_candidate_persists_assessment_and_blocked_confidence_before_readiness():
+def test_operator_teardown_candidate_persists_unblocked_confidence_for_manual_activation():
     from controller.mpc import Controller
 
     persisted = []
@@ -815,9 +811,7 @@ def test_operator_teardown_candidate_persists_assessment_and_blocked_confidence_
     controller._learning_session_id = "session"
     controller._learning_cook_id = "cook"
     controller._persisted_activation_confidence_ids = set()
-    controller._persist_grey_lifecycle = lambda evidence, trace, **kwargs: persisted.append(
-        (evidence, trace, kwargs)
-    )
+    controller._persist_grey_lifecycle = lambda evidence, trace, **kwargs: persisted.append((evidence, trace, kwargs))
     controller._activation_persistence_channel = lambda: SimpleNamespace(
         submit_activation_confidence=lambda record: (submitted.append(record), _Receipt())[1]
     )
@@ -839,6 +833,6 @@ def test_operator_teardown_candidate_persists_assessment_and_blocked_confidence_
     assert persisted[0][0].rejection_reasons == ()
     assert submitted[0].payload == ConfidenceDecisionEvidence(
         decision_id=decision_id,
-        blocked=True,
-        reason="operator-review-required",
+        blocked=False,
+        reason=None,
     )

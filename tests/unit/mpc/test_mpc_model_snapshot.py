@@ -115,6 +115,20 @@ def test_restore_applies_v4_parameters_to_running_estimator_and_policy():
     assert restored.estimator.C_c == pytest.approx(2520.0)
 
 
+def test_restore_rebinds_owned_active_pair_to_rebuilt_handles():
+    source = _identified()
+    snapshot = source.get_model_snapshot()
+    restored = _controller()
+    previous = restored.active_control_pair
+
+    assert restored.restore_model(snapshot) is True
+
+    active = restored.active_control_pair
+    assert active is not previous
+    assert active.estimator is restored.estimator
+    assert active.solver is restored.mpc
+
+
 def test_runtime_restore_refuses_v3_even_though_one_shot_migration_accepts_it(capsys):
     v3 = {
         "version": 3,
