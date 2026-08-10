@@ -21,6 +21,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     SchemaInvalidationEvidence,
 )
+from common.web_contracts.learning import ModelEvidenceReport
 
 from .contracts import ActivationPolicy, CandidateOrigin, CheckStatus, FitStatus, LearningStatus
 
@@ -466,7 +467,10 @@ def build_learning_report(
     }
     revision_material = {**payload, "revision": None}
     payload["revision"] = hashlib.sha256(_canonical_bytes(revision_material)).hexdigest()
-    return LearningReport(_canonical_bytes(payload))
+    contract = ModelEvidenceReport.model_validate_json(_canonical_bytes(payload), strict=True)
+    return LearningReport(
+        _canonical_bytes(contract.model_dump(mode="json", exclude_unset=True))
+    )
 
 
 def current_learning_report(

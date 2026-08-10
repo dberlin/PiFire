@@ -6,11 +6,20 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass as std_dataclass
-from typing import Annotated, Literal, TypeAlias, cast
+from dataclasses import dataclass as std_dataclass
+from typing import cast
 
-from pydantic import ConfigDict, Field
-from pydantic.dataclasses import dataclass
+from common.web_contracts.learning import (
+    FopdtPidSpCheckpoint,
+    IpdtPidSpCheckpoint,
+    PidSpCheckpointModel,
+    PidSpConfirmationProgress,
+    PidSpGateValue,
+    PidSpLearningGate,
+    PidSpLearningReport,
+    PidSpLiveLearning,
+    PidSpLiveLearningStatus,
+)
 
 from controller.fopdt_identifier import (
     AMBIENT_F,
@@ -26,63 +35,6 @@ from controller.fopdt_identifier import (
     RESTORE_BOUNDS,
 )
 
-PidSpLearningStatus: TypeAlias = Literal[
-    "collecting",
-    "insufficient-excitation",
-    "evaluating",
-    "active",
-    "fallback",
-]
-FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
-GateValue: TypeAlias = int | FiniteFloat | bool
-NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
-
-_DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
-
-
-@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
-class PidSpLearningGate:
-    """One backend-owned threshold and its current live observation."""
-
-    name: str
-    passed: bool
-    observed: GateValue
-    required: GateValue
-    unit: str | None
-
-
-@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
-class PidSpConfirmationProgress:
-    """Candidate confirmations observed against the backend-owned requirement."""
-
-    observed: NonNegativeInt | None
-    required: NonNegativeInt
-
-
-@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
-class PidSpLiveLearning:
-    """Validated immutable source for the JSON-safe live status projection."""
-
-    schema_version: Literal[1]
-    controller: Literal["pid_sp"]
-    status: PidSpLearningStatus
-    identifier: dict[str, object]
-    predictor: dict[str, object]
-    confirmation: PidSpConfirmationProgress
-    gates: tuple[PidSpLearningGate, ...]
-
-    def to_dict(self) -> dict[str, object]:
-        """Return a caller-owned JSON projection of this immutable report."""
-
-        return {
-            "schema_version": self.schema_version,
-            "controller": self.controller,
-            "status": self.status,
-            "identifier": _owned_json_mapping(self.identifier, "identifier"),
-            "predictor": _owned_json_mapping(self.predictor, "predictor"),
-            "confirmation": asdict(self.confirmation),
-            "gates": [asdict(gate) for gate in self.gates],
-        }
 
 
 def _owned_json_value(value: object, path: str) -> object:
@@ -242,53 +194,17 @@ def build_pid_sp_live_learning(
         schema_version=1,
         controller="pid_sp",
         status=status,
-        identifier=identifier_owned,
-        predictor=predictor_owned,
+        identifier=identifier,
+        predictor=predictor,
         confirmation=confirmation,
         gates=gates,
-    ).to_dict()
+    ).model_dump(mode="json")
 
 
-PidSpReportStatus: TypeAlias = Literal[
-    "idle",
-    "collecting",
-    "insufficient-excitation",
-    "evaluating",
-    "active",
-    "fallback",
-    "error",
-]
-
-
-@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
-class FopdtPidSpCheckpoint:
-    """Validated durable first-order PID-SP model."""
-
-    form: Literal["fopdt"]
-    K: FiniteFloat
-    tau: FiniteFloat
-    theta: FiniteFloat
-    revision: NonNegativeInt
-    identified_at_f: FiniteFloat | None = None
-
-
-@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
-class IpdtPidSpCheckpoint:
-    """Validated durable integrating PID-SP model."""
-
-    form: Literal["ipdt"]
-    K_i: FiniteFloat
-    c0: FiniteFloat
-    theta: FiniteFloat
-    revision: NonNegativeInt
-    identified_at_f: FiniteFloat | None = None
-
-
-PidSpCheckpoint: TypeAlias = FopdtPidSpCheckpoint | IpdtPidSpCheckpoint
 
 
 @std_dataclass(frozen=True, slots=True)
-class PidSpLearningReport:
+class _CanonicalPidSpLearningReport:
     """Immutable canonical report bytes safe to cache or serve."""
 
     payload_bytes: bytes
@@ -389,7 +305,7 @@ def _normalize_checkpoint(checkpoint: object) -> dict[str, object] | None:
         if identified > AMBIENT_F + MIN_RISE_F:
             identified_at_f = identified
 
-    contract: PidSpCheckpoint
+    contract: PidSpCheckpointModel
     if form == FORM_FOPDT:
         contract = FopdtPidSpCheckpoint(
             form="fopdt",
@@ -408,10 +324,7 @@ def _normalize_checkpoint(checkpoint: object) -> dict[str, object] | None:
             revision=revision,
             identified_at_f=identified_at_f,
         )
-    normalized = asdict(contract)
-    if identified_at_f is None:
-        normalized.pop("identified_at_f")
-    return normalized
+    return contract.model_dump(mode="json", exclude_unset=True)
 
 
 def _marked_pid_sp_live(value: object) -> bool:
@@ -439,7 +352,7 @@ def _live_from_status(status: object) -> object:
     return nested if _marked_pid_sp_live(nested) else None
 
 
-def _gate_value(mapping: Mapping[str, object], field: str) -> GateValue:
+def _gate_value(mapping: Mapping[str, object], field: str) -> PidSpGateValue:
     value = mapping.get(field)
     if isinstance(value, bool) or isinstance(value, int):
         return value
@@ -518,20 +431,20 @@ def _normalize_live(live: object) -> dict[str, object]:
     normalized = PidSpLiveLearning(
         schema_version=1,
         controller="pid_sp",
-        status=cast(PidSpLearningStatus, status),
+        status=cast(PidSpLiveLearningStatus, status),
         identifier=identifier,
         predictor=predictor,
         confirmation=confirmation,
         gates=tuple(gates),
     )
-    return normalized.to_dict()
+    return normalized.model_dump(mode="json")
 
 
 def current_pid_sp_learning_report(
     *,
     status: object,
     checkpoint: object,
-) -> PidSpLearningReport:
+) -> _CanonicalPidSpLearningReport:
     """Project one live status and one durable checkpoint without side effects."""
 
     normalized_checkpoint = _normalize_checkpoint(checkpoint)
@@ -570,10 +483,13 @@ def current_pid_sp_learning_report(
                 }
             )
     payload["revision"] = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
-    return PidSpLearningReport(_canonical_bytes(payload))
+    contract = PidSpLearningReport.model_validate(payload, strict=True)
+    return _CanonicalPidSpLearningReport(
+        _canonical_bytes(contract.model_dump(mode="json", exclude_unset=True))
+    )
 
 
-def backend_pid_sp_learning_report() -> PidSpLearningReport:
+def backend_pid_sp_learning_report() -> _CanonicalPidSpLearningReport:
     """Read each PID-SP report authority once and compose its projection."""
 
     from common.controller_model_state import ControllerModelStore

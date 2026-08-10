@@ -1,13 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import type { TemperatureUnit } from "../../helpers/modelEvidence/types";
+import type { Units } from "../../helpers/settings/settingsTypes.gen";
 import { MpcLearningView } from "./learning/MpcLearningView";
 import { PidSpLearningView } from "./learning/PidSpLearningView";
 
 interface LearningPanelProps {
   apiBase: string;
   selectedController: string | null;
-  units: TemperatureUnit;
+  units: Units;
   ambientC: number;
   modelLearningRevision?: string | null;
 }

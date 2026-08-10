@@ -4,6 +4,16 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from common.web_contracts.learning import (
+    ModelActionRejected,
+    ModelActivationAccepted,
+    ModelActivationRequest,
+    ModelEvidenceReport,
+    ModelRollbackAccepted,
+    ModelRollbackRequest,
+    MpcCalibrationCommand,
+)
+from controller.model_learning.report import build_learning_report
 
 
 _PROVIDER_MODULES = {
@@ -99,3 +109,92 @@ def test_provider_failure_does_not_fall_through_to_the_other_provider(monkeypatc
         _dispatcher()(controller_name)
 
     assert calls == [controller_name]
+
+
+def test_model_evidence_report_contract_preserves_the_real_canonical_projection():
+    report = build_learning_report(
+        (),
+        activation_state={},
+        live_status={},
+        checkpoint_required=True,
+        calibration_command_high_water=0,
+    )
+    payload = report.as_dict()
+
+    validated = ModelEvidenceReport.model_validate(payload, strict=True)
+
+    assert validated.model_dump(mode="json", exclude_unset=True) == payload
+
+
+def test_model_evidence_action_contracts_preserve_exact_request_and_response_members():
+    digest = "a" * 64
+    request = ModelActivationRequest(candidate_digest=digest, decision_id="decision-1")
+    accepted = ModelActivationAccepted(
+        accepted=True,
+        phase="prepared",
+        transaction_id="b" * 64,
+        decision_id="decision-1",
+        candidate_digest=digest,
+        role_generation=3,
+    )
+    rejected = ModelActionRejected(
+        accepted=False,
+        active_kind="grey-box",
+        error="model-activation-rejected",
+        detail="stale-confidence-decision",
+    )
+    rollback_request = ModelRollbackRequest(reason="operator observed instability")
+    rollback = ModelRollbackAccepted(
+        accepted=True,
+        active_kind="grey-box",
+        decision_id="decision-1",
+        reason="operator observed instability",
+        role_generation=4,
+        rollback_digest="c" * 64,
+    )
+    calibration = MpcCalibrationCommand(
+        action="start",
+        revision=7,
+        ambient_c=20.0,
+        ambient_source="measured",
+        empty_grill_confirmed=True,
+        pellets_confirmed=True,
+    )
+
+    assert request.model_dump(mode="json") == {
+        "candidate_digest": digest,
+        "decision_id": "decision-1",
+    }
+    assert accepted.model_dump(mode="json") == {
+        "accepted": True,
+        "phase": "prepared",
+        "transaction_id": "b" * 64,
+        "decision_id": "decision-1",
+        "candidate_digest": digest,
+        "role_generation": 3,
+    }
+    assert rejected.model_dump(mode="json") == {
+        "accepted": False,
+        "active_kind": "grey-box",
+        "error": "model-activation-rejected",
+        "detail": "stale-confidence-decision",
+    }
+    assert rollback_request.model_dump(mode="json") == {
+        "reason": "operator observed instability",
+    }
+    assert rollback.model_dump(mode="json") == {
+        "accepted": True,
+        "active_kind": "grey-box",
+        "decision_id": "decision-1",
+        "reason": "operator observed instability",
+        "role_generation": 4,
+        "rollback_digest": "c" * 64,
+    }
+    assert calibration.model_dump(mode="json") == {
+        "action": "start",
+        "revision": 7,
+        "ambient_c": 20.0,
+        "ambient_source": "measured",
+        "empty_grill_confirmed": True,
+        "pellets_confirmed": True,
+    }

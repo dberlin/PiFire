@@ -7,7 +7,7 @@ import type {
   CookRefitOutcome,
   ModelEvidenceReport,
   ModelEvidenceStatus,
-} from "../../../../src/helpers/modelEvidence/types";
+} from "../../../../src/helpers/contracts/learning.gen";
 import { testQueryClient } from "../../test-utils";
 
 const ACTIVE_DIGEST = "a".repeat(64);

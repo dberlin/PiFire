@@ -143,9 +143,19 @@ class ControllerModelStore:
         return self._load(name, strict=True)
 
     def _load(self, name, *, strict):
+        if strict:
+            models, _safe = self._read_state(strict_name=name)
+            persisted = models.get(name)
+            if persisted is None:
+                return None
+            self._remember_owned(name, persisted, committed=True)
+            snapshot = deepcopy(persisted)
+            self._revisions[name] = persisted["revision"]
+            return snapshot
+
         snapshot = self._latest_owned(name)
         if snapshot is None:
-            models, _safe = self._read_state(strict_name=name if strict else None)
+            models, _safe = self._read_state()
             persisted = models.get(name)
             if persisted is None:
                 return None

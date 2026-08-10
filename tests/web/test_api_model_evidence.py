@@ -226,6 +226,30 @@ def test_report_route_exposes_the_accepted_calibration_command_high_water(client
     assert response.get_json()["calibration"]["revision"] == 7
 
 
+def test_report_route_rejects_a_producer_projection_outside_the_pydantic_contract(client, monkeypatch):
+    report, records = routes._model_evidence_projection()
+    malformed = report.as_dict()
+    malformed["schema_version"] = 99
+    monkeypatch.setattr(
+        routes,
+        "_model_evidence_projection",
+        lambda: (SimpleNamespace(as_dict=lambda: malformed), records),
+    )
+
+    response = client.get("/api/model-evidence/report")
+
+    assert response.status_code == 422
+    assert response.get_json()["error"] == "model-evidence-report-invalid"
+
+
+def test_calibration_route_uses_the_existing_error_envelope_for_pydantic_request_failures(client):
+    response = client.post("/api/set_mpc_calibration", json={"action": "start"})
+
+    assert response.status_code == 422
+    assert response.get_json()["result"] == "ERROR"
+    assert response.get_json()["data"] == {}
+
+
 class _ReadyReport:
     def __init__(
         self,
@@ -645,6 +669,16 @@ def test_activate_route_requires_exact_body_digest_decision_and_operator_policy(
     assert malformed.status_code == 422
     assert stale.status_code == 409
     assert read_model_activation() is None
+
+
+def test_activate_route_treats_typed_contract_failures_as_unprocessable(client):
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={"candidate_digest": "not-a-digest", "decision_id": "decision-1"},
+    )
+
+    assert response.status_code == 422
+    assert response.get_json()["error"] == "model-activation-rejected"
 
 
 def test_activate_route_rejects_non_operator_reviewed_candidate_policy(client, monkeypatch):

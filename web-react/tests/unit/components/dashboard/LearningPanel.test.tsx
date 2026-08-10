@@ -5,8 +5,8 @@ import { LearningPanel } from "../../../../src/components/dashboard/LearningPane
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
-} from "../../../../src/helpers/modelEvidence/types";
-import type { PidSpLearningReport } from "../../../../src/helpers/pidSpLearning/types";
+  PidSpLearningReport,
+} from "../../../../src/helpers/contracts/learning.gen";
 import { testQueryClient } from "../../test-utils";
 
 function mpcReport(status: ModelEvidenceStatus, revision: string): ModelEvidenceReport {

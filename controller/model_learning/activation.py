@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Generic, Protocol, TypeVar
+from common.web_contracts.learning import ModelActivationRequest
 
 from .contracts import ActivationPolicy, CandidateOrigin
 
@@ -184,17 +185,6 @@ class OwnedGreyControlPair:
             raise RuntimeError("could not close complete grey control pair") from errors[0]
 
 
-@dataclass(frozen=True, slots=True)
-class ActivationRequest:
-    """The exact candidate and confidence decision reviewed by an operator."""
-
-    candidate_digest: str
-    decision_id: str
-
-    def __post_init__(self) -> None:
-        _digest(self.candidate_digest, "candidate_digest")
-        _nonblank(self.decision_id, "decision_id")
-
 
 @dataclass(frozen=True, slots=True)
 class PreparedActivationRecord:
@@ -352,14 +342,14 @@ class ActivationManager(Generic[_PairT]):
 
     def prepare(
         self,
-        request: ActivationRequest,
+        request: ModelActivationRequest,
         candidate: GreyControlPairDescriptor,
         *,
         origin: CandidateOrigin,
         policy: ActivationPolicy,
     ) -> ActivationDecision:
-        if not isinstance(request, ActivationRequest):
-            raise TypeError("request must be an ActivationRequest")
+        if not isinstance(request, ModelActivationRequest):
+            raise TypeError("request must be a ModelActivationRequest")
         if not isinstance(candidate, GreyControlPairDescriptor):
             raise TypeError("candidate must be a GreyControlPairDescriptor")
         if not isinstance(origin, CandidateOrigin) or not isinstance(policy, ActivationPolicy):

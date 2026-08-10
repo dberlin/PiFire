@@ -4,14 +4,14 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PidSpLearningView } from "../../../../src/components/dashboard/learning/PidSpLearningView";
 import type {
+  PidSpCheckpointModel,
   PidSpLearningReport,
   PidSpLearningStatus,
-  PidSpModel,
   PidSpPredictorModel,
-} from "../../../../src/helpers/pidSpLearning/types";
+} from "../../../../src/helpers/contracts/learning.gen";
 import { testQueryClient } from "../../test-utils";
 
-const FOPDT: PidSpModel = {
+const FOPDT: PidSpCheckpointModel = {
   form: "fopdt",
   K: 86.5,
   tau: 610,
@@ -237,7 +237,7 @@ describe("PidSpLearningView", () => {
         theta: 30,
         revision: 9,
         identified_at_f: 275,
-      } satisfies PidSpModel,
+      } satisfies PidSpCheckpointModel,
       [
         ["K_i", "0.87", "°F/s per duty ratio"],
         ["c0", "-0.18", "°F/s"],

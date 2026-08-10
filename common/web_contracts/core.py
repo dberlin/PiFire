@@ -209,20 +209,3 @@ class CommandResponse(ApiEnvelope[CommandResponseData]):
     pass
 
 
-class MpcCalibrationCommandPayload(WireModel):
-    action: Literal["start", "pause", "resume", "stop", "reset-progress"]
-    revision: int
-    ambient_c: FiniteFloat
-    ambient_source: Literal["measured", "manual", "weather", "configured"]
-    empty_grill_confirmed: bool
-    pellets_confirmed: bool
-
-
-class MpcCalibrationCommandResponseData(WireModel):
-    mpc_calibration: MpcCalibrationCommandPayload
-
-
-class MpcCalibrationCommandResponse(
-    ApiEnvelope[MpcCalibrationCommandResponseData | CommandResponseData]
-):
-    pass

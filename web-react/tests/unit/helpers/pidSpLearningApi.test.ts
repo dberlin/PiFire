@@ -3,7 +3,7 @@ import {
   fetchPidSpLearningReport,
   parsePidSpLearningReport,
 } from "../../../src/helpers/pidSpLearning/pidSpLearningApi";
-import type { PidSpLearningReport } from "../../../src/helpers/pidSpLearning/types";
+import type { PidSpLearningReport } from "../../../src/helpers/contracts/learning.gen";
 
 const FOPDT = {
   form: "fopdt" as const,

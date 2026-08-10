@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
-} from "../../src/helpers/modelEvidence/types";
-import type { PidSpLearningReport } from "../../src/helpers/pidSpLearning/types";
+  PidSpLearningReport,
+} from "../../src/helpers/contracts/learning.gen";
 import { freezeDate } from "./layoutBaseline";
 
 // 800x480 -- the grill's own screen.

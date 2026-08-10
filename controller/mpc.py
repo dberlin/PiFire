@@ -77,6 +77,7 @@ from controller.runtime.model_fitting import (
     grey_config_digest,
     prepare_candidate_off_path,
 )
+from common.web_contracts.learning import ModelActivationRequest
 from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
@@ -89,7 +90,6 @@ from controller.model_learning.contracts import (
 from controller.model_learning.activation import (
     ActivationManager,
     ActivationPhase,
-    ActivationRequest,
     GreyControlPairDescriptor,
     OwnedGreyControlPair,
     PreparedActivationRecord,
@@ -1531,7 +1531,10 @@ class Controller(ControllerBase):
                 raise RuntimeError("activation-confidence-not-durable")
             persisted_confidence.add(decision_id)
         decision = manager.prepare(
-            ActivationRequest(candidate_descriptor.model_digest, decision_id),
+            ModelActivationRequest(
+                candidate_digest=candidate_descriptor.model_digest,
+                decision_id=decision_id,
+            ),
             candidate_descriptor,
             origin=request.origin,
             policy=policy,

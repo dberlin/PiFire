@@ -59,7 +59,7 @@ def test_json_post_dispatches_the_validated_calibration_command(client):
 def test_json_post_rejects_invalid_body_without_queuing_a_control_change(client):
     response = client.post("/api/set_mpc_calibration", json={"action": "start"})
 
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert response.get_json()["result"] == "ERROR"
     execute_control_writes()
     assert "mpc_calibration" not in read_control()

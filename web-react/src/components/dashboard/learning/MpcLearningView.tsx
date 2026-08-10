@@ -9,8 +9,8 @@ import {
 import type {
   CheckStatus,
   MpcCalibrationAction,
-  TemperatureUnit,
-} from "../../../helpers/modelEvidence/types";
+} from "../../../helpers/contracts/learning.gen";
+import type { Units } from "../../../helpers/settings/settingsTypes.gen";
 
 import { LearningDialog } from "./LearningDialog";
 import { LEARNING_SECTION_CLASS } from "./learningDisplay";
@@ -31,7 +31,7 @@ const CALIBRATION_ACTION_LABEL: Record<MpcCalibrationAction, string> = {
 interface MpcLearningViewProps {
   apiBase: string;
   selectedController: string | null;
-  units: TemperatureUnit;
+  units: Units;
   ambientC: number;
   /** Socket invalidation high-water. REST remains the only rendered authority. */
   modelLearningRevision?: string | null;
@@ -44,7 +44,7 @@ class ReportRequestError extends Error {
   }
 }
 
-function bandCenters(units: TemperatureUnit): string {
+function bandCenters(units: Units): string {
   const values = BAND_CENTERS_F.map((f) => (units === "F" ? f : Math.round(((f - 32) * 5) / 9)));
   return `${values[0]}, ${values[1]} and ${values[2]} °${units}`;
 }

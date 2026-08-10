@@ -1,15 +1,19 @@
-import type { MpcCalibrationCommandResponse } from "../contracts/core.gen";
-
 import type {
   ModelActivationAcknowledgement,
   ModelActivationRequest,
   ModelEvidenceReport,
-  ModelEvidenceResult,
   ModelRollbackAcknowledgement,
   ModelRollbackRequest,
   MpcCalibrationCommand,
-  MpcCalibrationRequest,
-} from "./types";
+  MpcCalibrationCommandResponse,
+} from "../contracts/learning.gen";
+
+export interface ModelEvidenceResult<T> {
+  ok: boolean;
+  status: number;
+  message: string;
+  data: T | null;
+}
 
 const DEFAULT_BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -147,7 +151,7 @@ export function rollbackModel(
 
 /** Send one revisioned calibration intent. */
 export async function setMpcCalibration(
-  request: MpcCalibrationRequest,
+  request: MpcCalibrationCommand,
   baseUrl = DEFAULT_BASE_URL,
 ): Promise<ModelEvidenceResult<MpcCalibrationCommand>> {
   const command: MpcCalibrationCommand = {

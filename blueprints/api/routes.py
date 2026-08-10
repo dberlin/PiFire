@@ -30,7 +30,6 @@ from common.pellets_actions import PELLETS_DISPATCH
 from blueprints.api.probe_map_actions import (
     module_requires_install,
     unsupported_new_modules,
-    valid_probe_map,
 )
 from common.defaults import set_probe_map
 from common.i2c_bus import (
@@ -52,6 +51,16 @@ from common.web_contracts.core import (
     ControlHealthResponse,
     DismissWarningsRequest,
     DismissWarningsResponse,
+)
+from common.web_contracts.learning import (
+    ModelActionRejected,
+    ModelActivationAccepted,
+    ModelActivationRequest,
+    ModelEvidenceReport,
+    ModelRollbackAccepted,
+    ModelRollbackRequest,
+    PidSpLearningReport,
+    MpcCalibrationCommand,
     MpcCalibrationCommandResponse,
 )
 from common.web_contracts.settings import (
@@ -62,9 +71,14 @@ from common.web_contracts.settings import (
     SettingsUpdateRequest,
     SettingsUpdateResponse,
 )
+from common.web_contracts.wizard import (
+    ProbeModuleCatalog,
+    _ProbeMapApplyResponse,
+    _ProbeMapErrorResponse,
+    _ProbeMapRequest,
+)
 from controller.model_learning.activation import (
     ActivationManager,
-    ActivationRequest,
     GreyControlPairDescriptor,
     OwnedGreyControlPair,
 )
@@ -194,13 +208,17 @@ def _api_get_probe_modules(settings, server_status):
     edits LIVE settings. This route is the manifest and nothing else.
     """
     modules = read_wizard().get("modules", {}).get("probes", {})
+    catalog = ProbeModuleCatalog.model_validate(
+        {
+            "modules": modules,
+            "requires_install": {key: module_requires_install(mod) for key, mod in modules.items()},
+        },
+        strict=True,
+    )
     return jsonify(
         api_response(
             result="OK",
-            data={
-                "modules": modules,
-                "requires_install": {key: module_requires_install(mod) for key, mod in modules.items()},
-            },
+            data=catalog.model_dump(mode="json", by_alias=True, exclude_unset=True),
         )
     ), 200
 
@@ -214,9 +232,13 @@ def api_model_evidence_report():
     """Return the current read-only confidence projection, including empty state."""
     try:
         report, _records = _model_evidence_projection()
+        payload = ModelEvidenceReport.model_validate_json(
+            json.dumps(report.as_dict(), allow_nan=False),
+            strict=True,
+        )
     except (TypeError, ValueError) as exc:
         return jsonify({"error": "model-evidence-report-invalid", "detail": str(exc)}), 422
-    return jsonify(report.as_dict()), 200
+    return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 200
 
 
 @api_bp.get("/pid-sp-learning/report")
@@ -225,10 +247,13 @@ def api_pid_sp_learning_report():
 
     try:
         report = backend_pid_sp_learning_report()
-        payload = report.as_dict()
+        payload = PidSpLearningReport.model_validate_json(
+            json.dumps(report.as_dict(), allow_nan=False),
+            strict=True,
+        )
     except (TypeError, ValueError) as exc:
         return jsonify({"error": "pid-sp-learning-report-invalid", "detail": str(exc)}), 422
-    return jsonify(payload), 200
+    return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 200
 
 
 @api_bp.get("/model-evidence/artifact")
@@ -313,14 +338,13 @@ def _activation_checkpoint():
 
 
 def _activation_rejection(reason, status=409):
-    return jsonify(
-        {
-            "accepted": False,
-            "active_kind": "grey-box",
-            "error": "model-activation-rejected",
-            "detail": reason,
-        }
-    ), status
+    payload = ModelActionRejected(
+        accepted=False,
+        active_kind="grey-box",
+        error="model-activation-rejected",
+        detail=str(reason),
+    )
+    return jsonify(payload.model_dump(mode="json")), status
 
 
 @api_bp.post("/model-evidence/activate")
@@ -333,10 +357,10 @@ def api_model_evidence_activate():
             422,
         )
     try:
-        activation_request = ActivationRequest(
-            candidate_digest=body["candidate_digest"],
-            decision_id=body["decision_id"],
-        )
+        activation_request = ModelActivationRequest.model_validate(body, strict=True)
+    except ValidationError as error:
+        return _activation_rejection(str(error), 422)
+    try:
         report, _records = _model_evidence_projection()
         projection = report.to_dict()
         if projection["status"] != "ready-for-review":
@@ -391,16 +415,15 @@ def api_model_evidence_activate():
         decision.candidate_pair.close()
     record = decision.record
     assert record is not None
-    return jsonify(
-        {
-            "accepted": True,
-            "phase": record.phase.value,
-            "transaction_id": record.transaction_id,
-            "decision_id": record.decision_id,
-            "candidate_digest": record.candidate.model_digest,
-            "role_generation": record.candidate.role_generation,
-        }
-    ), 200
+    payload = ModelActivationAccepted(
+        accepted=True,
+        phase="prepared",
+        transaction_id=record.transaction_id,
+        decision_id=record.decision_id,
+        candidate_digest=record.candidate.model_digest,
+        role_generation=record.candidate.role_generation,
+    )
+    return jsonify(payload.model_dump(mode="json")), 200
 
 
 @api_bp.post("/model-evidence/rollback")
@@ -409,9 +432,11 @@ def api_model_evidence_rollback():
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or set(body) != {"reason"}:
         return _activation_rejection("request must contain exactly reason", 422)
-    reason = body.get("reason")
-    if not isinstance(reason, str) or not reason.strip():
-        return _activation_rejection("rollback reason must be non-blank", 422)
+    try:
+        rollback_request = ModelRollbackRequest.model_validate(body, strict=True)
+    except ValidationError as error:
+        return _activation_rejection(str(error), 422)
+    reason = rollback_request.reason.strip()
     activation = read_model_activation()
     if activation is None or activation.phase != "active":
         return _activation_rejection("there is no active grey generation", 409)
@@ -441,17 +466,15 @@ def api_model_evidence_rollback():
     except Exception as error:
         return _activation_rejection(f"rollback-persistence-failed: {error}", 503)
     lifecycle = outcome.record.payload
-    fallback_kind = "grey-box"
-    return jsonify(
-        {
-            "accepted": True,
-            "active_kind": fallback_kind,
-            "decision_id": activation.evidence_decision_id,
-            "reason": lifecycle.reason,
-            "role_generation": outcome.record.role_generation,
-            "rollback_digest": rollback_pair.model_digest,
-        }
-    ), 200
+    payload = ModelRollbackAccepted(
+        accepted=True,
+        active_kind="grey-box",
+        decision_id=activation.evidence_decision_id,
+        reason=lifecycle.reason,
+        role_generation=outcome.record.role_generation,
+        rollback_digest=rollback_pair.model_digest,
+    )
+    return jsonify(payload.model_dump(mode="json")), 200
 
 
 _API_GET_ACTIONS = {
@@ -763,24 +786,38 @@ def _api_post_probe_map(settings, request_json):
                            None) because this is live config, not a draft
     Only after all four does anything get written.
     """
-    probe_map = request_json.get("probe_map")
-    if not valid_probe_map(probe_map):
-        return jsonify({"result": "error", "message": "bad_probe_map"}), 400
+    try:
+        request_payload = _ProbeMapRequest.model_validate(request_json, strict=True)
+    except ValidationError:
+        response = _ProbeMapErrorResponse(result="error", message="bad_probe_map")
+        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 400
+    probe_map = request_payload.probe_map.model_dump(mode="json", by_alias=True, exclude_unset=True)
 
     control = read_control()
     if control.get("mode") != Mode.STOP:
-        return jsonify({"result": "error", "message": "system_active"}), 409
+        response = _ProbeMapErrorResponse(result="error", message="system_active")
+        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 409
 
     manifest_modules = read_wizard().get("modules", {}).get("probes", {})
     live_map = settings["probe_settings"]["probe_map"]
     offenders = unsupported_new_modules(probe_map, live_map, manifest_modules)
     if offenders:
-        return jsonify({"result": "error", "message": "modules_require_install", "modules": offenders}), 422
+        response = _ProbeMapErrorResponse(
+            result="error",
+            message="modules_require_install",
+            modules=offenders,
+        )
+        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 422
 
     try:
         validate_bus_kinds(configured_bus_kinds(settings, probe_map))
     except I2CBusConfigError as exc:
-        return jsonify({"result": "error", "message": "bus_conflict", "detail": str(exc)}), 422
+        response = _ProbeMapErrorResponse(
+            result="error",
+            message="bus_conflict",
+            detail=str(exc),
+        )
+        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 422
 
     settings = set_probe_map(settings, probe_map, control)
     # settings_update makes the loop re-read settings; probe_map_update is what
@@ -798,7 +835,12 @@ def _api_post_probe_map(settings, request_json):
         origin="api",
         ops=[{"op": "notify.replace", "entries": control["notify_data"]}],
     )
-    return jsonify({"result": "success", "message": "Probe map applied.", "data": {"probe_map": probe_map}}), 200
+    response = _ProbeMapApplyResponse(
+        result="success",
+        message="Probe map applied.",
+        data={"probe_map": probe_map},
+    )
+    return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 200
 
 
 def _api_post_dismiss_warnings(settings, request_json):
@@ -828,7 +870,23 @@ def _api_post_dismiss_warnings(settings, request_json):
 
 def _api_post_mpc_calibration(settings, request_json):
     """Dispatch the body-only calibration command through the standard command guard."""
-    data = process_command("set", ["mpc_calibration", request_json], origin="api")
+    try:
+        request_payload = MpcCalibrationCommand.model_validate(request_json, strict=True)
+    except ValidationError as error:
+        response = MpcCalibrationCommandResponse.model_validate(
+            {
+                "result": "ERROR",
+                "message": str(error),
+                "data": {},
+            },
+            strict=True,
+        )
+        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_none=False)), 422
+    data = process_command(
+        "set",
+        ["mpc_calibration", request_payload.model_dump(mode="json")],
+        origin="api",
+    )
     response = MpcCalibrationCommandResponse.model_validate(data, strict=True)
     return (
         jsonify(response.model_dump(mode="json", by_alias=True, exclude_none=False)),

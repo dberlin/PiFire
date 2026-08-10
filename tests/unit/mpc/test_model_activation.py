@@ -17,13 +17,13 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
+from common.web_contracts.learning import ModelActivationRequest
 import controller.runtime.model_persistence as model_persistence_module
 
 from controller.model_learning.activation import (
     ActivationDecision,
     ActivationManager,
     ActivationPhase,
-    ActivationRequest,
     GreyControlPairDescriptor,
     OwnedGreyControlPair,
     PreparedActivationRecord,
@@ -135,8 +135,11 @@ def _manager(
     return manager, candidate_descriptor, incumbent, candidate, calls, records, durable_receipt
 
 
-def _request(descriptor: GreyControlPairDescriptor) -> ActivationRequest:
-    return ActivationRequest(descriptor.model_digest, "decision-9")
+def _request(descriptor: GreyControlPairDescriptor) -> ModelActivationRequest:
+    return ModelActivationRequest(
+        candidate_digest=descriptor.model_digest,
+        decision_id="decision-9",
+    )
 
 
 def test_pair_descriptor_is_complete_immutable_and_digest_checked() -> None:
@@ -265,7 +268,7 @@ def test_manual_request_requires_exact_digest_decision_and_operator_reviewed_pol
     manager, descriptor, _incumbent, candidate, calls, *_ = _manager()
 
     wrong_digest = manager.prepare(
-        ActivationRequest("f" * 64, "decision-9"),
+        ModelActivationRequest(candidate_digest="f" * 64, decision_id="decision-9"),
         descriptor,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
         policy=ActivationPolicy.OPERATOR_REVIEWED,

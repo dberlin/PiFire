@@ -98,15 +98,6 @@ export type ThroughId = number;
 export type Data2 = null;
 export type Message3 = string;
 export type Result3 = "OK" | "ERROR";
-export type Action = "start" | "pause" | "resume" | "stop" | "reset-progress";
-export type AmbientC = number;
-export type AmbientSource = "measured" | "manual" | "weather" | "configured";
-export type EmptyGrillConfirmed = boolean;
-export type PelletsConfirmed = boolean;
-export type Revision = number;
-export type Data3 = MpcCalibrationCommandResponseData | CommandResponseData | null;
-export type Message4 = string;
-export type Result4 = "OK" | "ERROR";
 export type DateLoaded = string;
 export type EstUsage = number;
 export type HopperLevel = number;
@@ -310,34 +301,6 @@ export interface DismissWarningsResponse {
   data?: Data2;
   message?: Message3;
   result: Result3;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "MpcCalibrationCommandPayload".
- */
-export interface MpcCalibrationCommandPayload {
-  action: Action;
-  ambient_c: AmbientC;
-  ambient_source: AmbientSource;
-  empty_grill_confirmed: EmptyGrillConfirmed;
-  pellets_confirmed: PelletsConfirmed;
-  revision: Revision;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "MpcCalibrationCommandResponse".
- */
-export interface MpcCalibrationCommandResponse {
-  data?: Data3;
-  message?: Message4;
-  result: Result4;
-}
-/**
- * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
- * via the `definition` "MpcCalibrationCommandResponseData".
- */
-export interface MpcCalibrationCommandResponseData {
-  mpc_calibration: MpcCalibrationCommandPayload;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema

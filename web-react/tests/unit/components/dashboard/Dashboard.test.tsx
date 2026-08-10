@@ -9,9 +9,9 @@ import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
-} from "../../../../src/helpers/modelEvidence/types";
+  PidSpLearningReport,
+} from "../../../../src/helpers/contracts/learning.gen";
 import type { NotifyUpdate } from "../../../../src/helpers/notify/notifyApi";
-import type { PidSpLearningReport } from "../../../../src/helpers/pidSpLearning/types";
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };

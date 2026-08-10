@@ -1,8 +1,16 @@
 """Read-only API contracts for the durable PID-SP learning report."""
 
+from types import SimpleNamespace
+
 import pytest
 from common import controller_model_state
 from common import datastore_accessors
+from common.controller_model_state import (
+    MODEL_STATE_KEY,
+    SCHEMA_VERSION,
+    ControllerModelStore,
+)
+from common.datastore_accessors import write_generic_key
 
 from app import app as flask_app
 from blueprints.api import routes
@@ -13,7 +21,6 @@ from controller.fopdt_identifier import (
     MIN_TEMP_SPAN_F,
 )
 from controller.pid_sp_learning import (
-    PidSpLearningReport,
     build_pid_sp_live_learning,
     current_pid_sp_learning_report,
 )
@@ -158,6 +165,34 @@ def test_corrupt_persisted_checkpoint_returns_an_explicit_422(client, monkeypatc
     }
 
 
+def test_corrupt_persistence_is_not_hidden_by_a_warm_shared_cache(client):
+    store = ControllerModelStore()
+    assert store.save(
+        "pid_sp",
+        {
+            "form": "fopdt",
+            "K": 800.0,
+            "tau": 600.0,
+            "theta": 40.0,
+            "revision": 3,
+        },
+    )
+    assert store.load("pid_sp")["revision"] == 3
+    write_generic_key(
+        MODEL_STATE_KEY,
+        {
+            "version": SCHEMA_VERSION,
+            "models": {"pid_sp": {"revision": "interrupted-write"}},
+        },
+    )
+
+    response = client.get("/api/pid-sp-learning/report")
+
+    assert response.status_code == 422
+    assert response.get_json()["error"] == "pid-sp-learning-report-invalid"
+    assert "malformed stored snapshot" in response.get_json()["detail"]
+
+
 def test_pid_sp_learning_api_exposes_no_mutation_endpoint(client):
     body = {"action": "start"}
 
@@ -188,17 +223,30 @@ def test_report_route_preserves_every_published_live_status(client, monkeypatch,
     assert response.get_json()["live"] is True
 
 
+def test_report_route_rejects_a_projection_outside_the_pydantic_contract(client, monkeypatch):
+    report = current_pid_sp_learning_report(status={}, checkpoint=None).as_dict()
+    report["schema_version"] = 2
+    monkeypatch.setattr(
+        routes,
+        "backend_pid_sp_learning_report",
+        lambda: SimpleNamespace(as_dict=lambda: report),
+    )
+
+    response = client.get("/api/pid-sp-learning/report")
+
+    assert response.status_code == 422
+    assert response.get_json()["error"] == "pid-sp-learning-report-invalid"
+
+
 def test_report_serialization_failure_is_an_explicit_422(client, monkeypatch):
-    report = PidSpLearningReport(b"[]")
+    report = SimpleNamespace(as_dict=lambda: [])
     monkeypatch.setattr(routes, "backend_pid_sp_learning_report", lambda: report)
 
     response = client.get("/api/pid-sp-learning/report")
 
     assert response.status_code == 422
-    assert response.get_json() == {
-        "error": "pid-sp-learning-report-invalid",
-        "detail": "PID-SP learning report root is not an object",
-    }
+    assert response.get_json()["error"] == "pid-sp-learning-report-invalid"
+    assert "an object" in response.get_json()["detail"]
 
 
 @pytest.mark.parametrize(

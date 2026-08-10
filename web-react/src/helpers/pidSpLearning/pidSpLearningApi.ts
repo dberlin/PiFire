@@ -1,20 +1,26 @@
 import type {
-  FopdtPidSpModel,
-  FopdtPidSpPredictorModel,
-  IpdtPidSpModel,
-  IpdtPidSpPredictorModel,
+  FopdtPidSpCheckpoint,
+  FopdtPidSpPredictor,
+  IpdtPidSpCheckpoint,
+  IpdtPidSpPredictor,
+  PidSpCheckpointModel,
   PidSpConfirmationProgress,
   PidSpGateValue,
   PidSpIdentifierReport,
   PidSpLearningFailure,
   PidSpLearningGate,
   PidSpLearningReport,
-  PidSpLearningResult,
   PidSpLearningStatus,
-  PidSpModel,
   PidSpPredictorModel,
   PidSpPredictorReport,
-} from "./types";
+} from "../contracts/learning.gen";
+
+export interface PidSpLearningResult<T> {
+  ok: boolean;
+  status: number;
+  message: string;
+  data: T | null;
+}
 
 const DEFAULT_BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 const REPORT_PATH = "/api/pid-sp-learning/report";
@@ -78,7 +84,7 @@ function nullable<T>(value: unknown, parse: (item: unknown) => T): T | null {
   return value === null ? null : parse(value);
 }
 
-function parseModel(value: unknown, path: string): PidSpModel {
+function parseModel(value: unknown, path: string): PidSpCheckpointModel {
   const source = record(value, path);
   if (source.form === "fopdt") {
     exactKeys(
@@ -88,7 +94,7 @@ function parseModel(value: unknown, path: string): PidSpModel {
         : ["form", "K", "tau", "theta", "revision", "identified_at_f"],
       path,
     );
-    const model: FopdtPidSpModel = {
+    const model: FopdtPidSpCheckpoint = {
       form: "fopdt",
       K: finiteNumber(source.K, `${path}.K`),
       tau: finiteNumber(source.tau, `${path}.tau`),
@@ -108,7 +114,7 @@ function parseModel(value: unknown, path: string): PidSpModel {
         : ["form", "K_i", "c0", "theta", "revision", "identified_at_f"],
       path,
     );
-    const model: IpdtPidSpModel = {
+    const model: IpdtPidSpCheckpoint = {
       form: "ipdt",
       K_i: finiteNumber(source.K_i, `${path}.K_i`),
       c0: finiteNumber(source.c0, `${path}.c0`),
@@ -127,7 +133,7 @@ function parsePredictorModel(value: unknown, path: string): PidSpPredictorModel 
   const source = record(value, path);
   if (source.form === "fopdt") {
     exactKeys(source, ["form", "K", "tau", "theta"], path);
-    const model: FopdtPidSpPredictorModel = {
+    const model: FopdtPidSpPredictor = {
       form: "fopdt",
       K: finiteNumber(source.K, `${path}.K`),
       tau: finiteNumber(source.tau, `${path}.tau`),
@@ -137,7 +143,7 @@ function parsePredictorModel(value: unknown, path: string): PidSpPredictorModel 
   }
   if (source.form === "ipdt") {
     exactKeys(source, ["form", "K_i", "c0", "theta"], path);
-    const model: IpdtPidSpPredictorModel = {
+    const model: IpdtPidSpPredictor = {
       form: "ipdt",
       K_i: finiteNumber(source.K_i, `${path}.K_i`),
       c0: finiteNumber(source.c0, `${path}.c0`),

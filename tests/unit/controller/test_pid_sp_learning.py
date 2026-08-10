@@ -5,6 +5,15 @@ from dataclasses import FrozenInstanceError
 from copy import deepcopy
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
+
+from common.web_contracts.learning import (
+    IpdtPidSpCheckpoint,
+    FopdtPidSpCheckpoint,
+    PidSpCheckpointModel,
+    PidSpLearningReport as WirePidSpLearningReport,
+    PidSpPredictorModel,
+)
 from controller import pid_sp_learning as learning
 from common import controller_model_state
 from common import datastore_accessors
@@ -305,6 +314,62 @@ def test_idle_report_normalizes_each_durable_checkpoint_form(checkpoint, expecte
     assert report["failure"] is None
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        "collecting",
+        "insufficient-excitation",
+        "evaluating",
+        "active",
+        "fallback",
+    ],
+)
+@pytest.mark.parametrize("checkpoint", [_FOPDT_CHECKPOINT, _IPDT_CHECKPOINT])
+def test_pid_sp_report_contract_preserves_each_real_live_and_checkpoint_projection(status, checkpoint):
+    live = _marked_live()
+    live["status"] = status
+    report = _report(status={"learning": live}, checkpoint=checkpoint)
+    payload = report.as_dict()
+
+    validated = WirePidSpLearningReport.model_validate(payload, strict=True)
+
+    assert validated.model_dump(mode="json", exclude_unset=True) == payload
+
+
+def test_pid_sp_report_contract_preserves_idle_and_structured_failure_projections():
+    idle = _report().as_dict()
+    malformed_live = _marked_live()
+    malformed_live["identifier"]["accepted"] = True
+    failed = _report(status={"learning": malformed_live}).as_dict()
+
+    assert WirePidSpLearningReport.model_validate(idle, strict=True).model_dump(
+        mode="json",
+        exclude_unset=True,
+    ) == idle
+    assert WirePidSpLearningReport.model_validate(failed, strict=True).model_dump(
+        mode="json",
+        exclude_unset=True,
+    ) == failed
+
+
+def test_checkpoint_and_live_predictor_models_remain_distinct_discriminated_unions():
+    checkpoint = TypeAdapter(PidSpCheckpointModel).validate_python(_FOPDT_CHECKPOINT, strict=True)
+    predictor = TypeAdapter(PidSpPredictorModel).validate_python(
+        {"form": "fopdt", "K": 800.0, "tau": 600.0, "theta": 40.0},
+        strict=True,
+    )
+
+    assert isinstance(checkpoint, FopdtPidSpCheckpoint)
+    assert predictor.form == "fopdt"
+    with pytest.raises(ValidationError):
+        TypeAdapter(PidSpPredictorModel).validate_python(_FOPDT_CHECKPOINT, strict=True)
+    with pytest.raises(ValidationError):
+        TypeAdapter(PidSpCheckpointModel).validate_python(
+            {"form": "fopdt", "K": 800.0, "tau": 600.0, "theta": 40.0},
+            strict=True,
+        )
+
+
 def test_legacy_checkpoint_without_form_is_normalized_to_fopdt():
     checkpoint = {key: value for key, value in _FOPDT_CHECKPOINT.items() if key != "form"}
 
@@ -460,7 +525,15 @@ def test_revision_is_canonical_and_covers_every_visible_field():
 
 
 def test_report_has_immutable_storage_and_returns_defensive_copies():
-    live = _marked_live(trusted={"form": "fopdt", "K": 800.0, "tau": 600.0, "theta": 40.0})
+    live = _marked_live(
+        trusted={
+            "form": "fopdt",
+            "K": 800.0,
+            "tau": 600.0,
+            "theta": 40.0,
+            "revision": 3,
+        }
+    )
     status = {"controller": {"learning": live}}
     checkpoint = deepcopy(_FOPDT_CHECKPOINT)
     original_status = deepcopy(status)
@@ -504,8 +577,8 @@ def test_backend_report_reads_status_and_checkpoint_once(monkeypatch):
 
 
 def test_checkpoint_contracts_are_immutable_and_discriminated():
-    fopdt = learning.FopdtPidSpCheckpoint(**_FOPDT_CHECKPOINT)
-    ipdt = learning.IpdtPidSpCheckpoint(
+    fopdt = FopdtPidSpCheckpoint(**_FOPDT_CHECKPOINT)
+    ipdt = IpdtPidSpCheckpoint(
         form="ipdt",
         K_i=0.8,
         c0=-0.2,
@@ -516,7 +589,7 @@ def test_checkpoint_contracts_are_immutable_and_discriminated():
 
     assert fopdt.form == "fopdt"
     assert ipdt.form == "ipdt"
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(ValidationError):
         fopdt.K = 900.0
 
 

@@ -1,0 +1,1987 @@
+{
+  "$defs": {
+    "ActivationLifecycle": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/CandidateOrigin"
+        },
+        "payload_type": {
+          "const": "activation_lifecycle",
+          "title": "Payload Type",
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/ActivationPhase"
+        },
+        "policy": {
+          "$ref": "#/$defs/ActivationPolicy"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "decision_id",
+        "phase",
+        "origin",
+        "policy",
+        "reason",
+        "payload_type"
+      ],
+      "title": "ActivationLifecycle",
+      "type": "object"
+    },
+    "ActivationPhase": {
+      "enum": [
+        "prepared",
+        "active",
+        "aborted"
+      ],
+      "type": "string"
+    },
+    "ActivationPolicy": {
+      "enum": [
+        "passive-auto",
+        "operator-reviewed",
+        "cook-refit"
+      ],
+      "type": "string"
+    },
+    "ActivationReport": {
+      "additionalProperties": false,
+      "properties": {
+        "active_snapshot_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Snapshot Json"
+        },
+        "candidate_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Digest"
+        },
+        "candidate_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Generation"
+        },
+        "candidate_pair_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Pair Json"
+        },
+        "controller_configuration_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Controller Configuration Digest"
+        },
+        "evidence_decision_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Decision Id"
+        },
+        "incumbent_pair_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Incumbent Pair Json"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandidateOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pending_frame_boundary_swap": {
+          "title": "Pending Frame Boundary Swap",
+          "type": "boolean"
+        },
+        "pending_persistence": {
+          "title": "Pending Persistence",
+          "type": "boolean"
+        },
+        "phase": {
+          "$ref": "#/$defs/ActivationPhase"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActivationPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "role_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Generation"
+        },
+        "rollback_pair_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rollback Pair Json"
+        },
+        "rollback_snapshot_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rollback Snapshot Json"
+        },
+        "transaction_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transaction Id"
+        }
+      },
+      "required": [
+        "phase",
+        "reason",
+        "pending_persistence",
+        "pending_frame_boundary_swap"
+      ],
+      "title": "ActivationReport",
+      "type": "object"
+    },
+    "ActiveModelReport": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Digest"
+        },
+        "role_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role Generation"
+        }
+      },
+      "required": [
+        "digest",
+        "role_generation"
+      ],
+      "title": "ActiveModelReport",
+      "type": "object"
+    },
+    "AmbientSource": {
+      "enum": [
+        "measured",
+        "manual",
+        "weather",
+        "configured"
+      ],
+      "type": "string"
+    },
+    "CalibrationReport": {
+      "additionalProperties": false,
+      "properties": {
+        "command_high_water": {
+          "minimum": 0,
+          "title": "Command High Water",
+          "type": "integer"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "command_high_water"
+      ],
+      "title": "CalibrationReport",
+      "type": "object"
+    },
+    "CandidateAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence_accepted": {
+          "title": "Confidence Accepted",
+          "type": "boolean"
+        },
+        "decision_id": {
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "fit_accepted": {
+          "title": "Fit Accepted",
+          "type": "boolean"
+        },
+        "identifiability_accepted": {
+          "title": "Identifiability Accepted",
+          "type": "boolean"
+        },
+        "native_build": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "native_dry_solve": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "origin": {
+          "$ref": "#/$defs/CandidateOrigin"
+        },
+        "payload_type": {
+          "const": "candidate_assessment",
+          "title": "Payload Type",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/ActivationPolicy"
+        },
+        "rejection_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rejection Reasons",
+          "type": "array"
+        },
+        "target_timing": {
+          "$ref": "#/$defs/CheckStatus"
+        }
+      },
+      "required": [
+        "decision_id",
+        "origin",
+        "policy",
+        "fit_accepted",
+        "identifiability_accepted",
+        "native_build",
+        "native_dry_solve",
+        "target_timing",
+        "confidence_accepted",
+        "rejection_reasons",
+        "payload_type"
+      ],
+      "title": "CandidateAssessment",
+      "type": "object"
+    },
+    "CandidateOrigin": {
+      "enum": [
+        "passive-online",
+        "operator-calibration",
+        "cook-refit"
+      ],
+      "type": "string"
+    },
+    "CandidateReport": {
+      "additionalProperties": false,
+      "properties": {
+        "assessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandidateAssessment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Generation"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Digest"
+        },
+        "fit_quality": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fit Quality"
+        },
+        "identifiability": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Identifiability"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandidateOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parameter_deltas": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parameter Deltas"
+        },
+        "parameters": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GreyParameters"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActivationPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role Generation"
+        }
+      },
+      "required": [
+        "digest",
+        "origin",
+        "policy",
+        "role_generation",
+        "candidate_generation",
+        "parameters",
+        "parameter_deltas",
+        "fit_quality",
+        "identifiability",
+        "assessment"
+      ],
+      "title": "CandidateReport",
+      "type": "object"
+    },
+    "CheckStatus": {
+      "enum": [
+        "not-run",
+        "pending",
+        "passed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "CommandResponseData": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "CommandResponseData",
+      "type": "object"
+    },
+    "CookRefitAuthorization": {
+      "enum": [
+        "blocked",
+        "operator-review",
+        "next-cook"
+      ],
+      "type": "string"
+    },
+    "CookRefitOutcome": {
+      "enum": [
+        "disabled",
+        "insufficient",
+        "rejected",
+        "failed",
+        "ready-for-review",
+        "accepted-next-cook",
+        "checkpoint-failure"
+      ],
+      "type": "string"
+    },
+    "CookRefitReport": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization": {
+          "$ref": "#/$defs/CookRefitAuthorization"
+        },
+        "final_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FitStatus"
+            },
+            {
+              "$ref": "#/$defs/CookRefitOutcome"
+            }
+          ],
+          "title": "Final Status"
+        },
+        "latest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CookRefitOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_cook": {
+          "title": "Next Cook",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/FitStatus"
+        }
+      },
+      "required": [
+        "status",
+        "latest",
+        "final_status",
+        "authorization",
+        "next_cook"
+      ],
+      "title": "CookRefitReport",
+      "type": "object"
+    },
+    "EvidenceGate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "name",
+        "passed",
+        "reason"
+      ],
+      "title": "EvidenceGate",
+      "type": "object"
+    },
+    "EvidenceSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "audit_count": {
+          "minimum": 0,
+          "title": "Audit Count",
+          "type": "integer"
+        },
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "high_water": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "High Water"
+        },
+        "retired_excluded": {
+          "minimum": 0,
+          "title": "Retired Excluded",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "audit_count",
+        "high_water",
+        "retired_excluded"
+      ],
+      "title": "EvidenceSummary",
+      "type": "object"
+    },
+    "FiniteNumber": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "FitReport": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Request Id"
+        },
+        "status": {
+          "$ref": "#/$defs/FitStatus"
+        },
+        "window_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Window Id"
+        }
+      },
+      "required": [
+        "status",
+        "request_id",
+        "window_id",
+        "error"
+      ],
+      "title": "FitReport",
+      "type": "object"
+    },
+    "FitStatus": {
+      "enum": [
+        "idle",
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "stale"
+      ],
+      "type": "string"
+    },
+    "FitWindowIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "configuration_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Digest",
+          "type": "string"
+        },
+        "cook_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cook Id"
+        },
+        "first_observation_sequence": {
+          "minimum": 0,
+          "title": "First Observation Sequence",
+          "type": "integer"
+        },
+        "incumbent_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Incumbent Digest",
+          "type": "string"
+        },
+        "last_observation_sequence": {
+          "minimum": 0,
+          "title": "Last Observation Sequence",
+          "type": "integer"
+        },
+        "role_generation": {
+          "minimum": 0,
+          "title": "Role Generation",
+          "type": "integer"
+        },
+        "session_id": {
+          "minLength": 1,
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "cook_id",
+        "first_observation_sequence",
+        "last_observation_sequence",
+        "configuration_digest",
+        "incumbent_digest",
+        "role_generation"
+      ],
+      "title": "FitWindowIdentity",
+      "type": "object"
+    },
+    "FopdtPidSpCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "K": {
+          "title": "K",
+          "type": "number"
+        },
+        "form": {
+          "const": "fopdt",
+          "title": "Form",
+          "type": "string"
+        },
+        "identified_at_f": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identified At F"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "tau": {
+          "title": "Tau",
+          "type": "number"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "form",
+        "K",
+        "tau",
+        "theta",
+        "revision"
+      ],
+      "title": "FopdtPidSpCheckpoint",
+      "type": "object"
+    },
+    "FopdtPidSpPredictor": {
+      "additionalProperties": false,
+      "properties": {
+        "K": {
+          "title": "K",
+          "type": "number"
+        },
+        "form": {
+          "const": "fopdt",
+          "title": "Form",
+          "type": "string"
+        },
+        "tau": {
+          "title": "Tau",
+          "type": "number"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "form",
+        "K",
+        "tau",
+        "theta"
+      ],
+      "title": "FopdtPidSpPredictor",
+      "type": "object"
+    },
+    "GreyParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "C_c": {
+          "title": "C C",
+          "type": "number"
+        },
+        "K_Q": {
+          "title": "K Q",
+          "type": "number"
+        },
+        "T_amb": {
+          "title": "T Amb",
+          "type": "number"
+        },
+        "h_amb": {
+          "title": "H Amb",
+          "type": "number"
+        },
+        "n_delay": {
+          "const": 8,
+          "title": "N Delay",
+          "type": "integer"
+        },
+        "sigma": {
+          "title": "Sigma",
+          "type": "number"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "C_c",
+        "h_amb",
+        "T_amb",
+        "theta",
+        "n_delay",
+        "K_Q",
+        "sigma"
+      ],
+      "title": "GreyParameters",
+      "type": "object"
+    },
+    "IpdtPidSpCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "K_i": {
+          "title": "K I",
+          "type": "number"
+        },
+        "c0": {
+          "title": "C0",
+          "type": "number"
+        },
+        "form": {
+          "const": "ipdt",
+          "title": "Form",
+          "type": "string"
+        },
+        "identified_at_f": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identified At F"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "form",
+        "K_i",
+        "c0",
+        "theta",
+        "revision"
+      ],
+      "title": "IpdtPidSpCheckpoint",
+      "type": "object"
+    },
+    "IpdtPidSpPredictor": {
+      "additionalProperties": false,
+      "properties": {
+        "K_i": {
+          "title": "K I",
+          "type": "number"
+        },
+        "c0": {
+          "title": "C0",
+          "type": "number"
+        },
+        "form": {
+          "const": "ipdt",
+          "title": "Form",
+          "type": "string"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "form",
+        "K_i",
+        "c0",
+        "theta"
+      ],
+      "title": "IpdtPidSpPredictor",
+      "type": "object"
+    },
+    "LearningFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "payload_type": {
+          "anyOf": [
+            {
+              "const": "learning_failure",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload Type"
+        },
+        "terminal": {
+          "title": "Terminal",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "terminal"
+      ],
+      "title": "LearningFailure",
+      "type": "object"
+    },
+    "ModelActionRejected": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "const": false,
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "active_kind": {
+          "const": "grey-box",
+          "title": "Active Kind",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "error": {
+          "const": "model-activation-rejected",
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "active_kind",
+        "error",
+        "detail"
+      ],
+      "title": "ModelActionRejected",
+      "type": "object"
+    },
+    "ModelActivationAccepted": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "const": true,
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "candidate_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Digest",
+          "type": "string"
+        },
+        "decision_id": {
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "phase": {
+          "const": "prepared",
+          "title": "Phase",
+          "type": "string"
+        },
+        "role_generation": {
+          "minimum": 0,
+          "title": "Role Generation",
+          "type": "integer"
+        },
+        "transaction_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Transaction Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "phase",
+        "transaction_id",
+        "decision_id",
+        "candidate_digest",
+        "role_generation"
+      ],
+      "title": "ModelActivationAccepted",
+      "type": "object"
+    },
+    "ModelActivationAcknowledgement": {
+      "discriminator": {
+        "mapping": {
+          "False": "#/$defs/ModelActionRejected",
+          "True": "#/$defs/ModelActivationAccepted"
+        },
+        "propertyName": "accepted"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ModelActivationAccepted"
+        },
+        {
+          "$ref": "#/$defs/ModelActionRejected"
+        }
+      ],
+      "title": "ModelActivationAcknowledgement"
+    },
+    "ModelActivationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Digest",
+          "type": "string"
+        },
+        "decision_id": {
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_digest",
+        "decision_id"
+      ],
+      "title": "ModelActivationRequest",
+      "type": "object"
+    },
+    "ModelEvidenceReport": {
+      "additionalProperties": false,
+      "properties": {
+        "activation": {
+          "$ref": "#/$defs/ActivationReport"
+        },
+        "active_model": {
+          "$ref": "#/$defs/ActiveModelReport"
+        },
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "calibration": {
+          "$ref": "#/$defs/CalibrationReport"
+        },
+        "candidate": {
+          "$ref": "#/$defs/CandidateReport"
+        },
+        "checks": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CheckStatus"
+          },
+          "title": "Checks",
+          "type": "object"
+        },
+        "cook_refit": {
+          "$ref": "#/$defs/CookRefitReport"
+        },
+        "decision_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Decision Id"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "evidence": {
+          "$ref": "#/$defs/EvidenceSummary"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LearningFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fit": {
+          "$ref": "#/$defs/FitReport"
+        },
+        "gates": {
+          "items": {
+            "$ref": "#/$defs/EvidenceGate"
+          },
+          "title": "Gates",
+          "type": "array"
+        },
+        "identities": {
+          "$ref": "#/$defs/ModelIdentities"
+        },
+        "latest_lifecycle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActivationLifecycle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandidateOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Revision",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/ModelEvidenceStatus"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FitWindowIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "status",
+        "mode",
+        "decision_id",
+        "evidence",
+        "fit",
+        "cook_refit",
+        "window",
+        "checks",
+        "candidate",
+        "activation",
+        "active_model",
+        "identities",
+        "calibration",
+        "latest_lifecycle",
+        "failure",
+        "gates",
+        "blockers",
+        "errors",
+        "revision"
+      ],
+      "title": "ModelEvidenceReport",
+      "type": "object"
+    },
+    "ModelEvidenceStatus": {
+      "enum": [
+        "collecting",
+        "insufficient-excitation",
+        "fitting",
+        "evaluating",
+        "ready-for-review",
+        "activating",
+        "active",
+        "fallback",
+        "error",
+        "schema-invalidated"
+      ],
+      "type": "string"
+    },
+    "ModelIdentities": {
+      "additionalProperties": false,
+      "properties": {
+        "active_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Active Digest"
+        },
+        "active_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Active Generation"
+        },
+        "candidate_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Digest"
+        },
+        "candidate_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Generation"
+        },
+        "rollback_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rollback Digest"
+        },
+        "rollback_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rollback Generation"
+        }
+      },
+      "required": [
+        "active_digest",
+        "active_generation",
+        "candidate_digest",
+        "candidate_generation",
+        "rollback_digest",
+        "rollback_generation"
+      ],
+      "title": "ModelIdentities",
+      "type": "object"
+    },
+    "ModelRollbackAccepted": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "const": true,
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "active_kind": {
+          "const": "grey-box",
+          "title": "Active Kind",
+          "type": "string"
+        },
+        "decision_id": {
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "role_generation": {
+          "minimum": 0,
+          "title": "Role Generation",
+          "type": "integer"
+        },
+        "rollback_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Rollback Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "active_kind",
+        "decision_id",
+        "reason",
+        "role_generation",
+        "rollback_digest"
+      ],
+      "title": "ModelRollbackAccepted",
+      "type": "object"
+    },
+    "ModelRollbackAcknowledgement": {
+      "discriminator": {
+        "mapping": {
+          "False": "#/$defs/ModelActionRejected",
+          "True": "#/$defs/ModelRollbackAccepted"
+        },
+        "propertyName": "accepted"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ModelRollbackAccepted"
+        },
+        {
+          "$ref": "#/$defs/ModelActionRejected"
+        }
+      ],
+      "title": "ModelRollbackAcknowledgement"
+    },
+    "ModelRollbackRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "ModelRollbackRequest",
+      "type": "object"
+    },
+    "MpcCalibrationAction": {
+      "enum": [
+        "start",
+        "pause",
+        "resume",
+        "stop",
+        "reset-progress"
+      ],
+      "type": "string"
+    },
+    "MpcCalibrationCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/MpcCalibrationAction"
+        },
+        "ambient_c": {
+          "title": "Ambient C",
+          "type": "number"
+        },
+        "ambient_source": {
+          "$ref": "#/$defs/AmbientSource"
+        },
+        "empty_grill_confirmed": {
+          "title": "Empty Grill Confirmed",
+          "type": "boolean"
+        },
+        "pellets_confirmed": {
+          "title": "Pellets Confirmed",
+          "type": "boolean"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "revision",
+        "ambient_c",
+        "ambient_source",
+        "empty_grill_confirmed",
+        "pellets_confirmed"
+      ],
+      "title": "MpcCalibrationCommand",
+      "type": "object"
+    },
+    "MpcCalibrationCommandResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MpcCalibrationCommandResponseData"
+            },
+            {
+              "$ref": "#/$defs/CommandResponseData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "OK",
+            "ERROR"
+          ],
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "MpcCalibrationCommandResponse",
+      "type": "object"
+    },
+    "MpcCalibrationCommandResponseData": {
+      "additionalProperties": false,
+      "properties": {
+        "mpc_calibration": {
+          "$ref": "#/$defs/MpcCalibrationCommand"
+        }
+      },
+      "required": [
+        "mpc_calibration"
+      ],
+      "title": "MpcCalibrationCommandResponseData",
+      "type": "object"
+    },
+    "PidSpCheckpointModel": {
+      "discriminator": {
+        "mapping": {
+          "fopdt": "#/$defs/FopdtPidSpCheckpoint",
+          "ipdt": "#/$defs/IpdtPidSpCheckpoint"
+        },
+        "propertyName": "form"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FopdtPidSpCheckpoint"
+        },
+        {
+          "$ref": "#/$defs/IpdtPidSpCheckpoint"
+        }
+      ]
+    },
+    "PidSpConfirmationProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "observed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed"
+        },
+        "required": {
+          "minimum": 0,
+          "title": "Required",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "observed",
+        "required"
+      ],
+      "title": "PidSpConfirmationProgress",
+      "type": "object"
+    },
+    "PidSpGateValue": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "PidSpIdentifierReport": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "accepted_seconds": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "best_residual": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "candidates_passing": {
+          "minimum": 0,
+          "title": "Candidates Passing",
+          "type": "integer"
+        },
+        "confirming": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confirming"
+        },
+        "distrust_count": {
+          "minimum": 0,
+          "title": "Distrust Count",
+          "type": "integer"
+        },
+        "distrust_ratio": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "duty_segments": {
+          "minimum": 0,
+          "title": "Duty Segments",
+          "type": "integer"
+        },
+        "duty_std": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "runner_up_residual": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "temp_span": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "transition_seen": {
+          "title": "Transition Seen",
+          "type": "boolean"
+        },
+        "trusted": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpCheckpointModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accepted",
+        "accepted_seconds",
+        "duty_std",
+        "temp_span",
+        "transition_seen",
+        "duty_segments",
+        "best_residual",
+        "runner_up_residual",
+        "candidates_passing",
+        "confirming",
+        "trusted",
+        "distrust_count",
+        "distrust_ratio"
+      ],
+      "title": "PidSpIdentifierReport",
+      "type": "object"
+    },
+    "PidSpLearningFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "terminal": {
+          "title": "Terminal",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "terminal"
+      ],
+      "title": "PidSpLearningFailure",
+      "type": "object"
+    },
+    "PidSpLearningGate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/$defs/PidSpGateValue"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "required": {
+          "$ref": "#/$defs/PidSpGateValue"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "name",
+        "passed",
+        "observed",
+        "required",
+        "unit"
+      ],
+      "title": "PidSpLearningGate",
+      "type": "object"
+    },
+    "PidSpLearningReport": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpCheckpointModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpConfirmationProgress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "controller": {
+          "const": "pid_sp",
+          "title": "Controller",
+          "type": "string"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpLearningFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gates": {
+          "items": {
+            "$ref": "#/$defs/PidSpLearningGate"
+          },
+          "title": "Gates",
+          "type": "array"
+        },
+        "identifier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpIdentifierReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "live": {
+          "title": "Live",
+          "type": "boolean"
+        },
+        "predictor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpPredictorReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Revision",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/PidSpLearningStatus"
+        }
+      },
+      "required": [
+        "schema_version",
+        "controller",
+        "status",
+        "live",
+        "revision",
+        "gates",
+        "confirmation",
+        "identifier",
+        "predictor",
+        "checkpoint",
+        "failure"
+      ],
+      "title": "PidSpLearningReport",
+      "type": "object"
+    },
+    "PidSpLearningStatus": {
+      "enum": [
+        "idle",
+        "collecting",
+        "insufficient-excitation",
+        "evaluating",
+        "active",
+        "fallback",
+        "error"
+      ],
+      "type": "string"
+    },
+    "PidSpPredictorModel": {
+      "discriminator": {
+        "mapping": {
+          "fopdt": "#/$defs/FopdtPidSpPredictor",
+          "ipdt": "#/$defs/IpdtPidSpPredictor"
+        },
+        "propertyName": "form"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FopdtPidSpPredictor"
+        },
+        {
+          "$ref": "#/$defs/IpdtPidSpPredictor"
+        }
+      ]
+    },
+    "PidSpPredictorReport": {
+      "additionalProperties": false,
+      "properties": {
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "disabled": {
+          "title": "Disabled",
+          "type": "boolean"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpPredictorModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "residual_streak": {
+          "minimum": 0,
+          "title": "Residual Streak",
+          "type": "integer"
+        },
+        "truncated": {
+          "minimum": 0,
+          "title": "Truncated",
+          "type": "integer"
+        },
+        "x0": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "xd": {
+          "$ref": "#/$defs/FiniteNumber"
+        }
+      },
+      "required": [
+        "active",
+        "disabled",
+        "x0",
+        "xd",
+        "residual_streak",
+        "truncated",
+        "model"
+      ],
+      "title": "PidSpPredictorReport",
+      "type": "object"
+    }
+  },
+  "title": "PiFire learning web contracts"
+}

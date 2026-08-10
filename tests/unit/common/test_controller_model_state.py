@@ -135,6 +135,20 @@ def test_strict_load_rejects_a_malformed_target_without_poisoning_a_good_control
 
     assert store.load("mpc") == UNRELATED
 
+def test_strict_load_revalidates_persistence_even_when_shared_cache_is_warm():
+    store, fake = _store()
+    assert store.save("pid_sp", FOPDT) is True
+    assert store.load("pid_sp") == FOPDT
+    fake.blobs[MODEL_STATE_KEY] = json.dumps(
+        {
+            "version": SCHEMA_VERSION,
+            "models": {"pid_sp": {"revision": "interrupted-write"}},
+        }
+    )
+
+    with pytest.raises(ValueError, match="malformed stored snapshot.*pid_sp"):
+        store.load_strict("pid_sp")
+
 
 def test_controllers_do_not_cross_contaminate():
     store, _ = _store()
