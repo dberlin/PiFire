@@ -5,7 +5,7 @@
 DONE
 
 Implementation commit: `47fe3c5ed68b13330bf90aa12efea165f30c2f44` (`tnwzokqovrtnsqlskonrkrpwvmukoork`)
-Aggregate fixture-fix commit: `901b1e8da316125b08f80f467729144bb9afac9b` (`wmzqkyoskorrzlyspsuqoysupwntvsus`)
+Aggregate fixture-fix commit: `dc8c36fed7d5899f4c39ed2efd200229ff082a3c` (`wmzqkyoskorrzlyspsuqoysupwntvsus`)
 
 ## Changed paths
 
