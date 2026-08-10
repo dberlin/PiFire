@@ -2,20 +2,28 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass as std_dataclass
 from typing import Annotated, Literal, TypeAlias, cast
 
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
 from controller.fopdt_identifier import (
+    AMBIENT_F,
     CONFIRM_WINDOW,
+    DELAYS,
+    FORM_FOPDT,
+    FORM_IPDT,
     MIN_ACCEPTED,
     MIN_ACCEPTED_SECONDS,
     MIN_DUTY_STD,
+    MIN_RISE_F,
     MIN_TEMP_SPAN_F,
+    RESTORE_BOUNDS,
 )
 
 PidSpLearningStatus: TypeAlias = Literal[
@@ -239,3 +247,320 @@ def build_pid_sp_live_learning(
         confirmation=confirmation,
         gates=gates,
     ).to_dict()
+
+
+PidSpReportStatus: TypeAlias = Literal[
+    "idle",
+    "collecting",
+    "insufficient-excitation",
+    "evaluating",
+    "active",
+    "fallback",
+    "error",
+]
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class FopdtPidSpCheckpoint:
+    """Validated durable first-order PID-SP model."""
+
+    form: Literal["fopdt"]
+    K: FiniteFloat
+    tau: FiniteFloat
+    theta: FiniteFloat
+    revision: NonNegativeInt
+    identified_at_f: FiniteFloat | None = None
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class IpdtPidSpCheckpoint:
+    """Validated durable integrating PID-SP model."""
+
+    form: Literal["ipdt"]
+    K_i: FiniteFloat
+    c0: FiniteFloat
+    theta: FiniteFloat
+    revision: NonNegativeInt
+    identified_at_f: FiniteFloat | None = None
+
+
+PidSpCheckpoint: TypeAlias = FopdtPidSpCheckpoint | IpdtPidSpCheckpoint
+
+
+@std_dataclass(frozen=True, slots=True)
+class PidSpLearningReport:
+    """Immutable canonical report bytes safe to cache or serve."""
+
+    payload_bytes: bytes
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a caller-owned decoded report."""
+
+        decoded = json.loads(self.payload_bytes)
+        if not isinstance(decoded, dict):
+            raise ValueError("PID-SP learning report root is not an object")
+        return cast(dict[str, object], decoded)
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a caller-owned decoded report."""
+
+        return self.as_dict()
+
+    @property
+    def revision(self) -> str:
+        """Return the report invalidation token."""
+
+        revision = self.as_dict().get("revision")
+        if not isinstance(revision, str):
+            raise ValueError("PID-SP learning report revision is missing")
+        return revision
+
+
+def _canonical_bytes(value: object) -> bytes:
+    return json.dumps(
+        _owned_json_value(value, "report"),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _checkpoint_error(detail: str, error: Exception | None = None) -> ValueError:
+    failure = ValueError(f"checkpoint {detail}")
+    if error is not None:
+        failure.__cause__ = error
+    return failure
+
+
+def _checkpoint_number(checkpoint: Mapping[str, object], field: str) -> float:
+    try:
+        value = float(cast(str | int | float, checkpoint[field]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise _checkpoint_error(f"{field} must be a number", error)
+    if not math.isfinite(value):
+        raise _checkpoint_error(f"{field} must be finite")
+    return value
+
+
+def _normalize_checkpoint(checkpoint: object) -> dict[str, object] | None:
+    if checkpoint is None:
+        return None
+    if not isinstance(checkpoint, Mapping):
+        raise _checkpoint_error("must be an object")
+    owned = _owned_json_mapping(checkpoint, "checkpoint")
+    form = owned.get("form", FORM_FOPDT)
+    if form not in (FORM_FOPDT, FORM_IPDT):
+        raise _checkpoint_error("form is invalid")
+    bounds = RESTORE_BOUNDS[form]
+    values = {bound[0]: _checkpoint_number(owned, bound[0]) for bound in bounds}
+    for name, lower, upper in bounds:
+        if not lower <= values[name] <= upper:
+            raise _checkpoint_error(f"{name} is outside the restore bounds")
+    theta = _checkpoint_number(owned, "theta")
+    if not float(DELAYS.min()) <= theta <= float(DELAYS.max()):
+        raise _checkpoint_error("theta is outside the restore bounds")
+    revision_value = owned.get("revision")
+    if isinstance(revision_value, bool):
+        raise _checkpoint_error("revision must be a non-negative integer")
+    try:
+        revision = int(cast(str | int | float, revision_value))
+    except (TypeError, ValueError) as error:
+        raise _checkpoint_error("revision must be a non-negative integer", error)
+    if revision < 0:
+        raise _checkpoint_error("revision must be a non-negative integer")
+
+    identified_value = owned.get("identified_at_f", owned.get("setpoint_f"))
+    identified_at_f = None
+    if identified_value is not None:
+        try:
+            identified = float(cast(str | int | float, identified_value))
+        except (TypeError, ValueError) as error:
+            raise _checkpoint_error("identified_at_f must be a number", error)
+        if not math.isfinite(identified):
+            raise _checkpoint_error("identified_at_f must be finite")
+        if identified > AMBIENT_F + MIN_RISE_F:
+            identified_at_f = identified
+
+    contract: PidSpCheckpoint
+    if form == FORM_FOPDT:
+        contract = FopdtPidSpCheckpoint(
+            form="fopdt",
+            K=values["K"],
+            tau=values["tau"],
+            theta=theta,
+            revision=revision,
+            identified_at_f=identified_at_f,
+        )
+    else:
+        contract = IpdtPidSpCheckpoint(
+            form="ipdt",
+            K_i=values["K_i"],
+            c0=values["c0"],
+            theta=theta,
+            revision=revision,
+            identified_at_f=identified_at_f,
+        )
+    normalized = asdict(contract)
+    if identified_at_f is None:
+        normalized.pop("identified_at_f")
+    return normalized
+
+
+def _marked_pid_sp_live(value: object) -> bool:
+    return isinstance(value, Mapping) and value.get("schema_version") == 1 and value.get("controller") == "pid_sp"
+
+
+def _live_from_status(status: object) -> object:
+    if _marked_pid_sp_live(status):
+        return status
+    if not isinstance(status, Mapping):
+        return None
+    direct = status.get("learning")
+    if _marked_pid_sp_live(direct):
+        return direct
+    controller = status.get("controller")
+    nested = controller.get("learning") if isinstance(controller, Mapping) else None
+    return nested if _marked_pid_sp_live(nested) else None
+
+
+def _gate_value(mapping: Mapping[str, object], field: str) -> GateValue:
+    value = mapping.get(field)
+    if isinstance(value, bool) or isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return value
+    raise ValueError(f"gate {field} must be a finite number or boolean")
+
+
+def _learning_gate(value: object) -> PidSpLearningGate:
+    mapping = _owned_json_mapping(value, "gate")
+    if set(mapping) != {"name", "passed", "observed", "required", "unit"}:
+        raise ValueError("gate fields are invalid")
+    name = mapping["name"]
+    passed = mapping["passed"]
+    unit = mapping["unit"]
+    if not isinstance(name, str):
+        raise ValueError("gate name must be a string")
+    if not isinstance(passed, bool):
+        raise ValueError("gate passed must be a boolean")
+    if unit is not None and not isinstance(unit, str):
+        raise ValueError("gate unit must be a string or null")
+    return PidSpLearningGate(
+        name=name,
+        passed=passed,
+        observed=_gate_value(mapping, "observed"),
+        required=_gate_value(mapping, "required"),
+        unit=unit,
+    )
+
+
+def _normalize_live(live: object) -> dict[str, object]:
+    mapping = _owned_json_mapping(live, "live status")
+    required = {
+        "schema_version",
+        "controller",
+        "status",
+        "identifier",
+        "predictor",
+        "confirmation",
+        "gates",
+    }
+    if set(mapping) != required:
+        raise ValueError("live status fields are invalid")
+    status = mapping["status"]
+    if status not in {
+        "collecting",
+        "insufficient-excitation",
+        "evaluating",
+        "active",
+        "fallback",
+    }:
+        raise ValueError("live status value is invalid")
+    identifier = _owned_json_mapping(mapping["identifier"], "identifier")
+    predictor = _owned_json_mapping(mapping["predictor"], "predictor")
+    _validate_status_fields(identifier, predictor)
+    for field in ("accepted", "accepted_seconds", "duty_std", "temp_span"):
+        _number(identifier, field)
+    _boolean(identifier, "transition_seen")
+    _boolean(predictor, "active")
+    _boolean(predictor, "disabled")
+
+    confirmation_mapping = _owned_json_mapping(mapping["confirmation"], "confirmation")
+    if set(confirmation_mapping) != {"observed", "required"}:
+        raise ValueError("confirmation fields are invalid")
+    required_confirmations = _optional_nonnegative_int(confirmation_mapping, "required")
+    if required_confirmations is None:
+        raise ValueError("confirmation required must be a non-negative integer")
+    confirmation = PidSpConfirmationProgress(
+        observed=_optional_nonnegative_int(confirmation_mapping, "observed"),
+        required=required_confirmations,
+    )
+    gates_value = mapping["gates"]
+    if not isinstance(gates_value, Sequence) or isinstance(gates_value, (str, bytes, bytearray)):
+        raise ValueError("gates must be an array")
+    gates = [_learning_gate(value) for value in gates_value]
+    normalized = PidSpLiveLearning(
+        schema_version=1,
+        controller="pid_sp",
+        status=cast(PidSpLearningStatus, status),
+        identifier=identifier,
+        predictor=predictor,
+        confirmation=confirmation,
+        gates=tuple(gates),
+    )
+    return normalized.to_dict()
+
+
+def current_pid_sp_learning_report(
+    *,
+    status: object,
+    checkpoint: object,
+) -> PidSpLearningReport:
+    """Project one live status and one durable checkpoint without side effects."""
+
+    normalized_checkpoint = _normalize_checkpoint(checkpoint)
+    live = _live_from_status(status)
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "controller": "pid_sp",
+        "status": "idle",
+        "live": False,
+        "gates": [],
+        "identifier": None,
+        "predictor": None,
+        "checkpoint": normalized_checkpoint,
+        "failure": None,
+    }
+    if live is not None:
+        try:
+            normalized_live = _normalize_live(live)
+        except (TypeError, ValueError) as error:
+            payload["status"] = "error"
+            payload["failure"] = {
+                "code": "live-status-invalid",
+                "detail": str(error),
+                "terminal": False,
+            }
+        else:
+            payload.update(
+                {
+                    "status": normalized_live["status"],
+                    "live": True,
+                    "gates": normalized_live["gates"],
+                    "identifier": normalized_live["identifier"],
+                    "predictor": normalized_live["predictor"],
+                }
+            )
+    payload["revision"] = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
+    return PidSpLearningReport(_canonical_bytes(payload))
+
+
+def backend_pid_sp_learning_report() -> PidSpLearningReport:
+    """Read each PID-SP report authority once and compose its projection."""
+
+    from common.controller_model_state import ControllerModelStore
+    from common.datastore_accessors import read_status
+
+    status = read_status()
+    checkpoint = ControllerModelStore().load("pid_sp")
+    return current_pid_sp_learning_report(status=status, checkpoint=checkpoint)

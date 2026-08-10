@@ -48,6 +48,7 @@ from controller.model_learning.activation import (
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.model_learning.report import backend_learning_report, build_learning_artifact
+from controller.pid_sp_learning import backend_pid_sp_learning_report
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from . import api_bp
 
@@ -189,6 +190,18 @@ def api_model_evidence_report():
     except (TypeError, ValueError) as exc:
         return jsonify({"error": "model-evidence-report-invalid", "detail": str(exc)}), 422
     return jsonify(report.as_dict()), 200
+
+
+@api_bp.get("/pid-sp-learning/report")
+def api_pid_sp_learning_report():
+    """Return the current read-only PID-SP learning projection."""
+
+    try:
+        report = backend_pid_sp_learning_report()
+        payload = report.as_dict()
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": "pid-sp-learning-report-invalid", "detail": str(exc)}), 422
+    return jsonify(payload), 200
 
 
 @api_bp.get("/model-evidence/artifact")
