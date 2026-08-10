@@ -98,6 +98,18 @@ def test_projection_publishes_the_five_backend_owned_excitation_gates():
     ]
 
 
+def test_projection_publishes_backend_owned_confirmation_progress():
+    projection = build_pid_sp_live_learning(
+        _identifier_status(confirming=CONFIRM_WINDOW - 3),
+        _predictor_status(),
+    )
+
+    assert projection["confirmation"] == {
+        "observed": CONFIRM_WINDOW - 3,
+        "required": CONFIRM_WINDOW,
+    }
+
+
 @pytest.mark.parametrize(
     ("identifier", "predictor", "expected"),
     [
@@ -180,6 +192,17 @@ def test_booleans_are_not_accepted_as_numeric_gate_observations(field):
             _identifier_status(**{field: True}),
             _predictor_status(),
         )
+
+
+def test_arbitrarily_large_integer_observations_remain_valid_numbers():
+    accepted = 10**1000
+
+    projection = build_pid_sp_live_learning(
+        _identifier_status(accepted=accepted),
+        _predictor_status(),
+    )
+
+    assert projection["gates"][0]["observed"] == accepted
 
 
 def test_projection_defensively_copies_nested_identifier_and_predictor_mappings():

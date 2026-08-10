@@ -11,6 +11,7 @@ from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
 from controller.fopdt_identifier import (
+    CONFIRM_WINDOW,
     MIN_ACCEPTED,
     MIN_ACCEPTED_SECONDS,
     MIN_DUTY_STD,
@@ -26,6 +27,7 @@ PidSpLearningStatus: TypeAlias = Literal[
 ]
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 GateValue: TypeAlias = int | FiniteFloat | bool
+NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
 
 _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
 
@@ -42,6 +44,14 @@ class PidSpLearningGate:
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class PidSpConfirmationProgress:
+    """Candidate confirmations observed against the backend-owned requirement."""
+
+    observed: NonNegativeInt | None
+    required: NonNegativeInt
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class PidSpLiveLearning:
     """Validated immutable source for the JSON-safe live status projection."""
 
@@ -50,6 +60,7 @@ class PidSpLiveLearning:
     status: PidSpLearningStatus
     identifier: dict[str, object]
     predictor: dict[str, object]
+    confirmation: PidSpConfirmationProgress
     gates: tuple[PidSpLearningGate, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -61,6 +72,7 @@ class PidSpLiveLearning:
             "status": self.status,
             "identifier": _owned_json_mapping(self.identifier, "identifier"),
             "predictor": _owned_json_mapping(self.predictor, "predictor"),
+            "confirmation": asdict(self.confirmation),
             "gates": [asdict(gate) for gate in self.gates],
         }
 
@@ -90,8 +102,17 @@ def _number(mapping: Mapping[str, object], field: str) -> int | float:
     value = mapping.get(field)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be a number")
-    if not math.isfinite(value):
+    if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"{field} must be finite")
+    return value
+
+
+def _optional_nonnegative_int(mapping: Mapping[str, object], field: str) -> int | None:
+    value = mapping.get(field)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer or null")
     return value
 
 
@@ -120,7 +141,6 @@ def _validate_status_fields(identifier: Mapping[str, object], predictor: Mapping
             "best_residual",
             "runner_up_residual",
             "candidates_passing",
-            "confirming",
             "distrust_count",
             "distrust_ratio",
         ),
@@ -156,6 +176,10 @@ def build_pid_sp_live_learning(
     temp_span = _number(identifier_owned, "temp_span")
     predictor_active = _boolean(predictor_owned, "active")
     predictor_disabled = _boolean(predictor_owned, "disabled")
+    confirmation = PidSpConfirmationProgress(
+        observed=_optional_nonnegative_int(identifier_owned, "confirming"),
+        required=CONFIRM_WINDOW,
+    )
 
     gates = (
         PidSpLearningGate(
@@ -212,5 +236,6 @@ def build_pid_sp_live_learning(
         status=status,
         identifier=identifier_owned,
         predictor=predictor_owned,
+        confirmation=confirmation,
         gates=gates,
     ).to_dict()

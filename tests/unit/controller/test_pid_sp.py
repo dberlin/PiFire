@@ -7,6 +7,7 @@ import time
 import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.fopdt_identifier import CONFIRM_WINDOW
 from controller.pid_sp import STARTUP_REDUCTION
 from grillplat.actuator_capabilities import AUGER_TIMING
 
@@ -568,6 +569,7 @@ def test_get_status_projects_one_identifier_and_predictor_snapshot(clock, monkey
         "status": "collecting",
         "identifier": identifier,
         "predictor": predictor,
+        "confirmation": {"observed": None, "required": CONFIRM_WINDOW},
         "gates": [
             {
                 "name": "accepted_samples",
