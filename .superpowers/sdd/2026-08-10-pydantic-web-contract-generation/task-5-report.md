@@ -230,3 +230,35 @@ Fresh GREEN evidence after regeneration:
 
 The repository-wide pytest run was explicitly cancelled at the integration
 owner's direction; it is not part of this fix's validation evidence.
+
+## Aggregate-gate compatibility follow-up
+
+Legacy notify compatibility commit:
+`d287a9b44937735dac6a53861e14dfdcf61456d4`
+(`vtonnzkzuxqytuvtqoloskmtrvruqxlk`).
+
+The aggregate Python gate exposed one preserved-client regression:
+`NotifyEntry.shutdown` had become required, so the characterized legacy
+whole-`notify_data` entry `{label, type, req, target}` was rejected with HTTP
+400 before reaching the existing `notify.replace` operation. `shutdown` is now
+optional and omitted values remain omitted during `exclude_unset` dumping;
+declared values are still strict booleans. The control schema and TypeScript
+contract were regenerated.
+
+- RED:
+  `test_post_control_routes_notify_data_through_the_replace_op` failed with
+  expected 201 versus actual 400.
+- GREEN: that focused regression passed; the complete control-delta seam plus
+  control-contract suites passed 81 tests in 4.75s.
+- `bun run gen:types:check` and `bun run typecheck` both passed after
+  regeneration; LSP diagnostics for `control.py` were clean.
+
+Lint-only test commit: `a125c980a07bcc972baff8649ac986f95776947a`
+(`mvvxropyqrrnoroppwtzwkkuuyrwxzqx`). The Prime negative type assertions now
+use invalid typed assignments instead of a constant-false branch, preserving
+the compile-time contract without violating Biome's
+`lint/correctness/noConstantCondition` rule.
+
+- RED: focused Biome reported `noConstantCondition` (plus import ordering).
+- GREEN: focused Biome checked one file with no diagnostics; the command suite
+  passed 33 tests and `bun run typecheck` passed.
