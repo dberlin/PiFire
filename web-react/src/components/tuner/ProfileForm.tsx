@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { saveProfile, tunerErrorText } from "../../helpers/tuner/tunerApi";
-import type { SavedProfile } from "../../helpers/tuner/tunerTypes";
+import type { ProfileInput, SavedProfile } from "../../helpers/contracts/operations.gen";
 import "./tuner.css";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
@@ -21,7 +21,7 @@ export function ProfileForm({
   probeLabel,
   onSaved,
 }: {
-  coefficients: { a: number; b: number; c: number };
+  coefficients: Pick<ProfileInput, "a" | "b" | "c">;
   probeLabel: string;
   onSaved: (saved: SavedProfile) => void;
 }) {

@@ -1,4 +1,4 @@
-import type { AutoStatus } from "../../helpers/tuner/tunerTypes";
+import type { AutoStatus } from "../../helpers/contracts/operations.gen";
 import "./tuner.css";
 
 /**

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Segment, TrReading } from "../../helpers/tuner/tunerTypes";
+import type { Segment, TrReading } from "../../helpers/contracts/operations.gen";
 import "./tuner.css";
 
 /**

@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { adminErrorText, fetchAdminState } from "../../helpers/admin/adminApi";
-import type { AdminResult, AdminState, Reading } from "../../helpers/admin/adminTypes";
+import type { AdminResult } from "../../helpers/admin/adminTypes";
+import type { AdminState, Reading } from "../../helpers/contracts/operations.gen";
 import { queryKeys } from "../../helpers/query/keys";
 import { ApiError, unwrap } from "../../helpers/query/unwrap";
 import "./admin.css";

@@ -188,6 +188,17 @@ def test_change_branch_validates_against_the_branch_list(ds, client, monkeypatch
     assert len(fired) == 1  # rejected target never fired
 
 
+def test_change_branch_rejects_extra_json_members(ds, client, monkeypatch):
+    ur, fired = _neutralize(monkeypatch)
+    monkeypatch.setattr(ur, "get_update_data", lambda settings: {"branches": ["main", "dev"]})
+    _set_real_hw(True)
+
+    resp = client.post("/api/update/branch", json={"target": "dev", "extra": True})
+
+    assert resp.status_code == 400
+    assert fired == []
+
+
 def test_pull_is_blocked_unless_stopped(ds, client, monkeypatch):
     ur, fired = _neutralize(monkeypatch)
     monkeypatch.setattr(ur, "get_branch", lambda: ("main", ""))

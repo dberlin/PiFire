@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
-import type { SystemAction } from "../../helpers/admin/adminTypes";
+import type { SystemAction } from "../../helpers/contracts/operations.gen";
+import type { InstallStatus } from "../../helpers/contracts/wizard.gen";
 import { getInstallLog, getInstallStatus } from "../../helpers/wizard/wizardApi";
-import type { InstallStatus } from "../../helpers/wizard/wizardTypes";
 import { StreamingLogPanel } from "../logs/StreamingLogPanel";
 
 export interface InstallProgressProps {

@@ -6,31 +6,36 @@
 
 import type {
   AutoStatus,
+  AutoStatusRequest,
   Coefficients,
+  CoefficientsRequest,
   ProfileInput,
   SavedProfile,
   TrReading,
   TunerPoint,
-  TunerResult,
   TunerSession,
-} from "./tunerTypes";
+  TunerSessionRequest,
+} from "../contracts/operations.gen";
+import type { TunerResult } from "./tunerTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/tuner/${path}`;
 
+interface TunerEnvelope<T> {
+  result?: string;
+  message?: string;
+  data?: (T & { mode?: string; field?: string }) | null;
+}
+
 async function unpack<T>(res: Response): Promise<TunerResult<T>> {
-  const body = (await res.json().catch(() => ({}))) as {
-    result?: string;
-    message?: string;
-    data?: (T & { mode?: string; field?: string }) | null;
-  };
+  const body: TunerEnvelope<T> = await res.json().catch(() => ({}));
   const detail = body.data ?? null;
   return {
     ok: res.ok && body.result === "OK",
     status: res.status,
     message: body.message ?? `HTTP ${res.status}`,
-    data: detail as T | null,
+    data: detail,
     mode: detail?.mode,
     field: detail?.field,
   };
@@ -80,13 +85,17 @@ export function tunerErrorText(result: TunerResult<unknown>): string {
 
 /** Enter tuning mode. Moves a STOPPED grill to Monitor; refused with 409
  * `not_tunable` from any mode that is neither Stop nor Monitor. */
-export const openSession = (baseUrl = BASE_URL) =>
-  post<TunerSession>(baseUrl, "session", { open: true });
+export const openSession = (baseUrl = BASE_URL) => {
+  const body: TunerSessionRequest = { open: true };
+  return post<TunerSession>(baseUrl, "session", body);
+};
 
 /** Leave tuning mode, restoring Stop only if the grill is still in Monitor.
  * Idempotent: the page closes on unmount, which can follow an explicit Finish. */
-export const closeSession = (baseUrl = BASE_URL) =>
-  post<TunerSession>(baseUrl, "session", { open: false });
+export const closeSession = (baseUrl = BASE_URL) => {
+  const body: TunerSessionRequest = { open: false };
+  return post<TunerSession>(baseUrl, "session", body);
+};
 
 /** One probe's live resistance. Inert — safe to poll. */
 export const fetchTr = (probe: string, baseUrl = BASE_URL) =>
@@ -94,8 +103,10 @@ export const fetchTr = (probe: string, baseUrl = BASE_URL) =>
 
 /** Solve Steinhart-Hart. Refused with 422 `uncomputable` rather than
  * answering the (0, 0, 0) the underlying function returns on failure. */
-export const computeCoefficients = (points: TunerPoint[], baseUrl = BASE_URL) =>
-  post<Coefficients>(baseUrl, "coefficients", { points });
+export const computeCoefficients = (points: TunerPoint[], baseUrl = BASE_URL) => {
+  const body: CoefficientsRequest = { points };
+  return post<Coefficients>(baseUrl, "coefficients", body);
+};
 
 export const saveProfile = (profile: ProfileInput, baseUrl = BASE_URL) =>
   post<SavedProfile>(baseUrl, "profile", profile);
@@ -105,5 +116,7 @@ export const saveProfile = (profile: ProfileInput, baseUrl = BASE_URL) =>
  * A POST, not a GET: each poll captures a datapoint. It writes only the
  * autotune queue server-side, never control -- the session calls remain the
  * sole writers of grill state. */
-export const fetchAutoStatus = (probe: string, reference: string, baseUrl = BASE_URL) =>
-  post<AutoStatus>(baseUrl, "auto-status", { probe, reference });
+export const fetchAutoStatus = (probe: string, reference: string, baseUrl = BASE_URL) => {
+  const body: AutoStatusRequest = { probe, reference };
+  return post<AutoStatus>(baseUrl, "auto-status", body);
+};

@@ -2,7 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AutoTuneCard } from "../../../../src/components/tuner/AutoTuneCard";
-import type { AutoStatus } from "../../../../src/helpers/tuner/tunerTypes";
+import type { AutoStatus } from "../../../../src/helpers/contracts/operations.gen";
 
 const STATUS: AutoStatus = {
   current_tr: 41000,

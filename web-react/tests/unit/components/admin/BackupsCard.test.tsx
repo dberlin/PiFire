@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
-import type { BackupListing } from "../../../../src/helpers/admin/adminTypes";
+import type { BackupListing } from "../../../../src/helpers/contracts/operations.gen";
 
 const createBackupMock = rs.fn();
 const restoreBackupMock = rs.fn();

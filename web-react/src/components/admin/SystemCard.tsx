@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { adminErrorText, factoryReset, systemAction } from "../../helpers/admin/adminApi";
-import type { AdminResult, SystemAction } from "../../helpers/admin/adminTypes";
+import type { AdminResult } from "../../helpers/admin/adminTypes";
+import type { SystemAction } from "../../helpers/contracts/operations.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 /** The mode the server requires before it will honour any of these. */

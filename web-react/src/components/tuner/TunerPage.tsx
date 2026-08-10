@@ -12,7 +12,7 @@ import type {
   Segment,
   TrReading,
   TunerPoint,
-} from "../../helpers/tuner/tunerTypes";
+} from "../../helpers/contracts/operations.gen";
 import { useTunerSession } from "../../helpers/tuner/useTunerSession";
 import { AutoTuneCard } from "./AutoTuneCard";
 import { ProfileForm } from "./ProfileForm";

@@ -8,16 +8,24 @@
 
 import type {
   BuildLog,
+  UpdateBranchRequest,
   UpdateCheck,
-  UpdateResult,
+  UpdateLog,
   UpdateStarted,
   UpdateState,
   UpdateStatus,
-} from "./updateTypes";
+} from "../contracts/operations.gen";
+import type { UpdateResult } from "./updateTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/update/${path}`;
+
+interface UpdateEnvelope<T> {
+  result?: string;
+  message?: string;
+  data?: T | null;
+}
 
 /** Unpack the envelope into an UpdateResult, whatever the status.
  *
@@ -25,16 +33,12 @@ const url = (baseUrl: string, path: string) => `${baseUrl}/api/update/${path}`;
  * mask the status the caller branches on, so the parse failure falls back to
  * the status rather than propagating. */
 async function unpack<T>(res: Response): Promise<UpdateResult<T>> {
-  const body = (await res.json().catch(() => ({}))) as {
-    result?: string;
-    message?: string;
-    data?: T | null;
-  };
+  const body: UpdateEnvelope<T> = await res.json().catch(() => ({}));
   return {
     ok: res.ok && body.result === "OK",
     status: res.status,
     message: body.message ?? `HTTP ${res.status}`,
-    data: (body.data ?? null) as T | null,
+    data: body.data ?? null,
   };
 }
 
@@ -68,13 +72,15 @@ async function post<T>(
 export const fetchUpdateState = (baseUrl = BASE_URL) => get<UpdateState>(baseUrl, "state");
 export const fetchUpdateCheck = (baseUrl = BASE_URL) => get<UpdateCheck>(baseUrl, "check");
 export const fetchUpdateLog = (commits: number, baseUrl = BASE_URL) =>
-  get<{ output: string }>(baseUrl, `log?commits=${commits}`);
+  get<UpdateLog>(baseUrl, `log?commits=${commits}`);
 export const fetchUpdateStatus = (baseUrl = BASE_URL) => get<UpdateStatus>(baseUrl, "status");
 
 export const refreshBranches = (baseUrl = BASE_URL) =>
   post<UpdateStarted>(baseUrl, "branches/refresh");
-export const changeBranch = (target: string, baseUrl = BASE_URL) =>
-  post<UpdateStarted>(baseUrl, "branch", { target });
+export const changeBranch = (target: string, baseUrl = BASE_URL) => {
+  const body: UpdateBranchRequest = { target };
+  return post<UpdateStarted>(baseUrl, "branch", body);
+};
 export const pullUpdate = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "pull");
 export const upgradeDeps = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "upgrade");
 export const rebuildWebUi = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "rebuild-web-ui");

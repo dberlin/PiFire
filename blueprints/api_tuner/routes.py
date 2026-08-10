@@ -14,6 +14,8 @@ Monitor: tuning during a cook would fight the controller for the probes.
 from flask import jsonify, request
 from werkzeug.exceptions import BadRequest
 
+from pydantic import ValidationError
+
 from common.app import api_response
 from common.common import WriteKind, generate_uuid
 from common.control_delta import control_delta
@@ -32,6 +34,19 @@ from common.datastore_accessors import (
 from common.modes import Mode
 
 from blueprints.tuner.tuner import calc_auto_tune_status, calc_shh_chart, calc_shh_coefficients
+from common.web_contracts.operations import (
+    AutoStatus,
+    AutoStatusRequest,
+    Coefficients,
+    CoefficientsRequest,
+    ProfileInput,
+    SavedProfile,
+    TrReading,
+    TunerSession,
+    TunerSessionRequest,
+    dump_error_data,
+    dump_wire,
+)
 
 from . import api_tuner_bp
 
@@ -44,7 +59,8 @@ TUNABLE_MODES = (Mode.STOP, Mode.MONITOR)
 
 
 def error(message, status, **data):
-    return jsonify(api_response("Error", message, data or None)), status
+    details = dump_error_data(data) if data else None
+    return jsonify(api_response("Error", message, details)), status
 
 
 def json_body():
@@ -52,6 +68,15 @@ def json_body():
         return request.get_json(silent=True) or {}
     except BadRequest:
         return {}
+
+
+def validate_json(model, *, fallback_field=None):
+    try:
+        return model.model_validate(json_body(), strict=True), None
+    except ValidationError as exc:
+        location = exc.errors()[0]["loc"]
+        field = next((part for part in reversed(location) if isinstance(part, str)), fallback_field)
+        return None, error("bad_request", 400, field=field or fallback_field)
 
 
 def set_control(**values):
@@ -80,17 +105,18 @@ def tuner_session():
     open is left alone. `restored` reports whether the mode was actually moved,
     which is what makes "close twice" observable rather than silent.
     """
-    body = json_body()
-    if not isinstance(body.get("open"), bool):
-        return error("bad_request", 400, field="open")
+    payload, invalid = validate_json(TunerSessionRequest, fallback_field="open")
+    if payload is None:
+        assert invalid is not None
+        return invalid
 
-    if body["open"]:
+    if payload.open:
         refusal = require_tunable()
         if refusal:
             return refusal
         control = read_control()
         moved = control.get("mode") == Mode.STOP
-        values = {"tuning_mode": True}
+        values: dict[str, object] = {"tuning_mode": True}
         if moved:
             values.update({"mode": Mode.MONITOR, "updated": True})
         set_control(**values)
@@ -99,16 +125,18 @@ def tuner_session():
         #  mode -- which is this call now. Manual tuning never reads this queue,
         #  so the flush is a no-op there.
         flush_autotune()
-        return jsonify(api_response("OK", None, {"open": True, "mode": Mode.MONITOR, "restored": moved})), 200
+        data = dump_wire(TunerSession, {"open": True, "mode": Mode.MONITOR, "restored": moved})
+        return jsonify(api_response("OK", None, data)), 200
 
     control = read_control()
     restored = control.get("mode") == Mode.MONITOR
-    values = {"tuning_mode": False}
+    values: dict[str, object] = {"tuning_mode": False}
     if restored:
         values.update({"mode": Mode.STOP, "updated": True})
     set_control(**values)
     mode_after = Mode.STOP if restored else control.get("mode")
-    return jsonify(api_response("OK", None, {"open": False, "mode": mode_after, "restored": restored})), 200
+    data = dump_wire(TunerSession, {"open": False, "mode": mode_after, "restored": restored})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_tuner_bp.route("/tr", methods=["GET"])
@@ -129,19 +157,17 @@ def tuner_tr():
 
     readings = read_tr()
     control = read_control()
-    return jsonify(
-        api_response(
-            "OK",
-            None,
-            {
-                "probe": probe,
-                "trohms": readings.get(probe),
-                #  A reading taken outside a session is stale: control.py only
-                #  refreshes this blob in tuning mode.
-                "tuning": bool(control.get("tuning_mode")),
-            },
-        )
-    ), 200
+    data = dump_wire(
+        TrReading,
+        {
+            "probe": probe,
+            "trohms": readings.get(probe),
+            # A reading taken outside a session is stale: control.py only
+            # refreshes this blob in tuning mode.
+            "tuning": bool(control.get("tuning_mode")),
+        },
+    )
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_tuner_bp.route("/coefficients", methods=["POST"])
@@ -159,30 +185,14 @@ def tuner_coefficients():
         which its own docstring calls common. An empty chart is reported as
         chart_ok: false rather than drawn as an empty chart.
     """
-    body = json_body()
-    raw = body.get("points")
-    if not isinstance(raw, list) or len(raw) != 3:
-        return error("bad_request", 400, field="points")
-
-    by_segment = {}
-    for entry in raw:
-        if not isinstance(entry, dict):
-            return error("bad_request", 400, field="points")
-        segment = entry.get("segment")
-        if segment not in SEGMENTS:
-            return error("bad_request", 400, field="segment")
-        try:
-            #  bool is a subclass of int, so `True` would otherwise sail
-            #  through float() and become a 1-ohm reading.
-            for key in ("temp", "trohms"):
-                if isinstance(entry.get(key), bool):
-                    raise TypeError(key)
-            by_segment[segment] = (float(entry["temp"]), float(entry["trohms"]))
-        except TypeError, ValueError, KeyError:
-            return error("bad_request", 400, field="points")
-
-    if set(by_segment) != set(SEGMENTS):
-        return error("bad_request", 400, field="points")
+    payload, invalid = validate_json(CoefficientsRequest, fallback_field="points")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    by_segment = {
+        point.segment: (float(point.temp), float(point.trohms))
+        for point in payload.points
+    }
 
     units = read_settings()["globals"]["units"]
     (high_t, high_r) = by_segment["High"]
@@ -196,7 +206,11 @@ def tuner_coefficients():
     _labels, chart = calc_shh_chart(
         a, b, c, units=units, temp_range=220, tr_points=[int(high_r), int(medium_r), int(low_r)]
     )
-    return jsonify(api_response("OK", None, {"a": a, "b": b, "c": c, "chart": chart, "chart_ok": bool(chart)})), 200
+    data = dump_wire(
+        Coefficients,
+        {"a": a, "b": b, "c": c, "chart": chart, "chart_ok": bool(chart)},
+    )
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_tuner_bp.route("/profile", methods=["POST"])
@@ -217,22 +231,12 @@ def tuner_profile():
     Not routed through _settings_addprofile: that handler reads request.form
     off the global, so it is not callable without faking a request context.
     """
-    body = json_body()
-
-    name = body.get("name")
-    if not isinstance(name, str) or not name.strip():
-        return error("bad_request", 400, field="name")
-
-    coefficients = {}
-    for key in ("a", "b", "c"):
-        value = body.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return error("bad_request", 400, field=key)
-        coefficients[key] = float(value)
-
-    apply_to = body.get("apply_to")
-    if apply_to is not None and not isinstance(apply_to, str):
-        return error("bad_request", 400, field="apply_to")
+    payload, invalid = validate_json(ProfileInput, fallback_field="name")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    coefficients = {"a": float(payload.a), "b": float(payload.b), "c": float(payload.c)}
+    apply_to = payload.apply_to
 
     settings = read_settings()
     probe_info = settings["probe_settings"]["probe_map"]["probe_info"]
@@ -249,7 +253,7 @@ def tuner_profile():
         "A": coefficients["a"],
         "B": coefficients["b"],
         "C": coefficients["c"],
-        "name": name.strip(),
+        "name": payload.name,
         "id": profile_id,
     }
     settings["probe_settings"]["probe_profiles"][profile_id] = profile
@@ -257,9 +261,11 @@ def tuner_profile():
         probe_info[target]["profile"] = profile
     write_settings(settings)
 
-    return jsonify(
-        api_response("OK", None, {"id": profile_id, "applied": apply_to if target is not None else None})
-    ), 200
+    data = dump_wire(
+        SavedProfile,
+        {"id": profile_id, "applied": apply_to if target is not None else None},
+    )
+    return jsonify(api_response("OK", None, data)), 200
 
 
 def _reference_temp(current, reference):
@@ -291,13 +297,12 @@ def tuner_auto_status():
     samples span a wide enough temperature range, calc_auto_tune_status
     (unchanged) fills in the high/medium/low points and flips `ready`.
     """
-    body = json_body()
-    probe = body.get("probe")
-    reference = body.get("reference")
-    if not isinstance(probe, str) or not probe:
-        return error("bad_request", 400, field="probe")
-    if not isinstance(reference, str) or not reference:
-        return error("bad_request", 400, field="reference")
+    payload, invalid = validate_json(AutoStatusRequest, fallback_field="probe")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    probe = payload.probe
+    reference = payload.reference
 
     current_tr = read_tr().get(probe)
     current_temp = _reference_temp(read_current_snapshot(), reference)
@@ -331,4 +336,4 @@ def tuner_auto_status():
         calc_auto_tune_status(samples, settings["globals"]["units"], status)
 
     status["samples"] = len(samples)
-    return jsonify(api_response("OK", None, status)), 200
+    return jsonify(api_response("OK", None, dump_wire(AutoStatus, status))), 200

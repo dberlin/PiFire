@@ -14,6 +14,8 @@ import shlex
 
 from flask import Response, jsonify, request
 
+from pydantic import ValidationError
+
 from common.app import api_response
 from common.datastore_accessors import (
     get_updater_install_status,
@@ -24,6 +26,18 @@ from common.datastore_accessors import (
 from common.modes import Mode
 from common.system import is_real_hardware
 from common.web_ui_build import last_build_failed, read_build_log, web_ui_needs_rebuild
+from common.web_contracts.operations import (
+    BuildLog,
+    EmptyOperationRequest,
+    UpdateBranchRequest,
+    UpdateCheck,
+    UpdateLog,
+    UpdateStarted,
+    UpdateState,
+    UpdateStatus,
+    dump_error_data,
+    dump_wire,
+)
 from updater import (
     REPO_ROOT,
     detached_head,
@@ -41,7 +55,15 @@ def _ok(data=None):
 
 
 def _error(message, status, **data):
-    return jsonify(api_response("Error", message, data or None)), status
+    details = dump_error_data(data) if data else None
+    return jsonify(api_response("Error", message, details)), status
+
+
+def _json_request(model):
+    try:
+        return model.model_validate(request.get_json(silent=True) or {}, strict=True), None
+    except ValidationError:
+        return None, _error("bad_request", 400)
 
 
 def _python_exec(settings):
@@ -76,7 +98,7 @@ def _started(settings, command):
     started, error = _fire(settings, command)
     if error:
         return _error(error, 500)
-    return _ok({"started": started})
+    return _ok(dump_wire(UpdateStarted, {"started": started}))
 
 
 @api_update_bp.route("/state", methods=["GET"])
@@ -88,25 +110,28 @@ def update_state():
     # rather than offer an update that cannot work.
     detached = detached_head()
     return _ok(
-        {
-            "version": d["version"],
-            # Empty rather than get_branch()'s error string: the page binds this
-            # to the branch picker, and there is no current branch to bind.
-            "branch": "" if detached else d["branch_target"],
-            "detached": detached,
-            "branches": d["branches"],
-            "remote_url": d["remote_url"],
-            "remote_version": d["remote_version"],
-            # Whether the served React bundle is older than the sources on
-            # disk. Drives the updater page's Rebuild Web UI control, which is
-            # the way back from a pull whose rebuild did not run or failed.
-            "web_ui_stale": web_ui_needs_rebuild(REPO_ROOT),
-            # Whether the last rebuild attempt failed. Distinct from stale: a
-            # forced rebuild of an already-current bundle can fail and leave
-            # nothing out of date, and a stale bundle can simply never have
-            # been built. This is what puts the build log on offer.
-            "web_ui_build_failed": last_build_failed(),
-        }
+        dump_wire(
+            UpdateState,
+            {
+                "version": d["version"],
+                # Empty rather than get_branch()'s error string: the page binds this
+                # to the branch picker, and there is no current branch to bind.
+                "branch": "" if detached else d["branch_target"],
+                "detached": detached,
+                "branches": d["branches"],
+                "remote_url": d["remote_url"],
+                "remote_version": d["remote_version"],
+                # Whether the served React bundle is older than the sources on
+                # disk. Drives the updater page's Rebuild Web UI control, which is
+                # the way back from a pull whose rebuild did not run or failed.
+                "web_ui_stale": web_ui_needs_rebuild(REPO_ROOT),
+                # Whether the last rebuild attempt failed. Distinct from stale: a
+                # forced rebuild of an already-current bundle can fail and leave
+                # nothing out of date, and a stale bundle can simply never have
+                # been built. This is what puts the build log on offer.
+                "web_ui_build_failed": last_build_failed(),
+            },
+        )
     )
 
 
@@ -116,7 +141,12 @@ def update_check():
     avail = get_available_updates()
     if not avail.get("success"):
         return _error(avail.get("message", "update check failed"), 502)
-    return _ok({"current": settings["versions"]["server"], "behind": avail["commits_behind"]})
+    return _ok(
+        dump_wire(
+            UpdateCheck,
+            {"current": settings["versions"]["server"], "behind": avail["commits_behind"]},
+        )
+    )
 
 
 @api_update_bp.route("/log", methods=["GET"])
@@ -127,7 +157,7 @@ def update_log():
     result, error_msg = get_log(num_commits=int(commits))
     if error_msg:
         return _error(error_msg, 502)
-    return _ok({"output": result})
+    return _ok(dump_wire(UpdateLog, {"output": result}))
 
 
 @api_update_bp.route("/buildlog", methods=["GET"])
@@ -141,7 +171,7 @@ def update_build_log():
     first time it opens the panel.
     """
     text, offset, reset = read_build_log(request.args.get("offset", type=int) or 0)
-    return _ok({"text": text, "offset": offset, "reset": reset})
+    return _ok(dump_wire(BuildLog, {"text": text, "offset": offset, "reset": reset}))
 
 
 @api_update_bp.route("/buildlog/download", methods=["GET"])
@@ -162,11 +192,15 @@ def update_build_log_download():
 @api_update_bp.route("/status", methods=["GET"])
 def update_status():
     percent, status, output = get_updater_install_status()
-    return _ok({"percent": percent, "status": status, "output": output})
+    return _ok(dump_wire(UpdateStatus, {"percent": percent, "status": status, "output": output}))
 
 
 @api_update_bp.route("/branches/refresh", methods=["POST"])
 def update_branches_refresh():
+    _, invalid = _json_request(EmptyOperationRequest)
+    if invalid:
+        return invalid
+
     settings = read_settings()
     set_updater_install_status(0, "Refreshing remote branches...", "")
     return _started(settings, f"{_python_exec(settings)} updater.py -r &")
@@ -175,17 +209,21 @@ def update_branches_refresh():
 @api_update_bp.route("/branch", methods=["POST"])
 def update_branch():
     settings = read_settings()
-    body = request.get_json(silent=True) or {}
-    target = body.get("target")
+    payload, _ = _json_request(UpdateBranchRequest)
     branches = get_update_data(settings)["branches"]
-    if target not in branches:
+    if payload is None or payload.target not in branches:
         return _error("invalid_branch", 400, branches=branches)
+    target = payload.target
     set_updater_install_status(0, "Starting Branch Change...", "")
     return _started(settings, f"{_python_exec(settings)} updater.py -b {shlex.quote(target)} &")
 
 
 @api_update_bp.route("/pull", methods=["POST"])
 def update_pull():
+    _, invalid = _json_request(EmptyOperationRequest)
+    if invalid:
+        return invalid
+
     settings = read_settings()
     if read_control().get("mode") != Mode.STOP:
         return _error("system_active", 409)
@@ -206,6 +244,10 @@ def update_rebuild_web_ui():
     than conditional -- an explicit request builds even when the bundle looks
     current, because a half-finished build can look current and be broken.
     """
+    _, invalid = _json_request(EmptyOperationRequest)
+    if invalid:
+        return invalid
+
     settings = read_settings()
     set_updater_install_status(0, "Starting Web UI Rebuild...", "")
     return _started(settings, f"{_python_exec(settings)} updater.py -w &")
@@ -213,6 +255,10 @@ def update_rebuild_web_ui():
 
 @api_update_bp.route("/upgrade", methods=["POST"])
 def update_upgrade():
+    _, invalid = _json_request(EmptyOperationRequest)
+    if invalid:
+        return invalid
+
     settings = read_settings()
     if read_control().get("mode") != Mode.STOP:
         return _error("system_active", 409)

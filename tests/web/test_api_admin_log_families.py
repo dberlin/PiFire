@@ -12,6 +12,8 @@ development machine that hid 5 of 15 files, including the three largest.
 
 import pytest
 
+from app import app as flask_app
+
 import blueprints.api_admin.admin_api as admin_api
 
 
@@ -50,6 +52,20 @@ def test_excludes_non_log_names(logdir):
 
 def test_missing_folder_is_empty_not_an_error(tmp_path):
     assert admin_api.list_log_families(str(tmp_path / "nope")) == {}
+
+
+def test_log_metadata_endpoint_exposes_families_without_streamed_text(ds, logdir, monkeypatch):
+    monkeypatch.setattr(admin_api, "LOG_FOLDER", logdir)
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        body = client.get("/api/admin/logs").get_json()
+
+    assert body["result"] == "OK"
+    families = {family["stem"]: family for family in body["data"]["families"]}
+    assert families["events"]["members"] == ["events.log.2", "events.log.1", "events.log"]
+    assert set(families["events"]) == {"stem", "members", "bytes"}
+    assert "text" not in families["events"]
 
 
 #  ---- stitching -------------------------------------------------------------

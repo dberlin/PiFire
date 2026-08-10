@@ -124,6 +124,13 @@ def test_an_unknown_action_is_refused(hazard):
     assert hazard["calls"] == []
 
 
+def test_system_action_rejects_extra_json_members(hazard):
+    resp = hazard["client"].post("/api/admin/system", json={"action": "reboot", "extra": True})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "extra"
+    assert hazard["calls"] == []
+
+
 def test_a_missing_action_is_refused(hazard):
     resp = hazard["client"].post("/api/admin/system", json={})
     assert resp.status_code == 400

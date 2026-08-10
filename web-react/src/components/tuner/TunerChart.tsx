@@ -1,3 +1,5 @@
+import type { Coefficients } from "../../helpers/contracts/operations.gen";
+
 import "./tuner.css";
 
 const WIDTH = 320;
@@ -20,7 +22,7 @@ export function TunerChart({
   chart,
   chartOk,
 }: {
-  chart: { x: number; y: number }[];
+  chart: Coefficients["chart"];
   chartOk: boolean;
 }) {
   if (!chartOk || chart.length === 0) {

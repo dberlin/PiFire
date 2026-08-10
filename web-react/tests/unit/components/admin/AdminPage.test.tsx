@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
-import type { AdminState } from "../../../../src/helpers/admin/adminTypes";
+import type { AdminState } from "../../../../src/helpers/contracts/operations.gen";
 import { testQueryClient } from "../../test-utils";
 
 // Stubbed through a lazy wrapper so the hoisted mock factory never captures an

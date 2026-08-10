@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
-import type { AdminSettings } from "../../../../src/helpers/admin/adminTypes";
+import type { AdminSettings } from "../../../../src/helpers/contracts/operations.gen";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { testQueryClient } from "../../test-utils";
 

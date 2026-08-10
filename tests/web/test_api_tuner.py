@@ -154,6 +154,12 @@ def test_the_open_flag_must_be_a_bool(ds, client):
     assert resp.get_json()["data"]["field"] == "open"
 
 
+def test_session_rejects_extra_json_members(ds, client):
+    resp = client.post("/api/tuner/session", json={"open": True, "extra": True})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "extra"
+
+
 def test_the_generic_api_catchall_does_not_swallow_this_path(ds, client):
     """blueprints/api registers /api/<action>/<arg0> for GET and POST, which
     matches /api/tuner/session. See blueprints/api_admin/routes.py's docstring

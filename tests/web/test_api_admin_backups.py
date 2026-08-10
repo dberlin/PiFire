@@ -109,6 +109,12 @@ def test_an_unknown_kind_is_refused(env):
     assert resp.get_json()["data"]["field"] == "kind"
 
 
+def test_create_backup_rejects_extra_json_members(env):
+    resp = env["client"].post("/api/admin/backups/create", json={"kind": "settings", "extra": True})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "extra"
+
+
 # --------------------------------------------------------------------------
 # restore
 # --------------------------------------------------------------------------

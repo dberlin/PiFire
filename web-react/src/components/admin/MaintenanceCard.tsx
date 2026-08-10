@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { adminErrorText, maintenanceAction, saveAdminSettings } from "../../helpers/admin/adminApi";
-import type { AdminSettings, MaintenanceAction } from "../../helpers/admin/adminTypes";
+import type { AdminSettings, MaintenanceAction } from "../../helpers/contracts/operations.gen";
 import { queryKeys } from "../../helpers/query/keys";
 import type { SaveStatus } from "../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../dashboard/ConfirmAction";

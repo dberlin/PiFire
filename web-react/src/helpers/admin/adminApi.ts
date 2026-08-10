@@ -14,18 +14,35 @@
 // has to render the reason rather than escape past it.
 
 import type {
-  AdminResult,
-  AdminSettings,
+  AdminSettingsUpdate,
   AdminState,
+  BackupCreateRequest,
+  BackupCreated,
   BackupKind,
   BackupListing,
+  BackupRestoreRequest,
+  BackupRestored,
+  FactoryResetResponse,
+  LogsDeleted,
+  LogsMetadata,
   MaintenanceAction,
+  MaintenanceActionRequest,
+  MaintenanceActionResponse,
   SystemAction,
-} from "./adminTypes";
+  SystemActionRequest,
+  SystemActionResponse,
+} from "../contracts/operations.gen";
+import type { AdminResult } from "./adminTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/admin/${path}`;
+
+interface AdminEnvelope<T> {
+  result?: string;
+  message?: string;
+  data?: (T & { field?: string; mode?: string }) | null;
+}
 
 /** Unpack the envelope into an AdminResult, whatever the status.
  *
@@ -33,17 +50,13 @@ const url = (baseUrl: string, path: string) => `${baseUrl}/api/admin/${path}`;
  * mask the status the caller branches on, so the parse failure falls back to
  * the status rather than propagating. */
 async function unpack<T>(res: Response): Promise<AdminResult<T>> {
-  const body = (await res.json().catch(() => ({}))) as {
-    result?: string;
-    message?: string;
-    data?: (T & { field?: string; mode?: string }) | null;
-  };
+  const body: AdminEnvelope<T> = await res.json().catch(() => ({}));
   const detail = body.data ?? null;
   return {
     ok: res.ok && body.result === "OK",
     status: res.status,
     message: body.message ?? `HTTP ${res.status}`,
-    data: detail as T | null,
+    data: detail,
     field: detail?.field,
     mode: detail?.mode,
   };
@@ -110,14 +123,16 @@ export const fetchAdminState = (baseUrl = BASE_URL) => get<AdminState>(baseUrl, 
  * POST is enforced server-side: /api/cmd/reboot answered a bare GET until
  * 2026-07-27, which made a link or a prefetch enough to power the box off.
  * Refused with 409 `not_stopped` unless the grill is stopped. */
-export const systemAction = (action: SystemAction, baseUrl = BASE_URL) =>
-  post<{ action: SystemAction }>(baseUrl, "system", { action });
+export const systemAction = (action: SystemAction, baseUrl = BASE_URL) => {
+  const body: SystemActionRequest = { action };
+  return post<SystemActionResponse>(baseUrl, "system", body);
+};
 
 /** Reset settings, control, history AND the pellet database to defaults, then
  * restart. The pellet database goes too -- every profile and every log entry --
  * which is a deliberate ruling, not a side effect. Also 409-gated. */
 export const factoryReset = (baseUrl = BASE_URL) =>
-  post<{ action: "factory_reset" }>(baseUrl, "factory-reset", {});
+  post<FactoryResetResponse>(baseUrl, "factory-reset", {});
 
 // ---------------------------------------------------------------------------
 // maintenance and toggles
@@ -125,15 +140,17 @@ export const factoryReset = (baseUrl = BASE_URL) =>
 
 /** One of the four clears. Not mode-gated: clearing a pellet log mid-cook is
  * recoverable, so the server allows it from any mode. */
-export const maintenanceAction = (action: MaintenanceAction, baseUrl = BASE_URL) =>
-  post<{ action: MaintenanceAction }>(baseUrl, "maintenance", { action });
+export const maintenanceAction = (action: MaintenanceAction, baseUrl = BASE_URL) => {
+  const body: MaintenanceActionRequest = { action };
+  return post<MaintenanceActionResponse>(baseUrl, "maintenance", body);
+};
 
 /** Save one or both admin toggles. An unknown key is refused with 400
  * `data.field`, so this is typed as a subset of AdminSettings rather than a
  * bare Record. Toggling debug_mode also raises the control settings_update
  * flag server-side, which is how the running control process learns. */
-export const saveAdminSettings = (fields: Partial<AdminSettings>, baseUrl = BASE_URL) =>
-  post<AdminSettings>(baseUrl, "settings", fields);
+export const saveAdminSettings = (fields: AdminSettingsUpdate, baseUrl = BASE_URL) =>
+  post<AdminSettingsUpdate>(baseUrl, "settings", fields);
 
 // ---------------------------------------------------------------------------
 // backups
@@ -141,16 +158,20 @@ export const saveAdminSettings = (fields: Partial<AdminSettings>, baseUrl = BASE
 
 export const fetchBackups = (baseUrl = BASE_URL) => get<BackupListing>(baseUrl, "backups");
 
-export const createBackup = (kind: BackupKind, baseUrl = BASE_URL) =>
-  post<{ filename: string }>(baseUrl, "backups/create", { kind });
+export const createBackup = (kind: BackupKind, baseUrl = BASE_URL) => {
+  const body: BackupCreateRequest = { kind };
+  return post<BackupCreated>(baseUrl, "backups/create", body);
+};
 
 /** Restore from a backup already in the folder.
  *
  * A settings restore restarts the server and is 409-gated; a pellet-database
  * restore does neither, because settings are read once at boot by processes
  * this request cannot reach whereas the pellet database is re-read on demand. */
-export const restoreBackup = (kind: BackupKind, file: string, baseUrl = BASE_URL) =>
-  post<{ kind: BackupKind; file: string }>(baseUrl, "backups/restore", { kind, file });
+export const restoreBackup = (kind: BackupKind, file: string, baseUrl = BASE_URL) => {
+  const body: BackupRestoreRequest = { kind, file };
+  return post<BackupRestored>(baseUrl, "backups/restore", body);
+};
 
 /** Upload a .json backup into the folder. Multipart, so it cannot go through
  * post(): setting a JSON Content-Type would strip the boundary. */
@@ -158,13 +179,13 @@ export async function uploadBackup(
   kind: BackupKind,
   file: File,
   baseUrl = BASE_URL,
-): Promise<AdminResult<{ filename: string }>> {
+): Promise<AdminResult<BackupCreated>> {
   const form = new FormData();
   form.append("kind", kind);
   form.append("backup", file);
   try {
     const res = await fetch(url(baseUrl, "backups/upload"), { method: "POST", body: form });
-    return await unpack<{ filename: string }>(res);
+    return await unpack<BackupCreated>(res);
   } catch (e) {
     return { ok: false, status: 0, message: (e as Error).message, data: null };
   }
@@ -179,13 +200,13 @@ export const backupDownloadUrl = (kind: BackupKind, file: string, baseUrl = BASE
 // logs
 // ---------------------------------------------------------------------------
 
-export const fetchLogs = (baseUrl = BASE_URL) => get<{ logs: string[] }>(baseUrl, "logs");
+export const fetchLogs = (baseUrl = BASE_URL) => get<LogsMetadata>(baseUrl, "logs");
 
 /** Delete every .log. Answers with the names that actually went -- Flask ran
  * `rm logs/*.log` inside a bare `except:`, where a failure was indistinguishable
  * from success, so the caller should render this list rather than assume. */
 export const deleteLogs = (baseUrl = BASE_URL) =>
-  post<{ removed: string[] }>(baseUrl, "logs/delete", {});
+  post<LogsDeleted>(baseUrl, "logs/delete", {});
 
 /** Href for the zip of every log. Same anchor reasoning as backupDownloadUrl. */
 export const logsDownloadUrl = (baseUrl = BASE_URL) => url(baseUrl, "logs/download");

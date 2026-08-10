@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { fetchLogFamilies } from "../../helpers/logs/logsApi";
-import type { LogFamily } from "../../helpers/logs/logTypes";
+import type { LogFamily } from "../../helpers/contracts/operations.gen";
 import { LogFilesTab } from "./LogFilesTab";
 import { LogViewer } from "./LogViewer";
 import "./logs.css";

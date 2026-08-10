@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
-import type { SystemAction } from "../../helpers/admin/adminTypes";
+import type {
+  SystemAction,
+  UpdateCheck,
+  UpdateStarted,
+  UpdateState,
+  UpdateStatus,
+} from "../../helpers/contracts/operations.gen";
 import { behindText } from "../../helpers/update/behindText";
 import {
   buildLogDownloadUrl,
@@ -15,13 +21,7 @@ import {
   refreshBranches,
   upgradeDeps,
 } from "../../helpers/update/updateApi";
-import type {
-  UpdateCheck,
-  UpdateResult,
-  UpdateStarted,
-  UpdateState,
-  UpdateStatus,
-} from "../../helpers/update/updateTypes";
+import type { UpdateResult } from "../../helpers/update/updateTypes";
 import { StreamingLogPanel } from "../logs/StreamingLogPanel";
 import "./update.css";
 

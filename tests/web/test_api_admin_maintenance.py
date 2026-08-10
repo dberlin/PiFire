@@ -150,6 +150,12 @@ def test_an_unknown_maintenance_action_is_refused(client):
     assert resp.get_json()["data"]["field"] == "action"
 
 
+def test_maintenance_action_rejects_extra_json_members(client):
+    resp = client.post("/api/admin/maintenance", json={"action": "clear_history", "extra": True})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "extra"
+
+
 def test_debug_mode_toggle_persists_and_flags_the_control_process(client):
     """_admin_setting_debugenabled raises settings_update alongside the write;
     without it the running control process never learns the setting changed.

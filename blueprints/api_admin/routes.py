@@ -18,6 +18,8 @@ from flask import current_app, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest
 from werkzeug.utils import secure_filename
 
+from pydantic import ValidationError
+
 from common.app import api_response
 from common.backups import backup_pellet_db, backup_settings, read_pellet_db_file
 from common.common import WriteKind, write_log
@@ -41,6 +43,25 @@ from common.modes import Mode
 from common.pellets_actions import clear_pellet_db
 from common.server_status import set_server_status
 from common.system import reboot_system, restart_scripts, shutdown_system
+from common.web_contracts.operations import (
+    AdminSettingsUpdate,
+    AdminState,
+    BackupCreateRequest,
+    BackupCreated,
+    BackupListing,
+    BackupRestoreRequest,
+    BackupRestored,
+    EmptyOperationRequest,
+    FactoryResetResponse,
+    LogsDeleted,
+    LogsMetadata,
+    MaintenanceActionRequest,
+    MaintenanceActionResponse,
+    SystemActionRequest,
+    SystemActionResponse,
+    dump_error_data,
+    dump_wire,
+)
 
 from . import admin_api, api_admin_bp
 
@@ -72,7 +93,8 @@ _MAINTENANCE_ACTIONS = {
 
 def error(message, status, **data):
     """Uniform error envelope: {"result":"Error","message":...,"data":{...}}."""
-    return jsonify(api_response("Error", message, data or None)), status
+    details = dump_error_data(data) if data else None
+    return jsonify(api_response("Error", message, details)), status
 
 
 def json_body():
@@ -85,6 +107,15 @@ def json_body():
         return request.get_json(silent=True) or {}
     except BadRequest:
         return {}
+
+
+def validate_json(model, *, fallback_field=None):
+    try:
+        return model.model_validate(json_body(), strict=True), None
+    except ValidationError as exc:
+        location = exc.errors()[0]["loc"]
+        field = next((part for part in location if isinstance(part, str)), fallback_field)
+        return None, error("bad_request", 400, field=field or fallback_field)
 
 
 def backup_folder():
@@ -126,10 +157,12 @@ def admin_system():
     if request.method != "POST":
         return error("method_not_allowed", 405, field="method")
 
-    action = json_body().get("action")
-    entry = _SYSTEM_ACTIONS.get(action)
-    if entry is None:
-        return error("bad_request", 400, field="action")
+    payload, invalid = validate_json(SystemActionRequest, fallback_field="action")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    action = payload.action
+    entry = _SYSTEM_ACTIONS[action]
 
     refusal = require_stopped()
     if refusal:
@@ -141,7 +174,8 @@ def admin_system():
     #  Resolved from module globals at call time, so the tests' patches on this
     #  module's own bindings intercept here.
     call()
-    return jsonify(api_response("OK", None, {"action": action})), 200
+    data = dump_wire(SystemActionResponse, {"action": action})
+    return jsonify(api_response("OK", None, data)), 200
 
 
 @api_admin_bp.route("/factory-reset", methods=["POST"])
@@ -160,6 +194,10 @@ def admin_factory_reset():
         queued alongside cannot clobber it. timer and notify_data are stated as
         ops because they are only expressible that way.
     """
+    _, invalid = validate_json(EmptyOperationRequest)
+    if invalid:
+        return invalid
+
     refusal = require_stopped()
     if refusal:
         return refusal
@@ -183,7 +221,7 @@ def admin_factory_reset():
     )
     set_server_status("restarting")
     restart_scripts()
-    return jsonify(api_response("OK", None, {"action": "factory_reset"})), 200
+    return jsonify(api_response("OK", None, dump_wire(FactoryResetResponse, {"action": "factory_reset"}))), 200
 
 
 @api_admin_bp.route("/maintenance", methods=["POST"])
@@ -194,13 +232,15 @@ def admin_maintenance():
     recoverable, and Flask offers all four from any mode. The system actions
     above are the ones that need the guard.
     """
-    action = json_body().get("action")
-    if action not in _MAINTENANCE_ACTIONS:
-        return error("bad_request", 400, field="action")
+    payload, invalid = validate_json(MaintenanceActionRequest, fallback_field="action")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    action = payload.action
 
     write_log(f"Admin: {action} via /api/admin/maintenance")
     _MAINTENANCE_ACTIONS[action]()
-    return jsonify(api_response("OK", None, {"action": action})), 200
+    return jsonify(api_response("OK", None, dump_wire(MaintenanceActionResponse, {"action": action}))), 200
 
 
 @api_admin_bp.route("/settings", methods=["POST"])
@@ -211,23 +251,18 @@ def admin_settings():
     _admin_setting_debugenabled: without it the running control process never
     learns the setting changed.
     """
-    body = json_body()
-    unknown = set(body) - {"debug_mode", "boot_to_monitor"}
-    if unknown:
-        return error("bad_request", 400, field=sorted(unknown)[0])
-    if not body:
-        return error("bad_request", 400, field="debug_mode")
-    for key, value in body.items():
-        if not isinstance(value, bool):
-            return error("bad_request", 400, field=key)
-
+    payload, invalid = validate_json(AdminSettingsUpdate, fallback_field="debug_mode")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    body = payload.model_dump(mode="json", by_alias=True)
     settings = read_settings()
     settings["globals"].update(body)
     write_settings(settings)
     if "debug_mode" in body:
         write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin="api-admin")
         write_log(f"Debug Mode {'Enabled' if body['debug_mode'] else 'Disabled'}.")
-    return jsonify(api_response("OK", None, body)), 200
+    return jsonify(api_response("OK", None, dump_wire(AdminSettingsUpdate, body))), 200
 
 
 def _require_backup(kind, name):
@@ -252,18 +287,34 @@ def _require_backup(kind, name):
 
 @api_admin_bp.route("/backups", methods=["GET"])
 def admin_backups():
-    return jsonify(api_response("OK", None, admin_api.list_backups(backup_folder()))), 200
+    return jsonify(
+        api_response(
+            "OK",
+            None,
+            dump_wire(BackupListing, admin_api.list_backups(backup_folder())),
+        )
+    ), 200
 
 
 @api_admin_bp.route("/backups/create", methods=["POST"])
 def admin_backup_create():
-    kind = json_body().get("kind")
-    if kind not in admin_api.BACKUP_KINDS:
-        return error("bad_request", 400, field="kind")
+    payload, invalid = validate_json(BackupCreateRequest, fallback_field="kind")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    kind = payload.kind
     path = backup_settings() if kind == "settings" else backup_pellet_db(action="backup")
+    if not isinstance(path, str):
+        raise TypeError("backup creation did not return a path")
     #  Only the bare name goes back: the path rule governs responses as well as
     #  requests, and the client has no use for the server's filesystem layout.
-    return jsonify(api_response("OK", None, {"filename": os.path.basename(path)})), 200
+    return jsonify(
+        api_response(
+            "OK",
+            None,
+            dump_wire(BackupCreated, {"filename": os.path.basename(path)}),
+        )
+    ), 200
 
 
 @api_admin_bp.route("/backups/download", methods=["GET"])
@@ -272,6 +323,8 @@ def admin_backup_download():
     path, err = _require_backup(args.get("kind"), args.get("file", ""))
     if err:
         return err
+    if path is None:
+        return error("not_found", 404)
     return send_file(path, as_attachment=True, max_age=0)
 
 
@@ -293,7 +346,13 @@ def admin_backup_upload():
     if destination is None:
         return error("bad_request", 400, field="backup")
     storage.save(destination)
-    return jsonify(api_response("OK", None, {"filename": os.path.basename(destination)})), 200
+    return jsonify(
+        api_response(
+            "OK",
+            None,
+            dump_wire(BackupCreated, {"filename": os.path.basename(destination)}),
+        )
+    ), 200
 
 
 @api_admin_bp.route("/backups/restore", methods=["POST"])
@@ -312,11 +371,16 @@ def admin_backup_restore():
     write_pellet_db() validate before persisting, so a rejection leaves the
     store untouched and, for settings, never restarts.
     """
-    body = json_body()
-    kind = body.get("kind")
-    path, err = _require_backup(kind, body.get("file", ""))
+    payload, invalid = validate_json(BackupRestoreRequest, fallback_field="kind")
+    if payload is None:
+        assert invalid is not None
+        return invalid
+    kind = payload.kind
+    path, err = _require_backup(kind, payload.file)
     if err:
         return err
+    if path is None:
+        return error("not_found", 404)
 
     if kind == "settings":
         refusal = require_stopped()
@@ -339,7 +403,13 @@ def admin_backup_restore():
         except PelletDbValidationError as exc:
             return error("invalid_backup", 400, detail="; ".join(exc.errors))
         write_log(f"Admin: restored pellet database from {os.path.basename(path)}")
-    return jsonify(api_response("OK", None, {"kind": kind, "file": os.path.basename(path)})), 200
+    return jsonify(
+        api_response(
+            "OK",
+            None,
+            dump_wire(BackupRestored, {"kind": kind, "file": os.path.basename(path)}),
+        )
+    ), 200
 
 
 @api_admin_bp.route("/logs", methods=["GET"])
@@ -351,7 +421,10 @@ def admin_logs():
         api_response(
             "OK",
             None,
-            {"logs": admin_api.list_logs(), "families": admin_api.log_family_listing()},
+            dump_wire(
+                LogsMetadata,
+                {"logs": admin_api.list_logs(), "families": admin_api.log_family_listing()},
+            ),
         )
     ), 200
 
@@ -399,14 +472,18 @@ def admin_logs_delete():
     failure there is indistinguishable from success. This globs server-side and
     reports what actually went.
     """
+    _, invalid = validate_json(EmptyOperationRequest)
+    if invalid:
+        return invalid
+
     removed = admin_api.delete_logs()
     write_log(f"Admin: deleted {len(removed)} log file(s) via /api/admin/logs/delete")
-    return jsonify(api_response("OK", None, {"removed": removed})), 200
+    return jsonify(api_response("OK", None, dump_wire(LogsDeleted, {"removed": removed}))), 200
 
 
 @api_admin_bp.route("/state", methods=["GET"])
 def admin_state():
     settings = read_settings()
     control = read_control()
-    payload = admin_api.state_payload(settings, control, backup_folder())
+    payload = dump_wire(AdminState, admin_api.state_payload(settings, control, backup_folder()))
     return jsonify(api_response("OK", None, payload)), 200

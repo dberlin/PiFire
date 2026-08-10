@@ -117,6 +117,15 @@ def test_auto_status_requires_both_probes(ds, client):
         assert resp.get_json()["data"]["field"] in ("probe", "reference")
 
 
+def test_auto_status_rejects_extra_json_members(ds, client):
+    resp = client.post(
+        "/api/tuner/auto-status",
+        json={"probe": "Grill", "reference": "Ref", "extra": True},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "extra"
+
+
 def test_auto_status_records_a_sample_and_reports_it(ds, client):
     from common.datastore_accessors import flush_autotune, read_autotune
 

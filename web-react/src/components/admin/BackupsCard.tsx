@@ -6,7 +6,8 @@ import {
   restoreBackup,
   uploadBackup,
 } from "../../helpers/admin/adminApi";
-import type { AdminResult, BackupKind, BackupListing } from "../../helpers/admin/adminTypes";
+import type { AdminResult } from "../../helpers/admin/adminTypes";
+import type { BackupKind, BackupListing } from "../../helpers/contracts/operations.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 const STOPPED = "Stop";
