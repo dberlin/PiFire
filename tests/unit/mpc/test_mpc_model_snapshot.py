@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import json
 from types import SimpleNamespace
 
 import pytest
 
 from controller.mpc import GreySnapshotInvalid, _DEFAULTS, Controller, migrate_grey_learning_snapshot
-from controller.model_learning.activation import ActivationPhase
+from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
+
 from controller.runtime.model_fitting import TeardownRefitOutcome
 
 
@@ -127,6 +129,31 @@ def test_restore_rebinds_owned_active_pair_to_rebuilt_handles():
     assert active is not previous
     assert active.estimator is restored.estimator
     assert active.solver is restored.mpc
+
+
+def test_restore_rotates_learning_to_the_restored_pair_generation():
+    source = _identified()
+    snapshot = source.get_model_snapshot()
+    restored_descriptor = replace(
+        source.active_control_pair.descriptor,
+        candidate_generation=7,
+        role_generation=7,
+        ownership_digest="",
+    )
+    assert isinstance(restored_descriptor, GreyControlPairDescriptor)
+    snapshot["revision"] = 7
+    snapshot["active_pair"] = restored_descriptor.to_dict()
+    snapshot["identities"]["active_digest"] = restored_descriptor.model_digest
+    snapshot["identities"]["active_generation"] = 7
+    restored = _controller(enable_online_adaptation=True)
+
+    try:
+        assert restored.restore_model(snapshot) is True
+        assert restored._learning_role_generation == 7
+        assert restored._teardown_history.role_generation == 7
+    finally:
+        restored.close()
+        source.close()
 
 
 def test_runtime_restore_refuses_v3_even_though_one_shot_migration_accepts_it(capsys):

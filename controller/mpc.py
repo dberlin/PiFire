@@ -2486,6 +2486,7 @@ class Controller(ControllerBase):
             self._model_meta = None
         self._learning_eligible_updates = owned["evidence"]["eligible"]
         self._learning_rejected_updates = owned["evidence"]["rejected"]
+        self._rotate_teardown_role_generation(restored_descriptor.role_generation)
         if self._learning_enabled:
             self._learning = self._build_learning()
         self.get_model_snapshot()
