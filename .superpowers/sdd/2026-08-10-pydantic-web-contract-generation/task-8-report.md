@@ -2,7 +2,7 @@
 
 ## Result
 
-DONE — source and tests implemented; shared registration, generation, and command execution remain deferred exactly as required for the concurrent wave.
+DONE — source/tests implemented and serialized registry/generated integration supplied; remaining broad command execution is tracked below.
 
 Implementation commit: `cff915caeba5112bda99a4de79a83555c5b9d7b6` (`tyvpuyssktxwkxsswtntzqrpsqksvpol`)
 
@@ -10,11 +10,17 @@ Review fix commit: `3698076cc53a813d88b828a12294d038421b1cb6` (`kyutnyuykmmrnxrz
 
 Branch validation fix commit: `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8` (`mnxosvtxqsmzrwxryrlzoxvqrnwyrrlp`)
 
+Idle status fix commit: `c934e5f9628969713b99dea6e1577f35e50f72dd` (`rzpkttmwwyrzqnyxoulxzwoktpkrxort`)
+
+Idle status generated commit: `f33662faaad0394a265590ff9dea7717b3b1573e` (`pvwssymprlytymoznzmzyqwurmsrrukp`)
+
 Initial report change: `qxmwwvxquoqytltsnytkypzlqqotwklw`
 
 Report update change: `uqrmrzywvsnlwlzoporumqrzyntyrpmo`
 
 Evidence report change: `srtlxlwmswxpynmnxxkxllsllomnvzlp`
+
+Idle status evidence change: `rmqppwqsswxyxmqvxrupnspxrzpzxkyn`
 
 ## Implemented
 
@@ -189,12 +195,53 @@ uv run pytest -q tests/web/test_api_update.py
 EXIT=0
 ```
 
+## Real-browser idle status regression
+
+Aggregate real-browser verification found that the untouched updater datastore
+returns `(None, None, None)` before any updater run. The original strict
+`UpdateStatus` model rejected all three values and made `GET /api/update/status`
+an HTTP 500.
+
+RED:
+
+```bash
+uv run pytest -q tests/unit/common/web_contracts/test_operations.py::test_update_status_preserves_idle_null_triplet tests/web/test_api_update.py::test_status_preserves_idle_null_triplet
+```
+
+```text
+FF                                                                       [100%]
+3 validation errors for UpdateStatus: percent int_type; status string_type; output string_type
+2 failed in 3.36s
+EXIT=1
+```
+
+Fix commit `c934e5f9628969713b99dea6e1577f35e50f72dd`
+preserves each idle null field in the Python model/JSON envelope. The update
+page ignores a nullable idle `percent` while polling instead of applying numeric
+completion logic to it.
+
+GREEN, same command:
+
+```text
+..                                                                       [100%]
+2 passed in 3.28s
+EXIT=0
+```
+
+The Task 8 source agent ran no broad gate for this regression fix. The serialized
+integration owner regenerated `operations.schema.json` and `operations.gen.ts`
+from the corrected model in commit `f33662faaad0394a265590ff9dea7717b3b1573e`;
+the regenerated manifest was unchanged. Its post-generation gates reported:
+operations/update Python 51 passed, updater Rstest 10 passed, generated drift
+check and typecheck passed, and updater Playwright 1 passed after reloading the
+stale backend process.
+
 ## Verification
 
 The initial concurrent wave intentionally did not run tests, formatters, linters,
-builds, typecheck, Playwright, or generation. Review fix round 2 subsequently
-ran only the focused updater commands recorded above. The brief's combined
-commands otherwise remain unrun verbatim:
+builds, typecheck, Playwright, or generation. Review fix rounds subsequently ran
+only the focused updater commands recorded above. The brief's combined commands
+otherwise remain unrun verbatim:
 
 ```bash
 uv run pytest -q tests/web/test_api_admin_system.py tests/web/test_api_admin_backups.py tests/web/test_api_admin_maintenance.py tests/web/test_api_admin_log_families.py tests/web/test_api_update.py tests/web/test_api_tuner.py tests/web/test_api_tuner_auto.py
@@ -217,5 +264,5 @@ Static LSP diagnostics were clean for `common/web_contracts/operations.py` and t
 ## Concerns
 
 - No Task 8 integration blocker is currently known; registry/generated artifacts are owned and supplied by the serialized integration wave.
-- Behavioral verification remains outstanding for the acceptance commands other than the now-green focused updater suite.
-- No Critical or Important static-review concern from rounds 1–2 remains after fix commits `3698076cc53a813d88b828a12294d038421b1cb6` and `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8`.
+- Behavioral verification remains outstanding for the broad acceptance commands; the focused updater route suite and both idle-status regressions are green.
+- No known Critical or Important Task 8 concern remains after fix commits `3698076cc53a813d88b828a12294d038421b1cb6`, `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8`, and `c934e5f9628969713b99dea6e1577f35e50f72dd`.
