@@ -459,7 +459,7 @@ test("one report trigger stays after Hopper and the full panel is reachable at b
     await trigger.click();
     const dialog = page.getByRole("dialog", { name: "MPC model learning" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("Role generation: 44")).toBeVisible();
+    await expect(dialog.getByText("Role generation: 44", { exact: true })).toBeVisible();
     await expect(dialog.getByText("Candidate generation: 5")).toBeVisible();
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
