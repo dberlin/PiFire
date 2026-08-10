@@ -124,6 +124,21 @@ def test_status_passes_through_the_install_status_triplet(ds, client, monkeypatc
     assert body["data"] == {"percent": 42, "status": "Working...", "output": "line"}
 
 
+def test_status_preserves_idle_null_triplet(ds, client, monkeypatch):
+    import blueprints.api_update.routes as ur
+
+    monkeypatch.setattr(ur, "get_updater_install_status", lambda: (None, None, None))
+
+    resp = client.get("/api/update/status")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {
+        "data": {"percent": None, "status": None, "output": None},
+        "result": "OK",
+        "message": None,
+    }
+
+
 def _set_mode(mode):
     from common.datastore_accessors import read_control, write_control
 

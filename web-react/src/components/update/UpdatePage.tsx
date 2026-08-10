@@ -92,7 +92,7 @@ export function UpdatePage() {
     if (!polling) return;
     const id = setInterval(async () => {
       const r = await fetchUpdateStatus();
-      if (!r.ok || !r.data) return;
+      if (!r.ok || !r.data || r.data.percent === null) return;
       setProgress(r.data);
       const failed = isFailure(r.data.percent);
       if (r.data.percent <= 100 && !failed) return;
@@ -279,7 +279,7 @@ export function UpdatePage() {
             className="pf-update-progress"
             // Clamped at both ends: the failure sentinel is a negative percent,
             // which as a width is a bar that renders inside out.
-            style={{ width: `${Math.min(Math.max(progress.percent, 0), 100)}%` }}
+            style={{ width: `${Math.min(Math.max(progress.percent ?? 0, 0), 100)}%` }}
           />
           <p>{progress.status}</p>
           <pre className="pf-update-log">{progress.output}</pre>

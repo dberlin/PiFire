@@ -48,6 +48,19 @@ def test_os_info_rejects_non_string_os_release_extras() -> None:
         OsInfo.model_validate(payload, strict=True)
 
 
+def test_update_status_preserves_idle_null_triplet() -> None:
+    status = UpdateStatus.model_validate(
+        {"percent": None, "status": None, "output": None},
+        strict=True,
+    )
+
+    assert status.model_dump(mode="json", by_alias=True) == {
+        "percent": None,
+        "status": None,
+        "output": None,
+    }
+
+
 @pytest.mark.parametrize(
     ("model", "payload"),
     [

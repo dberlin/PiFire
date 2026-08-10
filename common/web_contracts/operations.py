@@ -211,9 +211,9 @@ class BuildLog(WireModel):
 
 
 class UpdateStatus(WireModel):
-    percent: int
-    status: str
-    output: str
+    percent: int | None
+    status: str | None
+    output: str | None
 
 
 class UpdateStarted(WireModel):
