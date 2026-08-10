@@ -141,7 +141,9 @@ _GREY_V4_KEYS = frozenset(
         "structure",
         "active",
         "challenger",
+        "active_pair",
         "window",
+        "candidate_pair",
         "evidence",
         "origin",
         "policy",
@@ -262,6 +264,17 @@ def _grey_v4_model(value, reason):
     }
 
 
+def _grey_v4_pair_descriptor(value, reason):
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise GreySnapshotInvalid(reason)
+    try:
+        return GreyControlPairDescriptor.from_dict(dict(value)).to_dict()
+    except (KeyError, TypeError, ValueError) as error:
+        raise GreySnapshotInvalid(reason) from error
+
+
 def _grey_v4_snapshot(snapshot):
     revision = _grey_v4_nonnegative_int(snapshot.get("revision"), "invalid-revision")
     active = _grey_v4_model(snapshot.get("active"), "invalid-active")
@@ -292,6 +305,14 @@ def _grey_v4_snapshot(snapshot):
             window = asdict(FitWindowIdentity(**dict(window_mapping)))
         except (TypeError, ValueError) as error:
             raise GreySnapshotInvalid("invalid-window") from error
+    active_pair = _grey_v4_pair_descriptor(
+        snapshot.get("active_pair"),
+        "invalid-active-pair",
+    )
+    candidate_pair = _grey_v4_pair_descriptor(
+        snapshot.get("candidate_pair"),
+        "invalid-candidate-pair",
+    )
     evidence_value = _grey_v4_mapping(
         snapshot.get("evidence"),
         ("eligible", "rejected", "confidence_decision_id"),
@@ -400,7 +421,9 @@ def _grey_v4_snapshot(snapshot):
         "structure": {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10},
         "active": active,
         "challenger": challenger,
+        "active_pair": active_pair,
         "window": window,
+        "candidate_pair": candidate_pair,
         "evidence": evidence,
         "origin": origin,
         "policy": policy,
@@ -433,7 +456,9 @@ def _new_grey_learning_snapshot(*, revision, parameters, metadata):
         "challenger": None,
         "window": None,
         "evidence": {"eligible": 0, "rejected": 0, "confidence_decision_id": None},
+        "active_pair": None,
         "origin": None,
+        "candidate_pair": None,
         "policy": None,
         "identification": {
             "status": "identified" if owned_metadata["samples"] else "unidentified",
@@ -2689,7 +2714,66 @@ class Controller(ControllerBase):
             CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
         }[origin]
 
+    def _persist_reviewed_candidate_checkpoint(self, evaluation, preparation):
+        request = getattr(getattr(preparation, "candidate", None), "request", None)
+        if (
+            getattr(request, "origin", None)
+            is not CandidateOrigin.OPERATOR_CALIBRATION
+            or not bool(getattr(evaluation, "accepted", False))
+            or tuple(getattr(evaluation, "blockers", ()))
+        ):
+            return
+        candidate_pair = getattr(preparation, "candidate_pair", None)
+        candidate_descriptor = getattr(candidate_pair, "descriptor", None)
+        active_descriptor = self._active_control_pair.descriptor
+        if not isinstance(candidate_descriptor, GreyControlPairDescriptor):
+            raise RuntimeError("reviewed-candidate-descriptor-missing")
+        if (
+            evaluation.incumbent_digest != active_descriptor.model_digest
+            or evaluation.challenger_digest != candidate_descriptor.model_digest
+            or evaluation.candidate_generation
+            != candidate_descriptor.candidate_generation
+        ):
+            raise RuntimeError("reviewed-candidate-identity-changed")
+        persisted = getattr(self, "_reviewed_checkpoint_decision_ids", None)
+        if persisted is None:
+            persisted = set()
+            self._reviewed_checkpoint_decision_ids = persisted
+        if evaluation.decision_id in persisted:
+            return
+
+        from common.controller_model_state import (
+            CheckpointSaveOutcome,
+            ControllerModelStore,
+        )
+
+        previous_revision = self._model_revision
+        self._model_revision = max(
+            previous_revision + 1,
+            candidate_descriptor.role_generation,
+        )
+        checkpoint = self.get_model_snapshot()
+        if checkpoint is None:
+            self._model_revision = previous_revision
+            raise RuntimeError("reviewed-candidate-checkpoint-invalid")
+        checkpoint["evidence"]["confidence_decision_id"] = evaluation.decision_id
+        checkpoint["origin"] = CandidateOrigin.OPERATOR_CALIBRATION.value
+        checkpoint["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
+        outcome = ControllerModelStore().save_outcome("mpc", checkpoint)
+        if outcome is not CheckpointSaveOutcome.SAVED:
+            self._model_revision = previous_revision
+            raise RuntimeError("reviewed-candidate-checkpoint-not-durable")
+        persisted.add(evaluation.decision_id)
+
+
     def _persist_candidate_evaluation(self, evaluation, preparation):
+        persisted_ids = getattr(
+            self,
+            "_persisted_activation_confidence_ids",
+            (),
+        )
+        if evaluation.decision_id in persisted_ids:
+            return None
         request = getattr(getattr(preparation, "candidate", None), "request", None)
         origin = getattr(request, "origin", None)
         if not isinstance(origin, CandidateOrigin):
@@ -2751,43 +2835,42 @@ class Controller(ControllerBase):
             model_digest=evaluation.challenger_digest,
             provenance_digest=evaluation.incumbent_digest,
         )
-        if confidence_accepted:
-            confidence = ModelEvidenceRecord(
-                evidence_id=(
-                    f"activation-confidence:{evaluation.decision_id}:"
-                    f"{evaluation.role_generation}"
-                ),
-                kind=EvidenceKind.CONFIDENCE_DECISION,
-                session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
-                cook_id=getattr(self, "_learning_cook_id", None),
-                timestamp_ms=timestamp_ms,
-                role_generation=evaluation.role_generation,
-                model_digest=evaluation.challenger_digest,
-                provenance_digest=evaluation.incumbent_digest,
-                payload=ConfidenceDecisionEvidence(
-                    decision_id=evaluation.decision_id,
-                    blocked=False,
-                    reason=None,
-                ),
-            )
-            receipt = self._activation_persistence_channel().submit_activation_confidence(
-                confidence
-            )
-            if (
-                not receipt.accepted
-                or receipt.wait(2.0) is not True
-                or receipt.durable is not True
-            ):
-                raise RuntimeError("activation-confidence-not-durable")
-            persisted_ids = getattr(
-                self,
-                "_persisted_activation_confidence_ids",
-                None,
-            )
-            if persisted_ids is None:
-                persisted_ids = set()
-                self._persisted_activation_confidence_ids = persisted_ids
-            persisted_ids.add(evaluation.decision_id)
+        confidence = ModelEvidenceRecord(
+            evidence_id=(
+                f"activation-confidence:{evaluation.decision_id}:"
+                f"{evaluation.role_generation}"
+            ),
+            kind=EvidenceKind.CONFIDENCE_DECISION,
+            session_id=getattr(self, "_learning_session_id", None) or "mpc-learning",
+            cook_id=getattr(self, "_learning_cook_id", None),
+            timestamp_ms=timestamp_ms,
+            role_generation=evaluation.role_generation,
+            model_digest=evaluation.challenger_digest,
+            provenance_digest=evaluation.incumbent_digest,
+            payload=ConfidenceDecisionEvidence(
+                decision_id=evaluation.decision_id,
+                blocked=not confidence_accepted,
+                reason=None if confidence_accepted else reasons[0],
+            ),
+        )
+        receipt = self._activation_persistence_channel().submit_activation_confidence(
+            confidence
+        )
+        if (
+            not receipt.accepted
+            or receipt.wait(2.0) is not True
+            or receipt.durable is not True
+        ):
+            raise RuntimeError("activation-confidence-not-durable")
+        persisted_ids = getattr(
+            self,
+            "_persisted_activation_confidence_ids",
+            None,
+        )
+        if persisted_ids is None:
+            persisted_ids = set()
+            self._persisted_activation_confidence_ids = persisted_ids
+        persisted_ids.add(evaluation.decision_id)
         return persisted
 
     def _persist_fit_transition(
@@ -3143,6 +3226,11 @@ class Controller(ControllerBase):
         with self._learning_evaluation_lock:
             evaluation = learning.evaluate_ready_off_path()
             blockers = () if evaluation is None else tuple(evaluation.blockers)
+            preparation = getattr(learning, "prepared", None)
+            if evaluation is not None:
+                self._persist_reviewed_candidate_checkpoint(evaluation, preparation)
+            if evaluation is not None:
+                self._persist_candidate_evaluation(evaluation, preparation)
             if blockers:
                 retire = getattr(learning, "retire_evaluated_candidate", None)
                 if callable(retire):
@@ -3156,14 +3244,11 @@ class Controller(ControllerBase):
                 evaluation_duration_ms=evaluation_duration_ms,
             )
         )
-        preparation = getattr(learning, "prepared", None)
         preparation_origin = getattr(
             getattr(getattr(preparation, "candidate", None), "request", None),
             "origin",
             None,
         )
-        if evaluation is not None:
-            self._persist_candidate_evaluation(evaluation, preparation)
         if (
             evaluation is not None
             and not blockers
@@ -3442,6 +3527,13 @@ class Controller(ControllerBase):
                     },
                 }
                 snapshot["window"] = asdict(prepared.candidate.request.window)
+                candidate_descriptor = getattr(
+                    getattr(prepared, "candidate_pair", None),
+                    "descriptor",
+                    None,
+                )
+            else:
+                candidate_descriptor = None
             snapshot["evidence"] = {
                 "eligible": int(self._online_eligible_updates),
                 "rejected": int(self._online_rejected_updates),
@@ -3494,6 +3586,14 @@ class Controller(ControllerBase):
                     "code": live["failure"]["code"],
                     "detail": live["failure"]["detail"],
                 }
+            )
+            snapshot["active_pair"] = active.to_dict()
+            snapshot["candidate_pair"] = (
+                candidate.to_dict()
+                if candidate is not None
+                else candidate_descriptor.to_dict()
+                if isinstance(candidate_descriptor, GreyControlPairDescriptor)
+                else None
             )
             encoded = json.dumps(snapshot, allow_nan=False).encode()
         except (AttributeError, TypeError, ValueError, OverflowError):

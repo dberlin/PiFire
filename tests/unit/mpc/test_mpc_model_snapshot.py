@@ -55,7 +55,9 @@ def test_current_writer_has_every_grey_learning_section_and_no_process_job_or_re
         "structure",
         "active",
         "challenger",
+        "active_pair",
         "window",
+        "candidate_pair",
         "evidence",
         "origin",
         "policy",
@@ -65,6 +67,8 @@ def test_current_writer_has_every_grey_learning_section_and_no_process_job_or_re
         "activation",
         "failure",
     }
+    assert snapshot["active_pair"] == _identified().active_control_pair.descriptor.to_dict()
+    assert snapshot["candidate_pair"] is None
     encoded = json.dumps(snapshot, allow_nan=False, sort_keys=True)
     assert "job" not in encoded
     assert "scheduled-arx" not in encoded

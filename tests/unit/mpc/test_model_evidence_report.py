@@ -30,6 +30,10 @@ from common.control_trace import (
 from common.controller_model_state import ControllerModelStore
 from common.datastore_accessors import read_control_trace_session, read_model_evidence
 from controller.mpc import Controller, _DEFAULTS
+from controller.model_learning.activation import (
+    GreyControlPairDescriptor,
+    OwnedGreyControlPair,
+)
 from controller.model_learning.report import (
     backend_learning_report,
     build_learning_artifact,
@@ -457,6 +461,14 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     incumbent = controller.active_control_pair.descriptor
     native_config = controller.mpc.config
     candidate_digest = grey_config_digest(native_config)
+    candidate_descriptor = GreyControlPairDescriptor(
+        model_digest=candidate_digest,
+        configuration=dict(incumbent.configuration),
+        estimator_kind=incumbent.estimator_kind,
+        solver_kind=incumbent.solver_kind,
+        candidate_generation=1,
+        role_generation=1,
+    )
     request = FitRequest(
         request_id="operator-request",
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
@@ -474,7 +486,11 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     preparation = SimpleNamespace(
         accepted=True,
         candidate_digest=candidate_digest,
-        candidate_pair=SimpleNamespace(estimator=object(), controller=object()),
+        candidate_pair=OwnedGreyControlPair(
+            candidate_descriptor,
+            object(),
+            object(),
+        ),
         candidate=SimpleNamespace(
             request=request,
             config=native_config,
@@ -518,8 +534,11 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     worker = getattr(controller, "_activation_persistence_worker", None)
     if worker is not None:
         worker.flush_and_stop(timeout=2.0)
-    checkpoint = controller.get_model_snapshot()
-    assert ControllerModelStore().save("mpc", checkpoint) is True
+    checkpoint = ControllerModelStore().load("mpc")
+    assert checkpoint is not None
+    assert checkpoint["revision"] == 1
+    assert checkpoint["active_pair"] == incumbent.to_dict()
+    assert checkpoint["candidate_pair"] == candidate_descriptor.to_dict()
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
 
@@ -726,6 +745,113 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
     else:
         assert expected_rejection in assessments[-1].rejection_reasons
     assert {record.event_kind.value for record in trace} >= {"fit_lifecycle"}
+    assert artifact["report"] == report.as_dict()
+
+
+def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds) -> None:
+    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller.bind_learning_identity("session-evaluation-blocker", "cook-blocked", 0)
+    incumbent = controller.active_control_pair.descriptor
+    candidate_config = controller.mpc.config
+    candidate_digest = grey_config_digest(candidate_config)
+    request = FitRequest(
+        request_id="blocked-evaluation-request",
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        candidate_generation=1,
+        window=FitWindowIdentity(
+            session_id="session-evaluation-blocker",
+            cook_id="cook-blocked",
+            first_observation_sequence=7,
+            last_observation_sequence=15,
+            role_generation=0,
+            incumbent_digest=incumbent.model_digest,
+            configuration_digest="d" * 64,
+        ),
+    )
+    preparation = SimpleNamespace(
+        accepted=True,
+        candidate_digest=candidate_digest,
+        candidate_pair=SimpleNamespace(estimator=object(), controller=object()),
+        candidate=SimpleNamespace(
+            request=request,
+            config=candidate_config,
+            rmse_c=1.5,
+            sample_count=16,
+            temperature_band_c=(75.0, 125.0),
+            nfev=5,
+        ),
+        blockers=(),
+        dry_solve_finite=True,
+        timing=SimpleNamespace(accepted=True),
+    )
+    evaluation = SimpleNamespace(
+        decision_id="blocked-evaluation-decision",
+        accepted=False,
+        blockers=("confidence-window",),
+        role_generation=0,
+        candidate_generation=1,
+        incumbent_digest=incumbent.model_digest,
+        challenger_digest=candidate_digest,
+        completed_origins=(),
+    )
+
+    class _Learning:
+        handoff = None
+        _pending_request = None
+
+        def __init__(self):
+            self.prepared = preparation
+            self.retired = []
+
+        def poll_fit_off_path(self, **_kwargs):
+            return None
+
+        def evaluate_ready_off_path(self):
+            return evaluation
+
+        def retire_evaluated_candidate(self, retired):
+            self.retired.append(retired)
+            self.prepared = None
+
+    learning = _Learning()
+    checkpoint = controller.get_model_snapshot()
+    assert ControllerModelStore().save("mpc", checkpoint) is True
+    controller._learning = learning
+    controller._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
+    controller._poll_learning_off_path_locked(
+        live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
+    )
+    worker = controller._activation_persistence_worker
+    worker.flush_and_stop(timeout=2.0)
+
+    report, records = backend_learning_report()
+    artifact = json.loads(build_learning_artifact(report, records))
+    assessments = [
+        record
+        for record in records
+        if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT
+    ]
+    confidence = [
+        record
+        for record in records
+        if record.kind is EvidenceKind.CONFIDENCE_DECISION
+    ]
+    trace = read_control_trace_session("session-evaluation-blocker")
+
+    assert learning.retired == [evaluation]
+    assert len(assessments) == 1
+    assert assessments[0].model_digest == candidate_digest
+    assert assessments[0].provenance_digest == incumbent.model_digest
+    assert assessments[0].payload.rejection_reasons == ("confidence-window",)
+    assert len(confidence) == 1
+    assert confidence[0].model_digest == candidate_digest
+    assert confidence[0].provenance_digest == incumbent.model_digest
+    assert confidence[0].payload.blocked is True
+    assert confidence[0].payload.reason == "confidence-window"
+    assert {record.event_kind.value for record in trace} >= {"candidate_assessment"}
+    assert report.as_dict()["candidate"]["assessment"]["rejection_reasons"] == [
+        "confidence-window"
+    ]
     assert artifact["report"] == report.as_dict()
 
 

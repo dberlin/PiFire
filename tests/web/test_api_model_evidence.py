@@ -11,6 +11,8 @@ from common.datastore_accessors import (
     write_status,
     commit_model_activation_phase,
     read_model_activation,
+    read_settings,
+    write_settings,
     read_model_evidence,
 )
 from common.model_evidence import (
@@ -375,15 +377,39 @@ def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
     return pair, estimator, solver
 
 
-def test_operator_evaluation_persists_real_report_consumed_by_actual_activation_route(
+def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_activation_route(
     client,
-    monkeypatch,
 ):
-    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    settings = read_settings()
+    settings["controller"]["selected"] = "mpc"
+    settings["controller"]["config"]["mpc"] = dict(_DEFAULTS)
+    write_settings(settings)
+    controller = Controller(
+        dict(_DEFAULTS),
+        settings["globals"]["units"],
+        settings["cycle_data"],
+    )
     controller.bind_learning_identity("session-api-operator", None, 0)
     incumbent = controller.active_control_pair.descriptor
-    native_config = controller.mpc.config
-    candidate_digest = grey_config_digest(native_config)
+    candidate_settings = dict(_DEFAULTS)
+    candidate_settings["theta"] = float(candidate_settings["theta"]) + 1.0
+    candidate_controller = Controller(
+        candidate_settings,
+        settings["globals"]["units"],
+        settings["cycle_data"],
+    )
+    candidate_config = candidate_controller.mpc.config
+    configuration = dict(candidate_controller.active_control_pair.descriptor.configuration)
+    candidate = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(configuration),
+        configuration=configuration,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=1,
+        role_generation=1,
+    )
+    candidate_pair = OwnedGreyControlPair(candidate, _ApiHandle(), _ApiHandle())
+    candidate_digest = candidate.model_digest
     request = FitRequest(
         request_id="request-api-operator",
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
@@ -401,10 +427,10 @@ def test_operator_evaluation_persists_real_report_consumed_by_actual_activation_
     preparation = SimpleNamespace(
         accepted=True,
         candidate_digest=candidate_digest,
-        candidate_pair=SimpleNamespace(estimator=object(), controller=object()),
+        candidate_pair=candidate_pair,
         candidate=SimpleNamespace(
             request=request,
-            config=native_config,
+            config=candidate_config,
             rmse_c=1.0,
             sample_count=12,
             temperature_band_c=(80.0, 120.0),
@@ -442,32 +468,30 @@ def test_operator_evaluation_persists_real_report_consumed_by_actual_activation_
         live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
     )
     controller._activation_persistence_worker.flush_and_stop(timeout=2.0)
-    checkpoint = controller.get_model_snapshot()
-    assert ControllerModelStore().save("mpc", checkpoint) is True
-
-    configuration = {
-        name: getattr(native_config, name)
-        for name in native_config.__dataclass_fields__
-    }
-    candidate = GreyControlPairDescriptor(
-        model_digest=candidate_digest,
-        configuration=configuration,
-        estimator_kind="ekf",
-        solver_kind="acados-grey",
-        candidate_generation=1,
-        role_generation=1,
-    )
-    pair = OwnedGreyControlPair(candidate, _ApiHandle(), _ApiHandle())
-    monkeypatch.setattr(
-        routes,
-        "_activation_checkpoint",
-        lambda: {
-            "active_pair": incumbent.to_dict(),
-            "candidate_pair": candidate.to_dict(),
+    checkpoint = ControllerModelStore().load("mpc")
+    assert checkpoint is not None
+    assert checkpoint["revision"] == 1
+    assert checkpoint["active_pair"] == incumbent.to_dict()
+    assert migrate_grey_learning_snapshot(checkpoint)["revision"] == 1
+    restart_report = client.get("/api/model-evidence/report").get_json()
+    assert restart_report["status"] == "ready-for-review", restart_report
+    assert checkpoint["candidate_pair"] == candidate.to_dict()
+    rebuilt_controller = Controller(
+        {
+            **settings["controller"]["config"]["mpc"],
+            **candidate.configuration,
         },
+        settings["globals"]["units"],
+        settings["cycle_data"],
     )
-    monkeypatch.setattr(routes, "_build_manual_candidate_pair", lambda _descriptor: pair)
-    monkeypatch.setattr(routes, "_manual_candidate_dry_solve", lambda value: value is pair)
+    assert (
+        rebuilt_controller.active_control_pair.descriptor.configuration
+        == candidate.configuration
+    )
+    rebuilt = routes._build_manual_candidate_pair(candidate)
+    assert rebuilt.descriptor == candidate
+    assert routes._manual_candidate_dry_solve(rebuilt) is True
+    rebuilt.close()
 
     response = client.post(
         "/api/model-evidence/activate",
@@ -477,7 +501,7 @@ def test_operator_evaluation_persists_real_report_consumed_by_actual_activation_
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.get_json()
     assert response.get_json()["phase"] == "prepared"
     assert read_model_activation().candidate_pair == candidate
 
