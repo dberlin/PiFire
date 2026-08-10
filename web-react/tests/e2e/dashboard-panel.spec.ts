@@ -475,7 +475,9 @@ test("one report trigger stays after Hopper and the full panel is reachable at b
   }
 });
 
-test("passive automatic transitions never expose reviewed activation controls", async ({ page }) => {
+test("passive automatic transitions never expose reviewed activation controls", async ({
+  page,
+}) => {
   let report = evidenceReport("collecting", EXACT_DIGEST, EXACT_DECISION);
   await page.route("**/api/settings", (route) =>
     route.fulfill({

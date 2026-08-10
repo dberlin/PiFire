@@ -89,11 +89,7 @@ async function postModelAction<
     accepted: boolean;
     detail?: string | null;
   },
->(
-  path: string,
-  request: TRequest,
-  baseUrl: string,
-): Promise<ModelEvidenceResult<TResponse>> {
+>(path: string, request: TRequest, baseUrl: string): Promise<ModelEvidenceResult<TResponse>> {
   try {
     const response = await fetch(endpoint(baseUrl, path), {
       method: "POST",

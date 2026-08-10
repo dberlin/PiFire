@@ -71,9 +71,7 @@ class ReportRequestError extends Error {
 }
 
 function bandCenters(units: TemperatureUnit): string {
-  const values = BAND_CENTERS_F.map((f) =>
-    units === "F" ? f : Math.round(((f - 32) * 5) / 9),
-  );
+  const values = BAND_CENTERS_F.map((f) => (units === "F" ? f : Math.round(((f - 32) * 5) / 9)));
   return `${values[0]}, ${values[1]} and ${values[2]} °${units}`;
 }
 
@@ -92,11 +90,7 @@ function checkTone(status: CheckStatus): string {
   return "text-probe-label";
 }
 
-function generationIdentity(
-  label: string,
-  digest: string | null,
-  generation: number | null,
-) {
+function generationIdentity(label: string, digest: string | null, generation: number | null) {
   return (
     <div className="grid min-w-0 gap-1">
       <p className="font-semibold">{label}</p>
@@ -135,7 +129,10 @@ function ActiveMpcLearningPanel({
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLElement>(null);
   const wasOpen = useRef(false);
-  const confirmationIdentity = useRef<{ candidateDigest: string | null; decisionId: string | null }>({
+  const confirmationIdentity = useRef<{
+    candidateDigest: string | null;
+    decisionId: string | null;
+  }>({
     candidateDigest: null,
     decisionId: null,
   });
@@ -208,7 +205,8 @@ function ActiveMpcLearningPanel({
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const focusIsInside =
-        document.activeElement !== null && dialog.current?.contains(document.activeElement) === true;
+        document.activeElement !== null &&
+        dialog.current?.contains(document.activeElement) === true;
       if (!focusIsInside) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
@@ -399,7 +397,10 @@ function ActiveMpcLearningPanel({
               {report && (
                 <>
                   {(report.errors.length > 0 || report.failure !== null) && (
-                    <div className="grid gap-2 rounded-lg border border-danger p-3 text-danger" role="alert">
+                    <div
+                      className="grid gap-2 rounded-lg border border-danger p-3 text-danger"
+                      role="alert"
+                    >
                       {report.errors.map((error) => (
                         <p key={error}>Report error: {error}</p>
                       ))}
@@ -416,7 +417,8 @@ function ActiveMpcLearningPanel({
                     <h3 className="font-bold">Operator calibration commands</h3>
                     <p className="mt-2 text-sm text-probe-label">
                       Calibration probes around the active Hold at {bandCenters(units)}. The report
-                      serializes command high-water only; this panel does not invent a command phase.
+                      serializes command high-water only; this panel does not invent a command
+                      phase.
                     </p>
                     <p className="mt-2 text-sm">
                       Accepted command high-water: {report.calibration.command_high_water}
@@ -478,7 +480,9 @@ function ActiveMpcLearningPanel({
                       <div className="mt-2 grid gap-2 text-sm">
                         <p>Mode: {report.mode ?? "none"}</p>
                         <p>Role generation: {report.candidate.role_generation ?? "none"}</p>
-                        <p>Candidate generation: {report.candidate.candidate_generation ?? "none"}</p>
+                        <p>
+                          Candidate generation: {report.candidate.candidate_generation ?? "none"}
+                        </p>
                         <p>Candidate policy: {report.candidate.policy ?? "none"}</p>
                         <p className="break-all font-mono text-xs">
                           Candidate digest: {report.candidate.digest ?? "none"}
@@ -520,7 +524,9 @@ function ActiveMpcLearningPanel({
                             {report.window.last_observation_sequence}
                           </p>
                           <p>Window role generation: {report.window.role_generation}</p>
-                          <p className="break-all">Configuration: {report.window.configuration_digest}</p>
+                          <p className="break-all">
+                            Configuration: {report.window.configuration_digest}
+                          </p>
                           <p className="break-all">Incumbent: {report.window.incumbent_digest}</p>
                         </>
                       )}
@@ -533,20 +539,33 @@ function ActiveMpcLearningPanel({
                       <p className="mt-2 text-probe-label">No candidate parameters reported.</p>
                     ) : (
                       <div className="mt-3 overflow-x-auto">
-                        <table className="w-full text-left text-sm" aria-label="Grey candidate parameters">
+                        <table
+                          className="w-full text-left text-sm"
+                          aria-label="Grey candidate parameters"
+                        >
                           <thead className="text-label">
                             <tr>
-                              <th className="p-2" scope="col">Parameter</th>
-                              <th className="p-2" scope="col">Candidate</th>
-                              <th className="p-2" scope="col">Delta</th>
+                              <th className="p-2" scope="col">
+                                Parameter
+                              </th>
+                              <th className="p-2" scope="col">
+                                Candidate
+                              </th>
+                              <th className="p-2" scope="col">
+                                Delta
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
                             {parameterEntries.map(([name, candidateValue]) => {
-                              const delta = deltaEntries.find(([deltaName]) => deltaName === name)?.[1];
+                              const delta = deltaEntries.find(
+                                ([deltaName]) => deltaName === name,
+                              )?.[1];
                               return (
                                 <tr className="border-t border-card-border" key={name}>
-                                  <th className="p-2" scope="row">{name}</th>
+                                  <th className="p-2" scope="row">
+                                    {name}
+                                  </th>
                                   <td className="p-2">{candidateValue}</td>
                                   <td className="p-2">{shown(delta)}</td>
                                 </tr>
@@ -556,21 +575,37 @@ function ActiveMpcLearningPanel({
                         </table>
                       </div>
                     )}
-                    <p className="mt-2 text-sm">Fit quality: {shown(report.candidate.fit_quality)}</p>
-                    <p className="text-sm">Identifiability: {shown(report.candidate.identifiability)}</p>
+                    <p className="mt-2 text-sm">
+                      Fit quality: {shown(report.candidate.fit_quality)}
+                    </p>
+                    <p className="text-sm">
+                      Identifiability: {shown(report.candidate.identifiability)}
+                    </p>
                   </section>
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <section className={REPORT_SECTION}>
                       <h3 className="font-bold">Native candidate and timing</h3>
                       <div className="mt-2 grid gap-1 text-sm">
-                        <p className={assessment ? checkTone(assessment.native_build) : "text-probe-label"}>
+                        <p
+                          className={
+                            assessment ? checkTone(assessment.native_build) : "text-probe-label"
+                          }
+                        >
                           Native build: {assessment?.native_build ?? "not reported"}
                         </p>
-                        <p className={assessment ? checkTone(assessment.native_dry_solve) : "text-probe-label"}>
+                        <p
+                          className={
+                            assessment ? checkTone(assessment.native_dry_solve) : "text-probe-label"
+                          }
+                        >
                           Native dry solve: {assessment?.native_dry_solve ?? "not reported"}
                         </p>
-                        <p className={assessment ? checkTone(assessment.target_timing) : "text-probe-label"}>
+                        <p
+                          className={
+                            assessment ? checkTone(assessment.target_timing) : "text-probe-label"
+                          }
+                        >
                           Target timing: {assessment?.target_timing ?? "not reported"}
                         </p>
                         <p>Ambient provenance: not reported by backend</p>
@@ -579,12 +614,21 @@ function ActiveMpcLearningPanel({
                     <section className={REPORT_SECTION}>
                       <h3 className="font-bold">Readiness and rejection</h3>
                       <div className="mt-2 grid gap-1 text-sm">
-                        <p>Fit accepted: {assessment ? yesNo(assessment.fit_accepted) : "not reported"}</p>
                         <p>
-                          Identifiability accepted: {assessment ? yesNo(assessment.identifiability_accepted) : "not reported"}
+                          Fit accepted:{" "}
+                          {assessment ? yesNo(assessment.fit_accepted) : "not reported"}
                         </p>
-                        <p>Confidence accepted: {assessment ? yesNo(assessment.confidence_accepted) : "not reported"}</p>
-                        <p>Rejection reasons: {assessment?.rejection_reasons.join(", ") || "none"}</p>
+                        <p>
+                          Identifiability accepted:{" "}
+                          {assessment ? yesNo(assessment.identifiability_accepted) : "not reported"}
+                        </p>
+                        <p>
+                          Confidence accepted:{" "}
+                          {assessment ? yesNo(assessment.confidence_accepted) : "not reported"}
+                        </p>
+                        <p>
+                          Rejection reasons: {assessment?.rejection_reasons.join(", ") || "none"}
+                        </p>
                         <p>Blockers: {report.blockers.join(", ") || "none"}</p>
                       </div>
                     </section>
@@ -618,12 +662,19 @@ function ActiveMpcLearningPanel({
                       <p>Policy: {report.activation.policy ?? "none"}</p>
                       <p>Origin: {report.activation.origin ?? "none"}</p>
                       <p>Persistence pending: {yesNo(report.activation.pending_persistence)}</p>
-                      <p>Frame-boundary swap pending: {yesNo(report.activation.pending_frame_boundary_swap)}</p>
-                      <p className="break-all">Transaction: {report.activation.transaction_id ?? "none"}</p>
+                      <p>
+                        Frame-boundary swap pending:{" "}
+                        {yesNo(report.activation.pending_frame_boundary_swap)}
+                      </p>
+                      <p className="break-all">
+                        Transaction: {report.activation.transaction_id ?? "none"}
+                      </p>
                       <p>Reason: {report.activation.reason ?? "none"}</p>
                       <p>
                         Latest lifecycle: {report.latest_lifecycle?.phase ?? "none"}
-                        {report.latest_lifecycle?.reason ? ` — ${report.latest_lifecycle.reason}` : ""}
+                        {report.latest_lifecycle?.reason
+                          ? ` — ${report.latest_lifecycle.reason}`
+                          : ""}
                       </p>
                     </div>
                   </section>
@@ -632,7 +683,8 @@ function ActiveMpcLearningPanel({
                     <section className="min-w-0 rounded-card border border-ok bg-inset p-4">
                       <h3 className="font-bold">Activate reviewed model</h3>
                       <p className="mt-2 text-sm">
-                        Confirm the exact candidate digest and confidence decision serialized by this report.
+                        Confirm the exact candidate digest and confidence decision serialized by
+                        this report.
                       </p>
                       <dl className="mt-3 grid gap-2 text-sm">
                         <div>

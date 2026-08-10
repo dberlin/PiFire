@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
 import { MpcLearningPanel } from "../../../../src/components/dashboard/MpcLearningPanel";
 import type {
   CookRefitOutcome,
@@ -153,9 +153,7 @@ afterEach(() => {
   rs.useRealTimers();
 });
 
-function renderPanel(
-  props: Partial<React.ComponentProps<typeof MpcLearningPanel>> = {},
-) {
+function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningPanel>> = {}) {
   const queryClient = testQueryClient();
   return render(
     <MpcLearningPanel
@@ -258,17 +256,20 @@ describe("MpcLearningPanel", () => {
     ["fallback", "Fallback"],
     ["error", "Error"],
     ["schema-invalidated", "Schema invalidated"],
-  ] as const)("projects the backend %s status into the pill and open panel", async (status, label) => {
-    fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, status }));
-    renderPanel();
+  ] as const)(
+    "projects the backend %s status into the pill and open panel",
+    async (status, label) => {
+      fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, status }));
+      renderPanel();
 
-    const trigger = await screen.findByRole("button", {
-      name: `MPC learning: ${label.toLowerCase()}`,
-    });
-    await userEvent.click(trigger);
+      const trigger = await screen.findByRole("button", {
+        name: `MPC learning: ${label.toLowerCase()}`,
+      });
+      await userEvent.click(trigger);
 
-    expect(screen.getByText(label, { exact: true })).toBeVisible();
-  });
+      expect(screen.getByText(label, { exact: true })).toBeVisible();
+    },
+  );
 
   it.each(["idle", "queued", "running", "succeeded", "failed", "stale"] as const)(
     "renders fit status %s without deriving it from the top-level state",
@@ -286,7 +287,9 @@ describe("MpcLearningPanel", () => {
       renderPanel();
       await openPanel();
 
-      const fit = screen.getByRole("heading", { name: "Fit and evidence window" }).closest("section");
+      const fit = screen
+        .getByRole("heading", { name: "Fit and evidence window" })
+        .closest("section");
       expect(fit).not.toBeNull();
       expect(fit!).toHaveTextContent(`Status: ${fitStatus}`);
       if (fitStatus === "failed") expect(fit!).toHaveTextContent("native fitter failed");
@@ -340,9 +343,7 @@ describe("MpcLearningPanel", () => {
         });
       }
       return jsonResponse(
-        accepted
-          ? { ...REPORT, calibration: { revision: 5, command_high_water: 5 } }
-          : REPORT,
+        accepted ? { ...REPORT, calibration: { revision: 5, command_high_water: 5 } } : REPORT,
       );
     });
     renderPanel();
@@ -397,7 +398,9 @@ describe("MpcLearningPanel", () => {
     await openPanel();
 
     expect(screen.queryByLabelText("Type the exact candidate digest")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Type the exact confidence decision ID")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Type the exact confidence decision ID"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Activate exact model" })).not.toBeInTheDocument();
   });
 
@@ -439,11 +442,17 @@ describe("MpcLearningPanel", () => {
 
     const activate = screen.getByRole("button", { name: "Activate exact model" });
     expect(activate).toBeDisabled();
-    await userEvent.type(screen.getByLabelText("Type the exact candidate digest"), CANDIDATE_DIGEST);
+    await userEvent.type(
+      screen.getByLabelText("Type the exact candidate digest"),
+      CANDIDATE_DIGEST,
+    );
     await userEvent.type(screen.getByLabelText("Type the exact confidence decision ID"), "wrong");
     expect(activate).toBeDisabled();
     await userEvent.clear(screen.getByLabelText("Type the exact confidence decision ID"));
-    await userEvent.type(screen.getByLabelText("Type the exact confidence decision ID"), DECISION_ID);
+    await userEvent.type(
+      screen.getByLabelText("Type the exact confidence decision ID"),
+      DECISION_ID,
+    );
     expect(activate).toBeEnabled();
     await userEvent.click(activate);
 
@@ -529,12 +538,15 @@ describe("MpcLearningPanel", () => {
     expect(alert).toHaveTextContent("activation-terminal");
     expect(alert).toHaveTextContent("native solver crashed");
     expect(alert).toHaveTextContent("terminal");
-    expect(screen.getByRole("heading", { name: "Fit and evidence window" }).closest("section"))
-      .toHaveTextContent("optimizer-nonconvergence");
-    expect(screen.getByRole("heading", { name: "Readiness and rejection" }).closest("section"))
-      .toHaveTextContent("identifiability");
-    expect(screen.getByRole("heading", { name: "Activation and swap" }).closest("section"))
-      .toHaveTextContent("swap-compensated");
+    expect(
+      screen.getByRole("heading", { name: "Fit and evidence window" }).closest("section"),
+    ).toHaveTextContent("optimizer-nonconvergence");
+    expect(
+      screen.getByRole("heading", { name: "Readiness and rejection" }).closest("section"),
+    ).toHaveTextContent("identifiability");
+    expect(
+      screen.getByRole("heading", { name: "Activation and swap" }).closest("section"),
+    ).toHaveTextContent("swap-compensated");
   });
 
   it("invalidates immediately on socket revision and ignores the superseded response", async () => {
@@ -544,7 +556,9 @@ describe("MpcLearningPanel", () => {
         (_input, init) =>
           new Promise<Response>((resolve, reject) => {
             resolveFirst = resolve;
-            init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
           }),
       )
       .mockResolvedValueOnce(jsonResponse({ ...REPORT, status: "active", revision: "new" }));

@@ -6,11 +6,11 @@ import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { NotifyUpdate } from "../../../../src/helpers/notify/notifyApi";
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
 } from "../../../../src/helpers/modelEvidence/types";
+import type { NotifyUpdate } from "../../../../src/helpers/notify/notifyApi";
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };
