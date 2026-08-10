@@ -147,6 +147,7 @@ class ActivationReport(WireModel):
     active_snapshot_json: str | None = None
     rollback_snapshot_json: str | None = None
     evidence_decision_id: str | None = None
+    decision_id: NonBlankString | None = None
     controller_configuration_digest: str | None = None
     role_generation: NonNegativeInt | None = None
     transaction_id: str | None = None
@@ -157,6 +158,7 @@ class ActivationReport(WireModel):
     policy: ActivationPolicy | None = None
     candidate_generation: NonNegativeInt | None = None
     candidate_digest: Digest | None = None
+    incumbent_digest: Digest | None = None
     phase: ActivationPhase
     reason: str | None
     pending_persistence: bool
