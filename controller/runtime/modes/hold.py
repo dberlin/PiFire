@@ -565,7 +565,12 @@ class HoldMode(ControlMode):
         if not worker.submit_evidence_batch((compact,)).accepted:
             self._learning_evidence_available = False
 
-    def _deliver_completed_pulse_observation(self, frame_key: tuple[int, int], observation: FrameObservation) -> None:
+    def _deliver_completed_pulse_observation(
+        self,
+        frame_key: tuple[int, int],
+        observation: FrameObservation,
+        feedback: AppliedOutput | None = None,
+    ) -> None:
         self._submit_calibration_frame_evidence(observation)
         if not observation.probe_valid:
             self._pulse_observation_last_frame_key = frame_key
@@ -589,7 +594,11 @@ class HoldMode(ControlMode):
             return
         if self._runner is None:
             return
-        submission = self._runner.observe_frame(observation)
+        submission = (
+            self._runner.complete_frame(feedback, observation)
+            if feedback is not None
+            else self._runner.observe_frame(observation)
+        )
         sequence = getattr(submission, "submission_sequence", None)
         generation = getattr(submission, "configuration_generation", None)
         if (
@@ -1010,6 +1019,7 @@ class HoldMode(ControlMode):
             )
             is not None
         )
+        terminal_feedback = None
         for frame in decision.completed_frames:
             self._trace_pulse_frame(frame, InhibitReason.NONE, previous_frame_revision)
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
@@ -1026,7 +1036,7 @@ class HoldMode(ControlMode):
                 completed_request = controller.pulse_frame_requested_auger_duty
                 completed_maximum_duty = controller.pulse_frame_maximum_duty
             if transition_at_s is not None:
-                self._report_framed_feedback(
+                terminal_feedback = self._report_framed_feedback(
                     transition_at_s,
                     delivered_at_transition_s,
                     ptemp=ptemp,
@@ -1045,6 +1055,7 @@ class HoldMode(ControlMode):
                             else FrameFeedbackDisposition.DISCARDED
                         )
                     ),
+                    dispatch=len(captured) != 1,
                 )
         if apply_transition and decision.transition is not None:
             if decision.transition.command_on:
@@ -1052,7 +1063,8 @@ class HoldMode(ControlMode):
             else:
                 self.grill.auger_off()
         for frame_key, observation in captured:
-            self._deliver_completed_pulse_observation(frame_key, observation)
+            self._deliver_completed_pulse_observation(frame_key, observation, terminal_feedback)
+            terminal_feedback = None
         return decision
 
     def _stamp_latched_calibration_cancellation(
@@ -1188,16 +1200,17 @@ class HoldMode(ControlMode):
         completed_calibration_action: str | None = None,
         completed_calibration_generation: int | None = None,
         feedback_disposition: FrameFeedbackDisposition = FrameFeedbackDisposition.PROGRESS,
-    ) -> None:
+        dispatch: bool = True,
+    ) -> AppliedOutput | None:
         controller = self.state.controller
         start = controller.pulse_feedback_start_s
         if start is None:
             controller.pulse_feedback_start_s = now
             controller.pulse_feedback_delivered_on_s = delivered_on_s
-            return
+            return None
         elapsed = now - start
         if elapsed <= 0:
-            return
+            return None
         realized_duty = max(0.0, min(1.0, (delivered_on_s - controller.pulse_feedback_delivered_on_s) / elapsed))
         requested = controller.pulse_frame_requested_auger_duty if completed_request is None else completed_request
         maximum_duty = controller.pulse_frame_maximum_duty if completed_maximum_duty is None else completed_maximum_duty
@@ -1227,7 +1240,7 @@ class HoldMode(ControlMode):
             controller.trace_prior_output_source = applied.source
             controller.trace_prior_fan_duty = controller.fan_duty
             controller.trace_prior_combustion_load = inverse_combustion_load
-        self._set_output(
+        applied = self._set_output(
             applied,
             now,
             producing_revision=revision,
@@ -1236,11 +1249,13 @@ class HoldMode(ControlMode):
             producing_calibration_generation=completed_calibration_generation,
             sample_complete=sample_complete,
             feedback_disposition=feedback_disposition,
+            dispatch=dispatch,
         )
         if measured_source:
             controller.trace_prior_combustion_load = inverse_combustion_load
         controller.pulse_feedback_start_s = now
         controller.pulse_feedback_delivered_on_s = delivered_on_s
+        return applied
 
     def _trace_warning(self, message: str) -> None:
         try:
@@ -1770,7 +1785,8 @@ class HoldMode(ControlMode):
         producing_calibration_generation: int | None = None,
         sample_complete: bool = False,
         feedback_disposition: FrameFeedbackDisposition = FrameFeedbackDisposition.PROGRESS,
-    ) -> None:
+        dispatch: bool = True,
+    ) -> AppliedOutput:
         controller = self.state.controller
         coalesce_seed = (
             controller.pulse_frame_result_revision == 0
@@ -1809,9 +1825,10 @@ class HoldMode(ControlMode):
             sample_complete=sample_complete,
             feedback_disposition=feedback_disposition,
         )
-        self._runner.set_output(applied)
+        if dispatch:
+            self._runner.set_output(applied)
         if coalesce_seed:
-            return
+            return applied
         controller.trace_interval_start_ms = int(now * 1_000)
         controller.trace_interval_result_revision = revision
         controller.trace_prior_requested_auger_duty = (
@@ -1822,6 +1839,7 @@ class HoldMode(ControlMode):
         controller.trace_prior_fan_duty = controller.fan_duty
         controller.trace_combustion_load = None
         controller.trace_prior_combustion_load = None
+        return applied
 
     name = Mode.HOLD
     _model_store = None
@@ -1845,6 +1863,7 @@ class HoldMode(ControlMode):
         self._last_ptemp = None
         self._final_refit_done = False
         self._final_checkpoint_done = False
+        self._final_checkpoint_outcome = None
         self._final_refit_outcome = None
         self._activation_state_identity = None
         self._activation_lifecycle_evidence_id = None
@@ -2779,38 +2798,56 @@ class HoldMode(ControlMode):
     ) -> bool:
         if self._final_checkpoint_done:
             return True
-        self._final_checkpoint_done = True
         finalize = getattr(self._runner, "finalize_cook_refit", None)
+        final_outcome = self._final_checkpoint_outcome or outcome
         if callable(finalize):
             try:
-                finalize(outcome)
+                if finalize(final_outcome) is False:
+                    raise RuntimeError("refit outcome was not finalized")
             except Exception:
-                finalize = None
+                final_outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
+                self._final_checkpoint_outcome = final_outcome
+                try:
+                    if finalize(final_outcome) is False:
+                        return False
+                except Exception:
+                    return False
         snapshot = self._runner.get_model_snapshot()
         if not isinstance(snapshot, dict):
             self._learning_evidence_available = False
-            if callable(finalize):
-                try:
-                    finalize(TeardownRefitOutcome.CHECKPOINT_FAILURE)
-                except Exception:
-                    pass
             return False
         self._clear_trace_session_model_authority()
-        self._trace_model(ModelEventType.REFIT, f"model refit outcome: {outcome.value}", snapshot)
-        if outcome in {
+        self._trace_model(
+            ModelEventType.REFIT,
+            f"model refit outcome: {final_outcome.value}",
+            snapshot,
+        )
+        if final_outcome in {
             TeardownRefitOutcome.READY_FOR_REVIEW,
             TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
         }:
-            self._trace_model(ModelEventType.ADOPT, getattr(verdict, "reason", outcome.value), snapshot)
-        elif outcome is not TeardownRefitOutcome.DISABLED:
-            self._trace_model(ModelEventType.REJECT, getattr(verdict, "reason", outcome.value), snapshot)
+            self._trace_model(
+                ModelEventType.ADOPT,
+                getattr(verdict, "reason", final_outcome.value),
+                snapshot,
+            )
+        elif final_outcome is not TeardownRefitOutcome.DISABLED:
+            self._trace_model(
+                ModelEventType.REJECT,
+                getattr(verdict, "reason", final_outcome.value),
+                snapshot,
+            )
         accepted = self._checkpoint_model(snapshot)
-        if not accepted and callable(finalize):
+        if accepted:
+            self._final_checkpoint_done = True
+            return True
+        if final_outcome is not TeardownRefitOutcome.CHECKPOINT_FAILURE and callable(finalize):
             try:
                 finalize(TeardownRefitOutcome.CHECKPOINT_FAILURE)
+                self._final_checkpoint_outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
             except Exception:
                 pass
-        return accepted
+        return False
 
     def teardown(self, ptemp):
         first_trace_teardown = not self._trace_closed and (
@@ -2834,11 +2871,14 @@ class HoldMode(ControlMode):
         try:
             if self._runner is not None:
                 stop_for_refit = getattr(self._runner, "stop_for_refit", self._runner.stop)
-                stop_for_refit()
+                stopped = stop_for_refit()
                 if getattr(self, "ctx", None) is not None:
                     self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
-                outcome, verdict = self._refit_model_once()
-                self._publish_final_checkpoint_once(outcome, verdict)
+                if stopped is False:
+                    self._trace_warning("Controller worker did not stop; final checkpoint was not queued")
+                else:
+                    outcome, verdict = self._refit_model_once()
+                    self._publish_final_checkpoint_once(outcome, verdict)
         finally:
             self._retire_runner_evidence_context(self._runner_configuration_revision)
             worker = self._persistence_worker

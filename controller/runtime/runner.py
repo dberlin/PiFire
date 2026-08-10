@@ -505,7 +505,12 @@ class ControllerRunner(ABC):
     @abstractmethod
     def set_output(self, applied): ...
     @abstractmethod
-    def observe_frame(self, observation: FrameObservation): ...
+    def observe_frame(self, observation: FrameObservation) -> ObservationSubmission | None: ...
+    def complete_frame(self, applied, observation: FrameObservation) -> ObservationSubmission | None:
+        """Deliver terminal feedback before its observation as one runner operation."""
+        self.set_output(applied)
+        return self.observe_frame(observation)
+
     @abstractmethod
     def drain_observation_outcomes(self) -> ObservationOutcomeDrain: ...
     @abstractmethod
@@ -527,7 +532,7 @@ class ControllerRunner(ABC):
         return ()
     def submit_activation_confidence(self, record):
         return None
-    def stop_for_refit(self):
+    def stop_for_refit(self) -> bool | None:
         """Stop control ownership while retaining the joined core for teardown fitting."""
         self.stop()
 
@@ -676,9 +681,10 @@ class SyncControllerRunner(ControllerRunner):
 
     def stop_for_refit(self):
         if self._stopped:
-            return
+            return self._retained_for_refit
         self._stopped = True
         self._retained_for_refit = True
+        return True
 
     def finish_teardown(self):
         if not self._retained_for_refit:
@@ -723,6 +729,10 @@ class SyncControllerRunner(ControllerRunner):
                 )
             self._observation_outcomes.append(ObservationOutcomeEnvelope(sequence, generation, observation, outcome))
         return ObservationSubmission(sequence, generation)
+
+    def complete_frame(self, applied, observation: FrameObservation):
+        self._core.set_output(applied)
+        return self.observe_frame(observation)
 
     def drain_observation_outcomes(self) -> ObservationOutcomeDrain:
         envelopes: list[ObservationOutcomeEnvelope] = []
@@ -916,6 +926,10 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pair_activation_ids: set[str] = set()
         self._mpc_activation_terminated = False
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
+        self._pending_completed_frames: collections.deque[
+            tuple[int, int, object, FrameObservation]
+        ] = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
+
         self._accepted_observations: dict[int, tuple[int, FrameObservation]] = {}
         self._inflight_observations: set[int] = set()
         self._accept_observations = True
@@ -1193,6 +1207,24 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_calibrations.clear()
                 pending_activations = tuple(self._pending_activations)
                 self._pending_activations.clear()
+                completed_frames = tuple(self._pending_completed_frames)
+                self._pending_completed_frames.clear()
+            for sequence, generation, applied, observation in completed_frames:
+                self._core.set_output(applied)
+                with self._lock:
+                    self._latest_delivered_output = applied
+                observe = getattr(self._core, "observe_frame", None)
+                try:
+                    outcome = None if observe is None else observe(observation)
+                except Exception as error:
+                    reject = getattr(self._core, "observation_failure", None)
+                    outcome = reject(observation, error) if callable(reject) else None
+                with self._lock:
+                    if outcome is None:
+                        self._terminalize_observation_locked(sequence, "runner-no-observation-outcome")
+                    else:
+                        self._complete_observation_locked(sequence, generation, observation, outcome)
+
             # A pending core is installed only after the old core has drained
             # the returned generation bound to the consuming core.
             if restore is not None:
@@ -1537,6 +1569,28 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._dropped_observations += 1
                 self._observations_discontinuous.add(evicted_generation)
             return ObservationSubmission(sequence, generation, evicted_sequence)
+    def complete_frame(self, applied, observation: FrameObservation):
+        with self._lock:
+            if not self._accept_observations:
+                return None
+            self._observation_sequence += 1
+            sequence = self._observation_sequence
+            generation = self._configuration_revision
+            self._accepted_observations[sequence] = (generation, observation)
+            if len(self._pending_completed_frames) == self._pending_completed_frames.maxlen:
+                evicted_sequence, evicted_generation, _, _ = self._pending_completed_frames.popleft()
+                self._accepted_observations.pop(evicted_sequence, None)
+                self._terminal_drops_since_drain.append(
+                    ObservationTerminalDrop(
+                        evicted_sequence,
+                        evicted_generation,
+                        observation,
+                        "runner-completed-frame-evicted",
+                    )
+                )
+            self._pending_completed_frames.append((sequence, generation, applied, observation))
+            return ObservationSubmission(sequence, generation)
+
 
     def drain_observation_outcomes(self) -> ObservationOutcomeDrain:
         with self._lock:
@@ -1658,6 +1712,9 @@ class ThreadedControllerRunner(ControllerRunner):
         if self._thread.is_alive():
             with self._lock:
                 self._pending_observations.clear()
+                while self._pending_completed_frames:
+                    sequence, _, _, _ = self._pending_completed_frames.popleft()
+                    self._terminalize_observation_locked(sequence, "runner-stop-timeout")
                 for sequence in tuple(self._accepted_observations):
                     self._terminalize_observation_locked(sequence, "runner-stop-timeout")
 
@@ -1665,6 +1722,7 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._retain_core_for_refit = True
         self._stop_and_join()
+        return not self._thread.is_alive()
 
     def finish_teardown(self):
         with self._lock:

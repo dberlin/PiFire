@@ -1294,6 +1294,7 @@ class Controller(ControllerBase):
         self._teardown_candidate_descriptor: GreyControlPairDescriptor | None = None
         self._teardown_fit_window: FitWindowIdentity | None = None
         self._next_cook_descriptor: GreyControlPairDescriptor | None = None
+        self._teardown_decision_id: str | None = None
         try:
             self._learning = self._build_learning() if self._online_enabled else None
         except BaseException:
@@ -1648,6 +1649,7 @@ class Controller(ControllerBase):
             or record.candidate != self._active_control_pair.descriptor
         ):
             return False
+        self._rotate_teardown_role_generation(record.candidate.role_generation)
         self._activation_output_authorized = True
         self._active_activation_record = record
         self._inert_activation = None
@@ -2645,17 +2647,22 @@ class Controller(ControllerBase):
             "forecast_origin_evidence": (),
         }
 
+    def _rotate_teardown_role_generation(self, role_generation: int) -> None:
+        normalized = int(role_generation)
+        if normalized == self._learning_role_generation:
+            return
+        self._learning_role_generation = normalized
+        self._teardown_history = TeardownGreyHistory(
+            role_generation=normalized,
+            max_observations=self._teardown_history.max_observations,
+        )
+
     def bind_learning_identity(self, session_id, cook_id, role_generation):
         """Fence Task 7 work to the runner's current cook/configuration identity."""
         with self._learning_lifecycle_lock:
             self._learning_session_id = session_id
             self._learning_cook_id = cook_id
-            self._learning_role_generation = int(role_generation)
-            if self._teardown_history.role_generation != self._learning_role_generation:
-                self._teardown_history = TeardownGreyHistory(
-                    role_generation=self._learning_role_generation,
-                    max_observations=self._teardown_history.max_observations,
-                )
+            del role_generation
             with self._learning_lock:
                 learning = self._learning
             if learning is not None:
@@ -3589,7 +3596,9 @@ class Controller(ControllerBase):
                 "eligible": int(self._online_eligible_updates),
                 "rejected": int(self._online_rejected_updates),
                 "confidence_decision_id": (
-                    None
+                    self._teardown_decision_id
+                    if self._teardown_decision_id is not None
+                    else None
                     if self._active_activation_record is None
                     else self._active_activation_record.decision_id
                 ),
@@ -3775,6 +3784,67 @@ class Controller(ControllerBase):
         Controller._close_component(getattr(pair, "controller", None))
         Controller._close_component(getattr(pair, "estimator", None))
 
+    def _persist_operator_teardown_authority(self, window, descriptor) -> str:
+        session_id = getattr(self, "_learning_session_id", None) or "mpc-learning"
+        cook_id = getattr(self, "_learning_cook_id", None) or "none"
+        decision_id = (
+            f"teardown:{session_id}:{cook_id}:{window.first_observation_sequence}:"
+            f"{window.last_observation_sequence}:{descriptor.model_digest}"
+        )
+        timestamp_ms = time.time_ns() // 1_000_000
+        assessment = CandidateAssessmentEvidence(
+            decision_id=decision_id,
+            origin=CandidateOrigin.OPERATOR_CALIBRATION.value,
+            policy=ActivationPolicy.OPERATOR_REVIEWED.value,
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=False,
+            rejection_reasons=("operator-review-required",),
+        )
+        self._persist_grey_lifecycle(
+            assessment,
+            GreyCandidateAssessmentPayload(
+                decision_id=decision_id,
+                origin=assessment.origin,
+                policy=assessment.policy,
+                fit_accepted=True,
+                identifiability_accepted=True,
+                native_build="passed",
+                native_dry_solve="passed",
+                target_timing="passed",
+                confidence_accepted=False,
+                rejection_reasons=assessment.rejection_reasons,
+            ),
+            timestamp_ms=timestamp_ms,
+            role_generation=window.role_generation,
+            model_digest=descriptor.model_digest,
+            provenance_digest=window.incumbent_digest,
+        )
+        confidence = ModelEvidenceRecord(
+            evidence_id=f"activation-confidence:{decision_id}:{window.role_generation}",
+            kind=EvidenceKind.CONFIDENCE_DECISION,
+            session_id=session_id,
+            cook_id=None if cook_id == "none" else cook_id,
+            timestamp_ms=timestamp_ms,
+            role_generation=window.role_generation,
+            model_digest=descriptor.model_digest,
+            provenance_digest=window.incumbent_digest,
+            payload=ConfidenceDecisionEvidence(
+                decision_id=decision_id,
+                blocked=True,
+                reason="operator-review-required",
+            ),
+        )
+        receipt = self._activation_persistence_channel().submit_activation_confidence(confidence)
+        if not receipt.accepted or receipt.wait(2.0) is not True or receipt.durable is not True:
+            raise RuntimeError("operator-review-confidence-not-durable")
+        self._persisted_activation_confidence_ids.add(decision_id)
+        self._teardown_decision_id = decision_id
+        return decision_id
+
     def _refit_completed_frames(self) -> TeardownRefitResult:
         from controller.model_promotion import evaluate
         from controller.update_mpc import fit_quality
@@ -3884,6 +3954,7 @@ class Controller(ControllerBase):
         self._teardown_fit_window = window
         try:
             if origin is CandidateOrigin.OPERATOR_CALIBRATION:
+                self._persist_operator_teardown_authority(window, descriptor)
                 self._teardown_candidate = success
                 self._teardown_candidate_descriptor = descriptor
                 return TeardownRefitResult.ready_for_review(

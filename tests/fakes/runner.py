@@ -137,6 +137,10 @@ class FakeControllerRunner:
         self.applied.append(applied)
         self.calls.append(("apply", applied))
 
+    def complete_frame(self, applied, observation: FrameObservation):
+        self.set_output(applied)
+        return self.observe_frame(observation)
+
     def observe_frame(self, observation: FrameObservation):
         self._observation_sequence += 1
         owned = replace(observation)

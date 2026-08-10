@@ -6,11 +6,13 @@ what puts a learned model on the grill.
 """
 
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 from common.controller_model_state import CheckpointSaveOutcome
 
+from common.model_evidence import ConfidenceDecisionEvidence
 from common.control_trace import ActuationMode
 
 from controller.applied_output import AppliedOutput, OutputSource
@@ -564,6 +566,68 @@ def test_final_checkpoint_failure_is_terminal_and_is_not_retried(hold_cycle):
     ]
 
 
+
+def test_checkpoint_queue_failure_retries_only_the_authoritative_failure_snapshot(hold_cycle):
+    class _Queue:
+        def __init__(self):
+            self.attempts = []
+
+        def submit_checkpoint(self, _name, snapshot):
+            self.attempts.append(snapshot)
+            return len(self.attempts) > 1
+
+    runner = _FinalLifecycleRunner(
+        result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="d" * 64)
+    )
+    hold = _hold(hold_cycle, runner, identification=True)
+    queue = _Queue()
+    hold._persistence_worker = queue
+
+    assert hold._publish_final_checkpoint_once(
+        TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+        runner.refit_verdict,
+    ) is False
+    assert hold._final_checkpoint_done is False
+    assert hold._publish_final_checkpoint_once(
+        TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+        runner.refit_verdict,
+    ) is True
+
+    assert len(queue.attempts) == 2
+    assert (
+        runner.final_outcomes,
+        hold._final_checkpoint_outcome,
+        queue.attempts[-1]["cook_refit"]["latest"],
+    ) == (
+        [
+            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+            TeardownRefitOutcome.CHECKPOINT_FAILURE,
+            TeardownRefitOutcome.CHECKPOINT_FAILURE,
+        ],
+        TeardownRefitOutcome.CHECKPOINT_FAILURE,
+        "checkpoint-failure",
+    )
+    assert hold._final_checkpoint_done is True
+
+
+def test_finalize_exception_never_queues_a_stale_snapshot(hold_cycle):
+    class _ExplodingFinalizeRunner(_FinalLifecycleRunner):
+        def finalize_cook_refit(self, outcome):
+            if outcome is not TeardownRefitOutcome.CHECKPOINT_FAILURE:
+                raise RuntimeError("finalize exploded")
+            return super().finalize_cook_refit(outcome)
+
+    runner = _ExplodingFinalizeRunner()
+    hold = _hold(hold_cycle, runner, identification=True)
+    queued = []
+    hold._persistence_worker = SimpleNamespace(
+        submit_checkpoint=lambda _name, snapshot: (queued.append(snapshot), True)[1]
+    )
+
+    assert hold._publish_final_checkpoint_once(TeardownRefitOutcome.FAILED, None)
+    assert len(queued) == 1
+    assert queued[0]["cook_refit"]["latest"] == "checkpoint-failure"
+
 class _RetainedRefitCore:
     def __init__(self):
         self.events = []
@@ -705,14 +769,14 @@ def test_completed_frame_feedback_and_observation_reach_incumbent_before_activat
             lambda _record, _expected: durable,
         )
         assert runner.queue_pair_activation(transition)
-        runner.set_output(
+        submission = runner.complete_frame(
             AppliedOutput(
                 ratio=0.3,
                 source=OutputSource.CONTROLLER,
                 timestamp=1.0,
-            )
+            ),
+            _completed_frame(1),
         )
-        submission = runner.observe_frame(_completed_frame(1))
         assert submission.configuration_generation == 0
 
         gate.release()
@@ -722,3 +786,63 @@ def test_completed_frame_feedback_and_observation_reach_incumbent_before_activat
         assert core.events.index(("observation", 0)) < core.events.index("install")
     finally:
         runner.stop()
+
+def test_durable_role_change_rotates_teardown_history_and_accepts_first_new_role_frame():
+    from controller.mpc import Controller
+
+    controller = object.__new__(Controller)
+    controller._learning_role_generation = 0
+    controller._teardown_history = TeardownGreyHistory(role_generation=0)
+    controller._teardown_history.observe(_completed_frame(1))
+
+    controller._rotate_teardown_role_generation(7)
+    decision = controller._teardown_history.observe(
+        replace(_completed_frame(2), role_generation=7)
+    )
+
+    assert decision.accepted
+    assert controller._learning_role_generation == 7
+    assert controller._teardown_history.role_generation == 7
+    assert [frame.role_generation for frame in controller._teardown_history.observations] == [7]
+
+
+def test_operator_teardown_candidate_persists_assessment_and_blocked_confidence_before_readiness():
+    from controller.mpc import Controller
+
+    persisted = []
+    submitted = []
+
+    class _Receipt:
+        accepted = completed = durable = True
+
+        def wait(self, _timeout):
+            return True
+
+    controller = object.__new__(Controller)
+    controller._learning_session_id = "session"
+    controller._learning_cook_id = "cook"
+    controller._persisted_activation_confidence_ids = set()
+    controller._persist_grey_lifecycle = lambda evidence, trace, **kwargs: persisted.append(
+        (evidence, trace, kwargs)
+    )
+    controller._activation_persistence_channel = lambda: SimpleNamespace(
+        submit_activation_confidence=lambda record: (submitted.append(record), _Receipt())[1]
+    )
+    window = SimpleNamespace(
+        first_observation_sequence=4,
+        last_observation_sequence=9,
+        role_generation=3,
+        incumbent_digest="a" * 64,
+    )
+    descriptor = SimpleNamespace(model_digest="b" * 64)
+
+    decision_id = controller._persist_operator_teardown_authority(window, descriptor)
+
+    assert decision_id == f"teardown:session:cook:4:9:{'b' * 64}"
+    assert persisted[0][0].decision_id == decision_id
+    assert persisted[0][0].policy == "operator-reviewed"
+    assert submitted[0].payload == ConfidenceDecisionEvidence(
+        decision_id=decision_id,
+        blocked=True,
+        reason="operator-review-required",
+    )

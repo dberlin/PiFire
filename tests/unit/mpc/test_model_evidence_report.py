@@ -125,6 +125,51 @@ def test_report_emits_only_the_locked_status_vocabulary(status: LearningStatus) 
     }
 
 
+@pytest.mark.parametrize(
+    ("latest", "authorization", "next_cook"),
+    (
+        ("disabled", "blocked", False),
+        ("insufficient", "blocked", False),
+        ("rejected", "blocked", False),
+        ("failed", "blocked", False),
+        ("ready-for-review", "operator-review", False),
+        ("accepted-next-cook", "next-cook", True),
+        ("checkpoint-failure", "blocked", False),
+    ),
+)
+def test_report_projects_every_final_cook_refit_outcome(
+    monkeypatch, latest, authorization, next_cook
+) -> None:
+    monkeypatch.setattr(report_module, "_validated_checkpoint", lambda checkpoint: checkpoint)
+    payload = build_learning_report(
+        (),
+        activation_state=_activation(phase="aborted"),
+        live_status=_live(),
+        calibration_command_high_water=0,
+        checkpoint={"cook_refit": {"status": "idle", "latest": latest}},
+    ).as_dict()
+
+    assert payload["cook_refit"] == {
+        "status": "idle",
+        "latest": latest,
+        "final_status": latest,
+        "authorization": authorization,
+        "next_cook": next_cook,
+    }
+
+
+def test_report_rejects_malformed_final_cook_refit(monkeypatch) -> None:
+    monkeypatch.setattr(report_module, "_validated_checkpoint", lambda checkpoint: checkpoint)
+    with pytest.raises(ValueError, match="invalid cook_refit"):
+        build_learning_report(
+            (),
+            activation_state=_activation(phase="aborted"),
+            live_status=_live(),
+            calibration_command_high_water=0,
+            checkpoint={"cook_refit": {"status": "idle", "latest": "activate-now"}},
+        )
+
+
 def test_report_serializes_locked_fit_and_check_statuses_without_linear_model_fields() -> None:
     payload = build_learning_report(
         (),

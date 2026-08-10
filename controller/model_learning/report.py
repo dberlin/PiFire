@@ -112,6 +112,12 @@ def _pair_digest(activation: Mapping[str, object], name: str):
             digest = decoded.get("model_digest")
             return digest if isinstance(digest, str) else None
     return None
+def _validated_checkpoint(checkpoint: dict[str, object]) -> dict[str, object]:
+    from controller.mpc import migrate_grey_learning_snapshot
+
+    return migrate_grey_learning_snapshot(checkpoint)
+
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,9 +172,7 @@ def build_learning_report(
     schema_invalidated = False
     if checkpoint_map:
         try:
-            from controller.mpc import migrate_grey_learning_snapshot
-
-            checkpoint_map = migrate_grey_learning_snapshot(checkpoint_map)
+            checkpoint_map = _validated_checkpoint(checkpoint_map)
         except (TypeError, ValueError):
             errors.append("checkpoint-schema-invalid")
             schema_invalidated = True
@@ -193,6 +197,35 @@ def build_learning_report(
     except ValueError:
         fit_status = FitStatus.FAILED.value
         errors.append("live-fit-status-invalid")
+
+    from controller.runtime.model_fitting import TeardownRefitOutcome
+
+    cook_refit_value = checkpoint_map.get("cook_refit", {"status": FitStatus.IDLE.value, "latest": None})
+    if (
+        not isinstance(cook_refit_value, Mapping)
+        or set(cook_refit_value) != {"status", "latest"}
+    ):
+        raise ValueError("invalid cook_refit")
+    cook_refit_status = _enum_value(
+        cook_refit_value["status"],
+        FitStatus,
+        "cook_refit status",
+    )
+    cook_refit_latest_value = cook_refit_value["latest"]
+    if cook_refit_latest_value is None:
+        cook_refit_latest = None
+    else:
+        try:
+            cook_refit_latest = TeardownRefitOutcome(cook_refit_latest_value).value
+        except (TypeError, ValueError) as error:
+            raise ValueError("invalid cook_refit latest") from error
+    cook_refit_authorization = (
+        "next-cook"
+        if cook_refit_latest == TeardownRefitOutcome.ACCEPTED_NEXT_COOK.value
+        else "operator-review"
+        if cook_refit_latest == TeardownRefitOutcome.READY_FOR_REVIEW.value
+        else "blocked"
+    )
 
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
@@ -373,6 +406,13 @@ def build_learning_report(
             "request_id": None if fit_payload is None else fit_payload.request_id,
             "window_id": None if fit_payload is None else fit_payload.window_id,
             "error": None if fit_payload is None else fit_payload.error,
+        },
+        "cook_refit": {
+            "status": cook_refit_status,
+            "latest": cook_refit_latest,
+            "final_status": cook_refit_latest or cook_refit_status,
+            "authorization": cook_refit_authorization,
+            "next_cook": cook_refit_latest == TeardownRefitOutcome.ACCEPTED_NEXT_COOK.value,
         },
         "window": checkpoint_map.get("window"),
         "checks": checks,
