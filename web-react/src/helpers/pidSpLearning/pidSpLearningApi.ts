@@ -299,8 +299,14 @@ export function parsePidSpLearningReport(value: unknown): PidSpLearningReport {
   );
   const failure = nullable(source.failure, parseFailure);
 
-  const hasLiveDetail = identifier !== null && predictor !== null;
-  if (live !== hasLiveDetail) invalid("live detail does not match live flag");
+  const hasIdentifier = identifier !== null;
+  const hasPredictor = predictor !== null;
+  if (
+    (live && (!hasIdentifier || !hasPredictor)) ||
+    (!live && (hasIdentifier || hasPredictor))
+  ) {
+    invalid("live detail does not match live flag");
+  }
   if (live !== (confirmation !== null)) {
     invalid("confirmation does not match live flag");
   }
@@ -340,11 +346,15 @@ export function parsePidSpLearningReport(value: unknown): PidSpLearningReport {
 }
 
 async function responseMessage(response: Response): Promise<string> {
-  const body = (await response.json().catch(() => ({}))) as {
-    message?: unknown;
-    error?: unknown;
-    detail?: unknown;
-  };
+  const decoded: unknown = await response.json().catch(() => ({}));
+  const body =
+    decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+      ? (decoded as {
+          message?: unknown;
+          error?: unknown;
+          detail?: unknown;
+        })
+      : {};
   for (const candidate of [body.detail, body.message, body.error]) {
     if (typeof candidate === "string" && candidate !== "") return candidate;
   }

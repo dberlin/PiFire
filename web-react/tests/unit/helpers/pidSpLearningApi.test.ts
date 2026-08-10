@@ -205,6 +205,16 @@ describe("fetchPidSpLearningReport", () => {
       data: null,
     });
   });
+  it("maps a non-2xx null JSON body to the HTTP status fallback", async () => {
+    fetchMock.mockResolvedValue(response(null, 503));
+
+    await expect(fetchPidSpLearningReport()).resolves.toEqual({
+      ok: false,
+      status: 503,
+      message: "HTTP 503",
+      data: null,
+    });
+  });
 
   it("maps invalid success JSON without losing the HTTP status", async () => {
     fetchMock.mockResolvedValue({
@@ -249,6 +259,45 @@ describe("fetchPidSpLearningReport", () => {
       },
     ],
   ])("rejects schema mismatch: %s", async (_case, body) => {
+    fetchMock.mockResolvedValue(response(body));
+
+    const result = await fetchPidSpLearningReport();
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(200);
+    expect(result.message).toMatch(/^Invalid PID-SP learning report:/);
+    expect(result.data).toBeNull();
+  });
+  it.each([
+    ["idle with identifier only", { ...IDLE, identifier: IDENTIFIER }],
+    ["idle with predictor only", { ...IDLE, predictor: PREDICTOR }],
+    [
+      "error with identifier only",
+      {
+        ...IDLE,
+        status: "error",
+        identifier: IDENTIFIER,
+        failure: {
+          code: "live-status-invalid",
+          detail: "predictor is missing",
+          terminal: false,
+        },
+      },
+    ],
+    [
+      "error with predictor only",
+      {
+        ...IDLE,
+        status: "error",
+        predictor: PREDICTOR,
+        failure: {
+          code: "live-status-invalid",
+          detail: "identifier is missing",
+          terminal: false,
+        },
+      },
+    ],
+  ])("rejects partial non-live detail: %s", async (_case, body) => {
     fetchMock.mockResolvedValue(response(body));
 
     const result = await fetchPidSpLearningReport();
