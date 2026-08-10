@@ -38,17 +38,10 @@ function record(value: unknown, path: string): UnknownRecord {
   return value as UnknownRecord;
 }
 
-function exactKeys(
-  value: UnknownRecord,
-  expected: readonly string[],
-  path: string,
-) {
+function exactKeys(value: UnknownRecord, expected: readonly string[], path: string) {
   const keys = Object.keys(value).sort();
   const wanted = [...expected].sort();
-  if (
-    keys.length !== wanted.length ||
-    keys.some((key, index) => key !== wanted[index])
-  ) {
+  if (keys.length !== wanted.length || keys.some((key, index) => key !== wanted[index])) {
     invalid(`${path} fields are invalid`);
   }
 }
@@ -100,10 +93,7 @@ function parseModel(value: unknown, path: string): PidSpModel {
       revision: nonNegativeInteger(source.revision, `${path}.revision`),
     };
     if (source.identified_at_f !== undefined) {
-      model.identified_at_f = finiteNumber(
-        source.identified_at_f,
-        `${path}.identified_at_f`,
-      );
+      model.identified_at_f = finiteNumber(source.identified_at_f, `${path}.identified_at_f`);
     }
     return model;
   }
@@ -123,10 +113,7 @@ function parseModel(value: unknown, path: string): PidSpModel {
       revision: nonNegativeInteger(source.revision, `${path}.revision`),
     };
     if (source.identified_at_f !== undefined) {
-      model.identified_at_f = finiteNumber(
-        source.identified_at_f,
-        `${path}.identified_at_f`,
-      );
+      model.identified_at_f = finiteNumber(source.identified_at_f, `${path}.identified_at_f`);
     }
     return model;
   }
@@ -146,8 +133,7 @@ function parseGate(value: unknown, index: number): PidSpLearningGate {
     passed: booleanValue(source.passed, `${path}.passed`),
     observed: gateValue(source.observed, `${path}.observed`),
     required: gateValue(source.required, `${path}.required`),
-    unit:
-      source.unit === null ? null : stringValue(source.unit, `${path}.unit`),
+    unit: source.unit === null ? null : stringValue(source.unit, `${path}.unit`),
   };
 }
 
@@ -175,44 +161,21 @@ function parseIdentifier(value: unknown): PidSpIdentifierReport {
   );
   return {
     accepted: finiteNumber(source.accepted, `${path}.accepted`),
-    accepted_seconds: finiteNumber(
-      source.accepted_seconds,
-      `${path}.accepted_seconds`,
-    ),
+    accepted_seconds: finiteNumber(source.accepted_seconds, `${path}.accepted_seconds`),
     duty_std: finiteNumber(source.duty_std, `${path}.duty_std`),
     temp_span: finiteNumber(source.temp_span, `${path}.temp_span`),
-    transition_seen: booleanValue(
-      source.transition_seen,
-      `${path}.transition_seen`,
-    ),
-    duty_segments: nonNegativeInteger(
-      source.duty_segments,
-      `${path}.duty_segments`,
-    ),
+    transition_seen: booleanValue(source.transition_seen, `${path}.transition_seen`),
+    duty_segments: nonNegativeInteger(source.duty_segments, `${path}.duty_segments`),
     best_residual: finiteNumber(source.best_residual, `${path}.best_residual`),
-    runner_up_residual: finiteNumber(
-      source.runner_up_residual,
-      `${path}.runner_up_residual`,
-    ),
-    candidates_passing: nonNegativeInteger(
-      source.candidates_passing,
-      `${path}.candidates_passing`,
-    ),
+    runner_up_residual: finiteNumber(source.runner_up_residual, `${path}.runner_up_residual`),
+    candidates_passing: nonNegativeInteger(source.candidates_passing, `${path}.candidates_passing`),
     confirming:
       source.confirming === null
         ? null
         : nonNegativeInteger(source.confirming, `${path}.confirming`),
-    trusted: nullable(source.trusted, (item) =>
-      parseModel(item, `${path}.trusted`),
-    ),
-    distrust_count: nonNegativeInteger(
-      source.distrust_count,
-      `${path}.distrust_count`,
-    ),
-    distrust_ratio: finiteNumber(
-      source.distrust_ratio,
-      `${path}.distrust_ratio`,
-    ),
+    trusted: nullable(source.trusted, (item) => parseModel(item, `${path}.trusted`)),
+    distrust_count: nonNegativeInteger(source.distrust_count, `${path}.distrust_count`),
+    distrust_ratio: finiteNumber(source.distrust_ratio, `${path}.distrust_ratio`),
   };
 }
 
@@ -229,10 +192,7 @@ function parsePredictor(value: unknown): PidSpPredictorReport {
     disabled: booleanValue(source.disabled, `${path}.disabled`),
     x0: finiteNumber(source.x0, `${path}.x0`),
     xd: finiteNumber(source.xd, `${path}.xd`),
-    residual_streak: nonNegativeInteger(
-      source.residual_streak,
-      `${path}.residual_streak`,
-    ),
+    residual_streak: nonNegativeInteger(source.residual_streak, `${path}.residual_streak`),
     truncated: nonNegativeInteger(source.truncated, `${path}.truncated`),
     model: nullable(source.model, (item) => parseModel(item, `${path}.model`)),
   };
@@ -244,9 +204,7 @@ function parseConfirmation(value: unknown): PidSpConfirmationProgress {
   exactKeys(source, ["observed", "required"], path);
   return {
     observed:
-      source.observed === null
-        ? null
-        : nonNegativeInteger(source.observed, `${path}.observed`),
+      source.observed === null ? null : nonNegativeInteger(source.observed, `${path}.observed`),
     required: nonNegativeInteger(source.required, `${path}.required`),
   };
 }
@@ -294,24 +252,18 @@ export function parsePidSpLearningReport(value: unknown): PidSpLearningReport {
   const confirmation = nullable(source.confirmation, parseConfirmation);
   const identifier = nullable(source.identifier, parseIdentifier);
   const predictor = nullable(source.predictor, parsePredictor);
-  const checkpoint = nullable(source.checkpoint, (item) =>
-    parseModel(item, "checkpoint"),
-  );
+  const checkpoint = nullable(source.checkpoint, (item) => parseModel(item, "checkpoint"));
   const failure = nullable(source.failure, parseFailure);
 
   const hasIdentifier = identifier !== null;
   const hasPredictor = predictor !== null;
-  if (
-    (live && (!hasIdentifier || !hasPredictor)) ||
-    (!live && (hasIdentifier || hasPredictor))
-  ) {
+  if ((live && (!hasIdentifier || !hasPredictor)) || (!live && (hasIdentifier || hasPredictor))) {
     invalid("live detail does not match live flag");
   }
   if (live !== (confirmation !== null)) {
     invalid("confirmation does not match live flag");
   }
-  if (!live && gates.length !== 0)
-    invalid("non-live reports cannot contain gates");
+  if (!live && gates.length !== 0) invalid("non-live reports cannot contain gates");
   if (status === "idle" && (live || failure !== null)) {
     invalid("idle report fields are inconsistent");
   }
@@ -413,9 +365,7 @@ export async function fetchPidSpLearningReport(
       ok: false,
       status: response.status,
       message:
-        error instanceof Error
-          ? error.message
-          : "Invalid PID-SP learning report: schema mismatch",
+        error instanceof Error ? error.message : "Invalid PID-SP learning report: schema mismatch",
       data: null,
     };
   }

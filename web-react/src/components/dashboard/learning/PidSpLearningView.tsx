@@ -65,10 +65,7 @@ function GateTable({ gates }: { gates: PidSpLearningGate[] }) {
         <tbody>
           {gates.map((gate) => (
             <tr key={gate.name}>
-              <th
-                className="border-b border-card-border p-2 font-semibold"
-                scope="row"
-              >
+              <th className="border-b border-card-border p-2 font-semibold" scope="row">
                 {GATE_LABELS[gate.name] ?? gate.name.replaceAll("_", " ")}
               </th>
               <td
@@ -143,15 +140,11 @@ function ModelTable({ heading, model }: ModelTableProps) {
     <section className={LEARNING_SECTION_CLASS}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="font-bold">{heading}</h3>
-        <p className="text-sm uppercase tracking-wide text-probe-label">
-          {model.form}
-        </p>
+        <p className="text-sm uppercase tracking-wide text-probe-label">{model.form}</p>
       </div>
       <p className="mt-2 text-sm text-probe-label">Revision {model.revision}</p>
       {model.identified_at_f !== undefined && (
-        <p className="mt-1 text-sm text-probe-label">
-          Identified at: {model.identified_at_f} °F
-        </p>
+        <p className="mt-1 text-sm text-probe-label">Identified at: {model.identified_at_f} °F</p>
       )}
       <div className="mt-3 overflow-x-auto">
         <table className="w-full border-collapse text-left text-sm">
@@ -174,19 +167,12 @@ function ModelTable({ heading, model }: ModelTableProps) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.name}>
-                <th
-                  className="border-b border-card-border p-2 font-mono"
-                  scope="row"
-                >
+                <th className="border-b border-card-border p-2 font-mono" scope="row">
                   {row.name}
                 </th>
-                <td className="border-b border-card-border p-2 tabular-nums">
-                  {row.value}
-                </td>
+                <td className="border-b border-card-border p-2 tabular-nums">{row.value}</td>
                 <td className="border-b border-card-border p-2">{row.unit}</td>
-                <td className="border-b border-card-border p-2 text-probe-label">
-                  {row.meaning}
-                </td>
+                <td className="border-b border-card-border p-2 text-probe-label">{row.meaning}</td>
               </tr>
             ))}
           </tbody>
@@ -197,20 +183,12 @@ function ModelTable({ heading, model }: ModelTableProps) {
 }
 
 export function PidSpLearningView(props: PidSpLearningViewProps) {
-  return props.selectedController === "pid_sp" ? (
-    <ActivePidSpLearningView {...props} />
-  ) : null;
+  return props.selectedController === "pid_sp" ? <ActivePidSpLearningView {...props} /> : null;
 }
 
-function ActivePidSpLearningView({
-  apiBase,
-  modelLearningRevision,
-}: PidSpLearningViewProps) {
+function ActivePidSpLearningView({ apiBase, modelLearningRevision }: PidSpLearningViewProps) {
   const queryClient = useQueryClient();
-  const queryKey = useMemo(
-    () => [REPORT_QUERY_ROOT, "pid_sp", apiBase] as const,
-    [apiBase],
-  );
+  const queryKey = useMemo(() => [REPORT_QUERY_ROOT, "pid_sp", apiBase] as const, [apiBase]);
   const requestGeneration = useRef(0);
   const lastModelLearningRevision = useRef(modelLearningRevision);
   const {
@@ -224,15 +202,10 @@ function ActivePidSpLearningView({
       const generation = ++requestGeneration.current;
       const result = await fetchPidSpLearningReport(apiBase, signal);
       if (signal.aborted || generation !== requestGeneration.current) {
-        throw new DOMException(
-          "Superseded PID-SP learning report request",
-          "AbortError",
-        );
+        throw new DOMException("Superseded PID-SP learning report request", "AbortError");
       }
       if (!result.ok || result.data === null) {
-        throw new PidSpReportRequestError(
-          result.message || "PID-SP learning report unavailable",
-        );
+        throw new PidSpReportRequestError(result.message || "PID-SP learning report unavailable");
       }
       return result.data;
     },
@@ -289,31 +262,21 @@ function ActivePidSpLearningView({
             >
               <p className="font-semibold">{report.failure.code}</p>
               <p>{report.failure.detail}</p>
-              <p className="text-sm">
-                {report.failure.terminal ? "terminal" : "recoverable"}
-              </p>
+              <p className="text-sm">{report.failure.terminal ? "terminal" : "recoverable"}</p>
             </div>
           )}
 
-          {!report.live &&
-            report.checkpoint === null &&
-            report.failure === null && (
-              <section className={LEARNING_SECTION_CLASS}>
-                <h3 className="font-bold">
-                  No PID-SP learning data is available yet.
-                </h3>
-                <p className="mt-2 text-sm text-probe-label">
-                  Diagnostics are collected automatically while PID-SP Hold is
-                  running.
-                </p>
-              </section>
-            )}
+          {!report.live && report.checkpoint === null && report.failure === null && (
+            <section className={LEARNING_SECTION_CLASS}>
+              <h3 className="font-bold">No PID-SP learning data is available yet.</h3>
+              <p className="mt-2 text-sm text-probe-label">
+                Diagnostics are collected automatically while PID-SP Hold is running.
+              </p>
+            </section>
+          )}
 
           {report.checkpoint && (
-            <ModelTable
-              heading="Durable checkpoint"
-              model={report.checkpoint}
-            />
+            <ModelTable heading="Durable checkpoint" model={report.checkpoint} />
           )}
 
           {report.live && report.gates.length > 0 && (
@@ -336,9 +299,7 @@ function ActivePidSpLearningView({
                 </div>
                 <div>
                   <dt className="text-probe-label">Accepted time</dt>
-                  <dd>
-                    Accepted time: {report.identifier.accepted_seconds} seconds
-                  </dd>
+                  <dd>Accepted time: {report.identifier.accepted_seconds} seconds</dd>
                 </div>
                 <div>
                   <dt className="text-probe-label">Duty variation</dt>
@@ -350,10 +311,7 @@ function ActivePidSpLearningView({
                 </div>
                 <div>
                   <dt className="text-probe-label">Transition</dt>
-                  <dd>
-                    Transition observed:{" "}
-                    {yesNo(report.identifier.transition_seen)}
-                  </dd>
+                  <dd>Transition observed: {yesNo(report.identifier.transition_seen)}</dd>
                 </div>
                 <div>
                   <dt className="text-probe-label">Duty segments</dt>
@@ -361,16 +319,13 @@ function ActivePidSpLearningView({
                 </div>
                 <div>
                   <dt className="text-probe-label">Candidate count</dt>
-                  <dd>
-                    Candidates passing: {report.identifier.candidates_passing}
-                  </dd>
+                  <dd>Candidates passing: {report.identifier.candidates_passing}</dd>
                 </div>
                 {report.confirmation && (
                   <div>
                     <dt className="text-probe-label">Confirmation progress</dt>
                     <dd>
-                      Confirmation progress:{" "}
-                      {report.confirmation.observed ?? "not started"} of{" "}
+                      Confirmation progress: {report.confirmation.observed ?? "not started"} of{" "}
                       {report.confirmation.required}
                     </dd>
                   </div>
@@ -381,9 +336,7 @@ function ActivePidSpLearningView({
                 </div>
                 <div>
                   <dt className="text-probe-label">Runner-up residual</dt>
-                  <dd>
-                    Runner-up residual: {report.identifier.runner_up_residual}
-                  </dd>
+                  <dd>Runner-up residual: {report.identifier.runner_up_residual}</dd>
                 </div>
                 <div>
                   <dt className="text-probe-label">Distrust count</dt>

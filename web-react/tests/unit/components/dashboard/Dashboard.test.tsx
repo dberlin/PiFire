@@ -4,10 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type {
-  CommandClient,
-  CommandResult,
-} from "../../../../src/helpers/command";
+import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import type {
   ModelEvidenceReport,
@@ -31,8 +28,7 @@ rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
   getSettings: (...a: unknown[]) => getSettingsMock(...a),
 }));
 
-const { Dashboard } =
-  await import("../../../../src/components/dashboard/Dashboard");
+const { Dashboard } = await import("../../../../src/components/dashboard/Dashboard");
 const { renderRoute, testQueryClient } = await import("../../test-utils");
 
 afterEach(cleanup);
@@ -199,14 +195,10 @@ function DashboardApiHarness() {
 }
 
 function DashboardLearningRevisionHarness() {
-  const [modelLearningRevision, setModelLearningRevision] =
-    useState("raw-revision:001");
+  const [modelLearningRevision, setModelLearningRevision] = useState("raw-revision:001");
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setModelLearningRevision("raw-revision:1")}
-      >
+      <button type="button" onClick={() => setModelLearningRevision("raw-revision:1")}>
         Publish raw learning revision
       </button>
       <Dashboard
@@ -286,9 +278,7 @@ describe("Dashboard MPC settings authority", () => {
 
       renderDashboard(FIXTURE_DASH);
 
-      expect(
-        await screen.findByRole("button", { name: expectedPill }),
-      ).toBeVisible();
+      expect(await screen.findByRole("button", { name: expectedPill })).toBeVisible();
     },
   );
 
@@ -321,14 +311,10 @@ describe("Dashboard MPC settings authority", () => {
       await screen.findByRole("button", { name: "MPC learning: loading" }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Use API B" }));
-    expect(
-      screen.queryByRole("button", { name: /MPC learning:/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Use API A" }));
-    expect(
-      screen.queryByRole("button", { name: /MPC learning:/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
   });
 
   it("uses the live revision only to invalidate one shared pill and panel report immediately", async () => {
@@ -354,13 +340,9 @@ describe("Dashboard MPC settings authority", () => {
     expect(
       await screen.findByRole("button", { name: "MPC learning: collecting" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("button", { name: /MPC learning:/i }),
-    ).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /MPC learning:/i })).toHaveLength(1);
 
-    await user.click(
-      screen.getByRole("button", { name: "Publish raw learning revision" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Publish raw learning revision" }));
 
     const trigger = await screen.findByRole("button", {
       name: "MPC learning: active",
@@ -368,14 +350,10 @@ describe("Dashboard MPC settings authority", () => {
     expect(reportRequests).toBe(2);
     await user.click(trigger);
 
-    expect(
-      screen.getByRole("dialog", { name: "MPC model learning" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "MPC model learning" })).toBeInTheDocument();
     expect(screen.getByText("Role generation: 22")).toBeInTheDocument();
     expect(screen.getByText("Candidate generation: 23")).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("button", { name: /MPC learning:/i }),
-    ).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /MPC learning:/i })).toHaveLength(1);
     expect(reportRequests).toBe(2);
   });
 });
@@ -404,9 +382,7 @@ describe("Dashboard", () => {
   it("renders the food-probe column when foodProbes are present", () => {
     renderDashboard(FIXTURE_DASH);
     expect(screen.getByText("Food Probes")).toBeInTheDocument();
-    expect(screen.getAllByText("AMBIENT")).toHaveLength(
-      FIXTURE_DASH.foodProbes.length,
-    );
+    expect(screen.getAllByText("AMBIENT")).toHaveLength(FIXTURE_DASH.foodProbes.length);
   });
 
   it("hides the food-probe column when there are no foodProbes", () => {
@@ -530,10 +506,7 @@ describe("Dashboard", () => {
                 />
               }
             />
-            <Route
-              path="/settings"
-              element={<div data-testid="settings-route" />}
-            />
+            <Route path="/settings" element={<div data-testid="settings-route" />} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -555,10 +528,7 @@ describe("Dashboard", () => {
 // cycle.
 // --------------------------------------------------------------------------
 
-function stubNotifyFetch(
-  postBody: unknown = { result: "success" },
-  postOk = true,
-) {
+function stubNotifyFetch(postBody: unknown = { result: "success" }, postOk = true) {
   const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async () => ({
     ok: postOk,
     status: postOk ? 201 : 500,
@@ -571,9 +541,7 @@ function stubNotifyFetch(
 const fetchCallsTo = (fetchMock: ReturnType<typeof rs.fn>, suffix: string) =>
   fetchMock.mock.calls.filter((call) => String(call[0]).endsWith(suffix));
 
-const postedNotifyUpdates = (
-  fetchMock: ReturnType<typeof rs.fn>,
-): NotifyUpdate[] => {
+const postedNotifyUpdates = (fetchMock: ReturnType<typeof rs.fn>): NotifyUpdate[] => {
   const post = fetchCallsTo(fetchMock, "/api/control")[0];
   if (post === undefined) throw new Error("no POST /api/control was issued");
   const body = JSON.parse(String((post[1] as RequestInit).body)) as {
@@ -602,16 +570,10 @@ describe("Dashboard target notifications", () => {
         },
       ],
     });
-    await user.click(
-      screen.getByRole("button", { name: "Notifications for Brisket" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
     expect(screen.getByText("Brisket Notifications")).toBeInTheDocument();
-    expect(
-      screen.getByRole("checkbox", { name: /target temperature/i }),
-    ).toBeChecked();
-    expect(screen.getByRole("spinbutton", { name: /^target/i })).toHaveValue(
-      203,
-    );
+    expect(screen.getByRole("checkbox", { name: /target temperature/i })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: /^target/i })).toHaveValue(203);
     expect(screen.getByRole("radio", { name: /keep warm/i })).toBeChecked();
   });
 
@@ -631,15 +593,12 @@ describe("Dashboard target notifications", () => {
     expect(
       screen.getByText(`${FIXTURE_DASH.primaryProbe.title} Notifications`),
     ).toBeInTheDocument();
-    expect(
-      screen.queryAllByRole("group", { name: /when it is reached/i }),
-    ).toHaveLength(0);
-    expect(
-      screen.getByRole("group", { name: /above the high limit/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("slider", { name: /^target temperature/i }),
-    ).toHaveAttribute("max", "600");
+    expect(screen.queryAllByRole("group", { name: /when it is reached/i })).toHaveLength(0);
+    expect(screen.getByRole("group", { name: /above the high limit/i })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: /^target temperature/i })).toHaveAttribute(
+      "max",
+      "600",
+    );
   });
 
   it("saves a food probe's target as ONE addressed post", async () => {
@@ -647,28 +606,17 @@ describe("Dashboard target notifications", () => {
     const fetchMock = stubNotifyFetch();
     renderDashboard({
       ...FIXTURE_DASH,
-      foodProbes: [
-        { ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" },
-      ],
+      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" }],
     });
-    await user.click(
-      screen.getByRole("button", { name: "Notifications for Brisket" }),
-    );
-    await user.click(
-      screen.getByRole("checkbox", { name: /target temperature/i }),
-    );
+    await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
     await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
-    await user.type(
-      screen.getByRole("spinbutton", { name: /^target/i }),
-      "203",
-    );
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "203");
     await user.click(screen.getByRole("radio", { name: /keep warm/i }));
     await user.click(screen.getByRole("button", { name: "Set" }));
 
     await waitFor(() =>
-      expect(
-        screen.queryByText("Brisket Notifications"),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByText("Brisket Notifications")).not.toBeInTheDocument(),
     );
     // ONE request, not a read followed by a write, and not one request per
     // entry: the three entries this modal owns travel as three ADDRESSED
@@ -678,9 +626,7 @@ describe("Dashboard target notifications", () => {
     // apart, and naming only these four fields on the `probe` entry is what
     // leaves every other field of it to whatever the control loop holds when the
     // queue drains.
-    expect(
-      postedNotifyUpdates(fetchMock).map((u) => [u.label, u.type]),
-    ).toEqual([
+    expect(postedNotifyUpdates(fetchMock).map((u) => [u.label, u.type])).toEqual([
       ["Probe1", "probe"],
       ["Probe1", "probe_limit_high"],
       ["Probe1", "probe_limit_low"],
@@ -713,23 +659,15 @@ describe("Dashboard target notifications", () => {
         },
       ],
     });
-    await user.click(
-      screen.getByRole("button", { name: "Notifications for Brisket" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
     await user.click(screen.getByRole("checkbox", { name: /high limit/i }));
     await user.clear(screen.getByRole("spinbutton", { name: /^high limit/i }));
-    await user.type(
-      screen.getByRole("spinbutton", { name: /^high limit/i }),
-      "200",
-    );
+    await user.type(screen.getByRole("spinbutton", { name: /^high limit/i }), "200");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
-    await waitFor(() =>
-      expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(1),
-    );
+    await waitFor(() => expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(1));
     expect(
-      postedNotifyUpdates(fetchMock).find((u) => u.type === "probe_limit_high")
-        ?.fields,
+      postedNotifyUpdates(fetchMock).find((u) => u.type === "probe_limit_high")?.fields,
     ).toEqual({
       req: true,
       target: 200,
@@ -750,57 +688,35 @@ describe("Dashboard target notifications", () => {
         name: `Notifications for ${FIXTURE_DASH.primaryProbe.title}`,
       }),
     );
-    await user.click(
-      screen.getByRole("checkbox", { name: /target temperature/i }),
-    );
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
     await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
-    await user.type(
-      screen.getByRole("spinbutton", { name: /^target/i }),
-      "225",
-    );
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "225");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
-    await waitFor(() =>
-      expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(1),
-    );
+    await waitFor(() => expect(fetchCallsTo(fetchMock, "/api/control")).toHaveLength(1));
     expect(
       postedNotifyUpdates(fetchMock).find(
-        (u) =>
-          u.label === FIXTURE_DASH.primaryProbe.label && u.type === "probe",
+        (u) => u.label === FIXTURE_DASH.primaryProbe.label && u.type === "probe",
       )?.fields,
     ).toMatchObject({ req: true, target: 225 });
   });
 
   it("keeps the modal open and shows the error when the save is rejected", async () => {
     const user = userEvent.setup();
-    stubNotifyFetch(
-      { result: "error", message: "Settings update failed." },
-      true,
-    );
+    stubNotifyFetch({ result: "error", message: "Settings update failed." }, true);
     renderDashboard({
       ...FIXTURE_DASH,
-      foodProbes: [
-        { ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" },
-      ],
+      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" }],
     });
-    await user.click(
-      screen.getByRole("button", { name: "Notifications for Brisket" }),
-    );
-    await user.click(
-      screen.getByRole("checkbox", { name: /target temperature/i }),
-    );
+    await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
     await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
-    await user.type(
-      screen.getByRole("spinbutton", { name: /^target/i }),
-      "203",
-    );
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "203");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
     // Closing on failure would be indistinguishable from success: the write is
     // queued and not echoed back over the socket for ~110ms either way.
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("Settings update"),
-    );
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Settings update"));
     expect(screen.getByText("Brisket Notifications")).toBeInTheDocument();
   });
 
@@ -813,27 +729,16 @@ describe("Dashboard target notifications", () => {
     stubNotifyFetch();
     renderDashboard({
       ...FIXTURE_DASH,
-      foodProbes: [
-        { ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" },
-      ],
+      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" }],
     });
-    await user.click(
-      screen.getByRole("button", { name: "Notifications for Brisket" }),
-    );
-    await user.click(
-      screen.getByRole("checkbox", { name: /target temperature/i }),
-    );
+    await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
     await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
-    await user.type(
-      screen.getByRole("spinbutton", { name: /^target/i }),
-      "203",
-    );
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "203");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
     await waitFor(() =>
-      expect(
-        screen.queryByText("Brisket Notifications"),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByText("Brisket Notifications")).not.toBeInTheDocument(),
     );
     expect(screen.getByText("AMBIENT")).toBeInTheDocument();
     expect(screen.queryByText("→ 203°")).not.toBeInTheDocument();
@@ -844,13 +749,9 @@ describe("Dashboard target notifications", () => {
     const fetchMock = stubNotifyFetch();
     renderDashboard({
       ...FIXTURE_DASH,
-      foodProbes: [
-        { ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" },
-      ],
+      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" }],
     });
-    await user.click(
-      screen.getByRole("button", { name: "Notifications for Brisket" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
     await user.click(screen.getByRole("button", { name: /cancel/i }));
     expect(screen.queryByText("Brisket Notifications")).not.toBeInTheDocument();
     // Flask's Cancel POSTs a wipe of the target AND both limit alerts
@@ -877,16 +778,12 @@ describe("Dashboard control-health recheck", () => {
 
   it("offers no Recheck while the control process is reported alive", () => {
     renderDashboard(FIXTURE_DASH, { phase: "live", controlAlive: true });
-    expect(
-      screen.queryByRole("button", { name: "Recheck" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
   });
 
   it("offers no Recheck in demo mode, where there is no backend to ask", () => {
     renderDashboard(FIXTURE_DASH, { phase: "demo", controlAlive: false });
-    expect(
-      screen.queryByRole("button", { name: "Recheck" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
   });
 
   it("asks /api/sys/check_alive and believes an OK over the stale blob", async () => {
@@ -901,9 +798,7 @@ describe("Dashboard control-health recheck", () => {
     await user.click(screen.getByRole("button", { name: "Recheck" }));
     await waitFor(() => expect(screen.getByText("LIVE")).toBeInTheDocument());
     expect(fetchCallsTo(fetchMock, "/api/sys/check_alive")).toHaveLength(1);
-    expect(
-      screen.queryByRole("button", { name: "Recheck" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
   });
 
   it("stays offline when the recheck says the control process really is down", async () => {
@@ -918,17 +813,12 @@ describe("Dashboard control-health recheck", () => {
     renderDashboard(FIXTURE_DASH, { phase: "live", controlAlive: false });
 
     await user.click(screen.getByRole("button", { name: "Recheck" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Recheck" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Recheck" })).toBeEnabled());
     expect(screen.getByText("CTRL OFFLINE")).toBeInTheDocument();
   });
 
   it("leaves Stop reachable while the control process is reported down", () => {
-    renderDashboard(
-      { ...FIXTURE_DASH, currentMode: "Hold" },
-      { controlAlive: false },
-    );
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold" }, { controlAlive: false });
     expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Smoke" })).toBeDisabled();
   });
@@ -948,9 +838,7 @@ describe("Dashboard status readouts", () => {
       startDuration: 240,
       modeStartTime: secondsAgo(60),
     });
-    expect(
-      screen.getByText(/Time Left in Mode: 1(79|80)s/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Time Left in Mode: 1(79|80)s/)).toBeInTheDocument();
   });
 
   it("shows no mode countdown in a mode that has no duration", () => {
@@ -1004,15 +892,7 @@ describe("Dashboard status readouts", () => {
 // cycle a P-number describes. Settings > Work Mode still edits it anywhere.
 describe("Dashboard P-Mode control", () => {
   it("is not shown outside Smoke, where the pills carry the actuator duties", () => {
-    for (const mode of [
-      "Hold",
-      "Stop",
-      "Startup",
-      "Prime",
-      "Shutdown",
-      "Reignite",
-      "Monitor",
-    ]) {
+    for (const mode of ["Hold", "Stop", "Startup", "Prime", "Shutdown", "Reignite", "Monitor"]) {
       const { unmount } = renderDashboard({
         ...FIXTURE_DASH,
         currentMode: mode,
@@ -1021,10 +901,7 @@ describe("Dashboard P-Mode control", () => {
       expect(screen.queryByText("P-2"), mode).not.toBeInTheDocument();
       expect(screen.queryByText("P-MODE"), mode).not.toBeInTheDocument();
       expect(screen.queryByText("SMOKE+"), mode).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: /P-MODE/ }),
-        mode,
-      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /P-MODE/ }), mode).not.toBeInTheDocument();
       expect(screen.getByText("AUGER DUTY"), mode).toBeInTheDocument();
       unmount();
     }
@@ -1039,19 +916,14 @@ describe("Dashboard P-Mode control", () => {
     expect(screen.getByText("P-Mode")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "0 - Off" })).toBeInTheDocument();
     for (let n = 1; n <= 9; n++) {
-      expect(
-        screen.getByRole("button", { name: String(n) }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: String(n) })).toBeInTheDocument();
     }
   });
 
   it("sends the picked value through setPMode", async () => {
     const user = userEvent.setup();
     const command = makeCommand();
-    renderDashboard(
-      { ...FIXTURE_DASH, currentMode: "Smoke", pMode: 2 },
-      { command },
-    );
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", pMode: 2 }, { command });
     await user.click(screen.getByRole("button", { name: /P-MODE/ }));
     await user.click(screen.getByRole("button", { name: "7" }));
     await waitFor(() => expect(command.setPMode).toHaveBeenCalledWith(7));
@@ -1064,9 +936,7 @@ describe("Dashboard P-Mode control", () => {
     renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", pMode: 2 });
     await user.click(screen.getByRole("button", { name: /P-MODE/ }));
     await user.click(screen.getByRole("button", { name: "7" }));
-    await waitFor(() =>
-      expect(screen.queryByText("P-Mode")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByText("P-Mode")).not.toBeInTheDocument());
     expect(screen.getByText("P-2")).toBeInTheDocument();
     expect(screen.queryByText("P-7")).not.toBeInTheDocument();
   });
@@ -1079,9 +949,7 @@ describe("Dashboard hopper card", () => {
   it("renders the hopper card when the grill has a distance sensor", () => {
     renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: true });
     expect(screen.getByText("Hopper")).toBeInTheDocument();
-    expect(
-      screen.getByText(`${FIXTURE_DASH.hopperLevel}%`),
-    ).toBeInTheDocument();
+    expect(screen.getByText(`${FIXTURE_DASH.hopperLevel}%`)).toBeInTheDocument();
   });
 
   it("hides the whole card when the grill has none, exactly as Flask does", () => {
@@ -1095,9 +963,7 @@ describe("Dashboard hopper card", () => {
   // deliberate divergence from Flask, which keeps its button.
   it("carries no refresh control, because the level refreshes itself", () => {
     renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: true });
-    expect(
-      screen.queryByRole("button", { name: "Refresh Status" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh Status" })).not.toBeInTheDocument();
   });
 });
 
@@ -1108,27 +974,17 @@ describe("Dashboard Smoke+ control", () => {
   it("toggles Smoke+ on from the pill in Smoke", async () => {
     const user = userEvent.setup();
     const command = makeCommand();
-    renderDashboard(
-      { ...FIXTURE_DASH, currentMode: "Smoke", smokePlus: false },
-      { command },
-    );
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", smokePlus: false }, { command });
     await user.click(screen.getByRole("button", { name: /SMOKE\+/ }));
-    await waitFor(() =>
-      expect(command.setSmokePlus).toHaveBeenCalledWith(true),
-    );
+    await waitFor(() => expect(command.setSmokePlus).toHaveBeenCalledWith(true));
   });
 
   it("toggles Smoke+ off again from the same pill", async () => {
     const user = userEvent.setup();
     const command = makeCommand();
-    renderDashboard(
-      { ...FIXTURE_DASH, currentMode: "Smoke", smokePlus: true },
-      { command },
-    );
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", smokePlus: true }, { command });
     await user.click(screen.getByRole("button", { name: /SMOKE\+/ }));
-    await waitFor(() =>
-      expect(command.setSmokePlus).toHaveBeenCalledWith(false),
-    );
+    await waitFor(() => expect(command.setSmokePlus).toHaveBeenCalledWith(false));
   });
 
   it("is not a button where the pill reads the fan duty", () => {
@@ -1137,10 +993,7 @@ describe("Dashboard Smoke+ control", () => {
         ...FIXTURE_DASH,
         currentMode: mode,
       });
-      expect(
-        screen.queryByRole("button", { name: /SMOKE\+/ }),
-        mode,
-      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /SMOKE\+/ }), mode).not.toBeInTheDocument();
       expect(screen.getByText("FAN DUTY"), mode).toBeInTheDocument();
       unmount();
     }
@@ -1152,9 +1005,7 @@ describe("Dashboard Smoke+ control", () => {
       currentMode: "Smoke",
       recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true },
     });
-    expect(
-      screen.queryByRole("button", { name: /SMOKE\+/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /SMOKE\+/ })).not.toBeInTheDocument();
     expect(screen.getByText("SMOKE+")).toBeInTheDocument();
   });
 });

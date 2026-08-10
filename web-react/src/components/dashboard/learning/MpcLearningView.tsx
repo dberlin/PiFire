@@ -45,9 +45,7 @@ class ReportRequestError extends Error {
 }
 
 function bandCenters(units: TemperatureUnit): string {
-  const values = BAND_CENTERS_F.map((f) =>
-    units === "F" ? f : Math.round(((f - 32) * 5) / 9),
-  );
+  const values = BAND_CENTERS_F.map((f) => (units === "F" ? f : Math.round(((f - 32) * 5) / 9)));
   return `${values[0]}, ${values[1]} and ${values[2]} °${units}`;
 }
 
@@ -66,26 +64,18 @@ function checkTone(status: CheckStatus): string {
   return "text-probe-label";
 }
 
-function generationIdentity(
-  label: string,
-  digest: string | null,
-  generation: number | null,
-) {
+function generationIdentity(label: string, digest: string | null, generation: number | null) {
   return (
     <div className="grid min-w-0 gap-1">
       <p className="font-semibold">{label}</p>
-      <p className="break-all font-mono text-xs text-probe-label">
-        {digest ?? "none"}
-      </p>
+      <p className="break-all font-mono text-xs text-probe-label">{digest ?? "none"}</p>
       <p className="text-probe-label">Generation: {generation ?? "none"}</p>
     </div>
   );
 }
 
 export function MpcLearningView(props: MpcLearningViewProps) {
-  return props.selectedController === "mpc" ? (
-    <ActiveMpcLearningView {...props} />
-  ) : null;
+  return props.selectedController === "mpc" ? <ActiveMpcLearningView {...props} /> : null;
 }
 
 function ActiveMpcLearningView({
@@ -95,20 +85,14 @@ function ActiveMpcLearningView({
   modelLearningRevision,
 }: MpcLearningViewProps) {
   const queryClient = useQueryClient();
-  const queryKey = useMemo(
-    () => [REPORT_QUERY_ROOT, apiBase] as const,
-    [apiBase],
-  );
+  const queryKey = useMemo(() => [REPORT_QUERY_ROOT, apiBase] as const, [apiBase]);
   const requestGeneration = useRef(0);
   const lastModelLearningRevision = useRef(modelLearningRevision);
   const [actionError, setActionError] = useState<string | null>(null);
   const [emptyGrill, setEmptyGrill] = useState(false);
   const [pellets, setPellets] = useState(false);
-  const [pendingActions, setPendingActions] = useState<
-    Set<MpcCalibrationAction>
-  >(new Set());
-  const [candidateDigestConfirmation, setCandidateDigestConfirmation] =
-    useState("");
+  const [pendingActions, setPendingActions] = useState<Set<MpcCalibrationAction>>(new Set());
+  const [candidateDigestConfirmation, setCandidateDigestConfirmation] = useState("");
   const [decisionIdConfirmation, setDecisionIdConfirmation] = useState("");
   const [activationPending, setActivationPending] = useState(false);
   const [rollbackReason, setRollbackReason] = useState("");
@@ -133,15 +117,10 @@ function ActiveMpcLearningView({
       const generation = ++requestGeneration.current;
       const result = await fetchModelEvidenceReport(apiBase, signal);
       if (signal.aborted || generation !== requestGeneration.current) {
-        throw new DOMException(
-          "Superseded model-evidence report request",
-          "AbortError",
-        );
+        throw new DOMException("Superseded model-evidence report request", "AbortError");
       }
       if (!result.ok || result.data === null) {
-        throw new ReportRequestError(
-          result.message || "Model evidence report unavailable",
-        );
+        throw new ReportRequestError(result.message || "Model evidence report unavailable");
       }
       return result.data;
     },
@@ -177,11 +156,7 @@ function ActiveMpcLearningView({
     const candidateDigest = report?.candidate.digest ?? null;
     const decisionId = report?.decision_id ?? null;
     const previous = confirmationIdentity.current;
-    if (
-      previous.candidateDigest === candidateDigest &&
-      previous.decisionId === decisionId
-    )
-      return;
+    if (previous.candidateDigest === candidateDigest && previous.decisionId === decisionId) return;
     confirmationIdentity.current = { candidateDigest, decisionId };
     setCandidateDigestConfirmation("");
     setDecisionIdConfirmation("");
@@ -206,10 +181,7 @@ function ActiveMpcLearningView({
   const runCalibrationAction = async (action: MpcCalibrationAction) => {
     if (pendingActions.has(action)) return;
     const revision =
-      Math.max(
-        nextCalibrationRevision.current,
-        report?.calibration.command_high_water ?? 0,
-      ) + 1;
+      Math.max(nextCalibrationRevision.current, report?.calibration.command_high_water ?? 0) + 1;
     nextCalibrationRevision.current = revision;
     setPendingActions((current) => new Set(current).add(action));
     setActionError(null);
@@ -225,8 +197,7 @@ function ActiveMpcLearningView({
       },
       apiBase,
     );
-    if (!result.ok)
-      setActionError(result.message || `${action} was not accepted`);
+    if (!result.ok) setActionError(result.message || `${action} was not accepted`);
     await refreshReport();
     setPendingActions((current) => {
       const next = new Set(current);
@@ -236,8 +207,7 @@ function ActiveMpcLearningView({
   };
 
   const runActivation = async () => {
-    if (!activationConfirmed || activationPending || report === undefined)
-      return;
+    if (!activationConfirmed || activationPending || report === undefined) return;
     setActivationPending(true);
     setActionError(null);
     const result = await activateModel(
@@ -248,11 +218,8 @@ function ActiveMpcLearningView({
       apiBase,
     );
     if (!result.ok || result.data?.accepted === false) {
-      const detail =
-        result.data && "detail" in result.data ? result.data.detail : null;
-      setActionError(
-        detail || result.message || "Model activation was not accepted",
-      );
+      const detail = result.data && "detail" in result.data ? result.data.detail : null;
+      setActionError(detail || result.message || "Model activation was not accepted");
     } else {
       setCandidateDigestConfirmation("");
       setDecisionIdConfirmation("");
@@ -268,11 +235,8 @@ function ActiveMpcLearningView({
     setActionError(null);
     const result = await rollbackModel({ reason }, apiBase);
     if (!result.ok || result.data?.accepted === false) {
-      const detail =
-        result.data && "detail" in result.data ? result.data.detail : null;
-      setActionError(
-        detail || result.message || "Model rollback was not accepted",
-      );
+      const detail = result.data && "detail" in result.data ? result.data.detail : null;
+      setActionError(detail || result.message || "Model rollback was not accepted");
     } else {
       setRollbackReason("");
     }
@@ -318,8 +282,7 @@ function ActiveMpcLearningView({
               ))}
               {report.failure && (
                 <p>
-                  <strong>{report.failure.code}</strong> —{" "}
-                  {report.failure.detail}
+                  <strong>{report.failure.code}</strong> — {report.failure.detail}
                   {report.failure.terminal ? " — terminal" : ""}
                 </p>
               )}
@@ -329,13 +292,11 @@ function ActiveMpcLearningView({
           <section className={LEARNING_SECTION_CLASS}>
             <h3 className="font-bold">Operator calibration commands</h3>
             <p className="mt-2 text-sm text-probe-label">
-              Calibration probes around the active Hold at {bandCenters(units)}.
-              The report serializes command high-water only; this panel does not
-              invent a command phase.
+              Calibration probes around the active Hold at {bandCenters(units)}. The report
+              serializes command high-water only; this panel does not invent a command phase.
             </p>
             <p className="mt-2 text-sm">
-              Accepted command high-water:{" "}
-              {report.calibration.command_high_water}
+              Accepted command high-water: {report.calibration.command_high_water}
             </p>
             <div className="mt-3 grid gap-2 text-sm">
               <label className="flex items-start gap-2">
@@ -358,21 +319,14 @@ function ActiveMpcLearningView({
               </label>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-5">
-              {(
-                ["start", "pause", "resume", "stop", "reset-progress"] as const
-              ).map((action) => {
+              {(["start", "pause", "resume", "stop", "reset-progress"] as const).map((action) => {
                 const pending = pendingActions.has(action);
-                const startBlocked =
-                  action === "start" && (!emptyGrill || !pellets);
+                const startBlocked = action === "start" && (!emptyGrill || !pellets);
                 return (
                   <button
                     key={action}
                     className={`pf-modal-btn ${
-                      action === "start"
-                        ? "accent"
-                        : action === "stop"
-                          ? "danger"
-                          : ""
+                      action === "start" ? "accent" : action === "stop" ? "danger" : ""
                     } ${FOCUS_RING}`}
                     type="button"
                     disabled={pending || startBlocked}
@@ -398,13 +352,8 @@ function ActiveMpcLearningView({
               <h3 className="font-bold">Current authority</h3>
               <div className="mt-2 grid gap-2 text-sm">
                 <p>Mode: {report.mode ?? "none"}</p>
-                <p>
-                  Role generation: {report.candidate.role_generation ?? "none"}
-                </p>
-                <p>
-                  Candidate generation:{" "}
-                  {report.candidate.candidate_generation ?? "none"}
-                </p>
+                <p>Role generation: {report.candidate.role_generation ?? "none"}</p>
+                <p>Candidate generation: {report.candidate.candidate_generation ?? "none"}</p>
                 <p>Candidate policy: {report.candidate.policy ?? "none"}</p>
                 <p className="break-all font-mono text-xs">
                   Candidate digest: {report.candidate.digest ?? "none"}
@@ -422,14 +371,8 @@ function ActiveMpcLearningView({
               <div className="mt-2 grid gap-1 text-sm">
                 <p>Current evidence: {report.evidence.count}</p>
                 <p>Audit evidence: {report.evidence.audit_count}</p>
-                <p>
-                  Retired schema entries excluded:{" "}
-                  {report.evidence.retired_excluded}
-                </p>
-                <p>
-                  High-water:{" "}
-                  {report.evidence.high_water?.join(" / ") ?? "none"}
-                </p>
+                <p>Retired schema entries excluded: {report.evidence.retired_excluded}</p>
+                <p>High-water: {report.evidence.high_water?.join(" / ") ?? "none"}</p>
               </div>
             </section>
           </div>
@@ -440,11 +383,7 @@ function ActiveMpcLearningView({
               <p>Status: {report.fit.status}</p>
               <p>Request: {report.fit.request_id ?? "none"}</p>
               <p>Window ID: {report.fit.window_id ?? "none"}</p>
-              <p
-                className={
-                  report.fit.error ? "text-danger" : "text-probe-label"
-                }
-              >
+              <p className={report.fit.error ? "text-danger" : "text-probe-label"}>
                 Fit error: {report.fit.error ?? "none"}
               </p>
               {report.window && (
@@ -452,17 +391,12 @@ function ActiveMpcLearningView({
                   <p>Session: {report.window.session_id}</p>
                   <p>Cook: {report.window.cook_id ?? "none"}</p>
                   <p>
-                    Observation sequence:{" "}
-                    {report.window.first_observation_sequence}–
+                    Observation sequence: {report.window.first_observation_sequence}–
                     {report.window.last_observation_sequence}
                   </p>
                   <p>Window role generation: {report.window.role_generation}</p>
-                  <p className="break-all">
-                    Configuration: {report.window.configuration_digest}
-                  </p>
-                  <p className="break-all">
-                    Incumbent: {report.window.incumbent_digest}
-                  </p>
+                  <p className="break-all">Configuration: {report.window.configuration_digest}</p>
+                  <p className="break-all">Incumbent: {report.window.incumbent_digest}</p>
                 </>
               )}
             </div>
@@ -471,15 +405,10 @@ function ActiveMpcLearningView({
           <section className={LEARNING_SECTION_CLASS}>
             <h3 className="font-bold">Grey candidate</h3>
             {parameterEntries.length === 0 ? (
-              <p className="mt-2 text-probe-label">
-                No candidate parameters reported.
-              </p>
+              <p className="mt-2 text-probe-label">No candidate parameters reported.</p>
             ) : (
               <div className="mt-3 overflow-x-auto">
-                <table
-                  className="w-full text-left text-sm"
-                  aria-label="Grey candidate parameters"
-                >
+                <table className="w-full text-left text-sm" aria-label="Grey candidate parameters">
                   <thead className="text-label">
                     <tr>
                       <th className="p-2" scope="col">
@@ -495,9 +424,7 @@ function ActiveMpcLearningView({
                   </thead>
                   <tbody>
                     {parameterEntries.map(([name, candidateValue]) => {
-                      const delta = deltaEntries.find(
-                        ([deltaName]) => deltaName === name,
-                      )?.[1];
+                      const delta = deltaEntries.find(([deltaName]) => deltaName === name)?.[1];
                       return (
                         <tr className="border-t border-card-border" key={name}>
                           <th className="p-2" scope="row">
@@ -512,43 +439,26 @@ function ActiveMpcLearningView({
                 </table>
               </div>
             )}
-            <p className="mt-2 text-sm">
-              Fit quality: {shown(report.candidate.fit_quality)}
-            </p>
-            <p className="text-sm">
-              Identifiability: {shown(report.candidate.identifiability)}
-            </p>
+            <p className="mt-2 text-sm">Fit quality: {shown(report.candidate.fit_quality)}</p>
+            <p className="text-sm">Identifiability: {shown(report.candidate.identifiability)}</p>
           </section>
 
           <div className="grid gap-4 md:grid-cols-2">
             <section className={LEARNING_SECTION_CLASS}>
               <h3 className="font-bold">Native candidate and timing</h3>
               <div className="mt-2 grid gap-1 text-sm">
-                <p
-                  className={
-                    assessment
-                      ? checkTone(assessment.native_build)
-                      : "text-probe-label"
-                  }
-                >
+                <p className={assessment ? checkTone(assessment.native_build) : "text-probe-label"}>
                   Native build: {assessment?.native_build ?? "not reported"}
                 </p>
                 <p
                   className={
-                    assessment
-                      ? checkTone(assessment.native_dry_solve)
-                      : "text-probe-label"
+                    assessment ? checkTone(assessment.native_dry_solve) : "text-probe-label"
                   }
                 >
-                  Native dry solve:{" "}
-                  {assessment?.native_dry_solve ?? "not reported"}
+                  Native dry solve: {assessment?.native_dry_solve ?? "not reported"}
                 </p>
                 <p
-                  className={
-                    assessment
-                      ? checkTone(assessment.target_timing)
-                      : "text-probe-label"
-                  }
+                  className={assessment ? checkTone(assessment.target_timing) : "text-probe-label"}
                 >
                   Target timing: {assessment?.target_timing ?? "not reported"}
                 </p>
@@ -558,26 +468,16 @@ function ActiveMpcLearningView({
             <section className={LEARNING_SECTION_CLASS}>
               <h3 className="font-bold">Readiness and rejection</h3>
               <div className="mt-2 grid gap-1 text-sm">
-                <p>
-                  Fit accepted:{" "}
-                  {assessment ? yesNo(assessment.fit_accepted) : "not reported"}
-                </p>
+                <p>Fit accepted: {assessment ? yesNo(assessment.fit_accepted) : "not reported"}</p>
                 <p>
                   Identifiability accepted:{" "}
-                  {assessment
-                    ? yesNo(assessment.identifiability_accepted)
-                    : "not reported"}
+                  {assessment ? yesNo(assessment.identifiability_accepted) : "not reported"}
                 </p>
                 <p>
                   Confidence accepted:{" "}
-                  {assessment
-                    ? yesNo(assessment.confidence_accepted)
-                    : "not reported"}
+                  {assessment ? yesNo(assessment.confidence_accepted) : "not reported"}
                 </p>
-                <p>
-                  Rejection reasons:{" "}
-                  {assessment?.rejection_reasons.join(", ") || "none"}
-                </p>
+                <p>Rejection reasons: {assessment?.rejection_reasons.join(", ") || "none"}</p>
                 <p>Blockers: {report.blockers.join(", ") || "none"}</p>
               </div>
             </section>
@@ -610,23 +510,15 @@ function ActiveMpcLearningView({
               <p>Durable phase: {report.activation.phase}</p>
               <p>Policy: {report.activation.policy ?? "none"}</p>
               <p>Origin: {report.activation.origin ?? "none"}</p>
+              <p>Persistence pending: {yesNo(report.activation.pending_persistence)}</p>
               <p>
-                Persistence pending:{" "}
-                {yesNo(report.activation.pending_persistence)}
+                Frame-boundary swap pending: {yesNo(report.activation.pending_frame_boundary_swap)}
               </p>
-              <p>
-                Frame-boundary swap pending:{" "}
-                {yesNo(report.activation.pending_frame_boundary_swap)}
-              </p>
-              <p className="break-all">
-                Transaction: {report.activation.transaction_id ?? "none"}
-              </p>
+              <p className="break-all">Transaction: {report.activation.transaction_id ?? "none"}</p>
               <p>Reason: {report.activation.reason ?? "none"}</p>
               <p>
                 Latest lifecycle: {report.latest_lifecycle?.phase ?? "none"}
-                {report.latest_lifecycle?.reason
-                  ? ` — ${report.latest_lifecycle.reason}`
-                  : ""}
+                {report.latest_lifecycle?.reason ? ` — ${report.latest_lifecycle.reason}` : ""}
               </p>
             </div>
           </section>
@@ -635,28 +527,21 @@ function ActiveMpcLearningView({
             <section className="min-w-0 rounded-card border border-ok bg-inset p-4">
               <h3 className="font-bold">Activate reviewed model</h3>
               <p className="mt-2 text-sm">
-                Confirm the exact candidate digest and confidence decision
-                serialized by this report.
+                Confirm the exact candidate digest and confidence decision serialized by this
+                report.
               </p>
               <dl className="mt-3 grid gap-2 text-sm">
                 <div>
                   <dt className="font-semibold">Candidate digest</dt>
-                  <dd className="break-all text-probe-label">
-                    {report.candidate.digest}
-                  </dd>
+                  <dd className="break-all text-probe-label">{report.candidate.digest}</dd>
                 </div>
                 <div>
                   <dt className="font-semibold">Confidence decision ID</dt>
-                  <dd className="break-all text-probe-label">
-                    {report.decision_id}
-                  </dd>
+                  <dd className="break-all text-probe-label">{report.decision_id}</dd>
                 </div>
               </dl>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <label
-                  className="grid gap-1 text-sm"
-                  htmlFor="mpc-activation-digest"
-                >
+                <label className="grid gap-1 text-sm" htmlFor="mpc-activation-digest">
                   Type the exact candidate digest
                   <input
                     id="mpc-activation-digest"
@@ -664,15 +549,10 @@ function ActiveMpcLearningView({
                     autoComplete="off"
                     spellCheck={false}
                     value={candidateDigestConfirmation}
-                    onChange={(event) =>
-                      setCandidateDigestConfirmation(event.target.value)
-                    }
+                    onChange={(event) => setCandidateDigestConfirmation(event.target.value)}
                   />
                 </label>
-                <label
-                  className="grid gap-1 text-sm"
-                  htmlFor="mpc-activation-decision"
-                >
+                <label className="grid gap-1 text-sm" htmlFor="mpc-activation-decision">
                   Type the exact confidence decision ID
                   <input
                     id="mpc-activation-decision"
@@ -680,9 +560,7 @@ function ActiveMpcLearningView({
                     autoComplete="off"
                     spellCheck={false}
                     value={decisionIdConfirmation}
-                    onChange={(event) =>
-                      setDecisionIdConfirmation(event.target.value)
-                    }
+                    onChange={(event) => setDecisionIdConfirmation(event.target.value)}
                   />
                 </label>
               </div>
@@ -693,9 +571,7 @@ function ActiveMpcLearningView({
                 aria-busy={activationPending || undefined}
                 onClick={() => void runActivation()}
               >
-                {activationPending
-                  ? "Activating exact model…"
-                  : "Activate exact model"}
+                {activationPending ? "Activating exact model…" : "Activate exact model"}
               </button>
             </section>
           )}
@@ -724,10 +600,7 @@ function ActiveMpcLearningView({
           {rollbackAvailable && (
             <section className="min-w-0 rounded-card border border-warn bg-inset p-4">
               <h3 className="font-bold">Roll back active model</h3>
-              <label
-                className="mt-2 grid gap-1 text-sm"
-                htmlFor="mpc-rollback-reason"
-              >
+              <label className="mt-2 grid gap-1 text-sm" htmlFor="mpc-rollback-reason">
                 Required rollback reason
                 <input
                   id="mpc-rollback-reason"
@@ -743,9 +616,7 @@ function ActiveMpcLearningView({
                 aria-busy={rollbackPending || undefined}
                 onClick={() => void runRollback()}
               >
-                {rollbackPending
-                  ? "Rolling back model…"
-                  : "Roll back to explicit owner"}
+                {rollbackPending ? "Rolling back model…" : "Roll back to explicit owner"}
               </button>
             </section>
           )}

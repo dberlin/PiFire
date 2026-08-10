@@ -1,17 +1,9 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  type Mock,
-  rs,
-} from "@rstest/core";
-import type { PidSpLearningReport } from "../../../src/helpers/pidSpLearning/types";
+import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
 import {
   fetchPidSpLearningReport,
   parsePidSpLearningReport,
 } from "../../../src/helpers/pidSpLearning/pidSpLearningApi";
+import type { PidSpLearningReport } from "../../../src/helpers/pidSpLearning/types";
 
 const FOPDT = {
   form: "fopdt" as const,
@@ -97,9 +89,7 @@ interface StubResponse {
   json: Mock<() => Promise<unknown>>;
 }
 
-type FetchMock = Mock<
-  (input: string, init?: RequestInit) => Promise<StubResponse>
->;
+type FetchMock = Mock<(input: string, init?: RequestInit) => Promise<StubResponse>>;
 let fetchMock: FetchMock;
 
 function response(body: unknown, status = 200): StubResponse {
@@ -142,9 +132,7 @@ describe("fetchPidSpLearningReport", () => {
   it("prefixes the exact report path with an explicit API base", async () => {
     await fetchPidSpLearningReport("https://grill.example");
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://grill.example/api/pid-sp-learning/report",
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://grill.example/api/pid-sp-learning/report");
   });
 
   it("decodes both discriminated durable model forms", async () => {
@@ -156,16 +144,14 @@ describe("fetchPidSpLearningReport", () => {
       revision: 9,
       identified_at_f: 275,
     };
-    fetchMock
-      .mockResolvedValueOnce(response(structuredClone(REPORT)))
-      .mockResolvedValueOnce(
-        response({
-          ...structuredClone(REPORT),
-          checkpoint: ipdt,
-          identifier: { ...structuredClone(IDENTIFIER), trusted: ipdt },
-          predictor: { ...structuredClone(PREDICTOR), model: ipdt },
-        }),
-      );
+    fetchMock.mockResolvedValueOnce(response(structuredClone(REPORT))).mockResolvedValueOnce(
+      response({
+        ...structuredClone(REPORT),
+        checkpoint: ipdt,
+        identifier: { ...structuredClone(IDENTIFIER), trusted: ipdt },
+        predictor: { ...structuredClone(PREDICTOR), model: ipdt },
+      }),
+    );
 
     const fopdt = await fetchPidSpLearningReport();
     const integrating = await fetchPidSpLearningReport();
@@ -309,14 +295,8 @@ describe("fetchPidSpLearningReport", () => {
   });
 
   it.each([
-    [
-      "checkpoint numeric boolean",
-      { ...REPORT, checkpoint: { ...FOPDT, K: true } },
-    ],
-    [
-      "identifier numeric boolean",
-      { ...REPORT, identifier: { ...IDENTIFIER, accepted: false } },
-    ],
+    ["checkpoint numeric boolean", { ...REPORT, checkpoint: { ...FOPDT, K: true } }],
+    ["identifier numeric boolean", { ...REPORT, identifier: { ...IDENTIFIER, accepted: false } }],
     [
       "predictor numeric boolean",
       { ...REPORT, predictor: { ...PREDICTOR, residual_streak: true } },
@@ -351,10 +331,7 @@ describe("fetchPidSpLearningReport", () => {
   it.each([
     ["report live", { ...REPORT, live: 1 }],
     ["gate passed", { ...REPORT, gates: [{ ...REPORT.gates[0], passed: 1 }] }],
-    [
-      "identifier transition",
-      { ...REPORT, identifier: { ...IDENTIFIER, transition_seen: 1 } },
-    ],
+    ["identifier transition", { ...REPORT, identifier: { ...IDENTIFIER, transition_seen: 1 } }],
     ["predictor active", { ...REPORT, predictor: { ...PREDICTOR, active: 1 } }],
     [
       "failure terminal",

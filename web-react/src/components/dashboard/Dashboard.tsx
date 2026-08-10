@@ -4,22 +4,10 @@ import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
-import {
-  lidCountdown,
-  modeCountdown,
-  recipeLabel,
-} from "../../helpers/dashboard/countdowns";
-import {
-  deriveView,
-  type PillView,
-  reading,
-} from "../../helpers/dashboard/deriveView";
+import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
+import { deriveView, type PillView, reading } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
-import {
-  type NotifyEdit,
-  readNotifyEdit,
-  saveNotifyEdit,
-} from "../../helpers/notify/notifyState";
+import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
 import { queryKeys } from "../../helpers/query/keys";
 import { saveAccent } from "../../helpers/settings/accent";
 import { getSettings } from "../../helpers/settings/settingsApi";
@@ -112,8 +100,7 @@ export function Dashboard({
   const now = useClock();
   const health = useControlHealth(controlAlive, apiBase);
   const mpcConfigRequestIdentity = useMemo(() => Symbol(apiBase), [apiBase]);
-  const [loadedMpcConfig, setLoadedMpcConfig] =
-    useState<LoadedMpcConfig | null>(null);
+  const [loadedMpcConfig, setLoadedMpcConfig] = useState<LoadedMpcConfig | null>(null);
   // A response belongs only to the specific API-base transition that produced
   // it. The identity changes even across A → B → A, so a failed second A read
   // cannot revive the first A response.
@@ -135,8 +122,7 @@ export function Dashboard({
           requestIdentity: mpcConfigRequestIdentity,
           selectedController: settings.controller?.selected ?? null,
           ambientC:
-            typeof configuredAmbient === "number" &&
-            Number.isFinite(configuredAmbient)
+            typeof configuredAmbient === "number" && Number.isFinite(configuredAmbient)
               ? configuredAmbient
               : DEFAULT_MPC_AMBIENT_C,
         });
@@ -163,9 +149,7 @@ export function Dashboard({
   // other. Reignite deliberately does not rewrite the timestamp
   // (controller/runtime/modes/reignite.py:17-18), so a reignited cook keeps
   // counting from the original ignition -- which is what Flask has always done.
-  const cookTime = fmtElapsed(
-    cookElapsed(dash.startupTimestamp, now.getTime() / 1000),
-  );
+  const cookTime = fmtElapsed(cookElapsed(dash.startupTimestamp, now.getTime() / 1000));
   const clock = now.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -225,9 +209,7 @@ export function Dashboard({
       // Stay open on failure. This write is not echoed back until the control
       // loop drains the queue (~110 ms), so closing on an error would be
       // indistinguishable from a save that worked.
-      setNotifyError(
-        e instanceof Error ? e.message : "could not save notification",
-      );
+      setNotifyError(e instanceof Error ? e.message : "could not save notification");
     } finally {
       setNotifySaving(false);
     }
@@ -242,11 +224,7 @@ export function Dashboard({
         // Always paired with the CSS above: the board is pinned at top/left 50%
         // there, so the translate is what centres it and the scale is what fits
         // it. Absent entirely on the reflow branch.
-        style={
-          fitted
-            ? { transform: `translate(-50%, -50%) scale(${scale})` }
-            : undefined
-        }
+        style={fitted ? { transform: `translate(-50%, -50%) scale(${scale})` } : undefined}
       >
         <div className="pf-dash-glow" />
 
@@ -281,11 +259,7 @@ export function Dashboard({
                 } as CSSProperties
               }
             >
-              {phase === "demo"
-                ? "DEMO"
-                : health.alive
-                  ? "LIVE"
-                  : "CTRL OFFLINE"}
+              {phase === "demo" ? "DEMO" : health.alive ? "LIVE" : "CTRL OFFLINE"}
             </span>
             {/* The offline signal is a blob nothing can clear (see
                 helpers/dashboard/controlHealth.ts), so offer to ask the control
@@ -293,11 +267,7 @@ export function Dashboard({
                 verdict from up to 30 seconds ago. Not rendered in demo mode:
                 there is no backend to ask. */}
             {!health.alive && phase !== "demo" && (
-              <button
-                className="pf-toggle"
-                onClick={health.recheck}
-                disabled={health.rechecking}
-              >
+              <button className="pf-toggle" onClick={health.recheck} disabled={health.rechecking}>
                 Recheck
               </button>
             )}
@@ -341,18 +311,11 @@ export function Dashboard({
           {/* Left: food probes */}
           {view.hasProbes && (
             <div data-pf="probeCol" className="pf-dash-probecol">
-              <div
-                data-pf="probeColTitle"
-                className="pf-dash-caption pf-dash-coltitle"
-              >
+              <div data-pf="probeColTitle" className="pf-dash-caption pf-dash-coltitle">
                 Food Probes
               </div>
               {view.probes.map((p, i) => (
-                <ProbeCard
-                  key={`${p.name}-${i}`}
-                  p={p}
-                  onOpenNotify={openNotify}
-                />
+                <ProbeCard key={`${p.name}-${i}`} p={p} onOpenNotify={openNotify} />
               ))}
             </div>
           )}
@@ -382,9 +345,7 @@ export function Dashboard({
                       this card's existing label column so the 52px row keeps
                       its height. */}
                   {modeLeft !== null && (
-                    <span className="pf-dash-modeleft">
-                      Time Left in Mode: {modeLeft}s
-                    </span>
+                    <span className="pf-dash-modeleft">Time Left in Mode: {modeLeft}s</span>
                   )}
                 </div>
                 <span className="pf-dash-cookval">{cookTime}</span>
@@ -410,9 +371,7 @@ export function Dashboard({
                       (dash_default.js:397). Two lines inside the SAME 210x52
                       box -- the box is not widened. */}
                   {lidLeft !== null && (
-                    <span className="pf-dash-lid-sub">
-                      PID Paused {lidLeft}s
-                    </span>
+                    <span className="pf-dash-lid-sub">PID Paused {lidLeft}s</span>
                   )}
                 </div>
               )}
@@ -437,9 +396,7 @@ export function Dashboard({
             <div data-pf="pills" className="pf-dash-pills">
               <Pill
                 p={view.pillL}
-                onClick={
-                  view.pModeEditable ? () => setPModeOpen(true) : undefined
-                }
+                onClick={view.pModeEditable ? () => setPModeOpen(true) : undefined}
               />
               {/* Smoke+ is a toggle, not a picker, so the pill writes
                   straight through rather than opening a menu. The value comes
@@ -515,12 +472,7 @@ function Pill({ p, onClick }: { p: PillView; onClick?: () => void }) {
   } as CSSProperties;
   if (onClick !== undefined) {
     return (
-      <button
-        type="button"
-        className="pf-dash-pill"
-        style={vars}
-        onClick={onClick}
-      >
+      <button type="button" className="pf-dash-pill" style={vars} onClick={onClick}>
         <PillBody p={p} />
       </button>
     );

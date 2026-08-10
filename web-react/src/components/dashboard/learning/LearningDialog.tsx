@@ -60,8 +60,7 @@ export function LearningDialog({
       }
       if (event.key !== "Tab") return;
 
-      const focusable =
-        dialog.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
+      const focusable = dialog.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
       if (!focusable || focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -102,10 +101,7 @@ export function LearningDialog({
       </button>
       {open &&
         createPortal(
-          <div
-            className="pf-modal-scrim pf-modal-scrim-fixed"
-            onClick={() => setOpen(false)}
-          >
+          <div className="pf-modal-scrim pf-modal-scrim-fixed" onClick={() => setOpen(false)}>
             <section
               ref={dialog}
               className="pf-modal max-h-full w-11/12 max-w-5xl min-w-0 overflow-y-auto text-text"
@@ -139,10 +135,7 @@ export function LearningDialog({
 
               {loading && <p role="status">{loadingLabel}</p>}
               {error !== null && (
-                <div
-                  className="rounded-lg border border-danger p-3 text-danger"
-                  role="alert"
-                >
+                <div className="rounded-lg border border-danger p-3 text-danger" role="alert">
                   <p>{error}</p>
                   <button
                     className={`pf-modal-btn mt-2 ${FOCUS_RING}`}

@@ -1,22 +1,15 @@
+import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  type Mock,
-  rs,
-} from "@rstest/core";
 import { LearningPanel } from "../../../../src/components/dashboard/LearningPanel";
+import type {
+  ModelEvidenceReport,
+  ModelEvidenceStatus,
+} from "../../../../src/helpers/modelEvidence/types";
 import type { PidSpLearningReport } from "../../../../src/helpers/pidSpLearning/types";
 import { testQueryClient } from "../../test-utils";
 
-function mpcReport(
-  status: ModelEvidenceStatus,
-  revision: string,
-): ModelEvidenceReport {
+function mpcReport(status: ModelEvidenceStatus, revision: string): ModelEvidenceReport {
   return {
     schema_version: 2,
     status,
@@ -102,9 +95,7 @@ const jsonResponse = (body: unknown) =>
     headers: { "Content-Type": "application/json" },
   });
 
-type FetchMock = Mock<
-  (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
->;
+type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>;
 let fetchMock: FetchMock;
 
 beforeEach(() => {
@@ -178,85 +169,59 @@ describe("LearningPanel", () => {
   it("mounts and requests only the MPC provider for exact mpc", async () => {
     renderPanel("mpc");
 
-    expect(
-      await screen.findByRole("button", { name: "MPC learning: collecting" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: collecting" })).toBeVisible();
     expect(requestsTo("/api/model-evidence/report")).toHaveLength(1);
     expect(requestsTo("/api/pid-sp-learning/report")).toHaveLength(0);
-    expect(
-      screen.queryByRole("button", { name: /PID-SP learning:/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /PID-SP learning:/i })).not.toBeInTheDocument();
   });
 
   it("mounts and requests only the PID-SP provider for exact pid_sp", async () => {
     renderPanel("pid_sp");
 
-    expect(
-      await screen.findByRole("button", { name: "PID-SP learning: idle" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "PID-SP learning: idle" })).toBeVisible();
     expect(requestsTo("/api/pid-sp-learning/report")).toHaveLength(1);
     expect(requestsTo("/api/model-evidence/report")).toHaveLength(0);
-    expect(
-      screen.queryByRole("button", { name: /MPC learning:/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
   });
 
   it("fences a late MPC response after handing off to PID-SP", async () => {
     const oldMpc = deferredResponse();
     fetchMock.mockImplementation((input) => {
-      if (String(input).endsWith("/api/model-evidence/report"))
-        return oldMpc.promise;
+      if (String(input).endsWith("/api/model-evidence/report")) return oldMpc.promise;
       return Promise.resolve(jsonResponse(pidSpReport("c".repeat(64))));
     });
     const view = renderPanel("mpc");
 
-    expect(
-      screen.getByRole("button", { name: "MPC learning: loading" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "MPC learning: loading" })).toBeVisible();
     view.rerender(panel("pid_sp"));
-    expect(
-      await screen.findByRole("button", { name: "PID-SP learning: idle" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "PID-SP learning: idle" })).toBeVisible();
 
     await act(async () => {
       oldMpc.resolve(jsonResponse(mpcReport("collecting", "mpc-late")));
       await Promise.resolve();
     });
-    expect(
-      screen.getByRole("button", { name: "PID-SP learning: idle" }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: /MPC learning:/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "PID-SP learning: idle" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
   });
 
   it("fences a late PID-SP response after handing off to MPC", async () => {
     const oldPidSp = deferredResponse();
     fetchMock.mockImplementation((input) => {
-      if (String(input).endsWith("/api/pid-sp-learning/report"))
-        return oldPidSp.promise;
+      if (String(input).endsWith("/api/pid-sp-learning/report")) return oldPidSp.promise;
       return Promise.resolve(jsonResponse(mpcReport("active", "mpc-new")));
     });
     const view = renderPanel("pid_sp");
 
-    expect(
-      screen.getByRole("button", { name: "PID-SP learning: loading" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "PID-SP learning: loading" })).toBeVisible();
     view.rerender(panel("mpc"));
-    expect(
-      await screen.findByRole("button", { name: "MPC learning: active" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: active" })).toBeVisible();
 
     await act(async () => {
       oldPidSp.resolve(jsonResponse(pidSpReport("d".repeat(64))));
       await Promise.resolve();
     });
-    expect(
-      screen.getByRole("button", { name: "MPC learning: active" }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: /PID-SP learning:/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "MPC learning: active" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /PID-SP learning:/i })).not.toBeInTheDocument();
   });
 
   it("does not show the prior API base report while the new base is pending", async () => {
@@ -266,17 +231,11 @@ describe("LearningPanel", () => {
       return Promise.resolve(jsonResponse(mpcReport("active", "old-base")));
     });
     const view = renderPanel("mpc", { apiBase: "/old" });
-    expect(
-      await screen.findByRole("button", { name: "MPC learning: active" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: active" })).toBeVisible();
 
     view.rerender(panel("mpc", { apiBase: "/new" }));
-    expect(
-      screen.getByRole("button", { name: "MPC learning: loading" }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "MPC learning: active" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "MPC learning: loading" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "MPC learning: active" })).not.toBeInTheDocument();
   });
 
   it("does not resurrect a successful report after an inactive remount", async () => {
@@ -292,20 +251,14 @@ describe("LearningPanel", () => {
         : remount.promise;
     });
     const view = renderPanel("mpc");
-    expect(
-      await screen.findByRole("button", { name: "MPC learning: active" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: active" })).toBeVisible();
 
     view.rerender(panel("pid"));
     await act(async () => Promise.resolve());
     view.rerender(panel("mpc"));
 
-    expect(
-      screen.getByRole("button", { name: "MPC learning: loading" }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "MPC learning: active" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "MPC learning: loading" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "MPC learning: active" })).not.toBeInTheDocument();
     expect(mpcRequests).toBe(2);
   });
 
@@ -314,9 +267,7 @@ describe("LearningPanel", () => {
     await screen.findByRole("button", { name: "MPC learning: collecting" });
 
     view.rerender(panel("mpc", { modelLearningRevision: "wire-b" }));
-    await waitFor(() =>
-      expect(requestsTo("/api/model-evidence/report")).toHaveLength(2),
-    );
+    await waitFor(() => expect(requestsTo("/api/model-evidence/report")).toHaveLength(2));
     expect(requestsTo("/api/pid-sp-learning/report")).toHaveLength(0);
 
     view.rerender(panel("pid_sp", { modelLearningRevision: "wire-b" }));
@@ -325,9 +276,7 @@ describe("LearningPanel", () => {
     expect(requestsTo("/api/pid-sp-learning/report")).toHaveLength(1);
 
     view.rerender(panel("pid_sp", { modelLearningRevision: "wire-c" }));
-    await waitFor(() =>
-      expect(requestsTo("/api/pid-sp-learning/report")).toHaveLength(2),
-    );
+    await waitFor(() => expect(requestsTo("/api/pid-sp-learning/report")).toHaveLength(2));
     expect(requestsTo("/api/model-evidence/report")).toHaveLength(2);
   });
 });

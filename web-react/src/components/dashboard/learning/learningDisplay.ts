@@ -1,5 +1,4 @@
-export const LEARNING_SECTION_CLASS =
-  "min-w-0 rounded-card border border-card-border bg-inset p-4";
+export const LEARNING_SECTION_CLASS = "min-w-0 rounded-card border border-card-border bg-inset p-4";
 
 const STATUS_TONE: Record<string, string> = {
   "insufficient excitation": "text-warn",
@@ -14,11 +13,7 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 export function normalizeLearningStatus(status: string): string {
-  const normalized = status
-    .trim()
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .toLowerCase();
+  const normalized = status.trim().replace(/[-_]+/g, " ").replace(/\s+/g, " ").toLowerCase();
   return normalized || "unavailable";
 }
 

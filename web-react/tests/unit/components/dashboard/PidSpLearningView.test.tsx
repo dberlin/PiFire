@@ -1,15 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "@tanstack/react-query";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  type Mock,
-  rs,
-} from "@rstest/core";
 import { PidSpLearningView } from "../../../../src/components/dashboard/learning/PidSpLearningView";
 import type {
   PidSpLearningReport,
@@ -119,9 +111,7 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-type FetchMock = Mock<
-  (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
->;
+type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>;
 let fetchMock: FetchMock;
 
 beforeEach(() => {
@@ -136,9 +126,7 @@ afterEach(() => {
   rs.useRealTimers();
 });
 
-function renderPanel(
-  props: Partial<React.ComponentProps<typeof PidSpLearningView>> = {},
-) {
+function renderPanel(props: Partial<React.ComponentProps<typeof PidSpLearningView>> = {}) {
   const queryClient = testQueryClient();
   return render(
     <PidSpLearningView
@@ -149,18 +137,14 @@ function renderPanel(
     />,
     {
       wrapper: ({ children }: React.PropsWithChildren) => (
-        <QueryClientProvider client={queryClient}>
-          {children}
-        </QueryClientProvider>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
       ),
     },
   );
 }
 
 async function openPanel() {
-  await userEvent.click(
-    await screen.findByRole("button", { name: /PID-SP learning:/i }),
-  );
+  await userEvent.click(await screen.findByRole("button", { name: /PID-SP learning:/i }));
   return screen.findByRole("dialog", { name: "PID-SP model learning" });
 }
 
@@ -185,9 +169,7 @@ describe("PidSpLearningView", () => {
   it("renders nothing and makes no request for another controller", () => {
     renderPanel({ selectedController: "mpc" });
 
-    expect(
-      screen.queryByRole("button", { name: /PID-SP learning:/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /PID-SP learning:/i })).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -210,9 +192,7 @@ describe("PidSpLearningView", () => {
       });
       await userEvent.click(trigger);
 
-      expect(
-        screen.getByText(label, { exact: true, selector: "header p" }),
-      ).toHaveClass(tone);
+      expect(screen.getByText(label, { exact: true, selector: "header p" })).toHaveClass(tone);
     },
   );
 
@@ -221,9 +201,7 @@ describe("PidSpLearningView", () => {
     renderPanel();
     const dialog = await openPanel();
 
-    expect(dialog).toHaveTextContent(
-      "No PID-SP learning data is available yet.",
-    );
+    expect(dialog).toHaveTextContent("No PID-SP learning data is available yet.");
     expect(dialog).toHaveTextContent(
       "Diagnostics are collected automatically while PID-SP Hold is running.",
     );
@@ -258,36 +236,32 @@ describe("PidSpLearningView", () => {
         ["theta", "30", "seconds"],
       ],
     ],
-  ] as const)(
-    "renders the durable %s checkpoint parameters",
-    async (_form, model, rows) => {
-      fetchMock.mockResolvedValue(
-        jsonResponse({ ...IDLE, checkpoint: model, revision: "c".repeat(64) }),
-      );
-      renderPanel();
-      const dialog = await openPanel();
-      const section = within(dialog)
-        .getByRole("heading", { name: "Durable checkpoint" })
-        .closest("section");
-      expect(section).not.toBeNull();
+  ] as const)("renders the durable %s checkpoint parameters", async (_form, model, rows) => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ ...IDLE, checkpoint: model, revision: "c".repeat(64) }),
+    );
+    renderPanel();
+    const dialog = await openPanel();
+    const section = within(dialog)
+      .getByRole("heading", { name: "Durable checkpoint" })
+      .closest("section");
+    expect(section).not.toBeNull();
 
-      for (const [name, value, unit] of rows) {
-        expect(
-          within(section!).getByRole("row", {
-            name: new RegExp(`^${name} ${value} .*${unit}`),
-          }),
-        ).toBeVisible();
-      }
-      expect(section!).toHaveTextContent(
-        _form === "ipdt" ? "Revision 9" : "Revision 7",
-        { normalizeWhitespace: true },
-      );
-      expect(section!).toHaveTextContent(
-        _form === "ipdt" ? "Identified at: 275 °F" : "Identified at: 250 °F",
-        { normalizeWhitespace: true },
-      );
-    },
-  );
+    for (const [name, value, unit] of rows) {
+      expect(
+        within(section!).getByRole("row", {
+          name: new RegExp(`^${name} ${value} .*${unit}`),
+        }),
+      ).toBeVisible();
+    }
+    expect(section!).toHaveTextContent(_form === "ipdt" ? "Revision 9" : "Revision 7", {
+      normalizeWhitespace: true,
+    });
+    expect(section!).toHaveTextContent(
+      _form === "ipdt" ? "Identified at: 275 °F" : "Identified at: 250 °F",
+      { normalizeWhitespace: true },
+    );
+  });
 
   it("displays backend gate decisions and thresholds without rederiving pass or fail", async () => {
     renderPanel();
@@ -364,9 +338,7 @@ describe("PidSpLearningView", () => {
     expect(alert).toHaveTextContent("live-status-invalid");
     expect(alert).toHaveTextContent("identifier.accepted must be a number");
     expect(alert).toHaveTextContent("recoverable");
-    expect(
-      within(dialog).getByRole("heading", { name: "Durable checkpoint" }),
-    ).toBeVisible();
+    expect(within(dialog).getByRole("heading", { name: "Durable checkpoint" })).toBeVisible();
   });
 
   it("shows an explicit loading state while the first report is pending", async () => {
@@ -393,9 +365,7 @@ describe("PidSpLearningView", () => {
       /start learning/i,
       /pause/i,
     ]) {
-      expect(
-        within(dialog).queryByRole("button", { name }),
-      ).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name })).not.toBeInTheDocument();
     }
     expect(fetchMock.mock.calls).toHaveLength(1);
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
@@ -404,32 +374,20 @@ describe("PidSpLearningView", () => {
   it("keeps the previous report visible on refresh failure and retries in place", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(REPORT))
-      .mockResolvedValueOnce(
-        jsonResponse({ detail: "report temporarily unavailable" }, 503),
-      )
+      .mockResolvedValueOnce(jsonResponse({ detail: "report temporarily unavailable" }, 503))
       .mockResolvedValueOnce(jsonResponse({ ...REPORT, status: "active" }));
     const view = renderPanel({ modelLearningRevision: "socket-a" });
     await openPanel();
     expect(screen.getByText("86.5", { exact: true })).toBeVisible();
 
     view.rerender(
-      <PidSpLearningView
-        apiBase=""
-        selectedController="pid_sp"
-        modelLearningRevision="socket-b"
-      />,
+      <PidSpLearningView apiBase="" selectedController="pid_sp" modelLearningRevision="socket-b" />,
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "report temporarily unavailable",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("report temporarily unavailable");
     expect(screen.getByText("86.5", { exact: true })).toBeVisible();
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Retry PID-SP learning report" }),
-    );
-    expect(
-      await screen.findByRole("button", { name: "PID-SP learning: active" }),
-    ).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Retry PID-SP learning report" }));
+    expect(await screen.findByRole("button", { name: "PID-SP learning: active" })).toBeVisible();
   });
 
   it("polls every five seconds and recovers from an initial failure", async () => {
@@ -441,18 +399,14 @@ describe("PidSpLearningView", () => {
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
-    expect(
-      screen.getByRole("button", { name: "PID-SP learning: error" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "PID-SP learning: error" })).toBeVisible();
 
     await act(async () => {
       await rs.advanceTimersByTimeAsync(5_000);
       await rs.advanceTimersByTimeAsync(1);
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(
-      screen.getByRole("button", { name: "PID-SP learning: evaluating" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "PID-SP learning: evaluating" })).toBeVisible();
   });
 
   it("invalidates on the raw socket revision and fences the superseded response", async () => {
@@ -473,15 +427,9 @@ describe("PidSpLearningView", () => {
     const view = renderPanel({ modelLearningRevision: "wire-old" });
 
     view.rerender(
-      <PidSpLearningView
-        apiBase=""
-        selectedController="pid_sp"
-        modelLearningRevision="wire-new"
-      />,
+      <PidSpLearningView apiBase="" selectedController="pid_sp" modelLearningRevision="wire-new" />,
     );
-    expect(
-      await screen.findByRole("button", { name: "PID-SP learning: active" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "PID-SP learning: active" })).toBeVisible();
 
     await act(async () => {
       resolveFirst?.(
@@ -493,9 +441,7 @@ describe("PidSpLearningView", () => {
       );
       await Promise.resolve();
     });
-    expect(
-      screen.getByRole("button", { name: "PID-SP learning: active" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "PID-SP learning: active" })).toBeVisible();
   });
 
   it("fences a late response when the API base changes", async () => {
@@ -521,9 +467,7 @@ describe("PidSpLearningView", () => {
         modelLearningRevision="socket-a"
       />,
     );
-    expect(
-      await screen.findByRole("button", { name: "PID-SP learning: active" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "PID-SP learning: active" })).toBeVisible();
     expect(oldSignal?.aborted).toBe(true);
 
     await act(async () => {
@@ -536,9 +480,7 @@ describe("PidSpLearningView", () => {
       );
       await Promise.resolve();
     });
-    expect(
-      screen.getByRole("button", { name: "PID-SP learning: active" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "PID-SP learning: active" })).toBeVisible();
   });
 
   it("aborts the report request when the controller changes or the view unmounts", async () => {
@@ -555,20 +497,12 @@ describe("PidSpLearningView", () => {
     });
 
     view.rerender(
-      <PidSpLearningView
-        apiBase=""
-        selectedController="mpc"
-        modelLearningRevision="socket-a"
-      />,
+      <PidSpLearningView apiBase="" selectedController="mpc" modelLearningRevision="socket-a" />,
     );
     expect(signals[0]?.aborted).toBe(true);
 
     view.rerender(
-      <PidSpLearningView
-        apiBase=""
-        selectedController="pid_sp"
-        modelLearningRevision={null}
-      />,
+      <PidSpLearningView apiBase="" selectedController="pid_sp" modelLearningRevision={null} />,
     );
     await act(async () => {
       await Promise.resolve();

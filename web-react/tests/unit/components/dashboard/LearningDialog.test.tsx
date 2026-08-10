@@ -23,9 +23,7 @@ const DEFAULT_PROPS: React.ComponentProps<typeof LearningDialog> = {
 
 afterEach(() => cleanup());
 
-function renderDialog(
-  props: Partial<React.ComponentProps<typeof LearningDialog>> = {},
-) {
+function renderDialog(props: Partial<React.ComponentProps<typeof LearningDialog>> = {}) {
   return render(<LearningDialog {...DEFAULT_PROPS} {...props} />);
 }
 
@@ -44,9 +42,7 @@ describe("LearningDialog", () => {
   it("renders the supplied controller label and normalized status in its pill", () => {
     renderDialog({ status: "  READY_for-review  " });
 
-    expect(
-      screen.getByRole("button", { name: "PID-SP learning: ready for review" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "PID-SP learning: ready for review" })).toBeVisible();
   });
 
   it("moves focus to Close when opened", async () => {
@@ -54,9 +50,7 @@ describe("LearningDialog", () => {
 
     await openDialog();
 
-    expect(
-      screen.getByRole("button", { name: "Close PID-SP adaptation evidence" }),
-    ).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Close PID-SP adaptation evidence" })).toHaveFocus();
   });
 
   it("closes on Escape and restores focus to its trigger", async () => {
@@ -146,9 +140,7 @@ describe("LearningDialog", () => {
     });
 
     expect(dialog).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Loading PID-SP evidence…",
-    );
+    expect(screen.getByRole("status")).toHaveTextContent("Loading PID-SP evidence…");
     expect(screen.getByText("Retained prior estimate")).toBeVisible();
   });
 
@@ -157,13 +149,9 @@ describe("LearningDialog", () => {
     renderDialog({ error: "PID-SP evidence unavailable", onRetry });
     await openDialog();
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "PID-SP evidence unavailable",
-    );
+    expect(screen.getByRole("alert")).toHaveTextContent("PID-SP evidence unavailable");
     expect(screen.getByText("Retained prior estimate")).toBeVisible();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Retry PID-SP evidence" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Retry PID-SP evidence" }));
 
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
@@ -174,12 +162,8 @@ describe("LearningDialog", () => {
       screen.getByRole("button", { name: "PID-SP learning: ready for review" }),
     );
 
-    expect(
-      screen.getByRole("dialog", { name: "PID-SP adaptation evidence" }),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Close PID-SP adaptation evidence" }),
-    ).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "PID-SP adaptation evidence" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Close PID-SP adaptation evidence" })).toBeVisible();
     expect(screen.queryByText(/MPC model learning/i)).not.toBeInTheDocument();
   });
 });

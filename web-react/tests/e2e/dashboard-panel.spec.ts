@@ -600,9 +600,9 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
     await trigger.scrollIntoViewIfNeeded();
     await expect(trigger).toBeVisible();
     await expect(rightColumn).toContainText("PID-SP learning: active");
-    expect(
-      await hopper.evaluate((node) => node.nextElementSibling?.textContent),
-    ).toContain("PID-SP learning: active");
+    expect(await hopper.evaluate((node) => node.nextElementSibling?.textContent)).toContain(
+      "PID-SP learning: active",
+    );
 
     const [rightColumnBox, triggerBox] = await Promise.all([
       rightColumn.boundingBox(),
@@ -628,12 +628,8 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
     await expect(dialog).toBeVisible();
     await expect(title).toBeVisible();
     await expect(close).toBeVisible();
-    await expect(
-      dialog.getByText("Trusted model: ipdt revision 12"),
-    ).toBeVisible();
-    await expect(
-      dialog.getByText("Confirmation progress: 3 of 4"),
-    ).toBeVisible();
+    await expect(dialog.getByText("Trusted model: ipdt revision 12")).toBeVisible();
+    await expect(dialog.getByText("Confirmation progress: 3 of 4")).toBeVisible();
 
     const dialogGeometry = await dialog.evaluate((node) => {
       const rect = node.getBoundingClientRect();
@@ -653,50 +649,30 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
     });
     expect(dialogGeometry.scrimPosition).toBe("fixed");
     expect(dialogGeometry.left).toBeGreaterThanOrEqual(0);
-    expect(dialogGeometry.right).toBeLessThanOrEqual(
-      dialogGeometry.viewportWidth,
-    );
+    expect(dialogGeometry.right).toBeLessThanOrEqual(dialogGeometry.viewportWidth);
     expect(dialogGeometry.top).toBeGreaterThanOrEqual(0);
-    expect(dialogGeometry.bottom).toBeLessThanOrEqual(
-      dialogGeometry.viewportHeight,
-    );
-    expect(dialogGeometry.documentWidth).toBeLessThanOrEqual(
-      dialogGeometry.viewportWidth,
-    );
+    expect(dialogGeometry.bottom).toBeLessThanOrEqual(dialogGeometry.viewportHeight);
+    expect(dialogGeometry.documentWidth).toBeLessThanOrEqual(dialogGeometry.viewportWidth);
 
-    const gates = dialog
-      .getByRole("heading", { name: "Excitation gates" })
-      .locator("..");
-    await expect(
-      gates.getByRole("row", { name: /Accepted samples Met 480 360/ }),
-    ).toBeVisible();
+    const gates = dialog.getByRole("heading", { name: "Excitation gates" }).locator("..");
+    await expect(gates.getByRole("row", { name: /Accepted samples Met 480 360/ })).toBeVisible();
     const checkpoint = dialog
       .getByRole("heading", { name: "Durable checkpoint" })
       .locator("xpath=ancestor::section[1]");
-    await expect(
-      checkpoint.getByRole("row", { name: /K_i 0.043/ }),
-    ).toBeVisible();
+    await expect(checkpoint.getByRole("row", { name: /K_i 0.043/ })).toBeVisible();
 
     if (viewport.width === 800) {
-      expect(dialogGeometry.scrollHeight).toBeGreaterThan(
-        dialogGeometry.clientHeight,
-      );
+      expect(dialogGeometry.scrollHeight).toBeGreaterThan(dialogGeometry.clientHeight);
       const pageScroller = page.locator(".pf-shell-main");
-      const pageScrollBefore = await pageScroller.evaluate(
-        (node) => node.scrollTop,
-      );
-      const dialogScrollBefore = await dialog.evaluate(
-        (node) => node.scrollTop,
-      );
+      const pageScrollBefore = await pageScroller.evaluate((node) => node.scrollTop);
+      const dialogScrollBefore = await dialog.evaluate((node) => node.scrollTop);
       await dialog.hover();
       await page.mouse.wheel(0, 2_000);
       await expect
         .poll(() => dialog.evaluate((node) => node.scrollTop))
         .toBeGreaterThan(dialogScrollBefore);
       const dialogScrollAfter = await dialog.evaluate((node) => node.scrollTop);
-      expect(await pageScroller.evaluate((node) => node.scrollTop)).toBe(
-        pageScrollBefore,
-      );
+      expect(await pageScroller.evaluate((node) => node.scrollTop)).toBe(pageScrollBefore);
 
       const finalSection = dialog.getByRole("heading", {
         name: "Predictor diagnostics",
@@ -711,9 +687,7 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
       expect(finalSectionBox!.y + finalSectionBox!.height).toBeLessThanOrEqual(
         scrolledDialogBox!.y + scrolledDialogBox!.height,
       );
-      await expect(
-        dialog.getByText("Predictor model: ipdt revision 12"),
-      ).toBeVisible();
+      await expect(dialog.getByText("Predictor model: ipdt revision 12")).toBeVisible();
 
       await page.mouse.wheel(0, -2_000);
       await expect
@@ -735,9 +709,9 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
       }
     } else {
       expect(dialogGeometry.clientWidth).toBeGreaterThan(0);
-      expect(
-        await dialog.evaluate((node) => node.scrollWidth),
-      ).toBeLessThanOrEqual(dialogGeometry.clientWidth);
+      expect(await dialog.evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(
+        dialogGeometry.clientWidth,
+      );
       for (const section of [gates, checkpoint]) {
         const columnHeaders = section.getByRole("columnheader");
         expect(await columnHeaders.count()).toBe(4);
@@ -748,9 +722,7 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
           scrollWidth: node.scrollWidth,
         }));
         expect(wrapperGeometry.clientWidth).toBeGreaterThan(0);
-        expect(wrapperGeometry.scrollWidth).toBeLessThanOrEqual(
-          wrapperGeometry.clientWidth,
-        );
+        expect(wrapperGeometry.scrollWidth).toBeLessThanOrEqual(wrapperGeometry.clientWidth);
         const boxes = await columnHeaders.evaluateAll((nodes) =>
           nodes.map((node) => {
             const rect = node.getBoundingClientRect();
@@ -759,24 +731,19 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
         );
         expect(new Set(boxes.map(({ x }) => Math.round(x))).size).toBe(4);
         expect(
-          Math.max(...boxes.map(({ y }) => y)) -
-            Math.min(...boxes.map(({ y }) => y)),
+          Math.max(...boxes.map(({ y }) => y)) - Math.min(...boxes.map(({ y }) => y)),
         ).toBeLessThan(2);
       }
     }
 
-    await expect(
-      dialog.getByRole("button", { name: "Activate exact model" }),
-    ).toHaveCount(0);
-    await expect(
-      dialog.getByRole("button", { name: "Roll back to explicit owner" }),
-    ).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Activate exact model" })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Roll back to explicit owner" })).toHaveCount(
+      0,
+    );
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
     await expect(trigger).toBeFocused();
-    expect(await page.locator('[data-pf="stage"]').innerText()).toBe(
-      dashboardBefore,
-    );
+    expect(await page.locator('[data-pf="stage"]').innerText()).toBe(dashboardBefore);
   }
 });
 
