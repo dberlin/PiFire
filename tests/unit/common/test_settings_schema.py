@@ -27,6 +27,7 @@ from common.settings_schema import (
     SettingsSchema,
     Versions,
 )
+from common.web_contracts.export import SCHEMA_DIRECTORY, render_contract_artifacts
 from common.web_contracts.settings import (
     ModeResponse,
     SettingsResponse,
@@ -248,7 +249,8 @@ def test_migrated_ancient_settings_round_trip(_migration_env):
 
 # ---------------------------------------------------------------------------
 # Drift test: schema committed to web-react/schema/settings.schema.json
-# must match SettingsSchema directly at all times. Flags unintended schema drift.
+# must match the registered exporter, including deterministic TypeScript
+# ownership metadata derived from the Pydantic schema.
 # ---------------------------------------------------------------------------
 
 
@@ -259,8 +261,10 @@ SCHEMA_PATH = Path(__file__).resolve().parents[3] / "web-react" / "schema" / "se
 
 def test_committed_schema_is_current():
     """Fails when the registered exporter has not regenerated settings schema."""
-    committed = json.loads(SCHEMA_PATH.read_text())
-    assert committed == SettingsSchema.model_json_schema()
+    artifact = next(item for item in WEB_ROOT_CONTRACTS if item.name == "settings")
+    generated = render_contract_artifacts()[SCHEMA_DIRECTORY / artifact.schema_output]
+
+    assert SCHEMA_PATH.read_bytes() == generated
 
 
 def test_settings_schema_is_registered_at_its_established_direct_root_path():
