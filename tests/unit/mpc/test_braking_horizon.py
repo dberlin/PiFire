@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from docs.superpowers.experiments import braking_horizon
+from tools.experiments import braking_horizon
 
 
 TARGETS_F = (225, 350, 450)
