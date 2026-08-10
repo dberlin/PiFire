@@ -642,6 +642,7 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
         right: rect.right,
         top: rect.top,
         bottom: rect.bottom,
+        clientWidth: node.clientWidth,
         clientHeight: node.clientHeight,
         scrollHeight: node.scrollHeight,
         scrimPosition: getComputedStyle(node.parentElement!).position,
@@ -684,30 +685,72 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
       const pageScrollBefore = await pageScroller.evaluate(
         (node) => node.scrollTop,
       );
-      const dialogScrollTop = await dialog.evaluate((node) => {
-        node.scrollTop = node.scrollHeight;
-        return node.scrollTop;
-      });
-      expect(dialogScrollTop).toBeGreaterThan(0);
+      const dialogScrollBefore = await dialog.evaluate(
+        (node) => node.scrollTop,
+      );
+      await dialog.hover();
+      await page.mouse.wheel(0, 2_000);
+      await expect
+        .poll(() => dialog.evaluate((node) => node.scrollTop))
+        .toBeGreaterThan(dialogScrollBefore);
+      const dialogScrollAfter = await dialog.evaluate((node) => node.scrollTop);
       expect(await pageScroller.evaluate((node) => node.scrollTop)).toBe(
         pageScrollBefore,
       );
+
       const finalSection = dialog.getByRole("heading", {
         name: "Predictor diagnostics",
       });
-      await finalSection.scrollIntoViewIfNeeded();
-      await expect(finalSection).toBeVisible();
+      const [scrolledDialogBox, finalSectionBox] = await Promise.all([
+        dialog.boundingBox(),
+        finalSection.boundingBox(),
+      ]);
+      expect(scrolledDialogBox).not.toBeNull();
+      expect(finalSectionBox).not.toBeNull();
+      expect(finalSectionBox!.y).toBeGreaterThanOrEqual(scrolledDialogBox!.y);
+      expect(finalSectionBox!.y + finalSectionBox!.height).toBeLessThanOrEqual(
+        scrolledDialogBox!.y + scrolledDialogBox!.height,
+      );
       await expect(
         dialog.getByText("Predictor model: ipdt revision 12"),
       ).toBeVisible();
-      await close.scrollIntoViewIfNeeded();
-      await expect(close).toBeVisible();
-      await title.scrollIntoViewIfNeeded();
-      await expect(title).toBeVisible();
+
+      await page.mouse.wheel(0, -2_000);
+      await expect
+        .poll(() => dialog.evaluate((node) => node.scrollTop))
+        .toBeLessThan(dialogScrollAfter);
+      const [returnedDialogBox, titleBox, closeBox] = await Promise.all([
+        dialog.boundingBox(),
+        title.boundingBox(),
+        close.boundingBox(),
+      ]);
+      expect(returnedDialogBox).not.toBeNull();
+      expect(titleBox).not.toBeNull();
+      expect(closeBox).not.toBeNull();
+      for (const box of [titleBox!, closeBox!]) {
+        expect(box.y).toBeGreaterThanOrEqual(returnedDialogBox!.y);
+        expect(box.y + box.height).toBeLessThanOrEqual(
+          returnedDialogBox!.y + returnedDialogBox!.height,
+        );
+      }
     } else {
+      expect(dialogGeometry.clientWidth).toBeGreaterThan(0);
+      expect(
+        await dialog.evaluate((node) => node.scrollWidth),
+      ).toBeLessThanOrEqual(dialogGeometry.clientWidth);
       for (const section of [gates, checkpoint]) {
         const columnHeaders = section.getByRole("columnheader");
         expect(await columnHeaders.count()).toBe(4);
+        const tableWrapper = section.getByRole("table").locator("..");
+        await expect(tableWrapper).toBeVisible();
+        const wrapperGeometry = await tableWrapper.evaluate((node) => ({
+          clientWidth: node.clientWidth,
+          scrollWidth: node.scrollWidth,
+        }));
+        expect(wrapperGeometry.clientWidth).toBeGreaterThan(0);
+        expect(wrapperGeometry.scrollWidth).toBeLessThanOrEqual(
+          wrapperGeometry.clientWidth,
+        );
         const boxes = await columnHeaders.evaluateAll((nodes) =>
           nodes.map((node) => {
             const rect = node.getBoundingClientRect();
