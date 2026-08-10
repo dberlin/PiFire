@@ -160,8 +160,8 @@ def test_retry_uncontended_case_unchanged():
 def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
     """Regression: an existing pre-fast-follow DB (old blob metrics(id, data)
     table, user_version=1) must be upgraded in place to the columnar schema
-    on next connect, with schema version bumped to 6 (also picking up the
-    psp NUMERIC-affinity history migration and durable model-evidence tables).
+    on next connect, with schema version bumped to 7 (also picking up the
+    psp NUMERIC-affinity history migration and durable model-activation tables).
     In-progress metric loss is expected/acceptable on this one-time upgrade.
     """
     db_path = str(tmp_path / "v1.db")
@@ -179,12 +179,12 @@ def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         cols = {r[1] for r in conn.execute("PRAGMA table_info(metrics)")}
         assert "seq" in cols
         assert "mode" in cols
         assert "data" not in cols
-        # Symmetry with the v2->v6 migration test below: pellet_level_start
+        # Symmetry with the v2->v7 migration test below: pellet_level_start
         # must have NUMERIC affinity (not REAL), so integer values round-trip
         # as ints instead of being coerced to floats.
         affinities = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(metrics)")}
@@ -198,7 +198,7 @@ def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
 def test_metrics_v2_real_affinity_db_migrates_to_numeric(tmp_path):
     """Regression: a DB already upgraded to the columnar schema at v2 (numeric
     metric columns declared REAL) must be rebuilt in place with NUMERIC
-    affinity on next connect, with schema version bumped to 6. REAL affinity
+    affinity on next connect, with schema version bumped to 7. REAL affinity
     silently coerced integer values (e.g. pellet_level_start=87) to floats
     (87.0) on round-trip; NUMERIC affinity fixes that.
     """
@@ -226,7 +226,7 @@ CREATE TABLE metrics (
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         cols = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(metrics)")}
         assert cols["pellet_level_start"] == "NUMERIC"
         assert cols["starttime"] == "NUMERIC"
@@ -236,18 +236,18 @@ CREATE TABLE metrics (
         datastore._reset_for_tests(None)
 
 
-def test_metrics_v6_migration_idempotent(tmp_path):
-    """A fresh DB (schema version 6) must not be touched again on
+def test_metrics_v7_migration_idempotent(tmp_path):
+    """A fresh DB (schema version 7) must not be touched again on
     reconnect (idempotent migration)."""
-    db_path = str(tmp_path / "v6.db")
+    db_path = str(tmp_path / "v7.db")
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         datastore.execute_write("INSERT INTO metrics(id, mode) VALUES ('abc', 'Hold')")
         datastore._reset_for_tests(db_path)  # drop cached connection, keep file
         conn = datastore.connection()  # reconnect -> _ensure_schema runs again
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         # Row must survive: idempotent migration must not re-drop the table.
         assert conn.execute("SELECT mode FROM metrics WHERE id=?", ("abc",)).fetchone()[0] == "Hold"
     finally:
@@ -257,7 +257,7 @@ def test_metrics_v6_migration_idempotent(tmp_path):
 def test_history_v3_real_affinity_db_migrates_to_numeric_preserving_rows(tmp_path):
     """Regression: a DB at schema version 3 (history.psp declared REAL) must
     be rebuilt in place with NUMERIC affinity on next connect, with schema
-    version bumped to 6 -- and, unlike the transient metrics migrations
+    version bumped to 7 -- and, unlike the transient metrics migrations
     above, the existing history rows must be PRESERVED (history is durable).
     Re-storing an existing REAL value (225.0) through the rebuilt NUMERIC
     column must normalize it back to an int (225)."""
@@ -290,7 +290,7 @@ CREATE TABLE history (
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         cols = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(history)")}
         assert cols["psp"] == "NUMERIC"
 
@@ -392,7 +392,7 @@ CREATE TABLE history (
         # A clean reconnect (no injected failure) must complete the migration.
         datastore._reset_for_tests(db_path)  # drop any cached connection, keep the file
         conn2 = datastore.connection()
-        assert conn2.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn2.execute("PRAGMA user_version").fetchone()[0] == 7
         row2 = conn2.execute("SELECT ts, psp, primary_temps FROM history").fetchone()
         assert row2 == (1000, 225, '{"Grill": 225}')
         assert isinstance(row2[1], int)
@@ -400,21 +400,21 @@ CREATE TABLE history (
         datastore._reset_for_tests(None)
 
 
-def test_history_v6_migration_idempotent(tmp_path):
-    """A DB already at schema version 6 must not be touched again on
+def test_history_v7_migration_idempotent(tmp_path):
+    """A DB already at schema version 7 must not be touched again on
     reconnect: history must not be rebuilt/dropped a second time."""
     db_path = tmp_path / "pifire.db"
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         conn.execute(
             "INSERT INTO history(ts, psp, primary_temps, food_temps, aux_temps, notify_targets) "
             "VALUES (2000, 165, '{}', '{}', '{}', '{}')"
         )
         datastore._reset_for_tests(db_path)  # drop cached connection, keep file
         conn = datastore.connection()  # reconnect -> _ensure_schema runs again
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         # Row must survive: idempotent migration must not re-drop the table.
         row = conn.execute("SELECT ts, psp FROM history").fetchone()
         assert row == (2000, 165)

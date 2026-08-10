@@ -78,12 +78,12 @@ class _Estimator:
     def update(self, applied_load, measured_temperature):
         assert applied_load == 0.7
         assert measured_temperature == 100.0
-        return mpc.np.array([1.0, 2.0, 3.0, 4.0])
+        return mpc.np.arange(1.0, 11.0)
 
 
 class _Solver:
     def solve(self, x_hat, *, setpoint_c, q_previous, equilibrium_q):
-        assert tuple(x_hat) == (1.0, 2.0, 3.0, 4.0)
+        assert tuple(x_hat) == tuple(float(value) for value in range(1, 11))
         assert setpoint_c == 120.0
         assert q_previous == 0.7
         assert equilibrium_q == 0.0
@@ -109,12 +109,14 @@ def _bare_mpc_controller():
     core = object.__new__(mpc.Controller)
     core.units = "C"
     core.cfg = {
-        "n_delay": 2,
+        "n_delay": mpc._DEFAULTS["n_delay"],
         "n_horizon": 2,
-        "h_amb": 2.0,
-        "T_amb": 20.0,
-        "sigma": 0.0,
-        "K_Q": 400.0,
+        "C_c": mpc._DEFAULTS["C_c"],
+        "h_amb": mpc._DEFAULTS["h_amb"],
+        "T_amb": mpc._DEFAULTS["T_amb"],
+        "theta": mpc._DEFAULTS["theta"],
+        "sigma": mpc._DEFAULTS["sigma"],
+        "K_Q": mpc._DEFAULTS["K_Q"],
         "fan_min_pct": 40.0,
         "fan_max_pct": 100.0,
         "enable_fan_input": False,
@@ -164,9 +166,9 @@ def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monk
 
     diagnostic = core.trace_diagnostics()
     assert isinstance(diagnostic, MpcTraceDiagnostics)
-    assert diagnostic.state_names == ("q0", "q1", "T_c", "d")
-    assert diagnostic.state_values == (1.0, 2.0, 3.0, 4.0)
-    assert diagnostic.disturbance_estimate == pytest.approx(4.0)
+    assert diagnostic.state_names == ("q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "T_c", "d")
+    assert diagnostic.state_values == tuple(float(value) for value in range(1, 11))
+    assert diagnostic.disturbance_estimate == pytest.approx(10.0)
     assert diagnostic.raw_policy_firing_load == pytest.approx(1.0)
     assert diagnostic.bounded_firing_load == pytest.approx(1.0)
     assert diagnostic.model_revision == 3
