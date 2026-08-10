@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
@@ -31,7 +32,14 @@ export type CommandRequest =
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "GrillMode".
  */
-export type GrillMode = "startup" | "smoke" | "shutdown" | "stop" | "monitor" | "reignite" | "manual";
+export type GrillMode =
+  | "startup"
+  | "smoke"
+  | "shutdown"
+  | "stop"
+  | "monitor"
+  | "reignite"
+  | "manual";
 type Operation = "set_mode";
 type Operation1 = "set_primary_setpoint";
 /**

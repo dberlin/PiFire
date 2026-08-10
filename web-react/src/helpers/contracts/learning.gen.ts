@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
@@ -250,7 +251,13 @@ type SchemaVersion1 = 1;
  * via the `definition` "PidSpLearningStatus".
  */
 export type PidSpLearningStatus =
-  "idle" | "collecting" | "insufficient-excitation" | "evaluating" | "active" | "fallback" | "error";
+  | "idle"
+  | "collecting"
+  | "insufficient-excitation"
+  | "evaluating"
+  | "active"
+  | "fallback"
+  | "error";
 
 export interface PiFireLearningWebContracts {
   [k: string]: unknown | undefined;

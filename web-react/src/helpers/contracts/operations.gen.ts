@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
@@ -66,7 +67,11 @@ type Logs1 = string[];
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "MaintenanceAction".
  */
-export type MaintenanceAction = "clear_history" | "clear_events" | "clear_pelletdb" | "clear_pelletdb_log";
+export type MaintenanceAction =
+  | "clear_history"
+  | "clear_events"
+  | "clear_pelletdb"
+  | "clear_pelletdb_log";
 type ApplyTo = string | null;
 type Name1 = string;
 type Applied = string | null;

@@ -1,11 +1,17 @@
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { compileFromFile } from "json-schema-to-typescript";
 import ts from "typescript";
 
 const SCHEMA_DIRECTORY = "schema/contracts";
 const TYPESCRIPT_DIRECTORY = "src/helpers/contracts";
 const MANIFEST_PATH = join(SCHEMA_DIRECTORY, "manifest.json");
+const WEB_REACT_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const BIOME_EXECUTABLE = join(WEB_REACT_ROOT, "node_modules/.bin/biome");
+const BIOME_CONFIG = join(WEB_REACT_ROOT, "biome.jsonc");
+const BIOME_HEADER =
+  "// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.";
 
 const COMPILER_OPTIONS = {
   additionalProperties: false,
@@ -147,6 +153,35 @@ async function readManifest(): Promise<Record<string, string>> {
   return Object.fromEntries(entries) as Record<string, string>;
 }
 
+async function formatGeneratedTypeScript(generated: string, outputPath: string): Promise<string> {
+  const formatterInput = /\binterface\s+[\w$]+\s*\{\s*\}/.test(generated)
+    ? `${BIOME_HEADER}\n${generated}`
+    : generated;
+  const formatter = Bun.spawn(
+    [
+      BIOME_EXECUTABLE,
+      "format",
+      "--config-path",
+      BIOME_CONFIG,
+      "--stdin-file-path",
+      outputPath,
+    ],
+    {
+      cwd: WEB_REACT_ROOT,
+      stdin: new Blob([formatterInput]),
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const formattedOutput = new Response(formatter.stdout).text();
+  const formatterError = new Response(formatter.stderr).text();
+  const exitCode = await formatter.exited;
+  if (exitCode !== 0) {
+    throw new Error(`Biome failed to format ${outputPath}: ${await formatterError}`);
+  }
+  return lfTerminated(await formattedOutput);
+}
+
 async function atomicWrite(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = `${path}.${process.pid}.tmp`;
@@ -195,8 +230,9 @@ export async function emitWebContracts(check: boolean): Promise<boolean> {
       ? { ...COMPILER_OPTIONS, strictIndexSignatures: false }
       : COMPILER_OPTIONS;
     const compiled = await compileFromFile(schemaPath, compilerOptions);
-    const generated = lfTerminated(
+    const generated = await formatGeneratedTypeScript(
       exposeOwnedDeclarations(compiled, await ownedTypeScriptExports(schemaPath)),
+      outputPath,
     );
 
     if (!check) {

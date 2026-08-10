@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.
 /* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
@@ -105,7 +106,14 @@ type Step = number;
  * via the `definition` "ProbeFieldType".
  */
 export type ProbeFieldType =
-  "list" | "int" | "float" | "string" | "i2c_bus" | "probes_list" | "bt_address" | "usb_serial_device";
+  | "list"
+  | "int"
+  | "float"
+  | "string"
+  | "i2c_bus"
+  | "probes_list"
+  | "bt_address"
+  | "usb_serial_device";
 type ProbeDevices1 = ProbeDevice[];
 type ProbeInfo = Probe[];
 type AptDependencies = string[];

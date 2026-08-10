@@ -133,3 +133,60 @@ def test_typescript_write_removes_nested_unexpected_generated_files(tmp_path):
     assert write_result.returncode == 0, write_result.stderr
     assert not unexpected.exists()
     assert check_result.returncode == 0, check_result.stderr
+
+
+def test_typescript_output_is_biome_clean(tmp_path):
+    manifest_path = tmp_path / "schema/contracts/manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text('{"lint.schema.json": "lint.gen.ts"}\n', encoding="utf-8")
+    schema = {
+        "$defs": {
+            "Empty": {
+                "additionalProperties": False,
+                "properties": {},
+                "type": "object",
+            },
+            "LongMode": {
+                "enum": [
+                    "insufficient-excitation",
+                    "operator-calibration",
+                    "ready-for-review",
+                    "accepted-next-cook",
+                    "checkpoint-failure",
+                ],
+                "type": "string",
+            },
+        },
+        "title": "PiFire lint web contracts",
+        "x-pifire-typescript-exports": ["Empty", "LongMode"],
+    }
+    (manifest_path.parent / "lint.schema.json").write_text(
+        json.dumps(schema),
+        encoding="utf-8",
+    )
+    repository_root = Path(__file__).resolve().parents[4]
+    emitter = repository_root / "web-react/scripts/emitWebContracts.ts"
+    generated = tmp_path / "src/helpers/contracts/lint.gen.ts"
+
+    write_result = subprocess.run(
+        ["bun", str(emitter), "--write"],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    biome_result = subprocess.run(
+        [
+            str(repository_root / "web-react/node_modules/.bin/biome"),
+            "check",
+            "--config-path",
+            str(repository_root / "web-react/biome.jsonc"),
+            str(generated),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert write_result.returncode == 0, write_result.stderr
+    assert biome_result.returncode == 0, biome_result.stdout + biome_result.stderr
