@@ -27,6 +27,21 @@ IGNORED_PARTS = frozenset(
     }
 )
 SYS_PATH_MUTATORS = frozenset({"append", "clear", "extend", "insert", "pop", "remove", "reverse", "sort"})
+AUGMENTED_OPERATOR_TOKENS: dict[type[ast.operator], str] = {
+    ast.Add: "+=",
+    ast.Sub: "-=",
+    ast.Mult: "*=",
+    ast.MatMult: "@=",
+    ast.Div: "/=",
+    ast.Mod: "%=",
+    ast.Pow: "**=",
+    ast.LShift: "<<=",
+    ast.RShift: ">>=",
+    ast.BitOr: "|=",
+    ast.BitXor: "^=",
+    ast.BitAnd: "&=",
+    ast.FloorDiv: "//=",
+}
 
 
 def _sources() -> list[Path]:
@@ -86,8 +101,8 @@ def _mutates_sys_path(path: Path) -> list[str]:
                 violations.append(f"{relative_path}:{node.lineno}:{action} =")
         elif isinstance(node, ast.AugAssign):
             if _sys_path_target(node.target):
-                action = ast.unparse(node)
-                violations.append(f"{relative_path}:{node.lineno}:{action[: action.index('=') + 1]}")
+                action = f"{ast.unparse(node.target)} {AUGMENTED_OPERATOR_TOKENS[type(node.op)]}"
+                violations.append(f"{relative_path}:{node.lineno}:{action}")
         elif isinstance(node, ast.Delete):
             for target in node.targets:
                 if action := _sys_path_target(target):
@@ -133,6 +148,19 @@ def test_direct_sys_path_mutator_is_reported(
         ("sys.path = []", "sys.path ="),
         ("sys.path: list[str] = []", "sys.path ="),
         ("sys.path += []", "sys.path +="),
+        ("sys.path -= []", "sys.path -="),
+        ("sys.path *= 2", "sys.path *="),
+        ("sys.path @= []", "sys.path @="),
+        ("sys.path /= 2", "sys.path /="),
+        ("sys.path %= 2", "sys.path %="),
+        ("sys.path **= 2", "sys.path **="),
+        ("sys.path <<= 2", "sys.path <<="),
+        ("sys.path >>= 2", "sys.path >>="),
+        ("sys.path |= []", "sys.path |="),
+        ("sys.path ^= []", "sys.path ^="),
+        ("sys.path &= []", "sys.path &="),
+        ("sys.path //= 2", "sys.path //="),
+        ('sys.path[(index := 0)] += ["probe"]', "sys.path[(index := 0)] +="),
         ('sys.path[0] = "probe"', "sys.path[0] ="),
         ('sys.path[:] = ["probe"]', "sys.path[:] ="),
     ],
