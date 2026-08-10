@@ -193,6 +193,12 @@ function pidSpReport(): PidSpLearningReport {
     revision: 12,
     identified_at_f: 250,
   };
+  const predictorModel = {
+    form: "ipdt" as const,
+    K_i: 0.043,
+    c0: -0.006,
+    theta: 18,
+  };
   return {
     schema_version: 1,
     controller: "pid_sp",
@@ -262,7 +268,7 @@ function pidSpReport(): PidSpLearningReport {
       xd: 252.1,
       residual_streak: 0,
       truncated: 1,
-      model: trusted,
+      model: predictorModel,
     },
     checkpoint: {
       form: "ipdt",
@@ -687,7 +693,7 @@ test("PID-SP learning stays reachable and controller-authored at both target siz
       expect(finalSectionBox!.y + finalSectionBox!.height).toBeLessThanOrEqual(
         scrolledDialogBox!.y + scrolledDialogBox!.height,
       );
-      await expect(dialog.getByText("Predictor model: ipdt revision 12")).toBeVisible();
+      await expect(dialog.getByText("Predictor model: ipdt", { exact: true })).toBeVisible();
 
       await page.mouse.wheel(0, -2_000);
       await expect
