@@ -180,3 +180,42 @@ The handwritten learning DTO files are deleted, all direct consumers import gene
 ## Concerns
 
 No known Critical or Important Task 4 defect remains. Full repository TypeScript typecheck is intentionally deferred solely for the concurrent Task 8 integration described above.
+
+## Fix round 1: absent PID-SP checkpoint provenance
+
+Implementation commit: `427a255c` (`tqqnlynp`)
+
+RED:
+
+```bash
+uv run pytest -q tests/web/test_api_pid_sp_learning.py::test_report_route_omits_absent_checkpoint_provenance
+```
+
+```text
+FAILED: response checkpoint contained {"identified_at_f": None}
+1 failed in 3.51s
+```
+
+GREEN, run from a clean Jujutsu workspace at the fix commit because the shared working copy contained the intentionally incomplete concurrent registry/core integration:
+
+```bash
+uv run pytest -q tests/unit/controller/test_pid_sp_learning.py tests/web/test_api_pid_sp_learning.py
+```
+
+```text
+77 passed in 6.44s
+```
+
+Strict frontend decoder regression:
+
+```bash
+bunx rstest run tests/unit/helpers/pidSpLearningApi.test.ts
+```
+
+```text
+Test Files 1 passed
+Tests 36 passed
+Duration 248ms
+```
+
+The backend now omits `identified_at_f` when a valid legacy/current checkpoint has no provenance. The retained strict decoder continues to reject a present `identified_at_f: null`.
