@@ -90,6 +90,7 @@ class CookFileCommentUpdateRequest(FileRequest):
 class CookFileCommentDeleteRequest(FileRequest):
     action: Literal["delete"]
     id: str
+    text: str = ""
 
 
 class CookFileCommentAssetsRequest(FileRequest):

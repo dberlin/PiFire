@@ -97,6 +97,29 @@ def test_unknown_comment_id_is_404_not_a_false_success(client, folders, action):
     assert resp.get_json()["message"] == "comment_not_found"
 
 
+def test_delete_comment_accepts_legacy_text_but_rejects_unrelated_extras(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Strict-Delete-Cook")
+
+    resp = client.post(
+        URL,
+        json={
+            "file": name,
+            "action": "delete",
+            "id": "nope",
+            "text": "legacy form value",
+            "future": True,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "result": "Error",
+        "message": "bad_request",
+        "data": {"field": "future"},
+    }
+
+
 def test_comment_on_an_unreadable_file_is_422_not_a_crash(client, folders):
     """The legacy `comments` branch reads without checking status and then does
     cookfiledata.append(...) on a dict -- AttributeError -> HTTP 500."""

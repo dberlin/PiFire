@@ -288,6 +288,11 @@
         "id": {
           "title": "Id",
           "type": "string"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
         }
       },
       "required": [

@@ -63,10 +63,11 @@ type Id2 = string;
 type Action1 = "delete";
 type File2 = string;
 type Id3 = string;
+type Text2 = string;
 type Action2 = "update";
 type File3 = string;
 type Id4 = string;
-type Text2 = string;
+type Text3 = string;
 type Assets4 = CookFileAsset[];
 type Comments = CookFileComment[];
 type EventTotals = CookFileTotals | EmptyCookFileTotals;
@@ -128,7 +129,7 @@ type Quantity = string;
 type Assets7 = string[];
 type Ingredients = string[];
 type Step = number;
-type Text3 = string;
+type Text4 = string;
 type AugerontimeC1 = string;
 type EndtimeC1 = string | 0;
 type EstusageI2 = string;
@@ -196,7 +197,7 @@ type File16 = string;
 type Index4 = number;
 type Ingredients2 = string[];
 type Step1 = number;
-type Text4 = string;
+type Text5 = string;
 type Author1 = string;
 type CookTime1 = number;
 type Description1 = string;
@@ -403,6 +404,7 @@ export interface CookFileCommentDeleteRequest {
   action: Action1;
   file: File2;
   id: Id3;
+  text?: Text2;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -412,7 +414,7 @@ export interface CookFileCommentUpdateRequest {
   action: Action2;
   file: File3;
   id: Id4;
-  text: Text2;
+  text: Text3;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -645,7 +647,7 @@ export interface Instruction {
   assets: Assets7;
   ingredients: Ingredients;
   step: Step;
-  text: Text3;
+  text: Text4;
   [k: string]: unknown | undefined;
 }
 /**
@@ -830,7 +832,7 @@ export interface RecipeInstructionUpdateRequest {
   index: Index4;
   ingredients: Ingredients2;
   step: Step1;
-  text: Text4;
+  text: Text5;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
