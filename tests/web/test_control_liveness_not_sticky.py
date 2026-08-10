@@ -91,11 +91,15 @@ def _socket_tick(consumers):
 
     settings = read_settings_store()
     pelletdb = read_pellets_store()
-    # The probe assembly needs a control-runtime-seeded `current`, which this
-    # harness deliberately lacks; stub it out. The errors composition under
-    # test happens in _get_dash_data itself, not in the probe helpers.
+    # Keep probe assembly out of this liveness test, but use the real wire
+    # structure rather than invalid empty dicts now that the producer validates
+    # every frame against DashSocketPayload.
+    def probe_payloads(probe_type, *_args):
+        count = 1 if probe_type == "Primary" else 4
+        return [consumers.sio._get_probe_structure(probe_type, settings) for _ in range(count)]
+
     with (
-        mock.patch.object(consumers.sio, "_get_probe_data", return_value=[{}, {}, {}, {}]),
+        mock.patch.object(consumers.sio, "_get_probe_data", side_effect=probe_payloads),
         mock.patch.object(consumers.sio, "read_current", return_value=[[], [], []]),
     ):
         return consumers.sio._get_dash_data(settings, pelletdb)
