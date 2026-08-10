@@ -11,11 +11,12 @@ Source-wave commits integrated:
 - Task 5: `0e16235661e16e2f952b0c044eacc08d773115f3`
 - Task 6: `1fb4d14491b1351765f22c73b56c8723ed8d8b6e`, review fix `055868c60780f4d631ed0b47a5f583da0fe1768a`
 - Task 7: `1f8b4412` (the source report records the abbreviated commit ID)
-- Task 8: `cff915caeba5112bda99a4de79a83555c5b9d7b6`, review fix `3698076cc53a813d88b828a12294d038421b1cb6`, branch-validation fix `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8`, evidence report `2cc28f5841909a85b49d668e750dc851eb17662d`
+- Task 8: `cff915caeba5112bda99a4de79a83555c5b9d7b6`, review fix `3698076cc53a813d88b828a12294d038421b1cb6`, branch-validation fix `af5f2b62137b72d836a5e4e0eba004d7b0ae7eb8`, evidence report `2cc28f5841909a85b49d668e750dc851eb17662d`, idle-null fix `c934e5f9628969713b99dea6e1577f35e50f72dd`
 
 Serialized integration/fix commit:
 
 - `5f956d2b44cb4c10722c85699cec38ac1e409607` — `fix(web-contracts): integrate parallel contract bundles`
+- `f33662faaad0394a265590ff9dea7717b3b1573e` — `build(web-contracts): regenerate idle updater status`
 
 The report commit is recorded in the final response because a commit cannot contain its own final immutable ID.
 
@@ -38,6 +39,7 @@ One `bun run gen:types` invocation wrote all registered schema, TypeScript, defa
 - Preserved generated optional dictionary semantics in content/operations consumers with source-level narrowing and explicit finite-entry filtering.
 - Corrected operations coefficient validation to require High/Medium/Low exactly once and made Pydantic error locations map to the public response field.
 - Validated updater branch-request JSON before settings reads or update discovery, so malformed, non-object, and extra-bearing requests cannot trigger discovery side effects.
+- Preserved the updater's valid idle `null` values for `percent`, `status`, and `output`, guarded the nullable percentage in `UpdatePage`, and regenerated `operations.schema.json`/`operations.gen.ts` from Pydantic.
 - The first browser attempts were invalid because no live PiFire backend was running. The canonical README commands (`uv run python control.py` and the gunicorn app) were started, `/api/current` was observed, and the complete 53-test focused invocation then passed. This was an environment prerequisite, not a product-code failure.
 
 ## Exact verification evidence
@@ -48,10 +50,10 @@ One `bun run gen:types` invocation wrote all registered schema, TypeScript, defa
 - `uv run pytest -q tests/web/test_api_wizard.py tests/web/test_api_probe_map.py` — **89 passed**.
 - `python -m pytest -q tests/web/test_api_files_listing.py tests/web/test_api_files_cookfile_read.py tests/web/test_api_files_cookfile_write.py tests/web/test_api_files_cookfile_comments.py tests/web/test_api_files_cookfile_assets.py tests/web/test_api_files_recipes_read.py tests/web/test_api_files_recipes_write.py tests/web/test_api_files_recipes_assets.py tests/web/test_api_history.py tests/web/test_api_metrics.py` — **246 passed**.
 - `python -m pytest -q tests/unit/common/web_contracts/test_content.py` — **5 passed**.
-- `uv run pytest -q tests/web/test_api_admin_system.py tests/web/test_api_admin_backups.py tests/web/test_api_admin_maintenance.py tests/web/test_api_admin_log_families.py tests/web/test_api_update.py tests/web/test_api_tuner.py tests/web/test_api_tuner_auto.py` — **151 passed** after the branch-validation fix.
+- `uv run pytest -q tests/web/test_api_admin_system.py tests/web/test_api_admin_backups.py tests/web/test_api_admin_maintenance.py tests/web/test_api_admin_log_families.py tests/web/test_api_update.py tests/web/test_api_tuner.py tests/web/test_api_tuner_auto.py` — **152 passed** after the branch-validation and idle-null fixes.
 - `uv run pytest -q tests/unit/common/web_contracts/test_operations.py` — **11 passed**.
 
-Total executed focused Python assertions: **742 passed**.
+Total executed focused Python assertions: **743 passed**.
 
 ### Focused Rstest
 
@@ -74,8 +76,7 @@ The Task 6 helper tests are intentionally present in both exact deferred command
 With the canonical live backend and control loop running:
 
 `cd web-react && bunx playwright test tests/e2e/pellets.spec.ts tests/e2e/notify.spec.ts tests/e2e/wled-editor.spec.ts tests/e2e/wizard.spec.ts tests/e2e/probes.spec.ts tests/e2e/cookfiles.spec.ts tests/e2e/recipes.spec.ts tests/e2e/history.spec.ts tests/e2e/metrics.spec.ts tests/e2e/admin.spec.ts tests/e2e/update.spec.ts tests/e2e/tuner.spec.ts tests/e2e/events.spec.ts`
-
-Result: **53 passed in 41.0s** using one worker.
+Result: **53 passed in 41.0s** using one worker. After the final idle-null fix, `bunx playwright test tests/e2e/update.spec.ts` was rerun against the reloaded live backend: **1 passed**.
 
 ### Focused formatting
 
@@ -150,6 +151,9 @@ Subsequent Task 8 branch-validation fix:
 
 - `blueprints/api_update/routes.py`
 - `tests/web/test_api_update.py`
+- `common/web_contracts/operations.py`
+- `tests/unit/common/web_contracts/test_operations.py`
+- `web-react/src/components/update/UpdatePage.tsx`
 
 Report path:
 
