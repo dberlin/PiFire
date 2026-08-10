@@ -10,6 +10,8 @@ Review-fix commit: `bebd9c25689213f2d6781740697ccf3d6a35486c` (`qqxprkxlvwmtxply
 
 Source-parity fix commit: `686aee526138be186d17a6ac742f02de1a8eedb7` (`mkuqxmnmnkruqtzmmnyluvmskpuykwnr`) — `fix(contracts): derive ownership from frontend calls`.
 
+Dynamic-source fix commit: `25c02efb717359ece43a20ce3a01444fd161ec86` (`oqtzpwsklsqwvlxnvywploumpxmslmym`) — `fix(contracts): derive finite dynamic endpoints`.
+
 ## Ownership enforcement
 
 - Added `JSON_WEB_CONTRACT_INVENTORY` with HTTP and Socket.IO request/response model ownership across `content`, `control`, `controller`, `core`, `learning`, `operations`, `settings`, and `wizard`.
@@ -93,6 +95,21 @@ POST /api/files/cookfiles/assets/delete: JSON body has no concrete request model
 
 The fix removed `src/helpers/jsonWebEndpoints.json`. `scripts/extractWebTransports.ts` now derives JSON endpoints, Socket.IO events, multipart bodies, byte downloads, text/range streams, and browser-file usage from frontend source. It catches the real `POST /api/files/cookfiles/assets/upload` path and extracts JSON body fields for parity with registered request models. A same-name `AdminState` view probe now passes outside wire use, while the same declaration fails when used as a `response.json()` body.
 
+A third review found that the extractor discarded the real dynamic `fetchFileListing()` URL and substituted a filename-triggered cookfiles/recipes list. A strict RED mutation added `"snapshots"` to `FileKind`:
+
+```text
+derives finite file-listing endpoints from the URL template and FileKind domain
+expected [ "GET /api/files/cookfiles", ... ] to deeply equal [
+  "GET /api/files/cookfiles",
+  "GET /api/files/recipes",
+  "GET /api/files/snapshots"
+]
+Tests 1 failed | 6 skipped
+EXIT=1
+```
+
+The permanent probe also rewrites the template from `/api/files/${kind}` to `/api/archive/${kind}` and requires the extracted endpoints to change accordingly. The extractor now reads finite string-union domains, resolves a template identifier to its typed function parameter, expands the Cartesian route values from the actual template, and has no filename-based listing fallback.
+
 ## Removed declarations and retired paths
 
 Removed handwritten declarations:
@@ -124,7 +141,7 @@ The source-parity fix also removed the handwritten `web-react/src/helpers/jsonWe
 
 ```text
 uv run pytest -q tests/unit/common/web_contracts/test_inventory.py
-10 passed in 2.85s
+10 passed in 2.80s
 EXIT=0
 ```
 
@@ -138,7 +155,7 @@ EXIT=0
 cd web-react
 bunx rstest run tests/unit/helpers/generatedContracts.test.ts
 Test Files 1 passed
-Tests 6 passed
+Tests 7 passed
 EXIT=0
 ```
 
