@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { ProfileFields } from "../../helpers/pellets/pelletsApi";
-import type { PelletProfile } from "../../helpers/pellets/pelletTypes";
+import type { PelletDatabasePayload } from "../../helpers/contracts/core.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { Select } from "../settings/fields/Select";
 
 interface Props {
-  archive: Record<string, PelletProfile>;
+  archive: PelletDatabasePayload["archive"];
   brands: string[];
   woods: string[];
   currentId: string;
@@ -28,9 +28,10 @@ const sortValues = (values: string[]) => [...values].sort((a, b) => a.localeComp
 
 /** One draft per profile id, derived from the archive. Module-level and pure
     so it can be used both to initialise state and to re-seed it during render. */
-function seed(archive: Record<string, PelletProfile>): Record<string, ProfileFields> {
+function seed(archive: PelletDatabasePayload["archive"]): Record<string, ProfileFields> {
   const drafts: Record<string, ProfileFields> = {};
   for (const [id, p] of Object.entries(archive)) {
+    if (!p) continue;
     drafts[id] = {
       brand_name: p.brand,
       wood_type: p.wood,
@@ -183,6 +184,7 @@ export function ProfileEditor({
 
         {ids.map((id) => {
           const profile = archive[id];
+          if (!profile) return null;
           const label = `${profile.brand} ${profile.wood}`;
           const draft = drafts[id];
           const isCurrent = id === currentId;

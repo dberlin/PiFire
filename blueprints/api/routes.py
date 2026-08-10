@@ -3,6 +3,7 @@ import math
 import logging
 import time
 
+from pydantic import ValidationError
 from flask import Response, abort, jsonify, request
 from common.common import WriteKind, write_log, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
@@ -40,6 +41,13 @@ from common.modes import Mode
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings_pairs
 from common.controller_deps import guard_controller_selection
+from common.web_contracts.core import (
+    CommandResponse,
+    ControlHealthResponse,
+    DismissWarningsRequest,
+    DismissWarningsResponse,
+    MpcCalibrationCommandResponse,
+)
 from controller.model_learning.activation import (
     ActivationManager,
     ActivationRequest,
@@ -744,19 +752,32 @@ def _api_post_dismiss_warnings(settings, request_json):
     (socket_dash_data's warningsMaxId), so a warning written between that
     payload and the click keeps a larger id and survives the clear.
     """
-    through_id = request_json.get("through_id")
-    # bool is an int subclass, so it has to be excluded explicitly or True
-    # would silently clear id 1.
-    if isinstance(through_id, bool) or not isinstance(through_id, int):
-        return jsonify(api_response("ERROR", "through_id must be an integer.")), 400
-    clear_warnings_through(through_id)
-    return jsonify(api_response("OK", "Warnings dismissed.")), 200
+    try:
+        request_payload = DismissWarningsRequest.model_validate(request_json, strict=True)
+    except ValidationError:
+        response = DismissWarningsResponse(
+            result="ERROR",
+            message="through_id must be an integer.",
+            data=None,
+        )
+        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_none=False)), 400
+    clear_warnings_through(request_payload.through_id)
+    response = DismissWarningsResponse(
+        result="OK",
+        message="Warnings dismissed.",
+        data=None,
+    )
+    return jsonify(response.model_dump(mode="json", by_alias=True, exclude_none=False)), 200
 
 
 def _api_post_mpc_calibration(settings, request_json):
     """Dispatch the body-only calibration command through the standard command guard."""
     data = process_command("set", ["mpc_calibration", request_json], origin="api")
-    return jsonify(data), 201 if data["result"] == "OK" else 400
+    response = MpcCalibrationCommandResponse.model_validate(data, strict=True)
+    return (
+        jsonify(response.model_dump(mode="json", by_alias=True, exclude_none=False)),
+        201 if response.result == "OK" else 400,
+    )
 
 
 _API_POST_ACTIONS = {
@@ -805,6 +826,18 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
         if action == "sys":
             """ If system command, wait for output from control """
             data = get_system_command_output(requested=arg0)
+        if action in {"set", "cmd"}:
+            data = CommandResponse.model_validate(data, strict=True).model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=False,
+            )
+        elif action == "sys" and arg0 == "check_alive":
+            data = ControlHealthResponse.model_validate(data, strict=True).model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=False,
+            )
 
         return jsonify(data), 201
 

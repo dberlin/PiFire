@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { buildCommandUrl, createCommand } from "../../../src/helpers/command";
+import type { CommandResponse } from "../../../src/helpers/contracts/core.gen";
+
+const OK_COMMAND_RESPONSE = {
+  result: "OK",
+  message: "",
+  data: {},
+} satisfies CommandResponse;
 
 describe("buildCommandUrl", () => {
   it("joins base + /api + segments", () => {
@@ -15,7 +22,7 @@ describe("createCommand issues the right URLs", () => {
   beforeEach(() => {
     fetchMock = rs.fn(async () => ({
       ok: true,
-      json: async () => ({ result: "OK", message: "", data: {} }),
+      json: async () => OK_COMMAND_RESPONSE,
     }));
     rs.stubGlobal("fetch", fetchMock);
   });

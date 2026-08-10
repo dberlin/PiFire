@@ -5,13 +5,13 @@ import {
   recipeLabel,
 } from "../../../../src/helpers/dashboard/countdowns";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const NOW = 1_700_000_000;
 
-const at = (over: Partial<LiveState> = {}): LiveState => ({ ...FIXTURE_DASH, ...over });
+const at = (over: Partial<DashSocketPayload> = {}): DashSocketPayload => ({ ...FIXTURE_DASH, ...over });
 
-const inRecipe = (over: Partial<LiveState> = {}): LiveState =>
+const inRecipe = (over: Partial<DashSocketPayload> = {}): DashSocketPayload =>
   at({ recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true }, ...over });
 
 describe("modeCountdown", () => {

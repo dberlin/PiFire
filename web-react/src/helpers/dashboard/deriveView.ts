@@ -1,4 +1,4 @@
-import type { LiveState, ProbeStatus } from "../types";
+import type { DashSocketPayload, ProbeStatusPayload } from "../contracts/core.gen"
 import {
   type BatteryBadge,
   batteryBadge,
@@ -50,7 +50,7 @@ export function staleLabel(seconds: number): string {
  *  null only for a probe that has produced nothing at all. */
 export function reading(
   temp: number | null,
-  status: ProbeStatus,
+  status: ProbeStatusPayload,
 ): { shown: number | null; stale: string | null } {
   if (temp !== null) return { shown: temp, stale: null };
   const last = status.lastTemp;
@@ -155,7 +155,7 @@ function outputView(on: boolean, onColor: string, onStatus: string): OutputView 
   };
 }
 
-function probeCard(fp: LiveState["foodProbes"][number], units: "F" | "C"): ProbeCardView {
+function probeCard(fp: DashSocketPayload["foodProbes"][number], units: "F" | "C"): ProbeCardView {
   const hasTarget = fp.target > 0 && fp.targetReq;
   const { shown, stale } = reading(fp.temp, fp.status);
   // Progress is measured against whatever the card is showing: a stale reading
@@ -200,7 +200,7 @@ function hopperView(level: number): HopperView {
   };
 }
 
-export function deriveView(dash: LiveState): DashView {
+export function deriveView(dash: DashSocketPayload): DashView {
   const mode = dash.currentMode || "Stop";
   const cooking = COOKING_MODES.has(mode);
   const units = dash.tempUnits;

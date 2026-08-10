@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { PelletDb } from "../../../../src/helpers/pellets/pelletTypes";
+import type { PelletDatabasePayload } from "../../../../src/helpers/contracts/core.gen"
 
 const useShellStateMock = rs.fn();
 rs.mock("../../../../src/helpers/shellContext", () => ({
@@ -45,7 +45,7 @@ const { PelletsPage } = await import("../../../../src/components/pellets/Pellets
 const LOG_KEY = "1785013200000";
 const LOG_LABEL = `Delete log entry ${new Date(Number(LOG_KEY)).toLocaleString()}`;
 
-const DB: PelletDb = {
+const DB: PelletDatabasePayload = {
   schema_version: 2,
   current: {
     pelletid: "p1",
@@ -63,12 +63,12 @@ const DB: PelletDb = {
   lastupdated: { time: 1785000000 },
 };
 
-function mount(pellets: PelletDb | null, live: { hopperLevel: number; tempUnits: "F" | "C" }) {
+function mount(pellets: PelletDatabasePayload | null, live: { hopperLevel: number; tempUnits: "F" | "C" }) {
   useShellStateMock.mockReturnValue({ live, pellets });
   render(<PelletsPage />);
 }
 
-const mountDb = (pellets: PelletDb | null = DB) =>
+const mountDb = (pellets: PelletDatabasePayload | null = DB) =>
   mount(pellets, { hopperLevel: 62, tempUnits: "F" });
 
 /** Expand a profile's collapse so its Save/Delete buttons exist. */

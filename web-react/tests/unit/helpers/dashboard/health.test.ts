@@ -1,12 +1,35 @@
-import { describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   clampSetpoint,
   deriveControlAlive,
   setpointRange,
 } from "../../../../src/helpers/dashboard/health";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
+import type { ControlHealthResponse } from "../../../../src/helpers/contracts/core.gen";
+import { recheckControl } from "../../../../src/helpers/dashboard/controlHealth";
+
+afterEach(() => {
+  rs.unstubAllGlobals();
+});
 
 const CONTROL_DOWN = "The control process did not respond to a request and may be stopped.";
+
+describe("recheckControl", () => {
+  it("uses the generated health response and accepts only OK", async () => {
+    const response = {
+      command: ["check_alive", null, null, null],
+      result: "OK",
+      message: null,
+      data: {},
+    } satisfies ControlHealthResponse;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(JSON.stringify(response), { status: 200 })),
+    );
+
+    await expect(recheckControl("http://pi:5000")).resolves.toBe(true);
+  });
+});
 
 describe("deriveControlAlive", () => {
   it("true when no control-down error present", () => {

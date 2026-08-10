@@ -1,4 +1,4 @@
-import type { ProbeStatus } from "../types";
+import type { ProbeStatusPayload } from "../contracts/core.gen"
 
 // The two per-probe badges the Flask card carries and this port declared in its
 // types but never read: link state and battery level
@@ -17,7 +17,7 @@ export interface ConnectionBadge {
   tone: "ok" | "off";
 }
 
-export function connectionBadge(status: ProbeStatus | undefined): ConnectionBadge | null {
+export function connectionBadge(status: ProbeStatusPayload | undefined): ConnectionBadge | null {
   if (status === undefined || !("connected" in status)) return null;
   return status.connected === true
     ? { label: "Connected", tone: "ok" }
@@ -31,7 +31,7 @@ export interface BatteryBadge {
   level: 0 | 1 | 2 | 3;
 }
 
-export function batteryBadge(status: ProbeStatus | undefined): BatteryBadge | null {
+export function batteryBadge(status: ProbeStatusPayload | undefined): BatteryBadge | null {
   if (status === undefined || !("batteryPercentage" in status)) return null;
   const raw = status.batteryPercentage;
   if (raw === null || raw === undefined || typeof raw !== "number" || Number.isNaN(raw)) {

@@ -1,11 +1,11 @@
 import { useState } from "react";
-import type { PelletLogEntry, PelletProfile } from "../../helpers/pellets/pelletTypes";
+import type { PelletDatabasePayload } from "../../helpers/contracts/core.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { Rating } from "./Rating";
 
 interface Props {
-  log: Record<string, PelletLogEntry>;
-  archive: Record<string, PelletProfile>;
+  log: PelletDatabasePayload["log"];
+  archive: PelletDatabasePayload["archive"];
   busy: boolean;
   onDelete(key: string): void;
 }
@@ -40,6 +40,7 @@ export function PelletLog({ log, archive, busy, onDelete }: Props) {
         <table className="pf-devices-table">
           <tbody>
             {rows.map(([key, entry]) => {
+              if (!entry) return null;
               const profile = entry.pelletid === null ? undefined : archive[entry.pelletid];
               const when = formatKey(key);
               return (

@@ -1,11 +1,11 @@
 import { useState } from "react";
-import type { PelletDb, PelletProfile } from "../../helpers/pellets/pelletTypes";
+import type { PelletDatabasePayload, PelletProfilePayload } from "../../helpers/contracts/core.gen";
 import { formatUsage } from "../../helpers/pellets/usage";
 import { Select } from "../settings/fields/Select";
 import { Rating } from "./Rating";
 
 interface Props {
-  db: PelletDb;
+  db: PelletDatabasePayload;
   hopperLevel: number;
   tempUnits: "F" | "C";
   busy: boolean;
@@ -31,7 +31,7 @@ export function CurrentLoadCard({
   // May be undefined: current.pelletid can point at a profile that was
   // removed (or at nothing, on a cleared DB). The Jinja at index.html:47
   // would 500 here; this renders "No profile loaded".
-  const loaded: PelletProfile | undefined = db.archive[db.current.pelletid];
+  const loaded: PelletProfilePayload | undefined = db.archive[db.current.pelletid];
   const usage = formatUsage(db.current.est_usage);
   const [picking, setPicking] = useState(false);
 
@@ -115,10 +115,13 @@ export function CurrentLoadCard({
               label="Profile to load"
               value={choice}
               onChange={setChoice}
-              options={ids.map((id) => ({
-                value: id,
-                label: `${db.archive[id].brand} ${db.archive[id].wood}`,
-              }))}
+              options={ids.map((id) => {
+                const profile = db.archive[id];
+                return {
+                  value: id,
+                  label: profile ? `${profile.brand} ${profile.wood}` : id,
+                };
+              })}
             />
             <div className="pf-modal-actions">
               <button className="pf-modal-btn" onClick={() => setPicking(false)}>

@@ -15,7 +15,7 @@ import type { PidSpLearningReport } from "../../../../src/helpers/pidSpLearning/
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 // renderRoute() mounts AppPrefsProvider, which now reads settings itself
 // (AppPrefs.tsx) -- unmocked, that call would land on the same global `fetch`
@@ -149,7 +149,7 @@ function makeCommand(): CommandClient {
 }
 
 function renderDashboard(
-  dash: LiveState,
+  dash: DashSocketPayload,
   overrides: Partial<Parameters<typeof Dashboard>[0]> = {},
 ) {
   return renderRoute(

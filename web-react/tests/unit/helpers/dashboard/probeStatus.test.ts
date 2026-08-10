@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { batteryBadge, connectionBadge } from "../../../../src/helpers/dashboard/probeStatus";
-import type { ProbeStatus } from "../../../../src/helpers/types";
+import type { ProbeStatusPayload } from "../../../../src/helpers/contracts/core.gen"
 
 describe("connectionBadge", () => {
   it("is null when the probe has no `connected` key at all", () => {
@@ -18,7 +18,7 @@ describe("connectionBadge", () => {
 });
 
 describe("batteryBadge", () => {
-  const withPct = (batteryPercentage: number | null): ProbeStatus => ({ batteryPercentage });
+  const withPct = (batteryPercentage: number | null): ProbeStatusPayload => ({ batteryPercentage });
 
   it("is null when the probe has no `batteryPercentage` key at all", () => {
     expect(batteryBadge({})).toBeNull();

@@ -11,6 +11,9 @@ real modal falling back to a fixed ceiling with nothing failing.
 """
 
 import pytest
+from pydantic import ValidationError
+
+from common.web_contracts.core import DashSocketPayload
 
 
 from common.datastore_accessors import (
@@ -37,6 +40,22 @@ def _dash_data(**status_over):
         write_status({**read_status(), **status_over})
 
     return socket_io._get_dash_data(read_settings(), read_pellet_db())
+
+
+def test_dash_payload_matches_the_strict_wire_contract(ds):
+    payload = _dash_data()
+
+    validated = DashSocketPayload.model_validate(payload, strict=True)
+
+    assert validated.model_dump(mode="json", by_alias=True, exclude_none=False) == payload
+
+
+def test_dash_payload_rejects_non_finite_numbers(ds):
+    payload = _dash_data()
+    payload["safetyMaxTemp"] = float("inf")
+
+    with pytest.raises(ValidationError):
+        DashSocketPayload.model_validate(payload, strict=True)
 
 
 def test_payload_carries_the_safety_limit(ds):

@@ -6,7 +6,7 @@ import type { CommandClient, CommandResult } from "../../../../src/helpers/comma
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { useShellState } from "../../../../src/helpers/shellContext";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 // The shell owns the app's ONE live-state subscription (useLiveState opens a
 // socket per call), so it is mocked here rather than connected: these tests are
@@ -21,7 +21,7 @@ const { AppShell } = await import("../../../../src/components/shell/AppShell");
 const OK: CommandResult = { ok: true, message: "" };
 const NOW = 1_700_000_000;
 
-type Timer = LiveState["timer"];
+type Timer = DashSocketPayload["timer"];
 
 const timerBlock = (over: Partial<Timer> = {}): Timer => ({
   start: 0,
@@ -73,7 +73,7 @@ function ContextProbe() {
   );
 }
 
-function mountShell(over: Partial<LiveState> = {}) {
+function mountShell(over: Partial<DashSocketPayload> = {}) {
   useLiveStateMock.mockReturnValue({
     live: { ...FIXTURE_DASH, timer: timerBlock(), ...over },
     phase: "live",
@@ -102,11 +102,11 @@ function mountShell(over: Partial<LiveState> = {}) {
 // A full live-state frame to vary uiHash on, one socket tick at a time --
 // App.tsx wraps every route in QueryClientProvider, so AppShell's
 // useQueryClient() needs one here too.
-const FRAME: LiveState = { ...FIXTURE_DASH, timer: timerBlock() };
+const FRAME: DashSocketPayload = { ...FIXTURE_DASH, timer: timerBlock() };
 
 function frameRenderer(client: QueryClient) {
   let utils: ReturnType<typeof render> | null = null;
-  return (frame: LiveState) => {
+  return (frame: DashSocketPayload) => {
     useLiveStateMock.mockReturnValue({
       live: frame,
       phase: "live",

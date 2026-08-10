@@ -4,10 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { ControlButtons } from "../../../../src/components/dashboard/ControlButtons";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const OK: CommandResult = { ok: true, message: "" };
-const at = (mode: string, over: Partial<LiveState> = {}): LiveState => ({
+const at = (mode: string, over: Partial<DashSocketPayload> = {}): DashSocketPayload => ({
   ...FIXTURE_DASH,
   currentMode: mode,
   ...over,
@@ -343,7 +343,7 @@ describe("ControlButtons startup confirmation", () => {
     rs.unstubAllGlobals();
   });
 
-  const holdPrompt = (over: Partial<LiveState> = {}) =>
+  const holdPrompt = (over: Partial<DashSocketPayload> = {}) =>
     at("Stop", {
       startToHoldPrompt: true,
       startupGotoMode: "Hold",

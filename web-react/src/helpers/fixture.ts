@@ -1,4 +1,4 @@
-import type { LiveState } from "./types";
+import type { DashSocketPayload } from "./contracts/core.gen";
 
 // Real `socket_dash_data` payload captured 2026-07-21 from the running
 // prototype backend (control.py + gunicorn on localhost:5000), via a
@@ -8,7 +8,7 @@ import type { LiveState } from "./types";
 // temps/outputs read as zero/false — this is a genuine backend snapshot, not
 // a hand-authored "nice" cook state. See `.superpowers/sdd/task-dash1-report.md`
 // for the capture procedure.
-export const FIXTURE_DASH: LiveState = {
+export const FIXTURE_DASH = {
   uuid: "91a66346-7e6a-11f1-b29c-84470959a251",
   errors: [],
   warnings: [],
@@ -174,4 +174,5 @@ export const FIXTURE_DASH: LiveState = {
     },
     device: "proto_adc",
   },
-};
+  modelLearningRevision: null,
+} satisfies DashSocketPayload;

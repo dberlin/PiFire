@@ -1,3 +1,8 @@
+import type {
+  DismissWarningsRequest,
+  DismissWarningsResponse,
+} from "../contracts/core.gen";
+
 // Client for the warnings dismiss endpoint.
 //
 // Modeled on helpers/update/updateApi.ts: a refusal resolves to false rather
@@ -14,9 +19,9 @@ export async function dismissWarnings(throughId: number): Promise<boolean> {
     const res = await fetch(`${BASE_URL}/api/dismiss_warnings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ through_id: throughId }),
+      body: JSON.stringify({ through_id: throughId } satisfies DismissWarningsRequest),
     });
-    const body = (await res.json().catch(() => ({}))) as { result?: string };
+    const body = (await res.json().catch(() => ({}))) as Partial<DismissWarningsResponse>;
     return res.ok && body.result === "OK";
   } catch {
     return false;

@@ -11,7 +11,11 @@ import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/n
 import { queryKeys } from "../../helpers/query/keys";
 import { saveAccent } from "../../helpers/settings/accent";
 import { getSettings } from "../../helpers/settings/settingsApi";
-import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
+import type {
+  DashSocketPayload,
+  ProbeDataPayload,
+} from "../../helpers/contracts/core.gen";
+import type { AccentName } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { ActionMenu, type MenuItem } from "./ActionMenu";
 import { ControlButtons } from "./ControlButtons";
@@ -54,7 +58,7 @@ const PMODE_ITEMS: MenuItem[] = Array.from({ length: 10 }, (_, n) => ({
 }));
 
 interface DashboardProps {
-  dash: LiveState;
+  dash: DashSocketPayload;
   command: CommandClient;
   /** Base URL for the REST writes that do not go through CommandClient --
    *  currently just the notify round trip, which needs a GET as well as a POST.
@@ -177,7 +181,7 @@ export function Dashboard({
   const [notifyLabel, setNotifyLabel] = useState<string | null>(null);
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifyError, setNotifyError] = useState<string | null>(null);
-  const notifyProbe: ProbeData | null =
+  const notifyProbe: ProbeDataPayload | null =
     notifyLabel === null
       ? null
       : dash.primaryProbe.label === notifyLabel

@@ -74,6 +74,7 @@ from common.app import (
     api_response,
 )
 from common.settings_schema import SettingsValidationError, apply_settings_delta
+from common.web_contracts.core import DashSocketPayload, PelletSocketPayload
 from flask import request
 from werkzeug.utils import secure_filename
 from app import socketio
@@ -229,7 +230,7 @@ def _emit_app_data(event, force_refresh):
             pelletdb = read_pellets_store()
             uuid = settings["server_info"]["uuid"]
 
-            pellet_data = {"uuid": uuid, "pellets": pelletdb}
+            pellet_data = _get_pellet_socket_data(settings, pelletdb)
 
             event_data = {"uuid": uuid, "events": read_events_records()}
 
@@ -279,8 +280,15 @@ def _emit_app_data_to(client_id):
     uuid = settings["server_info"]["uuid"]
 
     socketio.emit("socket_event_data", {"uuid": uuid, "events": read_events_records()}, to=client_id)
-    socketio.emit("socket_pellet_data", {"uuid": uuid, "pellets": pelletdb}, to=client_id)
+    socketio.emit("socket_pellet_data", _get_pellet_socket_data(settings, pelletdb), to=client_id)
     socketio.emit("socket_dash_data", _get_dash_data(settings, pelletdb), to=client_id)
+
+
+def _get_pellet_socket_data(settings, pelletdb):
+    return PelletSocketPayload.model_validate(
+        {"uuid": settings["server_info"]["uuid"], "pellets": pelletdb},
+        strict=True,
+    ).model_dump(mode="json", by_alias=True, exclude_none=False)
 
 
 def _get_dash_data(settings, pelletdb):
@@ -384,7 +392,11 @@ def _get_dash_data(settings, pelletdb):
         "primaryProbe": primary_probe,
         "modelLearningRevision": controller_learning_report_revision(settings["controller"]["selected"]),
     }
-    return dash_data
+    return DashSocketPayload.model_validate(dash_data, strict=True).model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_none=False,
+    )
 
 
 def _get_app_data_settings_data(settings, arg01, arg02):

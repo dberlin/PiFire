@@ -6,11 +6,11 @@ import {
   type CommandResult,
   createCommand,
 } from "../../../../src/helpers/command";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const OK: CommandResult = { ok: true, message: "" };
 
-type Timer = LiveState["timer"];
+type Timer = DashSocketPayload["timer"];
 
 const timer = (over: Partial<Timer> = {}): Timer => ({
   start: 0,

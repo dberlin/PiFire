@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNow } from "../../helpers/clock";
 import type { CommandClient } from "../../helpers/command";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
-import type { LiveState } from "../../helpers/types";
+import type { DashSocketPayload } from "../../helpers/contracts/core.gen"
 import { TimerModal } from "./TimerModal";
 import "./shell.css";
 
@@ -15,7 +15,7 @@ export function TimerBar({
   timer,
   command,
 }: {
-  timer: LiveState["timer"];
+  timer: DashSocketPayload["timer"];
   command: CommandClient;
 }) {
   const [modalOpen, setModalOpen] = useState(false);

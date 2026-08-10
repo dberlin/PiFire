@@ -1,4 +1,4 @@
-import type { LiveState } from "../types";
+import type { DashSocketPayload } from "../contracts/core.gen"
 
 // Substring of common/app.py's CONTROL_DOWN_ERROR, which
 // socket_io._get_dash_data composes into `errors` on every frame while the last
@@ -6,7 +6,7 @@ import type { LiveState } from "../types";
 // server-side, so it clears itself on the first frame after control answers.
 const CONTROL_DOWN_MARKER = "control process did not respond";
 
-export function deriveControlAlive(dash: LiveState): boolean {
+export function deriveControlAlive(dash: DashSocketPayload): boolean {
   return !(dash.errors ?? []).some((e) => e.includes(CONTROL_DOWN_MARKER));
 }
 

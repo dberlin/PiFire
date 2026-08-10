@@ -2,7 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { buttonsForMode } from "../../../../src/helpers/dashboard/buttonsForMode";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const OK: CommandResult = { ok: true, message: "" };
 
@@ -28,7 +28,7 @@ function stubCommand(): CommandClient {
   };
 }
 
-const at = (mode: string, over: Partial<LiveState> = {}): LiveState => ({
+const at = (mode: string, over: Partial<DashSocketPayload> = {}): DashSocketPayload => ({
   ...FIXTURE_DASH,
   currentMode: mode,
   ...over,
@@ -339,7 +339,7 @@ describe("buttonsForMode", () => {
 // prompt both disappeared. buttonsForMode returns the INTENT; which of the two
 // variants to render is ControlButtons' decision.
 describe("buttonsForMode startup confirmation", () => {
-  const startupAction = (dash: LiveState) =>
+  const startupAction = (dash: DashSocketPayload) =>
     buttonsForMode(dash).find((b) => b.label === "Startup")?.action;
 
   it("is a plain command when neither the check nor the hold prompt is configured", () => {
@@ -390,7 +390,7 @@ describe("buttonsForMode startup confirmation", () => {
 // exactly the buttons that break out of the recipe, and exactly the ones Flask
 // hides (control_panel.js:181-182).
 describe("buttonsForMode during a recipe", () => {
-  const inRecipe = (over: Partial<LiveState["recipeStatus"]> = {}, mode = "Recipe") =>
+  const inRecipe = (over: Partial<DashSocketPayload["recipeStatus"]> = {}, mode = "Recipe") =>
     at(mode, {
       recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true, ...over },
     });

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
 import { deriveView, staleLabel } from "../../../../src/helpers/dashboard/deriveView";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { LiveState, ProbeData } from "../../../../src/helpers/types";
+import type { DashSocketPayload, ProbeDataPayload } from "../../../../src/helpers/contracts/core.gen"
 
 // probeCard()'s existing fields (targetStr / tgtColor / barPct / barColor) are
 // covered through components/dashboard/ProbeCard.test.tsx, which renders them.
 // These cases cover the fields the card cannot show by itself: the write
 // identity and the ETA readout.
-const card = (over: Partial<ProbeData>) =>
+const card = (over: Partial<ProbeDataPayload>) =>
   deriveView({ ...FIXTURE_DASH, foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], ...over }] })
     .probes[0];
 
@@ -28,7 +28,7 @@ describe("probeCard identity", () => {
 // Math.round(null) is 0, so the card used to render a confident zero -- a
 // plausible temperature, which reads as data rather than as absence.
 describe("probeCard with no current reading", () => {
-  const withLast = (over: Partial<ProbeData["status"]>) =>
+  const withLast = (over: Partial<ProbeDataPayload["status"]>) =>
     card({ temp: null, status: { ...FIXTURE_DASH.foodProbes[0].status, ...over } });
 
   it("shows the last real reading rather than a zero", () => {
@@ -130,7 +130,7 @@ describe("probeCard etaStr", () => {
 // left pill reads AUGER DUTY everywhere else -- a pill that must never open a
 // P-Mode picker.
 describe("deriveView.pModeEditable", () => {
-  const at = (over: Partial<LiveState>): LiveState => ({ ...FIXTURE_DASH, ...over });
+  const at = (over: Partial<DashSocketPayload>): DashSocketPayload => ({ ...FIXTURE_DASH, ...over });
 
   it("is editable in Smoke", () => {
     expect(deriveView(at({ currentMode: "Smoke" })).pModeEditable).toBe(true);
@@ -176,7 +176,7 @@ describe("deriveView.pModeEditable", () => {
 // duties instead. The attached display makes the same swap on the same
 // condition (display/qml/screens/DashScreen.qml).
 describe("duty pills", () => {
-  const at = (over: Partial<LiveState>): LiveState => ({ ...FIXTURE_DASH, ...over });
+  const at = (over: Partial<DashSocketPayload>): DashSocketPayload => ({ ...FIXTURE_DASH, ...over });
 
   it("shows P-mode and Smoke+ in Smoke, and only there", () => {
     const view = deriveView(at({ currentMode: "Smoke", pMode: 3, smokePlus: true }));
@@ -226,7 +226,7 @@ describe("duty pills", () => {
     const { cycleRatio, fanDuty, ...older } = at({ currentMode: "Hold" });
     void cycleRatio;
     void fanDuty;
-    const view = deriveView(older as LiveState);
+    const view = deriveView(older as DashSocketPayload);
     expect(view.pillL.value).toBe("0%");
     expect(view.pillR.value).toBe("0%");
   });

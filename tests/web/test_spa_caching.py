@@ -13,6 +13,7 @@ import pytest
 
 from app import app as flask_app
 from blueprints.spa import routes as spa_routes
+from common.web_contracts.core import WebUiBuildResponse
 
 
 @pytest.fixture
@@ -62,6 +63,8 @@ def test_build_id_identifies_the_bundle(dist, client):
 
     expected = hashlib.sha256((dist / "index.html").read_bytes()).hexdigest()[:16]
     assert body["build"] == expected
+    validated = WebUiBuildResponse.model_validate(body, strict=True)
+    assert validated.model_dump(mode="json", by_alias=True, exclude_none=False) == body
 
 
 def test_the_build_id_endpoint_is_never_cached(dist, client):

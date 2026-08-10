@@ -1,5 +1,5 @@
 import type { CommandClient, CommandResult, ManualOutput } from "../command";
-import type { LiveState } from "../types";
+import type { DashSocketPayload } from "../contracts/core.gen"
 
 export type ButtonAction =
   | { type: "command"; run(c: CommandClient): Promise<CommandResult> }
@@ -83,7 +83,7 @@ const STOP: ControlButton = {
 //   safety.startup_check OR (start_to_hold_prompt AND after_startup_mode == 'Hold')
 // (_macro_control_panel.html:89-90). Both halves matter: the hold prompt alone
 // is not enough -- it only fires when the configured post-startup mode is Hold.
-const startupButton = (dash: LiveState): ControlButton => ({
+const startupButton = (dash: DashSocketPayload): ControlButton => ({
   label: "Startup",
   // Primary, never accent: lighting a fire is what this row is FOR, but it is
   // not a mode you are in. Carrying accent put a second lit border next to the
@@ -112,7 +112,7 @@ const STOP_IDLE: ControlButton = {
 // one "Prime / Startup / Monitor / Stop" list for Stop, Prime AND Monitor, and
 // marks the running mode via `button_active` -- so in both UIs the row reads as
 // a mode selector rather than changing shape underneath the press.
-const idleRow = (dash: LiveState, mode: string): ControlButton[] => {
+const idleRow = (dash: DashSocketPayload, mode: string): ControlButton[] => {
   const monitoring = mode === "Monitor";
   return [
     startupButton(dash),
@@ -137,7 +137,7 @@ const idleRow = (dash: LiveState, mode: string): ControlButton[] => {
   ];
 };
 
-export function buttonsForMode(dash: LiveState): ControlButton[] {
+export function buttonsForMode(dash: DashSocketPayload): ControlButton[] {
   const mode = dash.currentMode;
 
   // A running recipe drives the mode itself, so the ordinary ladder below would

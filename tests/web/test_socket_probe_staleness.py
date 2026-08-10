@@ -13,6 +13,7 @@ and the real cards showing a stale number as though it were live.
 
 import json
 
+from common.web_contracts.core import ProbeDataPayload, ProbeStatusPayload
 from common import datastore
 from common.datastore_accessors import (
     flush_current,
@@ -155,3 +156,20 @@ def test_a_reporting_probe_publishes_a_last_reading_that_agrees_with_temp(ds):
     assert probe["temp"] == 140
     assert probe["status"]["lastTemp"] == 140
     assert probe["status"]["lastReadingAge"] == 0
+
+
+def test_probe_structure_matches_the_strict_wire_contract(ds):
+    from blueprints.mobile import socket_io
+
+    payload = socket_io._get_probe_structure("Food", read_settings())
+    validated = ProbeDataPayload.model_validate(payload, strict=True)
+
+    assert validated.model_dump(mode="json", by_alias=True, exclude_none=False) == payload
+
+
+def test_probe_status_preserves_plugin_specific_members():
+    payload = {"connected": True, "pluginSignal": -42}
+
+    validated = ProbeStatusPayload.model_validate(payload, strict=True)
+
+    assert validated.model_dump(mode="json", by_alias=True, exclude_none=False) == payload

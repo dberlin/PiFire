@@ -7,7 +7,7 @@ import { Dashboard } from "../../../../src/components/dashboard/Dashboard";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIT_QUERY } from "../../../../src/helpers/dashboard/hooks";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 import { testQueryClient } from "../../test-utils";
 
 afterEach(cleanup);
@@ -36,7 +36,7 @@ function makeCommand(): CommandClient {
   };
 }
 
-function renderDash(dash: LiveState = FIXTURE_DASH) {
+function renderDash(dash: DashSocketPayload = FIXTURE_DASH) {
   return render(
     <QueryClientProvider client={testQueryClient()}>
       <MemoryRouter>

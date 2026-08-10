@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { queryKeys } from "./query/keys";
+import type { WebUiBuildResponse } from "./contracts/core.gen";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -15,7 +16,7 @@ export async function fetchBuildId(baseUrl = BASE_URL): Promise<string | null> {
   try {
     const response = await fetch(`${baseUrl}/api/webui`, { cache: "no-store" });
     if (!response.ok) return null;
-    const body = (await response.json()) as { build?: string | null };
+    const body = (await response.json()) as WebUiBuildResponse;
     return body.build ?? null;
   } catch {
     // Mid-update the backend is restarting and this will fail for a while.

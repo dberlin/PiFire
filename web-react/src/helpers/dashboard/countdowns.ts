@@ -1,4 +1,4 @@
-import type { LiveState } from "../types";
+import type { DashSocketPayload } from "../contracts/core.gen"
 
 // The three status readouts the Flask dashboard has always carried and the
 // React port dropped: how long is left in a timed mode, how long the PID stays
@@ -9,7 +9,7 @@ import type { LiveState } from "../types";
 // blueprints/dash/static/default/js/dash_default.js:348-368 and :386-398.
 
 /** Modes that run against a fixed duration, and which duration each one uses. */
-const MODE_DURATION: Record<string, keyof LiveState> = {
+const MODE_DURATION: Record<string, keyof DashSocketPayload> = {
   Startup: "startDuration",
   Reignite: "startDuration",
   Prime: "primeDuration",
@@ -25,7 +25,7 @@ const MODE_DURATION: Record<string, keyof LiveState> = {
  * countdown is shown. That is reproduced rather than improved on: the countdown's
  * inputs are not published per-step, so a per-step number would be invented.
  */
-export function modeCountdown(dash: LiveState, nowSeconds: number): number | null {
+export function modeCountdown(dash: DashSocketPayload, nowSeconds: number): number | null {
   if (dash.recipeStatus?.recipeMode) return null;
   const durationKey = MODE_DURATION[dash.currentMode];
   if (durationKey === undefined) return null;
@@ -40,7 +40,7 @@ export function modeCountdown(dash: LiveState, nowSeconds: number): number | nul
  * situation. Shown ONLY in Hold: lid-open detection does not run in any other
  * mode (dash_default.js:386).
  */
-export function lidCountdown(dash: LiveState, nowSeconds: number): number | null {
+export function lidCountdown(dash: DashSocketPayload, nowSeconds: number): number | null {
   if (dash.currentMode !== "Hold" || !dash.lidOpenDetected) return null;
   const left = Math.floor(Math.floor(dash.lidOpenEndTime) - Math.floor(nowSeconds));
   return left < 0 ? 0 : left;
@@ -53,7 +53,7 @@ export function lidCountdown(dash: LiveState, nowSeconds: number): number | null
  * displayMode is status["mode"] on the wire (socket_io.py:250) -- the running
  * SUB-mode, not the outer "Recipe".
  */
-export function recipeLabel(dash: LiveState): string | null {
+export function recipeLabel(dash: DashSocketPayload): string | null {
   if (!dash.recipeStatus?.recipeMode) return null;
   return `Recipe | ${dash.displayMode}`;
 }

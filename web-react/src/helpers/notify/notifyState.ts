@@ -1,4 +1,4 @@
-import type { ProbeData } from "../types";
+import type { ProbeDataPayload } from "../contracts/core.gen"
 import { type NotifyUpdate, postNotifyUpdates } from "./notifyApi";
 
 // The backend runs `if shutdown: ... elif keep_warm: ...`
@@ -25,7 +25,7 @@ export function targetRange(isPrimary: boolean, units: "F" | "C"): { min: number
 /** Seed an edit from the live socket payload, which already carries every field
  *  (blueprints/mobile/socket_io.py:823-848 flattens the type:"probe" entry onto
  *  each probe). No REST read is needed to open the modal. */
-export function readTargetEdit(probe: ProbeData): TargetEdit {
+export function readTargetEdit(probe: ProbeDataPayload): TargetEdit {
   return {
     enabled: probe.targetReq,
     target: Math.round(probe.target),
@@ -97,7 +97,7 @@ const LIMIT_CONDITION: Record<LimitKind, string> = {
 /** Seed both limit sections from the live socket payload, which flattens the
  *  two limit entries onto each probe (blueprints/mobile/socket_io.py:781-795).
  *  `shutdown` is read before `reignite` because the backend acts on it first. */
-export function readLimitEdit(probe: ProbeData, kind: LimitKind): LimitEdit {
+export function readLimitEdit(probe: ProbeDataPayload, kind: LimitKind): LimitEdit {
   if (kind === "high") {
     return {
       enabled: probe.highLimitReq,
@@ -114,7 +114,7 @@ export function readLimitEdit(probe: ProbeData, kind: LimitKind): LimitEdit {
   };
 }
 
-export function readNotifyEdit(probe: ProbeData): NotifyEdit {
+export function readNotifyEdit(probe: ProbeDataPayload): NotifyEdit {
   return {
     target: readTargetEdit(probe),
     high: readLimitEdit(probe, "high"),

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import { createCommand } from "../../../../src/helpers/command";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 // ---------------------------------------------------------------------------
 // A model of the control-write seam, so the bar's BUTTON SEQUENCES can be
@@ -205,7 +205,7 @@ class ControlProcess {
 }
 
 /** The socket payload the shell renders from, derived from the persisted blob. */
-function liveTimer(cp: ControlProcess): LiveState["timer"] {
+function liveTimer(cp: ControlProcess): DashSocketPayload["timer"] {
   return {
     start: cp.blob.timer.start,
     paused: cp.blob.timer.paused,

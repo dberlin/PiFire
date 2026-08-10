@@ -1,3 +1,5 @@
+import type { MpcCalibrationCommandResponse } from "../contracts/core.gen";
+
 import type {
   ModelActivationAcknowledgement,
   ModelActivationRequest,
@@ -163,17 +165,15 @@ export async function setMpcCalibration(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(command),
     });
-    const body = (await response.json().catch(() => ({}))) as {
-      result?: string;
-      message?: string;
-      data?: { mpc_calibration?: MpcCalibrationCommand };
-    };
+    const body = (await response.json().catch(() => ({}))) as MpcCalibrationCommandResponse;
+    const responseCommand =
+      body.data && "mpc_calibration" in body.data ? body.data.mpc_calibration : command;
     const ok = response.ok && body.result?.toUpperCase() === "OK";
     return {
       ok,
       status: response.status,
       message: body.message ?? `HTTP ${response.status}`,
-      data: ok ? (body.data?.mpc_calibration ?? command) : null,
+      data: ok ? responseCommand : null,
     };
   } catch (error) {
     return {

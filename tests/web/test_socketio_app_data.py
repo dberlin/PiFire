@@ -49,6 +49,7 @@ from flask import request as flask_request
 from app import app as flask_app
 from common import datastore
 from common.common import ErrorKind, WriteKind
+from common.web_contracts.core import PelletSocketPayload
 from common.datastore_accessors import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
@@ -1684,6 +1685,30 @@ def test_emit_app_data_force_refresh_emits_all_three_once(sio):
     assert emitted == ["socket_event_data", "socket_pellet_data", "socket_dash_data"]
     assert not event.is_set()
     assert sio.mod.thread is None
+
+
+def test_emit_app_data_pellet_payload_matches_the_strict_wire_contract(sio):
+    event = threading.Event()
+    event.set()
+    emitted = {}
+
+    def fake_sleep(_seconds):
+        event.clear()
+
+    with (
+        mock.patch.object(sio.mod, "_get_dash_data", return_value={"sentinel": "dash"}),
+        mock.patch.object(
+            sio.mod.socketio,
+            "emit",
+            side_effect=lambda name, data: emitted.setdefault(name, data),
+        ),
+        mock.patch.object(sio.mod.socketio, "sleep", side_effect=fake_sleep),
+    ):
+        sio.mod._emit_app_data(event, True)
+
+    payload = emitted["socket_pellet_data"]
+    validated = PelletSocketPayload.model_validate(payload, strict=True)
+    assert validated.model_dump(mode="json", by_alias=True, exclude_none=False) == payload
 
 
 def test_emit_app_data_checks_control_status_every_pass(sio):

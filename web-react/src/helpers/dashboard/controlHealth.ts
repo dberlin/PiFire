@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ControlHealthResponse } from "../contracts/core.gen";
 
 // The "control process did not respond" entry in dash.errors is a POLL RESULT,
 // not a durable error. blueprints/mobile/socket_io.py re-probes every 30s and
@@ -20,7 +21,7 @@ export async function recheckControl(baseUrl: string): Promise<boolean> {
   try {
     const res = await fetch(`${baseUrl}/api/sys/check_alive`);
     if (!res.ok) return false;
-    const body = (await res.json()) as { result?: string };
+    const body = (await res.json()) as ControlHealthResponse;
     return body.result === "OK";
   } catch {
     return false;

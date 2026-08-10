@@ -7,7 +7,7 @@ import {
   type MenuItem,
 } from "../../helpers/dashboard/buttonsForMode";
 import { applySettings } from "../../helpers/settings/settingsApi";
-import type { LiveState } from "../../helpers/types";
+import type { DashSocketPayload } from "../../helpers/contracts/core.gen"
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmAction } from "./ConfirmAction";
 import { PwmEntry } from "./PwmEntry";
@@ -52,7 +52,7 @@ export function ControlButtons({
   disabled,
   apiBase,
 }: {
-  dash: LiveState;
+  dash: DashSocketPayload;
   command: CommandClient;
   disabled: boolean;
   /** Same-origin API base for the settings write the hold prompt makes. NOT the

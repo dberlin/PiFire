@@ -13,12 +13,12 @@ import {
   targetEditFields,
   targetRange,
 } from "../../../../src/helpers/notify/notifyState";
-import type { ProbeData } from "../../../../src/helpers/types";
+import type { ProbeDataPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const ON: TargetEdit = { enabled: true, target: 203, action: "keepWarm" };
 const LIMIT_OFF: LimitEdit = { enabled: false, target: 0, action: "none" };
 
-const probe = (over: Partial<ProbeData>): ProbeData =>
+const probe = (over: Partial<ProbeDataPayload>): ProbeDataPayload =>
   ({
     title: "Probe-1",
     label: "Probe1",
@@ -42,7 +42,7 @@ const probe = (over: Partial<ProbeData>): ProbeData =>
     targetKeepWarm: false,
     status: {},
     ...over,
-  }) as ProbeData;
+  }) as ProbeDataPayload;
 
 describe("targetRange", () => {
   // Hard-coded in the Flask template

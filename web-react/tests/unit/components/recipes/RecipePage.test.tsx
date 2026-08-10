@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 import type { RecipeDetail } from "../../../../src/helpers/files/recipeTypes";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 import { testQueryClient } from "../../test-utils";
 
 const fetchRecipeDetailMock = rs.fn();
@@ -75,7 +75,7 @@ const DETAIL: RecipeDetail = {
 
 function mount(
   filename: string,
-  live: LiveState = FIXTURE_DASH,
+  live: DashSocketPayload = FIXTURE_DASH,
   queryClient: QueryClient = testQueryClient(),
 ) {
   useShellStateMock.mockReturnValue({ live });

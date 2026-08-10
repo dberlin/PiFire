@@ -8,7 +8,7 @@
 // These functions never read the clock. `nowSeconds` is a parameter so callers
 // tick it themselves and tests stay deterministic.
 
-import type { LiveState } from "../types";
+import type { DashSocketPayload } from "../contracts/core.gen"
 
 export type TimerState = "stopped" | "running" | "paused";
 
@@ -30,7 +30,7 @@ export interface DerivedTimer {
  *
  * Remaining is clamped at 0 -- an expired timer reads 00:00:00, never negative.
  */
-export function deriveTimer(timer: LiveState["timer"], nowSeconds: number): DerivedTimer {
+export function deriveTimer(timer: DashSocketPayload["timer"], nowSeconds: number): DerivedTimer {
   if (timer.start === 0) return { state: "stopped", remaining: 0 };
   if (timer.paused > 0) {
     return { state: "paused", remaining: clampSeconds(timer.end - timer.paused) };

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@rstest/core";
 import { deriveTimer, formatRemaining } from "../../../../src/helpers/timer/timerState";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
-type Timer = LiveState["timer"];
+type Timer = DashSocketPayload["timer"];
 
 const timer = (over: Partial<Timer> = {}): Timer => ({
   start: 0,

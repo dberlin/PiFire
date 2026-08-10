@@ -1,8 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
+import type { DashSocketPayload } from "../../../src/helpers/contracts/core.gen";
+
+const CONTRACT_DASH: DashSocketPayload = FIXTURE_DASH;
 
 describe("LiveState fixture shape", () => {
   it("has the real top-level keys", () => {
+    expect(CONTRACT_DASH).toBe(FIXTURE_DASH);
     for (const k of [
       "uuid",
       "errors",

@@ -1,4 +1,5 @@
 import { postControl } from "./notify/notifyApi";
+import type { CommandResponse } from "./contracts/core.gen";
 
 // REST command client using PiFire's command grammar (common/api_commands.py
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
@@ -119,7 +120,7 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-    const body = (await res.json()) as { result?: string; message?: string; data?: unknown };
+    const body = (await res.json()) as CommandResponse;
     return { ok: body.result === "OK", message: body.message ?? "", data: body.data };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "network error" };

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
-import type { LiveState } from "../../../../src/helpers/types";
+import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen"
 
 const OK: CommandResult = { ok: true, message: "" };
 
-type Timer = LiveState["timer"];
+type Timer = DashSocketPayload["timer"];
 
 // A fixed wall clock so "remaining" is deterministic. Epoch SECONDS, matching
 // the control process's math.trunc'd timer block.

@@ -4,8 +4,7 @@ import { type CommandClient, createCommand } from "./command";
 import { deriveControlAlive } from "./dashboard/health";
 import { demoDashAt } from "./demoData";
 import { FIXTURE_DASH } from "./fixture";
-import type { PelletDb } from "./pellets/pelletTypes";
-import type { LiveState } from "./types";
+import type { DashSocketPayload, PelletSocketPayload } from "./contracts/core.gen";
 
 export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
 
@@ -13,7 +12,7 @@ export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
 // Outlet context (helpers/shellContext.ts). Sharing the type keeps the context
 // from drifting away from what the hook actually returns.
 export interface LiveStateResult {
-  live: LiveState;
+  live: DashSocketPayload;
   phase: ConnectionPhase;
   controlAlive: boolean;
   targetUrl: string;
@@ -23,16 +22,16 @@ export interface LiveStateResult {
       emits this on change at a 1s cadence and directly to a freshly
       connected client (blueprints/mobile/socket_io.py), so the pellets page
       needs no polling and no refetch after a write. */
-  pellets: PelletDb | null;
+  pellets: PelletSocketPayload["pellets"] | null;
 }
 
 const FORCE_DEMO = import.meta.env.PUBLIC_DEMO === "1" || import.meta.env.PUBLIC_DEMO === "true";
 const TARGET_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export function useLiveState(): LiveStateResult {
-  const [live, setLive] = useState<LiveState>(FIXTURE_DASH);
+  const [live, setLive] = useState<DashSocketPayload>(FIXTURE_DASH);
   const [phase, setPhase] = useState<ConnectionPhase>(FORCE_DEMO ? "demo" : "connecting");
-  const [pellets, setPellets] = useState<PelletDb | null>(null);
+  const [pellets, setPellets] = useState<PelletSocketPayload["pellets"] | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -55,14 +54,14 @@ export function useLiveState(): LiveStateResult {
     });
     socket.on("connect_error", () => setPhase((p) => (p === "live" ? p : "unreachable")));
     socket.on("disconnect", () => setPhase("unreachable"));
-    socket.on("socket_dash_data", (data: LiveState) => {
+    socket.on("socket_dash_data", (data: DashSocketPayload) => {
       setPhase("live");
       setLive(data);
     });
     // Deliberately does NOT touch setPhase: phase is socket_dash_data's and
     // connect's business, and a pellet payload arriving is not evidence the
     // dash feed is healthy.
-    socket.on("socket_pellet_data", (data: { uuid: string; pellets: PelletDb }) => {
+    socket.on("socket_pellet_data", (data: PelletSocketPayload) => {
       setPellets(data.pellets);
     });
     return () => {

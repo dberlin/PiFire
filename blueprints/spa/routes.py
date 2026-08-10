@@ -4,6 +4,7 @@ import os
 from flask import abort, jsonify, send_from_directory
 
 from blueprints.spa import spa_bp
+from common.web_contracts.core import WebUiBuildResponse
 
 # Absolute paths into the built React app (repo-root/web-react/dist), resolved
 # from this file's location so serving never depends on the process CWD.
@@ -85,7 +86,11 @@ def spa_build():
     Polled by the running app so a tab held open across an update reloads
     itself. Never cached -- a cached answer is a tab that never notices.
     """
-    return _cached(jsonify({"build": build_id()}), "no-store")
+    response = WebUiBuildResponse(build=build_id())
+    return _cached(
+        jsonify(response.model_dump(mode="json", by_alias=True, exclude_none=False)),
+        "no-store",
+    )
 
 
 @spa_bp.route("/")
