@@ -69,6 +69,7 @@ def test_empty_report_route_returns_the_exact_idle_schema(client, monkeypatch):
         "gates": [],
         "identifier": None,
         "predictor": None,
+        "confirmation": None,
         "checkpoint": None,
         "failure": None,
     }
@@ -93,6 +94,10 @@ def test_report_route_serializes_the_complete_live_and_checkpoint_projection(cli
     assert response.status_code == 200
     assert response.get_json() == report.as_dict()
     assert response.get_json()["status"] == "evaluating"
+    assert response.get_json()["confirmation"] == {
+        "observed": 2,
+        "required": 20,
+    }
     assert response.get_json()["checkpoint"] == {
         "form": "ipdt",
         "K_i": 0.8,
@@ -205,3 +210,21 @@ def test_oversized_checkpoint_integer_is_an_explicit_422(client, monkeypatch, fi
         "error": "pid-sp-learning-report-invalid",
         "detail": detail,
     }
+
+
+def test_confirmation_progress_is_visible_and_changes_the_api_revision(client, monkeypatch):
+    live = _live_status()
+    first = current_pid_sp_learning_report(status=live, checkpoint=None)
+    live["confirmation"]["observed"] = 3
+    changed = current_pid_sp_learning_report(status=live, checkpoint=None)
+    monkeypatch.setattr(routes, "backend_pid_sp_learning_report", lambda: changed)
+
+    response = client.get("/api/pid-sp-learning/report")
+
+    assert first.revision != changed.revision
+    assert response.status_code == 200
+    assert response.get_json()["confirmation"] == {
+        "observed": 3,
+        "required": 20,
+    }
+    assert response.get_json()["revision"] == changed.revision

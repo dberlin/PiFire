@@ -267,6 +267,7 @@ def test_empty_sources_produce_a_complete_idle_report():
         "gates": [],
         "identifier": None,
         "predictor": None,
+        "confirmation": None,
         "checkpoint": None,
         "failure": None,
     }
@@ -297,6 +298,7 @@ def test_idle_report_normalizes_each_durable_checkpoint_form(checkpoint, expecte
 
     assert report["status"] == "idle"
     assert report["live"] is False
+    assert report["confirmation"] is None
     assert report["checkpoint"] == expected
     assert report["failure"] is None
 
@@ -320,6 +322,7 @@ def test_marked_pid_sp_live_projection_is_preserved():
     assert payload["gates"] == live["gates"]
     assert payload["identifier"] == live["identifier"]
     assert payload["predictor"] == live["predictor"]
+    assert payload["confirmation"] == live["confirmation"]
     assert payload["checkpoint"] == _FOPDT_CHECKPOINT
     assert payload["failure"] is None
 
@@ -357,6 +360,7 @@ def test_stale_or_unmarked_learning_mapping_is_not_pid_sp_live_state(status):
     assert payload["gates"] == []
     assert payload["identifier"] is None
     assert payload["predictor"] is None
+    assert payload["confirmation"] is None
     assert payload["failure"] is None
 
 
@@ -378,6 +382,7 @@ def test_malformed_marked_live_state_is_structured_error_without_hiding_checkpoi
     assert payload["gates"] == []
     assert payload["identifier"] is None
     assert payload["predictor"] is None
+    assert payload["confirmation"] is None
     assert payload["checkpoint"] == _FOPDT_CHECKPOINT
     assert payload["failure"]["code"] == "live-status-invalid"
     assert payload["failure"]["terminal"] is False
@@ -420,9 +425,16 @@ def test_revision_is_canonical_and_covers_every_visible_field():
         status={"learning": live},
         checkpoint={**_FOPDT_CHECKPOINT, "K": 801.0},
     )
+    confirmation_changed_live = deepcopy(live)
+    confirmation_changed_live["confirmation"]["observed"] -= 1
+    confirmation_changed = _report(
+        status={"learning": confirmation_changed_live},
+        checkpoint=_FOPDT_CHECKPOINT,
+    )
 
     assert first.revision == reordered.revision
     assert first.revision != changed.revision
+    assert first.revision != confirmation_changed.revision
     first_without_revision = first.as_dict()
     first_without_revision.pop("revision")
     assert json.dumps(first_without_revision, allow_nan=False)
@@ -438,11 +450,13 @@ def test_report_has_immutable_storage_and_returns_defensive_copies():
     report = _report(status=status, checkpoint=checkpoint)
     returned = report.as_dict()
     returned["identifier"]["trusted"]["K"] = 999.0
+    returned["confirmation"]["observed"] = 999
     returned["checkpoint"]["K"] = 999.0
 
     assert status == original_status
     assert checkpoint == original_checkpoint
     assert report.as_dict()["identifier"]["trusted"]["K"] == 800.0
+    assert report.as_dict()["confirmation"] == original_status["controller"]["learning"]["confirmation"]
     assert report.as_dict()["checkpoint"]["K"] == 800.0
     with pytest.raises(FrozenInstanceError):
         report.payload_bytes = b"{}"

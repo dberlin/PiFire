@@ -544,6 +544,7 @@ def current_pid_sp_learning_report(
         "gates": [],
         "identifier": None,
         "predictor": None,
+        "confirmation": None,
         "checkpoint": normalized_checkpoint,
         "failure": None,
     }
@@ -565,6 +566,7 @@ def current_pid_sp_learning_report(
                     "gates": normalized_live["gates"],
                     "identifier": normalized_live["identifier"],
                     "predictor": normalized_live["predictor"],
+                    "confirmation": normalized_live["confirmation"],
                 }
             )
     payload["revision"] = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
