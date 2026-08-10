@@ -187,3 +187,46 @@ bun run typecheck
 - Until the integration gate updates `registry.py`, importing the registry is expected to fail because it still imports the removed temporary core pellet classes. This is deliberate rather than leaving aliases or duplicate ownership.
 - Frontend files intentionally point at the not-yet-generated `control.gen.ts`; they cannot typecheck before the serialized generator gate.
 - The integration gate should confirm the TypeScript emitter preserves the RootModel names `CommandRequest` and `PelletActionRequest` as discriminated unions and the alias `TimerOptionsPayload.keepWarm`. If the emitter chooses a structurally equivalent unexpected name, fix generation/registration rather than adding frontend aliases or casts.
+
+## Post-integration review closure
+
+Review-fix commit: `364e04b656124c6bc3ae94f96e10f8d6c4d4c2bc`
+(`vwnwxoqzywqrttxmtmluzwoptsvqnvzn`)
+
+The serialized integration gate registered and generated the control bundle, so
+the deferred-state notes and concerns above describe only the original
+concurrent-wave handoff. The review fix:
+
+- narrows `PrimeCommandRequest.next_mode` and `CommandClient.prime` to the two
+  backend-recognized follow-on modes, `startup` and `monitor`; the Prime-and-Stop
+  UI now omits the optional segment so the backend selects its default `Stop`
+  outcome rather than claiming that `stop`, `smoke`, or `manual` is recognized;
+- models successful WLED profile pushes with concrete
+  `WledProfileItem {name, number, description}` objects, matching
+  `WLEDProfileManager.push_all_profiles()` and the route envelope;
+- registers `WledProfileItem` in the control bundle and regenerates
+  `control.schema.json` and `control.gen.ts`.
+
+Strict RED evidence was captured before production edits:
+
+- `uv run pytest -q tests/unit/common/web_contracts/test_control.py`:
+  3 expected failures (the model accepted `smoke` and `manual`, and rejected
+  real WLED profile objects), 42 passed;
+- `cd web-react && bun run typecheck`: the two new prime rejection checks
+  reported unused `@ts-expect-error` directives before the signature was
+  narrowed.
+
+Fresh GREEN evidence after regeneration:
+
+- focused Python boundary suite: 226 passed in 6.20s;
+- command/pellet/notify helper suite: 94 passed in 326ms;
+- command plus both direct Prime callers: 125 passed in 1.55s;
+- `bun run gen:types:check`: all generated Pydantic/settings/TypeScript
+  artifacts up to date;
+- `bun run typecheck`: exit 0 with no diagnostics;
+- LSP diagnostics: clean for `common/web_contracts/control.py`,
+  `web-react/src/helpers/command.ts`, and
+  `web-react/src/helpers/dashboard/buttonsForMode.ts`.
+
+The repository-wide pytest run was explicitly cancelled at the integration
+owner's direction; it is not part of this fix's validation evidence.
