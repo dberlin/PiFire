@@ -57,6 +57,12 @@ completion from a sweep:
   sound, which is recorded inside the entry so it is not re-investigated. Both
   were confirmed pre-existing by A/B — re-adding the deleted key and
   re-measuring — not by reading the diff.
+- **2026-08-10** — item 7 landed in five implementation commits:
+  `9845541d9d32` (controller matrix), `8c3a62b84d76` (braking horizon),
+  `24084d0424bf` (promotion signal), `094a7035f178` (residual MPC comparison)
+  and `c06ca5511cba` (mutation score). `d0ce422f05cc` followed the matrix move
+  to correct its historical copied-workspace procedure. The permanent import
+  boundary guard landed with the backlog closure.
 
 ---
 
@@ -305,9 +311,9 @@ invisible: the full-suite ordering happens not to trigger it.
 
 ---
 
-### 7. The test suite imports library code out of `docs/` — OPEN
+### 7. The test suite imports library code out of `docs/` — DONE 2026-08-10
 
-**Status:** OPEN. Found 2026-08-08 while retiring `cycle_data.HoldCycleTime`.
+**Status:** DONE 2026-08-10. Found 2026-08-08 while retiring `cycle_data.HoldCycleTime`.
 Pre-existing; the retirement only made it visible.
 
 34 test files import from `docs/superpowers/experiments/` with real
@@ -357,6 +363,15 @@ its own scoped piece of work, and the two groups do not want the same landing:
 
 Whatever the landing, the invariant to end at is: **nothing outside `docs/`
 imports from `docs/`.**
+
+**Landing, reconciled 2026-08-10.** The acados retirement reduced the live
+boundary to 10 test import sites across five modules before this work began.
+Those implementations now live in `tools/experiments`; their corresponding
+`docs/superpowers/experiments` paths are launchers only, retained so the
+committed regeneration commands remain executable. An AST architecture test
+now permanently rejects imports rooted at `docs` from Python outside `docs`,
+and rejects `sys.path` mutation under `tools/experiments`. Production packages
+still do not import experiment tooling.
 
 ---
 
