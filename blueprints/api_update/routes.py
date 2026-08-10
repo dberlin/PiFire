@@ -209,10 +209,14 @@ def update_branches_refresh():
 
 @api_update_bp.route("/branch", methods=["POST"])
 def update_branch():
+    payload, invalid = _json_request(UpdateBranchRequest)
+    if payload is None:
+        assert invalid is not None
+        return invalid
+
     settings = read_settings()
-    payload, _ = _json_request(UpdateBranchRequest)
     branches = get_update_data(settings)["branches"]
-    if payload is None or payload.target not in branches:
+    if payload.target not in branches:
         return _error("invalid_branch", 400, branches=branches)
     target = payload.target
     set_updater_install_status(0, "Starting Branch Change...", "")

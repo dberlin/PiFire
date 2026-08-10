@@ -188,14 +188,35 @@ def test_change_branch_validates_against_the_branch_list(ds, client, monkeypatch
     assert len(fired) == 1  # rejected target never fired
 
 
-def test_change_branch_rejects_extra_json_members(ds, client, monkeypatch):
+@pytest.mark.parametrize(
+    "body",
+    ['{"target":"dev","extra":true}', "null", "[]", "{"],
+)
+def test_change_branch_rejects_invalid_json_before_update_discovery(
+    ds,
+    client,
+    monkeypatch,
+    body,
+):
     ur, fired = _neutralize(monkeypatch)
-    monkeypatch.setattr(ur, "get_update_data", lambda settings: {"branches": ["main", "dev"]})
+    update_data_calls = []
+
+    def discover(settings):
+        update_data_calls.append(settings)
+        return {"branches": ["main", "dev"]}
+
+    monkeypatch.setattr(ur, "get_update_data", discover)
     _set_real_hw(True)
 
-    resp = client.post("/api/update/branch", json={"target": "dev", "extra": True})
+    resp = client.post(
+        "/api/update/branch",
+        data=body,
+        content_type="application/json",
+    )
 
     assert resp.status_code == 400
+    assert resp.get_json() == {"data": None, "result": "Error", "message": "bad_request"}
+    assert update_data_calls == []
     assert fired == []
 
 
