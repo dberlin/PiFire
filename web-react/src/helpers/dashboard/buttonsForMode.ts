@@ -67,9 +67,9 @@ const PRIME: ControlButton = {
     items: PRIME_MENU,
     run: (c, value) => {
       const [grams, next] = value.split(":");
-      // GrillMode is lowercase (command.ts:5-12); Flask's next_mode is
-      // capitalised, and the API grammar takes the lowercase form.
-      return c.prime(Number(grams), next === "startup" ? "startup" : "stop");
+      // Omission is the API's explicit "prime then Stop" form. Only Startup
+      // and Monitor are recognized next-mode path values.
+      return c.prime(Number(grams), next === "startup" ? "startup" : undefined);
     },
   },
 };

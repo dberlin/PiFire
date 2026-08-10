@@ -1,6 +1,6 @@
 import { postControl } from "./notify/notifyApi";
 import type { CommandResponse } from "./contracts/core.gen";
-import type { TimerOptionsPayload } from "./contracts/control.gen";
+import type { PrimeCommandRequest, TimerOptionsPayload } from "./contracts/control.gen";
 
 // REST command client using PiFire's command grammar (common/api_commands.py
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
@@ -29,7 +29,10 @@ export interface CommandClient {
   hold(tempF: number): Promise<CommandResult>;
   setSmokePlus(on: boolean): Promise<CommandResult>;
   setPMode(n: number): Promise<CommandResult>;
-  prime(grams: number, next?: GrillMode): Promise<CommandResult>;
+  prime(
+    grams: number,
+    next?: NonNullable<PrimeCommandRequest["next_mode"]>,
+  ): Promise<CommandResult>;
   // NOTE (verified against common/api_commands.py _cmd_set_timer):
   //  - timerStart is ALSO the unpause command: when control.timer.paused != 0
   //    the backend ignores `seconds` and just shifts the existing end time.

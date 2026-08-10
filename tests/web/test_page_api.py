@@ -316,11 +316,16 @@ def test_wled_push_profiles_success_envelope_mocked(live_server, page):
     """Success path (result["success"] is True) is unreachable without a
     real WLED device, so mock WLEDProfileManager itself to assert the
     route's success envelope shape."""
+    profiles = [
+        {"name": "idle", "number": 1, "description": "Idle state"},
+        {"name": "cooking", "number": 2, "description": "Cooking state"},
+        {"name": "error", "number": 3, "description": "Fault state"},
+    ]
     fake_manager = MagicMock()
     fake_manager.push_all_profiles.return_value = {
         "success": True,
         "profiles_pushed": 3,
-        "profiles": ["idle", "cooking", "error"],
+        "profiles": profiles,
         "message": "",
     }
     with patch("notify.wled_profiles.WLEDProfileManager", return_value=fake_manager) as mock_cls:
@@ -333,7 +338,7 @@ def test_wled_push_profiles_success_envelope_mocked(live_server, page):
     body = resp.json()
     assert body["result"] == "success"
     assert body["profiles_pushed"] == 3
-    assert body["profiles"] == ["idle", "cooking", "error"]
+    assert body["profiles"] == profiles
     assert "3 profiles" in body["message"]
     mock_cls.assert_called_once()
     fake_manager.push_all_profiles.assert_called_once_with(custom_profile_numbers={"idle": 1})

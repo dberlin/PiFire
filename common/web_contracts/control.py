@@ -53,7 +53,7 @@ class SetPModeCommandRequest(WireModel):
 class PrimeCommandRequest(WireModel):
     operation: Literal["prime"]
     grams: int = Field(ge=0)
-    next_mode: GrillMode | None = None
+    next_mode: Literal["startup", "monitor"] | None = None
 
 
 class TimerStartCommandRequest(WireModel):
@@ -366,8 +366,14 @@ class WledTestProfileRequest(WireModel):
     profile_number: int = 1
 
 
+class WledProfileItem(WireModel):
+    name: str
+    number: int
+    description: str
+
+
 class WledActionResponse(WireModel):
     result: Literal["success", "error"]
     message: str
     profiles_pushed: int | None = None
-    profiles: list[str] | None = None
+    profiles: list[WledProfileItem] | None = None

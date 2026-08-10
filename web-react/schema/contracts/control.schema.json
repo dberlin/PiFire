@@ -963,13 +963,18 @@
         "next_mode": {
           "anyOf": [
             {
-              "$ref": "#/$defs/GrillMode"
+              "enum": [
+                "startup",
+                "monitor"
+              ],
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Next Mode"
         },
         "operation": {
           "const": "prime",
@@ -1257,7 +1262,7 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/WledProfileItem"
               },
               "type": "array"
             },
@@ -1416,6 +1421,30 @@
         "devices"
       ],
       "title": "WledDiscoverResponse",
+      "type": "object"
+    },
+    "WledProfileItem": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "number",
+        "description"
+      ],
+      "title": "WledProfileItem",
       "type": "object"
     },
     "WledPushProfilesRequest": {

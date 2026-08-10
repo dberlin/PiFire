@@ -44,6 +44,7 @@ export type Operation2 = "set_smoke_plus";
 export type Operation3 = "set_p_mode";
 export type Value = number;
 export type Grams = number;
+export type NextMode = ("startup" | "monitor") | null;
 export type Operation4 = "prime";
 export type Operation5 = "timer_start";
 export type Operation6 = "timer_start_with_options";
@@ -160,13 +161,16 @@ export type Message3 = string | null;
 export type Result3 = "OK" | "Error";
 export type Uuid1 = string;
 export type Message4 = string;
-export type Profiles = string[] | null;
+export type Profiles = WledProfileItem[] | null;
+export type Description = string;
+export type Name = string;
+export type Number = number;
 export type ProfilesPushed = number | null;
 export type Result4 = "success" | "error";
 export type Ip = string;
 export type LedCount = number | null;
 export type Mac = string | null;
-export type Name = string;
+export type Name1 = string;
 export type Online = boolean | null;
 export type Port = number | null;
 export type Product = string | null;
@@ -271,7 +275,7 @@ export interface SetPModeCommandRequest {
  */
 export interface PrimeCommandRequest {
   grams: Grams;
-  next_mode?: GrillMode | null;
+  next_mode?: NextMode;
   operation: Operation4;
 }
 /**
@@ -627,13 +631,22 @@ export interface WledActionResponse {
 }
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
+ * via the `definition` "WledProfileItem".
+ */
+export interface WledProfileItem {
+  description: Description;
+  name: Name;
+  number: Number;
+}
+/**
+ * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
  * via the `definition` "WledDevice".
  */
 export interface WledDevice {
   ip: Ip;
   led_count?: LedCount;
   mac?: Mac;
-  name: Name;
+  name: Name1;
   online?: Online;
   port?: Port;
   product?: Product;

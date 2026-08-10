@@ -101,6 +101,7 @@ from .control import (
     WledActionResponse,
     WledDevice,
     WledDiscoverResponse,
+    WledProfileItem,
     WledPushProfilesRequest,
     WledTestProfileRequest,
 )
@@ -373,6 +374,7 @@ WEB_CONTRACT_BUNDLES: tuple[ContractBundle, ...] = (
             WledActionResponse,
             WledDevice,
             WledDiscoverResponse,
+            WledProfileItem,
             WledPushProfilesRequest,
             WledTestProfileRequest,
         ),

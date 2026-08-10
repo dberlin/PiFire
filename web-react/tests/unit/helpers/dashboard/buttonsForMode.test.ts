@@ -95,7 +95,7 @@ describe("buttonsForMode", () => {
       const action = primeAction();
       const command = stubCommand();
       await action.run(command, action.items[1].value);
-      expect(command.prime).toHaveBeenCalledWith(25, "stop");
+      expect(command.prime).toHaveBeenCalledWith(25, undefined);
     });
 
     it("primes and starts up for the last three", async () => {

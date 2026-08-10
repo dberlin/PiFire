@@ -83,9 +83,26 @@ describe("createCommand issues the right URLs", () => {
     await c.timerStop();
     expect(fetchMock.mock.calls[1][0]).toBe("/api/set/timer/stop");
   });
-  it("prime → grams and next mode", async () => {
-    await createCommand("").prime(20, "smoke");
-    expect(url()).toBe("/api/set/mode/prime/20/smoke");
+  it("prime → grams and each backend-recognized next mode", async () => {
+    const command = createCommand("");
+    await command.prime(20, "startup");
+    await command.prime(20, "monitor");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/set/mode/prime/20/startup",
+      "/api/set/mode/prime/20/monitor",
+    ]);
+  });
+  it("prime omits next mode to select the backend default Stop", async () => {
+    await createCommand("").prime(20);
+    expect(url()).toBe("/api/set/mode/prime/20");
+  });
+  it("prime rejects modes the backend silently maps to Stop", () => {
+    if (false) {
+      // @ts-expect-error smoke is not a recognized post-prime mode.
+      createCommand("").prime(20, "smoke");
+      // @ts-expect-error manual is not a recognized post-prime mode.
+      createCommand("").prime(20, "manual");
+    }
   });
   it("system → cmd grammar", async () => {
     await createCommand("").system("reboot");

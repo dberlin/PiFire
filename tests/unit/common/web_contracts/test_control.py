@@ -14,6 +14,7 @@ from common.web_contracts.control import (
     PelletCurrent,
     PelletDbSchema,
     PelletProfileFields,
+    PrimeCommandRequest,
     TimerOptionsPayload,
     WledActionResponse,
     WledDiscoverResponse,
@@ -55,6 +56,30 @@ def test_command_request_union_covers_command_client_path_grammar(payload):
 def test_command_request_union_is_discriminated_by_operation():
     with pytest.raises(ValidationError):
         TypeAdapter(CommandRequest).validate_python({"operation": "not_a_command"}, strict=True)
+@pytest.mark.parametrize("next_mode", ("startup", "monitor"))
+def test_prime_command_accepts_only_backend_recognized_next_modes(next_mode):
+    parsed = PrimeCommandRequest.model_validate(
+        {"operation": "prime", "grams": 125, "next_mode": next_mode},
+        strict=True,
+    )
+    assert parsed.next_mode == next_mode
+
+
+@pytest.mark.parametrize("next_mode", ("smoke", "manual"))
+def test_prime_command_rejects_modes_the_backend_maps_to_stop(next_mode):
+    with pytest.raises(ValidationError):
+        PrimeCommandRequest.model_validate(
+            {"operation": "prime", "grams": 125, "next_mode": next_mode},
+            strict=True,
+        )
+
+
+def test_prime_command_omits_next_mode_for_backend_default_stop():
+    parsed = PrimeCommandRequest.model_validate(
+        {"operation": "prime", "grams": 125},
+        strict=True,
+    )
+    assert parsed.next_mode is None
 
 
 @pytest.mark.parametrize(
@@ -281,14 +306,18 @@ def test_wled_discover_response_preserves_device_specific_fields():
     assert response.model_dump(mode="json")["devices"][0]["led_count"] == 144
 
 
-def test_wled_action_response_keeps_push_specific_fields_optional():
+def test_wled_action_response_models_the_real_manager_profile_items():
+    profiles = [
+        {"name": "idle", "number": 1, "description": "Idle state"},
+        {"name": "cooking", "number": 2, "description": "Cooking state"},
+    ]
     response = WledActionResponse.model_validate(
         {
             "result": "success",
             "message": "Successfully pushed 2 profiles",
             "profiles_pushed": 2,
-            "profiles": ["idle", "cooking"],
+            "profiles": profiles,
         },
         strict=True,
     )
-    assert response.model_dump(mode="json", exclude_unset=True)["profiles"] == ["idle", "cooking"]
+    assert response.model_dump(mode="json", exclude_unset=True)["profiles"] == profiles

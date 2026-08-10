@@ -560,7 +560,7 @@ describe("ControlButtons Prime menu", () => {
     render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Prime" }));
     fireEvent.click(screen.getByRole("button", { name: "Prime 50g" }));
-    await waitFor(() => expect(command.prime).toHaveBeenCalledWith(50, "stop"));
+    await waitFor(() => expect(command.prime).toHaveBeenCalledWith(50, undefined));
   });
 
   it("cancelling primes nothing", () => {
