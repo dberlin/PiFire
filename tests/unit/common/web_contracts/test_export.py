@@ -187,6 +187,22 @@ def test_typescript_output_is_biome_clean(tmp_path):
         capture_output=True,
         text=True,
     )
+    eslint_result = subprocess.run(
+        [
+            str(repository_root / "web-react/node_modules/.bin/eslint"),
+            "--stdin",
+            "--stdin-filename",
+            "src/helpers/contracts/lint.gen.ts",
+            "--max-warnings",
+            "0",
+        ],
+        cwd=repository_root / "web-react",
+        input=generated.read_text(encoding="utf-8"),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
     assert write_result.returncode == 0, write_result.stderr
     assert biome_result.returncode == 0, biome_result.stdout + biome_result.stderr
+    assert eslint_result.returncode == 0, eslint_result.stdout + eslint_result.stderr

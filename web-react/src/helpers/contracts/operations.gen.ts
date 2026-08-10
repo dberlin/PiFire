@@ -1,5 +1,4 @@
 // biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.
-/* eslint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
 type BootToMonitor = boolean;

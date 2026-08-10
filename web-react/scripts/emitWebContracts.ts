@@ -155,7 +155,7 @@ async function readManifest(): Promise<Record<string, string>> {
 
 async function formatGeneratedTypeScript(generated: string, outputPath: string): Promise<string> {
   const formatterInput = /\binterface\s+[\w$]+\s*\{\s*\}/.test(generated)
-    ? `${BIOME_HEADER}\n${generated}`
+    ? `${BIOME_HEADER}\n${generated.replace(/^\/\* eslint-disable \*\/\n/, "")}`
     : generated;
   const formatter = Bun.spawn(
     [
