@@ -914,14 +914,11 @@ class ThreadedControllerRunner(ControllerRunner):
         self._terminal_drops_since_drain: collections.deque[ObservationTerminalDrop] = collections.deque()
         self._outcome_drops_since_drain = 0
         self._outcome_dropped_sequences = collections.deque(maxlen=60)
-        self._pending_dispatches: collections.deque[tuple[str, object]] = collections.deque(
-            maxlen=_MAX_PENDING_OUTPUTS
-        )
+        self._pending_dispatches: collections.deque[tuple[str, object]] = collections.deque()
         self._latest_delivered_output = None
         self._pending_dropped = 0
         self._pending_restore = None
         self._pending_calibrations: collections.deque[tuple[str, object]] = collections.deque()
-        self._pending_activations: collections.deque[tuple[str, object]] = collections.deque()
         self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
         self._pending_pair_activation: PreparedPairTransition | None = None
         self._pair_activation_flight: _PairActivationFlight | None = None
@@ -1203,35 +1200,13 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_dispatches.clear()
                 restore = self._pending_restore
                 self._pending_restore = None
+
                 pending_calibrations = tuple(self._pending_calibrations)
                 self._pending_calibrations.clear()
-                pending_activations = tuple(self._pending_activations)
-                self._pending_activations.clear()
-
             # A pending core is installed only after the old core has drained
             # the returned generation bound to the consuming core.
             if restore is not None:
                 self._core.restore_model(restore)
-            for operation, payload in pending_activations:
-                callback = getattr(
-                    self._core,
-                    {
-                        "restore": "restore_activation",
-                        "rollback": "rollback_activation",
-                        "fallback": "activation_runtime_failure",
-                    }[operation],
-                    None,
-                )
-                if not callable(callback):
-                    continue
-                if operation == "restore":
-                    persisted, records = payload
-                    if callback(persisted, records) is not True:
-                        self._terminate_pair_activation("activation-recovery-failed")
-                else:
-                    callback(payload)
-            if pending_activations:
-                self._capture_activation_events()
             if safety_ceiling_c is not _UNSET:
                 self._core.set_safety_ceiling_c(safety_ceiling_c)
             if target is not _UNSET:
@@ -1243,6 +1218,26 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._core.set_output(payload)
                     with self._lock:
                         self._latest_delivered_output = payload
+                    continue
+                if operation == "activation":
+                    activation_operation, activation_payload = payload
+                    callback = getattr(
+                        self._core,
+                        {
+                            "restore": "restore_activation",
+                            "rollback": "rollback_activation",
+                            "fallback": "activation_runtime_failure",
+                        }[activation_operation],
+                        None,
+                    )
+                    if callable(callback):
+                        if activation_operation == "restore":
+                            persisted, records = activation_payload
+                            if callback(persisted, records) is not True:
+                                self._terminate_pair_activation("activation-recovery-failed")
+                        else:
+                            callback(activation_payload)
+                    self._capture_activation_events()
                     continue
                 sequence, generation, applied, observation = payload
                 self._core.set_output(applied)
@@ -1446,17 +1441,17 @@ class ThreadedControllerRunner(ControllerRunner):
                 if transaction_id in self._pair_activation_ids:
                     return True
                 self._pair_activation_ids.add(transaction_id)
-            self._pending_activations.append(("restore", (persisted, tuple(records))))
+            self._append_dispatch_locked("activation", ("restore", (persisted, tuple(records))))
         return True
 
     def activation_runtime_failure(self, reason: str):
         with self._lock:
-            self._pending_activations.append(("fallback", reason))
+            self._append_dispatch_locked("activation", ("fallback", reason))
         return True
 
     def rollback_activation(self, reason: str):
         with self._lock:
-            self._pending_activations.append(("rollback", reason))
+            self._append_dispatch_locked("activation", ("rollback", reason))
         return True
 
     def drain_activation_events(self):
@@ -1478,7 +1473,7 @@ class ThreadedControllerRunner(ControllerRunner):
             self._output, transition = self._quality.polled(self._output, self._monotonic_clock())
             result = self._output
             if transition is ResultStaleState.STALE:
-                self._pending_activations.append(("fallback", "stale-result-threshold"))
+                self._append_dispatch_locked("activation", ("fallback", "stale-result-threshold"))
         if transition is not None and self._warning_callback is not None:
             self._warning_callback(transition)
         return result
@@ -1536,21 +1531,33 @@ class ThreadedControllerRunner(ControllerRunner):
         return state
 
     def _append_dispatch_locked(self, operation: str, payload: object) -> None:
-        if len(self._pending_dispatches) == self._pending_dispatches.maxlen:
-            evicted_operation, evicted_payload = self._pending_dispatches.popleft()
-            if evicted_operation == "output":
-                self._pending_dropped += 1
-            else:
-                sequence, generation, _, observation = evicted_payload
-                self._accepted_observations.pop(sequence, None)
-                self._terminal_drops_since_drain.append(
-                    ObservationTerminalDrop(
-                        sequence,
-                        generation,
-                        observation,
-                        "runner-completed-frame-evicted",
-                    )
+        bounded = operation != "activation"
+        if bounded:
+            bounded_count = sum(
+                queued_operation != "activation"
+                for queued_operation, _ in self._pending_dispatches
+            )
+            if bounded_count == _MAX_PENDING_OUTPUTS:
+                evicted_index = next(
+                    index
+                    for index, (queued_operation, _) in enumerate(self._pending_dispatches)
+                    if queued_operation != "activation"
                 )
+                evicted_operation, evicted_payload = self._pending_dispatches[evicted_index]
+                del self._pending_dispatches[evicted_index]
+                if evicted_operation == "output":
+                    self._pending_dropped += 1
+                else:
+                    sequence, generation, _, observation = evicted_payload
+                    self._accepted_observations.pop(sequence, None)
+                    self._terminal_drops_since_drain.append(
+                        ObservationTerminalDrop(
+                            sequence,
+                            generation,
+                            observation,
+                            "runner-completed-frame-evicted",
+                        )
+                    )
         self._pending_dispatches.append((operation, payload))
 
     def set_output(self, applied):

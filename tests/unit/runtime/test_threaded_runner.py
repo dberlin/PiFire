@@ -5,6 +5,7 @@ import json
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
@@ -969,6 +970,74 @@ def test_completed_frame_does_not_overtake_older_output_dispatch():
             ("set_output", 20.0),
             ("observe_frame", 20.0),
         ]
+    finally:
+        core.release()
+        runner.stop()
+
+
+@pytest.mark.parametrize("operation", ("restore", "rollback", "fallback"))
+@pytest.mark.parametrize("transition_first", (False, True))
+def test_role_transition_and_completed_frame_share_one_causal_fifo(operation, transition_first):
+    class _RoleCore(_BlockedWorkerCore):
+        def __init__(self):
+            super().__init__()
+            self.role = 0
+            self.role_events = []
+
+        def observe_frame(self, observation):
+            self.role_events.append(("observation", observation.role_generation, self.role))
+            return {"eligible": False}
+
+        def restore_activation(self, _persisted, _records):
+            self.role = 1
+            self.role_events.append(("restore", self.role))
+            return True
+
+        def rollback_activation(self, _reason):
+            self.role = 1
+            self.role_events.append(("rollback", self.role))
+            return True
+
+        def activation_runtime_failure(self, _reason):
+            self.role = 1
+            self.role_events.append(("fallback", self.role))
+            return True
+
+    core = _RoleCore()
+    runner = ThreadedControllerRunner(core)
+    runner.submit(212.0)
+    assert core.entered.wait(2.0)
+
+    def queue_transition():
+        if operation == "restore":
+            assert runner.restore_activation(SimpleNamespace(transaction_id=f"txn-{transition_first}"), ())
+        elif operation == "rollback":
+            assert runner.rollback_activation("operator")
+        else:
+            assert runner.activation_runtime_failure("confidence")
+
+    try:
+        if transition_first:
+            queue_transition()
+        submission = runner.complete_frame(
+            _output(ratio=0.2, timestamp=20.0),
+            replace(_frame(0), role_generation=int(transition_first)),
+        )
+        assert submission is not None
+        if not transition_first:
+            queue_transition()
+        core.release()
+        assert _wait_for(lambda: len(core.role_events) == 2)
+        if transition_first:
+            assert core.role_events == [
+                (operation, 1),
+                ("observation", 1, 1),
+            ]
+        else:
+            assert core.role_events == [
+                ("observation", 0, 0),
+                (operation, 1),
+            ]
     finally:
         core.release()
         runner.stop()
