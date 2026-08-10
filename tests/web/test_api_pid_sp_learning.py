@@ -170,3 +170,38 @@ def test_report_serialization_failure_is_an_explicit_422(client, monkeypatch):
         "error": "pid-sp-learning-report-invalid",
         "detail": "PID-SP learning report root is not an object",
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "detail"),
+    [
+        pytest.param("K", "checkpoint K must be a number", id="model-parameter"),
+        pytest.param(
+            "identified_at_f",
+            "checkpoint identified_at_f must be a number",
+            id="provenance",
+        ),
+    ],
+)
+def test_oversized_checkpoint_integer_is_an_explicit_422(client, monkeypatch, field, detail):
+    checkpoint = {
+        "form": "fopdt",
+        "K": 800.0,
+        "tau": 600.0,
+        "theta": 40.0,
+        "revision": 3,
+        field: 10**10000,
+    }
+
+    def fail_report():
+        return current_pid_sp_learning_report(status={}, checkpoint=checkpoint)
+
+    monkeypatch.setattr(routes, "backend_pid_sp_learning_report", fail_report)
+
+    response = client.get("/api/pid-sp-learning/report")
+
+    assert response.status_code == 422
+    assert response.get_json() == {
+        "error": "pid-sp-learning-report-invalid",
+        "detail": detail,
+    }

@@ -334,8 +334,14 @@ def _checkpoint_error(detail: str, error: Exception | None = None) -> ValueError
 
 def _checkpoint_number(checkpoint: Mapping[str, object], field: str) -> float:
     try:
-        value = float(cast(str | int | float, checkpoint[field]))
-    except (KeyError, TypeError, ValueError) as error:
+        raw = checkpoint[field]
+    except KeyError as error:
+        raise _checkpoint_error(f"{field} must be a number", error)
+    if isinstance(raw, bool):
+        raise _checkpoint_error(f"{field} must be a number")
+    try:
+        value = float(cast(str | int | float, raw))
+    except (OverflowError, TypeError, ValueError) as error:
         raise _checkpoint_error(f"{field} must be a number", error)
     if not math.isfinite(value):
         raise _checkpoint_error(f"{field} must be finite")
@@ -372,9 +378,11 @@ def _normalize_checkpoint(checkpoint: object) -> dict[str, object] | None:
     identified_value = owned.get("identified_at_f", owned.get("setpoint_f"))
     identified_at_f = None
     if identified_value is not None:
+        if isinstance(identified_value, bool):
+            raise _checkpoint_error("identified_at_f must be a number")
         try:
             identified = float(cast(str | int | float, identified_value))
-        except (TypeError, ValueError) as error:
+        except (OverflowError, TypeError, ValueError) as error:
             raise _checkpoint_error("identified_at_f must be a number", error)
         if not math.isfinite(identified):
             raise _checkpoint_error("identified_at_f must be finite")
@@ -407,7 +415,15 @@ def _normalize_checkpoint(checkpoint: object) -> dict[str, object] | None:
 
 
 def _marked_pid_sp_live(value: object) -> bool:
-    return isinstance(value, Mapping) and value.get("schema_version") == 1 and value.get("controller") == "pid_sp"
+    if not isinstance(value, Mapping):
+        return False
+    schema_version = value.get("schema_version")
+    return (
+        isinstance(schema_version, int)
+        and not isinstance(schema_version, bool)
+        and schema_version == 1
+        and value.get("controller") == "pid_sp"
+    )
 
 
 def _live_from_status(status: object) -> object:

@@ -485,3 +485,54 @@ def test_checkpoint_contracts_are_immutable_and_discriminated():
     assert ipdt.form == "ipdt"
     with pytest.raises(FrozenInstanceError):
         fopdt.K = 900.0
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "field"),
+    [
+        pytest.param({**_FOPDT_CHECKPOINT, "K": True}, "K", id="fopdt-K"),
+        pytest.param({**_FOPDT_CHECKPOINT, "tau": True}, "tau", id="fopdt-tau"),
+        pytest.param({**_FOPDT_CHECKPOINT, "theta": True}, "theta", id="fopdt-theta"),
+        pytest.param(
+            {**_FOPDT_CHECKPOINT, "identified_at_f": True},
+            "identified_at_f",
+            id="fopdt-identified-at",
+        ),
+        pytest.param(
+            {
+                **{key: value for key, value in _FOPDT_CHECKPOINT.items() if key != "identified_at_f"},
+                "setpoint_f": True,
+            },
+            "identified_at_f",
+            id="fopdt-legacy-setpoint",
+        ),
+        pytest.param({**_IPDT_CHECKPOINT, "K_i": True}, "K_i", id="ipdt-K-i"),
+        pytest.param({**_IPDT_CHECKPOINT, "c0": True}, "c0", id="ipdt-c0"),
+        pytest.param({**_IPDT_CHECKPOINT, "theta": True}, "theta", id="ipdt-theta"),
+        pytest.param(
+            {**_IPDT_CHECKPOINT, "identified_at_f": True},
+            "identified_at_f",
+            id="ipdt-identified-at",
+        ),
+        pytest.param(
+            {**_IPDT_CHECKPOINT, "setpoint_f": True},
+            "identified_at_f",
+            id="ipdt-legacy-setpoint",
+        ),
+    ],
+)
+def test_checkpoint_numeric_fields_reject_booleans_before_conversion(checkpoint, field):
+    with pytest.raises(ValueError, match=rf"checkpoint {field} must be a number"):
+        _report(checkpoint=checkpoint)
+
+
+@pytest.mark.parametrize("schema_version", [True, 1.0])
+def test_bool_or_float_schema_markers_do_not_claim_pid_sp_live_state(schema_version):
+    live = _marked_live()
+    live["schema_version"] = schema_version
+
+    payload = _report(status={"learning": live}).as_dict()
+
+    assert payload["status"] == "idle"
+    assert payload["live"] is False
+    assert payload["failure"] is None
