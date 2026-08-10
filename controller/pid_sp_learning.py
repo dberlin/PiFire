@@ -324,7 +324,7 @@ def _normalize_checkpoint(checkpoint: object) -> dict[str, object] | None:
             revision=revision,
             identified_at_f=identified_at_f,
         )
-    return contract.model_dump(mode="json", exclude_unset=True)
+    return contract.model_dump(mode="json", exclude_none=True)
 
 
 def _marked_pid_sp_live(value: object) -> bool:

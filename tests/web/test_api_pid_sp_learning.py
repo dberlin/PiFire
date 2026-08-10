@@ -119,6 +119,31 @@ def test_report_route_serializes_the_complete_live_and_checkpoint_projection(cli
     assert b"Infinity" not in response.data
 
 
+def test_report_route_omits_absent_checkpoint_provenance(client, monkeypatch):
+    report = current_pid_sp_learning_report(
+        status={},
+        checkpoint={
+            "form": "fopdt",
+            "K": 800.0,
+            "tau": 600.0,
+            "theta": 40.0,
+            "revision": 3,
+        },
+    )
+    monkeypatch.setattr(routes, "backend_pid_sp_learning_report", lambda: report)
+
+    response = client.get("/api/pid-sp-learning/report")
+
+    assert response.status_code == 200
+    assert response.get_json()["checkpoint"] == {
+        "form": "fopdt",
+        "K": 800.0,
+        "tau": 600.0,
+        "theta": 40.0,
+        "revision": 3,
+    }
+
+
 def test_unrepresentable_report_returns_the_existing_explicit_422_shape(client, monkeypatch):
     def fail_report():
         return current_pid_sp_learning_report(

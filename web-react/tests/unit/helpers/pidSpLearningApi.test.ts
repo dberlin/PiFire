@@ -309,6 +309,7 @@ describe("fetchPidSpLearningReport", () => {
 
   it.each([
     ["checkpoint numeric boolean", { ...REPORT, checkpoint: { ...FOPDT, K: true } }],
+    ["null checkpoint provenance", { ...REPORT, checkpoint: { ...FOPDT, identified_at_f: null } }],
     ["identifier numeric boolean", { ...REPORT, identifier: { ...IDENTIFIER, accepted: false } }],
     [
       "predictor numeric boolean",
