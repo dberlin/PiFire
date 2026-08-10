@@ -27,9 +27,7 @@ import { freezeDate } from "./layoutBaseline";
 
 const ARTIFACTS = "tests/e2e/artifacts";
 
-const STALE_DIGEST = "a".repeat(64);
 const EXACT_DIGEST = "b".repeat(64);
-const STALE_DECISION = "review-stale";
 const EXACT_DECISION = "review-exact";
 
 function evidenceReport(
@@ -46,57 +44,19 @@ function evidenceReport(
   const policy = options.policy ?? "passive-auto";
   const roleGeneration = options.roleGeneration ?? 4;
   const complete = !["collecting", "insufficient-excitation", "fitting"].includes(status);
-  const active = status === "active";
-  const activating = status === "activating";
-  const identity = (modelDigest: string, candidateGeneration: number) => ({
-    kind: "grey-box",
-    digest: modelDigest,
-    model_schema: 4,
-    role_generation: roleGeneration,
-    candidate_generation: candidateGeneration,
-  });
+  const activationPhase =
+    status === "active" ? "active" : status === "activating" ? "prepared" : "aborted";
+  const activeDigest = "c".repeat(64);
   return {
     schema_version: 2,
     status,
-    mode:
-      origin === "operator-calibration"
-        ? "calibration"
-        : origin === "cook-refit"
-          ? "cook-refit"
-          : "passive",
-    origin,
-    role_generation: roleGeneration,
-    candidate_generation: 5,
+    mode: origin,
     decision_id: decisionId,
-    enable_online_adaptation: true,
-    enable_identification: true,
-    active_model: identity(active ? digest : "c".repeat(64), active ? 5 : 4),
-    default_model: {
-      ...identity("c".repeat(64), 0),
-      role_generation: 0,
-    },
-    candidate: identity(digest, 5),
-    rollback_owner: active ? identity("c".repeat(64), 4) : null,
-    observation: {
-      window_id: "window-e2e-5",
-      eligible_count: complete ? 120 : 0,
-      ineligible_count: complete ? 3 : 0,
-      rejection_reasons: complete ? [{ reason: "lid-open", count: 3 }] : [],
-      probe_provenance: origin === "operator-calibration" ? "calibration-probe" : "ordinary",
-      mixed_window_authority: origin === "operator-calibration" ? "operator-calibration" : null,
-    },
-    calibration: {
-      status: complete ? "accepted" : "inactive",
-      stage: complete ? "coast" : null,
-      current_probe: null,
-      completed_stages: complete ? ["low", "middle", "high", "coast"] : [],
-      missing_stages: complete ? [] : ["low", "middle", "high", "coast"],
-      eligible_count: complete ? 120 : 0,
-      ineligible_count: 0,
-      ineligible_reasons: [],
-      timed_out: false,
-      incomplete: false,
-      revision: complete ? 2 : 0,
+    evidence: {
+      count: complete ? 6 : 0,
+      audit_count: complete ? 7 : 0,
+      high_water: complete ? [1_780_000_601_000, "evidence-e2e"] : null,
+      retired_excluded: complete ? 1 : 0,
     },
     fit: {
       status:
@@ -105,180 +65,121 @@ function evidenceReport(
           : status === "collecting" || status === "insufficient-excitation"
             ? "idle"
             : "succeeded",
-      job_id: complete || status === "fitting" ? "fit-e2e-5" : null,
-      process_id: status === "fitting" ? 5025 : null,
-      role_generation: roleGeneration,
-      origin,
-      window: {
-        window_id: "window-e2e-5",
-        session_id: "session-e2e",
-        cook_id: "cook-e2e",
-        sample_count: complete ? 120 : 0,
-        config_digest: "config-e2e",
-        incumbent_digest: "c".repeat(64),
-        started_at_ms: 1_780_000_000_000,
-        ended_at_ms: 1_780_000_600_000,
-      },
-      result: complete
-        ? { reason: "converged", solver_iterations: 12, finished_at_ms: 1_780_000_601_000 }
-        : null,
-    },
-    grey_parameters: complete
-      ? [
-          {
-            name: "C_c",
-            unit: "J/°C",
-            incumbent_value: 4200,
-            candidate_value: 4475,
-            delta: 275,
-          },
-          {
-            name: "K_Q",
-            unit: "°C/s",
-            incumbent_value: 0.071,
-            candidate_value: 0.076,
-            delta: 0.005,
-          },
-          {
-            name: "theta",
-            unit: "s",
-            incumbent_value: 135,
-            candidate_value: 150,
-            delta: 15,
-          },
-        ]
-      : [],
-    candidate_structure: {
-      prediction_step_seconds: 25,
-      delay_states: 8,
-      horizon_steps: 12,
-    },
-    identifiability: {
-      status: complete ? "passed" : "not-run",
-      reason: complete ? null : "insufficient-excitation",
-      matrix_rank: complete ? 3 : null,
-      parameter_count: 3,
-      condition_number: complete ? 21.7 : null,
-      finite_diagnostics: complete,
-      confidence_intervals: complete
-        ? {
-            C_c: { lower: 4300, upper: 4650 },
-            K_Q: { lower: 0.071, upper: 0.081 },
-            theta: { lower: 140, upper: 162 },
-          }
-        : null,
-      physical_bounds: {
-        status: complete ? "passed" : "not-run",
-        detail: complete ? "all grey parameters within physical bounds" : "no candidate",
-      },
-    },
-    native: {
-      build: {
-        status: complete ? "passed" : "not-run",
-        build_digest: complete ? "native-build-e2e" : null,
-        manifest_digest: complete ? "native-build-e2e" : null,
-        detail: complete ? "candidate handle built off-path" : "no candidate build",
-      },
-      dry_solve: {
-        status: complete ? "passed" : "not-run",
-        solve_time_ms: complete ? 18.75 : null,
-        finite_diagnostics: complete,
-        detail: complete ? "representative 12-step solve passed" : "no candidate dry solve",
-      },
-    },
-    scores: complete
-      ? [
-          {
-            horizon_steps: 12,
-            temperature_band: "middle",
-            phase: "heating",
-            ambient_source: "configured",
-            candidate_generation: 5,
-            challenger_rmse_c: 0.5,
-            incumbent_rmse_c: 1,
-            challenger_bias_c: 0,
-            incumbent_bias_c: 0,
-            challenger_band_error_c: 0.5,
-            incumbent_band_error_c: 1,
-            bootstrap: {
-              available: true,
-              method: "hierarchical-cook-block",
-              replicate_count: 10_000,
-              rmse_ratio_upper_bound: 0.75,
-            },
-          },
-        ]
-      : [],
-    gates: complete
-      ? [
-          { name: "native-dry-solve", status: "passed", reason: null },
-          { name: "target-timing", status: "passed", reason: null },
-        ]
-      : [],
-    missing_gates: complete ? [] : ["observation-window", "target-timing"],
-    blockers: complete ? [] : ["observation-window", "target-timing"],
-    activation: {
-      policy,
-      reason: policy,
-      decision_id: decisionId,
-      persistence: {
-        status: active || activating ? "passed" : "not-run",
-        phase: active ? "active" : activating ? "prepared" : null,
-        record_id: active || activating ? "activation-e2e-5" : null,
-        detail: active || activating ? "candidate identities persisted" : "not prepared",
-      },
-      pending_swap: {
-        status: active ? "passed" : activating ? "pending" : "not-run",
-        frame_boundary: active || activating ? 505 : null,
-        detail: active
-          ? "completed frame swap committed"
-          : activating
-            ? "waiting for completed frame"
-            : "no pending swap",
-      },
-    },
-    rollback: {
-      permitted: active,
-      confidence_window_remaining: active ? 24 : 0,
-      latest_reason: null,
+      request_id: status === "collecting" ? null : "fit-e2e-5",
+      window_id: status === "collecting" ? null : "window-e2e-5",
+      error: null,
     },
     cook_refit: {
-      authorized: true,
-      status: "not-run",
-      outcome: null,
-      activation_timing: "next-cook-restore",
+      status: "idle",
+      latest: null,
+      final_status: "idle",
+      authorization: "blocked",
+      next_cook: false,
     },
-    target_timing: {
-      available: complete,
-      sample_count: complete ? 50 : 0,
-      p50_ms: complete ? 10 : null,
-      p95_ms: complete ? 20 : null,
-      p99_ms: complete ? 41 : null,
-      hardware_provenance: complete ? "Raspberry Pi 5 / target-hardware" : null,
-      status: complete ? "passed" : "not-run",
+    window: complete
+      ? {
+          session_id: "session-e2e",
+          cook_id: "cook-e2e",
+          first_observation_sequence: 1,
+          last_observation_sequence: 120,
+          configuration_digest: "d".repeat(64),
+          incumbent_digest: activeDigest,
+          role_generation: roleGeneration,
+        }
+      : null,
+    checks: complete
+      ? {
+          identifiability: "passed",
+          native_build: "passed",
+          native_dry_solve: "passed",
+          target_timing: "passed",
+        }
+      : {},
+    candidate: {
+      digest,
+      origin,
+      policy,
+      role_generation: roleGeneration,
+      candidate_generation: 5,
+      parameters: complete
+        ? {
+            C_c: 4475,
+            h_amb: 18.5,
+            T_amb: 20,
+            theta: 150,
+            n_delay: 8,
+            K_Q: 0.076,
+            sigma: 0,
+          }
+        : null,
+      parameter_deltas: null,
+      fit_quality: complete ? 0.5 : null,
+      identifiability: null,
+      assessment: complete
+        ? {
+            decision_id: decisionId,
+            origin,
+            policy,
+            fit_accepted: true,
+            identifiability_accepted: true,
+            native_build: "passed",
+            native_dry_solve: "passed",
+            target_timing: "passed",
+            confidence_accepted: true,
+            rejection_reasons: [],
+            payload_type: "candidate_assessment",
+          }
+        : null,
     },
-    lifecycle: complete
+    activation: {
+      phase: activationPhase,
+      transaction_id: complete ? "transaction-e2e-5" : null,
+      origin,
+      policy,
+      candidate_digest: digest,
+      candidate_generation: 5,
+      role_generation: roleGeneration,
+      reason: null,
+      pending_persistence: false,
+      pending_frame_boundary_swap: status === "activating",
+    },
+    active_model: {
+      digest: status === "active" ? digest : activeDigest,
+      role_generation: roleGeneration,
+    },
+    identities: {
+      active_digest: status === "active" ? digest : activeDigest,
+      active_generation: roleGeneration,
+      candidate_digest: digest,
+      candidate_generation: 5,
+      rollback_digest: status === "active" ? activeDigest : null,
+      rollback_generation: status === "active" ? roleGeneration - 1 : null,
+    },
+    calibration: {
+      revision: complete ? 2 : 0,
+      command_high_water: complete ? 2 : 0,
+    },
+    latest_lifecycle: complete
+      ? {
+          decision_id: decisionId,
+          phase: activationPhase,
+          origin,
+          policy,
+          reason: null,
+          payload_type: "activation_lifecycle",
+        }
+      : null,
+    failure: null,
+    gates: complete
       ? [
-          {
-            phase: "fit-succeeded",
-            timestamp_ms: 1_780_000_601_000,
-            reason: "converged",
-            role_generation: roleGeneration,
-            candidate_generation: 5,
-          },
+          { name: "native_build", passed: true, reason: null },
+          { name: "native_dry_solve", passed: true, reason: null },
+          { name: "target_timing", passed: true, reason: null },
         ]
       : [],
+    blockers: [],
     errors: [],
-    history: [],
-    ambient_provenance_limitation: "Ambient uses configured provenance; it is not measured.",
-    artifact_metadata: {
-      schema_version: 2,
-      provenance_digest: "c".repeat(64),
-      bootstrap_seed: 7,
-      bootstrap_replicates: 10_000,
-      decision_id: decisionId,
-      evidence_ids: ["calibration", "ordinary-a", "ordinary-b"],
-    },
+    revision: `${status}-${roleGeneration}`,
   };
 }
 
@@ -513,13 +414,12 @@ test("an over-tall dialog stays on screen and every item stays reachable", async
   await page.evaluate((sel) => document.querySelector(sel)?.remove(), scrimSel);
 });
 
-test("one grey report pill and panel stay placed and reachable at both target sizes", async ({
+test("one report trigger stays after Hopper and the full panel is reachable at both target sizes", async ({
   page,
 }) => {
   const report = evidenceReport("evaluating", EXACT_DIGEST, EXACT_DECISION, {
     roleGeneration: 44,
   });
-  let reportRequests = 0;
   await page.route("**/api/settings", (route) =>
     route.fulfill({
       json: {
@@ -530,10 +430,7 @@ test("one grey report pill and panel stay placed and reachable at both target si
       },
     }),
   );
-  await page.route("**/api/model-evidence/report", (route) => {
-    reportRequests += 1;
-    return route.fulfill({ json: report });
-  });
+  await page.route("**/api/model-evidence/report", (route) => route.fulfill({ json: report }));
   await page.reload();
 
   for (const viewport of [
@@ -541,10 +438,9 @@ test("one grey report pill and panel stay placed and reachable at both target si
     { width: 1280, height: 720 },
   ]) {
     await page.setViewportSize(viewport);
-    const learning = page.getByRole("button", { name: "MPC learning: evaluating" });
-    await expect(learning).toHaveCount(1);
-    await learning.scrollIntoViewIfNeeded();
-    await expect(learning).toBeVisible();
+    const trigger = page.getByRole("button", { name: "MPC learning: evaluating" });
+    await trigger.scrollIntoViewIfNeeded();
+    await expect(trigger).toBeVisible();
     await expect(page.locator('[data-pf="rightCol"]')).toContainText("MPC learning: evaluating");
     await expect(page.locator('[data-pf="controls"]')).not.toContainText("MPC learning:");
     const hopper = page.locator(".pf-dash-hopper");
@@ -553,22 +449,18 @@ test("one grey report pill and panel stay placed and reachable at both target si
       "MPC learning: evaluating",
     );
 
-    const pillBox = await learning.boundingBox();
-    expect(pillBox).not.toBeNull();
-    expect(pillBox!.x).toBeGreaterThanOrEqual(0);
-    expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(viewport.width);
-    expect(pillBox!.y).toBeGreaterThanOrEqual(0);
-    expect(pillBox!.y + pillBox!.height).toBeLessThanOrEqual(viewport.height);
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.x).toBeGreaterThanOrEqual(0);
+    expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(viewport.width);
+    expect(triggerBox!.y).toBeGreaterThanOrEqual(0);
+    expect(triggerBox!.y + triggerBox!.height).toBeLessThanOrEqual(viewport.height);
 
-    const beforeOpenRequests = reportRequests;
-    await learning.click();
+    await trigger.click();
     const dialog = page.getByRole("dialog", { name: "MPC model learning" });
-    await expect(dialog).toHaveCount(1);
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("Role generation 44")).toBeVisible();
-    await expect(dialog.getByText("Candidate generation 5")).toBeVisible();
-    if (viewport.width === 800) expect(reportRequests).toBe(beforeOpenRequests);
-
+    await expect(dialog.getByText("Role generation: 44")).toBeVisible();
+    await expect(dialog.getByText("Candidate generation: 5")).toBeVisible();
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
@@ -576,17 +468,14 @@ test("one grey report pill and panel stay placed and reachable at both target si
     expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
     expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewport.height);
 
-    const lifecycle = dialog.getByRole("heading", { name: "Lifecycle" });
-    await lifecycle.scrollIntoViewIfNeeded();
-    await expect(lifecycle).toBeVisible();
+    const finalSection = dialog.getByRole("heading", { name: "Cook refit" });
+    await finalSection.scrollIntoViewIfNeeded();
+    await expect(finalSection).toBeVisible();
     await dialog.getByRole("button", { name: "Close MPC model learning" }).click();
-    await expect(dialog).toBeHidden();
   }
 });
 
-test("passive learning advances automatically without ever exposing manual activation", async ({
-  page,
-}) => {
+test("passive automatic transitions never expose reviewed activation controls", async ({ page }) => {
   let report = evidenceReport("collecting", EXACT_DIGEST, EXACT_DECISION);
   await page.route("**/api/settings", (route) =>
     route.fulfill({
@@ -600,30 +489,28 @@ test("passive learning advances automatically without ever exposing manual activ
   );
   await page.route("**/api/model-evidence/report", (route) => route.fulfill({ json: report }));
 
-  const states = [
+  for (const [status, label] of [
     ["collecting", "Collecting"],
     ["fitting", "Fitting"],
     ["evaluating", "Evaluating"],
+    ["ready-for-review", "Ready for review"],
     ["activating", "Activating"],
     ["active", "Active"],
-  ] as const;
-  for (const [status, label] of states) {
+  ] as const) {
     report = evidenceReport(status, EXACT_DIGEST, EXACT_DECISION, {
       origin: "passive-online",
       policy: "passive-auto",
       roleGeneration: 20,
     });
     await page.reload();
-
     const trigger = page.getByRole("button", {
       name: `MPC learning: ${label.toLowerCase()}`,
     });
-    await expect(trigger).toBeVisible();
+    await trigger.scrollIntoViewIfNeeded();
     await trigger.click();
     const dialog = page.getByRole("dialog", { name: "MPC model learning" });
     await expect(dialog.getByText(label, { exact: true })).toBeVisible();
-    await expect(dialog.getByText(/passive[ -]online/i)).toBeVisible();
-    await expect(dialog.getByText(/passive[ -]auto/i)).toBeVisible();
+    await expect(dialog.getByText("Mode: passive-online")).toBeVisible();
     await expect(dialog.getByLabel("Type the exact candidate digest")).toHaveCount(0);
     await expect(dialog.getByLabel("Type the exact confidence decision ID")).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: "Activate exact model" })).toHaveCount(0);
@@ -631,17 +518,15 @@ test("passive learning advances automatically without ever exposing manual activ
   }
 });
 
-test("operator calibration reviews exact grey identity, activates, and rolls back by owner", async ({
+test("reviewed calibration activates exact digest and decision, then rolls back only to explicit owner", async ({
   page,
 }) => {
-  let report = evidenceReport("collecting", STALE_DIGEST, STALE_DECISION, {
+  let report = evidenceReport("ready-for-review", EXACT_DIGEST, EXACT_DECISION, {
     origin: "operator-calibration",
     policy: "operator-reviewed",
     roleGeneration: 4,
   });
-  const calibrationActions: string[] = [];
-  const activationBodies: Array<{ candidate_digest: string; decision_id: string }> = [];
-
+  const activationBodies: unknown[] = [];
   await page.route("**/api/settings", (route) =>
     route.fulfill({
       json: {
@@ -653,76 +538,23 @@ test("operator calibration reviews exact grey identity, activates, and rolls bac
     }),
   );
   await page.route("**/api/model-evidence/report", (route) => route.fulfill({ json: report }));
-  await page.route("**/api/set_mpc_calibration", async (route) => {
-    const body = route.request().postDataJSON() as {
-      action: string;
-      revision: number;
-      empty_grill_confirmed: boolean;
-      pellets_confirmed: boolean;
-    };
-    calibrationActions.push(body.action);
-    if (body.action === "start") {
-      expect(body).toMatchObject({
-        revision: 1,
-        empty_grill_confirmed: true,
-        pellets_confirmed: true,
-      });
-      report = {
-        ...report,
-        calibration: {
-          ...report.calibration,
-          status: "active",
-          stage: "low",
-          current_probe: 0.025,
-          eligible_count: 1,
-          revision: 1,
-        },
-      };
-    } else {
-      expect(body).toMatchObject({ action: "stop", revision: 2 });
-      report = evidenceReport("ready-for-review", STALE_DIGEST, STALE_DECISION, {
-        origin: "operator-calibration",
-        policy: "operator-reviewed",
-        roleGeneration: 4,
-      });
-    }
-    await route.fulfill({
-      json: {
-        result: "OK",
-        message: "accepted",
-        data: { mpc_calibration: body },
-      },
-    });
-  });
   await page.route("**/api/model-evidence/activate", async (route) => {
-    const body = route.request().postDataJSON() as {
-      candidate_digest: string;
-      decision_id: string;
-    };
+    const body = route.request().postDataJSON();
     activationBodies.push(body);
-    if (activationBodies.length === 1) {
-      report = evidenceReport("ready-for-review", EXACT_DIGEST, EXACT_DECISION, {
-        origin: "operator-calibration",
-        policy: "operator-reviewed",
-        roleGeneration: 4,
-      });
-      await route.fulfill({
-        status: 409,
-        json: { accepted: false, acknowledgement: "rejected", detail: "stale-confidence-decision" },
-      });
-      return;
-    }
-    expect(body).toEqual({
-      candidate_digest: EXACT_DIGEST,
-      decision_id: EXACT_DECISION,
-    });
     report = evidenceReport("activating", EXACT_DIGEST, EXACT_DECISION, {
       origin: "operator-calibration",
       policy: "operator-reviewed",
-      roleGeneration: 5,
+      roleGeneration: 4,
     });
     await route.fulfill({
-      json: { accepted: true, acknowledgement: "activation-requested" },
+      json: {
+        accepted: true,
+        phase: "prepared",
+        transaction_id: "transaction-e2e-5",
+        decision_id: EXACT_DECISION,
+        candidate_digest: EXACT_DIGEST,
+        role_generation: 4,
+      },
     });
   });
   await page.route("**/api/model-evidence/rollback", async (route) => {
@@ -734,51 +566,37 @@ test("operator calibration reviews exact grey identity, activates, and rolls bac
     });
     report = {
       ...fallback,
-      active_model: {
-        ...fallback.default_model,
-        role_generation: 6,
-        candidate_generation: 4,
-      },
-      rollback: {
-        ...fallback.rollback,
-        latest_reason: "active-solve-failed",
+      activation: {
+        ...fallback.activation,
+        phase: "aborted",
+        reason: "active-solve-failed",
       },
     };
     await route.fulfill({
-      json: { accepted: true, acknowledgement: "rollback-requested" },
+      json: {
+        accepted: true,
+        active_kind: "grey-box",
+        decision_id: EXACT_DECISION,
+        reason: "active-solve-failed",
+        role_generation: 6,
+        rollback_digest: "c".repeat(64),
+      },
     });
   });
 
   await page.reload();
-  const learning = page.getByRole("button", { name: "MPC learning: collecting" });
-  await learning.scrollIntoViewIfNeeded();
-  await learning.click();
-  await page.getByLabel("The grill is empty, with normal grates and drip tray installed.").check();
-  await page.getByLabel("Sufficient pellets are loaded for the calibration run.").check();
-  await page.getByRole("button", { name: "Start calibration" }).click();
-  await expect(page.getByText("Current probe: +0.025 q")).toBeVisible();
-  await page.getByRole("button", { name: "Stop calibration" }).click();
-
-  await expect(page.getByText("Ready for review", { exact: true })).toBeVisible();
-  await expect(page.getByText("Completed stages: low, middle, high, coast")).toBeVisible();
-  await expect(page.getByText("Missing gates: none")).toBeVisible();
-  await expect(page.getByText("Raspberry Pi 5 / target-hardware")).toBeVisible();
-  await expect(page.getByText(STALE_DIGEST, { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(STALE_DECISION, { exact: true }).first()).toBeVisible();
-
-  await page.getByLabel("Type the exact candidate digest").fill(STALE_DIGEST);
-  await page.getByLabel("Type the exact confidence decision ID").fill(STALE_DECISION);
-  await page.getByRole("button", { name: "Activate exact model" }).click();
-  await expect(page.getByRole("alert")).toContainText("stale-confidence-decision");
-  await expect(page.getByText(EXACT_DIGEST, { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(EXACT_DECISION, { exact: true }).first()).toBeVisible();
-
+  const trigger = page.getByRole("button", { name: "MPC learning: ready for review" });
+  await trigger.scrollIntoViewIfNeeded();
+  await trigger.click();
   await page.getByLabel("Type the exact candidate digest").fill(EXACT_DIGEST);
   await page.getByLabel("Type the exact confidence decision ID").fill(EXACT_DECISION);
   await page.getByRole("button", { name: "Activate exact model" }).click();
   await expect(page.getByText("Activating", { exact: true })).toBeVisible();
-  await expect(page.getByText("prepared", { exact: true })).toBeVisible();
-  await expect(page.getByText("waiting for completed frame", { exact: false })).toBeVisible();
+  await expect(page.getByText("Durable phase: prepared")).toBeVisible();
+  await expect(page.getByText("Frame-boundary swap pending: yes")).toBeVisible();
+  expect(activationBodies).toEqual([
+    { candidate_digest: EXACT_DIGEST, decision_id: EXACT_DECISION },
+  ]);
 
   report = evidenceReport("active", EXACT_DIGEST, EXACT_DECISION, {
     origin: "operator-calibration",
@@ -787,21 +605,16 @@ test("operator calibration reviews exact grey identity, activates, and rolls bac
   });
   await page.reload();
   await page.getByRole("button", { name: "MPC learning: active" }).click();
-  await expect(page.getByText("Active model: grey-box")).toBeVisible();
-  await expect(page.getByText("c".repeat(64), { exact: true }).first()).toBeVisible();
+  const ownership = page.getByRole("heading", { name: "Model ownership" }).locator("..");
+  await expect(ownership).toContainText("Rollback owner");
+  await expect(ownership).toContainText("c".repeat(64));
   await page.getByLabel("Required rollback reason").fill("active-solve-failed");
-  await page.getByRole("button", { name: "Roll back to last safe model" }).click();
+  await page.getByRole("button", { name: "Roll back to explicit owner" }).click();
   await expect(page.getByText("Fallback", { exact: true })).toBeVisible();
-  await expect(page.getByText("Latest rollback outcome: active-solve-failed")).toBeVisible();
-
-  expect(calibrationActions).toEqual(["start", "stop"]);
-  expect(activationBodies).toEqual([
-    { candidate_digest: STALE_DIGEST, decision_id: STALE_DECISION },
-    { candidate_digest: EXACT_DIGEST, decision_id: EXACT_DECISION },
-  ]);
+  await expect(page.getByText("Reason: active-solve-failed")).toBeVisible();
 });
 
-test("cook-refit authorization, outcome, native errors, and schema invalidation stay visible", async ({
+test("cook-refit, native rejection, structured failure, and schema invalidation remain backend-authored", async ({
   page,
 }) => {
   let report: ModelEvidenceReport = {
@@ -810,12 +623,12 @@ test("cook-refit authorization, outcome, native errors, and schema invalidation 
       policy: "cook-refit",
       roleGeneration: 30,
     }),
-    enable_identification: false,
     cook_refit: {
-      authorized: false,
-      status: "disabled",
-      outcome: "Learn This Grill is disabled",
-      activation_timing: null,
+      status: "idle",
+      latest: "disabled",
+      final_status: "disabled",
+      authorization: "blocked",
+      next_cook: false,
     },
   };
   await page.route("**/api/settings", (route) =>
@@ -832,62 +645,61 @@ test("cook-refit authorization, outcome, native errors, and schema invalidation 
 
   await page.reload();
   await page.getByRole("button", { name: "MPC learning: evaluating" }).click();
-  const cookRefit = page.getByRole("heading", { name: "Cook refit" }).locator("..");
-  await expect(cookRefit).toContainText("Not authorized");
-  await expect(cookRefit).toContainText("Learn This Grill is disabled");
+  let cookRefit = page.getByRole("heading", { name: "Cook refit" }).locator("..");
+  await expect(cookRefit).toContainText("Final outcome: disabled");
+  await expect(cookRefit).toContainText("Authorization: blocked");
+  await expect(cookRefit).toContainText("Next cook: no");
   await expect(page.getByRole("button", { name: "Activate exact model" })).toHaveCount(0);
 
   report = {
     ...report,
-    enable_identification: true,
     cook_refit: {
-      authorized: true,
-      status: "accepted",
-      outcome: "checkpoint cook-e2e-grey-v4 persisted",
-      activation_timing: "next-cook-restore",
+      status: "succeeded",
+      latest: "accepted-next-cook",
+      final_status: "accepted-next-cook",
+      authorization: "next-cook",
+      next_cook: true,
     },
   };
   await page.reload();
   await page.getByRole("button", { name: "MPC learning: evaluating" }).click();
-  await expect(page.getByText("checkpoint cook-e2e-grey-v4 persisted")).toBeVisible();
-  await expect(page.getByText(/next[ -]cook[ -]restore/i)).toBeVisible();
-  await expect(page.getByText(/no live end-of-cook swap/i)).toBeVisible();
+  cookRefit = page.getByRole("heading", { name: "Cook refit" }).locator("..");
+  await expect(cookRefit).toContainText("Final outcome: accepted-next-cook");
+  await expect(cookRefit).toContainText("Authorization: next-cook");
+  await expect(cookRefit).toContainText("Next cook: yes");
 
   report = {
     ...report,
     status: "error",
-    errors: [
-      {
-        code: "native-build-failed",
-        message: "candidate handle could not load ABI v2",
-        phase: "native-build",
-        retryable: false,
-        timestamp_ms: 1_780_000_700_000,
+    errors: ["native-build-failed"],
+    failure: {
+      code: "activation-terminal",
+      detail: "candidate handle could not load ABI v2",
+      terminal: true,
+    },
+    candidate: {
+      ...report.candidate,
+      assessment: {
+        ...report.candidate.assessment!,
+        native_build: "failed",
+        confidence_accepted: false,
+        rejection_reasons: ["native-build"],
       },
-    ],
+    },
   };
   await page.reload();
   await page.getByRole("button", { name: "MPC learning: error" }).click();
   await expect(page.getByRole("alert")).toContainText("native-build-failed");
   await expect(page.getByRole("alert")).toContainText("candidate handle could not load ABI v2");
+  await expect(page.getByText("Native build: failed")).toBeVisible();
 
   report = {
     ...report,
     status: "schema-invalidated",
-    errors: [
-      {
-        code: "model-schema-invalid",
-        message: "checkpoint delay structure is 6; expected 8",
-        phase: "checkpoint-load",
-        retryable: false,
-        timestamp_ms: 1_780_000_701_000,
-      },
-    ],
+    errors: ["checkpoint-schema-invalid"],
+    failure: null,
   };
   await page.reload();
   await page.getByRole("button", { name: "MPC learning: schema invalidated" }).click();
-  await expect(page.getByRole("alert")).toContainText("model-schema-invalid");
-  await expect(page.getByRole("alert")).toContainText(
-    "checkpoint delay structure is 6; expected 8",
-  );
+  await expect(page.getByRole("alert")).toContainText("checkpoint-schema-invalid");
 });

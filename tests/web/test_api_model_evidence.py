@@ -70,6 +70,58 @@ def test_empty_report_route_surfaces_missing_authority_terminally(client):
 
     assert response.status_code == 200
     payload = response.get_json()
+    assert set(payload) == {
+        "schema_version",
+        "status",
+        "mode",
+        "decision_id",
+        "evidence",
+        "fit",
+        "cook_refit",
+        "window",
+        "checks",
+        "candidate",
+        "activation",
+        "active_model",
+        "identities",
+        "calibration",
+        "latest_lifecycle",
+        "failure",
+        "gates",
+        "blockers",
+        "errors",
+        "revision",
+    }
+    assert set(payload["fit"]) == {"status", "request_id", "window_id", "error"}
+    assert set(payload["cook_refit"]) == {
+        "status",
+        "latest",
+        "final_status",
+        "authorization",
+        "next_cook",
+    }
+    assert set(payload["candidate"]) == {
+        "digest",
+        "origin",
+        "policy",
+        "role_generation",
+        "candidate_generation",
+        "parameters",
+        "parameter_deltas",
+        "fit_quality",
+        "identifiability",
+        "assessment",
+    }
+    assert set(payload["active_model"]) == {"digest", "role_generation"}
+    assert set(payload["identities"]) == {
+        "active_digest",
+        "active_generation",
+        "candidate_digest",
+        "candidate_generation",
+        "rollback_digest",
+        "rollback_generation",
+    }
+    assert set(payload["calibration"]) == {"revision", "command_high_water"}
     assert payload["schema_version"] == 2
     assert payload["status"] == "error"
     assert payload["errors"] == ["checkpoint-missing"]

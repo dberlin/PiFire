@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   activateModel,
@@ -7,10 +8,8 @@ import {
   setMpcCalibration,
 } from "../../helpers/modelEvidence/modelEvidenceApi";
 import type {
-  ModelEvidenceReport,
+  CheckStatus,
   ModelEvidenceStatus,
-  ModelIdentity,
-  ModelScore,
   MpcCalibrationAction,
   TemperatureUnit,
 } from "../../helpers/modelEvidence/types";
@@ -20,11 +19,14 @@ const BAND_CENTERS_F = [225, 325, 425];
 const FOCUS_RING =
   "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent";
 const REPORT_SECTION = "min-w-0 rounded-card border border-card-border bg-inset p-4";
-
-function bandCenters(units: TemperatureUnit): string {
-  const values = BAND_CENTERS_F.map((f) => (units === "F" ? f : Math.round(((f - 32) * 5) / 9)));
-  return `${values[0]}, ${values[1]} and ${values[2]} °${units}`;
-}
+const REPORT_QUERY_ROOT = "model-evidence-report";
+const CALIBRATION_ACTION_LABEL: Record<MpcCalibrationAction, string> = {
+  start: "Start calibration",
+  pause: "Pause calibration",
+  resume: "Resume calibration",
+  stop: "Stop calibration",
+  "reset-progress": "Reset calibration progress",
+};
 
 const STATUS_LABEL: Record<ModelEvidenceStatus, string> = {
   collecting: "Collecting",
@@ -57,71 +59,50 @@ interface MpcLearningPanelProps {
   selectedController: string | null;
   units: TemperatureUnit;
   ambientC: number;
-  /** Socket high-water mark. It invalidates REST authority but is never rendered. */
+  /** Socket invalidation high-water. REST remains the only rendered authority. */
   learningReportRevision?: number;
 }
 
-function metric(value: number | null, suffix = ""): string {
-  return value === null ? "Unavailable" : `${value.toFixed(2)}${suffix}`;
+class ReportRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReportRequestError";
+  }
 }
 
-function value(value: number | null, unit = ""): string {
-  return value === null ? "Unavailable" : `${value}${unit ? ` ${unit}` : ""}`;
-}
-
-function identitySummary(label: string, identity: ModelIdentity | null) {
-  if (identity === null) return <p>{label}: none</p>;
-  return (
-    <div className="grid gap-1">
-      <p>
-        {label}: {identity.kind}
-      </p>
-      <p className="break-all text-probe-label">{identity.digest ?? "Digest unavailable"}</p>
-      <p className="text-probe-label">
-        Schema {identity.model_schema ?? "unavailable"} · role generation {identity.role_generation ?? "unavailable"} · candidate generation {identity.candidate_generation ?? "unavailable"}
-      </p>
-    </div>
+function bandCenters(units: TemperatureUnit): string {
+  const values = BAND_CENTERS_F.map((f) =>
+    units === "F" ? f : Math.round(((f - 32) * 5) / 9),
   );
+  return `${values[0]}, ${values[1]} and ${values[2]} °${units}`;
 }
 
-function ScoreDetails({ score }: { score: ModelScore }) {
+function shown(value: string | number | null | undefined): string {
+  return value === null || value === undefined ? "not reported" : String(value);
+}
+
+function yesNo(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+function checkTone(status: CheckStatus): string {
+  if (status === "passed") return "text-ok";
+  if (status === "failed") return "text-danger";
+  if (status === "pending") return "text-accent";
+  return "text-probe-label";
+}
+
+function generationIdentity(
+  label: string,
+  digest: string | null,
+  generation: number | null,
+) {
   return (
-    <>
-      <div>
-        <dt className="text-label">Horizon</dt>
-        <dd>{score.horizon_steps} steps</dd>
-      </div>
-      <div>
-        <dt className="text-label">Band / phase</dt>
-        <dd>
-          {score.temperature_band} / {score.phase}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-label">Challenger RMSE</dt>
-        <dd>{metric(score.challenger_rmse_c, " °C")}</dd>
-      </div>
-      <div>
-        <dt className="text-label">Incumbent RMSE</dt>
-        <dd>{metric(score.incumbent_rmse_c, " °C")}</dd>
-      </div>
-      <div>
-        <dt className="text-label">Challenger bias / band error</dt>
-        <dd>
-          {metric(score.challenger_bias_c, " °C")} / {metric(score.challenger_band_error_c, " °C")}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-label">Incumbent bias / band error</dt>
-        <dd>
-          {metric(score.incumbent_bias_c, " °C")} / {metric(score.incumbent_band_error_c, " °C")}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-label">95% ratio upper bound</dt>
-        <dd>{metric(score.bootstrap.rmse_ratio_upper_bound)}</dd>
-      </div>
-    </>
+    <div className="grid min-w-0 gap-1">
+      <p className="font-semibold">{label}</p>
+      <p className="break-all font-mono text-xs text-probe-label">{digest ?? "none"}</p>
+      <p className="text-probe-label">Generation: {generation ?? "none"}</p>
+    </div>
   );
 }
 
@@ -135,11 +116,11 @@ function ActiveMpcLearningPanel({
   ambientC,
   learningReportRevision,
 }: MpcLearningPanelProps) {
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(() => [REPORT_QUERY_ROOT, apiBase] as const, [apiBase]);
+  const requestGeneration = useRef(0);
+  const lastLearningReportRevision = useRef(learningReportRevision);
   const [open, setOpen] = useState(false);
-  // This is the only report object in the component. Pill and dialog both project it directly.
-  const [report, setReport] = useState<ModelEvidenceReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [reportError, setReportError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [emptyGrill, setEmptyGrill] = useState(false);
   const [pellets, setPellets] = useState(false);
@@ -149,9 +130,7 @@ function ActiveMpcLearningPanel({
   const [activationPending, setActivationPending] = useState(false);
   const [rollbackReason, setRollbackReason] = useState("");
   const [rollbackPending, setRollbackPending] = useState(false);
-  const requestGeneration = useRef(0);
-  const nextRevision = useRef(0);
-  const lastLearningReportRevision = useRef(learningReportRevision);
+  const nextCalibrationRevision = useRef(0);
   const triggerButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLElement>(null);
@@ -161,40 +140,51 @@ function ActiveMpcLearningPanel({
     decisionId: null,
   });
 
+  const {
+    data: report,
+    error: reportQueryError,
+    isPending,
+    refetch,
+  } = useQuery({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      const generation = ++requestGeneration.current;
+      const result = await fetchModelEvidenceReport(apiBase, signal);
+      if (signal.aborted || generation !== requestGeneration.current) {
+        throw new DOMException("Superseded model-evidence report request", "AbortError");
+      }
+      if (!result.ok || result.data === null) {
+        throw new ReportRequestError(result.message || "Model evidence report unavailable");
+      }
+      return result.data;
+    },
+    refetchInterval: REPORT_REFRESH_MS,
+    retry: false,
+  });
+
+  const reportError =
+    reportQueryError instanceof Error
+      ? reportQueryError.message
+      : reportQueryError === null
+        ? null
+        : "Model evidence report unavailable";
+
   const refreshReport = useCallback(async () => {
-    const generation = ++requestGeneration.current;
-    const result = await fetchModelEvidenceReport(apiBase);
-    if (generation !== requestGeneration.current) return;
-    setLoading(false);
-    if (!result.ok || result.data === null) {
-      // Keep any prior report for inspection, but never let stale success hide this failure.
-      setReportError(result.message || "Model evidence report unavailable");
-      return;
-    }
-    setReport(result.data);
-    setReportError(null);
-  }, [apiBase]);
-
-  const loadReport = useCallback(async () => {
-    setLoading(true);
-    await refreshReport();
-  }, [refreshReport]);
-
-  useEffect(() => {
-    const initialRefresh = window.setTimeout(() => void refreshReport(), 0);
-    const interval = window.setInterval(() => void refreshReport(), REPORT_REFRESH_MS);
-    return () => {
-      requestGeneration.current += 1;
-      window.clearTimeout(initialRefresh);
-      window.clearInterval(interval);
-    };
-  }, [refreshReport]);
+    requestGeneration.current += 1;
+    await refetch({ cancelRefetch: true });
+  }, [refetch]);
 
   useEffect(() => {
     if (lastLearningReportRevision.current === learningReportRevision) return;
     lastLearningReportRevision.current = learningReportRevision;
-    void refreshReport();
-  }, [learningReportRevision, refreshReport]);
+    // Invalidate the observed query rather than creating a socket-owned report.
+    // Cancel first even when the initial request has no data: React Query
+    // otherwise deduplicates the invalidation onto that older promise.
+    requestGeneration.current += 1;
+    void queryClient
+      .cancelQueries({ queryKey, exact: true })
+      .then(() => queryClient.invalidateQueries({ queryKey, exact: true }));
+  }, [learningReportRevision, queryClient, queryKey]);
 
   useEffect(() => {
     if (!open) {
@@ -217,10 +207,9 @@ function ActiveMpcLearningPanel({
       if (!focusable || focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      const focusIsInsideDialog =
-        document.activeElement !== null &&
-        dialog.current?.contains(document.activeElement) === true;
-      if (!focusIsInsideDialog) {
+      const focusIsInside =
+        document.activeElement !== null && dialog.current?.contains(document.activeElement) === true;
+      if (!focusIsInside) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
       } else if (event.shiftKey && document.activeElement === first) {
@@ -245,28 +234,11 @@ function ActiveMpcLearningPanel({
     setDecisionIdConfirmation("");
   }, [report?.candidate.digest, report?.decision_id]);
 
-  const calibrationRunning =
-    report?.calibration.status === "active" || report?.calibration.status === "running";
-  const calibrationPaused = report?.calibration.status === "paused";
-  const calibrationEnded =
-    report !== null &&
-    !calibrationRunning &&
-    !calibrationPaused &&
-    report.calibration.status !== "inactive" &&
-    report.calibration.status !== "idle";
-  const resetProgressAvailable =
-    report !== null &&
-    ["cancelled", "timed-out", "failed", "completed"].includes(report.calibration.status);
-  const startDisabled =
-    report === null ||
-    calibrationRunning ||
-    calibrationPaused ||
-    !emptyGrill ||
-    !pellets ||
-    pendingActions.has("start");
   const activationReady =
     report?.status === "ready-for-review" &&
-    report.activation.policy === "operator-reviewed" &&
+    report.mode === "operator-calibration" &&
+    report.candidate.origin === "operator-calibration" &&
+    report.candidate.policy === "operator-reviewed" &&
     report.candidate.digest !== null &&
     report.decision_id !== null;
   const activationConfirmed =
@@ -274,12 +246,15 @@ function ActiveMpcLearningPanel({
     candidateDigestConfirmation === report.candidate.digest &&
     decisionIdConfirmation === report.decision_id;
   const rollbackAvailable =
-    report !== null && report.rollback.permitted && report.rollback_owner !== null;
+    report?.activation.phase === "active" &&
+    report.identities.rollback_digest !== null &&
+    report.identities.rollback_generation !== null;
 
-  const runAction = async (action: MpcCalibrationAction) => {
+  const runCalibrationAction = async (action: MpcCalibrationAction) => {
     if (pendingActions.has(action)) return;
-    const revision = Math.max(nextRevision.current, report?.calibration.revision ?? 0) + 1;
-    nextRevision.current = revision;
+    const revision =
+      Math.max(nextCalibrationRevision.current, report?.calibration.command_high_water ?? 0) + 1;
+    nextCalibrationRevision.current = revision;
     setPendingActions((current) => new Set(current).add(action));
     setActionError(null);
     const isStart = action === "start";
@@ -295,10 +270,7 @@ function ActiveMpcLearningPanel({
       apiBase,
     );
     if (!result.ok) setActionError(result.message || `${action} was not accepted`);
-    // The command response is only an acknowledgement. Keep this revision
-    // pending until the report authority has settled so stale controls cannot
-    // submit it again.
-    await loadReport();
+    await refreshReport();
     setPendingActions((current) => {
       const next = new Set(current);
       next.delete(action);
@@ -307,7 +279,7 @@ function ActiveMpcLearningPanel({
   };
 
   const runActivation = async () => {
-    if (!activationConfirmed || activationPending || report === null) return;
+    if (!activationConfirmed || activationPending || report === undefined) return;
     setActivationPending(true);
     setActionError(null);
     const result = await activateModel(
@@ -318,16 +290,13 @@ function ActiveMpcLearningPanel({
       apiBase,
     );
     if (!result.ok || result.data?.accepted === false) {
-      setActionError(
-        result.data?.detail || result.message || "Model activation was not accepted",
-      );
+      const detail = result.data && "detail" in result.data ? result.data.detail : null;
+      setActionError(detail || result.message || "Model activation was not accepted");
     } else {
       setCandidateDigestConfirmation("");
       setDecisionIdConfirmation("");
     }
-    // Never display activation success from the acknowledgement. Keep the
-    // control pending until the authoritative report has settled.
-    await loadReport();
+    await refreshReport();
     setActivationPending(false);
   };
 
@@ -338,24 +307,30 @@ function ActiveMpcLearningPanel({
     setActionError(null);
     const result = await rollbackModel({ reason }, apiBase);
     if (!result.ok || result.data?.accepted === false) {
-      setActionError(result.data?.detail || result.message || "Model rollback was not accepted");
+      const detail = result.data && "detail" in result.data ? result.data.detail : null;
+      setActionError(detail || result.message || "Model rollback was not accepted");
     } else {
       setRollbackReason("");
     }
-    // Never infer ownership or fallback from the acknowledgement. Keep the
-    // control pending until the authoritative report has settled.
-    await loadReport();
+    await refreshReport();
     setRollbackPending(false);
   };
 
   const triggerStatus =
     reportError !== null
       ? "error"
-      : loading && report === null
+      : isPending && report === undefined
         ? "loading"
         : report
           ? STATUS_LABEL[report.status].toLowerCase()
           : "unavailable";
+  const assessment = report?.candidate.assessment ?? null;
+  const parameterEntries = report?.candidate.parameters
+    ? Object.entries(report.candidate.parameters)
+    : [];
+  const deltaEntries = report?.candidate.parameter_deltas
+    ? Object.entries(report.candidate.parameter_deltas)
+    : [];
 
   return (
     <>
@@ -365,7 +340,7 @@ function ActiveMpcLearningPanel({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-busy={(loading && report === null) || undefined}
+        aria-busy={(isPending && report === undefined) || undefined}
         onClick={() => setOpen(true)}
       >
         MPC learning: {triggerStatus}
@@ -386,7 +361,7 @@ function ActiveMpcLearningPanel({
                   <h2 id="mpc-learning-title" className="text-xl font-bold">
                     MPC model learning
                   </h2>
-                  {report !== null && (
+                  {report && (
                     <p
                       className={`mt-1 font-semibold ${
                         reportError === null ? STATUS_TONE[report.status] : "text-danger"
@@ -407,39 +382,44 @@ function ActiveMpcLearningPanel({
                 </button>
               </header>
 
-              {loading && report === null && <p role="status">Loading model evidence…</p>}
+              {isPending && report === undefined && <p role="status">Loading model evidence…</p>}
               {reportError !== null && (
                 <div className="rounded-lg border border-danger p-3 text-danger" role="alert">
                   <p>{reportError}</p>
                   <button
                     className={`pf-modal-btn mt-2 ${FOCUS_RING}`}
                     type="button"
-                    onClick={() => void loadReport()}
+                    onClick={() => void refreshReport()}
                   >
                     Retry evidence report
                   </button>
                 </div>
               )}
 
-              {report !== null && (
+              {report && (
                 <>
-                  {report.errors.length > 0 && (
+                  {(report.errors.length > 0 || report.failure !== null) && (
                     <div className="grid gap-2 rounded-lg border border-danger p-3 text-danger" role="alert">
                       {report.errors.map((error) => (
-                        <p key={`${error.timestamp_ms}-${error.code}`}>
-                          <strong>{error.code}</strong> — {error.message} ({error.phase})
-                          {error.retryable ? " — retryable" : ""}
-                        </p>
+                        <p key={error}>Report error: {error}</p>
                       ))}
+                      {report.failure && (
+                        <p>
+                          <strong>{report.failure.code}</strong> — {report.failure.detail}
+                          {report.failure.terminal ? " — terminal" : ""}
+                        </p>
+                      )}
                     </div>
                   )}
 
                   <section className={REPORT_SECTION}>
-                    <p className="text-sm text-probe-label">
-                      Calibration probes around the hold you set; it does not drive the grill to a
-                      temperature of its own. Hold at each of its three bands in turn (
-                      {bandCenters(units)}), and it waits at the one it finished until you set the
-                      next. Probes stay under the configured grill maximum.
+                    <h3 className="font-bold">Operator calibration commands</h3>
+                    <p className="mt-2 text-sm text-probe-label">
+                      Calibration probes around the active Hold at {bandCenters(units)}. The report
+                      serializes command high-water only; this panel does not invent a command phase.
+                    </p>
+                    <p className="mt-2 text-sm">
+                      Accepted command high-water: {report.calibration.command_high_water}
                     </p>
                     <div className="mt-3 grid gap-2 text-sm">
                       <label className="flex items-start gap-2">
@@ -462,244 +442,189 @@ function ActiveMpcLearningPanel({
                       </label>
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-5">
-                      <button
-                        className={`pf-modal-btn accent ${FOCUS_RING}`}
-                        type="button"
-                        disabled={startDisabled}
-                        aria-busy={pendingActions.has("start") || undefined}
-                        onClick={() => void runAction("start")}
-                      >
-                        {pendingActions.has("start") ? "Start calibration…" : "Start calibration"}
-                      </button>
-                      {calibrationPaused ? (
-                        <button
-                          className={`pf-modal-btn ${FOCUS_RING}`}
-                          type="button"
-                          disabled={pendingActions.has("resume")}
-                          aria-busy={pendingActions.has("resume") || undefined}
-                          onClick={() => void runAction("resume")}
-                        >
-                          {pendingActions.has("resume") ? "Resume calibration…" : "Resume calibration"}
-                        </button>
-                      ) : (
-                        <button
-                          className={`pf-modal-btn ${FOCUS_RING}`}
-                          type="button"
-                          disabled={!calibrationRunning || pendingActions.has("pause")}
-                          aria-busy={pendingActions.has("pause") || undefined}
-                          onClick={() => void runAction("pause")}
-                        >
-                          {pendingActions.has("pause") ? "Pause calibration…" : "Pause calibration"}
-                        </button>
-                      )}
-                      <button
-                        className={`pf-modal-btn danger ${FOCUS_RING}`}
-                        type="button"
-                        disabled={pendingActions.has("stop")}
-                        aria-busy={pendingActions.has("stop") || undefined}
-                        onClick={() => void runAction("stop")}
-                      >
-                        {pendingActions.has("stop") ? "Stop calibration…" : "Stop calibration"}
-                      </button>
-                      {resetProgressAvailable && (
-                        <button
-                          className={`pf-modal-btn col-span-2 ${FOCUS_RING}`}
-                          type="button"
-                          disabled={pendingActions.has("reset-progress")}
-                          aria-busy={pendingActions.has("reset-progress") || undefined}
-                          onClick={() => void runAction("reset-progress")}
-                        >
-                          {pendingActions.has("reset-progress")
-                            ? "Resetting calibration progress…"
-                            : "Reset calibration progress"}
-                        </button>
+                      {(["start", "pause", "resume", "stop", "reset-progress"] as const).map(
+                        (action) => {
+                          const pending = pendingActions.has(action);
+                          const startBlocked = action === "start" && (!emptyGrill || !pellets);
+                          return (
+                            <button
+                              key={action}
+                              className={`pf-modal-btn ${
+                                action === "start" ? "accent" : action === "stop" ? "danger" : ""
+                              } ${FOCUS_RING}`}
+                              type="button"
+                              disabled={pending || startBlocked}
+                              aria-busy={pending || undefined}
+                              onClick={() => void runCalibrationAction(action)}
+                            >
+                              {pending
+                                ? `${CALIBRATION_ACTION_LABEL[action]}…`
+                                : CALIBRATION_ACTION_LABEL[action]}
+                            </button>
+                          );
+                        },
                       )}
                     </div>
-                    {actionError !== null && (
+                    {actionError && (
                       <p className="mt-3 text-danger" role="alert">
                         {actionError}
                       </p>
                     )}
                   </section>
 
-                  {(report.calibration.timed_out ||
-                    (report.calibration.incomplete && calibrationEnded)) && (
-                    <div className="rounded-lg border border-warn p-3 text-warn" role="alert">
-                      {report.calibration.timed_out && <p>Calibration stage timed out.</p>}
-                      {report.calibration.incomplete && calibrationEnded && (
-                        <p>Calibration ended without completing.</p>
-                      )}
-                    </div>
-                  )}
-
                   <div className="grid gap-4 md:grid-cols-2">
                     <section className={REPORT_SECTION}>
-                      <h3 className="font-bold">Candidate and progress</h3>
-                      <p className="mt-2">Role generation {report.role_generation}</p>
-                      <p>Candidate generation {report.candidate_generation ?? "unavailable"}</p>
-                      <p className="break-all text-sm text-probe-label">
-                        {report.candidate.digest ?? "Candidate digest unavailable"}
-                      </p>
-                      <div className="mt-3 grid gap-1 border-t border-card-border pt-3 text-sm">
-                        {identitySummary("Active model", report.active_model)}
-                        {identitySummary("Default model", report.default_model)}
-                      </div>
-                      <div className="mt-3 grid gap-1 text-sm">
-                        <p>Mode: {report.mode}</p>
-                        <p>Origin: {report.origin}</p>
-                        <p>Calibration: {report.calibration.status}</p>
-                        <p>Stage: {report.calibration.stage ?? "not started"}</p>
-                        <p>
-                          Current probe: {report.calibration.current_probe === null
-                            ? "none"
-                            : `${report.calibration.current_probe >= 0 ? "+" : ""}${report.calibration.current_probe.toFixed(3)} q`}
+                      <h3 className="font-bold">Current authority</h3>
+                      <div className="mt-2 grid gap-2 text-sm">
+                        <p>Mode: {report.mode ?? "none"}</p>
+                        <p>Role generation: {report.candidate.role_generation ?? "none"}</p>
+                        <p>Candidate generation: {report.candidate.candidate_generation ?? "none"}</p>
+                        <p>Candidate policy: {report.candidate.policy ?? "none"}</p>
+                        <p className="break-all font-mono text-xs">
+                          Candidate digest: {report.candidate.digest ?? "none"}
                         </p>
-                        <p>
-                          {report.calibration.eligible_count} eligible / {report.calibration.ineligible_count} ineligible
+                        <p className="break-all font-mono text-xs">
+                          Decision: {report.decision_id ?? "none"}
                         </p>
-                        <p>Completed stages: {report.calibration.completed_stages.join(", ") || "none"}</p>
-                        <p>Missing stages: {report.calibration.missing_stages.join(", ") || "none"}</p>
-                        {report.calibration.ineligible_reasons.length > 0 && (
-                          <p>Ineligible reasons: {report.calibration.ineligible_reasons.join(", ")}</p>
-                        )}
+                        <p className="break-all font-mono text-xs text-probe-label">
+                          Report revision: {report.revision}
+                        </p>
                       </div>
                     </section>
-
                     <section className={REPORT_SECTION}>
-                      <h3 className="font-bold">Observation eligibility</h3>
+                      <h3 className="font-bold">Evidence authority</h3>
                       <div className="mt-2 grid gap-1 text-sm">
-                        <p>Window: {report.observation.window_id ?? "unavailable"}</p>
-                        <p>{report.observation.eligible_count} eligible</p>
-                        <p>{report.observation.ineligible_count} ineligible</p>
-                        <p>Probe provenance: {report.observation.probe_provenance}</p>
-                        <p>
-                          Mixed-window authority: {report.observation.mixed_window_authority ?? "none"}
-                        </p>
-                        {report.observation.rejection_reasons.length === 0 ? (
-                          <p className="text-probe-label">No rejected observations.</p>
-                        ) : (
-                          <ul className="list-disc pl-5">
-                            {report.observation.rejection_reasons.map((reason) => (
-                              <li key={reason.reason}>{reason.reason}: {reason.count}</li>
-                            ))}
-                          </ul>
-                        )}
+                        <p>Current evidence: {report.evidence.count}</p>
+                        <p>Audit evidence: {report.evidence.audit_count}</p>
+                        <p>Retired schema entries excluded: {report.evidence.retired_excluded}</p>
+                        <p>High-water: {report.evidence.high_water?.join(" / ") ?? "none"}</p>
                       </div>
                     </section>
                   </div>
 
                   <section className={REPORT_SECTION}>
-                    <h3 className="font-bold">Fit job</h3>
+                    <h3 className="font-bold">Fit and evidence window</h3>
                     <div className="mt-2 grid gap-1 text-sm md:grid-cols-2">
                       <p>Status: {report.fit.status}</p>
-                      <p>Job: {report.fit.job_id ?? "none"}</p>
-                      <p>Process: {report.fit.process_id ?? "none"}</p>
-                      <p>Origin: {report.fit.origin}</p>
-                      <p>Role generation: {report.fit.role_generation}</p>
-                      {report.fit.window !== null && (
+                      <p>Request: {report.fit.request_id ?? "none"}</p>
+                      <p>Window ID: {report.fit.window_id ?? "none"}</p>
+                      <p className={report.fit.error ? "text-danger" : "text-probe-label"}>
+                        Fit error: {report.fit.error ?? "none"}
+                      </p>
+                      {report.window && (
                         <>
-                          <p>Window: {report.fit.window.window_id}</p>
-                          <p>Session: {report.fit.window.session_id ?? "none"}</p>
-                          <p>Cook: {report.fit.window.cook_id ?? "none"}</p>
-                          <p>Samples: {report.fit.window.sample_count}</p>
-                          <p className="break-all">Config digest: {report.fit.window.config_digest}</p>
-                          <p className="break-all">Incumbent digest: {report.fit.window.incumbent_digest}</p>
-                        </>
-                      )}
-                      {report.fit.result !== null && (
-                        <>
-                          <p>Result: {report.fit.result.reason}</p>
-                          <p>Solver iterations: {report.fit.result.solver_iterations ?? "unavailable"}</p>
+                          <p>Session: {report.window.session_id}</p>
+                          <p>Cook: {report.window.cook_id ?? "none"}</p>
+                          <p>
+                            Observation sequence: {report.window.first_observation_sequence}–
+                            {report.window.last_observation_sequence}
+                          </p>
+                          <p>Window role generation: {report.window.role_generation}</p>
+                          <p className="break-all">Configuration: {report.window.configuration_digest}</p>
+                          <p className="break-all">Incumbent: {report.window.incumbent_digest}</p>
                         </>
                       )}
                     </div>
                   </section>
 
                   <section className={REPORT_SECTION}>
-                    <h3 className="font-bold">Grey parameter changes</h3>
-                    <p className="mt-2 text-sm text-probe-label">
-                      {report.candidate_structure.prediction_step_seconds}-second prediction step · {report.candidate_structure.delay_states} delay states · {report.candidate_structure.horizon_steps}-step horizon
-                    </p>
-                    {report.grey_parameters.length === 0 ? (
-                      <p className="mt-2 text-probe-label">No candidate parameter changes yet.</p>
+                    <h3 className="font-bold">Grey candidate</h3>
+                    {parameterEntries.length === 0 ? (
+                      <p className="mt-2 text-probe-label">No candidate parameters reported.</p>
                     ) : (
                       <div className="mt-3 overflow-x-auto">
-                        <table className="w-full text-left text-sm" aria-label="Grey parameter changes">
+                        <table className="w-full text-left text-sm" aria-label="Grey candidate parameters">
                           <thead className="text-label">
                             <tr>
                               <th className="p-2" scope="col">Parameter</th>
-                              <th className="p-2" scope="col">Incumbent</th>
                               <th className="p-2" scope="col">Candidate</th>
                               <th className="p-2" scope="col">Delta</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {report.grey_parameters.map((parameter) => (
-                              <tr className="border-t border-card-border" key={parameter.name}>
-                                <th className="p-2" scope="row">{parameter.name}</th>
-                                <td className="p-2">{value(parameter.incumbent_value, parameter.unit)}</td>
-                                <td className="p-2">{value(parameter.candidate_value, parameter.unit)}</td>
-                                <td className="p-2">{value(parameter.delta, parameter.unit)}</td>
-                              </tr>
-                            ))}
+                            {parameterEntries.map(([name, candidateValue]) => {
+                              const delta = deltaEntries.find(([deltaName]) => deltaName === name)?.[1];
+                              return (
+                                <tr className="border-t border-card-border" key={name}>
+                                  <th className="p-2" scope="row">{name}</th>
+                                  <td className="p-2">{candidateValue}</td>
+                                  <td className="p-2">{shown(delta)}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
                     )}
+                    <p className="mt-2 text-sm">Fit quality: {shown(report.candidate.fit_quality)}</p>
+                    <p className="text-sm">Identifiability: {shown(report.candidate.identifiability)}</p>
                   </section>
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <section className={REPORT_SECTION}>
-                      <h3 className="font-bold">Native candidate</h3>
+                      <h3 className="font-bold">Native candidate and timing</h3>
                       <div className="mt-2 grid gap-1 text-sm">
-                        <p>Build: {report.native.build.status}</p>
-                        <p className="break-all">Build digest: {report.native.build.build_digest ?? "unavailable"}</p>
-                        <p className="break-all">Manifest digest: {report.native.build.manifest_digest ?? "unavailable"}</p>
-                        <p>{report.native.build.detail ?? "No build detail."}</p>
-                        <p>Dry solve: {report.native.dry_solve.status}</p>
-                        <p>Solve time: {metric(report.native.dry_solve.solve_time_ms, " ms")}</p>
-                        <p>Finite diagnostics: {report.native.dry_solve.finite_diagnostics ? "yes" : "no"}</p>
-                        <p>{report.native.dry_solve.detail ?? "No dry-solve detail."}</p>
+                        <p className={assessment ? checkTone(assessment.native_build) : "text-probe-label"}>
+                          Native build: {assessment?.native_build ?? "not reported"}
+                        </p>
+                        <p className={assessment ? checkTone(assessment.native_dry_solve) : "text-probe-label"}>
+                          Native dry solve: {assessment?.native_dry_solve ?? "not reported"}
+                        </p>
+                        <p className={assessment ? checkTone(assessment.target_timing) : "text-probe-label"}>
+                          Target timing: {assessment?.target_timing ?? "not reported"}
+                        </p>
+                        <p>Ambient provenance: not reported by backend</p>
                       </div>
                     </section>
-
                     <section className={REPORT_SECTION}>
-                      <h3 className="font-bold">Readiness</h3>
+                      <h3 className="font-bold">Readiness and rejection</h3>
                       <div className="mt-2 grid gap-1 text-sm">
-                        <p>Identifiability: {report.identifiability.status}</p>
-                        <p>{report.identifiability.reason ?? "No identifiability reason."}</p>
-                        <p>Rank: {report.identifiability.matrix_rank ?? "unavailable"} / {report.identifiability.parameter_count}</p>
-                        <p>Condition number: {report.identifiability.condition_number ?? "unavailable"}</p>
-                        <p>Physical bounds: {report.identifiability.physical_bounds.status}</p>
-                        <p>{report.identifiability.physical_bounds.detail ?? "No physical-bounds detail."}</p>
-                        <p>Missing gates: {report.missing_gates.join(", ") || "none"}</p>
-                        {report.gates.map((gate) => (
-                          <p key={gate.name}>{gate.name}: {gate.status}{gate.reason ? ` — ${gate.reason}` : ""}</p>
-                        ))}
-                        {report.blockers.length === 0 ? (
-                          <p className="text-ok">No current blockers.</p>
-                        ) : (
-                          <ul className="list-disc pl-5">
-                            {report.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
-                          </ul>
-                        )}
+                        <p>Fit accepted: {assessment ? yesNo(assessment.fit_accepted) : "not reported"}</p>
+                        <p>
+                          Identifiability accepted: {assessment ? yesNo(assessment.identifiability_accepted) : "not reported"}
+                        </p>
+                        <p>Confidence accepted: {assessment ? yesNo(assessment.confidence_accepted) : "not reported"}</p>
+                        <p>Rejection reasons: {assessment?.rejection_reasons.join(", ") || "none"}</p>
+                        <p>Blockers: {report.blockers.join(", ") || "none"}</p>
                       </div>
                     </section>
                   </div>
 
                   <section className={REPORT_SECTION}>
+                    <h3 className="font-bold">Backend checks and gates</h3>
+                    <dl className="mt-2 grid gap-2 text-sm md:grid-cols-2">
+                      {Object.entries(report.checks).map(([name, status]) => (
+                        <div key={name}>
+                          <dt className="font-semibold">{name}</dt>
+                          <dd className={checkTone(status)}>{status}</dd>
+                        </div>
+                      ))}
+                      {report.gates.map((gate) => (
+                        <div key={gate.name}>
+                          <dt className="font-semibold">{gate.name}</dt>
+                          <dd className={gate.passed ? "text-ok" : "text-danger"}>
+                            {gate.passed ? "passed" : "failed"}
+                            {gate.reason ? ` — ${gate.reason}` : ""}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+
+                  <section className={REPORT_SECTION}>
                     <h3 className="font-bold">Activation and swap</h3>
                     <div className="mt-2 grid gap-1 text-sm md:grid-cols-2">
-                      <p>Policy: {report.activation.policy}</p>
-                      <p>Reason: {report.activation.reason}</p>
-                      <p>Decision: {report.activation.decision_id ?? "none"}</p>
-                      <p>Persistence check: {report.activation.persistence.status}</p>
-                      <p>Persistence phase: {report.activation.persistence.phase ?? "none"}</p>
-                      <p>Record: {report.activation.persistence.record_id ?? "none"}</p>
-                      <p>{report.activation.persistence.detail ?? "No persistence detail."}</p>
-                      <p>Pending swap: {report.activation.pending_swap.status}</p>
-                      <p>Frame boundary: {report.activation.pending_swap.frame_boundary ?? "none"}</p>
-                      <p>{report.activation.pending_swap.detail ?? "No swap detail."}</p>
+                      <p>Durable phase: {report.activation.phase}</p>
+                      <p>Policy: {report.activation.policy ?? "none"}</p>
+                      <p>Origin: {report.activation.origin ?? "none"}</p>
+                      <p>Persistence pending: {yesNo(report.activation.pending_persistence)}</p>
+                      <p>Frame-boundary swap pending: {yesNo(report.activation.pending_frame_boundary_swap)}</p>
+                      <p className="break-all">Transaction: {report.activation.transaction_id ?? "none"}</p>
+                      <p>Reason: {report.activation.reason ?? "none"}</p>
+                      <p>
+                        Latest lifecycle: {report.latest_lifecycle?.phase ?? "none"}
+                        {report.latest_lifecycle?.reason ? ` — ${report.latest_lifecycle.reason}` : ""}
+                      </p>
                     </div>
                   </section>
 
@@ -707,7 +632,7 @@ function ActiveMpcLearningPanel({
                     <section className="min-w-0 rounded-card border border-ok bg-inset p-4">
                       <h3 className="font-bold">Activate reviewed model</h3>
                       <p className="mt-2 text-sm">
-                        Confirm both exact values. The refreshed report, not this request acknowledgement, determines the activation state.
+                        Confirm the exact candidate digest and confidence decision serialized by this report.
                       </p>
                       <dl className="mt-3 grid gap-2 text-sm">
                         <div>
@@ -757,11 +682,22 @@ function ActiveMpcLearningPanel({
 
                   <section className={REPORT_SECTION}>
                     <h3 className="font-bold">Model ownership</h3>
-                    <div className="mt-2 grid gap-3 text-sm">
-                      {identitySummary("Rollback owner", report.rollback_owner)}
-                      <p>Rollback permitted: {report.rollback.permitted ? "yes" : "no"}</p>
-                      <p>Confidence window remaining: {report.rollback.confidence_window_remaining}</p>
-                      <p>Latest rollback outcome: {report.rollback.latest_reason ?? "none"}</p>
+                    <div className="mt-2 grid gap-3 text-sm md:grid-cols-3">
+                      {generationIdentity(
+                        "Active owner",
+                        report.identities.active_digest,
+                        report.identities.active_generation,
+                      )}
+                      {generationIdentity(
+                        "Candidate owner",
+                        report.identities.candidate_digest,
+                        report.identities.candidate_generation,
+                      )}
+                      {generationIdentity(
+                        "Rollback owner",
+                        report.identities.rollback_digest,
+                        report.identities.rollback_generation,
+                      )}
                     </div>
                   </section>
 
@@ -784,7 +720,7 @@ function ActiveMpcLearningPanel({
                         aria-busy={rollbackPending || undefined}
                         onClick={() => void runRollback()}
                       >
-                        {rollbackPending ? "Rolling back model…" : "Roll back to last safe model"}
+                        {rollbackPending ? "Rolling back model…" : "Roll back to explicit owner"}
                       </button>
                     </section>
                   )}
@@ -792,135 +728,11 @@ function ActiveMpcLearningPanel({
                   <section className={REPORT_SECTION}>
                     <h3 className="font-bold">Cook refit</h3>
                     <div className="mt-2 grid gap-1 text-sm">
-                      <p>{report.cook_refit.authorized ? "Authorized" : "Not authorized"}</p>
                       <p>Status: {report.cook_refit.status}</p>
-                      <p>{report.cook_refit.outcome ?? "No cook-refit outcome yet."}</p>
-                      <p>
-                        {report.cook_refit.activation_timing === "next-cook-restore"
-                          ? "Becomes active on next-cook restore; no live end-of-cook swap."
-                          : "No end-of-cook fit is authorized."}
-                      </p>
+                      <p>Final outcome: {report.cook_refit.final_status}</p>
+                      <p>Authorization: {report.cook_refit.authorization}</p>
+                      <p>Next cook: {yesNo(report.cook_refit.next_cook)}</p>
                     </div>
-                  </section>
-
-                  <section className={REPORT_SECTION}>
-                    <h3 className="font-bold">Prediction scores</h3>
-                    {report.scores.length === 0 ? (
-                      <p className="mt-2 text-probe-label">No eligible score rows yet.</p>
-                    ) : (
-                      <>
-                        <table className="mt-3 hidden w-full table-fixed text-left text-sm md:table">
-                          <thead className="text-label">
-                            <tr>
-                              <th className="p-2" scope="col">Horizon</th>
-                              <th className="p-2" scope="col">Band / phase</th>
-                              <th className="p-2" scope="col">Challenger</th>
-                              <th className="p-2" scope="col">Incumbent</th>
-                              <th className="p-2" scope="col">Bias / band error</th>
-                              <th className="p-2" scope="col">95% upper</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {report.scores.map((score) => (
-                              <tr className="border-t border-card-border" key={`${score.horizon_steps}-${score.temperature_band}-${score.phase}-${score.ambient_source}-${score.candidate_generation}`}>
-                                <td className="break-words p-2">{score.horizon_steps}</td>
-                                <td className="break-words p-2">{score.temperature_band} / {score.phase}</td>
-                                <td className="break-words p-2">{metric(score.challenger_rmse_c, " °C")}</td>
-                                <td className="break-words p-2">{metric(score.incumbent_rmse_c, " °C")}</td>
-                                <td className="break-words p-2">
-                                  C {metric(score.challenger_bias_c, " °C")} / {metric(score.challenger_band_error_c, " °C")}
-                                  <br />I {metric(score.incumbent_bias_c, " °C")} / {metric(score.incumbent_band_error_c, " °C")}
-                                </td>
-                                <td className="break-words p-2">{metric(score.bootstrap.rmse_ratio_upper_bound)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        <div className="mt-3 grid gap-3 md:hidden">
-                          {report.scores.map((score) => (
-                            <dl className="grid grid-cols-2 gap-2 rounded-lg border border-card-border bg-card p-3 text-sm" key={`${score.horizon_steps}-${score.temperature_band}-${score.phase}-${score.ambient_source}-${score.candidate_generation}`}>
-                              <ScoreDetails score={score} />
-                            </dl>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </section>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <section className={REPORT_SECTION}>
-                      <h3 className="font-bold">Target timing</h3>
-                      <p className="mt-2 text-sm">Status: {report.target_timing.status}</p>
-                      {report.target_timing.available ? (
-                        <>
-                          <p className="mt-2 break-words">{report.target_timing.hardware_provenance}</p>
-                          <p className="mt-1 text-sm">
-                            {report.target_timing.sample_count} samples · p50 {metric(report.target_timing.p50_ms, " ms")} · p95 {metric(report.target_timing.p95_ms, " ms")} · p99 {metric(report.target_timing.p99_ms, " ms")}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="mt-2 text-probe-label">
-                          No target-hardware timing evidence. Workstation timing cannot satisfy this gate.
-                        </p>
-                      )}
-                    </section>
-                    <section className={REPORT_SECTION}>
-                      <h3 className="font-bold">Ambient provenance</h3>
-                      <p className="mt-2 text-sm">
-                        {report.ambient_provenance_limitation ?? "All scored ambient evidence has measured provenance."}
-                      </p>
-                    </section>
-                  </div>
-
-                  <section className={REPORT_SECTION}>
-                    <h3 className="font-bold">Lifecycle</h3>
-                    {report.lifecycle.length === 0 ? (
-                      <p className="mt-2 text-probe-label">No lifecycle entries yet.</p>
-                    ) : (
-                      <ol className="mt-2 grid gap-2 text-sm">
-                        {report.lifecycle.map((entry) => (
-                          <li className="border-l-2 border-card-border pl-3" key={`${entry.timestamp_ms}-${entry.phase}`}>
-                            <strong>{entry.phase}</strong>
-                            {entry.reason ? ` — ${entry.reason}` : ""}
-                            <span className="block text-probe-label">
-                              Role {entry.role_generation} · candidate {entry.candidate_generation ?? "none"}
-                            </span>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                  </section>
-
-                  <section className={REPORT_SECTION}>
-                    <h3 className="font-bold">History</h3>
-                    {report.history.length === 0 ? (
-                      <p className="mt-2 text-probe-label">No history entries yet.</p>
-                    ) : (
-                      <ol className="mt-2 grid gap-3 text-sm">
-                        {report.history.map((entry) => (
-                          <li
-                            className="grid gap-1 border-l-2 border-card-border pl-3"
-                            key={`${entry.timestamp_ms}-${entry.evidence_id}-${entry.event}`}
-                          >
-                            <strong>Event: {entry.event}</strong>
-                            <span>Reason: {entry.reason ?? "none"}</span>
-                            <span className="break-all">Evidence ID: {entry.evidence_id}</span>
-                            <span className="break-all">
-                              Decision ID: {entry.decision_id ?? "none"}
-                            </span>
-                            <span>
-                              Role generation: {entry.role_generation ?? "none"}
-                            </span>
-                            <span>
-                              Candidate generation: {entry.candidate_generation ?? "none"}
-                            </span>
-                            <span className="text-probe-label">
-                              Timestamp: {entry.timestamp_ms}
-                            </span>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
                   </section>
                 </>
               )}

@@ -38,145 +38,76 @@ function dashboardLearningReport(
   status: ModelEvidenceStatus,
   roleGeneration: number,
 ): ModelEvidenceReport {
-  const identity = (digest: string, candidateGeneration: number) => ({
-    kind: "grey-box",
-    digest,
-    model_schema: 4,
-    role_generation: roleGeneration,
-    candidate_generation: candidateGeneration,
-  });
+  const activeDigest = `${roleGeneration}`.padEnd(64, "a");
+  const candidateDigest = `${roleGeneration + 1}`.padEnd(64, "b");
   return {
     schema_version: 2,
     status,
-    mode: "passive",
-    origin: "passive-online",
-    role_generation: roleGeneration,
-    candidate_generation: roleGeneration + 1,
+    mode: "passive-online",
     decision_id: `decision-${roleGeneration}`,
-    enable_online_adaptation: true,
-    enable_identification: true,
-    active_model: identity(`active-${roleGeneration}`, roleGeneration),
-    default_model: {
-      ...identity("default-grey-v4", 0),
-      role_generation: 0,
-    },
-    candidate: identity(`candidate-${roleGeneration + 1}`, roleGeneration + 1),
-    rollback_owner: null,
-    observation: {
-      window_id: `window-${roleGeneration}`,
-      eligible_count: 0,
-      ineligible_count: 0,
-      rejection_reasons: [],
-      probe_provenance: "ordinary",
-      mixed_window_authority: null,
-    },
-    calibration: {
-      status: "inactive",
-      stage: null,
-      current_probe: null,
-      completed_stages: [],
-      missing_stages: ["low", "middle", "high", "coast"],
-      eligible_count: 0,
-      ineligible_count: 0,
-      ineligible_reasons: [],
-      timed_out: false,
-      incomplete: false,
-      revision: 0,
+    evidence: {
+      count: 0,
+      audit_count: 0,
+      high_water: null,
+      retired_excluded: 0,
     },
     fit: {
       status: "idle",
-      job_id: null,
-      process_id: null,
-      role_generation: roleGeneration,
-      origin: "passive-online",
-      window: null,
-      result: null,
-    },
-    grey_parameters: [],
-    candidate_structure: {
-      prediction_step_seconds: 25,
-      delay_states: 8,
-      horizon_steps: 12,
-    },
-    identifiability: {
-      status: "not-run",
-      reason: "not-run",
-      matrix_rank: null,
-      parameter_count: 3,
-      condition_number: null,
-      finite_diagnostics: false,
-      confidence_intervals: null,
-      physical_bounds: {
-        status: "not-run",
-        detail: "no candidate",
-      },
-    },
-    native: {
-      build: {
-        status: "not-run",
-        build_digest: null,
-        manifest_digest: null,
-        detail: "no candidate build",
-      },
-      dry_solve: {
-        status: "not-run",
-        solve_time_ms: null,
-        finite_diagnostics: false,
-        detail: "no candidate dry solve",
-      },
-    },
-    scores: [],
-    gates: [],
-    missing_gates: [],
-    blockers: [],
-    activation: {
-      policy: "passive-auto",
-      reason: "passive-auto",
-      decision_id: `decision-${roleGeneration}`,
-      persistence: {
-        status: "not-run",
-        phase: null,
-        record_id: null,
-        detail: "not prepared",
-      },
-      pending_swap: {
-        status: "not-run",
-        frame_boundary: null,
-        detail: "no pending swap",
-      },
-    },
-    rollback: {
-      permitted: false,
-      confidence_window_remaining: 0,
-      latest_reason: null,
+      request_id: null,
+      window_id: null,
+      error: null,
     },
     cook_refit: {
-      authorized: true,
-      status: "not-run",
-      outcome: null,
-      activation_timing: "next-cook-restore",
+      status: "idle",
+      latest: null,
+      final_status: "idle",
+      authorization: "blocked",
+      next_cook: false,
     },
-    target_timing: {
-      available: false,
-      sample_count: 0,
-      p50_ms: null,
-      p95_ms: null,
-      p99_ms: null,
-      hardware_provenance: null,
-      status: "not-run",
+    window: null,
+    checks: {},
+    candidate: {
+      digest: candidateDigest,
+      origin: "passive-online",
+      policy: "passive-auto",
+      role_generation: roleGeneration,
+      candidate_generation: roleGeneration + 1,
+      parameters: null,
+      parameter_deltas: null,
+      fit_quality: null,
+      identifiability: null,
+      assessment: null,
     },
-    lifecycle: [],
+    activation: {
+      phase: status === "active" ? "active" : "aborted",
+      origin: "passive-online",
+      policy: "passive-auto",
+      reason: null,
+      pending_persistence: false,
+      pending_frame_boundary_swap: false,
+    },
+    active_model: {
+      digest: activeDigest,
+      role_generation: roleGeneration,
+    },
+    identities: {
+      active_digest: activeDigest,
+      active_generation: roleGeneration,
+      candidate_digest: candidateDigest,
+      candidate_generation: roleGeneration + 1,
+      rollback_digest: null,
+      rollback_generation: null,
+    },
+    calibration: {
+      revision: 0,
+      command_high_water: 0,
+    },
+    latest_lifecycle: null,
+    failure: null,
+    gates: [],
+    blockers: [],
     errors: [],
-    history: [],
-    ambient_provenance_limitation: null,
-    artifact_metadata: {
-      schema_version: 2,
-      provenance_digest: null,
-      bootstrap_seed: 17,
-      bootstrap_replicates: 10_000,
-      decision_id: `decision-${roleGeneration}`,
-      evidence_ids: [],
-    },
+    revision: `report-${roleGeneration}`,
   };
 }
 
@@ -366,8 +297,8 @@ describe("Dashboard MPC settings authority", () => {
     await user.click(trigger);
 
     expect(screen.getByRole("dialog", { name: "MPC model learning" })).toBeInTheDocument();
-    expect(screen.getByText("Role generation 22")).toBeInTheDocument();
-    expect(screen.getByText("Candidate generation 23")).toBeInTheDocument();
+    expect(screen.getByText("Role generation: 22")).toBeInTheDocument();
+    expect(screen.getByText("Candidate generation: 23")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /MPC learning:/i })).toHaveLength(1);
     expect(reportRequests).toBe(2);
   });

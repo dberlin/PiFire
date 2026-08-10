@@ -25,9 +25,10 @@ async function responseMessage(response: Response): Promise<string> {
 /** Read-only confidence projection. An empty ledger is still a successful collecting report. */
 export async function fetchModelEvidenceReport(
   baseUrl = DEFAULT_BASE_URL,
+  signal?: AbortSignal,
 ): Promise<ModelEvidenceResult<ModelEvidenceReport>> {
   try {
-    const response = await fetch(endpoint(baseUrl, "model-evidence/report"));
+    const response = await fetch(endpoint(baseUrl, "model-evidence/report"), { signal });
     if (!response.ok) {
       return {
         ok: false,
@@ -86,7 +87,6 @@ async function postModelAction<
   TRequest,
   TResponse extends {
     accepted: boolean;
-    acknowledgement: string;
     detail?: string | null;
   },
 >(
@@ -108,12 +108,7 @@ async function postModelAction<
         })
       | null;
     const acknowledgement =
-      body !== null &&
-      typeof body.accepted === "boolean" &&
-      typeof body.acknowledgement === "string" &&
-      body.acknowledgement.trim() !== ""
-        ? (body as TResponse)
-        : null;
+      body !== null && typeof body.accepted === "boolean" ? (body as TResponse) : null;
     const ok = response.ok && acknowledgement?.accepted === true;
     return {
       ok,
@@ -123,7 +118,7 @@ async function postModelAction<
         : (body?.detail ??
           body?.message ??
           body?.error ??
-          (acknowledgement === null ? "Invalid acknowledgement response" : `HTTP ${response.status}`)),
+          (acknowledgement === null ? "Invalid action response" : `HTTP ${response.status}`)),
       data: acknowledgement,
     };
   } catch (error) {
