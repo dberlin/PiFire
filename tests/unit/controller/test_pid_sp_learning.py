@@ -6,6 +6,8 @@ from copy import deepcopy
 
 import pytest
 from controller import pid_sp_learning as learning
+from common import controller_model_state
+from common import datastore_accessors
 
 from controller.fopdt_identifier import (
     CONFIRM_WINDOW,
@@ -403,6 +405,23 @@ def test_malformed_or_non_finite_checkpoint_is_an_explicit_failure(checkpoint):
         _report(checkpoint=checkpoint)
 
 
+def test_backend_report_uses_a_strict_checkpoint_load(monkeypatch):
+    class CorruptCheckpointStore:
+        def load_strict(self, name):
+            assert name == "pid_sp"
+            raise ValueError("malformed stored snapshot for 'pid_sp'")
+
+    monkeypatch.setattr(datastore_accessors, "read_status", lambda: {})
+    monkeypatch.setattr(
+        controller_model_state,
+        "ControllerModelStore",
+        CorruptCheckpointStore,
+    )
+
+    with pytest.raises(ValueError, match="malformed stored snapshot.*pid_sp"):
+        learning.backend_pid_sp_learning_report()
+
+
 def test_revision_is_canonical_and_covers_every_visible_field():
     live = _marked_live()
     reordered_live = {
@@ -471,7 +490,7 @@ def test_backend_report_reads_status_and_checkpoint_once(monkeypatch):
         return {"learning": live}
 
     class Store:
-        def load(self, name):
+        def load_strict(self, name):
             calls.append(("checkpoint", name))
             return _FOPDT_CHECKPOINT
 

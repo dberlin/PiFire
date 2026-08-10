@@ -108,6 +108,34 @@ def test_load_returns_none_for_an_absent_controller():
     assert store.load("mpc") is None
 
 
+def test_strict_load_returns_none_only_for_an_absent_controller():
+    store, _ = _store()
+
+    assert store.load_strict("pid_sp") is None
+
+
+def test_strict_load_rejects_a_malformed_target_without_poisoning_a_good_controller():
+    fake = _FakeStore(
+        {
+            MODEL_STATE_KEY: json.dumps(
+                {
+                    "version": SCHEMA_VERSION,
+                    "models": {
+                        "pid_sp": {"revision": "not-an-integer"},
+                        "mpc": UNRELATED,
+                    },
+                }
+            )
+        }
+    )
+    store = ControllerModelStore(reader=fake.read, writer=fake.write)
+
+    with pytest.raises(ValueError, match="malformed stored snapshot.*pid_sp"):
+        store.load_strict("pid_sp")
+
+    assert store.load("mpc") == UNRELATED
+
+
 def test_controllers_do_not_cross_contaminate():
     store, _ = _store()
     store.save("pid_sp", FOPDT)

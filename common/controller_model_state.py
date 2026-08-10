@@ -119,16 +119,10 @@ def _shared_backend_state(reader, writer):
     datastore_path = datastore.DB_PATH
     with _BACKEND_STATES_LOCK:
         for saved_reader, saved_writer, saved_path, state in _BACKEND_STATES:
-            if (
-                saved_reader is reader_identity
-                and saved_writer is writer_identity
-                and saved_path == datastore_path
-            ):
+            if saved_reader is reader_identity and saved_writer is writer_identity and saved_path == datastore_path:
                 return state
         state = _BackendState()
-        _BACKEND_STATES.append(
-            (reader_identity, writer_identity, datastore_path, state)
-        )
+        _BACKEND_STATES.append((reader_identity, writer_identity, datastore_path, state))
         return state
 
 
@@ -141,9 +135,17 @@ class ControllerModelStore:
         self._revisions = {}
 
     def load(self, name):
+        return self._load(name, strict=False)
+
+    def load_strict(self, name):
+        """Load one model while preserving absent versus malformed storage."""
+
+        return self._load(name, strict=True)
+
+    def _load(self, name, *, strict):
         snapshot = self._latest_owned(name)
         if snapshot is None:
-            models, _safe = self._read_state()
+            models, _safe = self._read_state(strict_name=name if strict else None)
             persisted = models.get(name)
             if persisted is None:
                 return None
@@ -308,28 +310,35 @@ class ControllerModelStore:
                 baseline,
             )
 
-    def _read_state(self):
-        """Every stored snapshot, plus whether that read is trustworthy enough to write over.
+    def _read_state(self, *, strict_name=None):
+        """Return stored snapshots and whether the read is safe to overwrite.
 
-        Returns (models, safe_to_write). Three outcomes:
+        A strict read additionally raises when the target controller cannot be
+        distinguished from malformed storage. The legacy callers retain their
+        fail-closed, non-raising behavior.
+
+        Three storage outcomes remain:
 
         - the key has never been written: read_generic_key raises TypeError for an
           absent key (it calls json.loads(None)), which means "genuinely nothing here
-          yet" -- safe to write.
+          yet" -- safe to write;
         - the read succeeds and the envelope parses: safe to write, with any invalid
-          member dropped so one bad controller cannot poison another.
+          member dropped so one bad controller cannot poison another;
         - anything else -- a reader exception that is not the absent-key TypeError, an
-          unrecognized schema version, a malformed envelope: NOT safe to write. "I
-          could not read it" and "there is nothing there" are different facts, and a
-          caller must never turn the first into the second by writing a fresh,
-          nearly-empty blob over data it failed to parse.
+          unrecognized schema version, a malformed envelope: NOT safe to write.
         """
+
+        def strict_error(detail):
+            if strict_name is not None:
+                raise ValueError(f"malformed stored snapshot for {strict_name!r}: {detail}")
+
         try:
             raw = self._reader(MODEL_STATE_KEY)
         except TypeError:
             return {}, True
         except Exception:
             _logger.warning("controller_model_state: could not read the existing model record", exc_info=True)
+            strict_error("model state read failed")
             return {}, False
         if not isinstance(raw, dict) or raw.get("version") != SCHEMA_VERSION:
             _logger.warning(
@@ -337,12 +346,14 @@ class ControllerModelStore:
                 "(expected %s); leaving it untouched",
                 SCHEMA_VERSION,
             )
+            strict_error("model state envelope is invalid")
             return {}, False
         raw_models = raw.get("models")
         if not isinstance(raw_models, dict):
             _logger.warning(
                 "controller_model_state: existing record's 'models' field is not a dict; leaving it untouched"
             )
+            strict_error("model state models field is invalid")
             return {}, False
         models = {}
         for member_name, snap in raw_models.items():
@@ -350,4 +361,6 @@ class ControllerModelStore:
                 models[member_name] = snap
             else:
                 _logger.warning("controller_model_state: dropping a malformed stored snapshot for %r", member_name)
+                if member_name == strict_name:
+                    strict_error("snapshot failed persistence validation")
         return models, True

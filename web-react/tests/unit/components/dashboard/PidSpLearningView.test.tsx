@@ -7,6 +7,7 @@ import type {
   PidSpLearningReport,
   PidSpLearningStatus,
   PidSpModel,
+  PidSpPredictorModel,
 } from "../../../../src/helpers/pidSpLearning/types";
 import { testQueryClient } from "../../test-utils";
 
@@ -17,6 +18,13 @@ const FOPDT: PidSpModel = {
   theta: 45,
   revision: 7,
   identified_at_f: 250,
+};
+
+const PREDICTOR_FOPDT: PidSpPredictorModel = {
+  form: "fopdt",
+  K: 86.5,
+  tau: 610,
+  theta: 45,
 };
 
 const REPORT: PidSpLearningReport = {
@@ -85,7 +93,7 @@ const REPORT: PidSpLearningReport = {
     xd: 238.75,
     residual_streak: 1,
     truncated: 2,
-    model: FOPDT,
+    model: PREDICTOR_FOPDT,
   },
   checkpoint: FOPDT,
   failure: null,
@@ -327,6 +335,8 @@ describe("PidSpLearningView", () => {
     ]) {
       expect(predictor!).toHaveTextContent(detail);
     }
+    expect(predictor!).toHaveTextContent("Predictor model: fopdt");
+    expect(predictor!).not.toHaveTextContent("revision");
   });
 
   it("keeps a durable checkpoint visible beside a structured live failure", async () => {

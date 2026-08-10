@@ -14,6 +14,13 @@ const FOPDT = {
   identified_at_f: 250,
 };
 
+const PREDICTOR_FOPDT = {
+  form: "fopdt" as const,
+  K: 86.5,
+  tau: 610,
+  theta: 45,
+};
+
 const IDENTIFIER = {
   accepted: 144,
   accepted_seconds: 720.5,
@@ -37,7 +44,7 @@ const PREDICTOR = {
   xd: 238.75,
   residual_streak: 1,
   truncated: 2,
-  model: FOPDT,
+  model: PREDICTOR_FOPDT,
 };
 
 const REPORT: PidSpLearningReport = {
@@ -144,12 +151,18 @@ describe("fetchPidSpLearningReport", () => {
       revision: 9,
       identified_at_f: 275,
     };
+    const predictorIpdt = {
+      form: "ipdt" as const,
+      K_i: 0.87,
+      c0: -0.18,
+      theta: 30,
+    };
     fetchMock.mockResolvedValueOnce(response(structuredClone(REPORT))).mockResolvedValueOnce(
       response({
         ...structuredClone(REPORT),
         checkpoint: ipdt,
         identifier: { ...structuredClone(IDENTIFIER), trusted: ipdt },
-        predictor: { ...structuredClone(PREDICTOR), model: ipdt },
+        predictor: { ...structuredClone(PREDICTOR), model: predictorIpdt },
       }),
     );
 
@@ -159,7 +172,7 @@ describe("fetchPidSpLearningReport", () => {
     expect(fopdt.data?.checkpoint).toEqual(FOPDT);
     expect(integrating.data?.checkpoint).toEqual(ipdt);
     expect(integrating.data?.identifier?.trusted).toEqual(ipdt);
-    expect(integrating.data?.predictor?.model).toEqual(ipdt);
+    expect(integrating.data?.predictor?.model).toEqual(predictorIpdt);
   });
 
   it("accepts the complete idle report without inventing live detail", async () => {
@@ -317,6 +330,36 @@ describe("fetchPidSpLearningReport", () => {
       {
         ...REPORT,
         confirmation: { observed: Number.POSITIVE_INFINITY, required: 4 },
+      },
+    ],
+    [
+      "non-finite predictor model",
+      {
+        ...REPORT,
+        predictor: {
+          ...PREDICTOR,
+          model: { ...PREDICTOR_FOPDT, theta: Number.POSITIVE_INFINITY },
+        },
+      },
+    ],
+    [
+      "predictor model numeric boolean",
+      {
+        ...REPORT,
+        predictor: {
+          ...PREDICTOR,
+          model: { ...PREDICTOR_FOPDT, K: true },
+        },
+      },
+    ],
+    [
+      "checkpoint-only field on predictor model",
+      {
+        ...REPORT,
+        predictor: {
+          ...PREDICTOR,
+          model: { ...PREDICTOR_FOPDT, revision: 7 },
+        },
       },
     ],
   ])("rejects %s", async (_case, body) => {

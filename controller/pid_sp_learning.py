@@ -580,5 +580,5 @@ def backend_pid_sp_learning_report() -> PidSpLearningReport:
     from common.datastore_accessors import read_status
 
     status = read_status()
-    checkpoint = ControllerModelStore().load("pid_sp")
+    checkpoint = ControllerModelStore().load_strict("pid_sp")
     return current_pid_sp_learning_report(status=status, checkpoint=checkpoint)

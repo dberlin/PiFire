@@ -1,6 +1,8 @@
 import type {
   FopdtPidSpModel,
+  FopdtPidSpPredictorModel,
   IpdtPidSpModel,
+  IpdtPidSpPredictorModel,
   PidSpConfirmationProgress,
   PidSpGateValue,
   PidSpIdentifierReport,
@@ -10,6 +12,7 @@ import type {
   PidSpLearningResult,
   PidSpLearningStatus,
   PidSpModel,
+  PidSpPredictorModel,
   PidSpPredictorReport,
 } from "./types";
 
@@ -120,6 +123,31 @@ function parseModel(value: unknown, path: string): PidSpModel {
   return invalid(`${path}.form must be fopdt or ipdt`);
 }
 
+function parsePredictorModel(value: unknown, path: string): PidSpPredictorModel {
+  const source = record(value, path);
+  if (source.form === "fopdt") {
+    exactKeys(source, ["form", "K", "tau", "theta"], path);
+    const model: FopdtPidSpPredictorModel = {
+      form: "fopdt",
+      K: finiteNumber(source.K, `${path}.K`),
+      tau: finiteNumber(source.tau, `${path}.tau`),
+      theta: finiteNumber(source.theta, `${path}.theta`),
+    };
+    return model;
+  }
+  if (source.form === "ipdt") {
+    exactKeys(source, ["form", "K_i", "c0", "theta"], path);
+    const model: IpdtPidSpPredictorModel = {
+      form: "ipdt",
+      K_i: finiteNumber(source.K_i, `${path}.K_i`),
+      c0: finiteNumber(source.c0, `${path}.c0`),
+      theta: finiteNumber(source.theta, `${path}.theta`),
+    };
+    return model;
+  }
+  return invalid(`${path}.form must be fopdt or ipdt`);
+}
+
 function gateValue(value: unknown, path: string): PidSpGateValue {
   return typeof value === "boolean" ? value : finiteNumber(value, path);
 }
@@ -194,7 +222,7 @@ function parsePredictor(value: unknown): PidSpPredictorReport {
     xd: finiteNumber(source.xd, `${path}.xd`),
     residual_streak: nonNegativeInteger(source.residual_streak, `${path}.residual_streak`),
     truncated: nonNegativeInteger(source.truncated, `${path}.truncated`),
-    model: nullable(source.model, (item) => parseModel(item, `${path}.model`)),
+    model: nullable(source.model, (item) => parsePredictorModel(item, `${path}.model`)),
   };
 }
 

@@ -1,6 +1,8 @@
 """Read-only API contracts for the durable PID-SP learning report."""
 
 import pytest
+from common import controller_model_state
+from common import datastore_accessors
 
 from app import app as flask_app
 from blueprints.api import routes
@@ -131,6 +133,28 @@ def test_unrepresentable_report_returns_the_existing_explicit_422_shape(client, 
     assert response.get_json() == {
         "error": "pid-sp-learning-report-invalid",
         "detail": "checkpoint.K must be finite",
+    }
+
+
+def test_corrupt_persisted_checkpoint_returns_an_explicit_422(client, monkeypatch):
+    class CorruptCheckpointStore:
+        def load_strict(self, name):
+            assert name == "pid_sp"
+            raise ValueError("malformed stored snapshot for 'pid_sp'")
+
+    monkeypatch.setattr(datastore_accessors, "read_status", lambda: {})
+    monkeypatch.setattr(
+        controller_model_state,
+        "ControllerModelStore",
+        CorruptCheckpointStore,
+    )
+
+    response = client.get("/api/pid-sp-learning/report")
+
+    assert response.status_code == 422
+    assert response.get_json() == {
+        "error": "pid-sp-learning-report-invalid",
+        "detail": "malformed stored snapshot for 'pid_sp'",
     }
 
 

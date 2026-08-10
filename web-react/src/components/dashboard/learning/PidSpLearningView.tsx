@@ -387,9 +387,7 @@ function ActivePidSpLearningView({ apiBase, modelLearningRevision }: PidSpLearni
               </dl>
               <p className="mt-3 text-sm text-probe-label">
                 Predictor model:{" "}
-                {report.predictor.model === null
-                  ? "none"
-                  : `${report.predictor.model.form} revision ${report.predictor.model.revision}`}
+                {report.predictor.model === null ? "none" : report.predictor.model.form}
               </p>
             </section>
           )}

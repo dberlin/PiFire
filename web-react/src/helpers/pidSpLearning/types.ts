@@ -26,6 +26,22 @@ export interface IpdtPidSpModel {
 }
 
 export type PidSpModel = FopdtPidSpModel | IpdtPidSpModel;
+
+export interface FopdtPidSpPredictorModel {
+  form: "fopdt";
+  K: number;
+  tau: number;
+  theta: number;
+}
+
+export interface IpdtPidSpPredictorModel {
+  form: "ipdt";
+  K_i: number;
+  c0: number;
+  theta: number;
+}
+
+export type PidSpPredictorModel = FopdtPidSpPredictorModel | IpdtPidSpPredictorModel;
 export type PidSpGateValue = number | boolean;
 
 export interface PidSpLearningGate {
@@ -63,7 +79,7 @@ export interface PidSpPredictorReport {
   xd: number;
   residual_streak: number;
   truncated: number;
-  model: PidSpModel | null;
+  model: PidSpPredictorModel | null;
 }
 
 export interface PidSpLearningFailure {
