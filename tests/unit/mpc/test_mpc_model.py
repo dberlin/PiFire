@@ -2,16 +2,11 @@ import numpy as np
 import pytest
 
 import controller.mpc_model as mpc_model
-from controller.mpc_model import GreyBoxKF, build_do_mpc_model, simulate_grey_box
+from controller.mpc_model import GreyBoxKF, simulate_grey_box
 
 PARAMS = dict(C_c=306.0, h_amb=0.55, T_amb=20.0)
 
 
-def test_model_exposes_one_residual_input_and_an_equilibrium_tvp():
-    m = build_do_mpc_model(**PARAMS)
-    assert set(m.x.keys()) >= {"T_c", "d"}
-    assert set(m.u.keys()) - {"default"} == {"combustion_residual"}
-    assert set(m.tvp.keys()) >= {"T_set", "equilibrium_load"}
 
 
 def test_kf_rejects_an_applied_load_outside_the_normalized_domain():
@@ -20,17 +15,6 @@ def test_kf_rejects_an_applied_load_outside_the_normalized_domain():
         kf.update(1.01, 100.0)
 
 
-def test_the_model_has_no_firepot_state():
-    """The chamber is the only thermal mass.
-
-    Asserted against the built model rather than the source, because a firepot
-    left in the do-mpc model but out of the estimators would be a state the NLP
-    plans over and the EKF never estimates -- the two would disagree about what
-    x_hat's slots mean, which is exactly the shape of failure the state-vector
-    change can produce and which no dimension check elsewhere would catch.
-    """
-    m = build_do_mpc_model(**PARAMS, n_delay=3, theta=60.0)
-    assert set(m.x.keys()) == {"q0", "q1", "q2", "T_c", "d"}
 
 
 def test_kf_offset_free_under_constant_disturbance():
@@ -50,11 +34,10 @@ def test_kf_offset_free_under_constant_disturbance():
 def test_the_estimator_state_is_the_lag_chain_then_the_chamber_then_d():
     """The slot layout every consumer indexes into, pinned once.
 
-    controller/mpc_net.py reads the disturbance out of x_hat by position, and
-    controller/mpc.py hands x_hat straight to the NLP, so a wrong slot count is
-    a silent misread rather than an error. The default x0 is the cheapest place
-    to state the layout, since it is the only place the estimator writes a
-    value into every slot by name.
+    controller/mpc.py passes x_hat directly to the generated acados solver, so
+    a wrong slot count is a silent model mismatch rather than an error. The
+    default x0 is the cheapest place to state the layout, since it is the only
+    place the estimator writes a value into every slot by name.
     """
     kf = GreyBoxKF(t_step=5.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04, theta=60.0, n_delay=4, **PARAMS)
     assert kf.n == 6

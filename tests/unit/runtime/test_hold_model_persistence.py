@@ -159,102 +159,6 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
     assert runner.restored[0]["version"] == 4
 
 
-def test_setup_restores_durable_activation_before_control_ownership(hold_cycle, monkeypatch):
-    from controller.runtime.modes import hold as hold_module
-
-    active_json = '{"schema":"innovation-state-space/v2","model":{}}'
-    rollback_json = '{"schema":"grey-box-adapter/v1"}'
-    persisted = ModelActivationState(
-        active_snapshot_json=active_json,
-        rollback_snapshot_json=rollback_json,
-        evidence_decision_id="decision-7",
-        controller_configuration_digest="a" * 64,
-        role_generation=8,
-    )
-    activation = ModelEvidenceRecord(
-        evidence_id="activation-8",
-        kind=EvidenceKind.ACTIVATION,
-        session_id="session-8",
-        cook_id=None,
-        timestamp_ms=1_000,
-        role_generation=8,
-        model_digest=canonical_snapshot_digest(json.loads(active_json)),
-        provenance_digest="c" * 64,
-        payload=ActivationEvidence(
-            decision_id="decision-7",
-            active_snapshot_json=active_json,
-            rollback_snapshot_json=rollback_json,
-            controller_configuration_digest="a" * 64,
-        ),
-    )
-    monkeypatch.setattr(hold_module, "read_model_activation", lambda: persisted)
-    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: [activation])
-    runner = FakeControllerRunner(period=0.01)
-    hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
-
-    hold.setup()
-
-    assert runner.activation_restores == [(persisted, (activation,))]
-    assert hold._activation_state_identity == (
-        "decision-7",
-        "a" * 64,
-        8,
-        active_json,
-        rollback_json,
-    )
-
-
-def test_setup_consumes_restored_rollback_without_applying_it_twice(hold_cycle, monkeypatch):
-    from controller.runtime.modes import hold as hold_module
-
-    active_json = '{"schema":"innovation-state-space/v2","model":{}}'
-    rollback_json = '{"schema":"grey-box-adapter/v1"}'
-    active_digest = canonical_snapshot_digest(json.loads(active_json))
-    persisted = ModelActivationState(
-        active_snapshot_json=active_json,
-        rollback_snapshot_json=rollback_json,
-        evidence_decision_id="decision-7",
-        controller_configuration_digest="a" * 64,
-        role_generation=8,
-    )
-    activation = ModelEvidenceRecord(
-        evidence_id="activation-8",
-        kind=EvidenceKind.ACTIVATION,
-        session_id="session-8",
-        cook_id=None,
-        timestamp_ms=1_000,
-        role_generation=8,
-        model_digest=active_digest,
-        provenance_digest="c" * 64,
-        payload=ActivationEvidence(
-            decision_id="decision-7",
-            active_snapshot_json=active_json,
-            rollback_snapshot_json=rollback_json,
-            controller_configuration_digest="a" * 64,
-        ),
-    )
-    rollback = ModelEvidenceRecord(
-        evidence_id="rollback-8",
-        kind=EvidenceKind.ROLLBACK,
-        session_id="session-8",
-        cook_id=None,
-        timestamp_ms=1_001,
-        role_generation=9,
-        model_digest=active_digest,
-        provenance_digest="c" * 64,
-        payload=RollbackEvidence(decision_id="decision-7", reason="operator rollback"),
-    )
-    monkeypatch.setattr(hold_module, "read_model_activation", lambda: persisted)
-    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: [activation, rollback])
-    runner = FakeControllerRunner(period=0.01)
-    hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
-
-    hold.setup()
-    hold._reconcile_activation_state()
-
-    assert runner.activation_restores == [(persisted, (activation, rollback))]
-    assert runner.activation_rollbacks == []
-    assert hold._activation_lifecycle_evidence_id == "rollback-8"
 
 
 def _pair_phase_state(phase: ActivationPhase = ActivationPhase.PREPARED):
@@ -968,7 +872,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     candidate_controller_config["theta"] = (
         float(candidate_controller_config["theta"]) + 1.0
     )
-    candidate_estimator, _net, _model, candidate_solver = first_core._build_for(
+    candidate_estimator, candidate_solver = first_core._build_for(
         candidate_controller_config
     )
     candidate_configuration = {

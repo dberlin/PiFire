@@ -1,7 +1,6 @@
 """End-to-end Hold control-trace contracts using the normal fake runtime seam."""
 
 import queue
-from copy import deepcopy
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
@@ -1194,10 +1193,10 @@ def _promotion_outcome(*, frame_end_ms):
         "lifecycle": {
             "event": "adopt",
             "model_revision": 8,
-            "provenance": "scheduled-arx",
+            "provenance": "grey-fit",
             "detail": "promotion",
-            "model_kind": "scheduled-arx",
-            "model_schema": "scheduled-arx/v1",
+            "model_kind": "grey-box",
+            "model_schema": "pifire-grey-learning/v4",
             "role_generation": 1,
             "snapshot_digest": "c" * 64,
             "parameters": (),
@@ -1242,39 +1241,6 @@ def _promotion_outcome(*, frame_end_ms):
     return outcome
 
 
-def _state_space_evaluation():
-    evaluation = deepcopy(_promotion_outcome(frame_end_ms=20_000)["evaluation"])
-    evaluation.update(
-        challenger_model_kind="innovation-state-space",
-        state_space_refresh={
-            "accepted": True,
-            "terminal_reason": None,
-            "attempts": (
-                {
-                    "order": 2,
-                    "delay": 3,
-                    "sample_count": 48,
-                    "hankel_shape": (8, 33),
-                    "singular_values": (8.0, 2.0),
-                    "effective_rank": 2,
-                    "alignment_error_c": 0.25,
-                    "rejection_reasons": (),
-                    "elapsed_ms": 4.0,
-                },
-            ),
-            "refresh_duration_ms": 4.0,
-            "state_space_digest": "d" * 64,
-            "order": 2,
-            "delay": 3,
-            "singular_values": (8.0, 2.0),
-            "effective_rank": 2,
-            "alignment_error_c": 0.25,
-            "max_pole_magnitude": 0.8,
-            "process_covariance_trace": 0.2,
-            "measurement_covariance": 0.1,
-        },
-    )
-    return evaluation
 
 
 def _learning_observation(frame_start_s):

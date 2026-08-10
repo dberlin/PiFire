@@ -1,4 +1,5 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -12,13 +13,41 @@ class _Estimator:
         return np.array([20.0, 0.0])
 
 
+@dataclass(frozen=True)
+class _NativeConfig:
+    theta: float = 50.0
+
+
 class _Policy:
-    def make_step(self, state):
-        return np.array([[0.4]])
+    def __init__(self, horizon):
+        self.config = _NativeConfig()
+        self.horizon = horizon
+
+    def solve(self, _state, **_kwargs):
+        diagnostics = SimpleNamespace(
+            status=0,
+            backend_status=0,
+            iterations=1,
+            solve_time_s=0.001,
+            objective=1.0,
+            kkt_residual=0.0,
+            constraint_residual=0.0,
+            warm_started=True,
+        )
+        return SimpleNamespace(
+            sequence_q=np.full(self.horizon, 0.4),
+            sequence_residual=np.full(self.horizon, 0.4),
+            objective=1.0,
+            diagnostics=diagnostics,
+        )
 
 
 def _controller(monkeypatch, *, safe_forecast=True):
-    monkeypatch.setattr(Controller, "_build_for", lambda self, cfg: (_Estimator(), None, object(), _Policy()))
+    monkeypatch.setattr(
+        Controller,
+        "_build_for",
+        lambda self, cfg: (_Estimator(), _Policy(int(cfg["n_horizon"]))),
+    )
     if safe_forecast:
 
         class SafeForecast:

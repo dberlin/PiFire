@@ -364,7 +364,7 @@ class FallbackEvidence:
     failed_digest: Digest | None = None
     failed_generation: NonNegativeInt | None = None
     last_safe_command: NonNegativeFloat | None = None
-    fallback_kind: Literal["grey-box", "innovation-state-space"] | None = None
+    fallback_kind: Literal["grey-box"] | None = None
     payload_type: Literal["fallback"] = "fallback"
 
 

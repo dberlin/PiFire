@@ -43,7 +43,6 @@ from common.control_trace import (
     SessionPayload,
     TraceEventKind,
     TraceSetting,
-    StateSpaceRefreshPayload,
 )
 from controller.applied_output import OutputSource
 
@@ -235,7 +234,7 @@ def _payload_cases():
                 equilibrium_feed_forward=0.5,
                 residual_move=0.1,
                 bounded_firing_load=0.6,
-                policy_kind="linear_mpc",
+                policy_kind="acados-grey",
                 failure_state=MpcFailureState.SUCCESS,
                 solve_start_ms=8,
                 solve_end_ms=10,
@@ -622,8 +621,7 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
         ],
         "evaluation_duration_ms": 7.5,
         "payload_type": "model_evaluation",
-        "challenger_model_kind": "scheduled-arx",
-        "state_space_refresh": None,
+        "challenger_model_kind": "grey-box",
     }
     assert restored.payload.window_start_ms == min(
         origin.origin_time_ms for origin in restored.payload.completed_origins
@@ -1073,7 +1071,7 @@ def test_schema_four_has_one_canonical_model_evidence_contract():
         ),
     ),
 )
-def test_schema_five_round_trips_grey_lifecycle_without_relabelled_state_space_fields(kind, payload):
+def test_schema_five_round_trips_grey_lifecycle_with_grey_native_fields(kind, payload):
     record = ControlTraceRecord(
         ts_ms=10,
         session_id="session-grey",
@@ -1086,7 +1084,6 @@ def test_schema_five_round_trips_grey_lifecycle_without_relabelled_state_space_f
     restored = ControlTraceRecord.from_db_row(record.to_db_row())
     assert restored == record
     encoded = restored.model_dump_json()
-    assert "pole_magnitude" not in encoded
     assert "state_space_refresh" not in encoded
 
 
@@ -1141,8 +1138,8 @@ def test_enriched_model_lifecycle_metadata_is_bounded_and_round_trips():
         model_revision=8,
         provenance="fit-42",
         detail="adopted a validated model",
-        model_kind="scheduled-arx",
-        model_schema="scheduled-arx/v2",
+        model_kind="grey-box",
+        model_schema="pifire-grey-learning/v4",
         role_generation=3,
         snapshot_digest="b" * 64,
         parameters=(TraceSetting(key="delay", value=2),),
@@ -1206,209 +1203,6 @@ def test_v2_envelopes_accept_unchanged_payloads_but_reject_v3_learning_payloads(
         )
 
 
-def _state_space_refresh(*, accepted: bool, terminal_reason: str | None = None, **overrides):
-    selected = {
-        "order": 2,
-        "delay": 3,
-        "singular_values": (8.0, 2.0),
-        "effective_rank": 2,
-        "alignment_error_c": 1.5,
-        "max_pole_magnitude": 0.8,
-        "process_covariance_trace": 0.2,
-        "measurement_covariance": 0.1,
-    }
-    fields = {
-        "accepted": accepted,
-        "terminal_reason": terminal_reason,
-        "attempts": (
-            {
-                "order": 2,
-                "delay": 3,
-                "sample_count": 48,
-                "hankel_shape": (8, 33),
-                "singular_values": (8.0, 2.0),
-                "effective_rank": 2,
-                "alignment_error_c": 1.5,
-                "rejection_reasons": (),
-                "elapsed_ms": 4.0,
-            },
-        ),
-        "refresh_duration_ms": 4.5,
-        "state_space_digest": "d" * 64,
-    }
-    if accepted:
-        fields.update(selected)
-    fields.update(overrides)
-    return StateSpaceRefreshPayload(**fields)
-
-
-@pytest.mark.parametrize(
-    "refresh_factory",
-    (
-        lambda: _state_space_refresh(accepted=True),
-        lambda: _state_space_refresh(
-            accepted=True,
-            alignment_error_c=None,
-            attempts=(replace(_state_space_refresh(accepted=True).attempts[0], alignment_error_c=None),),
-        ),
-        lambda: _state_space_refresh(accepted=False, terminal_reason="insufficient-samples", attempts=()),
-        lambda: _state_space_refresh(
-            accepted=False,
-            terminal_reason="rank-deficient",
-            attempts=(
-                replace(
-                    _state_space_refresh(accepted=True).attempts[0],
-                    rejection_reasons=("rank-deficient",),
-                ),
-            ),
-        ),
-        lambda: _state_space_refresh(
-            accepted=False,
-            terminal_reason="no-valid-candidate",
-            attempts=(
-                replace(
-                    _state_space_refresh(accepted=True).attempts[0],
-                    rejection_reasons=("rank-deficient",),
-                ),
-            ),
-        ),
-        lambda: _state_space_refresh(
-            accepted=False,
-            terminal_reason="alignment-failed",
-            attempts=(
-                replace(
-                    _state_space_refresh(accepted=True).attempts[0],
-                    rejection_reasons=("alignment-failed",),
-                ),
-            ),
-        ),
-    ),
-)
-def test_state_space_refresh_trace_round_trips_accepted_rejected_bootstrap_and_replacement(refresh_factory):
-    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
-    refresh = refresh_factory()
-    evaluation = replace(
-        payload,
-        challenger_model_kind="innovation-state-space",
-        state_space_refresh=refresh,
-    )
-
-    record = ControlTraceRecord(
-        ts_ms=evaluation.evaluated_at_ms,
-        session_id="state-space-trace",
-        controller=ControllerType.MPC,
-        event_kind=TraceEventKind.MODEL_EVALUATION,
-        payload=evaluation,
-    )
-
-    assert ControlTraceRecord.model_validate_json(record.model_dump_json()) == record
-
-
-def test_model_evaluation_rejects_unpaired_state_space_model_kind_and_refresh_evidence():
-    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
-    refresh = _state_space_refresh(accepted=True)
-
-    with pytest.raises(ValidationError):
-        replace(payload, challenger_model_kind="innovation-state-space")
-    with pytest.raises(ValidationError):
-        replace(payload, state_space_refresh=refresh)
-
-
-def test_accepted_initial_state_space_fit_honestly_records_unattempted_alignment() -> None:
-    refresh = _state_space_refresh(
-        accepted=True,
-        alignment_error_c=None,
-        attempts=(replace(_state_space_refresh(accepted=True).attempts[0], alignment_error_c=None),),
-    )
-
-    assert refresh.accepted is True
-    assert refresh.alignment_error_c is None
-
-
-@pytest.mark.parametrize(
-    "attempt",
-    (
-        {
-            "order": 2,
-            "delay": 3,
-            "sample_count": 48,
-            "hankel_shape": (8, 33),
-            "singular_values": (-1.0, 0.5),
-            "effective_rank": 2,
-            "alignment_error_c": None,
-            "rejection_reasons": (),
-            "elapsed_ms": 4.0,
-        },
-        {
-            "order": 2,
-            "delay": 3,
-            "sample_count": 48,
-            "hankel_shape": (8, 33),
-            "singular_values": tuple(float(value) for value in range(10)),
-            "effective_rank": 9,
-            "alignment_error_c": None,
-            "rejection_reasons": (),
-            "elapsed_ms": 4.0,
-        },
-    ),
-)
-def test_state_space_attempt_rejects_negative_singular_values_and_rank_beyond_hankel_dimensions(attempt):
-    with pytest.raises(ValidationError):
-        StateSpaceRefreshPayload(
-            accepted=False,
-            terminal_reason="rank-deficient",
-            attempts=(attempt,),
-            refresh_duration_ms=1.0,
-            state_space_digest="a" * 64,
-        )
-
-
-@pytest.mark.parametrize(
-    "refresh",
-    (
-        lambda: _state_space_refresh(accepted=False, terminal_reason="no-valid-candidate", attempts=()),
-        lambda: _state_space_refresh(
-            accepted=True,
-            singular_values=(8.0, float("nan")),
-        ),
-        lambda: _state_space_refresh(accepted=True, effective_rank=3),
-        lambda: _state_space_refresh(accepted=True, refresh_duration_ms=-0.1),
-        lambda: _state_space_refresh(accepted=True, alignment_error_c=2.0000001),
-        lambda: _state_space_refresh(
-            accepted=True,
-            attempts=(replace(_state_space_refresh(accepted=True).attempts[0], order=4),),
-        ),
-        lambda: _state_space_refresh(accepted=False, terminal_reason="rank-deficient", order=2, delay=3),
-        lambda: _state_space_refresh(
-            accepted=False,
-            terminal_reason="rank-deficient",
-            attempts=(
-                replace(
-                    _state_space_refresh(accepted=True).attempts[0],
-                    rejection_reasons=("ill-conditioned",),
-                ),
-            ),
-        ),
-        lambda: _state_space_refresh(
-            accepted=True,
-            attempts=(replace(_state_space_refresh(accepted=True).attempts[0], effective_rank=1),),
-        ),
-        lambda: _state_space_refresh(
-            accepted=True,
-            attempts=(
-                replace(
-                    _state_space_refresh(accepted=True).attempts[0],
-                    rejection_reasons=("rank-deficient",),
-                ),
-            ),
-        ),
-    ),
-)
-def test_state_space_refresh_trace_rejects_invalid_or_contradictory_diagnostics(refresh):
-    with pytest.raises(ValidationError):
-        refresh()
-    with pytest.raises(ValidationError):
-        _state_space_refresh(accepted=True, refresh_duration_ms=3.99)
 
 
 def _canonical_observation_payload(*, calibration: bool) -> ModelObservationPayload:

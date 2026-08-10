@@ -5,9 +5,8 @@ harness, so neither one perturbs the plant for the callers that do not use it.
 behave identically to the boolean `auger_on` every existing caller passes. The
 GrillSim matrix harness (`docs/superpowers/experiments/controller_matrix.py`)
 needs `step()` to accept the auger's exact fractional on-time within a window
-instead of only a boolean sample of it. Every other caller -- this directory's
-`test_mpc_closed_loop.py`/`test_mpc_net_loop.py`, `sample_mpc.py`, the
-net-policy training sampler -- passes a Python bool.
+instead of only a boolean sample of it. The production controller and remaining
+closed-loop fixtures pass a Python bool.
 
 `lid_open` is a keyword every existing caller omits. `GrillSim` is the plant of
 record for 20+ experiments and two committed matrix artifacts, so the default

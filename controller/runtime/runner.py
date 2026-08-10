@@ -1809,23 +1809,16 @@ def _dependency_hint(controller_type, settings):
     names = ", ".join(missing.modules)
     return (
         f"It needs the {names} package, which is not part of a standard PiFire install. "
-        f"Open Settings > Controller, select {controller_type.upper()} and save: PiFire will install it "
-        f"in the background (several minutes on a Pi), after which the controller will start normally. "
+        "Install the missing base dependency before selecting this controller. "
     )
 
 
 def _build_core(settings, control, logger=None, controller_type=None):
-    """Construct the selected controller core. NEVER raises.
+    """Construct the selected controller core without leaking import or startup failures.
 
-    Both halves are guarded: `import_module` (a missing or renamed module) and --
-    the half that used to be outside the guard -- the CONSTRUCTOR. That gap was
-    not theoretical: controller/mpc.py imports do_mpc lazily inside __init__, so
-    on an install without the optional `mpc` extra the module imports cleanly and
-    then `Controller(...)` raises ModuleNotFoundError. Nothing between here and
-    the process entry point catches it, so the exception propagated out of
-    HoldMode.setup() -> Controller.run() and killed the control process with the
-    auger already commanded on. supervisor restarted it, control was flushed to
-    Stop, and the user's cook ended with the fire out and no explanation.
+    MPC construction also validates the published acados native release. A
+    missing or ABI-incompatible release is reported through the normal inactive
+    controller path rather than escaping into the live control process.
     """
     controller_type = controller_type or settings["controller"]["selected"]
     try:

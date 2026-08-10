@@ -1,41 +1,15 @@
-"""Optional per-controller Python dependencies: detection and on-demand install.
+"""Controller availability checks at the settings boundary.
 
-Most controllers need nothing beyond the base install. MPC needs do-mpc, which
-drags in CasADi -- no Linux-ARM wheel, so every Pi compiles it from source, which
-is minutes of a C++ toolchain the machine may not even have. That is unacceptable
-to inflict on every PiFire install, so do-mpc lives in the `mpc`
-optional-dependency extra in pyproject.toml and `uv sync --no-dev` -- what the
-installers run -- deliberately leaves it out.
-
-The cost of that is a hole this module fills: selecting a controller whose extra
-is absent must not be allowed to reach the control loop. Two rules:
-
-  1. NOTHING is hardcoded about *what* to install. controllers.json declares the
-     name of PiFire's own pyproject extra ("mpc"), never a requirement string --
-     the spec `do-mpc[full]>=5.1.1` exists in exactly one place, pyproject.toml,
-     and the install command inherits it via `--extra`/the lockfile. A literal
-     duplicated here is precisely the kind of thing that goes stale.
-  2. Whether a *given config* actually needs the extra is the controller
-     module's question, not ours: we ask `controller.<name>.requires_modules(config)`
-     rather than re-deriving its constructor's branches. `controller.mpc.requires_modules`
-     answers `("do_mpc",)` for every config it accepts -- no MPC configuration
-     runs on numpy/scipy alone, because a policy that starts out needing
-     nothing can still drop onto the do-mpc-backed NLP mid-cook.
-
-The install itself is DETACHED (see `install_extra_detached`) because a CasADi
-source build takes minutes: it must never block an HTTP request, and it must
-never run inside the control process, which is holding a live fire.
+Catalog metadata may declare importable modules for a controller. MPC instead
+uses the repository-published acados native runtime and has no optional Python
+dependency or on-demand installer.
 """
 
 import importlib
 import importlib.util
 import os
-import subprocess
-import sys
-import time
 
 from common.common import read_generic_json
-from common.datastore_accessors import read_generic_key, write_generic_key
 
 # Directory containing pyproject.toml / controllers.json. Derived from this
 # file's location, not the cwd: the detached installer and the Flask process do
@@ -43,12 +17,6 @@ from common.datastore_accessors import read_generic_key, write_generic_key
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTROLLERS_JSON = os.path.join(PROJECT_ROOT, "controller", "controllers.json")
 
-_STATE_KEY_PREFIX = "extra_install:"
-
-# An install still marked "running" after this long is presumed dead (process
-# killed, box rebooted mid-build) and may be relaunched. A CasADi source build
-# on a Pi is minutes, not tens of minutes, so this is generous on purpose.
-STALE_INSTALL_SECONDS = 45 * 60
 
 
 class MissingDependency:
@@ -77,7 +45,7 @@ def _metadata(metadata=None):
 def controller_dependencies(selected, metadata=None):
     """The `dependencies` block controllers.json declares for `selected`.
 
-    Absent for every controller that needs nothing, which is all of them but MPC.
+    Absent for controllers whose dependencies are already in the base install.
     """
     entry = _metadata(metadata).get(selected) or {}
     return entry.get("dependencies") or {}
@@ -87,12 +55,10 @@ def required_modules_for(selected, config, metadata=None):
     """Import names `selected` will need for THIS config.
 
     Prefers the controller module's own `requires_modules(config)` hook: it is
-    the one place that can answer per-config rather than per-controller, for any
-    controller whose needs vary by settings. MPC's hook currently answers the
-    same for every config it accepts, but the mechanism stays config-aware for
-    whichever controller needs it next. Falls back to the manifest's static list
-    when there is no hook, or when importing the module to ask fails -- failing
-    towards "it is needed" keeps the gate conservative.
+    the one place that can answer per-config rather than per-controller.
+    Falls back to the manifest's static list when there is no hook, or when
+    importing the module to ask fails -- failing towards "it is needed" keeps
+    the gate conservative.
     """
     declared = tuple(controller_dependencies(selected, metadata).get("modules") or ())
     if not declared:
@@ -147,115 +113,23 @@ def check_controller_dependencies(selected, config, metadata=None):
     return MissingDependency(selected, controller_dependencies(selected, metadata).get("extra"), missing)
 
 
-# --- install state, shared between the web process and the detached installer ---
 
-
-def install_state(extra):
-    """The last recorded state for `extra`, or None if it was never attempted."""
-    try:
-        return read_generic_key(_STATE_KEY_PREFIX + extra)
-    except Exception:
-        # read_generic_key json.loads()es a None blob when the key is absent.
-        return None
-
-
-def set_install_state(extra, state, message=""):
-    """Record install progress. `state` is running | done | failed."""
-    write_generic_key(_STATE_KEY_PREFIX + extra, {"state": state, "message": message, "updated": time.time()})
-
-
-def install_running(extra, now=None):
-    state = install_state(extra)
-    if not state or state.get("state") != "running":
-        return False
-    try:
-        updated = float(state.get("updated") or 0)
-    except TypeError, ValueError:
-        return False
-    return (time.time() if now is None else now) - updated < STALE_INSTALL_SECONDS
-
-
-def installer_command(extra, python_exec=None):
-    """argv that launches the detached installer for `extra`.
-
-    A module (`-m`) rather than a top-level script so it cannot be started with
-    the wrong sys.path, and a plain argv list rather than a shell string so the
-    extra name is never re-parsed by a shell.
-    """
-    return [python_exec or sys.executable or "python", "-m", "common.extra_installer", extra]
-
-
-def install_extra_detached(extra, python_exec=None, popen=None):
-    """Start `extra`'s install in a detached process; return (started, message).
-
-    Detached (`start_new_session=True`, no pipes held open) so it outlives the
-    gunicorn worker that started it -- a CasADi build easily outlasts a worker
-    recycle, and a half-finished venv is worse than none.
-    """
-    if install_running(extra):
-        return False, "An install of this dependency is already in progress."
-    command = installer_command(extra, python_exec=python_exec)
-    # Marked running BEFORE the spawn: two Save clicks in quick succession must
-    # not start two builds into the same venv.
-    set_install_state(extra, "running", "Starting installation...")
-    try:
-        (popen or subprocess.Popen)(
-            command,
-            cwd=PROJECT_ROOT,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
-        )
-    except Exception as exc:
-        set_install_state(extra, "failed", f"Could not start the installer: {exc}")
-        return False, f"Could not start the installer: {exc}"
-    return True, ""
-
-
-def dependency_message(missing, started, detail=""):
-    """The sentence the user sees when a controller selection is refused.
-
-    Says what is wrong, what is being done about it, that their grill is
-    untouched, and what to do next -- in that order.
-    """
+def dependency_message(missing):
+    """Describe a missing base dependency without attempting installation."""
     names = ", ".join(missing.modules)
-    head = f"The {missing.controller.upper()} controller needs the {names} package, which is not installed."
-    if missing.extra is None:
-        return f"{head} PiFire has no automatic install for it; install it manually and try again. The controller is unchanged."
-    if started:
-        return (
-            f"{head} Installing it in the background now -- this can take several minutes on a Pi. "
-            f"The controller is unchanged; select {missing.controller.upper()} again once the install finishes."
-        )
-    if detail:
-        return f"{head} {detail} The controller is unchanged."
-    return f"{head} The controller is unchanged."
+    return (
+        f"The {missing.controller.upper()} controller needs the {names} package, "
+        "which is not installed. PiFire has no automatic install for it; install "
+        "it manually and try again. The controller is unchanged."
+    )
 
 
 def guard_controller_selection(settings):
-    """Gate a settings save on the selected controller being constructible.
-
-    Returns None when the save may proceed, or the message to show the user when
-    it may not -- in which case an install of the missing extra has been kicked
-    off in the background.
-
-    REFUSING THE WHOLE SAVE is the deliberate choice. The alternative -- write
-    the selection and let the control loop deal with it -- means the stored
-    settings name a controller that cannot be built, which is precisely the state
-    this whole change exists to prevent. Refusing also matches the settings API's
-    existing contract: a rejected save leaves the store completely untouched, so
-    there is no half-applied state to reconcile and the previous controller keeps
-    running the user's cook.
-
-    Callers must apply this AFTER merging the delta, so it sees the selection the
-    save would actually produce.
-    """
+    """Refuse a settings save when its selected controller cannot be built."""
     try:
         selected = settings["controller"]["selected"]
         config = settings["controller"]["config"].get(selected, {})
-    except KeyError, TypeError, AttributeError:
+    except (KeyError, TypeError, AttributeError):
         return None
     try:
         missing = check_controller_dependencies(selected, config)
@@ -263,7 +137,4 @@ def guard_controller_selection(settings):
         return f"The {selected.upper()} controller is unavailable: {exc} The controller is unchanged."
     if missing is None:
         return None
-    if missing.extra is None:
-        return dependency_message(missing, started=False)
-    started, detail = install_extra_detached(missing.extra)
-    return dependency_message(missing, started=started, detail=detail)
+    return dependency_message(missing)

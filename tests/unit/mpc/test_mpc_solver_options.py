@@ -98,8 +98,6 @@ def test_live_build_maps_every_native_configuration_value(monkeypatch, horizon):
         "sigma": 1.1e-9,
     }
     assert controller.mpc is _Solver.created[0]
-    assert controller.model is None
-    assert controller._net is None
 
 
 def test_kf_is_the_only_alternate_estimator_and_keeps_control_cadence(monkeypatch):

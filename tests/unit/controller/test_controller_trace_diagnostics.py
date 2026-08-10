@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 
 import pytest
+from types import SimpleNamespace
 
 from common.control_trace import AllocationClampReason, ControllerBranch, MpcFailureState
 from controller import mpc, pid, pid_sp
@@ -80,11 +81,28 @@ class _Estimator:
         return mpc.np.array([1.0, 2.0, 3.0, 4.0])
 
 
-class _Policy:
-    def firing_rate_raw(self, x_hat, previous_load, setpoint_c):
-        assert previous_load == 0.7
+class _Solver:
+    def solve(self, x_hat, *, setpoint_c, q_previous, equilibrium_q):
+        assert tuple(x_hat) == (1.0, 2.0, 3.0, 4.0)
         assert setpoint_c == 120.0
-        return 1.1
+        assert q_previous == 0.7
+        assert equilibrium_q == 0.0
+        diagnostics = SimpleNamespace(
+            status=0,
+            backend_status=0,
+            iterations=1,
+            solve_time_s=0.001,
+            objective=1.0,
+            kkt_residual=0.0,
+            constraint_residual=0.0,
+            warm_started=True,
+        )
+        return SimpleNamespace(
+            sequence_q=mpc.np.array([1.0, 1.0]),
+            sequence_residual=mpc.np.array([1.0, 1.0]),
+            objective=1.0,
+            diagnostics=diagnostics,
+        )
 
 
 def _bare_mpc_controller():
@@ -92,6 +110,7 @@ def _bare_mpc_controller():
     core.units = "C"
     core.cfg = {
         "n_delay": 2,
+        "n_horizon": 2,
         "h_amb": 2.0,
         "T_amb": 20.0,
         "sigma": 0.0,
@@ -104,20 +123,17 @@ def _bare_mpc_controller():
     core._applied_combustion_load = 0.7
     core._last_combustion_load = 0.8
     core._last_raw_combustion_load = 0.8
-    core._policy_u_prev = 0.8
-    core._last_solve_failed = False
     core._consecutive_policy_failures = 0
     core._history = collections.deque(maxlen=2)
     core._model_revision = 3
-    core._model_meta = {"source": "cook-fit"}
-    core._online = None
-    core._activation_manager = None
-    core._online_pending_lifecycle = None
+    core._model_meta = None
     core._calibration_feedback = collections.deque()
     core._calibration_operations = collections.deque()
     core._trace_calibration = mpc.CalibrationDecision(False, 0.0, None, mpc.CalibrationProgress())
-    core._net = _Policy()
-    core.mpc = None
+    core.mpc = _Solver()
+    core._activation_output_authorized = True
+    core._native_failure_diagnostics = None
+    core._active_activation_record = None
     core.estimator = _Estimator()
     core.u_max = 0.9
     return core
@@ -151,10 +167,10 @@ def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monk
     assert diagnostic.state_names == ("q0", "q1", "T_c", "d")
     assert diagnostic.state_values == (1.0, 2.0, 3.0, 4.0)
     assert diagnostic.disturbance_estimate == pytest.approx(4.0)
-    assert diagnostic.raw_policy_firing_load == pytest.approx(1.1)
+    assert diagnostic.raw_policy_firing_load == pytest.approx(1.0)
     assert diagnostic.bounded_firing_load == pytest.approx(1.0)
     assert diagnostic.model_revision == 3
-    assert diagnostic.model_provenance == "adopted"
+    assert diagnostic.model_provenance == "configured"
     assert diagnostic.failure_state is MpcFailureState.SUCCESS
     assert diagnostic.solve_start_monotonic == pytest.approx(10.0)
     assert diagnostic.solve_end_monotonic == pytest.approx(10.25)
@@ -163,12 +179,12 @@ def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monk
 
 
 def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch):
-    class _FailingPolicy:
-        def firing_rate_raw(self, *_):
+    class _FailingSolver:
+        def solve(self, *_args, **_kwargs):
             raise RuntimeError("solve failed")
 
     core = _bare_mpc_controller()
-    core._net = _FailingPolicy()
+    core.mpc = _FailingSolver()
     core._last_combustion_load = 0.8
     monotonic = iter((10.0, 10.25))
     monkeypatch.setattr(mpc.time, "monotonic", lambda: next(monotonic))
@@ -186,12 +202,12 @@ def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch)
 
 
 def test_mpc_policy_timing_excludes_failure_logging(monkeypatch):
-    class _FailingPolicy:
-        def firing_rate_raw(self, *_):
+    class _FailingSolver:
+        def solve(self, *_args, **_kwargs):
             raise RuntimeError("solve failed")
 
     core = _bare_mpc_controller()
-    core._net = _FailingPolicy()
+    core.mpc = _FailingSolver()
     events = []
     monotonic = iter((10.0, 10.25))
     monkeypatch.setattr(mpc.time, "monotonic", lambda: (events.append("clock"), next(monotonic))[1])

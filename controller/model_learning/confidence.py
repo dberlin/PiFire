@@ -12,11 +12,11 @@ import numpy as np
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     CalibrationSummaryEvidence,
+    CandidateAssessmentEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
     RecorderGapEvidence,
-    RefreshDiagnosticsEvidence,
     TimingDistributionEvidence,
 )
 from .contracts import CandidateOrigin, LearningStatus
@@ -135,7 +135,7 @@ def evaluate_confidence(
         and record.role_generation == role_generation
     )
     origins, duplicate_conflict = _origins(selected)
-    refresh = _newest_payload(selected, RefreshDiagnosticsEvidence)
+    assessment = _newest_payload(selected, CandidateAssessmentEvidence)
     timing = _newest_payload(selected, TimingDistributionEvidence)
     schema_invalidated = _text(state.get("status")) == LearningStatus.SCHEMA_INVALIDATED.value
 
@@ -160,33 +160,34 @@ def evaluate_confidence(
         )
     _gate(
         gates,
+        "fit-accepted",
+        assessment is not None and assessment.fit_accepted,
+        "fit-accepted",
+    )
+    _gate(
+        gates,
         "identifiability",
-        refresh is not None and refresh.accepted and refresh.full_rank and refresh.finite_diagnostics,
+        assessment is not None and assessment.identifiability_accepted,
         "identifiability",
     )
     _gate(
         gates,
-        "sequential-wins",
-        refresh is not None and refresh.sequential_wins >= config.required_sequential_wins,
-        "sequential-wins",
+        "native-build",
+        assessment is not None and assessment.native_build == "passed",
+        "native-build",
     )
     _gate(
         gates,
-        "generation-continuity",
-        refresh is not None and refresh.generation_continuity,
-        "generation-continuity",
-    )
-    _gate(gates, "atomic-persistence", refresh is not None and refresh.atomic_persistence, "atomic-persistence")
-    _gate(
-        gates,
-        "production-prospective-construction",
-        refresh is not None and refresh.production_prospective,
-        "production-prospective-construction",
+        "native-dry-solve",
+        assessment is not None and assessment.native_dry_solve == "passed",
+        "native-dry-solve",
     )
     _gate(
         gates,
         "target-timing",
-        isinstance(timing, TimingDistributionEvidence)
+        assessment is not None
+        and assessment.target_timing == "passed"
+        and isinstance(timing, TimingDistributionEvidence)
         and timing.hardware_provenance == "target-hardware"
         and timing.p99_ms is not None
         and timing.p99_ms <= config.maximum_refresh_p99_ms,
@@ -264,7 +265,7 @@ def evaluate_confidence(
         _gate(gates, f"cook-weight:{label}", _cook_weight_ok(origins, interval), "cook-effective-weight")
 
     blockers = tuple(gate.reason for gate in gates if not gate.passed and gate.reason is not None)
-    status = _status(authoritative, schema_invalidated, selected, refresh, blockers)
+    status = _status(authoritative, schema_invalidated, selected, assessment, blockers)
     return ConfidenceReport(
         status,
         active_kind,
@@ -318,8 +319,8 @@ def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...
 
 def _newest_payload(
     records: Sequence[ModelEvidenceRecord],
-    payload_type: type[RefreshDiagnosticsEvidence] | type[TimingDistributionEvidence],
-) -> RefreshDiagnosticsEvidence | TimingDistributionEvidence | None:
+    payload_type: type[CandidateAssessmentEvidence] | type[TimingDistributionEvidence],
+) -> CandidateAssessmentEvidence | TimingDistributionEvidence | None:
     matches = [record for record in records if isinstance(record.payload, payload_type)]
     return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id)).payload if matches else None
 
@@ -500,7 +501,7 @@ def _status(
     authoritative: LearningStatus | None,
     invalidated: bool,
     records: Sequence[ModelEvidenceRecord],
-    refresh: RefreshDiagnosticsEvidence | TimingDistributionEvidence | None,
+    assessment: CandidateAssessmentEvidence | None,
     blockers: Sequence[str],
 ) -> LearningStatus:
     if authoritative is not None:
@@ -509,7 +510,7 @@ def _status(
         return LearningStatus.SCHEMA_INVALIDATED
     if not any(record.kind is not EvidenceKind.RECORDER_GAP for record in records):
         return LearningStatus.COLLECTING
-    if not isinstance(refresh, RefreshDiagnosticsEvidence):
+    if not isinstance(assessment, CandidateAssessmentEvidence):
         return LearningStatus.FITTING
     if "calibration-completeness" in blockers or "identifiability" in blockers:
         return LearningStatus.INSUFFICIENT_EXCITATION

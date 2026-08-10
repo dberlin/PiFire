@@ -8,12 +8,12 @@ import pytest
 from common.control_trace import AmbientSource
 from common.model_evidence import (
     CalibrationSummaryEvidence,
+    CandidateAssessmentEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
     ModelEvidencePayload,
     RecorderGapEvidence,
-    RefreshDiagnosticsEvidence,
     TimingDistributionEvidence,
 )
 from controller.model_learning.confidence import ConfidenceConfig, evaluate_confidence
@@ -88,27 +88,18 @@ def _qualifying(*, include_calibration: bool = False) -> tuple[ModelEvidenceReco
     records.extend(
         (
             _record(
-                EvidenceKind.REFRESH_DIAGNOSTICS,
-                RefreshDiagnosticsEvidence(
-                    accepted=True,
-                    full_rank=True,
-                    finite_diagnostics=True,
-                    # These legacy linear certificates are deliberately hostile.
-                    # A typed grey candidate must not be adjudicated by them.
-                    pole_magnitude=2.0,
-                    gain=-1.0,
-                    delay_steps=99,
-                    covariance_finite=False,
-                    alignment_error_c=999.0,
-                    snapshot_round_trip=False,
-                    sequential_wins=2,
-                    generation_continuity=True,
-                    atomic_persistence=True,
-                    production_prospective=True,
-                    braking_error_c=99.0,
-                    incumbent_braking_error_c=0.0,
+                EvidenceKind.CANDIDATE_ASSESSMENT,
+                CandidateAssessmentEvidence(
+                    decision_id="candidate-assessment-1",
+                    origin="passive-online",
+                    policy="passive-auto",
+                    fit_accepted=True,
+                    identifiability_accepted=True,
+                    native_build="passed",
+                    native_dry_solve="passed",
+                    target_timing="passed",
+                    confidence_accepted=True,
                 ),
-                timestamp=5,
             ),
             _record(
                 EvidenceKind.TIMING_DISTRIBUTION,

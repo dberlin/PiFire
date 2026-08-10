@@ -15,7 +15,6 @@ import hashlib
 import json
 import logging
 import math
-import os
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 import time
@@ -32,12 +31,9 @@ from common.control_trace import (
     GreyFitLifecyclePayload,
     GreyLearningFailurePayload,
     TraceEventKind,
-    CompletedOriginEvidence,
     CompletedOriginPayload,
-    HorizonScoreEvidence,
     HorizonScorePayload,
     ModelEvaluationPayload,
-    StateSpaceRefreshPayload,
 )
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.applied_output import FrameFeedbackDisposition
@@ -56,7 +52,6 @@ from common.model_evidence import (
     FitLifecycleEvidence,
     LearningFailureEvidence,
     ModelEvidenceRecord,
-    RefreshDiagnosticsEvidence,
     RollbackEvidence,
 )
 from controller.acados import (
@@ -518,9 +513,7 @@ def migrate_grey_learning_snapshot(snapshot):
 # also what bounds a refit: the longest cook the fit can ever be handed off
 # the teardown path is one full history.
 _HISTORY_MAX = 8640
-_SCHEDULED_ARX_LINEAR_CONFIG = None
 GREY_BOX_KIND = "grey-box"
-STATE_SPACE_KIND = "innovation-state-space"
 
 # Below this a record is an interrupted cook rather than a description of a
 # grill, and fitting it would produce a confident answer from nothing. There
@@ -569,16 +562,6 @@ def _finite_float(value):
     return value if math.isfinite(value) else None
 
 
-def _optional_int(value):
-    """Cast to int, or None when there is no number to report.
-
-    Distinguishes "not recorded" from a recorded zero, which for a count of
-    solver work are opposite claims.
-    """
-    try:
-        return int(value)
-    except TypeError, ValueError:
-        return None
 
 
 def _optional_float(value):
@@ -590,292 +573,36 @@ def _optional_float(value):
     return value if math.isfinite(value) else None
 
 
-def _online_count(value, name):
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"{name} must be a non-negative integer")
-    return value
 
 
-def _online_optional_string(value, name):
-    if value is not None and (not isinstance(value, str) or not value.strip()):
-        raise ValueError(f"{name} must be null or a non-blank string")
-    return value
 
 
-def _online_optional_score(value, name):
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be null or finite")
-    value = float(value)
-    if not math.isfinite(value):
-        raise ValueError(f"{name} must be null or finite")
-    return value
 
 
-def _online_required_score(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        raise ValueError(f"{name} must be a finite number")
-    return float(value)
 
 
-def _online_matches_completed_rmse(errors, reported):
-    if not errors:
-        return reported is None
-    if reported is None or reported < 0.0:
-        return False
-    expected = math.sqrt(sum(error * error for error in errors) / len(errors))
-    return math.isclose(reported, expected, rel_tol=1e-12, abs_tol=1e-12)
 
 
-_EVALUATION_KEYS = frozenset(
-    (
-        "decision_id",
-        "evaluated_at_s",
-        "role_generation",
-        "promoted",
-        "committed",
-        "consecutive_wins",
-        "rejection_reasons",
-        "incumbent_prediction_score",
-        "challenger_prediction_score",
-        "incumbent_braking_score",
-        "challenger_braking_score",
-        "sample_count",
-        "prospective_digest",
-        "window_start_s",
-        "window_end_s",
-        "incumbent_digest",
-        "challenger_digest",
-        "completed_origins",
-        "horizon_scores",
-        "evaluation_duration_ms",
-        "challenger_model_kind",
-        "state_space_refresh",
-    )
-)
-_LEGACY_EVALUATION_KEYS = _EVALUATION_KEYS - {"challenger_model_kind", "state_space_refresh"}
-_LIFECYCLE_KEYS = frozenset(
-    (
-        "event",
-        "model_revision",
-        "provenance",
-        "detail",
-        "model_kind",
-        "model_schema",
-        "role_generation",
-        "snapshot_digest",
-        "parameters",
-    )
-)
-_ORIGIN_EVIDENCE_KEYS = frozenset(
-    (
-        "origin_time_s",
-        "completion_time_s",
-        "horizon_steps",
-        "generation",
-        "observed_temperature_c",
-        "incumbent_error_c",
-        "challenger_error_c",
-        "braking",
-        "observation_sequence",
-        "incumbent_digest",
-        "challenger_digest",
-        "incumbent_prediction_c",
-        "challenger_prediction_c",
-        "temperature_band",
-        "ambient_source",
-    )
-)
-_HORIZON_EVIDENCE_KEYS = frozenset(("horizon_steps", "incumbent_rmse_c", "challenger_rmse_c", "sample_count"))
 
 
-def _online_nonnegative_score(value, name):
-    score = _online_required_score(value, name)
-    if score < 0:
-        raise ValueError(f"{name} must be a non-negative finite number")
-    return score
 
 
-def _online_digest(value, name):
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise ValueError(f"{name} must be a SHA-256 digest")
-    return value
 
 
-def _online_horizon(value, name):
-    if isinstance(value, bool) or not isinstance(value, int) or value not in _ONLINE_HORIZONS:
-        raise ValueError(f"{name} must be one of {_ONLINE_HORIZONS}")
-    return value
 
 
-def _online_evaluation(value):
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        raise ValueError("last_evaluation has an invalid schema")
-    evaluation_keys = set(value)
-    if evaluation_keys not in (_EVALUATION_KEYS, _LEGACY_EVALUATION_KEYS):
-        raise ValueError("last_evaluation has an invalid schema")
-    has_model_extension = evaluation_keys == _EVALUATION_KEYS
-    if not isinstance(value["decision_id"], str) or not value["decision_id"].strip():
-        raise ValueError("evaluation decision_id is invalid")
-    evaluated = _online_nonnegative_score(value["evaluated_at_s"], "evaluated_at_s")
-    role_generation = _online_count(value["role_generation"], "role_generation")
-    consecutive_wins = _online_count(value["consecutive_wins"], "consecutive_wins")
-    sample_count = _online_count(value["sample_count"], "sample_count")
-    for key in ("promoted", "committed"):
-        if not isinstance(value[key], bool):
-            raise ValueError(f"{key} must be bool")
-    if value["committed"] and not value["promoted"]:
-        raise ValueError("committed evaluation must be promoted")
-    reasons = value["rejection_reasons"]
-    if (
-        not isinstance(reasons, (list, tuple))
-        or len(reasons) > 32
-        or any(not isinstance(reason, str) or not reason.strip() for reason in reasons)
-    ):
-        raise ValueError("evaluation rejection_reasons are invalid")
-    if value["promoted"] and reasons:
-        raise ValueError("promoted evaluation cannot have rejection reasons")
-    for key in (
-        "incumbent_prediction_score",
-        "challenger_prediction_score",
-        "incumbent_braking_score",
-        "challenger_braking_score",
-    ):
-        _online_optional_score(value[key], key)
-    prospective_digest = value["prospective_digest"]
-    if (prospective_digest is not None) != value["promoted"]:
-        raise ValueError("evaluation prospective digest must match promotion")
-    if prospective_digest is not None:
-        _online_digest(prospective_digest, "prospective_digest")
-    window_start = _online_nonnegative_score(value["window_start_s"], "window_start_s")
-    window_end = _online_nonnegative_score(value["window_end_s"], "window_end_s")
-    if window_start > window_end or evaluated < window_end:
-        raise ValueError("evaluation window is invalid")
-    _online_digest(value["incumbent_digest"], "incumbent_digest")
-    _online_digest(value["challenger_digest"], "challenger_digest")
-    origins = value["completed_origins"]
-    if not isinstance(origins, (list, tuple)) or len(origins) > 1800 or sample_count != len(origins):
-        raise ValueError("evaluation completed origins are invalid")
-    actual_horizon_counts = {horizon: 0 for horizon in _ONLINE_HORIZONS}
-    horizon_errors = {horizon: ([], []) for horizon in _ONLINE_HORIZONS}
-    origin_starts = []
-    origin_ends = []
-    for index, origin in enumerate(origins):
-        if not isinstance(origin, Mapping) or set(origin) != _ORIGIN_EVIDENCE_KEYS:
-            raise ValueError(f"completed origin {index} has an invalid schema")
-        origin_start = _online_nonnegative_score(origin["origin_time_s"], f"completed origin {index} start")
-        origin_end = _online_nonnegative_score(origin["completion_time_s"], f"completed origin {index} end")
-        if origin_start >= origin_end:
-            raise ValueError("completed origin interval must be positive")
-        horizon = _online_horizon(origin["horizon_steps"], f"completed origin {index} horizon")
-        if _online_count(origin["generation"], f"completed origin {index} generation") != role_generation:
-            raise ValueError("completed origin generation must match evaluation")
-        _online_required_score(origin["observed_temperature_c"], f"completed origin {index} observed_temperature_c")
-        incumbent_error = _online_required_score(
-            origin["incumbent_error_c"], f"completed origin {index} incumbent_error_c"
-        )
-        challenger_error = _online_required_score(
-            origin["challenger_error_c"], f"completed origin {index} challenger_error_c"
-        )
-        if not isinstance(origin["braking"], bool):
-            raise ValueError("completed origin braking must be bool")
-        _online_count(origin["observation_sequence"], f"completed origin {index} observation sequence")
-        _online_digest(origin["incumbent_digest"], f"completed origin {index} incumbent digest")
-        _online_digest(origin["challenger_digest"], f"completed origin {index} challenger digest")
-        _online_required_score(origin["incumbent_prediction_c"], f"completed origin {index} incumbent prediction")
-        _online_required_score(origin["challenger_prediction_c"], f"completed origin {index} challenger prediction")
-        if not isinstance(origin["temperature_band"], str) or not origin["temperature_band"].strip():
-            raise ValueError(f"completed origin {index} temperature_band is invalid")
-        try:
-            AmbientSource(origin["ambient_source"])
-        except ValueError, TypeError:
-            raise ValueError(f"completed origin {index} ambient_source is invalid") from None
-        actual_horizon_counts[horizon] += 1
-        incumbent_errors, challenger_errors = horizon_errors[horizon]
-        incumbent_errors.append(incumbent_error)
-        challenger_errors.append(challenger_error)
-        origin_starts.append(origin_start)
-        origin_ends.append(origin_end)
-    if origins:
-        if window_start != min(origin_starts) or window_end != max(origin_ends):
-            raise ValueError("evaluation window must bound completed origins exactly")
-    elif window_start != window_end or window_end != evaluated:
-        raise ValueError("empty evaluation window must coincide with evaluation time")
-    scores = value["horizon_scores"]
-    if not isinstance(scores, (list, tuple)) or len(scores) != len(_ONLINE_HORIZONS):
-        raise ValueError("evaluation horizon scores are invalid")
-    scored_horizons = set()
-    complete_horizon_evidence = True
-    for index, score in enumerate(scores):
-        if not isinstance(score, Mapping) or set(score) != _HORIZON_EVIDENCE_KEYS:
-            raise ValueError(f"horizon score {index} has an invalid schema")
-        horizon = _online_horizon(score["horizon_steps"], f"horizon score {index} horizon")
-        scored_horizons.add(horizon)
-        horizon_sample_count = _online_count(score["sample_count"], f"horizon score {index} sample_count")
-        complete_horizon_evidence = complete_horizon_evidence and horizon_sample_count > 0
-        if horizon_sample_count > 0:
-            incumbent = _online_nonnegative_score(score["incumbent_rmse_c"], f"horizon score {index} incumbent_rmse_c")
-            challenger = _online_nonnegative_score(
-                score["challenger_rmse_c"], f"horizon score {index} challenger_rmse_c"
-            )
-        else:
-            incumbent = score["incumbent_rmse_c"]
-            challenger = score["challenger_rmse_c"]
-        incumbent_errors, challenger_errors = horizon_errors[horizon]
-        if (
-            horizon_sample_count != actual_horizon_counts[horizon]
-            or not _online_matches_completed_rmse(incumbent_errors, incumbent)
-            or not _online_matches_completed_rmse(challenger_errors, challenger)
-        ):
-            raise ValueError("evaluation horizon score is inconsistent")
-    if scored_horizons != set(_ONLINE_HORIZONS):
-        raise ValueError(f"evaluation horizon scores must contain {_ONLINE_HORIZONS}")
-    if not reasons and consecutive_wins == 0:
-        raise ValueError("successful evaluation must advance the win count")
-    if reasons and complete_horizon_evidence and consecutive_wins != 0:
-        raise ValueError("rejected complete evaluation must reset the win count")
-    _online_nonnegative_score(value["evaluation_duration_ms"], "evaluation_duration_ms")
-    restored = copy.deepcopy(dict(value))
-    if not has_model_extension:
-        return restored
-    challenger_model_kind = value["challenger_model_kind"]
-    if challenger_model_kind not in {"scheduled-arx", "innovation-state-space"}:
-        raise ValueError("evaluation challenger_model_kind is invalid")
-    refresh = value["state_space_refresh"]
-    if challenger_model_kind == "scheduled-arx":
-        if refresh is not None:
-            raise ValueError("scheduled-arx evaluation cannot include state-space refresh evidence")
-        return restored
-    if not isinstance(refresh, Mapping):
-        raise ValueError("state-space evaluation requires refresh evidence")
-    try:
-        restored["state_space_refresh"] = asdict(StateSpaceRefreshPayload(**dict(refresh)))
-    except TypeError, ValueError:
-        raise ValueError("evaluation state_space_refresh is invalid") from None
-    return restored
 
 
-def _online_lifecycle_metadata(value):
-    if value is None:
-        return None
-    if not isinstance(value, Mapping) or set(value) != _LIFECYCLE_KEYS:
-        raise ValueError("last_lifecycle has an invalid schema")
-    for key in ("event", "provenance", "detail", "model_kind", "model_schema", "snapshot_digest"):
-        _online_optional_string(value[key], key)
-        if value[key] is None:
-            raise ValueError(f"{key} is required")
-    for key in ("model_revision", "role_generation"):
-        _online_count(value[key], key)
-    if value["parameters"] != () and value["parameters"] != []:
-        raise ValueError("lifecycle parameters must be empty")
-    return copy.deepcopy(dict(value))
+
+
+
+
+
+
+
+
+
+
 
 
 def _sanitized_copy(mapping):
@@ -890,201 +617,13 @@ def _sanitized_copy(mapping):
     return {key: (_finite_float(value) if isinstance(value, float) else value) for key, value in mapping.items()}
 
 
-def _load_net_policy(cfg, n_horizon):
-    """Load the numpy net policy, or return None to fall back to the NLP.
-
-    The net approximates the NLP policy at one configured planning horizon, so
-    an artifact trained for any other horizon must be rejected.
-    """
-    from controller.mpc_net import NetPolicy, net_path_for
-
-    base = cfg.get("policy_net_path")
-    path = net_path_for(base, bool(cfg.get("enable_fan_input"))) if base else base
-    if not path or not os.path.exists(path):
-        print(f"[mpc] policy=net but artifact not found ({path}); using NLP")
-        return None
-    try:
-        net = NetPolicy.load(path)
-    except Exception as e:
-        print(f"[mpc] could not load net policy ({e}); using NLP")
-        return None
-    if not net.matches_config({**cfg, "n_horizon": n_horizon}):
-        if net.model_schema != MODEL_SCHEMA:
-            print(
-                f"[mpc] net policy at {path} uses model schema {net.model_schema}, but normalized combustion "
-                f"load requires schema {MODEL_SCHEMA}; using NLP -- regenerate it with tools/regenerate_mpc_net.py."
-            )
-        elif net.input_dim != net.expected_input_dim(cfg):
-            print(
-                f"[mpc] net policy at {path} takes a {net.input_dim}-wide input but this model "
-                f"produces {net.expected_input_dim(cfg)}; it was trained against a different "
-                "state vector. Using NLP -- regenerate it with tools/regenerate_mpc_net.py."
-            )
-        else:
-            print("[mpc] net policy calibration does not match config; using NLP")
-        return None
-    return net
 
 
-class _StateSpaceShadow:
-    """Buffer complete worker frames until the production realization can fit."""
-
-    _SCHEMA = "innovation-state-space-shadow/v1"
-
-    def __init__(self) -> None:
-        self._config = StateSpaceConfig(orders=(1, 2), delays=(1, 2, 3))
-        self._model = InnovationStateSpace(self._config)
-        self._frames: collections.deque[FrameObservation] = collections.deque(maxlen=self._config.max_buffer_samples)
-        self._fitted = False
-        self._refresh_attempts = 0
-        self._last_refresh_attempt_s: float | None = None
-
-    @classmethod
-    def from_fitted_snapshot(cls, snapshot):
-        """Restore a fitted realization behind the session-resettable wrapper."""
-        shadow = cls.__new__(cls)
-        shadow._model = InnovationStateSpace.from_snapshot(snapshot)
-        shadow._config = shadow._model._config
-        shadow._frames = collections.deque(maxlen=shadow._config.max_buffer_samples)
-        shadow._fitted = True
-        shadow._refresh_attempts = 0
-        shadow._last_refresh_attempt_s = None
-        return shadow
-
-    @property
-    def refresh_attempts(self) -> int:
-        return self._refresh_attempts
-
-    @property
-    def model_kind(self) -> str:
-        return "innovation-state-space"
-
-    def reset_lag_history(self) -> None:
-        """Discard every pre-gap state and frame before renewed shadow learning."""
-        self._model = InnovationStateSpace(self._config)
-        self._frames.clear()
-        self._fitted = False
-        self._last_refresh_attempt_s = None
-
-    def _minimum_samples(self) -> int:
-        return max(
-            self._config.max_buffer_samples // 100,
-            max(self._config.orders) + max(self._config.delays) + 6,
-            2 * self._config.block_rows + 3,
-        )
-
-    def _bootstrap(self, observation: FrameObservation) -> bool:
-        self._frames.append(observation)
-        if len(self._frames) < self._minimum_samples():
-            return False
-        diagnostics = self._model.fit(tuple(self._frames))
-        self._fitted = diagnostics.accepted
-        if self._fitted:
-            self._last_refresh_attempt_s = observation.frame_end_s
-        return self._fitted
-
-    def track(self, observation: FrameObservation) -> ModelUpdate:
-        if not self._fitted:
-            self._bootstrap(observation)
-            return ModelUpdate(observation.temp_c, observation.temp_c, 0.0, False)
-        return self._model.track(observation)
-
-    def observe(self, observation: FrameObservation) -> ModelUpdate:
-        if not self._fitted:
-            self._bootstrap(observation)
-            return ModelUpdate(observation.temp_c, observation.temp_c, 0.0, False)
-        if (
-            self._last_refresh_attempt_s is not None
-            and observation.frame_end_s - self._last_refresh_attempt_s >= self._config.refresh_interval_s
-        ):
-            self._refresh_attempts += 1
-            self._last_refresh_attempt_s = observation.frame_end_s
-        return self._model.observe(observation)
-
-    def affine_prediction(self, horizon_steps, q_previous, ambient_future):
-        if not self._fitted:
-            raise RuntimeError("state-space shadow has not accumulated a complete fit window")
-        return self._model.affine_prediction(horizon_steps, q_previous, ambient_future)
-
-    def snapshot(self):
-        if self._fitted:
-            return self._model.snapshot()
-        return {
-            "schema": self._SCHEMA,
-            "config": asdict(self._config),
-            "effective_samples": len(self._frames),
-            "poles": (0.0,),
-            "steady_gain": 1.0,
-            "delay_steps": (1,),
-            "diagnostics": {
-                "accepted": False,
-                "terminal_reason": "insufficient-samples",
-                "attempts": (),
-            },
-            "status": {"alignment_evidence": "measured", "alignment_error_c": None},
-        }
 
 
-class _GreyBoxAdaptiveModel:
-    """Immutable grey-box forecast origin with the coordinator model protocol."""
 
-    _SCHEMA = "grey-box-adapter/v1"
 
-    def __init__(self, adapter):
-        self._adapter = adapter
 
-    @classmethod
-    def from_controller(cls, controller):
-        return cls(GreyBoxPredictionAdapter.from_controller(controller))
-
-    def track(self, observation):
-        # The frozen origin intentionally does not learn.  Its one-step
-        # innovation is the chamber origin error, which is finite by adapter
-        # construction and sufficient for prequential comparison.
-        predicted = float(self._adapter.chamber_origin_c)
-        return ModelUpdate(predicted, observation.temp_c, observation.temp_c - predicted, False)
-
-    observe = track
-
-    def affine_prediction(self, horizon_steps, q_previous, ambient_future):
-        return self._adapter.affine_prediction(horizon_steps, q_previous, ambient_future)
-
-    def snapshot(self):
-        adapter = self._adapter
-        return {
-            "schema": self._SCHEMA,
-            "state": adapter.state.tolist(),
-            "transition": adapter.transition.tolist(),
-            "q_gain": adapter.q_gain.tolist(),
-            "ambient_gain": adapter.ambient_gain.tolist(),
-            "affine_offset": adapter.affine_offset.tolist(),
-            "radiation_constant_gain": adapter.radiation_constant_gain.tolist(),
-            "temperature_index": adapter.temperature_index,
-            "radiation_sigma": adapter.radiation_sigma,
-            "radiation_slope": adapter.radiation_slope,
-            "chamber_origin_c": adapter.chamber_origin_c,
-        }
-
-    @classmethod
-    def from_snapshot(cls, snapshot):
-        if not isinstance(snapshot, Mapping) or snapshot.get("schema") != cls._SCHEMA:
-            raise ValueError("invalid grey-box adapter snapshot")
-        fields = {
-            key: snapshot[key]
-            for key in (
-                "state",
-                "transition",
-                "q_gain",
-                "ambient_gain",
-                "affine_offset",
-                "radiation_constant_gain",
-                "temperature_index",
-                "radiation_sigma",
-                "radiation_slope",
-                "chamber_origin_c",
-            )
-        }
-        return cls(GreyBoxPredictionAdapter(**fields))
 
 
 _PHYSICAL_PARAMS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
@@ -1128,9 +667,6 @@ def _warn_about_model(cfg):
         )
 
 
-def requires_modules(config):
-    """The live controller has no optional Python dependency."""
-    return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1166,9 +702,7 @@ class CalibrationCommand:
 
 
 class Controller(ControllerBase):
-    def __init__(self, config, units, cycle_data, *, _online_challenger_kind=None):
-        if _online_challenger_kind is not None:
-            raise ValueError("legacy online challenger selection is retired")
+    def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
 
         self._activation_configuration = {
@@ -1185,39 +719,18 @@ class Controller(ControllerBase):
         self.u_max = float(cycle_data.get("u_max", 0.9))
 
         self._set_point_c = 0.0
-        self._online_enabled = cfg.get("enable_online_adaptation") is True
-        self._online = None
-        self._linear_config = None
-        self._online_challenger_kind = None
-        self._online_experiment_active = False
-        self._linear_policy = None
-        self._online_next_evaluation_s = None
-        self._online_last_evaluation = None
-        self._online_last_lifecycle_reason = None
-        self._online_promotion_count = 0
-        self._online_rollback_count = 0
-        self._online_eligible_updates = 0
-        self._online_rejected_updates = 0
-        self._online_last_rejection_reason = None
-        self._online_learner_duration = None
-        self._online_evaluation_duration = None
-        self._online_linear_duration = None
-        self._online_last_snapshot = None
+        self._learning_enabled = cfg.get("enable_online_adaptation") is True
+        self._learning_eligible_updates = 0
+        self._learning_rejected_updates = 0
         self._last_combustion_load = 0.0
         self._applied_combustion_load = 0.0
         self._x_hat = None
-        self._online_pending_lifecycle = None
-        self._policy_u_prev = 0.0
-        self._online_previous_setpoint = None
         self._last_raw_combustion_load = 0.0
         self._last_equilibrium_load = None
         self._last_residual_load = None
         self._last_feasibility = None
-        self._policy_equilibrium_load = 0.0
-        self._last_solve_failed = False
         # How long the output has been frozen. A single failure is a hiccup the
         # held command covers; a run of them means nothing is steering.
-        self._online_last_lifecycle = None
         self._consecutive_policy_failures = 0
         self._history = collections.deque(maxlen=_HISTORY_MAX)
         self._model_revision = 0
@@ -1237,13 +750,8 @@ class Controller(ControllerBase):
         self._trace_calibration = CalibrationDecision(False, 0.0, None, CalibrationProgress())
         self._trace_baseline_allocation: AllocationResult | None = None
         self._trace_allocation: AllocationResult | None = None
-        self._activation_manager: ActivationManager | None = None
         self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
-        self._activation_expected_temperature_c: float | None = None
-        self._activation_residual_failures = 0
-
-        self._online_pending_parameter_promotion = None
-        self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
+        self.estimator, self.mpc = self._build_for(cfg)
         live_configuration = {
             name: getattr(self.mpc.config, name)
             for name in self.mpc.config.__dataclass_fields__
@@ -1296,42 +804,23 @@ class Controller(ControllerBase):
         self._next_cook_descriptor: GreyControlPairDescriptor | None = None
         self._teardown_decision_id: str | None = None
         try:
-            self._learning = self._build_learning() if self._online_enabled else None
+            self._learning = self._build_learning() if self._learning_enabled else None
         except BaseException:
             self._close_component(self.mpc)
             self._close_component(self.estimator)
             raise
 
-    def _new_scheduled_arx(self):
-        return ScheduledARX(ScheduledARXConfig(na=2, nb=2, delays=(1, 2, 3), initial_covariance=10.0))
+    
 
-    def _new_state_space_challenger(self):
-        return _StateSpaceShadow()
+    
 
-    def _new_linear_policy(self):
-        return _SCHEDULED_ARX_LINEAR_CONFIG, LinearMPC(_SCHEDULED_ARX_LINEAR_CONFIG)
+    
 
-    def _new_grey_box_model(self):
-        return _GreyBoxAdaptiveModel.from_controller(self)
+    
 
-    def _new_online_adaptation(self, incumbent, challenger):
-        coordinator = OnlineAdaptation(incumbent, challenger, AdaptationPolicy(), accepted_sources=("controller",))
-        # ScheduledARX only predicts after its complete lag window exists.  Keep
-        # adaptation in tracking mode until then, rather than letting the
-        # coordinator invoke observe() against an incomplete learner.
-        if isinstance(challenger, ScheduledARX):
-            coordinator._lag_warmup_remaining = max(
-                challenger.config.na + 1,
-                max(challenger.config.delays) + challenger.config.nb + 1,
-            )
-        return coordinator
+    
 
-    def _initialize_online_adaptation(self):
-        state_space_experiment = self._online_challenger_kind == "state-space"
-        challenger = self._new_state_space_challenger() if state_space_experiment else self._new_scheduled_arx()
-        incumbent = self._new_scheduled_arx() if state_space_experiment else self._new_grey_box_model()
-        self._linear_config, self._linear_policy = self._new_linear_policy()
-        self._online = self._new_online_adaptation(incumbent, challenger)
+    
 
     def _build_for(self, cfg, *, model_identified=None):
         """Build one complete estimator/native-solver pair or leave no owner."""
@@ -1364,7 +853,7 @@ class Controller(ControllerBase):
         except BaseException:
             self._close_component(estimator)
             raise
-        return estimator, None, None, solver
+        return estimator, solver
 
     def _build_estimator(self, cfg, n_delay):
         """Build the selected estimator at the runtime control cadence."""
@@ -1519,84 +1008,13 @@ class Controller(ControllerBase):
             return ValueError("non-finite-forecast")
         return error
 
-    def _active_arx(self):
-        return self._online is not None and isinstance(self._online.incumbent, ScheduledARX)
+    
 
-    def _active_state_space(self):
-        manager = self._activation_manager
-        return manager is not None and manager.active_kind == STATE_SPACE_KIND and manager.active_model is not None
+    
 
-    def _activation_prospective_solve(self, candidate):
-        if self._linear_config is None or self._linear_policy is None:
-            self._linear_config, self._linear_policy = self._new_linear_policy()
-        prediction = candidate.affine_prediction(
-            self._linear_config.horizon_steps,
-            self._applied_combustion_load,
-            np.full(self._linear_config.horizon_steps, self.cfg["T_amb"]),
-        )
-        if not (np.isfinite(prediction.free_output_c).all() and np.isfinite(prediction.input_response_c).all()):
-            raise ValueError("non-finite-forecast")
-        disturbance = 0.0 if self._x_hat is None else float(np.asarray(self._x_hat).reshape(-1)[-1])
-        solve = self._linear_policy.solve(
-            prediction,
-            setpoint_c=self._set_point_c,
-            q_previous=self._applied_combustion_load,
-            equilibrium_q=self._equilibrium_load(self._set_point_c, disturbance),
-        )
-        rejection = self._linear_certificate_rejection(solve, self._linear_config)
-        if rejection is not None:
-            raise ValueError(rejection)
-        return float(solve.sequence_q[0])
+    
 
-    def _synchronize_active_adaptation(self):
-        """Mirror exact activation ownership into an isolated incumbent/challenger pair."""
-        manager = self._activation_manager
-        if self._online is None or manager is None:
-            return
-        state = manager.state
-        if state.active_kind == STATE_SPACE_KIND and manager.active_snapshot is not None:
-            active_snapshot = manager.active_snapshot
-            active_digest = OnlineAdaptation.model_digest(InnovationStateSpace.from_snapshot(active_snapshot))
-            if not (
-                isinstance(self._online.incumbent, InnovationStateSpace)
-                and OnlineAdaptation.model_digest(self._online.incumbent) == active_digest
-            ):
-                incumbent = InnovationStateSpace.from_snapshot(active_snapshot)
-                challenger = InnovationStateSpace.from_snapshot(active_snapshot)
-                self._online = self._new_online_adaptation(incumbent, challenger)
-                self._online._active_generation = state.role_generation
-                self._online._challenger_generation = state.role_generation + 1
-            self._online._active_generation = state.role_generation
-            self._online._challenger_generation = max(
-                self._online._challenger_generation,
-                state.role_generation + 1,
-            )
-            rollback_snapshot = manager.rollback_snapshot
-            if rollback_snapshot is not None:
-                rollback_model_snapshot = rollback_snapshot
-                online = rollback_snapshot.get("online_adaptation")
-                if isinstance(online, Mapping) and isinstance(online.get("incumbent"), Mapping):
-                    rollback_model_snapshot = online["incumbent"]
-                if rollback_model_snapshot.get("schema") == "innovation-state-space/v2":
-                    rollback = InnovationStateSpace.from_snapshot(rollback_model_snapshot)
-                elif rollback_model_snapshot.get("schema") == _GreyBoxAdaptiveModel._SCHEMA:
-                    rollback = _GreyBoxAdaptiveModel.from_snapshot(rollback_model_snapshot)
-                else:
-                    rollback = None
-                if rollback is not None:
-                    self._online._previous_incumbent = rollback
-                    self._online._previous_incumbent_snapshot = copy.deepcopy(dict(rollback_model_snapshot))
-                    self._online._previous_incumbent_digest = OnlineAdaptation.model_digest(rollback)
-                    if self._online._rollback_generation is None:
-                        self._online._rollback_generation = max(0, state.role_generation - 1)
-        else:
-            challenger = self._new_state_space_challenger()
-            self._online = self._new_online_adaptation(self._new_grey_box_model(), challenger)
-            self._online._active_generation = state.role_generation
-            self._online._challenger_generation = state.role_generation + 1
-        self._online._role_generation = state.role_generation
-        self._online._failed_generations.update(state.failed_generations)
-        self._online._begin_role_generation()
+    
 
     @property
     def active_control_pair(self) -> OwnedGreyControlPair:
@@ -1824,44 +1242,7 @@ class Controller(ControllerBase):
             raise TypeError("activation confidence must be confidence-decision evidence")
         return self._activation_persistence_channel().submit_activation_confidence(record)
 
-    def commit_active_parameter_promotion(self, manager, decision_id, confidence):
-        """Publish the exact durable activation without re-adjudicating its confidence."""
-        if not isinstance(manager, ActivationManager):
-            raise TypeError("manager must be ActivationManager")
-        pending = self._online_pending_parameter_promotion
-        if self._online is None or pending is None or pending[0] != decision_id:
-            return False
-        state = manager.state
-        active_snapshot = manager.active_snapshot
-        if not isinstance(active_snapshot, Mapping):
-            return False
-        try:
-            prospective = self._online.prospective_model(decision_id)
-            committed_digest = OnlineAdaptation.model_digest(InnovationStateSpace.from_snapshot(active_snapshot))
-        except KeyError, TypeError, ValueError, RuntimeError:
-            return False
-        if (
-            state.active_kind != STATE_SPACE_KIND
-            or state.decision_id != decision_id
-            or state.active_digest != committed_digest
-            or committed_digest != OnlineAdaptation.model_digest(prospective)
-            or state.role_generation <= self._online.role_generation
-            or state.role_generation in state.failed_generations
-        ):
-            return False
-
-        # ActivationManager's durable CAS is the sole post-persistence authority.
-        # Reconstructing from it consumes the old online pending decision by
-        # replacing that role pair; a later caller-supplied confidence view must
-        # not reverse ownership that the durable ledger already committed.
-        self._activation_manager = manager
-        self._synchronize_active_adaptation()
-        self._online_pending_parameter_promotion = None
-        self._online_promotion_count += 1
-        self._model_revision += 1
-        self._online_last_lifecycle_reason = "parameter-promotion"
-        self._online_last_lifecycle = self._online_lifecycle("adopt", "parameter-promotion")
-        return True
+    
 
     def _build_pair_from_descriptor(
         self,
@@ -1888,7 +1269,7 @@ class Controller(ControllerBase):
                 if source in configuration:
                     candidate_cfg[target] = configuration[source]
         candidate_cfg["estimator"] = descriptor.estimator_kind
-        estimator, _net, _model, solver = self._build_for(candidate_cfg)
+        estimator, solver = self._build_for(candidate_cfg)
         actual_digest = grey_config_digest(solver.config)
         if actual_digest != descriptor.model_digest:
             self._close_component(solver)
@@ -1980,466 +1361,12 @@ class Controller(ControllerBase):
         self._activation_events.clear()
         return events
 
-    @staticmethod
-    def _is_state_space_model(model):
-        return isinstance(model, (InnovationStateSpace, _StateSpaceShadow))
 
-    def _state_space_refresh_evidence(self, model):
-        snapshot = model.snapshot()
-        latest = (
-            model.diagnostics
-            if isinstance(model, InnovationStateSpace)
-            else model._model.diagnostics
-            if isinstance(model, _StateSpaceShadow) and model._fitted
-            else None
-        )
-        if latest is None:
-            diagnostics = snapshot.get("diagnostics")
-            if not isinstance(diagnostics, Mapping):
-                return None
-            attempts = tuple(
-                {
-                    "order": attempt["order"],
-                    "delay": attempt["delay"],
-                    "sample_count": attempt["sample_count"],
-                    "hankel_shape": tuple(attempt["hankel_shape"]),
-                    "singular_values": tuple(attempt["singular_values"]),
-                    "effective_rank": attempt["effective_rank"],
-                    "alignment_error_c": attempt["alignment_error_c"],
-                    "rejection_reasons": tuple(attempt["rejection_reasons"]),
-                    "elapsed_ms": attempt["elapsed_ms"],
-                }
-                for attempt in diagnostics.get("attempts", ())
-                if isinstance(attempt, Mapping)
-            )
-            accepted = diagnostics.get("accepted")
-            terminal_reason = diagnostics.get("terminal_reason")
-            selected_order = diagnostics.get("selected_order")
-            selected_delay = diagnostics.get("selected_delay")
-        else:
-            attempts = tuple(
-                {
-                    "order": attempt.order,
-                    "delay": attempt.delay,
-                    "sample_count": attempt.sample_count,
-                    "hankel_shape": attempt.hankel_shape,
-                    "singular_values": attempt.singular_values,
-                    "effective_rank": attempt.effective_rank,
-                    "alignment_error_c": attempt.alignment_error_c,
-                    "rejection_reasons": tuple(reason.value for reason in attempt.rejection_reasons),
-                    "elapsed_ms": attempt.elapsed_ms,
-                }
-                for attempt in latest.attempts
-            )
-            accepted = latest.accepted
-            terminal_reason = None if latest.terminal_reason is None else latest.terminal_reason.value
-            selected_order = latest.selected_order
-            selected_delay = latest.selected_delay
-        evidence = {
-            "accepted": accepted,
-            "terminal_reason": terminal_reason,
-            "attempts": attempts,
-            "refresh_duration_ms": sum(attempt["elapsed_ms"] for attempt in attempts),
-            "state_space_digest": OnlineAdaptation.model_digest(model),
-        }
-        if not accepted:
-            return evidence
-        selected = next(
-            (
-                attempt
-                for attempt in attempts
-                if (attempt["order"], attempt["delay"]) == (selected_order, selected_delay)
-            ),
-            None,
-        )
-        model_data = snapshot.get("model")
-        if selected is None or not isinstance(model_data, Mapping):
-            return None
-        process = np.asarray(model_data.get("process_covariance"), dtype=float)
-        poles = np.asarray(model_data.get("poles"), dtype=float)
-        evidence.update(
-            {
-                "order": selected["order"],
-                "delay": selected["delay"],
-                "singular_values": selected["singular_values"],
-                "effective_rank": selected["effective_rank"],
-                "alignment_error_c": selected["alignment_error_c"],
-                "max_pole_magnitude": float(np.max(poles)),
-                "process_covariance_trace": float(np.trace(process)),
-                "measurement_covariance": model_data.get("measurement_covariance"),
-            }
-        )
-        return evidence
+    
 
-    def _compact_refresh_evidence(self, decision, *, production_prospective: bool = False):
-        """Freeze selected state-space diagnostics for the compact ledger."""
-        if self._online is None or not self._is_state_space_model(self._online.challenger):
-            return None
-        model = self._online.challenger
-        refresh = self._state_space_refresh_evidence(model)
-        snapshot = model.snapshot()
-        model_data = snapshot.get("model")
-        if not isinstance(refresh, Mapping) or not isinstance(model_data, Mapping):
-            return None
-        poles = np.asarray(model_data.get("poles"), dtype=float)
-        covariance = np.asarray(model_data.get("process_covariance"), dtype=float)
-        gain = model_data.get("steady_gain")
-        delay = refresh.get("delay")
-        alignment = refresh.get("alignment_error_c")
-        order = refresh.get("order")
-        finite = (
-            poles.size > 0
-            and covariance.size > 0
-            and np.isfinite(poles).all()
-            and np.isfinite(covariance).all()
-            and isinstance(gain, (int, float))
-            and math.isfinite(float(gain))
-        )
-        round_trip = False
-        if isinstance(model, InnovationStateSpace):
-            try:
-                restored = InnovationStateSpace.from_snapshot(snapshot)
-                round_trip = restored.snapshot() == snapshot
-            except ValueError, FloatingPointError, RuntimeError:
-                round_trip = False
-        braking = decision.candidate_braking_score
-        incumbent_braking = decision.incumbent_braking_score
-        return RefreshDiagnosticsEvidence(
-            accepted=refresh.get("accepted") is True,
-            reason=refresh.get("terminal_reason") if isinstance(refresh.get("terminal_reason"), str) else None,
-            full_rank=isinstance(order, int) and refresh.get("effective_rank") == order,
-            finite_diagnostics=finite,
-            pole_magnitude=float(np.max(poles)) if finite else None,
-            gain=float(gain) if isinstance(gain, (int, float)) else None,
-            delay_steps=delay if isinstance(delay, int) else None,
-            covariance_finite=finite,
-            alignment_error_c=float(alignment) if isinstance(alignment, (int, float)) else None,
-            snapshot_round_trip=round_trip,
-            sequential_wins=decision.consecutive_wins,
-            generation_continuity=not any(
-                reason.value in {"continuity", "stale-generation"} for reason in decision.reasons
-            ),
-            atomic_persistence=False,
-            production_prospective=production_prospective,
-            braking_error_c=braking,
-            incumbent_braking_error_c=incumbent_braking,
-        )
+    
 
-    def _online_status(self):
-        coordinator = self._online
-        if coordinator is None:
-            return {
-                "enabled": False,
-                "active_model_kind": "grey-box",
-                "role_generation": 0,
-                "eligible_updates": 0,
-                "rejected_updates": 0,
-                "current_rejection_reason": None,
-                "active_delay": None,
-                "effective_samples": 0,
-                "last_evaluation_s": None,
-                "last_evaluation_outcome": None,
-                "incumbent_prediction_score": None,
-                "candidate_prediction_score": None,
-                "promotion_count": 0,
-                "rollback_count": 0,
-                "learner_duration_seconds": None,
-                "evaluation_duration_seconds": None,
-                "linear_solve_duration_seconds": None,
-            }
-        incumbent = coordinator.incumbent
-        active_kind = (
-            "innovation-state-space"
-            if isinstance(incumbent, InnovationStateSpace)
-            else "scheduled-arx"
-            if isinstance(incumbent, ScheduledARX)
-            else "grey-box"
-        )
-        return {
-            "enabled": True,
-            "active_model_kind": active_kind,
-            "role_generation": coordinator.role_generation,
-            "eligible_updates": self._online_eligible_updates,
-            "rejected_updates": self._online_rejected_updates,
-            "current_rejection_reason": self._online_last_rejection_reason,
-            "active_delay": incumbent.snapshot().get("active_delay") if isinstance(incumbent, ScheduledARX) else None,
-            "effective_samples": coordinator.effective_updates,
-            "last_evaluation_s": None
-            if self._online_last_evaluation is None
-            else self._online_last_evaluation.get("evaluated_at_s"),
-            "last_evaluation_outcome": self._online_last_evaluation,
-            "incumbent_prediction_score": None
-            if self._online_last_evaluation is None
-            else self._online_last_evaluation.get("incumbent_prediction_score"),
-            "candidate_prediction_score": None
-            if self._online_last_evaluation is None
-            else self._online_last_evaluation.get("challenger_prediction_score"),
-            "promotion_count": self._online_promotion_count,
-            "rollback_count": self._online_rollback_count,
-            "learner_duration_seconds": self._online_learner_duration,
-            "evaluation_duration_seconds": self._online_evaluation_duration,
-            "linear_solve_duration_seconds": self._online_linear_duration,
-        }
-
-    @staticmethod
-    def _completed_origin_payloads(origin) -> tuple[CompletedOriginEvidence, ForecastOriginEvidence]:
-        """Serialize one completed causal event into raw and compact forms."""
-        raw = CompletedOriginEvidence(
-            origin_time_ms=int(origin.origin_time_s * 1_000),
-            completion_time_ms=int(origin.completion_time_s * 1_000),
-            horizon_steps=origin.horizon_steps,
-            generation=origin.generation,
-            observed_temperature_c=origin.observed_temperature_c,
-            incumbent_error_c=origin.incumbent_error_c,
-            challenger_error_c=origin.challenger_error_c,
-            braking=origin.braking,
-            observation_sequence=origin.observation_sequence,
-            incumbent_digest=origin.incumbent_digest,
-            challenger_digest=origin.challenger_digest,
-            incumbent_prediction_c=origin.incumbent_prediction_c,
-            challenger_prediction_c=origin.challenger_prediction_c,
-            temperature_band=origin.temperature_band,
-            ambient_source=origin.ambient_source,
-        )
-        compact = ForecastOriginEvidence(
-            origin_sequence=origin.observation_sequence,
-            origin_time_ms=raw.origin_time_ms,
-            completion_time_ms=raw.completion_time_ms,
-            horizon_steps=raw.horizon_steps,
-            incumbent_digest=raw.incumbent_digest,
-            challenger_digest=raw.challenger_digest,
-            incumbent_prediction_c=raw.incumbent_prediction_c,
-            challenger_prediction_c=raw.challenger_prediction_c,
-            observed_temperature_c=raw.observed_temperature_c,
-            incumbent_error_c=raw.incumbent_error_c,
-            challenger_error_c=raw.challenger_error_c,
-            temperature_band=raw.temperature_band,
-            phase="coasting" if raw.braking else "heating",
-            ambient_source=raw.ambient_source,
-            calibration_fit=False,
-        )
-        return raw, compact
-
-    def _evaluation_payloads(
-        self, decision: EvaluationDecision
-    ) -> tuple[ModelEvaluationPayload, tuple[ForecastOriginEvidence, ...]]:
-        events = tuple(self._completed_origin_payloads(origin) for origin in decision.completed_origins)
-        raw_origins = tuple(event[0] for event in events)
-        return (
-            ModelEvaluationPayload(
-                decision_id=decision.decision_id,
-                evaluated_at_ms=int(decision.evaluated_at_s * 1_000),
-                role_generation=decision.generation,
-                promoted=decision.promoted,
-                committed=decision.committed,
-                consecutive_wins=decision.consecutive_wins,
-                rejection_reasons=tuple(reason.value for reason in decision.reasons),
-                incumbent_prediction_score=decision.incumbent_prediction_score,
-                challenger_prediction_score=decision.candidate_prediction_score,
-                incumbent_braking_score=decision.incumbent_braking_score,
-                challenger_braking_score=decision.candidate_braking_score,
-                sample_count=decision.sample_count,
-                prospective_digest=decision.prospective_digest,
-                window_start_ms=int(decision.window_start_s * 1_000),
-                window_end_ms=int(decision.window_end_s * 1_000),
-                incumbent_digest=decision.incumbent_digest,
-                challenger_digest=decision.challenger_digest,
-                completed_origins=raw_origins,
-                horizon_scores=tuple(
-                    HorizonScoreEvidence(
-                        horizon_steps=score.horizon_steps,
-                        incumbent_rmse_c=score.incumbent_rmse_c,
-                        challenger_rmse_c=score.challenger_rmse_c,
-                        sample_count=score.sample_count,
-                    )
-                    for score in decision.horizon_scores
-                ),
-                evaluation_duration_ms=decision.evaluation_duration_ms,
-                challenger_model_kind=(
-                    "innovation-state-space" if self._is_state_space_model(self._online.challenger) else "scheduled-arx"
-                ),
-                state_space_refresh=(
-                    self._state_space_refresh_evidence(self._online.challenger)
-                    if self._is_state_space_model(self._online.challenger)
-                    else None
-                ),
-            ),
-            tuple(event[1] for event in events),
-        )
-
-    def _record_evaluation(self, decision, *, committed=None):
-        self._online_last_evaluation = {
-            "decision_id": decision.decision_id,
-            "evaluated_at_s": decision.evaluated_at_s,
-            "role_generation": decision.generation,
-            "promoted": decision.promoted,
-            "committed": decision.committed if committed is None else committed,
-            "consecutive_wins": decision.consecutive_wins,
-            "rejection_reasons": tuple(reason.value for reason in decision.reasons),
-            "incumbent_prediction_score": decision.incumbent_prediction_score,
-            "challenger_prediction_score": decision.candidate_prediction_score,
-            "incumbent_braking_score": decision.incumbent_braking_score,
-            "challenger_braking_score": decision.candidate_braking_score,
-            "sample_count": decision.sample_count,
-            "prospective_digest": decision.prospective_digest,
-        }
-        challenger = self._online.challenger
-        if self._is_state_space_model(challenger):
-            evidence = self._state_space_refresh_evidence(challenger)
-            if evidence is not None:
-                self._online_last_evaluation.update(
-                    challenger_model_kind="innovation-state-space",
-                    state_space_refresh=evidence,
-                )
-        if isinstance(decision, EvaluationDecision):
-            self._online_last_evaluation.update(
-                {
-                    "window_start_s": decision.window_start_s,
-                    "window_end_s": decision.window_end_s,
-                    "incumbent_digest": decision.incumbent_digest,
-                    "challenger_digest": decision.challenger_digest,
-                    "completed_origins": tuple(asdict(origin) for origin in decision.completed_origins),
-                    "horizon_scores": tuple(asdict(score) for score in decision.horizon_scores),
-                    "evaluation_duration_ms": decision.evaluation_duration_ms,
-                }
-            )
-
-    def _online_lifecycle(self, event, detail):
-        model = self._online.incumbent
-        snapshot = model.snapshot()
-        state_space = self._is_state_space_model(model)
-        lifecycle = {
-            "event": event,
-            "model_revision": self._model_revision,
-            "provenance": "online-adaptation",
-            "detail": detail,
-            "model_kind": (
-                "innovation-state-space"
-                if state_space
-                else "scheduled-arx"
-                if isinstance(model, ScheduledARX)
-                else "grey-box"
-            ),
-            "model_schema": snapshot.get("schema"),
-            "role_generation": self._online.role_generation,
-            "snapshot_digest": OnlineAdaptation.model_digest(model),
-            "parameters": (),
-        }
-        if state_space:
-            lifecycle["state_space_refresh"] = self._state_space_refresh_evidence(model)
-        return lifecycle
-
-    def _evaluate_online(self, observation):
-        if self._online_next_evaluation_s is None:
-            self._online_next_evaluation_s = observation.frame_start_s + self._online.policy.evaluation_interval_s
-            return None
-        if observation.frame_end_s < self._online_next_evaluation_s:
-            return None
-        self._online_next_evaluation_s = observation.frame_end_s + self._online.policy.evaluation_interval_s
-        started = time.monotonic()
-        decision = self._online.evaluate_due(observation.frame_end_s)
-        self._online_evaluation_duration = time.monotonic() - started
-        if isinstance(decision, EvaluationDecision):
-            decision = replace(decision, evaluation_duration_ms=self._online_evaluation_duration * 1_000)
-        self._record_evaluation(decision)
-        evaluation_payload, forecast_origin_evidence = (
-            self._evaluation_payloads(decision) if isinstance(decision, EvaluationDecision) else (None, ())
-        )
-        refresh_diagnostics_evidence = (
-            self._compact_refresh_evidence(decision, production_prospective=False)
-            if isinstance(decision, EvaluationDecision)
-            else None
-        )
-        self._model_revision += 1
-        if not decision.promoted:
-            return {
-                "evaluation": self._online_last_evaluation,
-                "evaluation_payload": evaluation_payload,
-                "forecast_origin_evidence": forecast_origin_evidence,
-                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
-            }
-        if (
-            self._is_state_space_model(self._online.challenger)
-            and not self._online_experiment_active
-            and not self._active_state_space()
-        ):
-            self._online.reject_prospective(decision.decision_id, "experiment-activation-gate")
-            self._online_last_lifecycle_reason = "experiment-activation-gate"
-            return {
-                "evaluation": self._online_last_evaluation,
-                "evaluation_payload": evaluation_payload,
-                "forecast_origin_evidence": forecast_origin_evidence,
-                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
-            }
-        try:
-            candidate = self._online.prospective_model(decision.decision_id)
-            try:
-                prediction = candidate.affine_prediction(
-                    self._linear_config.horizon_steps,
-                    self._applied_combustion_load,
-                    np.full(self._linear_config.horizon_steps, self.cfg["T_amb"]),
-                )
-            except (ValueError, FloatingPointError, RuntimeError) as error:
-                raise self._normalized_forecast_failure(error) from error
-            disturbance = None if self._x_hat is None else float(np.asarray(self._x_hat).reshape(-1)[-1])
-            if disturbance is None or not math.isfinite(disturbance):
-                raise ValueError("invalid-disturbance")
-            started = time.monotonic()
-            solve = self._linear_policy.solve(
-                prediction,
-                setpoint_c=self._set_point_c,
-                q_previous=self._applied_combustion_load,
-                equilibrium_q=self._equilibrium_load(self._set_point_c, disturbance),
-            )
-            self._online_linear_duration = time.monotonic() - started
-            certificate_rejection = self._linear_certificate_rejection(solve, self._linear_config)
-            if certificate_rejection is not None:
-                raise ValueError(certificate_rejection)
-            refresh_diagnostics_evidence = self._compact_refresh_evidence(decision, production_prospective=True)
-            if self._active_state_space():
-                self._online_pending_parameter_promotion = (decision.decision_id, solve)
-                self._online_last_lifecycle_reason = "confidence-transaction-required"
-                return {
-                    "evaluation": self._online_last_evaluation,
-                    "evaluation_payload": evaluation_payload,
-                    "forecast_origin_evidence": forecast_origin_evidence,
-                    "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
-                }
-        except Exception as error:
-            detail = str(error)
-            self._online.reject_prospective(decision.decision_id, detail)
-            self._online_last_lifecycle_reason = detail
-            lifecycle = self._online_lifecycle("reject", detail)
-            self._online_last_rejection_reason = detail
-            self._online_last_lifecycle = lifecycle
-            return {
-                "evaluation": self._online_last_evaluation,
-                "evaluation_payload": evaluation_payload,
-                "forecast_origin_evidence": forecast_origin_evidence,
-                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
-                "lifecycle": lifecycle,
-            }
-        if not self._online.commit_promotion(decision.decision_id, solve):
-            return {
-                "evaluation": self._online_last_evaluation,
-                "evaluation_payload": evaluation_payload,
-                "forecast_origin_evidence": forecast_origin_evidence,
-                "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
-            }
-        self._online_promotion_count += 1
-        self._online_last_lifecycle_reason = "promotion"
-        self._model_revision += 1
-        self._record_evaluation(decision, committed=True)
-        evaluation_payload = replace(evaluation_payload, committed=True)
-        lifecycle = self._online_lifecycle("adopt", "promotion")
-        self._online_last_lifecycle = lifecycle
-        return {
-            "evaluation": self._online_last_evaluation,
-            "evaluation_payload": evaluation_payload,
-            "forecast_origin_evidence": forecast_origin_evidence,
-            "refresh_diagnostics_evidence": refresh_diagnostics_evidence,
-            "lifecycle": lifecycle,
-        }
+    
 
     @staticmethod
     def _completed_forecast_evidence(value):
@@ -3292,7 +2219,7 @@ class Controller(ControllerBase):
         ):
             learning.handoff_if_ready(
                 confidence_accepted=True,
-                online_enabled=self._online_enabled,
+                online_enabled=self._learning_enabled,
                 prepare=self._prepare_automatic_pair_activation,
             )
         with self._learning_lock:
@@ -3429,23 +2356,24 @@ class Controller(ControllerBase):
                 "rmse": _optional_float(self._model_meta["rmse"]),
             },
             "feasibility": None if self._last_feasibility is None else self._last_feasibility.as_status(),
-            "adaptation": self._online_status(),
             "learning": self._learning_live_status(),
-            "activation": (
-                {
-                    "active_kind": GREY_BOX_KIND,
-                    "active_digest": None,
-                    "decision_id": None,
-                    "role_generation": 0,
-                    "failed_digest": None,
-                    "failed_generation": None,
-                    "last_safe_command": None,
-                    "fallback_kind": None,
-                    "fallback_reason": None,
-                }
-                if self._activation_manager is None
-                else asdict(self._activation_manager.state)
-            ),
+            "activation": {
+                "active_kind": GREY_BOX_KIND,
+                "active_digest": self._active_control_pair.descriptor.model_digest,
+                "decision_id": (
+                    None
+                    if self._active_activation_record is None
+                    else self._active_activation_record.decision_id
+                ),
+                "role_generation": self._active_control_pair.descriptor.role_generation,
+                "failed_digest": None,
+                "failed_generation": None,
+                "last_safe_command": _finite_float(self._last_combustion_load),
+                "fallback_kind": (
+                    GREY_BOX_KIND if self._activation_terminated_reason is not None else None
+                ),
+                "fallback_reason": self._activation_terminated_reason,
+            },
         }
 
     #: The model structure a snapshot describes, shared with every other thing
@@ -3471,10 +2399,9 @@ class Controller(ControllerBase):
         bookkeeping -- `converged`, `nfev` -- travels alongside a fit without
         ever becoming part of the model.
 
-        Rebuilding the NLP is the CALLER's business: adoption between cooks
-        needs no rebuild because the next Hold's `restore_model` builds against
-        the model it restores, and adoption during one is rate-limited
-        elsewhere.
+        Rebuilding the native estimator/solver pair is the caller's business:
+        adoption between cooks needs no rebuild because the next Hold's
+        `restore_model` builds against the model it restores.
         """
         self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
         self._model_meta = {
@@ -3494,25 +2421,7 @@ class Controller(ControllerBase):
             "nfev": None if nfev is None else int(nfev),
         }
 
-    def _online_snapshot(self):
-        active_kind = (
-            "innovation-state-space"
-            if isinstance(self._online.incumbent, InnovationStateSpace)
-            else "scheduled-arx"
-            if self._active_arx()
-            else "grey-box"
-        )
-        return {
-            **self._online.snapshot(),
-            "active_model_kind": active_kind,
-            "eligible_updates": self._online_eligible_updates,
-            "rejected_updates": self._online_rejected_updates,
-            "promotion_count": self._online_promotion_count,
-            "rollback_count": self._online_rollback_count,
-            "last_lifecycle_reason": self._online_last_lifecycle_reason,
-            "last_evaluation": copy.deepcopy(self._online_last_evaluation),
-            "last_lifecycle": copy.deepcopy(self._online_last_lifecycle),
-        }
+    
 
     def get_model_snapshot(self):
         """Return the complete grey-only v4 checkpoint; process jobs stay live-only."""
@@ -3597,8 +2506,8 @@ class Controller(ControllerBase):
             else:
                 candidate_descriptor = None
             snapshot["evidence"] = {
-                "eligible": int(self._online_eligible_updates),
-                "rejected": int(self._online_rejected_updates),
+                "eligible": int(self._learning_eligible_updates),
+                "rejected": int(self._learning_rejected_updates),
                 "confidence_decision_id": (
                     self._teardown_decision_id
                     if self._teardown_decision_id is not None
@@ -3650,7 +2559,7 @@ class Controller(ControllerBase):
             snapshot["cook_refit"] = {
                 "status": refit_status,
                 "latest": (
-                    self._online_last_lifecycle_reason
+                    None
                     if self._cook_refit_outcome is None
                     else self._cook_refit_outcome.value
                 ),
@@ -3745,7 +2654,7 @@ class Controller(ControllerBase):
         old_solver = self.mpc
         old_learning = self._learning
         self.cfg.update(merged)
-        self.estimator, self._net, self.model, self.mpc = rebuilt
+        self.estimator, self.mpc = rebuilt
         self._learning = None
         self._close_component(old_learning)
         self._close_component(old_solver)
@@ -3769,16 +2678,14 @@ class Controller(ControllerBase):
         }
         if owned["identification"]["status"] != "identified":
             self._model_meta = None
-        self._online_eligible_updates = owned["evidence"]["eligible"]
-        self._online_rejected_updates = owned["evidence"]["rejected"]
-        if self._online_enabled:
+        self._learning_eligible_updates = owned["evidence"]["eligible"]
+        self._learning_rejected_updates = owned["evidence"]["rejected"]
+        if self._learning_enabled:
             self._learning = self._build_learning()
-        self._online_last_snapshot = None
         self.get_model_snapshot()
         return True
 
-    def _online_teardown_checkpoint(self, verdict):
-        return verdict
+    
 
     @staticmethod
     def _close_prepared_candidate(preparation) -> None:
@@ -4019,9 +2926,7 @@ class Controller(ControllerBase):
 
         rows = list(history if history is not None else self._history)
         if len(rows) < _REFIT_MIN_SAMPLES:
-            return self._online_teardown_checkpoint(
-                _Verdict(False, f"only {len(rows)} samples; need {_REFIT_MIN_SAMPLES}")
-            )
+            return _Verdict(False, f"only {len(rows)} samples; need {_REFIT_MIN_SAMPLES}")
 
         started = time.perf_counter()
         t = np.array([r[0] for r in rows], dtype=float)
@@ -4057,8 +2962,9 @@ class Controller(ControllerBase):
                     f"[mpc] refit: abandoned after {fitted['nfev']} evaluations over "
                     f"{len(rows)} samples in {time.perf_counter() - started:.1f} s"
                 )
-                return self._online_teardown_checkpoint(
-                    _Verdict(False, f"the solve did not converge within {fitted['nfev']} evaluations")
+                return _Verdict(
+                    False,
+                    f"the solve did not converge within {fitted['nfev']} evaluations",
                 )
             # The candidate starts from a fixed reference, but it is judged
             # against the model actually driving the grill: the question this
@@ -4072,9 +2978,9 @@ class Controller(ControllerBase):
             # cannot say -- a flat cook fits itself perfectly and pins nothing.
             ident = identifiability(t, Q, fitted, T_amb=T_amb, T0=float(temp[0]))
         except (ValueError, FloatingPointError) as e:
-            return self._online_teardown_checkpoint(_Verdict(False, f"fit failed: {e}"))
+            return _Verdict(False, f"fit failed: {e}")
         except Exception:
-            self._online_teardown_checkpoint(_Verdict(False, "fit failed"))
+            _Verdict(False, "fit failed")
             raise
 
         verdict = evaluate(
@@ -4097,7 +3003,7 @@ class Controller(ControllerBase):
                 band_c=(float(temp.min()), float(temp.max())),
                 nfev=fitted["nfev"],
             )
-        return self._online_teardown_checkpoint(verdict)
+        return verdict
 
     def set_safety_ceiling_c(self, ceiling_c) -> None:
         """Track the grill's configured maximum, which probing must stay under.
@@ -4365,7 +3271,6 @@ class Controller(ControllerBase):
         state_names = tuple(f"q{index}" for index in range(int(self.cfg["n_delay"]))) + ("T_c", "d")
         disturbance = state_values[-1]
         self._history.append((time.time(), float(y), float(applied_combustion_load)))
-        self._policy_u_prev = self._applied_combustion_load
         model_provenance = "adopted" if self._model_meta is not None else "configured"
         model_identified = _model_is_identified(self.cfg, self._model_meta)
         feasibility = feasibility_report(
@@ -4405,18 +3310,17 @@ class Controller(ControllerBase):
 
         if failure_state is MpcFailureState.SUCCESS:
             if self._consecutive_policy_failures:
-                print(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")
+                print(f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)")
             self._consecutive_policy_failures = 0
-            self._last_solve_failed = False
         else:
-            self._last_solve_failed = True
             self._consecutive_policy_failures += 1
             n = self._consecutive_policy_failures
             if n == 1 or n in (10, 60) or n % 300 == 0:
                 print(
-                    f"[mpc] policy has failed {n} consecutive step(s) ({type(failure_error).__name__}: {failure_error}); "
-                    f"holding normalized combustion load {combustion_load:.3f}. The grill is not being controlled to "
-                    "setpoint -- check the policy artifact and the model configuration."
+                    f"[mpc] native solver has failed {n} consecutive step(s) "
+                    f"({type(failure_error).__name__}: {failure_error}); holding normalized "
+                    f"combustion load {combustion_load:.3f}. The grill is not being controlled "
+                    "to setpoint -- check the published acados runtime and model configuration."
                 )
             # The runner owns stale/deadline fallback; the controller keeps the
             # last physically safe command until that ownership boundary acts.
@@ -4465,9 +3369,8 @@ class Controller(ControllerBase):
             solve_end_monotonic=solve_end,
             solve_duration_seconds=solve_end - solve_start,
             feasibility=feasibility,
-            model_lifecycle=self._online_pending_lifecycle,
+            model_lifecycle=None,
         )
-        self._online_pending_lifecycle = None
         return {"cycle_ratio": auger, "fan": {"duty": fan_duty}}
 
     def trace_diagnostics(self) -> MpcTraceDiagnostics | None:

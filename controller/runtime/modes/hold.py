@@ -22,7 +22,6 @@ from common.model_evidence import (
     RecorderGapEvidence,
     RollbackEvidence,
 )
-from controller.linear_mpc.activation import activation_record_for_state, matching_activation_lifecycle
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
@@ -2686,24 +2685,16 @@ class HoldMode(ControlMode):
 
     @staticmethod
     def _activation_identity(state) -> tuple[object, ...] | None:
-        if state is None:
+        if state is None or state.transaction_id is None:
             return None
-        if getattr(state, "transaction_id", None) is not None:
-            return (
-                state.phase,
-                state.transaction_id,
-                state.role_generation,
-                state.incumbent_pair_json,
-                state.candidate_pair_json,
-                state.rollback_pair_json,
-                state.reason,
-            )
         return (
-            state.evidence_decision_id,
-            state.controller_configuration_digest,
+            state.phase,
+            state.transaction_id,
             state.role_generation,
-            state.active_snapshot_json,
-            state.rollback_snapshot_json,
+            state.incumbent_pair_json,
+            state.candidate_pair_json,
+            state.rollback_pair_json,
+            state.reason,
         )
 
     @staticmethod
@@ -2739,16 +2730,11 @@ class HoldMode(ControlMode):
             self._trace_warning(f"Model activation state unavailable: {error}")
             return
         identity = self._activation_identity(state)
-        pair_transaction = state is not None and state.transaction_id is not None
-        if pair_transaction:
-            lifecycle = self._pair_activation_lifecycle(state, records)
-        else:
-            activation = None if state is None else activation_record_for_state(records, state)
-            if state is not None and activation is None:
-                self._learning_evidence_available = False
-                self._trace_warning("Model activation lineage is unavailable")
-                return
-            lifecycle = None if activation is None else matching_activation_lifecycle(records, activation)
+        if state is not None and identity is None:
+            self._learning_evidence_available = False
+            self._trace_warning("Model activation authority uses a retired schema")
+            return
+        lifecycle = None if state is None else self._pair_activation_lifecycle(state, records)
         if state is not None and identity != self._activation_state_identity:
             self._runner.restore_activation(state, records)
             self._activation_state_identity = identity
