@@ -22,6 +22,8 @@ Evidence report change: `srtlxlwmswxpynmnxxkxllsllomnvzlp`
 
 Idle status evidence change: `rmqppwqsswxyxmqvxrupnspxrzpzxkyn`
 
+Idle status smoke evidence change: `lnlyylkuwtrxnkomsymtoylrkrxlvtpp`
+
 ## Implemented
 
 - Added strict operations-domain Pydantic contracts in `common/web_contracts/operations.py` for admin system information/actions/settings/backups, updater state/actions/status/build-log JSON, tuner requests/lifecycle/readings/coefficients/profiles/auto-status, and log-family metadata.
@@ -235,6 +237,17 @@ the regenerated manifest was unchanged. Its post-generation gates reported:
 operations/update Python 51 passed, updater Rstest 10 passed, generated drift
 check and typecheck passed, and updater Playwright 1 passed after reloading the
 stale backend process.
+
+Aggregate real-browser smoke restarted the backend and observed:
+
+```text
+GET /api/update/status
+HTTP 200
+{"data":{"output":null,"percent":null,"status":null},"message":null,"result":"OK"}
+```
+
+The `/update` page then settled with System Update, Branch, Actions, and Update
+log content at both 800×480 and 1280×720, with zero horizontal overflow.
 
 ## Verification
 
