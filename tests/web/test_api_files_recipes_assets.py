@@ -229,6 +229,24 @@ def test_splash_rejects_more_than_one_asset(client, folders):
     assert resp.get_json()["data"]["field"] == "assets"
 
 
+@pytest.mark.parametrize("index", [0, None])
+def test_splash_rejects_any_index_member(client, folders, index):
+    _history_dir, recipe_dir = folders
+    name = write_recipe(recipe_dir, "SplashIndex-Recipe")
+
+    resp = client.post(
+        ASSETS_URL,
+        json={"file": name, "section": "splash", "index": index, "assets": []},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "result": "Error",
+        "message": "bad_request",
+        "data": {"field": "index"},
+    }
+
+
 def test_setting_an_ingredient_asset_list_replaces_it_wholesale(client, folders):
     """A stale client's own add/remove toggle could silently invert; a
     whole-list write states the intent and cannot invert (plan 1 Task 6)."""

@@ -1,16 +1,16 @@
 import { useId, useState } from "react";
+import type {
+  Ingredient,
+  Instruction,
+  RecipeAsset,
+  RecipeIndexedAssetAssignmentRequest,
+} from "../../helpers/contracts/content.gen";
 import {
   assetUrl,
   deleteRecipeAssets,
   setRecipeAssets,
   uploadRecipeAssets,
 } from "../../helpers/files/recipeApi";
-import type {
-  Ingredient,
-  Instruction,
-  RecipeAsset,
-  RecipeAssetAssignmentRequest,
-} from "../../helpers/contracts/content.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 // The recipe's asset library: upload, delete-from-archive, and attaching a
@@ -41,7 +41,7 @@ interface Props {
 }
 
 interface Picking {
-  section: Extract<RecipeAssetAssignmentRequest["section"], "ingredients" | "instructions">;
+  section: RecipeIndexedAssetAssignmentRequest["section"];
   index: number;
   label: string;
   selected: string[];

@@ -122,11 +122,7 @@ export type Units1 = "F" | "C";
 export type Filename4 = string;
 export type Id5 = string;
 export type Type2 = string;
-export type Assets6 = string[];
-export type File = string;
-export type Index = number | null;
-export type Section = "splash" | "ingredients" | "instructions";
-export type Assets7 = RecipeAsset[];
+export type Assets6 = RecipeAsset[];
 export type Ingredients1 = Ingredient[];
 export type Instructions = Instruction[];
 export type Message2 = string;
@@ -135,7 +131,7 @@ export type Notify = boolean;
 export type Pause = boolean;
 export type Food = FiniteNumber[];
 export type Steps = RecipeStep[];
-export type Assets8 = RecipeAsset[];
+export type Assets7 = RecipeAsset[];
 export type Filename5 = string;
 export type Author = string;
 export type CookTime = number;
@@ -151,6 +147,10 @@ export type Title2 = string;
 export type Units2 = string;
 export type Username = string;
 export type Version1 = string;
+export type Assets8 = string[];
+export type File = string;
+export type Index = number;
+export type Section = "ingredients" | "instructions";
 export type Action = "add";
 export type File1 = string;
 export type Action1 = "delete";
@@ -182,14 +182,17 @@ export type Rating1 = number;
 export type Title3 = string;
 export type Units3 = string;
 export type File7 = string;
-export type Action6 = "delete";
+export type Assets9 = string[];
 export type File8 = string;
+export type Section1 = "splash";
+export type Action6 = "delete";
+export type File9 = string;
 export type Index5 = number;
 export type Action7 = "insert";
-export type File9 = string;
+export type File10 = string;
 export type Index6 = number;
 export type Action8 = "update";
-export type File10 = string;
+export type File11 = string;
 export type Index7 = number;
 
 export interface PiFireContentWebContracts {
@@ -579,20 +582,10 @@ export interface RecipeAsset {
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
- * via the `definition` "RecipeAssetAssignmentRequest".
- */
-export interface RecipeAssetAssignmentRequest {
-  assets: Assets6;
-  file: File;
-  index?: Index;
-  section: Section;
-}
-/**
- * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "RecipeAssetsData".
  */
 export interface RecipeAssetsData {
-  assets: Assets7;
+  assets: Assets6;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -631,7 +624,7 @@ export interface RecipeTriggerTemperatures {
  * via the `definition` "RecipeDetail".
  */
 export interface RecipeDetail {
-  assets: Assets8;
+  assets: Assets7;
   filename: Filename5;
   metadata: RecipeMetadata;
   recipe: RecipeBody;
@@ -656,6 +649,16 @@ export interface RecipeMetadata {
   username: Username;
   version: Version1;
   [k: string]: unknown | undefined;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "RecipeIndexedAssetAssignmentRequest".
+ */
+export interface RecipeIndexedAssetAssignmentRequest {
+  assets: Assets8;
+  file: File;
+  index: Index;
+  section: Section;
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
@@ -739,11 +742,20 @@ export interface RecipeMetadataUpdateRequest {
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "RecipeSplashAssetAssignmentRequest".
+ */
+export interface RecipeSplashAssetAssignmentRequest {
+  assets: Assets9;
+  file: File8;
+  section: Section1;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "RecipeStepDeleteRequest".
  */
 export interface RecipeStepDeleteRequest {
   action: Action6;
-  file: File8;
+  file: File9;
   index: Index5;
 }
 /**
@@ -752,7 +764,7 @@ export interface RecipeStepDeleteRequest {
  */
 export interface RecipeStepInsertRequest {
   action: Action7;
-  file: File9;
+  file: File10;
   index: Index6;
 }
 /**
@@ -761,7 +773,7 @@ export interface RecipeStepInsertRequest {
  */
 export interface RecipeStepUpdateRequest {
   action: Action8;
-  file: File10;
+  file: File11;
   index: Index7;
   step: RecipeStep;
 }

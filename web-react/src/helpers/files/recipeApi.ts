@@ -11,8 +11,8 @@
 
 import type {
   RecipeAsset,
-  RecipeAssetAssignmentRequest,
   RecipeDetail,
+  RecipeIndexedAssetAssignmentRequest,
   RecipeIngredientAddRequest,
   RecipeIngredientDeleteRequest,
   RecipeIngredientUpdateRequest,
@@ -21,17 +21,18 @@ import type {
   RecipeInstructionUpdateRequest,
   RecipeMetadataFields,
   RecipeMetadataUpdateRequest,
+  RecipeSplashAssetAssignmentRequest,
   RecipeStep,
   RecipeStepDeleteRequest,
   RecipeStepInsertRequest,
   RecipeStepUpdateRequest,
 } from "../contracts/content.gen";
 import { postForm, read, write } from "./apiEnvelope";
+
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export const fetchRecipeDetail = (file: string, baseUrl = BASE_URL) =>
   read<RecipeDetail>("recipes", "detail", file, baseUrl);
-
 
 export const saveRecipeMetadata = (
   file: string,
@@ -134,7 +135,6 @@ export const deleteStep = (file: string, index: number, baseUrl = BASE_URL) => {
   return write<null>("recipes", "steps", body, baseUrl);
 };
 
-
 /** Multipart: adds one or more images to the recipe's asset pool WITHOUT
  * attaching them to any section -- attaching is a separate whole-list write
  * via setRecipeAssets. Field name is `assets` (recipes_api.py's upload_assets
@@ -156,21 +156,44 @@ export async function uploadRecipeAssets(
  * complete list a section should end up with, rather than a single
  * add/remove action Flask infers direction for. `index` is required for
  * `ingredients`/`instructions` and must be omitted for `splash`. */
-export const setRecipeAssets = (
+export function setRecipeAssets(
   file: string,
-  section: RecipeAssetAssignmentRequest["section"],
+  section: RecipeSplashAssetAssignmentRequest["section"],
   assets: string[],
-  index?: number,
+  baseUrl?: string,
+): Promise<{ assets: string[] }>;
+export function setRecipeAssets(
+  file: string,
+  section: RecipeIndexedAssetAssignmentRequest["section"],
+  assets: string[],
+  index: number,
+  baseUrl?: string,
+): Promise<{ assets: string[] }>;
+export function setRecipeAssets(
+  file: string,
+  section:
+    | RecipeSplashAssetAssignmentRequest["section"]
+    | RecipeIndexedAssetAssignmentRequest["section"],
+  assets: string[],
+  indexOrBaseUrl?: number | string,
   baseUrl = BASE_URL,
-) => {
-  const body: RecipeAssetAssignmentRequest = {
+) {
+  if (section === "splash") {
+    const body: RecipeSplashAssetAssignmentRequest = { file, section, assets };
+    const splashBaseUrl = typeof indexOrBaseUrl === "string" ? indexOrBaseUrl : baseUrl;
+    return write<{ assets: string[] }>("recipes", "assets", body, splashBaseUrl);
+  }
+  if (typeof indexOrBaseUrl !== "number") {
+    throw new TypeError("Recipe ingredient and instruction assets require an index.");
+  }
+  const body: RecipeIndexedAssetAssignmentRequest = {
     file,
     section,
+    index: indexOrBaseUrl,
     assets,
-    ...(index === undefined ? {} : { index }),
   };
   return write<{ assets: string[] }>("recipes", "assets", body, baseUrl);
-};
+}
 
 /** Deletes assets from the recipe archive outright. remove_assets already
  * scrubs metadata.image/thumbnail and every ingredient's/instruction's own

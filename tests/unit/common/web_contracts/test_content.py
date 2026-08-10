@@ -10,7 +10,7 @@ from common.web_contracts.content import (
     HistoryPoint,
     MetricRecord,
     MetricsPayload,
-    RecipeAssetAssignmentRequest,
+    RecipeIndexedAssetAssignmentRequest,
     RecipeIngredientAddRequest,
     RecipeIngredientDeleteRequest,
     RecipeIngredientUpdateRequest,
@@ -18,6 +18,7 @@ from common.web_contracts.content import (
     RecipeInstructionDeleteRequest,
     RecipeInstructionUpdateRequest,
     RecipeMetadataUpdateRequest,
+    RecipeSplashAssetAssignmentRequest,
     RecipeStep,
     RecipeStepDeleteRequest,
     RecipeStepInsertRequest,
@@ -59,9 +60,10 @@ def test_recipe_mutation_requests_preserve_concrete_action_shapes():
             ),
         ),
         RecipeStepDeleteRequest(file="dinner.pfrecipe", action="delete", index=1),
-        RecipeAssetAssignmentRequest(
+        RecipeIndexedAssetAssignmentRequest(
             file="dinner.pfrecipe", section="ingredients", index=0, assets=["photo.png"]
         ),
+        RecipeSplashAssetAssignmentRequest(file="dinner.pfrecipe", section="splash", assets=["hero.png"]),
     )
 
     assert [request.model_dump(mode="json", exclude_unset=True) for request in requests] == [
@@ -102,6 +104,7 @@ def test_recipe_mutation_requests_preserve_concrete_action_shapes():
         },
         {"file": "dinner.pfrecipe", "action": "delete", "index": 1},
         {"file": "dinner.pfrecipe", "section": "ingredients", "index": 0, "assets": ["photo.png"]},
+        {"file": "dinner.pfrecipe", "section": "splash", "assets": ["hero.png"]},
     ]
 
 
@@ -131,6 +134,28 @@ def test_recipe_requests_reject_coercion_unknown_keys_and_non_finite_numbers():
     with pytest.raises(ValidationError):
         RecipeIngredientAddRequest.model_validate(
             {"file": "dinner.pfrecipe", "action": "add", "future": True}, strict=True
+        )
+
+
+def test_recipe_asset_assignment_requires_the_section_specific_index_shape():
+    with pytest.raises(ValidationError):
+        RecipeSplashAssetAssignmentRequest.model_validate(
+            {
+                "file": "dinner.pfrecipe",
+                "section": "splash",
+                "index": None,
+                "assets": [],
+            },
+            strict=True,
+        )
+    with pytest.raises(ValidationError):
+        RecipeIndexedAssetAssignmentRequest.model_validate(
+            {
+                "file": "dinner.pfrecipe",
+                "section": "ingredients",
+                "assets": [],
+            },
+            strict=True,
         )
 
 
@@ -204,6 +229,4 @@ def test_browser_normalized_file_error_detail_has_a_finite_status_vocabulary():
         "errortype": "version",
     }
     with pytest.raises(ValidationError):
-        FileErrorDetail.model_validate(
-            {"status": "422", "message": "unreadable", "errortype": "legacy"}, strict=True
-        )
+        FileErrorDetail.model_validate({"status": "422", "message": "unreadable", "errortype": "legacy"}, strict=True)

@@ -1260,50 +1260,6 @@
       "title": "RecipeAsset",
       "type": "object"
     },
-    "RecipeAssetAssignmentRequest": {
-      "additionalProperties": false,
-      "properties": {
-        "assets": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Assets",
-          "type": "array"
-        },
-        "file": {
-          "title": "File",
-          "type": "string"
-        },
-        "index": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Index"
-        },
-        "section": {
-          "enum": [
-            "splash",
-            "ingredients",
-            "instructions"
-          ],
-          "title": "Section",
-          "type": "string"
-        }
-      },
-      "required": [
-        "file",
-        "section",
-        "assets"
-      ],
-      "title": "RecipeAssetAssignmentRequest",
-      "type": "object"
-    },
     "RecipeAssetsData": {
       "additionalProperties": false,
       "properties": {
@@ -1382,6 +1338,42 @@
         "assets"
       ],
       "title": "RecipeDetail",
+      "type": "object"
+    },
+    "RecipeIndexedAssetAssignmentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "section": {
+          "enum": [
+            "ingredients",
+            "instructions"
+          ],
+          "title": "Section",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "section",
+        "index",
+        "assets"
+      ],
+      "title": "RecipeIndexedAssetAssignmentRequest",
       "type": "object"
     },
     "RecipeIngredientAddRequest": {
@@ -1699,6 +1691,34 @@
         "fields"
       ],
       "title": "RecipeMetadataUpdateRequest",
+      "type": "object"
+    },
+    "RecipeSplashAssetAssignmentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "section": {
+          "const": "splash",
+          "title": "Section",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "section",
+        "assets"
+      ],
+      "title": "RecipeSplashAssetAssignmentRequest",
       "type": "object"
     },
     "RecipeStep": {

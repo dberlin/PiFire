@@ -275,11 +275,17 @@ class RecipeStepDeleteRequest(WireModel):
     index: int
 
 
-class RecipeAssetAssignmentRequest(WireModel):
+class RecipeIndexedAssetAssignmentRequest(WireModel):
     file: str
-    section: Literal["splash", "ingredients", "instructions"]
+    section: Literal["ingredients", "instructions"]
+    index: int
     assets: list[str]
-    index: int | None = None
+
+
+class RecipeSplashAssetAssignmentRequest(WireModel):
+    file: str
+    section: Literal["splash"]
+    assets: list[str]
 
 
 class HistoryPoint(WireModel):

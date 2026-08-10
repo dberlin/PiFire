@@ -222,9 +222,9 @@ describe("recipeApi asset writes", () => {
     expect(await uploadRecipeAssets("Ribs.recipe", [], "")).toEqual([]);
   });
 
-  test("setRecipeAssets omits index for splash and includes it otherwise", async () => {
+  test("setRecipeAssets omits the splash index argument and requires indexed sections to supply one", async () => {
     mockFetch(okEnvelope({ assets: [] }));
-    await setRecipeAssets("Ribs.recipe", "splash", ["a1"], undefined, "");
+    await setRecipeAssets("Ribs.recipe", "splash", ["a1"], "");
     let body = JSON.parse(String((calls()[0] as [string, RequestInit])[1].body));
     expect(body).toEqual({ file: "Ribs.recipe", section: "splash", assets: ["a1"] });
     expect("index" in body).toBe(false);

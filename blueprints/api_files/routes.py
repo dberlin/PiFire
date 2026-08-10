@@ -19,6 +19,7 @@ only /socket.io, /api and /static/img (web-react/rsbuild.config.ts:27-37), so a
 import os
 
 from flask import current_app, jsonify, request, send_file
+from pydantic import ValidationError
 from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
@@ -38,9 +39,9 @@ from common.web_contracts.content import (
     CookFileLabelData,
     FileListing,
     FilenameData,
-    RecipeAssetAssignmentRequest,
     RecipeAsset,
     RecipeAssetsData,
+    RecipeIndexedAssetAssignmentRequest,
     RecipeDetail,
     RecipeIngredientAddRequest,
     RecipeIngredientDeleteRequest,
@@ -48,6 +49,8 @@ from common.web_contracts.content import (
     RecipeInstructionAddRequest,
     RecipeInstructionDeleteRequest,
     RecipeInstructionUpdateRequest,
+    RecipeMetadataUpdateRequest,
+    RecipeSplashAssetAssignmentRequest,
     RecipeStep,
     RecipeStepDeleteRequest,
     RecipeStepInsertRequest,
@@ -76,6 +79,16 @@ def error(message, status, **data):
     """Uniform error envelope: {"result":"Error","message":...,"data":{...}}."""
     payload = api_response("Error", message, data or None)
     return jsonify(validated_content_json(ContentErrorEnvelope, payload)), status
+
+
+def _validated_request(model, body, fallback_field):
+    """Strictly validate one JSON request and retain the existing 400 envelope."""
+    try:
+        return model.model_validate(body, strict=True), None
+    except ValidationError as exc:
+        location = exc.errors()[0]["loc"]
+        field = next((part for part in reversed(location) if isinstance(part, str)), fallback_field)
+        return None, error("bad_request", 400, field=field or fallback_field)
 
 
 def _int_arg(name, default, *, minimum=1, choices=None):
@@ -492,12 +505,13 @@ def recipe_run():
 @api_files_bp.route("/recipes/metadata", methods=["POST"])
 def recipe_metadata():
     body = json_body()
-    path, err = require_file(body.get("file", ""), recipe_folder())
+    mutation, validation_err = _validated_request(RecipeMetadataUpdateRequest, body, "fields")
+    if validation_err:
+        return validation_err
+    path, err = require_file(mutation.file, recipe_folder())
     if err:
         return err
-    fields = body.get("fields")
-    if not isinstance(fields, dict):
-        return error("bad_request", 400, field="fields")
+    fields = mutation.fields.model_dump(mode="json", exclude_unset=True)
     status, field = recipes_api.set_metadata(path, fields)
     if status == "bad_field":
         return error("bad_request", 400, field=field)
@@ -514,39 +528,19 @@ def recipe_ingredients():
         return err
     action = body.get("action")
     if action == "add":
-        RecipeIngredientAddRequest.model_validate(
-            {"file": body.get("file"), "action": action},
-            strict=True,
-        )
+        mutation, validation_err = _validated_request(RecipeIngredientAddRequest, body, "action")
+        if validation_err:
+            return validation_err
         status = recipes_api.add_ingredient(path)
     elif action == "update":
-        index = body.get("index")
-        name, quantity = body.get("name"), body.get("quantity")
-        if not isinstance(index, int) or isinstance(index, bool):
-            return error("bad_request", 400, field="index")
-        if not isinstance(name, str):
-            return error("bad_request", 400, field="name")
-        if not isinstance(quantity, str):
-            return error("bad_request", 400, field="quantity")
-        mutation = RecipeIngredientUpdateRequest.model_validate(
-            {
-                "file": body.get("file"),
-                "action": action,
-                "index": index,
-                "name": name,
-                "quantity": quantity,
-            },
-            strict=True,
-        )
+        mutation, validation_err = _validated_request(RecipeIngredientUpdateRequest, body, "action")
+        if validation_err:
+            return validation_err
         status = recipes_api.update_ingredient(path, mutation.index, mutation.name, mutation.quantity)
     elif action == "delete":
-        index = body.get("index")
-        if not isinstance(index, int) or isinstance(index, bool):
-            return error("bad_request", 400, field="index")
-        mutation = RecipeIngredientDeleteRequest.model_validate(
-            {"file": body.get("file"), "action": action, "index": index},
-            strict=True,
-        )
+        mutation, validation_err = _validated_request(RecipeIngredientDeleteRequest, body, "action")
+        if validation_err:
+            return validation_err
         status = recipes_api.delete_ingredient(path, mutation.index)
     else:
         return error("bad_request", 400, field="action")
@@ -565,33 +559,14 @@ def recipe_instructions():
         return err
     action = body.get("action")
     if action == "add":
-        RecipeInstructionAddRequest.model_validate(
-            {"file": body.get("file"), "action": action},
-            strict=True,
-        )
+        mutation, validation_err = _validated_request(RecipeInstructionAddRequest, body, "action")
+        if validation_err:
+            return validation_err
         status = recipes_api.add_instruction(path)
     elif action == "update":
-        index = body.get("index")
-        text, ingredients, step = body.get("text"), body.get("ingredients"), body.get("step")
-        if not isinstance(index, int) or isinstance(index, bool):
-            return error("bad_request", 400, field="index")
-        if not isinstance(text, str):
-            return error("bad_request", 400, field="text")
-        if not isinstance(ingredients, list) or not all(isinstance(name, str) for name in ingredients):
-            return error("bad_request", 400, field="ingredients")
-        if not isinstance(step, int) or isinstance(step, bool):
-            return error("bad_request", 400, field="step")
-        mutation = RecipeInstructionUpdateRequest.model_validate(
-            {
-                "file": body.get("file"),
-                "action": action,
-                "index": index,
-                "text": text,
-                "ingredients": ingredients,
-                "step": step,
-            },
-            strict=True,
-        )
+        mutation, validation_err = _validated_request(RecipeInstructionUpdateRequest, body, "action")
+        if validation_err:
+            return validation_err
         status = recipes_api.update_instruction(
             path,
             mutation.index,
@@ -600,13 +575,9 @@ def recipe_instructions():
             mutation.step,
         )
     elif action == "delete":
-        index = body.get("index")
-        if not isinstance(index, int) or isinstance(index, bool):
-            return error("bad_request", 400, field="index")
-        mutation = RecipeInstructionDeleteRequest.model_validate(
-            {"file": body.get("file"), "action": action, "index": index},
-            strict=True,
-        )
+        mutation, validation_err = _validated_request(RecipeInstructionDeleteRequest, body, "action")
+        if validation_err:
+            return validation_err
         status = recipes_api.delete_instruction(path, mutation.index)
     else:
         return error("bad_request", 400, field="action")
@@ -742,32 +713,34 @@ def recipe_assets():
     if err:
         return err
     section = body.get("section")
-    if section not in ("splash", "ingredients", "instructions"):
-        return error("bad_request", 400, field="section")
-    assets = body.get("assets")
-    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
-        return error("bad_request", 400, field="assets")
     if section == "splash":
-        #  A single user-facing choice, not an arbitrary list: sets/clears
-        #  metadata.image and metadata.thumbnail together.
-        if len(assets) > 1:
+        mutation, validation_err = _validated_request(
+            RecipeSplashAssetAssignmentRequest,
+            body,
+            "section",
+        )
+        if validation_err:
+            return validation_err
+        # A single user-facing choice, not an arbitrary list: sets/clears
+        # metadata.image and metadata.thumbnail together.
+        if len(mutation.assets) > 1:
             return error("bad_request", 400, field="assets")
         index = None
+    elif section in ("ingredients", "instructions"):
+        mutation, validation_err = _validated_request(
+            RecipeIndexedAssetAssignmentRequest,
+            body,
+            "section",
+        )
+        if validation_err:
+            return validation_err
+        index = mutation.index
     else:
-        index = body.get("index")
-        if not isinstance(index, int) or isinstance(index, bool):
-            return error("bad_request", 400, field="index")
-    mutation_payload = {
-        "file": body.get("file"),
-        "section": section,
-        "assets": assets,
-        **({} if index is None else {"index": index}),
-    }
-    mutation = RecipeAssetAssignmentRequest.model_validate(mutation_payload, strict=True)
+        return error("bad_request", 400, field="section")
     stored, problem = recipes_api.set_assets(
         path,
         mutation.section,
-        mutation.index,
+        index,
         mutation.assets,
     )
     if problem == "bad_index":

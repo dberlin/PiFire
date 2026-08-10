@@ -260,12 +260,12 @@ def _read_member_bytes(path, member):
         return archive.read(member)
 
 
-def test_update_metadata_coerces_int_and_string_fields(client, folders):
+def test_update_metadata_accepts_strict_integer_and_string_fields(client, folders):
     _history, recipe_dir = folders
     name = write_recipe(recipe_dir, "Brisket")
     resp = client.post(
         "/api/files/recipes/metadata",
-        json={"file": name, "fields": {"title": "My Smoked Brisket", "prep_time": "45", "rating": 4}},
+        json={"file": name, "fields": {"title": "My Smoked Brisket", "prep_time": 45, "rating": 4}},
     )
     assert resp.status_code == 200
     assert resp.get_json()["result"] == "OK"
@@ -274,6 +274,25 @@ def test_update_metadata_coerces_int_and_string_fields(client, folders):
     assert detail["metadata"]["title"] == "My Smoked Brisket"
     assert detail["metadata"]["prep_time"] == 45
     assert detail["metadata"]["rating"] == 4
+
+
+def test_update_metadata_rejects_fractional_integer_fields_without_writing(client, folders):
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, "Strict-Metadata")
+    before = _read_member_bytes(recipe_dir + name, "metadata.json")
+
+    resp = client.post(
+        "/api/files/recipes/metadata",
+        json={"file": name, "fields": {"rating": 1.5}},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "result": "Error",
+        "message": "bad_request",
+        "data": {"field": "rating"},
+    }
+    assert _read_member_bytes(recipe_dir + name, "metadata.json") == before
 
 
 def test_raising_food_probes_pads_every_step(client, folders):
@@ -350,6 +369,47 @@ def test_metadata_write_leaves_comments_json_byte_identical(client, folders):
 
     after = _read_member_bytes(path, "comments.json")
     assert after == before
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "mutation"),
+    [
+        ("ingredients", {"action": "add"}),
+        (
+            "ingredients",
+            {"action": "update", "index": 0, "name": "Pepper", "quantity": "2 tsp"},
+        ),
+        ("ingredients", {"action": "delete", "index": 0}),
+        ("instructions", {"action": "add"}),
+        (
+            "instructions",
+            {"action": "update", "index": 0, "text": "Season", "ingredients": ["Salt"], "step": 0},
+        ),
+        ("instructions", {"action": "delete", "index": 0}),
+    ],
+)
+def test_recipe_mutations_reject_unknown_members_without_writing(client, folders, endpoint, mutation):
+    _history, recipe_dir = folders
+    name = write_recipe(
+        recipe_dir,
+        f"Strict-{endpoint}-{mutation['action']}",
+        ingredients=[{"name": "Salt", "quantity": "1 tsp", "assets": []}],
+        instructions=[{"text": "Salt", "ingredients": ["Salt"], "assets": [], "step": 0}],
+    )
+    before = _read_member_bytes(recipe_dir + name, "recipe.json")
+
+    resp = client.post(
+        f"/api/files/recipes/{endpoint}",
+        json={"file": name, **mutation, "future": True},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "result": "Error",
+        "message": "bad_request",
+        "data": {"field": "future"},
+    }
+    assert _read_member_bytes(recipe_dir + name, "recipe.json") == before
 
 
 # --------------------------------------------------------------------------
