@@ -44,7 +44,9 @@ from controller.model_learning.activation import (
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
-import controller.mpc as mpc_module
+import controller.mpc as _mpc_runtime
+from controller.mpc_snapshot import migrate_grey_learning_snapshot
+from controller.runtime.model_fitting import grey_config_digest
 
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
@@ -145,7 +147,7 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
 
     def migrate_before_restore(*, defaults):
         calls.append("migrate")
-        store.models["mpc"] = mpc_module.migrate_grey_learning_snapshot(v3)
+        store.models["mpc"] = migrate_grey_learning_snapshot(v3)
 
     monkeypatch.setattr(hold_module, "migrate_mpc_learning_authority", migrate_before_restore)
     monkeypatch.setattr(hold_module, "read_model_activation", lambda: None)
@@ -855,8 +857,8 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     _CrashRecoverySolver.created.clear()
     _CrashRecoverySolver.solve_order.clear()
     database_path = tmp_path / f"{crash_boundary}.sqlite"
-    monkeypatch.setattr(mpc_module, "GreyBoxEKF", _CrashRecoveryEstimator)
-    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", _CrashRecoverySolver)
+    monkeypatch.setattr(_mpc_runtime, "GreyBoxEKF", _CrashRecoveryEstimator)
+    monkeypatch.setattr(_mpc_runtime, "AcadosGreyBoxMPC", _CrashRecoverySolver)
 
     first_core = MpcController(
         dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
@@ -871,7 +873,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     candidate_configuration = {
         name: getattr(candidate_solver.config, name) for name in candidate_solver.config.__dataclass_fields__
     }
-    candidate_digest = mpc_module.grey_config_digest(candidate_solver.config)
+    candidate_digest = grey_config_digest(candidate_solver.config)
     assert grey_snapshot_digest(candidate_configuration) == candidate_digest
     candidate = GreyControlPairDescriptor(
         model_digest=candidate_digest,
