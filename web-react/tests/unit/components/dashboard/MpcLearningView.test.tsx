@@ -130,7 +130,7 @@ const REPORT: ModelEvidenceReport = {
   ],
   blockers: [],
   errors: [],
-  revision: "report-revision-7",
+  revision: "e".repeat(64),
 };
 
 const jsonResponse = (body: unknown, status = 200) =>
@@ -601,7 +601,9 @@ describe("MpcLearningView", () => {
             );
           }),
       )
-      .mockResolvedValueOnce(jsonResponse({ ...REPORT, status: "active", revision: "new" }));
+      .mockResolvedValueOnce(
+        jsonResponse({ ...REPORT, status: "active", revision: "f".repeat(64) }),
+      );
     const view = renderPanel({ modelLearningRevision: "wire-40" });
 
     view.rerender(
@@ -616,7 +618,7 @@ describe("MpcLearningView", () => {
     expect(await screen.findByRole("button", { name: "MPC learning: active" })).toBeVisible();
 
     await act(async () => {
-      resolveFirst?.(jsonResponse({ ...REPORT, status: "collecting", revision: "old" }));
+      resolveFirst?.(jsonResponse({ ...REPORT, status: "collecting", revision: "1".repeat(64) }));
       await Promise.resolve();
     });
     expect(screen.getByRole("button", { name: "MPC learning: active" })).toBeVisible();
