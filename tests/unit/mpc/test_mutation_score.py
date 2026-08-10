@@ -1,6 +1,6 @@
 """Mutation-score definitions must remain runnable, not silently skipped."""
 
-from docs.superpowers.experiments import mutation_score
+from tools.experiments import mutation_score
 
 
 def test_every_listed_mutation_anchor_occurs_exactly_once():
