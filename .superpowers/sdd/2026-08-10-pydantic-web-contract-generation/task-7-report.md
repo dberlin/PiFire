@@ -160,3 +160,41 @@ bunx biome check src/helpers/files/recipeApi.ts src/components/recipes/RecipeAss
 ```
 
 Results: Ruff `All checks passed`; Biome checked 3 files with no fixes required.
+
+## Review fix round 2
+
+Fix commit: `4c00bf80` (`lkozkyos`) — `fix(content): preserve legacy comment delete shape`.
+
+The legacy comment form sends its `text` input for both update and delete actions. `CookFileCommentDeleteRequest` initially omitted that known field, so strict validation rejected a delete for an unknown ID with 400 before the service could preserve the historical 404 `comment_not_found` result. The delete variant now accepts an optional strict string `text` while continuing to forbid every unrelated member.
+
+### RED evidence
+
+```bash
+python -m pytest -q 'tests/web/test_api_files_cookfile_comments.py::test_unknown_comment_id_is_404_not_a_false_success[delete]' tests/web/test_api_files_cookfile_comments.py::test_delete_comment_accepts_legacy_text_but_rejects_unrelated_extras
+```
+
+Result: `1 failed, 1 passed`; the legacy delete-with-text case returned 400 instead of 404, while the unrelated-extra rejection remained strict.
+
+### GREEN evidence
+
+The same focused command passed `2 passed in 2.95s`.
+
+```bash
+python -m pytest -q tests/unit/common/web_contracts/test_content.py tests/web/test_api_files_cookfile_comments.py
+cd web-react
+bun run gen:types:check
+bun run typecheck
+```
+
+Results:
+
+- Python: `26 passed in 3.60s`.
+- Contract drift: all Pydantic artifacts, defaults, and generated TypeScript up to date.
+- TypeScript: exit 0.
+
+```bash
+ruff format --check common/web_contracts/content.py tests/web/test_api_files_cookfile_comments.py
+ruff check common/web_contracts/content.py tests/web/test_api_files_cookfile_comments.py
+```
+
+Results: both files formatted; Ruff `All checks passed`.
