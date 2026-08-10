@@ -1,6 +1,6 @@
 import pytest
 
-from docs.superpowers.experiments import residual_mpc_compare as experiment
+from tools.experiments import residual_mpc_compare as experiment
 
 
 def _comparison_rows(*, candidate_auger=998.0, candidate_rmse=9.0, candidate_within=91.0):
