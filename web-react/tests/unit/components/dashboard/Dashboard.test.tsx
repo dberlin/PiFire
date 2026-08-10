@@ -11,7 +11,7 @@ import type {
   ModelEvidenceStatus,
   PidSpLearningReport,
 } from "../../../../src/helpers/contracts/learning.gen";
-import type { NotifyUpdate } from "../../../../src/helpers/notify/notifyApi";
+import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };

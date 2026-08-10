@@ -1,3 +1,10 @@
+import type {
+  WledActionResponse,
+  WledDiscoverResponse,
+  WledPushProfilesRequest,
+  WledTestProfileRequest,
+} from "../contracts/control.gen";
+
 // Typed client for the /api/wled_* action surface (discover / push / test).
 //
 // Unlike the file endpoints (helpers/files/apiEnvelope.ts) these return a bare
@@ -11,16 +18,10 @@
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
-export interface WledDevice {
-  ip: string;
-  led_count: number;
-  name: string;
-}
-
 export interface WledDiscoverResult {
   result: "success" | "error";
   message: string;
-  devices: WledDevice[];
+  devices: WledDiscoverResponse["devices"];
 }
 
 export interface WledActionResult {
@@ -32,7 +33,7 @@ export interface WledActionResult {
 export async function discoverWled(timeoutSec = 15): Promise<WledDiscoverResult> {
   try {
     const res = await fetch(`${BASE_URL}/api/wled_discover?timeout=${timeoutSec}`);
-    const body = (await res.json().catch(() => ({}))) as Partial<WledDiscoverResult>;
+    const body: Partial<WledDiscoverResponse> = await res.json().catch(() => ({}));
     return {
       result: body.result === "success" ? "success" : "error",
       message: body.message ?? `HTTP ${res.status}`,
@@ -52,16 +53,20 @@ export async function pushWledProfiles(
   profileNumbers: Record<string, number>,
 ): Promise<WledActionResult> {
   try {
+    const request: WledPushProfilesRequest = {
+      device_address: deviceAddress,
+      profile_numbers: profileNumbers,
+    };
     const res = await fetch(`${BASE_URL}/api/wled_push_profiles`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_address: deviceAddress, profile_numbers: profileNumbers }),
+      body: JSON.stringify(request),
     });
-    const body = (await res.json().catch(() => ({}))) as Partial<WledActionResult>;
+    const body: Partial<WledActionResponse> = await res.json().catch(() => ({}));
     return {
       result: body.result === "success" ? "success" : "error",
       message: body.message ?? `HTTP ${res.status}`,
-      profiles_pushed: body.profiles_pushed,
+      profiles_pushed: body.profiles_pushed ?? undefined,
     };
   } catch {
     return { result: "error", message: "Could not reach PiFire to push profiles." };
@@ -73,12 +78,16 @@ export async function testWledProfile(
   profileNumber: number,
 ): Promise<WledActionResult> {
   try {
+    const request: WledTestProfileRequest = {
+      device_address: deviceAddress,
+      profile_number: profileNumber,
+    };
     const res = await fetch(`${BASE_URL}/api/wled_test_profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_address: deviceAddress, profile_number: profileNumber }),
+      body: JSON.stringify(request),
     });
-    const body = (await res.json().catch(() => ({}))) as Partial<WledActionResult>;
+    const body: Partial<WledActionResponse> = await res.json().catch(() => ({}));
     return {
       result: body.result === "success" ? "success" : "error",
       message: body.message ?? `HTTP ${res.status}`,

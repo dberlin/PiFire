@@ -1,3 +1,12 @@
+import type {
+  AddPelletProfileData,
+  EditPelletProfileData,
+  EditPelletBrandsRequest,
+  EditPelletWoodsRequest,
+  PelletActionRequest,
+  PelletActionResponse,
+} from "../contracts/control.gen";
+
 // Write client for the pellet inventory manager.
 //
 // ONE endpoint, POST /api/pellets, carrying ONE INTENT per request:
@@ -19,29 +28,15 @@ export interface PelletActionResult {
   message: string;
 }
 
-type Action =
-  | "load_profile"
-  | "hopper_check"
-  | "edit_brands"
-  | "edit_woods"
-  | "add_profile"
-  | "edit_profile"
-  | "delete_profile"
-  | "delete_log";
-
-async function post(
-  baseUrl: string,
-  action: Action,
-  data: Record<string, unknown>,
-): Promise<PelletActionResult> {
+async function post(baseUrl: string, request: PelletActionRequest): Promise<PelletActionResult> {
   try {
     const res = await fetch(`${baseUrl}/api/pellets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, data }),
+      body: JSON.stringify(request),
     });
     if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-    const body = (await res.json()) as { result?: string; message?: string };
+    const body: PelletActionResponse = await res.json();
     return body.result === "OK"
       ? { ok: true, message: "" }
       : { ok: false, message: body.message ?? "Request rejected." };
@@ -50,26 +45,19 @@ async function post(
   }
 }
 
-// A `type` alias, not an `interface`, deliberately: only type aliases get an
-// implicit index signature, so `ProfileFields & {...}` is assignable to
-// post()'s `Record<string, unknown>` payload. As an interface this file does
-// not typecheck.
-export type ProfileFields = {
-  brand_name: string;
-  wood_type: string;
-  rating: number;
-  comments: string;
-};
-
-export const loadProfile = (b: string, profile: string) => post(b, "load_profile", { profile });
-export const hopperCheck = (b: string) => post(b, "hopper_check", {});
-export const editBrands = (b: string, d: { new_brand: string } | { delete_brand: string }) =>
-  post(b, "edit_brands", d);
-export const editWoods = (b: string, d: { new_wood: string } | { delete_wood: string }) =>
-  post(b, "edit_woods", d);
-export const addProfile = (b: string, d: ProfileFields & { add_and_load: boolean }) =>
-  post(b, "add_profile", d);
-export const editProfile = (b: string, d: ProfileFields & { profile: string }) =>
-  post(b, "edit_profile", d);
-export const deleteProfile = (b: string, profile: string) => post(b, "delete_profile", { profile });
-export const deleteLog = (b: string, log_item: string) => post(b, "delete_log", { log_item });
+export const loadProfile = (baseUrl: string, profile: string) =>
+  post(baseUrl, { action: "load_profile", data: { profile } });
+export const hopperCheck = (baseUrl: string) =>
+  post(baseUrl, { action: "hopper_check", data: {} });
+export const editBrands = (baseUrl: string, data: EditPelletBrandsRequest["data"]) =>
+  post(baseUrl, { action: "edit_brands", data });
+export const editWoods = (baseUrl: string, data: EditPelletWoodsRequest["data"]) =>
+  post(baseUrl, { action: "edit_woods", data });
+export const addProfile = (baseUrl: string, data: AddPelletProfileData) =>
+  post(baseUrl, { action: "add_profile", data });
+export const editProfile = (baseUrl: string, data: EditPelletProfileData) =>
+  post(baseUrl, { action: "edit_profile", data });
+export const deleteProfile = (baseUrl: string, profile: string) =>
+  post(baseUrl, { action: "delete_profile", data: { profile } });
+export const deleteLog = (baseUrl: string, log_item: string) =>
+  post(baseUrl, { action: "delete_log", data: { log_item } });

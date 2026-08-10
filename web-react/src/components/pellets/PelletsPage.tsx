@@ -9,8 +9,8 @@ import {
   hopperCheck,
   loadProfile,
   type PelletActionResult,
-  type ProfileFields,
 } from "../../helpers/pellets/pelletsApi";
+import type { PelletProfileFields } from "../../helpers/contracts/control.gen";
 import { useShellState } from "../../helpers/shellContext";
 import { CurrentLoadCard } from "./CurrentLoadCard";
 import { PelletLog } from "./PelletLog";
@@ -111,7 +111,7 @@ export function PelletsPage() {
         woods={pellets.woods}
         currentId={pellets.current.pelletid}
         busy={busy}
-        onAdd={(fields: ProfileFields, andLoad: boolean) =>
+        onAdd={(fields: PelletProfileFields, andLoad: boolean) =>
           run(() => addProfile(BASE_URL, { ...fields, add_and_load: andLoad }))
         }
         onEdit={(fields) => run(() => editProfile(BASE_URL, fields))}

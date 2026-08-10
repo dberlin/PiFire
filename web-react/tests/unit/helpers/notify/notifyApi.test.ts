@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import {
-  type NotifyUpdate,
-  postControl,
-  postNotifyUpdates,
-} from "../../../../src/helpers/notify/notifyApi";
+import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
+import { postControl, postNotifyUpdates } from "../../../../src/helpers/notify/notifyApi";
 
 const UPDATES: NotifyUpdate[] = [
   {

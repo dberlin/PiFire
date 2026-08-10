@@ -10,7 +10,8 @@ import copy
 
 import pytest
 
-from common.pellets_schema import PelletDbSchema, PelletDbValidationError, validate_pellet_db
+from common.pellets_schema import PelletDbValidationError, validate_pellet_db
+from common.web_contracts.control import PelletDbSchema
 
 
 def _v2_db():

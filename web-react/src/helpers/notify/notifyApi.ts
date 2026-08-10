@@ -1,3 +1,9 @@
+import type {
+  ControlPatchRequest,
+  ControlPatchResponse,
+  NotifyUpdate,
+} from "../contracts/control.gen";
+
 // Per-probe notification state lives in control["notify_data"] -- runtime
 // CONTROL state, not settings. Written with a SINGLE POST /api/control
 // carrying only the `notify_updates` key.
@@ -22,34 +28,11 @@
 // Verified live (Stop mode, 2026-07-25): a posted edit becomes visible on the
 // next read after ~110 ms -- it is queued, not immediate.
 
-export interface NotifyEntry {
-  label: string;
-  type: string; // "probe" | "probe_limit_high" | "probe_limit_low" | "timer" | "hopper" | "test"
-  req: boolean;
-  shutdown: boolean;
-  keep_warm?: boolean;
-  reignite?: boolean;
-  target?: number;
-  eta?: number | null;
-  condition?: string;
-  triggered?: boolean;
-  // Index signature: entries carry per-type extras (name, last_check, ...).
-  [k: string]: unknown;
-}
-
-/** One addressed patch: the entry is found by (label, type) at drain time, and
- *  only the named fields are written. Every field the object omits keeps
- *  whatever value the entry has when the control loop drains the queue. */
-export interface NotifyUpdate {
-  label: string;
-  type: string;
-  fields: Record<string, unknown>;
-}
 
 /** POST a minimal control patch. Keep the patch to the keys you actually own:
  *  the server queues it as a MERGE of the whole posted object, so any extra key
  *  is a value patched back over whatever the control loop set meanwhile. */
-export async function postControl(baseUrl: string, patch: Record<string, unknown>): Promise<void> {
+export async function postControl(baseUrl: string, patch: ControlPatchRequest): Promise<void> {
   const res = await fetch(`${baseUrl}/api/control`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -60,7 +43,7 @@ export async function postControl(baseUrl: string, patch: Record<string, unknown
   // the "OK" that common/app.py's api_response envelope uses everywhere else
   // (blueprints/api/routes.py:211). Do NOT route this through command.ts's
   // post(); it tests result === "OK" and would report every save as a failure.
-  const body = (await res.json()) as { result?: string; message?: string };
+  const body: ControlPatchResponse = await res.json();
   if (body.result !== "success") throw new Error(body.message ?? "control write rejected");
 }
 

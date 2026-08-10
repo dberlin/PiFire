@@ -147,6 +147,23 @@ def test_post_control_merges_via_write_control(live_server, page):
     assert control["s_plus"] is True
 
 
+def test_post_control_rejects_non_json_notify_fields_without_queueing(live_server, page):
+    before = read_control_from_server()
+    resp = page.request.post(
+        f"{live_server}/api/control",
+        data={
+            "notify_updates": [
+                {"label": "Probe 1", "type": "probe", "fields": float("inf")},
+            ]
+        },
+    )
+
+    assert resp.status == 400
+    assert resp.json()["result"] == "error"
+    drain_control_writes()
+    assert read_control_from_server() == before
+
+
 def test_post_no_json_body_returns_400(live_server, page):
     """`request.json` is falsy (parses to `None`) for a JSON body of
     literal `null` -- the route's own `if not request.json: abort(400)`
@@ -334,6 +351,16 @@ def test_wled_push_profiles_exception_returns_error_envelope(live_server, page):
     assert "boom" in body["message"]
 
 
+def test_wled_push_profiles_rejects_boolean_profile_number(live_server, page):
+    resp = page.request.post(
+        f"{live_server}/api/wled_push_profiles",
+        data={"device_address": "192.168.1.77", "profile_numbers": {"idle": True}},
+    )
+
+    assert resp.status == 400
+    assert resp.json() == {"result": "error", "message": "Profile numbers must be integers"}
+
+
 # --- wled_test_profile (POST) --------------------------------------------
 
 
@@ -376,3 +403,15 @@ def test_wled_test_profile_success_envelope_mocked(live_server, page):
     called_url = mock_post.call_args.args[0]
     assert called_url == "http://192.168.1.77/json/state"
     assert mock_post.call_args.kwargs["json"] == {"on": True, "bri": 128, "ps": 4}
+
+
+def test_wled_test_profile_rejects_boolean_profile_number_without_network(live_server, page):
+    with patch("requests.post") as mock_post:
+        resp = page.request.post(
+            f"{live_server}/api/wled_test_profile",
+            data={"device_address": "192.168.1.77", "profile_number": True},
+        )
+
+    assert resp.status == 400
+    assert resp.json() == {"result": "error", "message": "Profile number must be an integer"}
+    mock_post.assert_not_called()

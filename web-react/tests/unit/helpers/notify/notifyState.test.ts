@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { NotifyUpdate } from "../../../../src/helpers/notify/notifyApi";
+import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
 import {
   type LimitEdit,
   limitEditFields,

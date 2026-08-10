@@ -65,7 +65,7 @@ from common.system import (
 )
 from common.modes import Mode
 from controller.learning_report import controller_learning_report_revision
-from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
+from common.pellets_actions import clear_pellet_db, dispatch_pellet_action
 from common.app import (
     CONTROL_DOWN_ERROR,
     create_ui_hash,
@@ -73,7 +73,10 @@ from common.app import (
     save_settings_and_flag_update,
     api_response,
 )
+from pydantic import ValidationError
+
 from common.settings_schema import SettingsValidationError, apply_settings_delta
+from common.web_contracts.control import ControlPatchRequest
 from common.web_contracts.core import DashSocketPayload, PelletSocketPayload
 from flask import request
 from werkzeug.utils import secure_filename
@@ -409,7 +412,7 @@ def _get_app_data_dash_data(settings, arg01, arg02):
 
 
 def _get_app_data_pellets_data(settings, arg01, arg02):
-    return _response(result="OK", data={"uuid": settings["server_info"]["uuid"], "pellets": read_pellets_store()})
+    return _response(result="OK", data=_get_pellet_socket_data(settings, read_pellets_store()))
 
 
 def _get_app_data_events_data(settings, arg01, arg02):
@@ -549,8 +552,9 @@ def _post_app_data_update(settings, type, request):
                 # notify_ops_from_post() is shared with _api_post_control so the
                 # two doors cannot drift.
                 try:
-                    payload, ops = notify_ops_from_post(request)
-                except ControlDeltaError as exc:
+                    patch = ControlPatchRequest.model_validate(request, strict=True)
+                    payload, ops = notify_ops_from_post(patch.model_dump(mode="python", exclude_unset=True))
+                except (ControlDeltaError, ValidationError) as exc:
                     return _response(result="Error", message=f"Error: {exc}")
                 write_control(control_delta(set_values=payload, ops=ops), WriteKind.DELTA, origin="app-socketio")
                 return _response(result="OK", data=control)
@@ -658,10 +662,12 @@ def _post_app_data_units(settings, type, request):
 
 def _post_app_data_pellets(settings, type, request):
     pelletdb = read_pellets_store()
-    handler = PELLETS_DISPATCH.get(type)
-    if handler is None:
-        return _response(result="Error", message="Error: Received request without valid type")
-    return handler(pelletdb, request["pellets_action"])
+    return dispatch_pellet_action(
+        pelletdb,
+        type,
+        request["pellets_action"],
+        invalid_action_message="Error: Received request without valid type",
+    )
 
 
 def _post_app_data_timer(settings, type, request):

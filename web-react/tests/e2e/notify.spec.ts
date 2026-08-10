@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "@playwright/test";
+import type { NotifyEntry, NotifyListResponse } from "../../src/helpers/contracts/control.gen";
 import { API, ensureStopped, monitorProbeReadings } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run
@@ -13,24 +14,14 @@ import { API, ensureStopped, monitorProbeReadings } from "./helpers";
 // an afterEach that runs even when the assertions fail. Nothing in this file
 // ever writes `shutdown: true`.
 
-interface NotifyEntry {
-  label: string;
-  type: string;
-  req: boolean;
-  shutdown: boolean;
-  keep_warm?: boolean;
-  target?: number;
-  triggered?: boolean;
-  [k: string]: unknown;
-}
 
 async function getNotify(request: APIRequestContext): Promise<NotifyEntry[]> {
   const res = await request.get(`${API}/api/get/notify`);
   expect(res.ok()).toBe(true);
-  const body = (await res.json()) as { result?: string; data?: NotifyEntry[] };
+  const body: NotifyListResponse = await res.json();
   expect(body.result).toBe("OK");
   expect(Array.isArray(body.data)).toBe(true);
-  return body.data as NotifyEntry[];
+  return body.data;
 }
 
 /** HARNESS ONLY -- the whole-array door. This file's setup and its afterEach

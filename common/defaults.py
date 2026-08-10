@@ -19,7 +19,7 @@ import time
 
 from common.common import generate_uuid, read_generic_json, read_updater_manifest
 from common.modes import Mode, StatusState
-from common.pellets_schema import PELLETDB_SCHEMA_VERSION
+from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).

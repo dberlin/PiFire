@@ -1,9 +1,9 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { CurrentLoadCard } from "../../../../src/components/pellets/CurrentLoadCard";
-import type { PelletDatabasePayload } from "../../../../src/helpers/contracts/core.gen"
+import type { PelletDbSchema } from "../../../../src/helpers/contracts/control.gen"
 
-const DB: PelletDatabasePayload = {
+const DB: PelletDbSchema = {
   schema_version: 2,
   current: {
     pelletid: "p1",
@@ -50,7 +50,7 @@ describe("CurrentLoadCard", () => {
 
   it("renders 'No profile loaded' when current.pelletid is missing from archive", () => {
     // The Jinja at index.html:47 would 500 here.
-    const orphaned: PelletDatabasePayload = { ...DB, current: { ...DB.current, pelletid: "gone" } };
+    const orphaned: PelletDbSchema = { ...DB, current: { ...DB.current, pelletid: "gone" } };
     renderCard({ db: orphaned });
     expect(screen.getByText("No profile loaded", { exact: true })).toBeTruthy();
   });

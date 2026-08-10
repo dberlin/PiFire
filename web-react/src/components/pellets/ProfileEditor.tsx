@@ -1,17 +1,20 @@
 import { useState } from "react";
-import type { ProfileFields } from "../../helpers/pellets/pelletsApi";
-import type { PelletDatabasePayload } from "../../helpers/contracts/core.gen";
+import type {
+  EditPelletProfileData,
+  PelletDbSchema,
+  PelletProfileFields,
+} from "../../helpers/contracts/control.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { Select } from "../settings/fields/Select";
 
 interface Props {
-  archive: PelletDatabasePayload["archive"];
+  archive: PelletDbSchema["archive"];
   brands: string[];
   woods: string[];
   currentId: string;
   busy: boolean;
-  onAdd(fields: ProfileFields, andLoad: boolean): void;
-  onEdit(fields: ProfileFields & { profile: string }): void;
+  onAdd(fields: PelletProfileFields, andLoad: boolean): void;
+  onEdit(fields: EditPelletProfileData): void;
   onDelete(id: string): void;
 }
 
@@ -28,8 +31,8 @@ const sortValues = (values: string[]) => [...values].sort((a, b) => a.localeComp
 
 /** One draft per profile id, derived from the archive. Module-level and pure
     so it can be used both to initialise state and to re-seed it during render. */
-function seed(archive: PelletDatabasePayload["archive"]): Record<string, ProfileFields> {
-  const drafts: Record<string, ProfileFields> = {};
+function seed(archive: PelletDbSchema["archive"]): Record<string, PelletProfileFields> {
+  const drafts: Record<string, PelletProfileFields> = {};
   for (const [id, p] of Object.entries(archive)) {
     if (!p) continue;
     drafts[id] = {
@@ -64,7 +67,7 @@ export function ProfileEditor({
   // correct here and is why `busy` exists: the tick that follows a save
   // carries the saved values. Do NOT add an "is dirty" exception without
   // treating it as the design change it is.
-  const [drafts, setDrafts] = useState<Record<string, ProfileFields>>(() => seed(archive));
+  const [drafts, setDrafts] = useState<Record<string, PelletProfileFields>>(() => seed(archive));
   const [archiveSeen, setArchiveSeen] = useState(archive);
   if (archive !== archiveSeen) {
     setArchiveSeen(archive);
@@ -77,7 +80,7 @@ export function ProfileEditor({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
-  const [newProfile, setNewProfile] = useState<ProfileFields>(() => ({
+  const [newProfile, setNewProfile] = useState<PelletProfileFields>(() => ({
     brand_name: sortValues(brands)[0] ?? "",
     wood_type: sortValues(woods)[0] ?? "",
     rating: 5,
@@ -112,13 +115,13 @@ export function ProfileEditor({
   const ids = Object.keys(archive).sort();
   const pendingProfile = pending === null ? undefined : archive[pending];
 
-  const setDraft = (id: string, patch: Partial<ProfileFields>) =>
+  const setDraft = (id: string, patch: Partial<PelletProfileFields>) =>
     setDrafts((d) => ({ ...d, [id]: { ...d[id], ...patch } }));
 
   const fieldset = (
     nameFor: string,
-    value: ProfileFields,
-    update: (patch: Partial<ProfileFields>) => void,
+    value: PelletProfileFields,
+    update: (patch: Partial<PelletProfileFields>) => void,
   ) => (
     <div className="pf-pellets-profile-form">
       <Select

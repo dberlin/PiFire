@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook } from "@testing-library/react";
-import type { PelletDatabasePayload } from "../../../src/helpers/contracts/core.gen"
+import type { PelletDbSchema } from "../../../src/helpers/contracts/control.gen"
 import type { DashSocketPayload } from "../../../src/helpers/contracts/core.gen"
 import { useLiveState } from "../../../src/helpers/useLiveState";
 
-const PELLET_DB: PelletDatabasePayload = {
+const PELLET_DB: PelletDbSchema = {
   schema_version: 2,
   current: {
     pelletid: "p1",

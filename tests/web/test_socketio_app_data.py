@@ -563,6 +563,26 @@ def test_post_pellets_add_profile_no_load(sio):
     assert len(after - before) == 1
 
 
+def test_post_pellets_add_profile_rejects_boolean_rating(sio):
+    before = read_pellets_store()
+    payload = json.dumps(
+        {
+            "pellets_action": {
+                "brand_name": "B",
+                "wood_type": "W",
+                "rating": True,
+                "comments": "c",
+                "add_and_load": False,
+            }
+        }
+    )
+
+    resp = sio.mod._post_app_data("pellets_action", "add_profile", payload)
+    assert resp["result"] == "Error"
+    assert resp["message"] == "Error: rating must be a whole number from 1 to 5"
+    assert read_pellets_store() == before
+
+
 def test_post_pellets_add_profile_and_load(sio):
     payload = json.dumps(
         {

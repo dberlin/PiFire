@@ -26,7 +26,7 @@ from common.api_commands import mpc_calibration_command_revision, process_comman
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
 from common.controller_model_state import ControllerModelStore
 from common.model_evidence import EvidenceKind, FallbackEvidence, ModelEvidenceRecord, RollbackEvidence
-from common.pellets_actions import PELLETS_DISPATCH
+from common.pellets_actions import dispatch_pellet_action
 from blueprints.api.probe_map_actions import (
     module_requires_install,
     unsupported_new_modules,
@@ -46,6 +46,16 @@ from common.settings_schema import (
     validate_partial_settings_pairs,
 )
 from common.controller_deps import guard_controller_selection
+from common.web_contracts.control import (
+    ControlPatchRequest,
+    ControlPatchResponse,
+    PelletRestResponse,
+    NotifyListResponse,
+    WledActionResponse,
+    WledDiscoverResponse,
+    WledPushProfilesRequest,
+    WledTestProfileRequest,
+)
 from common.web_contracts.core import (
     CommandResponse,
     ControlHealthResponse,
@@ -164,12 +174,15 @@ def _api_get_pellets(settings, server_status):
     this route exists so a test can assert store state without going through
     the UI it is testing, and so a client with no socket can cold-start.
     """
-    return jsonify(
-        api_response(
-            result="OK",
-            data={"uuid": settings["server_info"]["uuid"], "pellets": read_pellet_db()},
-        )
-    ), 200
+    payload = PelletRestResponse.model_validate(
+        {
+            "result": "OK",
+            "message": None,
+            "data": {"uuid": settings["server_info"]["uuid"], "pellets": read_pellet_db()},
+        },
+        strict=True,
+    )
+    return jsonify(payload.model_dump(mode="json", by_alias=True, exclude_none=False)), 200
 
 
 def _api_get_wled_discover(settings, server_status):
@@ -185,10 +198,23 @@ def _api_get_wled_discover(settings, server_status):
         timeout = max(5, min(30, timeout))  # Clamp between 5-30 seconds
 
         devices = discover_wled_devices(timeout)
-        return jsonify({"result": "success", "message": f"Found {len(devices)} WLED devices", "devices": devices}), 200
+        payload = WledDiscoverResponse.model_validate(
+            {
+                "result": "success",
+                "message": f"Found {len(devices)} WLED devices",
+                "devices": devices,
+            },
+            strict=True,
+        )
+        return jsonify(payload.model_dump(mode="json", by_alias=True, exclude_unset=True)), 200
 
     except Exception as e:
-        return jsonify({"result": "error", "message": f"WLED discovery failed: {str(e)}", "devices": []}), 500
+        payload = WledDiscoverResponse(
+            result="error",
+            message=f"WLED discovery failed: {str(e)}",
+            devices=[],
+        )
+        return jsonify(payload.model_dump(mode="json", by_alias=True, exclude_unset=True)), 500
 
 
 def _api_get_controller_metadata(settings, server_status):
@@ -672,16 +698,25 @@ def _api_post_control(settings, request_json):
             }
         ), 400
     try:
-        members, ops = notify_ops_from_post(request_json)
+        patch = ControlPatchRequest.model_validate(request_json, strict=True)
+    except ValidationError as exc:
+        payload = ControlPatchResponse(control="error", result="error", message=str(exc))
+        return jsonify(payload.model_dump(mode="json", by_alias=True)), 400
+    try:
+        members, ops = notify_ops_from_post(patch.model_dump(mode="python", exclude_unset=True))
         write_control(control_delta(set_values=members, ops=ops), WriteKind.DELTA, origin="app")
-        return jsonify({"control": "success", "result": "success", "message": "Settings updated successfully."}), 201
+        payload = ControlPatchResponse(
+            control="success",
+            result="success",
+            message="Settings updated successfully.",
+        )
+        return jsonify(payload.model_dump(mode="json", by_alias=True)), 201
     except ControlDeltaError as exc:
-        # A malformed patch is the CLIENT's error and is named as such, rather
-        # than falling into the generic 201 below where a caller cannot tell a
-        # rejected request from an accepted one.
-        return jsonify({"control": "error", "result": "error", "message": str(exc)}), 400
+        payload = ControlPatchResponse(control="error", result="error", message=str(exc))
+        return jsonify(payload.model_dump(mode="json", by_alias=True)), 400
     except Exception:
-        return jsonify({"control": "error", "result": "error", "message": "Settings update failed."}), 201
+        payload = ControlPatchResponse(control="error", result="error", message="Settings update failed.")
+        return jsonify(payload.model_dump(mode="json", by_alias=True)), 201
 
 
 def _api_post_wled_push_profiles(settings, request_json):
@@ -689,63 +724,78 @@ def _api_post_wled_push_profiles(settings, request_json):
     try:
         from notify.wled_profiles import WLEDProfileManager
 
-        device_address = request_json.get("device_address", "").strip()
-        profile_numbers = request_json.get("profile_numbers", {})
+        raw_address = request_json.get("device_address", "")
+        if not isinstance(raw_address, str) or not raw_address.strip():
+            payload = WledActionResponse(result="error", message="Device address is required")
+            return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 400
+        try:
+            request_payload = WledPushProfilesRequest.model_validate(request_json, strict=True)
+        except ValidationError:
+            payload = WledActionResponse(result="error", message="Profile numbers must be integers")
+            return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 400
 
-        if not device_address:
-            return jsonify({"result": "error", "message": "Device address is required"}), 400
-
-        # Create profile manager and push profiles
-        profile_manager = WLEDProfileManager(device_address, settings)
-        result = profile_manager.push_all_profiles(custom_profile_numbers=profile_numbers)
+        profile_manager = WLEDProfileManager(request_payload.device_address.strip(), settings)
+        result = profile_manager.push_all_profiles(custom_profile_numbers=request_payload.profile_numbers)
 
         if result["success"]:
-            return jsonify(
-                {
-                    "result": "success",
-                    "message": f"Successfully pushed {result['profiles_pushed']} profiles",
-                    "profiles_pushed": result["profiles_pushed"],
-                    "profiles": result["profiles"],
-                }
-            ), 200
-        else:
-            return jsonify({"result": "error", "message": result["message"]}), 500
+            payload = WledActionResponse(
+                result="success",
+                message=f"Successfully pushed {result['profiles_pushed']} profiles",
+                profiles_pushed=result["profiles_pushed"],
+                profiles=result["profiles"],
+            )
+            return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 200
+        payload = WledActionResponse(result="error", message=result["message"])
+        return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
 
     except Exception as e:
-        return jsonify({"result": "error", "message": f"Failed to push profiles: {str(e)}"}), 500
+        payload = WledActionResponse(result="error", message=f"Failed to push profiles: {str(e)}")
+        return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
 
 
 def _api_post_wled_test_profile(settings, request_json):
     """Test a WLED profile"""
+    import requests
+
     try:
-        import requests
 
-        device_address = request_json.get("device_address", "").strip()
-        profile_number = request_json.get("profile_number", 1)
+        raw_address = request_json.get("device_address", "")
+        if not isinstance(raw_address, str) or not raw_address.strip():
+            payload = WledActionResponse(result="error", message="Device address is required")
+            return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 400
+        try:
+            request_payload = WledTestProfileRequest.model_validate(request_json, strict=True)
+        except ValidationError:
+            payload = WledActionResponse(result="error", message="Profile number must be an integer")
+            return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 400
 
-        if not device_address:
-            return jsonify({"result": "error", "message": "Device address is required"}), 400
-
-        # Clean device address
+        device_address = request_payload.device_address
         if "http://" in device_address:
             device_address = device_address.replace("http://", "")
         if "https://" in device_address:
             device_address = device_address.replace("https://", "")
         device_address = device_address.strip().rstrip("/")
 
-        # Send test command to WLED
         url = f"http://{device_address}/json/state"
-        payload = {"on": True, "bri": 128, "ps": profile_number}
-
-        response = requests.post(url, json=payload, timeout=5)
+        request_body = {"on": True, "bri": 128, "ps": request_payload.profile_number}
+        response = requests.post(url, json=request_body, timeout=5)
         response.raise_for_status()
 
-        return jsonify({"result": "success", "message": f"Profile {profile_number} activated successfully"}), 200
+        payload = WledActionResponse(
+            result="success",
+            message=f"Profile {request_payload.profile_number} activated successfully",
+        )
+        return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 200
 
     except requests.RequestException as e:
-        return jsonify({"result": "error", "message": f"Failed to communicate with WLED device: {str(e)}"}), 500
+        payload = WledActionResponse(
+            result="error",
+            message=f"Failed to communicate with WLED device: {str(e)}",
+        )
+        return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
     except Exception as e:
-        return jsonify({"result": "error", "message": f"Failed to test profile: {str(e)}"}), 500
+        payload = WledActionResponse(result="error", message=f"Failed to test profile: {str(e)}")
+        return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
 
 
 def _api_post_pellets(settings, request_json):
@@ -757,15 +807,14 @@ def _api_post_pellets(settings, request_json):
     INTENT ONLY -- see common/pellets_actions.py's module docstring. This route
     must never grow a "here is the whole pellet database" form.
     """
-    handler = PELLETS_DISPATCH.get(request_json.get("action"))
-    if handler is None:
-        return jsonify(api_response(result="Error", message="Error: Received request without valid action")), 200
     pelletdb = read_pellet_db()
-    # `or {}`: add_profile subscripts action_data["brand_name"] without .get(),
-    # so a missing `data` must arrive as a dict and raise KeyError inside the
-    # handler rather than TypeError on None. Mirrors socket_io.py's
-    # _ACTIONS_REQUIRING_JSON_DATA.
-    return jsonify(handler(pelletdb, request_json.get("data") or {})), 200
+    response = dispatch_pellet_action(
+        pelletdb,
+        request_json.get("action"),
+        request_json.get("data") or {},
+        invalid_action_message="Error: Received request without valid action",
+    )
+    return jsonify(response), 200
 
 
 def _api_post_probe_map(settings, request_json):
@@ -958,6 +1007,12 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
                 mode="json",
                 by_alias=True,
                 exclude_none=False,
+            )
+        elif action == "get" and arg0 == "notify":
+            data = NotifyListResponse.model_validate(data, strict=True).model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_unset=True,
             )
 
         return jsonify(data), 201

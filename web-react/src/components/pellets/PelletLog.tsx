@@ -1,11 +1,11 @@
 import { useState } from "react";
-import type { PelletDatabasePayload } from "../../helpers/contracts/core.gen";
+import type { PelletDbSchema } from "../../helpers/contracts/control.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { Rating } from "./Rating";
 
 interface Props {
-  log: PelletDatabasePayload["log"];
-  archive: PelletDatabasePayload["archive"];
+  log: PelletDbSchema["log"];
+  archive: PelletDbSchema["archive"];
   busy: boolean;
   onDelete(key: string): void;
 }

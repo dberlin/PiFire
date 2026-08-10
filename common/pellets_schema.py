@@ -21,81 +21,12 @@ that ever ran.
 
 import copy
 from datetime import datetime
-from typing import Annotated
-
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
 from common.common import write_log
+from common.web_contracts import control as control_contracts
 
-
-class _PelletSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-#: A log key is the load time in epoch milliseconds, as a decimal string --
-#: JSON object keys are strings, and the pattern is what keeps a
-#: second-resolution timestamp from being stored under a key that says
-#: milliseconds.
-_EpochMsKey = Annotated[str, StringConstraints(pattern=r"^\d+$")]
-
-
-class PelletLogEntry(_PelletSection):
-    # A removed profile leaves a tombstone rather than an in-band "deleted"
-    # string, so a log value has one type whatever happened to it.
-    pelletid: str | None
-    deleted: bool
-
-
-class PelletProfile(_PelletSection):
-    brand: str
-    wood: str
-    rating: int = Field(ge=1, le=5)
-    comments: str
-
-
-class PelletCurrent(_PelletSection):
-    pelletid: str
-    # An int percentage: every distance driver's get_level() returns one
-    # (distance/_sampled_base.py takes int() of the computed level).
-    hopper_level: int
-    date_loaded: str
-    # Grams since the last load, accumulated from the auger rate.
-    est_usage: float
-
-
-class PelletLastUpdated(_PelletSection):
-    time: int
-
-
-#: The shape of the pellet database, independent of both the release version
-#: and the settings tree's shape version. Different shapes, different migration
-#: histories: coupling them would mean bumping one to migrate the other.
-PELLETDB_SCHEMA_VERSION = 2
-
-
-class PelletDbSchema(_PelletSection):
-    schema_version: int = PELLETDB_SCHEMA_VERSION
-    current: PelletCurrent
-    archive: dict[str, PelletProfile]
-    # Keyed by load time in epoch milliseconds. A value names the profile
-    # loaded, or is a tombstone -- pellets_delete_profile rewrites rather than
-    # removes, so a log entry outlives the profile it points at.
-    log: dict[_EpochMsKey, PelletLogEntry]
-    # Autocomplete vocabularies, not enumerations: a profile may name a brand
-    # or wood that is absent from these.
-    brands: list[str]
-    woods: list[str]
-    lastupdated: PelletLastUpdated
-
-    @model_validator(mode="after")
-    def _loaded_profile_is_archived(self) -> "PelletDbSchema":
-        # pellets_delete_profile refuses to delete the loaded profile, so this
-        # holds in the store; stating it here makes the guard and the schema
-        # agree rather than the schema merely hoping.
-        if self.current.pelletid not in self.archive:
-            raise ValueError("current.pelletid must be a key of archive")
-        return self
 
 
 def _migrate_pellets_to_v2(pelletdb: dict) -> bool:
@@ -195,7 +126,7 @@ def validate_pellet_db(pelletdb: dict) -> dict:
     persisting. Raises PelletDbValidationError with dotted-path messages.
     """
     try:
-        model = PelletDbSchema.model_validate(pelletdb, strict=True)
+        model = control_contracts.PelletDbSchema.model_validate(pelletdb, strict=True)
     except ValidationError as exc:
         errors = exc.errors()
         if not errors or any(err["type"] != "extra_forbidden" for err in errors):
@@ -204,7 +135,7 @@ def validate_pellet_db(pelletdb: dict) -> dict:
         repaired = copy.deepcopy(pelletdb)
         _strip_error_locs(repaired, errors)
         try:
-            model = PelletDbSchema.model_validate(repaired, strict=True)
+            model = control_contracts.PelletDbSchema.model_validate(repaired, strict=True)
         except ValidationError as retry_exc:
             raise PelletDbValidationError(_format_errors(retry_exc.errors())) from retry_exc
 

@@ -1,5 +1,6 @@
 import type { ProbeDataPayload } from "../contracts/core.gen"
-import { type NotifyUpdate, postNotifyUpdates } from "./notifyApi";
+import type { NotifyUpdate } from "../contracts/control.gen";
+import { postNotifyUpdates } from "./notifyApi";
 
 // The backend runs `if shutdown: ... elif keep_warm: ...`
 // (notify/notifications.py:142-159), so ticking both means shutdown and silently

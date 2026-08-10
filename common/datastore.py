@@ -569,7 +569,8 @@ def _upgrade_pellets_in_store():
     import json
 
     from common.common import write_log
-    from common.pellets_schema import PELLETDB_SCHEMA_VERSION, _PELLET_MIGRATIONS
+    from common.pellets_schema import _PELLET_MIGRATIONS
+    from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
 
     with transaction() as conn:
         row = conn.execute("SELECT value FROM kv WHERE key='pellets:general'").fetchone()

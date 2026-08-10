@@ -5,6 +5,7 @@ from typing import Generic, Literal, TypeVar
 from pydantic import Field, SerializationInfo, SerializerFunctionWrapHandler, model_serializer
 
 from .base import ExtensibleWireModel, FiniteFloat, WireModel
+from .control import PelletDbSchema
 
 T = TypeVar("T")
 FiniteNumber = int | FiniteFloat
@@ -136,42 +137,11 @@ class DashSocketPayload(WireModel):
     model_learning_revision: str | None = Field(alias="modelLearningRevision")
 
 
-class PelletProfilePayload(WireModel):
-    brand: str
-    wood: str
-    rating: int
-    comments: str
-
-
-class PelletLogEntryPayload(WireModel):
-    pelletid: str | None
-    deleted: bool
-
-
-class PelletCurrentPayload(WireModel):
-    pelletid: str
-    hopper_level: FiniteNumber
-    date_loaded: str
-    est_usage: FiniteNumber
-
-
-class PelletLastUpdatedPayload(WireModel):
-    time: int
-
-
-class PelletDatabasePayload(WireModel):
-    schema_version: int
-    current: PelletCurrentPayload
-    brands: list[str]
-    woods: list[str]
-    archive: dict[str, PelletProfilePayload]
-    log: dict[str, PelletLogEntryPayload]
-    lastupdated: PelletLastUpdatedPayload
 
 
 class PelletSocketPayload(WireModel):
     uuid: str
-    pellets: PelletDatabasePayload
+    pellets: PelletDbSchema
 
 
 class WebUiBuildResponse(WireModel):

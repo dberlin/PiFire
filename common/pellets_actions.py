@@ -21,6 +21,8 @@ that accepts a whole pellet database.
 
 import time
 from datetime import datetime
+from pydantic import TypeAdapter, ValidationError
+
 
 from common.app import api_response
 from common.backups import backup_pellet_db
@@ -28,6 +30,8 @@ from common.common import WriteKind
 from common.control_delta import control_delta
 from common.datastore_accessors import write_control, write_pellet_db
 from common.defaults import default_pellets
+from common.web_contracts.control import PelletActionRequest, PelletActionResponse
+
 
 
 def _log_key(log):
@@ -212,7 +216,7 @@ def pellets_delete_log(pelletdb, action_data):
         return api_response(result="Error", message="Error: Function not specified")
 
 
-PELLETS_DISPATCH = {
+_PELLETS_DISPATCH = {
     "load_profile": pellets_load_profile,
     "hopper_check": pellets_hopper_check,
     "edit_brands": pellets_edit_brands,
@@ -222,3 +226,42 @@ PELLETS_DISPATCH = {
     "delete_profile": pellets_delete_profile,
     "delete_log": pellets_delete_log,
 }
+_PELLET_ACTION_ADAPTER = TypeAdapter(PelletActionRequest)
+
+
+def _pellet_validation_message(action, action_data):
+    if action in {"add_profile", "edit_profile"}:
+        if action == "edit_profile" and (not isinstance(action_data, dict) or "profile" not in action_data):
+            return "Error: Profile not included in request"
+        return "Error: rating must be a whole number from 1 to 5"
+    if action in {"load_profile", "delete_profile"}:
+        return "Error: Profile not included in request"
+    if action in {"edit_brands", "edit_woods", "delete_log"}:
+        return "Error: Function not specified"
+    return "Error: Invalid pellet action data"
+
+
+def dispatch_pellet_action(pelletdb, action, action_data, *, invalid_action_message):
+    """Validate one intent, run the existing handler, and validate its envelope."""
+    handler = _PELLETS_DISPATCH.get(action)
+    if handler is None:
+        return PelletActionResponse(
+            result="Error",
+            message=invalid_action_message,
+        ).model_dump(mode="json", by_alias=True, exclude_none=False)
+
+    candidate = {"action": action, "data": action_data if isinstance(action_data, dict) else {}}
+    try:
+        request = _PELLET_ACTION_ADAPTER.validate_python(candidate, strict=True).root
+    except ValidationError:
+        return PelletActionResponse(
+            result="Error",
+            message=_pellet_validation_message(action, action_data),
+        ).model_dump(mode="json", by_alias=True, exclude_none=False)
+
+    response = handler(pelletdb, request.data.model_dump(mode="python", exclude_none=True))
+    return PelletActionResponse.model_validate(response, strict=True).model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_none=False,
+    )

@@ -9,7 +9,8 @@ import copy
 import json
 from pathlib import Path
 
-from common.pellets_schema import PELLETDB_SCHEMA_VERSION, _migrate_pellets_to_v2, validate_pellet_db
+from common.pellets_schema import _migrate_pellets_to_v2, validate_pellet_db
+from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
 
 LIVE_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "pelletdb_live.json"
 

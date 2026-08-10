@@ -1,5 +1,6 @@
 import { postControl } from "./notify/notifyApi";
 import type { CommandResponse } from "./contracts/core.gen";
+import type { TimerOptionsPayload } from "./contracts/control.gen";
 
 // REST command client using PiFire's command grammar (common/api_commands.py
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
@@ -22,11 +23,6 @@ export interface CommandResult {
   data?: unknown;
 }
 
-/** The two "when the timer expires" flags, which live in control.notify_data. */
-export interface TimerOptions {
-  shutdown: boolean;
-  keepWarm: boolean;
-}
 
 export interface CommandClient {
   setMode(mode: GrillMode): Promise<CommandResult>;
@@ -59,7 +55,7 @@ export interface CommandClient {
   // make). Unlike timerStart this one does NOT unpause: the server rejects a
   // paused timer rather than silently ignoring the duration. Resuming is still
   // timerStart(), which carries no flags.
-  timerStartWithOptions(seconds: number, options: TimerOptions): Promise<CommandResult>;
+  timerStartWithOptions(seconds: number, options: TimerOptionsPayload): Promise<CommandResult>;
   timerPause(): Promise<CommandResult>;
   timerStop(): Promise<CommandResult>;
   // Standalone flag writes. NOTHING in this app calls them, and nothing should:
@@ -120,7 +116,7 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-    const body = (await res.json()) as CommandResponse;
+    const body: CommandResponse = await res.json();
     return { ok: body.result === "OK", message: body.message ?? "", data: body.data };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "network error" };
@@ -163,7 +159,7 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
  *  collapses the URL to the 3-argument form, which leaves both flags at
  *  whatever the previous cook set (see common/api_commands.py
  *  _parse_timer_expiry_options). */
-function timerExpirySegment(options: TimerOptions): string {
+function timerExpirySegment(options: TimerOptionsPayload): string {
   const named: string[] = [];
   if (options.shutdown) named.push("shutdown");
   if (options.keepWarm) named.push("keep_warm");

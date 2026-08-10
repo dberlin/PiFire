@@ -1,16 +1,16 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { PelletLog } from "../../../../src/components/pellets/PelletLog";
-import type { PelletLogEntryPayload, PelletProfilePayload } from "../../../../src/helpers/contracts/core.gen"
+import type { PelletLogEntry, PelletProfile } from "../../../../src/helpers/contracts/control.gen"
 
-const ARCHIVE: Record<string, PelletProfilePayload> = {
+const ARCHIVE: Record<string, PelletProfile> = {
   p1: { brand: "Generic", wood: "Alder", rating: 5, comments: "c" },
 };
 
 // Epoch milliseconds, as decimal strings. "999999999999" sorts after
 // "1784851200000" as text and before it as a number, which is why the
 // component sorts numerically.
-const LOG: Record<string, PelletLogEntryPayload> = {
+const LOG: Record<string, PelletLogEntry> = {
   "1785024000000": { pelletid: "p1", deleted: false },
   "999999999999": { pelletid: "p1", deleted: false },
   "1784851200000": { pelletid: null, deleted: true },

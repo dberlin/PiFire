@@ -79,6 +79,27 @@ def test_post_pellets_unknown_action(live_server, page):
     assert body["message"] == "Error: Received request without valid action"
 
 
+def test_post_pellets_rejects_boolean_rating_without_writing(live_server, page):
+    before = read_pellets_from_server()
+    resp = page.request.post(
+        f"{live_server}/api/pellets",
+        data={
+            "action": "add_profile",
+            "data": {
+                "brand_name": "REST Brand",
+                "wood_type": "Oak",
+                "rating": True,
+                "comments": "",
+                "add_and_load": False,
+            },
+        },
+    )
+
+    assert resp.status == 200
+    assert resp.json()["message"] == "Error: rating must be a whole number from 1 to 5"
+    assert read_pellets_from_server() == before
+
+
 def test_post_pellets_hopper_check_sets_control_flag(live_server, page):
     apply_control(lambda c: c.__setitem__("hopper_check", False))
     resp = page.request.post(f"{live_server}/api/pellets", data={"action": "hopper_check", "data": {}})

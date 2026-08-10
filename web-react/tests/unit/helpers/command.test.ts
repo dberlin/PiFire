@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { buildCommandUrl, createCommand } from "../../../src/helpers/command";
 import type { CommandResponse } from "../../../src/helpers/contracts/core.gen";
+import type { TimerOptionsPayload } from "../../../src/helpers/contracts/control.gen";
 
 const OK_COMMAND_RESPONSE = {
   result: "OK",
@@ -160,7 +161,7 @@ describe("timerStartWithOptions", () => {
     rs.unstubAllGlobals();
   });
 
-  const opts = { shutdown: true, keepWarm: false };
+  const opts = { shutdown: true, keepWarm: false } satisfies TimerOptionsPayload;
 
   it("issues exactly ONE request, carrying the duration and both flags", async () => {
     const r = await createCommand("http://pi:5000").timerStartWithOptions(600, {

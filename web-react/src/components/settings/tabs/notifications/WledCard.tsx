@@ -1,10 +1,6 @@
 import { useState } from "react";
-import {
-  discoverWled,
-  pushWledProfiles,
-  testWledProfile,
-  type WledDevice,
-} from "../../../../helpers/notify/wledApi";
+import type { WledDevice } from "../../../../helpers/contracts/control.gen";
+import { discoverWled, pushWledProfiles, testWledProfile } from "../../../../helpers/notify/wledApi";
 import { NumberField } from "../../fields/NumberField";
 import { Section } from "../../fields/Section";
 import { Select } from "../../fields/Select";

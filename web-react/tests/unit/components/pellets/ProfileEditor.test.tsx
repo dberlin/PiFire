@@ -1,9 +1,9 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ProfileEditor } from "../../../../src/components/pellets/ProfileEditor";
-import type { PelletProfilePayload } from "../../../../src/helpers/contracts/core.gen"
+import type { PelletProfile } from "../../../../src/helpers/contracts/control.gen"
 
-const ARCHIVE: Record<string, PelletProfilePayload> = {
+const ARCHIVE: Record<string, PelletProfile> = {
   p2: { brand: "Custom", wood: "Oak", rating: 3, comments: "second" },
   p1: { brand: "Generic", wood: "Alder", rating: 4, comments: "first" },
 };
