@@ -126,6 +126,19 @@
           "default": null,
           "title": "Controller Configuration Digest"
         },
+        "decision_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision Id"
+        },
         "evidence_decision_id": {
           "anyOf": [
             {
@@ -137,6 +150,19 @@
           ],
           "default": null,
           "title": "Evidence Decision Id"
+        },
+        "incumbent_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Incumbent Digest"
         },
         "incumbent_pair_json": {
           "anyOf": [

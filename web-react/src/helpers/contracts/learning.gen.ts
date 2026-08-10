@@ -24,7 +24,9 @@ type CandidateDigest = string | null;
 type CandidateGeneration = number | null;
 type CandidatePairJson = string | null;
 type ControllerConfigurationDigest = string | null;
+type DecisionId1 = string | null;
 type EvidenceDecisionId = string | null;
+type IncumbentDigest = string | null;
 type IncumbentPairJson = string | null;
 type PendingFrameBoundarySwap = boolean;
 type PendingPersistence = boolean;
@@ -43,7 +45,7 @@ export type AmbientSource = "measured" | "manual" | "weather" | "configured";
 type CommandHighWater = number;
 type Revision = number;
 type ConfidenceAccepted = boolean;
-type DecisionId1 = string;
+type DecisionId2 = string;
 type FitAccepted = boolean;
 type IdentifiabilityAccepted = boolean;
 /**
@@ -110,7 +112,7 @@ type WindowId = string | null;
 type ConfigurationDigest = string;
 type CookId = string | null;
 type FirstObservationSequence = number;
-type IncumbentDigest = string;
+type IncumbentDigest1 = string;
 type LastObservationSequence = number;
 type RoleGeneration3 = number;
 type SessionId = string;
@@ -144,7 +146,7 @@ type Detail1 = string;
 type Error1 = "model-activation-rejected";
 type Accepted1 = true;
 type CandidateDigest1 = string;
-type DecisionId2 = string;
+type DecisionId3 = string;
 type Phase = "prepared";
 type RoleGeneration4 = number;
 type TransactionId1 = string;
@@ -154,9 +156,9 @@ type TransactionId1 = string;
  */
 export type ModelActivationAcknowledgement = ModelActivationAccepted | ModelActionRejected;
 type CandidateDigest2 = string;
-type DecisionId3 = string;
+type DecisionId4 = string;
 type Blockers = string[];
-type DecisionId4 = string | null;
+type DecisionId5 = string | null;
 type Errors = string[];
 type Gates = EvidenceGate[];
 type ActiveDigest = string | null;
@@ -184,7 +186,7 @@ export type ModelEvidenceStatus =
   | "schema-invalidated";
 type Accepted2 = true;
 type ActiveKind1 = "grey-box";
-type DecisionId5 = string;
+type DecisionId6 = string;
 type Reason3 = string;
 type RoleGeneration5 = number;
 type RollbackDigest1 = string;
@@ -275,7 +277,9 @@ export interface ActivationReport {
   candidate_generation?: CandidateGeneration;
   candidate_pair_json?: CandidatePairJson;
   controller_configuration_digest?: ControllerConfigurationDigest;
+  decision_id?: DecisionId1;
   evidence_decision_id?: EvidenceDecisionId;
+  incumbent_digest?: IncumbentDigest;
   incumbent_pair_json?: IncumbentPairJson;
   origin?: CandidateOrigin | null;
   pending_frame_boundary_swap: PendingFrameBoundarySwap;
@@ -310,7 +314,7 @@ export interface CalibrationReport {
  */
 export interface CandidateAssessment {
   confidence_accepted: ConfidenceAccepted;
-  decision_id: DecisionId1;
+  decision_id: DecisionId2;
   fit_accepted: FitAccepted;
   identifiability_accepted: IdentifiabilityAccepted;
   native_build: CheckStatus;
@@ -403,7 +407,7 @@ export interface FitWindowIdentity {
   configuration_digest: ConfigurationDigest;
   cook_id: CookId;
   first_observation_sequence: FirstObservationSequence;
-  incumbent_digest: IncumbentDigest;
+  incumbent_digest: IncumbentDigest1;
   last_observation_sequence: LastObservationSequence;
   role_generation: RoleGeneration3;
   session_id: SessionId;
@@ -479,7 +483,7 @@ export interface ModelActionRejected {
 export interface ModelActivationAccepted {
   accepted: Accepted1;
   candidate_digest: CandidateDigest1;
-  decision_id: DecisionId2;
+  decision_id: DecisionId3;
   phase: Phase;
   role_generation: RoleGeneration4;
   transaction_id: TransactionId1;
@@ -490,7 +494,7 @@ export interface ModelActivationAccepted {
  */
 export interface ModelActivationRequest {
   candidate_digest: CandidateDigest2;
-  decision_id: DecisionId3;
+  decision_id: DecisionId4;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -504,7 +508,7 @@ export interface ModelEvidenceReport {
   candidate: CandidateReport;
   checks: Checks;
   cook_refit: CookRefitReport;
-  decision_id: DecisionId4;
+  decision_id: DecisionId5;
   errors: Errors;
   evidence: EvidenceSummary;
   failure: LearningFailure | null;
@@ -540,7 +544,7 @@ export interface ModelIdentities {
 export interface ModelRollbackAccepted {
   accepted: Accepted2;
   active_kind: ActiveKind1;
-  decision_id: DecisionId5;
+  decision_id: DecisionId6;
   reason: Reason3;
   role_generation: RoleGeneration5;
   rollback_digest: RollbackDigest1;
