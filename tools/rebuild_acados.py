@@ -564,6 +564,11 @@ def _command_compiler_identity(executable: str | Path) -> dict[str, str]:
         check=True,
     ).stdout.splitlines()[0]
     version = re.search(r"\d+(?:\.\d+)+", line)
+    version_text = version.group(0) if version else line
+    if "apple clang" in line.lower():
+        apple_build = re.search(r"\(clang-([^)]+)\)", line, flags=re.IGNORECASE)
+        if apple_build:
+            version_text = f"{version_text}+apple.{apple_build.group(1)}"
     target = subprocess.run(
         [str(resolved), "-dumpmachine"],
         capture_output=True,
@@ -572,7 +577,7 @@ def _command_compiler_identity(executable: str | Path) -> dict[str, str]:
     ).stdout.strip()
     return {
         "id": _normalize_compiler_id("Clang" if "clang" in line.lower() else "GNU"),
-        "version": version.group(0) if version else line,
+        "version": version_text,
         "target": target,
         "executable": str(resolved),
     }
@@ -598,7 +603,7 @@ def _configured_compiler_identity(build_root: Path) -> dict[str, str]:
     )
     return {
         "id": _normalize_compiler_id(setting("CMAKE_C_COMPILER_ID")),
-        "version": setting("CMAKE_C_COMPILER_VERSION"),
+        "version": command_identity["version"],
         "target": (
             target_match.group(1) if target_match is not None and target_match.group(1) else command_identity["target"]
         ),

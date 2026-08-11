@@ -258,6 +258,20 @@ def update_rebuild_web_ui():
     return _started(settings, f"{_python_exec(settings)} updater.py -w &")
 
 
+@api_update_bp.route("/rebuild-acados", methods=["POST"])
+def update_rebuild_acados():
+    """Conditionally rebuild the native runtime while the controller is stopped."""
+    _, invalid = _json_request(EmptyOperationRequest)
+    if invalid:
+        return invalid
+
+    settings = read_settings()
+    if read_control().get("mode") != Mode.STOP:
+        return _error("system_active", 409)
+    set_updater_install_status(0, "Starting Acados Rebuild...", "")
+    return _started(settings, f"{_python_exec(settings)} updater.py --rebuild-acados &")
+
+
 @api_update_bp.route("/upgrade", methods=["POST"])
 def update_upgrade():
     _, invalid = _json_request(EmptyOperationRequest)

@@ -16,6 +16,7 @@ rs.mock("../../../../src/helpers/update/updateApi", () => ({
   pullUpdate: rs.fn(),
   upgradeDeps: rs.fn(),
   rebuildWebUi: rs.fn(),
+  rebuildAcados: rs.fn(),
 }));
 
 const apiMocks = {
@@ -29,6 +30,7 @@ const apiMocks = {
   pullUpdate: api.pullUpdate as Mock,
   upgradeDeps: api.upgradeDeps as Mock,
   rebuildWebUi: api.rebuildWebUi as Mock,
+  rebuildAcados: api.rebuildAcados as Mock,
 };
 
 // The real panel renders through LazyLog, which virtualizes via virtua and so
@@ -229,6 +231,22 @@ describe("UpdatePage web UI rebuild", () => {
   });
 });
 
+describe("UpdatePage Acados rebuild", () => {
+  it("places the action below web UI rebuild and fires it when asked", async () => {
+    seed({ rebuildAcados: { ok: true, status: 200, message: "", data: { started: true } } });
+    renderPage();
+    await screen.findByText("Actions");
+
+    const webUiButton = screen.getByRole("button", { name: "Rebuild web UI" });
+    const acadosButton = screen.getByRole("button", { name: "Rebuild Acados" });
+    expect(webUiButton.nextElementSibling).toBe(acadosButton);
+
+    fireEvent.click(acadosButton);
+
+    await waitFor(() => expect(api.rebuildAcados).toHaveBeenCalledTimes(1));
+  });
+});
+
 function seedFailedBuild() {
   (api.fetchUpdateState as ReturnType<typeof rs.fn>).mockResolvedValue({
     ...state,
@@ -362,6 +380,7 @@ describe("UpdatePage on a detached checkout", () => {
     expect(screen.getByRole("button", { name: "Change Branch" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Upgrade dependencies" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Rebuild web UI" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Rebuild Acados" })).toBeEnabled();
   });
 
   it("offers a real branch to change to, not the empty current one", async () => {

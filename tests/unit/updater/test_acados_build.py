@@ -104,6 +104,48 @@ def test_markers_are_unambiguous_phase_boundaries() -> None:
     assert ACADOS_BUILD_FAIL_MARKER == "=== acados native rebuild failed ==="
     assert len({ACADOS_BUILD_RUN_MARKER, ACADOS_BUILD_OK_MARKER, ACADOS_BUILD_FAIL_MARKER}) == 3
 
+
+def test_standalone_rebuild_uses_the_conditional_shared_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import updater
+
+    calls: list[tuple[Path, bool]] = []
+    published: list[tuple[int, str, str]] = []
+    monkeypatch.setattr(updater, "logger", logging.getLogger("acados-rebuild-test"), raising=False)
+    monkeypatch.setattr(updater, "set_updater_install_status", lambda *args: published.append(args))
+
+    def rebuild(repo_root: Path, on_line: Callable[[str], None], *, if_needed: bool) -> int:
+        calls.append((repo_root, if_needed))
+        on_line("conditional rebuild output")
+        return 0
+
+    monkeypatch.setattr(updater, "run_acados_build", rebuild)
+
+    updater.run_acados_rebuild(tmp_path)
+
+    assert calls == [(tmp_path, True)]
+    assert (25, "Rebuilding acados native runtime...", "conditional rebuild output") in published
+    assert published[-1][0] == updater.FINISHED_PERCENT
+
+
+def test_standalone_rebuild_failure_is_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import updater
+
+    published: list[tuple[int, str, str]] = []
+    monkeypatch.setattr(updater, "logger", logging.getLogger("acados-rebuild-test"), raising=False)
+    monkeypatch.setattr(updater, "set_updater_install_status", lambda *args: published.append(args))
+    monkeypatch.setattr(updater, "run_acados_build", lambda *args, **kwargs: 17)
+
+    with pytest.raises(SystemExit):
+        updater.run_acados_rebuild(tmp_path)
+
+    assert published[-1][0] < 0
+    assert published[-1][1] == "Acados rebuild failed"
+    assert "17" in published[-1][2]
+
 def test_public_script_resolves_python_module_outside_repository(
     tmp_path: Path,
 ) -> None:

@@ -346,6 +346,7 @@ JSON_WEB_CONTRACT_INVENTORY: tuple[JsonWebContract, ...] = (
     _http("POST /api/update/pull", UpdateStarted, "operations", EmptyOperationRequest),
     _http("POST /api/update/upgrade", UpdateStarted, "operations", EmptyOperationRequest),
     _http("POST /api/update/rebuild-web-ui", UpdateStarted, "operations", EmptyOperationRequest),
+    _http("POST /api/update/rebuild-acados", UpdateStarted, "operations", EmptyOperationRequest),
     _http("GET /api/update/buildlog", BuildLog, "operations"),
     # Tuner JSON endpoints.
     _http("POST /api/tuner/session [open=true]", TunerSession, "operations", TunerSessionRequest),

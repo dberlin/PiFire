@@ -17,6 +17,7 @@ import {
   fetchUpdateState,
   fetchUpdateStatus,
   pullUpdate,
+  rebuildAcados,
   rebuildWebUi,
   refreshBranches,
   upgradeDeps,
@@ -233,6 +234,14 @@ export function UpdatePage() {
           onClick={() => void run(() => rebuildWebUi())}
         >
           Rebuild web UI
+        </button>
+        <button
+          type="button"
+          className="pf-admin-btn"
+          disabled={busy}
+          onClick={() => void run(() => rebuildAcados())}
+        >
+          Rebuild Acados
         </button>
         {state.web_ui_stale && (
           <p className="pf-update-note" role="status">

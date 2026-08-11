@@ -644,6 +644,22 @@ def report_failure(status, output):
     sys.exit(1)
 
 
+def run_acados_rebuild(repo_root: str | Path = REPO_ROOT) -> None:
+    """Conditionally rebuild the native runtime and publish terminal status."""
+    status = "Rebuilding acados native runtime..."
+    code = run_acados_build(
+        repo_root,
+        lambda line: _publish(25, status, line),
+        if_needed=True,
+    )
+    if code != 0:
+        report_failure(
+            "Acados rebuild failed",
+            f" - The conditional acados rebuild exited {code}.",
+        )
+    publish_finished(False)
+
+
 def run_update(branch):
     """The -u flow: pull, gate native, install dependencies, then finish."""
     settings = read_settings()
@@ -1037,6 +1053,12 @@ if __name__ == "__main__":
         required=False,
         help="Rebuild the React web UI from the current sources",
     )
+    parser.add_argument(
+        "--rebuild-acados",
+        action="store_true",
+        required=False,
+        help="Conditionally rebuild the acados native runtime",
+    )
     parser.add_argument("-l", "--legacyvenv", action="store_true", required=False, help="Set venv flag in settings")
     parser.add_argument("-d", "--debug", action="store_true", required=False, help="Enable Debug Mode")
     parser.add_argument(
@@ -1105,6 +1127,10 @@ if __name__ == "__main__":
                 "Web UI rebuild failed",
                 " - The build did not complete. The previously built interface is still being served.",
             )
+
+    elif args.rebuild_acados:
+        num_args += 1
+        run_acados_rebuild()
 
     elif args.remote:
         num_args += 1

@@ -237,7 +237,7 @@ def test_change_branch_rejects_invalid_json_before_update_discovery(
 
 @pytest.mark.parametrize(
     "path",
-    ["/branches/refresh", "/pull", "/rebuild-web-ui", "/upgrade"],
+    ["/branches/refresh", "/pull", "/rebuild-web-ui", "/rebuild-acados", "/upgrade"],
 )
 @pytest.mark.parametrize("body", ["null", "{"])
 def test_mutations_reject_present_invalid_json_before_side_effects(
@@ -323,6 +323,24 @@ def test_rebuild_web_ui_is_allowed_while_the_grill_runs(ds, client, monkeypatch)
 
     assert resp.status_code == 200
     assert len(fired) == 1
+
+
+def test_rebuild_acados_is_blocked_unless_stopped(ds, client, monkeypatch):
+    _, fired = _neutralize(monkeypatch)
+    _set_real_hw(True)
+    _set_mode(Mode.HOLD)
+
+    blocked = client.post("/api/update/rebuild-acados")
+
+    assert blocked.status_code == 409
+    assert fired == []
+
+    _set_mode(Mode.STOP)
+    started = client.post("/api/update/rebuild-acados")
+
+    assert started.status_code == 200
+    assert started.get_json()["data"] == {"started": True}
+    assert len(fired) == 1 and fired[0].endswith("updater.py --rebuild-acados &")
 
 
 def test_buildlog_serves_the_run_from_its_start_and_reports_the_next_offset(ds, client, monkeypatch):

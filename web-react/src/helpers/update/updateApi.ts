@@ -79,6 +79,7 @@ export const changeBranch = (target: string, baseUrl = BASE_URL) => {
 export const pullUpdate = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "pull");
 export const upgradeDeps = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "upgrade");
 export const rebuildWebUi = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "rebuild-web-ui");
+export const rebuildAcados = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "rebuild-acados");
 
 /** One incremental read of the last web UI build's output.
  *

@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import threading
 from typing import Any, Callable, Iterator, Mapping
 
@@ -160,6 +161,11 @@ STALENESS_CASES: tuple[tuple[str, Callable[[BuildInputIdentity], BuildInputIdent
     ("abi", lambda v: replace(v, abi_version=3), StalenessClass.ABI),
     ("host", lambda v: replace(v, host={"system": "Darwin", "machine": "arm64"}), StalenessClass.HOST_PLATFORM),
     ("compiler", lambda v: replace(v, compiler={**v.compiler, "id": "Clang"}), StalenessClass.COMPILER),
+    (
+        "compiler-version",
+        lambda v: replace(v, compiler={**v.compiler, "version": f"{v.compiler['version']}.next"}),
+        StalenessClass.COMPILER,
+    ),
     (
         "cmake-flags",
         lambda v: replace(v, cmake={**v.cmake, "flags": ["CMAKE_BUILD_TYPE=Debug"]}),
@@ -603,7 +609,7 @@ def test_local_publication_seals_release_only_after_cross_directory_rename(tmp_p
     release = runtime / "releases" / ("b" * 64)
     stage.mkdir(parents=True)
     release.parent.mkdir()
-    library = stage / "libacados_pifire.so"
+    library = stage / rebuild_module._library_filename()
     library.write_bytes(b"native")
     library_digest = hashlib.sha256(b"native").hexdigest()
     (stage / "build-manifest.json").write_text(
@@ -660,7 +666,7 @@ def test_same_release_collision_is_sealed_before_selector_recovery(
     releases = runtime / "releases"
     stage.mkdir(parents=True)
     releases.mkdir()
-    library = stage / "libacados_pifire.so"
+    library = stage / rebuild_module._library_filename()
     library.write_bytes(b"same native bytes")
     manifest = canonical_build_manifest(
         identity(),
@@ -782,6 +788,32 @@ def test_active_control_period_uses_settings_and_falls_back_to_catalog(
     )
 
 
+def test_command_appleclang_identity_retains_the_live_build_suffix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs = iter(
+        (
+            "Apple clang version 21.0.0 (clang-2100.3.30.1)\n",
+            "arm64-apple-darwin27.0.0\n",
+        )
+    )
+
+    def run(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, next(outputs), "")
+
+    monkeypatch.setattr(rebuild_module.subprocess, "run", run)
+
+    identity = rebuild_module._command_compiler_identity(tmp_path / "cc")
+
+    assert identity == {
+        "id": "Clang",
+        "version": "21.0.0+apple.2100.3.30.1",
+        "target": "arm64-apple-darwin27.0.0",
+        "executable": str((tmp_path / "cc").resolve()),
+    }
+
+
 def test_configured_compiler_identity_comes_from_cmake_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -814,6 +846,37 @@ def test_configured_compiler_identity_comes_from_cmake_cache(
         "target": "aarch64-linux-gnu",
         "executable": "/usr/bin/gcc",
     }
+
+
+def test_configured_appleclang_identity_uses_the_executable_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compiler_file = tmp_path / "CMakeFiles/4.2/CMakeCCompiler.cmake"
+    compiler_file.parent.mkdir(parents=True)
+    compiler_file.write_text(
+        "\n".join(
+            (
+                'set(CMAKE_C_COMPILER "/usr/bin/cc")',
+                'set(CMAKE_C_COMPILER_ID "AppleClang")',
+                'set(CMAKE_C_COMPILER_VERSION "21.0.0.21000330")',
+                'set(CMAKE_C_COMPILER_TARGET "")',
+            )
+        )
+    )
+    command_identity = {
+        "id": "Clang",
+        "version": "21.0.0+apple.2100.3.30.1",
+        "target": "arm64-apple-darwin27.0.0",
+        "executable": "/usr/bin/cc",
+    }
+    monkeypatch.setattr(
+        rebuild_module,
+        "_command_compiler_identity",
+        lambda _: command_identity,
+    )
+
+    assert rebuild_module._configured_compiler_identity(tmp_path) == command_identity
 
 
 def test_fetched_source_verification_rejects_dirty_dependency(

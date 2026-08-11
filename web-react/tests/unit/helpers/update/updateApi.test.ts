@@ -6,6 +6,7 @@ import {
   fetchUpdateState,
   fetchUpdateStatus,
   pullUpdate,
+  rebuildAcados,
   refreshBranches,
   upgradeDeps,
 } from "../../../../src/helpers/update/updateApi";
@@ -88,5 +89,16 @@ describe("updateApi mutations", () => {
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe("/api/update/branches/refresh");
     await upgradeDeps("");
     expect((fetchMock.mock.calls[1] as [string])[0]).toBe("/api/update/upgrade");
+  });
+
+  it("rebuildAcados POSTs the conditional rebuild path", async () => {
+    const fetchMock = stub(200, { result: "OK", data: { started: true } });
+
+    const result = await rebuildAcados("");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/update/rebuild-acados");
+    expect(init.method).toBe("POST");
+    expect(result.data?.started).toBe(true);
   });
 });
