@@ -3183,6 +3183,32 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				data['result'] = 'ERROR'
 				data['message'] = f'Before changing manual outputs, system must be put into Manual mode.'
 
+		elif arglist[0] == 'aux':
+			'''
+			Auxiliary Relay Control 
+			Note: Auxiliary relays are never driven by the controller, so unlike the manual 
+			commands above, no mode change or safety override is required.  
+			/api/set/aux/{aux1|aux2|aux3|aux4}/{true/false/toggle}
+			'''
+			aux_names = [aux['name'] for aux in get_aux_list(settings)]
+
+			if arglist[1] not in aux_names:
+				data['result'] = 'ERROR'
+				data['message'] = f'Auxiliary relay [{arglist[1]}] is not configured.  Configured relays: {aux_names}'
+			else:
+				if arglist[2] == 'toggle':
+					status = read_status()
+					arglist[2] = 'false' if status['outpins'].get(arglist[1], False) else 'true'
+
+				if arglist[2] in ['true', 'false']:
+					if control.get('aux', None) is None:
+						control['aux'] = {}
+					control['aux'][arglist[1]] = True if arglist[2] == 'true' else False
+					write_control(control, direct_write=direct_write, origin=origin)
+				else:
+					data['result'] = 'ERROR'
+					data['message'] = f'Auxiliary relay command [{arglist[2]}] not recognized.  Use true, false or toggle.'
+
 		else:
 			data['result'] = 'ERROR'
 			data['message'] = f'Set API Argument: {arglist[0]} not recognized.'
