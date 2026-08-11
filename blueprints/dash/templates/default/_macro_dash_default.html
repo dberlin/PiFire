@@ -412,6 +412,11 @@
 					<td><span class="badge badge-secondary">Fan</span></td>
 					<td><span class="badge badge-secondary">Auger</span></td>
 					<td><span class="badge badge-secondary">Igniter</span></td>
+					{% for aux_name in ['aux1', 'aux2', 'aux3', 'aux4'] %}
+					{% if settings['platform']['outputs'].get(aux_name) is not none %}
+					<td><span class="badge badge-secondary">{{ settings['platform']['aux_labels'].get(aux_name, aux_name) }}</span></td>
+					{% endif %}
+					{% endfor %}
 					<td id="pmode_badge">
 						<span class="badge badge-secondary">P-Mode</span>
 					</td>

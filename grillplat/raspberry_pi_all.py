@@ -256,6 +256,7 @@ class GrillPlatform:
 		self.igniter.close()
 		self.auger.close()
 		self.fan.close()
+		self._all_aux_off()
 		for name in self.aux:
 			self.aux[name].close()
 		self.pwm.stop()

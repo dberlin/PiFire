@@ -303,7 +303,7 @@ def _process_system_commands(grill_platform):
 			}
 		system_output.push(result)
 
-def _process_aux_requests(grill_platform):
+def _process_aux_requests(grill_platform, control):
 	"""
 	Apply any pending auxiliary relay requests.
 
@@ -313,8 +313,11 @@ def _process_aux_requests(grill_platform):
 
 	Requests are transient: they are cleared as soon as they have been applied, so that
 	Stop mode resetting the control structure cannot strand a stale desired state.
+
+	Takes the caller's in-memory `control` dict (rather than re-reading it) and mutates it
+	in place, so that any later stale write of that same object by the caller carries the
+	cleared aux state instead of resurrecting the just-applied request.
 	"""
-	control = read_control()
 	requests = control.get('aux', {})
 
 	if not requests:
@@ -613,7 +616,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 		control = read_control()
 
 		_process_system_commands(grill_platform)
-		_process_aux_requests(grill_platform)
+		_process_aux_requests(grill_platform, control)
 
 		# Check if new mode has been requested
 		if control['updated']:
@@ -1321,7 +1324,7 @@ while True:
 
 	# Check for system commands
 	_process_system_commands(grill_platform)
-	_process_aux_requests(grill_platform)
+	_process_aux_requests(grill_platform, control)
 
 	# Check if there were updates to any of the settings that were flagged
 	if control['settings_update']:
