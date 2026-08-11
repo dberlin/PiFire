@@ -177,15 +177,32 @@ def find_platform_pin_collisions(settings_dependencies, submitted_settings):
 	Detects GPIO pins assigned to more than one grill platform function in a submitted
 	wizard configuration.
 
-	Only fields that grillplat/raspberry_pi_all.py's GrillPlatform.__init__ actually turns
-	into a pin object are checked - mirroring that constructor exactly - so that fields left
-	inert by other settings (e.g. the AC fan pin on a DC-fan build, the selector pin on a
-	standalone build) are never flagged as claimed:
-	  - outputs.auger, outputs.igniter, outputs.power are always claimed
-	  - outputs.fan is claimed only when dc_fan is False
-	  - outputs.dc_fan and outputs.pwm are claimed only when dc_fan is True
-	  - inputs.selector is claimed only when standalone is False
-	  - outputs.aux1..aux4 are claimed only when not 'None'
+	Fields are checked when either of two things claims the pin before/independently of
+	control.py ever running:
+	  1. grillplat/raspberry_pi_all.py's GrillPlatform.__init__ turns the field into a pin
+	     object - mirrored exactly, so fields left inert by other settings (e.g. the AC fan
+	     pin on a DC-fan build, the selector pin on a standalone build) are never flagged:
+	       - outputs.auger, outputs.igniter, outputs.power are always claimed
+	       - outputs.fan is claimed only when dc_fan is False
+	       - outputs.dc_fan and outputs.pwm are claimed only when dc_fan is True
+	       - inputs.selector is claimed only when standalone is False
+	       - outputs.aux1..aux4 are claimed only when not 'None'
+	  2. board-config.py writes the pin into the boot config as a device-tree overlay, so the
+	     KERNEL claims it at boot, before GrillPlatform.__init__ ever runs - if an aux relay
+	     is assigned the same pin, GrillPlatform.__init__ loses that race and raises, which
+	     lands PiFire on the simulated prototype platform exactly as if the collision were
+	     with another GrillPlatform pin:
+	       - system.1WIRE is always claimed when set (dtoverlay=w1-gpio, board-config.py's
+	         set_onewire_gpio())
+	       - system.SPI0.CE0 and system.SPI0.CE1 are always claimed when set (the SPI0
+	         overlay enabled by board-config.py's enable_spi() fixes these pins)
+
+	Deliberately NOT checked, despite also being pin-valued fields in the manifest:
+	input_shutdown, device_display_*, device_distance_*, device_input_*. None of these are
+	touched by GrillPlatform.__init__, and unlike 1-Wire/SPI0 they were not verified against
+	board-config.py's overlay writes for this change - device_distance_trig in particular is
+	hardcoded to the same pin as output_auger on the pcb_4.x.x default, so treating it as
+	claimed would refuse that board's own stock configuration.
 
 	Parameters:
 	- settings_dependencies (dict): wizardData['modules']['grillplatform'][<profile>]['settings_dependencies'].
@@ -200,7 +217,11 @@ def find_platform_pin_collisions(settings_dependencies, submitted_settings):
 	dc_fan = submitted_settings.get('dc_fan') == 'True'
 	standalone = submitted_settings.get('standalone') == 'True'
 
-	pin_fields = ['output_auger', 'output_igniter', 'output_power', 'output_aux1', 'output_aux2', 'output_aux3', 'output_aux4']
+	pin_fields = [
+		'output_auger', 'output_igniter', 'output_power',
+		'output_aux1', 'output_aux2', 'output_aux3', 'output_aux4',
+		'system_1wire', 'system_spi0_ce0', 'system_spi0_ce1',
+	]
 	if dc_fan:
 		pin_fields += ['output_dc_fan', 'output_pwm']
 	else:
