@@ -251,6 +251,22 @@ describe("fetchPidSpLearningReport", () => {
     ["extra field", { ...REPORT, action: "reset" }],
     ["live detail disagreement", { ...IDLE, live: true }],
     [
+      "empty failure code",
+      {
+        ...IDLE,
+        status: "error",
+        failure: { code: "", detail: "predictor unavailable", terminal: true },
+      },
+    ],
+    [
+      "empty failure detail",
+      {
+        ...IDLE,
+        status: "error",
+        failure: { code: "predictor-unavailable", detail: "", terminal: true },
+      },
+    ],
+    [
       "failure attached to live status",
       {
         ...REPORT,

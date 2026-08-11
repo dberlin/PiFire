@@ -330,3 +330,38 @@ bunx playwright test --project=panel tests/e2e/dashboard-panel.spec.ts
 ```
 
 Once a decoded success violates the schema, the mounted MPC view retains a schema-invalidated state across subsequent network/server refresh failures. Cached candidate, activation, and rollback authority remain suppressed until a newly decoded valid report succeeds. The independent valid-to-network regression still preserves stale context when no schema violation preceded it.
+
+## Fix round 6: enforce nonblank PID-SP failure fields
+
+RED:
+
+```text
+bunx rstest run tests/unit/helpers/pidSpLearningApi.test.ts \
+  -t "rejects schema mismatch"
+2 failed: empty failure.code and failure.detail were accepted as successful reports
+```
+
+GREEN:
+
+```text
+bunx rstest run tests/unit/helpers/pidSpLearningApi.test.ts \
+  tests/unit/helpers/modelEvidenceApi.test.ts \
+  tests/unit/components/dashboard/PidSpLearningView.test.tsx \
+  tests/unit/components/dashboard/MpcLearningView.test.tsx \
+  tests/unit/components/dashboard/LearningPanel.test.tsx
+Test Files 5 passed
+Tests 107 passed
+Duration 2.46s
+
+bun run typecheck
+EXIT=0
+
+bunx biome check src/helpers/pidSpLearning/pidSpLearningApi.ts \
+  tests/unit/helpers/pidSpLearningApi.test.ts
+Checked 2 files. No fixes applied.
+
+bunx playwright test --project=panel tests/e2e/dashboard-panel.spec.ts
+14 passed (12.0s)
+```
+
+The strict PID-SP decoder now enforces the generated `NonBlankString` contract for both failure members. Valid structured error reports are unchanged; malformed successful responses still fail closed with `ok: false` and `data: null`.

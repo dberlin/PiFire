@@ -80,6 +80,12 @@ function stringValue(value: unknown, path: string): string {
   return value;
 }
 
+function nonBlankString(value: unknown, path: string): string {
+  const parsed = stringValue(value, path);
+  if (parsed.length === 0) return invalid(`${path} must be non-blank`);
+  return parsed;
+}
+
 function nullable<T>(value: unknown, parse: (item: unknown) => T): T | null {
   return value === null ? null : parse(value);
 }
@@ -248,8 +254,8 @@ function parseFailure(value: unknown): PidSpLearningFailure {
   const source = record(value, path);
   exactKeys(source, ["code", "detail", "terminal"], path);
   return {
-    code: stringValue(source.code, `${path}.code`),
-    detail: stringValue(source.detail, `${path}.detail`),
+    code: nonBlankString(source.code, `${path}.code`),
+    detail: nonBlankString(source.detail, `${path}.detail`),
     terminal: booleanValue(source.terminal, `${path}.terminal`),
   };
 }
