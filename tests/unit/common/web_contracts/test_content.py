@@ -19,7 +19,7 @@ from common.web_contracts.content import (
     RecipeInstructionUpdateRequest,
     RecipeMetadataUpdateRequest,
     RecipeSplashAssetAssignmentRequest,
-    RecipeStep,
+    RecipeStepRequest,
     RecipeStepDeleteRequest,
     RecipeStepInsertRequest,
     RecipeStepUpdateRequest,
@@ -49,7 +49,7 @@ def test_recipe_mutation_requests_preserve_concrete_action_shapes():
             file="dinner.pfrecipe",
             action="update",
             index=1,
-            step=RecipeStep(
+            step=RecipeStepRequest(
                 mode="Hold",
                 hold_temp=225,
                 timer=30,

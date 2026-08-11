@@ -124,7 +124,7 @@ from .wizard import (
     InstallStatus,
     ModuleValues,
     ModuleValuesRequest,
-    ProbeMap,
+    ProbeMapResponse,
     ProbeMapRequest,
     ProbeModuleCatalog,
     RowsResult,
@@ -135,6 +135,7 @@ from .wizard import (
     WizardDraftRequest,
     WizardFinishRequest,
     WizardState,
+    WizardActionResponse,
 )
 
 
@@ -222,11 +223,11 @@ JSON_WEB_CONTRACT_INVENTORY: tuple[JsonWebContract, ...] = (
     _http("POST /api/set_mpc_calibration", MpcCalibrationCommandResponse, "learning", MpcCalibrationCommand),
     # Wizard and live probe-map endpoints.
     _http("GET /api/wizard/state", WizardState, "wizard"),
-    _http("POST /api/wizard/draft", RowsResult, "wizard", WizardDraftRequest),
-    _http("POST /api/wizard/cancel", RowsResult, "wizard", EmptyWizardRequest),
+    _http("POST /api/wizard/draft", WizardActionResponse, "wizard", WizardDraftRequest),
+    _http("POST /api/wizard/cancel", WizardActionResponse, "wizard", EmptyWizardRequest),
     _http("POST /api/wizard/scan", ScanResult, "wizard", ScanRequest),
     _http("POST /api/wizard/module-values", ModuleValues, "wizard", ModuleValuesRequest),
-    _http("POST /api/wizard/finish", RowsResult, "wizard", WizardFinishRequest),
+    _http("POST /api/wizard/finish", WizardActionResponse, "wizard", WizardFinishRequest),
     _http("GET /api/wizard/installstatus", InstallStatus, "wizard"),
     _http("GET /api/wizard/installlog", InstallLog, "wizard"),
     _http("POST /api/wizard/scan/bluetooth", BtRowsResult, "wizard", EmptyWizardRequest),
@@ -243,7 +244,7 @@ JSON_WEB_CONTRACT_INVENTORY: tuple[JsonWebContract, ...] = (
         BusKindsValidationRequest,
     ),
     _http("GET /api/probe_modules", ProbeModuleCatalog, "wizard"),
-    _http("POST /api/probe_map", ProbeMap, "wizard", ProbeMapRequest),
+    _http("POST /api/probe_map", ProbeMapResponse, "wizard", ProbeMapRequest),
     # Managed JSON content. Generic write envelopes normalize through
     # ApiEnvelope; action-specific bodies are listed where they are shared.
     _http("GET /api/files/cookfiles", FileListing, "content"),

@@ -2057,6 +2057,55 @@
       "title": "RecipeStepInsertRequest",
       "type": "object"
     },
+    "RecipeStepRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "hold_temp": {
+          "title": "Hold Temp",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "Smoke",
+            "Hold",
+            "Startup",
+            "Shutdown"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "notify": {
+          "title": "Notify",
+          "type": "boolean"
+        },
+        "pause": {
+          "title": "Pause",
+          "type": "boolean"
+        },
+        "timer": {
+          "title": "Timer",
+          "type": "integer"
+        },
+        "trigger_temps": {
+          "$ref": "#/$defs/RecipeTriggerTemperaturesRequest"
+        }
+      },
+      "required": [
+        "mode",
+        "hold_temp",
+        "timer",
+        "notify",
+        "message",
+        "pause",
+        "trigger_temps"
+      ],
+      "title": "RecipeStepRequest",
+      "type": "object"
+    },
     "RecipeStepUpdateRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2074,7 +2123,7 @@
           "type": "integer"
         },
         "step": {
-          "$ref": "#/$defs/RecipeStep"
+          "$ref": "#/$defs/RecipeStepRequest"
         }
       },
       "required": [
@@ -2105,6 +2154,28 @@
         "food"
       ],
       "title": "RecipeTriggerTemperatures",
+      "type": "object"
+    },
+    "RecipeTriggerTemperaturesRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "food": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Food",
+          "type": "array"
+        },
+        "primary": {
+          "title": "Primary",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "primary",
+        "food"
+      ],
+      "title": "RecipeTriggerTemperaturesRequest",
       "type": "object"
     }
   },
@@ -2169,7 +2240,9 @@
     "RecipeStep",
     "RecipeStepDeleteRequest",
     "RecipeStepInsertRequest",
+    "RecipeStepRequest",
     "RecipeStepUpdateRequest",
-    "RecipeTriggerTemperatures"
+    "RecipeTriggerTemperatures",
+    "RecipeTriggerTemperaturesRequest"
   ]
 }

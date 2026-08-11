@@ -217,6 +217,14 @@ type Index5 = number;
 type Action11 = "insert";
 type File20 = string;
 type Index6 = number;
+type HoldTemp = number;
+type Message3 = string;
+type Mode4 = "Smoke" | "Hold" | "Startup" | "Shutdown";
+type Notify1 = boolean;
+type Pause1 = boolean;
+type Timer = number;
+type Food1 = number[];
+type Primary = number;
 type Action12 = "update";
 type File21 = string;
 type Index7 = number;
@@ -886,11 +894,32 @@ export interface RecipeStepInsertRequest {
 }
 /**
  * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "RecipeStepRequest".
+ */
+export interface RecipeStepRequest {
+  hold_temp: HoldTemp;
+  message: Message3;
+  mode: Mode4;
+  notify: Notify1;
+  pause: Pause1;
+  timer: Timer;
+  trigger_temps: RecipeTriggerTemperaturesRequest;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
+ * via the `definition` "RecipeTriggerTemperaturesRequest".
+ */
+export interface RecipeTriggerTemperaturesRequest {
+  food: Food1;
+  primary: Primary;
+}
+/**
+ * This interface was referenced by `PiFireContentWebContracts`'s JSON-Schema
  * via the `definition` "RecipeStepUpdateRequest".
  */
 export interface RecipeStepUpdateRequest {
   action: Action12;
   file: File21;
   index: Index7;
-  step: RecipeStep;
+  step: RecipeStepRequest;
 }

@@ -650,6 +650,49 @@ def _valid_step_payload(primary=0, food=None, **overrides):
     return payload
 
 
+@pytest.mark.parametrize("action", ["insert", "update", "delete"])
+def test_step_mutations_reject_outer_typo_members_without_writing(client, folders, action):
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, f"Strict-Step-{action}", steps=[_step()])
+    before = _read_member_bytes(recipe_dir + name, "recipe.json")
+    payload = {"file": name, "action": action, "index": 0, "future": True}
+    if action == "update":
+        payload["step"] = _valid_step_payload(mode="Hold", hold_temp=225)
+
+    resp = client.post("/api/files/recipes/steps", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "result": "Error",
+        "message": "bad_request",
+        "data": {"field": "future"},
+    }
+    assert _read_member_bytes(recipe_dir + name, "recipe.json") == before
+
+
+@pytest.mark.parametrize("location", ["step", "trigger_temps"])
+def test_update_step_rejects_nested_typo_members_without_writing(client, folders, location):
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, f"Strict-Nested-Step-{location}", steps=[_step()])
+    before = _read_member_bytes(recipe_dir + name, "recipe.json")
+    step = _valid_step_payload(mode="Hold", hold_temp=225)
+    target = step if location == "step" else step["trigger_temps"]
+    target["future"] = True
+
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": step},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "result": "Error",
+        "message": "bad_request",
+        "data": {"field": "future"},
+    }
+    assert _read_member_bytes(recipe_dir + name, "recipe.json") == before
+
+
 def test_a_step_is_inserted_at_the_index_not_appended(client, folders):
     """Flask inserts (routes.py:281). A recipe is an ordered program;
     appending would put a new step after Shutdown."""

@@ -62,7 +62,6 @@ from common.web_contracts.content import (
     RecipeInstructionUpdateRequest,
     RecipeMetadataUpdateRequest,
     RecipeSplashAssetAssignmentRequest,
-    RecipeStep,
     RecipeStepDeleteRequest,
     RecipeStepInsertRequest,
     RecipeStepUpdateRequest,
@@ -92,13 +91,18 @@ def error(message, status, **data):
     return jsonify(validated_content_json(ContentErrorEnvelope, payload)), status
 
 
-def _validated_request(model, body, fallback_field):
+def _validated_request(model, body, fallback_field, *, collapse_fields=()):
     """Strictly validate one JSON request and retain the existing 400 envelope."""
     try:
         return model.model_validate(body, strict=True), None
     except ValidationError as exc:
-        location = exc.errors()[0]["loc"]
-        field = next((part for part in reversed(location) if isinstance(part, str)), fallback_field)
+        detail = exc.errors()[0]
+        location = detail["loc"]
+        field = None
+        if detail["type"] != "extra_forbidden":
+            field = next((candidate for candidate in collapse_fields if candidate in location), None)
+        if field is None:
+            field = next((part for part in reversed(location) if isinstance(part, str)), fallback_field)
         return None, error("bad_request", 400, field=field or fallback_field)
 
 
@@ -622,63 +626,6 @@ def recipe_instructions():
     return jsonify(api_response("OK")), 200
 
 
-#: The editor only offers Smoke/Hold, but Startup and Shutdown are seeded by
-#: the recipe defaults and carried by every existing recipe, so a write must
-#: still accept all four.
-_STEP_MODES = ("Smoke", "Hold", "Startup", "Shutdown")
-
-
-def _validated_step_fields(body):
-    """Pull a step payload out of `body["step"]` and validate its shape.
-
-    Returns (fields, None) or (None, error_response). 0 is the disabled
-    sentinel for hold_temp and both trigger_temps members -- a legal value,
-    not a missing one -- so every check here is an isinstance check, never a
-    truthiness check.
-    """
-    step = body.get("step")
-    if not isinstance(step, dict):
-        return None, error("bad_request", 400, field="step")
-    mode = step.get("mode")
-    if mode not in _STEP_MODES:
-        return None, error("bad_request", 400, field="mode")
-    message = step.get("message")
-    if not isinstance(message, str):
-        return None, error("bad_request", 400, field="message")
-    hold_temp, timer = step.get("hold_temp"), step.get("timer")
-    if not isinstance(hold_temp, int) or isinstance(hold_temp, bool):
-        return None, error("bad_request", 400, field="hold_temp")
-    if not isinstance(timer, int) or isinstance(timer, bool):
-        return None, error("bad_request", 400, field="timer")
-    notify, pause = step.get("notify"), step.get("pause")
-    if not isinstance(notify, bool):
-        return None, error("bad_request", 400, field="notify")
-    if not isinstance(pause, bool):
-        return None, error("bad_request", 400, field="pause")
-    trigger_temps = step.get("trigger_temps")
-    if not isinstance(trigger_temps, dict):
-        return None, error("bad_request", 400, field="trigger_temps")
-    primary = trigger_temps.get("primary")
-    if not isinstance(primary, int) or isinstance(primary, bool):
-        return None, error("bad_request", 400, field="trigger_temps")
-    food = trigger_temps.get("food")
-    if not isinstance(food, list) or not all(isinstance(t, int) and not isinstance(t, bool) for t in food):
-        return None, error("bad_request", 400, field="trigger_temps")
-    fields = validated_content_json(
-        RecipeStep,
-        {
-            "mode": mode,
-            "message": message,
-            "hold_temp": hold_temp,
-            "timer": timer,
-            "notify": notify,
-            "pause": pause,
-            "trigger_temps": {"primary": primary, "food": food},
-        },
-    )
-    return fields, None
-
-
 @api_files_bp.route("/recipes/steps", methods=["POST"])
 def recipe_steps():
     body = json_body()
@@ -686,36 +633,32 @@ def recipe_steps():
     if err:
         return err
     action = body.get("action")
-    index = body.get("index")
-    if not isinstance(index, int) or isinstance(index, bool):
-        return error("bad_request", 400, field="index")
+    request_model = {
+        "insert": RecipeStepInsertRequest,
+        "update": RecipeStepUpdateRequest,
+        "delete": RecipeStepDeleteRequest,
+    }.get(action)
+    if request_model is None:
+        return error("bad_request", 400, field="action")
+    mutation, validation_err = _validated_request(
+        request_model,
+        body,
+        "action",
+        collapse_fields=("trigger_temps",),
+    )
+    if validation_err:
+        return validation_err
+    assert mutation is not None
     if action == "insert":
-        mutation = RecipeStepInsertRequest.model_validate(
-            {"file": body.get("file"), "action": action, "index": index},
-            strict=True,
-        )
         status = recipes_api.insert_step(path, mutation.index)
     elif action == "update":
-        fields, err = _validated_step_fields(body)
-        if err:
-            return err
-        mutation = RecipeStepUpdateRequest.model_validate(
-            {"file": body.get("file"), "action": action, "index": index, "step": fields},
-            strict=True,
-        )
         status = recipes_api.update_step(
             path,
             mutation.index,
             mutation.step.model_dump(mode="json", exclude_unset=True),
         )
-    elif action == "delete":
-        mutation = RecipeStepDeleteRequest.model_validate(
-            {"file": body.get("file"), "action": action, "index": index},
-            strict=True,
-        )
-        status = recipes_api.delete_step(path, mutation.index)
     else:
-        return error("bad_request", 400, field="action")
+        status = recipes_api.delete_step(path, mutation.index)
     if status == "bad_index":
         return error("bad_request", 400, field="index")
     if status == "bad_food_probes":

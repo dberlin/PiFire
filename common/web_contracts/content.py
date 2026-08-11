@@ -224,6 +224,21 @@ class RecipeStep(ExtensibleWireModel):
     trigger_temps: RecipeTriggerTemperatures
 
 
+class RecipeTriggerTemperaturesRequest(WireModel):
+    primary: int
+    food: list[int]
+
+
+class RecipeStepRequest(WireModel):
+    mode: Literal["Smoke", "Hold", "Startup", "Shutdown"]
+    hold_temp: int
+    timer: int
+    notify: bool
+    message: str
+    pause: bool
+    trigger_temps: RecipeTriggerTemperaturesRequest
+
+
 class RecipeAsset(ExtensibleWireModel):
     id: str
     filename: str
@@ -317,7 +332,7 @@ class RecipeStepUpdateRequest(WireModel):
     file: str
     action: Literal["update"]
     index: int
-    step: RecipeStep
+    step: RecipeStepRequest
 
 
 class RecipeStepDeleteRequest(WireModel):
