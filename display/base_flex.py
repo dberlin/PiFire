@@ -24,6 +24,10 @@ from display.flexobject import *
 from PIL import Image
 from common import read_control, write_control, is_real_hardware, read_generic_json, read_settings, write_settings, read_status, read_current
 
+''' Colour used to show an auxiliary relay is energised on the aux menu, matching the
+    web dashboards' colour for an "on" aux plug icon. '''
+AUX_RELAY_ON_COLOR = (0, 190, 0, 255)
+
 '''
 ==================================================================================
 Display base class definition
@@ -42,6 +46,9 @@ class DisplayBase:
         self.last_in_data = {}
         self.status_data = None
         self.last_status_data = {}
+        # Snapshot of {aux_name: bool} the currently-rendered aux menu's button colours were
+        # built from; used by _fetch_data() to detect a live state change and force a rebuild.
+        self.aux_menu_outpins = None
 
         self.input_enabled = False
         self.input_origin = None
@@ -177,6 +184,39 @@ class DisplayBase:
 
         menus['aux']['button_list'] = button_list
         menus['aux']['button_text'] = button_text
+
+    def _aux_relay_states(self):
+        '''
+        Return {aux_name: bool} for every configured auxiliary relay, read from the live
+        status data. An unconfigured relay never appears in self.config['aux_info'], and a
+        configured relay that is momentarily missing from status_data['outpins'] is treated
+        as off.
+        '''
+        outpins = {}
+        if self.status_data is not None:
+            outpins = self.status_data.get('outpins', {})
+
+        return {aux['name']: outpins.get(aux['name'], False) for aux in self.config.get('aux_info', [])}
+
+    def _calc_aux_button_colors(self):
+        '''
+        Build the button_colors list for the aux menu, aligned index-for-index with the
+        button_list that _configure_aux_menu() produced: green for a 'cmd_aux_toggle_<name>'
+        button whose relay is on, None (the menu's default colour) for an off relay and for
+        both menu_close bookend entries.
+        '''
+        button_list = self.display_data[self.display_profile]['menus']['aux'].get('button_list', [])
+        aux_states = self._aux_relay_states()
+
+        button_colors = []
+        for button in button_list:
+            if button.startswith('cmd_aux_toggle_'):
+                aux_name = button[len('cmd_aux_toggle_'):]
+                button_colors.append(AUX_RELAY_ON_COLOR if aux_states.get(aux_name, False) else None)
+            else:
+                button_colors.append(None)
+
+        return button_colors
 
 
     def _init_display_device(self):
@@ -332,6 +372,11 @@ class DisplayBase:
             section_data = self.display_data[self.display_profile][self.display_active] 
         elif 'menu_' in self.display_active:
             section_data = [self.display_data[self.display_profile]['menus'][self.display_active.replace('menu_', '')]]
+            if self.display_active == 'menu_aux':
+                # Colours are per-render (live relay state) and must not be baked into the
+                # static button_list/button_text that _configure_aux_menu() built at init.
+                section_data[0]['button_colors'] = self._calc_aux_button_colors()
+                self.aux_menu_outpins = self._aux_relay_states()
         elif 'input_' in self.display_active:
             section_data = [self.display_data[self.display_profile]['input'][self.display_active.replace('input_', '')]]
             section_data[0]['data']['origin'] = self.input_origin
@@ -644,6 +689,14 @@ class DisplayBase:
 
         self.units = self.status_data['units']
 
+        ''' If the aux menu is open and a configured relay's state has changed since the menu
+            was last built, force a rebuild so the button colours stay current. Menus are only
+            rebuilt on self.display_init (see the display loops), so there is no per-frame
+            update path for them like there is for the dash. '''
+        if self.display_active == 'menu_aux' and self.aux_menu_outpins is not None:
+            if self._aux_relay_states() != self.aux_menu_outpins:
+                self.display_init = True
+
         ''' Wake the display to the dash if it's currently off '''
         if self.display_active == None and self.status_data['mode'] != 'Stop':
             self.display_active = 'dash'
@@ -895,7 +948,9 @@ class DisplayBase:
                 requests.get(f'http://127.0.0.1:5000/api/set/aux/{aux_name}/toggle')
             except:
                 self.eventLogger.debug(f'Auxiliary Relay [{aux_name}] Toggle Failed.')
-            self.display_active = 'dash'
+            # Stay on the aux menu (rather than bouncing to dash) so the user sees the colour
+            # change; the toggle is applied asynchronously by the control script, so the actual
+            # colour update happens once _fetch_data() observes the new state (see item 3).
             self.display_init = True
 
         if 'lid_open' in self.command:
