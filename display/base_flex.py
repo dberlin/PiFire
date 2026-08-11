@@ -109,6 +109,8 @@ class DisplayBase:
 
         self._fixup_display_data()
 
+        self._configure_aux_menu()
+
         self._init_assets()
 
     def _fixup_display_data(self):
@@ -140,6 +142,41 @@ class DisplayBase:
                 if key in ['position', 'size', 'fg_color', 'bg_color', 'color', 'active_color', 'inactive_color', 'sp_color', 'np_color']:
                     self.display_data[self.display_profile]['input'][input][key] = tuple(object[key])
         #print(f'Fixed Up: \n{self.display_data[self.display_profile]["menus"]}')
+
+
+    def _configure_aux_menu(self):
+        '''
+        Populate the auxiliary relay menu from the configured relays, and remove the
+        menu entry point entirely when no relays are configured.
+
+        Mirrors the food probe gauge treatment in _configure_dash: objects that have
+        no backing configuration are dropped rather than rendered empty.
+        '''
+        menus = self.display_data[self.display_profile].get('menus', {})
+        if 'aux' not in menus:
+            return
+
+        aux_info = self.config.get('aux_info', [])
+
+        if not aux_info:
+            ''' No auxiliary relays configured - remove the entry point from every main menu '''
+            for menu_name, menu in menus.items():
+                while 'menu_aux' in menu.get('button_list', []):
+                    index = menu['button_list'].index('menu_aux')
+                    menu['button_list'].pop(index)
+                    menu['button_text'].pop(index)
+            return
+
+        button_list = ['menu_close']
+        button_text = ['Close Menu']
+        for aux in aux_info:
+            button_list.append(f'aux_toggle_{aux["name"]}')
+            button_text.append(aux['label'])
+        button_list.append('menu_close')
+        button_text.append('Close')
+
+        menus['aux']['button_list'] = button_list
+        menus['aux']['button_text'] = button_text
 
 
     def _init_display_device(self):
@@ -851,6 +888,15 @@ class DisplayBase:
                 requests.get('http://127.0.0.1:5000/api/set/manual/fan/toggle')
             except:
                 self.eventLogger.debug('Fan Toggle Failed.')
+
+        if 'aux_toggle_' in self.command:
+            aux_name = self.command.split('aux_toggle_')[-1]
+            try:
+                requests.get(f'http://127.0.0.1:5000/api/set/aux/{aux_name}/toggle')
+            except:
+                self.eventLogger.debug(f'Auxiliary Relay [{aux_name}] Toggle Failed.')
+            self.display_active = 'dash'
+            self.display_init = True
 
         if 'lid_open' in self.command:
             try:
