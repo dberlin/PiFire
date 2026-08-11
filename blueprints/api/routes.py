@@ -83,9 +83,9 @@ from common.web_contracts.settings import (
 )
 from common.web_contracts.wizard import (
     ProbeModuleCatalog,
-    _ProbeMapApplyData,
-    _ProbeMapApplyResponse,
-    _ProbeMapErrorResponse,
+    ProbeMapApplyData,
+    ProbeMapApplyResponse,
+    ProbeMapErrorResponse,
     ProbeMapRequest,
 )
 from controller.model_learning.activation import (
@@ -838,20 +838,20 @@ def _api_post_probe_map(settings, request_json):
     try:
         request_payload = ProbeMapRequest.model_validate(request_json, strict=True)
     except ValidationError:
-        response = _ProbeMapErrorResponse(result="error", message="bad_probe_map")
+        response = ProbeMapErrorResponse(result="error", message="bad_probe_map")
         return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 400
     probe_map = request_payload.probe_map.model_dump(mode="json", by_alias=True, exclude_unset=True)
 
     control = read_control()
     if control.get("mode") != Mode.STOP:
-        response = _ProbeMapErrorResponse(result="error", message="system_active")
+        response = ProbeMapErrorResponse(result="error", message="system_active")
         return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 409
 
     manifest_modules = read_wizard().get("modules", {}).get("probes", {})
     live_map = settings["probe_settings"]["probe_map"]
     offenders = unsupported_new_modules(probe_map, live_map, manifest_modules)
     if offenders:
-        response = _ProbeMapErrorResponse(
+        response = ProbeMapErrorResponse(
             result="error",
             message="modules_require_install",
             modules=offenders,
@@ -861,7 +861,7 @@ def _api_post_probe_map(settings, request_json):
     try:
         validate_bus_kinds(configured_bus_kinds(settings, probe_map))
     except I2CBusConfigError as exc:
-        response = _ProbeMapErrorResponse(
+        response = ProbeMapErrorResponse(
             result="error",
             message="bus_conflict",
             detail=str(exc),
@@ -884,10 +884,10 @@ def _api_post_probe_map(settings, request_json):
         origin="api",
         ops=[{"op": "notify.replace", "entries": control["notify_data"]}],
     )
-    response = _ProbeMapApplyResponse(
+    response = ProbeMapApplyResponse(
         result="success",
         message="Probe map applied.",
-        data=_ProbeMapApplyData(probe_map=request_payload.probe_map),
+        data=ProbeMapApplyData(probe_map=request_payload.probe_map),
     )
     return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 200
 

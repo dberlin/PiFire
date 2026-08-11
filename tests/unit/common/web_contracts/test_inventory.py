@@ -14,6 +14,7 @@ from common.web_contracts.inventory import (
     JsonWebContract,
 )
 from common.web_contracts.registry import WEB_CONTRACT_BUNDLES, WEB_ROOT_CONTRACTS
+from common.web_contracts.wizard import ProbeMapResponse, WizardActionResponse
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 WEB_REACT_ROOT = REPOSITORY_ROOT / "web-react"
@@ -170,6 +171,18 @@ def test_every_inventory_model_has_exactly_one_registered_owner():
                 continue
             assert owners.get(model) is not None, f"{contract.name}: {model.__name__} is not registered"
             assert len(owners[model]) == 1, f"{contract.name}: {model.__name__} owners={owners[model]}"
+
+
+def test_wizard_mutation_inventory_uses_the_emitted_response_contracts():
+    responses = {contract.name: contract.response for contract in JSON_WEB_CONTRACT_INVENTORY}
+
+    for endpoint in (
+        "POST /api/wizard/draft",
+        "POST /api/wizard/cancel",
+        "POST /api/wizard/finish",
+    ):
+        assert responses[endpoint] is WizardActionResponse
+    assert responses["POST /api/probe_map"] is ProbeMapResponse
 
 
 def test_every_bundle_has_committed_schema_generated_types_and_manifest_entry():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Generic, Literal, TypeVar
 
-from pydantic import Field
+from pydantic import Field, RootModel
 
 from common.settings_schema import I2CBusConfig
 
@@ -279,25 +279,29 @@ class ProbeMapRequest(WireModel):
     probe_map: ProbeMap
 
 
-class _ActionResponse(WireModel):
+class WizardActionResponse(WireModel):
     result: Literal["success", "error"]
     message: str = ""
     detail: str = ""
     sections: list[str] = Field(default_factory=list)
 
 
-class _ProbeMapApplyData(WireModel):
+class ProbeMapApplyData(WireModel):
     probe_map: ProbeMap
 
 
-class _ProbeMapApplyResponse(WireModel):
+class ProbeMapApplyResponse(WireModel):
     result: Literal["success"]
     message: str
-    data: _ProbeMapApplyData
+    data: ProbeMapApplyData
 
 
-class _ProbeMapErrorResponse(WireModel):
+class ProbeMapErrorResponse(WireModel):
     result: Literal["error"]
     message: Literal["bad_probe_map", "system_active", "modules_require_install", "bus_conflict"]
     detail: str = ""
     modules: list[str] = Field(default_factory=list)
+
+
+class ProbeMapResponse(RootModel[ProbeMapApplyResponse | ProbeMapErrorResponse]):
+    pass

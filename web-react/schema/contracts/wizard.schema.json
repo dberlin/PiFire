@@ -520,6 +520,81 @@
       "title": "ProbeMap",
       "type": "object"
     },
+    "ProbeMapApplyData": {
+      "additionalProperties": false,
+      "properties": {
+        "probe_map": {
+          "$ref": "#/$defs/ProbeMap"
+        }
+      },
+      "required": [
+        "probe_map"
+      ],
+      "title": "ProbeMapApplyData",
+      "type": "object"
+    },
+    "ProbeMapApplyResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ProbeMapApplyData"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "result": {
+          "const": "success",
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result",
+        "message",
+        "data"
+      ],
+      "title": "ProbeMapApplyResponse",
+      "type": "object"
+    },
+    "ProbeMapErrorResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "message": {
+          "enum": [
+            "bad_probe_map",
+            "system_active",
+            "modules_require_install",
+            "bus_conflict"
+          ],
+          "title": "Message",
+          "type": "string"
+        },
+        "modules": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Modules",
+          "type": "array"
+        },
+        "result": {
+          "const": "error",
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result",
+        "message"
+      ],
+      "title": "ProbeMapErrorResponse",
+      "type": "object"
+    },
     "ProbeMapRequest": {
       "additionalProperties": false,
       "properties": {
@@ -532,6 +607,17 @@
       ],
       "title": "ProbeMapRequest",
       "type": "object"
+    },
+    "ProbeMapResponse": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProbeMapApplyResponse"
+        },
+        {
+          "$ref": "#/$defs/ProbeMapErrorResponse"
+        }
+      ],
+      "title": "ProbeMapResponse"
     },
     "ProbeModuleCatalog": {
       "additionalProperties": false,
@@ -979,6 +1065,41 @@
           "type": "null"
         }
       ]
+    },
+    "WizardActionResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "success",
+            "error"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "WizardActionResponse",
+      "type": "object"
     },
     "WizardDraftRequest": {
       "additionalProperties": false,
@@ -1558,7 +1679,11 @@
     "ProbeDevice",
     "ProbeFieldType",
     "ProbeMap",
+    "ProbeMapApplyData",
+    "ProbeMapApplyResponse",
+    "ProbeMapErrorResponse",
     "ProbeMapRequest",
+    "ProbeMapResponse",
     "ProbeModuleCatalog",
     "ProbeModuleData",
     "ProbeProfile",
@@ -1572,6 +1697,7 @@
     "ThermoworksRowsResult",
     "WireScalar",
     "WireValue",
+    "WizardActionResponse",
     "WizardDraftRequest",
     "WizardFinishRequest",
     "WizardModuleData",

@@ -11,7 +11,13 @@ from common.datastore_accessors import (
 )
 from common.defaults import default_notify, default_probe_config
 from common.modes import Mode
-from common.web_contracts.wizard import ProbeMap, ProbeModuleCatalog
+from common.web_contracts.wizard import (
+    ProbeMap,
+    ProbeMapApplyResponse,
+    ProbeMapErrorResponse,
+    ProbeMapResponse,
+    ProbeModuleCatalog,
+)
 
 PROFILE_ID = "TWPS00"
 
@@ -359,6 +365,28 @@ def test_removing_a_probe_takes_its_notify_entries_with_it(ds, client):
     # The non-probe entries default_notify() always appends are not probes and
     # must survive every map edit.
     assert {e["label"] for e in notify_data if not e["type"].startswith("probe")} == {"Timer", "Hopper", "Test"}
+
+
+def test_probe_map_response_contracts_cover_success_and_every_error_shape():
+    success = {
+        "result": "success",
+        "message": "Probe map applied.",
+        "data": {"probe_map": {"probe_devices": [], "probe_info": []}},
+    }
+    error = {
+        "result": "error",
+        "message": "modules_require_install",
+        "modules": ["ds18b20"],
+    }
+
+    assert ProbeMapApplyResponse.model_validate(success, strict=True).model_dump(
+        mode="json", by_alias=True, exclude_unset=True
+    ) == success
+    assert ProbeMapErrorResponse.model_validate(error, strict=True).model_dump(
+        mode="json", by_alias=True, exclude_unset=True
+    ) == error
+    assert ProbeMapResponse.model_validate(success, strict=True).root.result == "success"
+    assert ProbeMapResponse.model_validate(error, strict=True).root.result == "error"
 
 
 def test_apply_rejects_an_empty_body_before_any_handler(ds, client):

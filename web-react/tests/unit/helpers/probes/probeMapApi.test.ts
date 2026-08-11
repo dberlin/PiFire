@@ -46,6 +46,15 @@ describe("applyProbeMap", () => {
     expect(JSON.parse(init.body as string)).toEqual({ probe_map: MAP });
   });
 
+  it("rejects an error envelope even if the transport status is 200", async () => {
+    fetchMock.mockResolvedValue(reply(200, { result: "error", message: "bad_probe_map" }));
+
+    expect(await applyProbeMap("", MAP)).toEqual({
+      ok: false,
+      message: "The probe configuration is malformed and was not saved.",
+    });
+  });
+
   it("translates system_active into a sentence about the grill", async () => {
     fetchMock.mockResolvedValue(reply(409, { result: "error", message: "system_active" }));
     const r = await applyProbeMap("", MAP);

@@ -115,6 +115,17 @@ export type ProbeFieldType =
   | "usb_serial_device";
 type ProbeDevices1 = ProbeDevice[];
 type ProbeInfo = Probe[];
+type Message = string;
+type Result = "success";
+type Detail1 = string;
+type Message1 = "bad_probe_map" | "system_active" | "modules_require_install" | "bus_conflict";
+type Modules = string[];
+type Result1 = "error";
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "ProbeMapResponse".
+ */
+export type ProbeMapResponse = ProbeMapApplyResponse | ProbeMapErrorResponse;
 type AptDependencies = string[];
 type CommandList = string[][];
 type Default = boolean;
@@ -154,6 +165,10 @@ type Serial2 = string;
 type Type2 = string;
 type Error3 = string | null;
 type Rows2 = ThermoworksRow[];
+type Detail2 = string;
+type Message2 = string;
+type Result2 = "success" | "error";
+type Sections = string[];
 type Clear = boolean;
 type ProbesUnits = string;
 type ProbesUnits1 = string;
@@ -413,6 +428,32 @@ export interface ProbeMap {
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "ProbeMapApplyData".
+ */
+export interface ProbeMapApplyData {
+  probe_map: ProbeMap;
+}
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "ProbeMapApplyResponse".
+ */
+export interface ProbeMapApplyResponse {
+  data: ProbeMapApplyData;
+  message: Message;
+  result: Result;
+}
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "ProbeMapErrorResponse".
+ */
+export interface ProbeMapErrorResponse {
+  detail?: Detail1;
+  message: Message1;
+  modules?: Modules;
+  result: Result1;
+}
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
  * via the `definition` "ProbeMapRequest".
  */
 export interface ProbeMapRequest {
@@ -423,10 +464,10 @@ export interface ProbeMapRequest {
  * via the `definition` "ProbeModuleCatalog".
  */
 export interface ProbeModuleCatalog {
-  modules: Modules;
+  modules: Modules1;
   requires_install: RequiresInstall;
 }
-interface Modules {
+interface Modules1 {
   [k: string]: ProbeModuleData;
 }
 /**
@@ -545,6 +586,16 @@ export interface ThermoworksRow {
 export interface ThermoworksRowsResult {
   error: Error3;
   rows: Rows2;
+}
+/**
+ * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema
+ * via the `definition` "WizardActionResponse".
+ */
+export interface WizardActionResponse {
+  detail?: Detail2;
+  message?: Message2;
+  result: Result2;
+  sections?: Sections;
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema

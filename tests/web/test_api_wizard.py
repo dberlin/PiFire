@@ -12,6 +12,7 @@ from common.web_contracts.wizard import (
     InstallStatus,
     ModuleValues,
     RowsResult,
+    WizardActionResponse,
     ScanResult,
     WizardDraftRequest,
     WizardState,
@@ -1195,6 +1196,42 @@ def test_wizard_post_routes_reject_invalid_json_contracts(ds, client, path, payl
     assert response.get_json()["message"] == "invalid_request"
 
 
+@pytest.mark.parametrize(
+    ("body", "content_type"),
+    [
+        ("null", "application/json"),
+        ("[1]", "application/json"),
+        ("{", "application/json"),
+        ("not-json", "text/plain"),
+    ],
+)
+def test_present_invalid_bodies_are_rejected_before_cancel_side_effects(ds, client, body, content_type):
+    settings = read_settings()
+    settings["globals"]["first_time_setup"] = True
+    write_settings_store(settings)
+
+    response = client.post("/api/wizard/cancel", data=body, content_type=content_type)
+
+    assert response.status_code == 400
+    assert response.get_json() == {"result": "error", "message": "invalid_request"}
+    assert read_settings()["globals"]["first_time_setup"] is True
+
+
+@pytest.mark.parametrize("path", ["draft", "scan", "scan/thermoworks"])
+def test_defaulted_wizard_requests_reject_a_genuinely_absent_body(ds, client, path):
+    response = client.post(f"/api/wizard/{path}")
+
+    assert response.status_code == 400
+    assert response.get_json()["message"] == "invalid_request"
+
+
+def test_cancel_retains_legacy_absent_body_compatibility(ds, client):
+    response = client.post("/api/wizard/cancel")
+
+    assert response.status_code == 200
+    assert response.get_json()["result"] == "success"
+
+
 def test_static_wizard_response_contracts_pin_null_and_omission():
     _assert_wire_round_trip(
         ScanResult,
@@ -1217,6 +1254,11 @@ def test_static_wizard_response_contracts_pin_null_and_omission():
         {"rows": [{"name": "IBBQ", "hw_id": "AA:BB", "info": ""}], "error": None},
     )
     _assert_wire_round_trip(BusKindsValidationResponse, {"ok": True})
+    _assert_wire_round_trip(WizardActionResponse, {"result": "success"})
+    _assert_wire_round_trip(
+        WizardActionResponse,
+        {"result": "error", "message": "bus_conflict", "detail": "mixed buses", "sections": []},
+    )
 
 
 def test_draft_request_contract_rejects_non_finite_plugin_values():

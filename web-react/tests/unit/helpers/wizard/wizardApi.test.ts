@@ -18,7 +18,9 @@ describe("wizardApi", () => {
   });
 
   test("saveDraft posts /api/wizard/draft and returns ok status", async () => {
-    globalThis.fetch = rs.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
+    globalThis.fetch = rs
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ result: "success" }) }) as never;
     const { saveDraft } = await import("../../../../src/helpers/wizard/wizardApi");
     const ok = await saveDraft("", {
       selections: { grillplatform: "", display: "", distance: "", probes: "" },
@@ -38,6 +40,27 @@ describe("wizardApi", () => {
       probe_map: { probe_devices: [], probe_info: [] },
       probes_units: "F",
     });
+  });
+
+  test("saveDraft rejects an error envelope even if the transport status is 200", async () => {
+    globalThis.fetch = rs
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ result: "error", message: "invalid_request" }),
+      }) as never;
+    const { saveDraft } = await import("../../../../src/helpers/wizard/wizardApi");
+
+    const ok = await saveDraft("", {
+      selections: {},
+      settings_dep_values: {},
+      display_config: {},
+      probe_map: { probe_devices: [], probe_info: [] },
+      probes_units: "F",
+    });
+
+    expect(ok).toBe(false);
   });
 
   test("cancelWizard posts /api/wizard/cancel and returns ok status", async () => {

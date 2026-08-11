@@ -3,6 +3,8 @@ import type {
   ProbeDevice,
   ProbeMap,
   ProbeMapRequest,
+  ProbeMapErrorResponse,
+  ProbeMapResponse,
   ProbeModuleCatalog,
   ProbeProfile,
 } from "../contracts/wizard.gen";
@@ -19,10 +21,7 @@ export async function getProbeModules(baseUrl: string): Promise<ProbeModuleCatal
 // The route's four rejection codes, turned into sentences here rather than in
 // the component: the codes are a backend contract and belong beside the client
 // that speaks it. `bus_conflict` carries its own already-readable detail.
-function explain(
-  status: number,
-  body: { message?: string; detail?: string; modules?: string[] },
-): string {
+function explain(status: number, body: ProbeMapErrorResponse): string {
   switch (body.message) {
     case "system_active":
       return "Stop the grill before changing probe configuration.";
@@ -49,8 +48,11 @@ export async function applyProbeMap(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ probe_map: probeMap } satisfies ProbeMapRequest),
     });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, message: explain(res.status, body) };
+    const body: ProbeMapResponse | null = await res.json().catch(() => null);
+    if (body?.result === "error") return { ok: false, message: explain(res.status, body) };
+    if (!res.ok || body === null) {
+      return { ok: false, message: `Probe configuration was not saved (HTTP ${res.status}).` };
+    }
     return { ok: true };
   } catch {
     return { ok: false, message: "Could not reach PiFire. The probe configuration was not saved." };

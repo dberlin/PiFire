@@ -52,7 +52,7 @@ from common.web_contracts.wizard import (
     WizardDraftRequest,
     WizardFinishRequest,
     WizardState,
-    _ActionResponse,
+    WizardActionResponse,
     EmptyWizardRequest,
     ThermoworksRequest,
 )
@@ -73,16 +73,22 @@ def _contract_response(model, payload, status=200):
 
 def _invalid_request():
     return _contract_response(
-        _ActionResponse,
+        WizardActionResponse,
         {"result": "error", "message": "invalid_request"},
         400,
     )
 
 
-def _request_contract(model):
-    payload = request.get_json(silent=True)
-    if payload is None:
+def _request_contract(model, *, allow_absent=False):
+    raw_body = request.get_data(cache=True)
+    if not raw_body:
+        if not allow_absent:
+            return None, _invalid_request()
         payload = {}
+    else:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return None, _invalid_request()
     try:
         validated = model.model_validate(payload, strict=True)
     except ValidationError:
@@ -284,7 +290,7 @@ def wizard_draft():
         info.pop("probes_units", None)
         info.pop(_STAMP_KEY, None)
         store_wizard_install_info(info)
-        return _contract_response(_ActionResponse, {"result": "success"})
+        return _contract_response(WizardActionResponse, {"result": "success"})
 
     info[_DRAFT_KEY] = True
     info["selections"] = payload.get("selections", {})
@@ -296,7 +302,7 @@ def wizard_draft():
     # cheaply and totally, whether this draft still applies.
     info[_STAMP_KEY] = _manifest_fingerprint(wizard_data)
     store_wizard_install_info(info)
-    return _contract_response(_ActionResponse, {"result": "success"})
+    return _contract_response(WizardActionResponse, {"result": "success"})
 
 
 @api_wizard_bp.route("/cancel", methods=["POST"])
@@ -327,13 +333,13 @@ def wizard_cancel():
     api blueprint's `/api/<action>/<arg0>` catch-all (blueprints/api/routes.py:291)
     swallows POST /api/wizard/cancel and answers 415, not 404.
     """
-    _, error_response = _request_contract(EmptyWizardRequest)
+    _, error_response = _request_contract(EmptyWizardRequest, allow_absent=True)
     if error_response is not None:
         return error_response
     settings = read_settings()
     settings["globals"]["first_time_setup"] = False
     write_settings(settings)
-    return _contract_response(_ActionResponse, {"result": "success"})
+    return _contract_response(WizardActionResponse, {"result": "success"})
 
 
 def _usb_serial_label(dev):
@@ -473,7 +479,7 @@ def wizard_module_values():
     module = request_payload.module
     if section not in ("grillplatform", "display", "distance"):
         return _contract_response(
-            _ActionResponse,
+            WizardActionResponse,
             {"result": "error", "message": "unknown_module"},
             400,
         )
@@ -481,7 +487,7 @@ def wizard_module_values():
     module_data = wizard_data.get("modules", {}).get(section, {}).get(module)
     if not isinstance(module_data, dict):
         return _contract_response(
-            _ActionResponse,
+            WizardActionResponse,
             {"result": "error", "message": "unknown_module"},
             400,
         )
@@ -571,19 +577,19 @@ def _wizard_install_info_from_payload(payload, existing):
 
 @api_wizard_bp.route("/finish", methods=["POST"])
 def wizard_finish():
-    settings = read_settings()
-    control = read_control()
-    if control.get("mode") != Mode.STOP:
-        return _contract_response(
-            _ActionResponse,
-            {"result": "error", "message": "system_active"},
-            409,
-        )
-
     request_payload, error_response = _request_contract(WizardFinishRequest)
     if error_response is not None:
         return error_response
     assert request_payload is not None
+    settings = read_settings()
+    control = read_control()
+    if control.get("mode") != Mode.STOP:
+        return _contract_response(
+            WizardActionResponse,
+            {"result": "error", "message": "system_active"},
+            409,
+        )
+
     payload = request_payload.model_dump(mode="json", by_alias=True, exclude_unset=True)
     wizard_data = read_wizard()
     existing = _load_draft(wizard_data)
@@ -606,7 +612,7 @@ def wizard_finish():
     ]
     if missing_sections:
         return _contract_response(
-            _ActionResponse,
+            WizardActionResponse,
             {"result": "error", "message": "missing_selection", "sections": missing_sections},
             400,
         )
@@ -615,7 +621,7 @@ def wizard_finish():
         validate_bus_kinds(wizard_bus_kinds(wizard_install_info, wizard_data))
     except I2CBusConfigError as exc:
         return _contract_response(
-            _ActionResponse,
+            WizardActionResponse,
             {"result": "error", "message": "bus_conflict", "detail": str(exc)},
             422,
         )
@@ -624,7 +630,7 @@ def wizard_finish():
     set_wizard_install_status(0, "Starting Install...", "")
     python_exec = settings["globals"].get("python_exec", "python")
     os.system(f"{python_exec} wizard.py &")  # Kickoff Installation (mirrors _wizard_finish)
-    return _contract_response(_ActionResponse, {"result": "success"})
+    return _contract_response(WizardActionResponse, {"result": "success"})
 
 
 @api_wizard_bp.route("/installstatus", methods=["GET"])
