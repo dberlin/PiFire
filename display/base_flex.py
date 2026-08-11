@@ -170,7 +170,7 @@ class DisplayBase:
         button_list = ['menu_close']
         button_text = ['Close Menu']
         for aux in aux_info:
-            button_list.append(f'aux_toggle_{aux["name"]}')
+            button_list.append(f'cmd_aux_toggle_{aux["name"]}')
             button_text.append(aux['label'])
         button_list.append('menu_close')
         button_text.append('Close')
