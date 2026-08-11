@@ -228,3 +228,30 @@ bun run typecheck
 ```
 
 Shared-path ownership: `common/web_contracts/registry.py` and `common/web_contracts/inventory.py` also contained concurrent Task 7 changes. Per coordination with the Task 7 owner, those combined shared paths were excluded from the Task 6 fix commit and captured in Task 7 commit `d9d75b5f` (`rmnpzkvs`).
+
+## Final lint follow-up
+
+Lint-only fix commit: `c4c1cdc4` (`yorykstp`)
+
+`bun run lint` reproduced four Biome organize/format errors across:
+
+- `web-react/src/helpers/probes/probeMapApi.ts`
+- `web-react/src/helpers/wizard/wizardApi.ts`
+- `web-react/tests/unit/helpers/wizard/wizardApi.test.ts`
+
+`bunx biome check --write` was limited to those three paths. Fresh verification:
+
+```bash
+cd web-react
+bun run lint
+# Checked 542 files in 225ms. No fixes applied. Exit 0.
+
+bunx rstest run tests/unit/helpers/wizard tests/unit/helpers/probes
+# 11 files passed; 93 tests passed in 964ms.
+
+bun run typecheck
+# node node_modules/typescript7/bin/tsc -b
+# exit 0
+```
+
+Focused review found no issues: the fix only alphabetizes type-only imports and reformats unchanged expressions/mocks, with identical runtime semantics and test intent.
