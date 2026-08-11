@@ -624,6 +624,42 @@ describe("MpcLearningView", () => {
     expect(screen.getByRole("button", { name: "MPC learning: active" })).toBeVisible();
   });
 
+  it("drops cached authority when a successful refresh violates the report schema", async () => {
+    const reviewed = { ...REPORT, status: "ready-for-review" as const };
+    fetchMock.mockResolvedValueOnce(jsonResponse(reviewed)).mockResolvedValueOnce(
+      jsonResponse({
+        ...reviewed,
+        candidate: {
+          ...reviewed.candidate,
+          parameters: {
+            ...reviewed.candidate.parameters,
+            C_c: "NaN",
+          },
+        },
+      }),
+    );
+    const view = renderPanel({ modelLearningRevision: "wire-valid" });
+    await openPanel();
+    expect(screen.getByRole("button", { name: "Activate exact model" })).toBeVisible();
+    expect(screen.getAllByText(CANDIDATE_DIGEST).length).toBeGreaterThan(0);
+
+    view.rerender(
+      <MpcLearningView
+        apiBase=""
+        selectedController="mpc"
+        units="F"
+        ambientC={20}
+        modelLearningRevision="wire-invalid"
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Invalid model evidence report: candidate.parameters.C_c must be a finite number",
+    );
+    expect(screen.queryByRole("button", { name: "Activate exact model" })).not.toBeInTheDocument();
+    expect(screen.queryByText(CANDIDATE_DIGEST)).not.toBeInTheDocument();
+  });
+
   it("recovers through the five-second poll after a failed projection", async () => {
     rs.useFakeTimers();
     fetchMock

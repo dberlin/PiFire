@@ -265,3 +265,35 @@ Generated web contract TypeScript is up to date.
 ```
 
 `ActivationReport` now owns the `decision_id` and `incumbent_digest` members already emitted by the authoritative model-evidence projection. The generated learning schema and TypeScript contract were regenerated from that corrected Pydantic source.
+
+## Fix round 4: discard cached authority after schema-invalid success
+
+RED:
+
+```text
+bunx rstest run tests/unit/components/dashboard/MpcLearningView.test.tsx -t "drops cached authority"
+1 failed: the prior "Activate exact model" action remained in the document after a malformed HTTP 200 refresh
+```
+
+GREEN:
+
+```text
+bunx rstest run tests/unit/helpers/modelEvidenceApi.test.ts \
+  tests/unit/components/dashboard/MpcLearningView.test.tsx \
+  tests/unit/components/dashboard/LearningPanel.test.tsx
+Test Files 3 passed
+Tests 48 passed
+Duration 2.31s
+
+bun run typecheck
+EXIT=0
+
+bunx biome check src/components/dashboard/learning/MpcLearningView.tsx \
+  tests/unit/components/dashboard/MpcLearningView.test.tsx
+Checked 2 files. No fixes applied.
+
+bunx playwright test --project=panel tests/e2e/dashboard-panel.spec.ts
+14 passed (12.1s)
+```
+
+The query view now distinguishes a schema-invalid successful response from a transport/server refresh failure. A schema-invalid success ignores cached report authority, removes candidate/activation/rollback content, and disables its actions. The established network failure regression continues to retain prior report context while presenting the stale-data error and retry controls.
