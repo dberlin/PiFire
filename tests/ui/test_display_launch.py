@@ -1,5 +1,8 @@
+import io
 import shlex
 import sys
+
+import pytest
 
 import display_launch
 
@@ -58,3 +61,46 @@ def test_build_launch_argv_does_not_mutate_env():
     env = {"XDG_RUNTIME_DIR": "/run/user/1000"}
     display_launch.build_launch_argv(settings, env)
     assert env == {"XDG_RUNTIME_DIR": "/run/user/1000"}
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "00:00:55.148 [ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: "
+        "Atomic commit failed: Device or resource busy\n",
+        "00:00:55.148 [ERROR] [wlr] [backend/drm/atomic.c:912] connector HDMI-A-1: "
+        "Atomic commit failed: Device or resource busy\n",
+        "00:00:55.148 [ERROR] [sway/desktop/output.c:300] Page-flip failed on output DP-1\n",
+        "00:00:55.148 [ERROR] [sway/desktop/output.c:411] Page-flip failed on output HDMI-A-1\n",
+    ],
+)
+def test_known_powered_down_output_errors_are_ignored(line):
+    assert display_launch._is_ignored_sway_stderr(line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "[ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: "
+        "Atomic commit failed: Invalid argument\n",
+        "[ERROR] [wlr] connector DP-1: Atomic commit failed: Device or resource busy\n",
+        "[ERROR] [sway/desktop/output.c:300] Page-flip failed while enabling output DP-1\n",
+        "Qt warning: Page-flip failed on output DP-1\n",
+    ],
+)
+def test_other_display_errors_are_preserved(line):
+    assert not display_launch._is_ignored_sway_stderr(line)
+
+
+def test_relay_removes_only_known_noise():
+    source = io.StringIO(
+        "[ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: "
+        "Atomic commit failed: Device or resource busy\n"
+        "actionable display error\n"
+        "[ERROR] [sway/desktop/output.c:300] Page-flip failed on output DP-1\n"
+    )
+    destination = io.StringIO()
+
+    display_launch._relay_sway_stderr(source, destination)
+
+    assert destination.getvalue() == "actionable display error\n"

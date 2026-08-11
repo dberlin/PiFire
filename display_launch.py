@@ -14,10 +14,13 @@ nothing from display/, preserving the invariant that PySide6 is never loaded in
 the display parent process.
 """
 
+from collections.abc import Iterable
 import logging
 import os
+import re
 import shlex
 import sys
+from typing import TextIO
 
 from common import datastore
 from common.datastore_accessors import read_settings
@@ -26,6 +29,14 @@ from common.datastore_accessors import read_settings
 # repo root; the config sits under display/sway/. It is only referenced as a
 # file path -- nothing from display/ is imported (PySide6 must not load here).
 SWAY_KIOSK_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "display", "sway", "kiosk.conf")
+
+_SWAY_IGNORED_STDERR_PATTERNS = (
+    re.compile(
+        r"\[wlr\] \[backend/drm/atomic\.c:\d+\] connector \S+: "
+        r"Atomic commit failed: Device or resource busy$"
+    ),
+    re.compile(r"\[sway/desktop/output\.c:\d+\] Page-flip failed on output \S+$"),
+)
 
 
 def build_launch_argv(settings, env):
@@ -60,6 +71,19 @@ def _ensure_runtime_dir(path):
     os.makedirs(path, mode=0o700, exist_ok=True)
     os.chmod(path, 0o700)
 
+
+
+def _is_ignored_sway_stderr(line: str) -> bool:
+    message = line.rstrip("\r\n")
+    return any(pattern.search(message) for pattern in _SWAY_IGNORED_STDERR_PATTERNS)
+
+
+def _relay_sway_stderr(source: Iterable[str], destination: TextIO) -> None:
+    for line in source:
+        if _is_ignored_sway_stderr(line):
+            continue
+        destination.write(line)
+        destination.flush()
 
 def main():
     # display_launch.py runs as its own standalone process (supervisor's exec
