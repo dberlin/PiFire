@@ -262,3 +262,25 @@ the compile-time contract without violating Biome's
 - RED: focused Biome reported `noConstantCondition` (plus import ordering).
 - GREEN: focused Biome checked one file with no diagnostics; the command suite
   passed 33 tests and `bun run typecheck` passed.
+
+## Aggregate-gate strict shutdown follow-up
+
+Commit: `c7a6a38dcb010fe31b964e70a716001d6cd6cffa`
+(`onmuxmnonlzwrlluywxkkxksuvzlztpo`).
+
+`NotifyEntry.shutdown` is an omissible but non-nullable boolean. Its `False`
+default is excluded by `exclude_unset=True` when a legacy whole-notify entry
+omits the member; explicit JSON `null` is rejected at the REST boundary with
+the preserved `{control, result, message}` error envelope. Explicit `false`
+and `true` remain accepted. The regenerated TypeScript field is
+`shutdown?: boolean`, not nullable.
+
+- Strict RED: the new focused model and route checks produced 2 failures and
+  3 passes: explicit null was accepted by the model and returned HTTP 201.
+- Strict GREEN: the same focused checks passed 5 tests.
+- Focused Task 5 Python suite, including the full control-delta seam: 267
+  passed in 7.18s (18 pre-existing syntax warnings from source-scanning
+  characterization).
+- Focused command/notify Rstest suite: 81 passed in 281ms.
+- `bun run gen:types:check`, `bun run typecheck`, and focused Python LSP
+  diagnostics passed after regeneration.
