@@ -82,7 +82,7 @@ Focused frontend tests and fixtures:
 
 - `web-react/src/components/wizard/InstallProgress.tsx` initially combined Task 6's `InstallStatus` generated import with Task 8's `SystemAction` generated import. Task 8 captured that shared cutover; the Task 6 review-fix commit subsequently changed only the null-safe `InstallStatus` consumer behavior.
 
-## Exact deferred registry integration
+## Original deferred registry integration (applied and extended by the final-review wave)
 
 Add these imports from `common.web_contracts.wizard` to `common/web_contracts/registry.py`, then insert this bundle in sorted bundle-name order:
 
@@ -155,9 +155,9 @@ It must also add this manifest entry during generation:
 "wizard.schema.json": "wizard.gen.ts"
 ```
 
-No registry, exporter, manifest, schema, or generated TypeScript path was edited in Task 6.
+No registry, exporter, manifest, schema, or generated TypeScript path was edited in the original concurrent Task 6 wave. The final-review fix later regenerated the wizard schema and TypeScript after canonical response ownership was integrated.
 
-## Deferred commands (not run in this concurrent wave)
+## Deferred commands from the concurrent wave
 
 ```bash
 uv run pytest -q tests/web/test_api_wizard.py tests/web/test_api_probe_map.py
@@ -184,6 +184,47 @@ bunx rstest run tests/unit/components/wizard tests/unit/components/settings/tabs
 
 ## Concerns
 
-- Direct frontend imports intentionally target the absent future `wizard.gen.ts`; compilation and generated-name confirmation belong to the serialized registry/generation wave.
+- `wizard.gen.ts` now exists and exports the canonical wizard and probe-map mutation response contracts. Registry/inventory ownership was updated in the shared working path and is captured by Task 7's coordinated shared-path commit.
 - `RowsResult` is the public generic base contract; `BtRowsResult` and `ThermoworksRowsResult` are concrete generated response contracts required so the two scan consumers retain precise row types without casts or duplicate handwritten wire types.
 - The wizard draft permits `{kind: "kernel", bus_num: null}` only as mutable/incomplete draft state. Completed bus variants reuse `common.settings_schema.I2CBusConfig`; no second complete I2C union was introduced.
+
+## Final-review fix wave
+
+Fix commit: `8abc7ae0` (`qovyuptp`)
+
+The final review identified two contract-boundary defects:
+
+- Wizard draft/cancel/finish inventory entries named `RowsResult`, and the probe-map write named raw `ProbeMap`, while the routes emitted private response models. The response models are now public, registered in the wizard bundle, represented by `WizardActionResponse` and the discriminated `ProbeMapResponse` union in inventory, generated into `wizard.gen.ts`, and consumed directly by the frontend helpers.
+- `_request_contract` collapsed every `request.get_json(silent=True) == None` case into `{}`. It now distinguishes a genuinely absent body from present JSON `null`, arrays, malformed JSON, and non-JSON bodies. Only `/api/wizard/cancel` retains its established absent-body compatibility; invalid present bodies return the normal 400 envelope before cancellation side effects.
+
+Strict RED evidence:
+
+- `uv run pytest -q tests/web/test_api_wizard.py tests/web/test_api_probe_map.py tests/unit/common/web_contracts/test_inventory.py` failed collection with three expected missing-public-contract import errors.
+- `cd web-react && bunx rstest run tests/unit/helpers/wizard/wizardApi.test.ts` failed the new error-envelope regression (`1 failed, 13 passed`).
+- `cd web-react && bunx rstest run tests/unit/helpers/probes/probeMapApi.test.ts` failed the corresponding probe-map regression (`1 failed, 13 passed`).
+
+Final GREEN evidence:
+
+```bash
+uv run pytest -q tests/web/test_api_wizard.py tests/web/test_api_probe_map.py
+# 98 passed in 3.47s
+
+cd web-react
+bunx rstest run tests/unit/helpers/wizard tests/unit/helpers/probes
+# 11 files passed; 93 tests passed in 1.02s
+
+cd ..
+uv run pytest -q tests/unit/common/web_contracts/test_inventory.py tests/unit/common/web_contracts/test_export.py
+# 17 passed in 3.87s
+
+cd web-react
+bun run gen:types:check
+# Pydantic web contract artifacts are up to date.
+# Generated web contract TypeScript is up to date.
+
+bun run typecheck
+# node node_modules/typescript7/bin/tsc -b
+# exit 0
+```
+
+Shared-path ownership: `common/web_contracts/registry.py` and `common/web_contracts/inventory.py` also contained concurrent Task 7 changes. Per coordination with the Task 7 owner, those combined shared paths were excluded from the Task 6 fix commit and captured in Task 7 commit `d9d75b5f` (`rmnpzkvs`).
