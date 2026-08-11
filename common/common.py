@@ -685,6 +685,8 @@ def default_control():
 		'pwm' : 100
 	}
 
+	control['aux'] = {}  # Pending auxiliary relay requests, i.e. {'aux1' : True}.  Cleared once applied.
+
 	control['smartstart'] = {
 		'startuptemp' : 0,
 		'profile_selected' : 0
