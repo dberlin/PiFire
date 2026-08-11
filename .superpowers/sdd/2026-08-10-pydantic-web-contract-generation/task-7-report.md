@@ -69,8 +69,10 @@ ContractBundle(
         RecipeStep,
         RecipeStepDeleteRequest,
         RecipeStepInsertRequest,
+        RecipeStepRequest,
         RecipeStepUpdateRequest,
         RecipeTriggerTemperatures,
+        RecipeTriggerTemperaturesRequest,
     ),
     typescript_output="content.gen.ts",
 ),
@@ -198,3 +200,47 @@ ruff check common/web_contracts/content.py tests/web/test_api_files_cookfile_com
 ```
 
 Results: both files formatted; Ruff `All checks passed`.
+
+## Final-review step validation fix
+
+Fix commit: `d9d75b5f` (`rmnpzkvs`) — `fix(content): validate original recipe step payloads`.
+
+The step route previously rebuilt reduced dictionaries for insert/update/delete and `_validated_step_fields` rebuilt both `step` and `trigger_temps`. Those projections silently erased forbidden typo members before Pydantic saw them. The route now selects the concrete request model from `action`, validates the original body, and passes the validated request step to `recipes_api.update_step`.
+
+Because archive response steps are intentionally extensible and finite-valued while recipe mutation inputs historically require strict integers, `RecipeStepRequest` and `RecipeTriggerTemperaturesRequest` provide the strict nested write shape without tightening old archive reads. Existing error fields remain unchanged: scalar trigger failures still report `trigger_temps`, while an actual forbidden nested member reports its own name.
+
+### RED evidence
+
+```bash
+python -m pytest -q tests/web/test_api_files_recipes_write.py::test_step_mutations_reject_outer_typo_members_without_writing tests/web/test_api_files_recipes_write.py::test_update_step_rejects_nested_typo_members_without_writing
+```
+
+Result: `5 failed`; insert, update, and delete outer typos plus step-level and trigger-level nested typos all returned 200 and reached archive mutation.
+
+### Integrated GREEN evidence
+
+The first post-fix Python attempt was temporarily blocked at app import while Task 6 renamed the wizard response models; no retired private name was restored or worked around. After canonical wizard commit `8abc7ae0` (`qovyuptp`) landed, generation and the full focused checks were rerun on integrated ancestry:
+
+```bash
+python -m pytest -q tests/unit/common/web_contracts/test_content.py tests/web/test_api_files_recipes_write.py
+cd web-react
+bunx rstest run tests/unit/helpers/files/recipeApi.test.ts
+bun run gen:types:check
+bun run typecheck
+```
+
+Results:
+
+- Python: `94 passed in 3.58s`.
+- Rstest: `1 passed` file, `15 passed` tests.
+- Contract drift: all Pydantic artifacts, defaults, and generated TypeScript up to date.
+- TypeScript: exit 0.
+
+```bash
+ruff format --check blueprints/api_files/routes.py common/web_contracts/content.py common/web_contracts/registry.py common/web_contracts/inventory.py tests/unit/common/web_contracts/test_content.py tests/web/test_api_files_recipes_write.py
+ruff check blueprints/api_files/routes.py common/web_contracts/content.py common/web_contracts/registry.py common/web_contracts/inventory.py tests/unit/common/web_contracts/test_content.py tests/web/test_api_files_recipes_write.py
+```
+
+Results: all 6 files formatted; Ruff `All checks passed`.
+
+The path-limited fix commit also captures the combined `registry.py` and `inventory.py` changes by explicit coordination with Task 6; its focused inventory test remains in the Task 6 commit.
