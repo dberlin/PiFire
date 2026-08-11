@@ -624,20 +624,30 @@ describe("MpcLearningView", () => {
     expect(screen.getByRole("button", { name: "MPC learning: active" })).toBeVisible();
   });
 
-  it("drops cached authority when a successful refresh violates the report schema", async () => {
+  it("keeps schema-invalidated authority absent through refresh errors until a valid report returns", async () => {
     const reviewed = { ...REPORT, status: "ready-for-review" as const };
-    fetchMock.mockResolvedValueOnce(jsonResponse(reviewed)).mockResolvedValueOnce(
-      jsonResponse({
-        ...reviewed,
-        candidate: {
-          ...reviewed.candidate,
-          parameters: {
-            ...reviewed.candidate.parameters,
-            C_c: "NaN",
+    const restored = {
+      ...REPORT,
+      status: "active" as const,
+      activation: { ...REPORT.activation, phase: "active" as const },
+      revision: "2".repeat(64),
+    };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(reviewed))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ...reviewed,
+          candidate: {
+            ...reviewed.candidate,
+            parameters: {
+              ...reviewed.candidate.parameters,
+              C_c: "NaN",
+            },
           },
-        },
-      }),
-    );
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ detail: "temporarily unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse(restored));
     const view = renderPanel({ modelLearningRevision: "wire-valid" });
     await openPanel();
     expect(screen.getByRole("button", { name: "Activate exact model" })).toBeVisible();
@@ -658,6 +668,23 @@ describe("MpcLearningView", () => {
     );
     expect(screen.queryByRole("button", { name: "Activate exact model" })).not.toBeInTheDocument();
     expect(screen.queryByText(CANDIDATE_DIGEST)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Roll back to explicit owner" }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry evidence report" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("temporarily unavailable");
+    expect(screen.queryByRole("button", { name: "Activate exact model" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Roll back to explicit owner" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(CANDIDATE_DIGEST)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry evidence report" }));
+    expect(
+      await screen.findByRole("button", { name: "Roll back to explicit owner" }),
+    ).toBeVisible();
+    expect(screen.getAllByText(CANDIDATE_DIGEST).length).toBeGreaterThan(0);
   });
 
   it("recovers through the five-second poll after a failed projection", async () => {

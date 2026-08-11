@@ -41,13 +41,6 @@ class ReportRequestError extends Error {
   }
 }
 
-class ReportSchemaError extends ReportRequestError {
-  constructor(message: string) {
-    super(message);
-    this.name = "ReportSchemaError";
-  }
-}
-
 function bandCenters(units: Units): string {
   const values = BAND_CENTERS_F.map((f) => (units === "F" ? f : Math.round(((f - 32) * 5) / 9)));
   return `${values[0]}, ${values[1]} and ${values[2]} °${units}`;
@@ -93,6 +86,7 @@ function ActiveMpcLearningView({
   const requestGeneration = useRef(0);
   const lastModelLearningRevision = useRef(modelLearningRevision);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [schemaInvalidated, setSchemaInvalidated] = useState(false);
   const [emptyGrill, setEmptyGrill] = useState(false);
   const [pellets, setPellets] = useState(false);
   const [pendingActions, setPendingActions] = useState<Set<MpcCalibrationAction>>(new Set());
@@ -124,16 +118,17 @@ function ActiveMpcLearningView({
         throw new DOMException("Superseded model-evidence report request", "AbortError");
       }
       if (!result.ok || result.data === null) {
-        const ErrorType =
-          result.status >= 200 && result.status < 300 ? ReportSchemaError : ReportRequestError;
-        throw new ErrorType(result.message || "Model evidence report unavailable");
+        const invalidSchema = result.status >= 200 && result.status < 300;
+        if (invalidSchema) setSchemaInvalidated(true);
+        throw new ReportRequestError(result.message || "Model evidence report unavailable");
       }
+      setSchemaInvalidated(false);
       return result.data;
     },
     refetchInterval: REPORT_REFRESH_MS,
     retry: false,
   });
-  const report = reportQueryError instanceof ReportSchemaError ? undefined : cachedReport;
+  const report = schemaInvalidated ? undefined : cachedReport;
 
   const reportError =
     reportQueryError instanceof Error

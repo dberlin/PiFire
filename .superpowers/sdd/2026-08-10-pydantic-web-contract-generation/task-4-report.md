@@ -297,3 +297,36 @@ bunx playwright test --project=panel tests/e2e/dashboard-panel.spec.ts
 ```
 
 The query view now distinguishes a schema-invalid successful response from a transport/server refresh failure. A schema-invalid success ignores cached report authority, removes candidate/activation/rollback content, and disables its actions. The established network failure regression continues to retain prior report context while presenting the stale-data error and retry controls.
+
+## Fix round 5: persist schema invalidation across failed polls
+
+RED:
+
+```text
+bunx rstest run tests/unit/components/dashboard/MpcLearningView.test.tsx \
+  -t "keeps schema-invalidated authority absent"
+1 failed: a following HTTP 503 replaced the schema-error marker and exposed the cached activation action again
+```
+
+GREEN:
+
+```text
+bunx rstest run tests/unit/helpers/modelEvidenceApi.test.ts \
+  tests/unit/components/dashboard/MpcLearningView.test.tsx \
+  tests/unit/components/dashboard/LearningPanel.test.tsx
+Test Files 3 passed
+Tests 48 passed
+Duration 2.43s
+
+bun run typecheck
+EXIT=0
+
+bunx biome check src/components/dashboard/learning/MpcLearningView.tsx \
+  tests/unit/components/dashboard/MpcLearningView.test.tsx
+Checked 2 files. No fixes applied.
+
+bunx playwright test --project=panel tests/e2e/dashboard-panel.spec.ts
+14 passed (12.2s)
+```
+
+Once a decoded success violates the schema, the mounted MPC view retains a schema-invalidated state across subsequent network/server refresh failures. Cached candidate, activation, and rollback authority remain suppressed until a newly decoded valid report succeeds. The independent valid-to-network regression still preserves stale context when no schema violation preceded it.
