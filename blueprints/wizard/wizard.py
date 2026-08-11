@@ -171,3 +171,58 @@ def prepare_wizard_data(form_data):
 				wizardInstallInfo['modules'][module]['config'][config.replace(module_ + 'config_', '')] = value
 
 	return(wizardInstallInfo)
+
+def find_platform_pin_collisions(settings_dependencies, submitted_settings):
+	"""
+	Detects GPIO pins assigned to more than one grill platform function in a submitted
+	wizard configuration.
+
+	Only fields that grillplat/raspberry_pi_all.py's GrillPlatform.__init__ actually turns
+	into a pin object are checked - mirroring that constructor exactly - so that fields left
+	inert by other settings (e.g. the AC fan pin on a DC-fan build, the selector pin on a
+	standalone build) are never flagged as claimed:
+	  - outputs.auger, outputs.igniter, outputs.power are always claimed
+	  - outputs.fan is claimed only when dc_fan is False
+	  - outputs.dc_fan and outputs.pwm are claimed only when dc_fan is True
+	  - inputs.selector is claimed only when standalone is False
+	  - outputs.aux1..aux4 are claimed only when not 'None'
+
+	Parameters:
+	- settings_dependencies (dict): wizardData['modules']['grillplatform'][<profile>]['settings_dependencies'].
+	  Used only to look up each field's friendly_name for the error message.
+	- submitted_settings (dict): wizardInstallInfo['modules']['grillplatform']['settings'], the raw
+	  setting-name -> submitted-string-value mapping produced by prepare_wizard_data().
+
+	Returns:
+	- list of str: one human-readable error message per colliding pair of fields, naming both
+	  fields and the shared pin. Empty if there are no collisions.
+	"""
+	dc_fan = submitted_settings.get('dc_fan') == 'True'
+	standalone = submitted_settings.get('standalone') == 'True'
+
+	pin_fields = ['output_auger', 'output_igniter', 'output_power', 'output_aux1', 'output_aux2', 'output_aux3', 'output_aux4']
+	if dc_fan:
+		pin_fields += ['output_dc_fan', 'output_pwm']
+	else:
+		pin_fields.append('output_fan')
+	if not standalone:
+		pin_fields.append('input_selector')
+
+	claimed_by = {}  # pin value (str) -> (field name, friendly name)
+	errors = []
+	for field in pin_fields:
+		value = submitted_settings.get(field)
+		if value is None or value == 'None':
+			continue  # unset/'Not Installed' pins are never claimed
+
+		friendly_name = settings_dependencies.get(field, {}).get('friendly_name', field)
+		if value in claimed_by:
+			_, other_friendly_name = claimed_by[value]
+			errors.append(
+				f'{other_friendly_name} and {friendly_name} are both set to GPIO{value}. '
+				f'Each pin may only be assigned to one function.'
+			)
+		else:
+			claimed_by[value] = (field, friendly_name)
+
+	return errors
