@@ -231,11 +231,21 @@ def default_settings():
 		},
 		"outputs": { 
 			"auger": 14,
+			"aux1": None,
+			"aux2": None,
+			"aux3": None,
+			"aux4": None,
 			"dc_fan": 26,
 			"fan": 15,
 			"igniter": 18,
 			"power": 4,
 			"pwm": 13
+		},
+		"aux_labels": {
+			"aux1": "Aux 1",
+			"aux2": "Aux 2",
+			"aux3": "Aux 3",
+			"aux4": "Aux 4"
 		},
 		"system" : {
 			"SPI0" : {
@@ -2413,6 +2423,32 @@ def get_probe_info(probe_info):
 			probe_structure['food'].append(food_probe)
 
 	return probe_structure 
+
+AUX_OUTPUT_NAMES = ['aux1', 'aux2', 'aux3', 'aux4']
+
+def get_aux_list(settings):
+	"""
+	Build the list of configured auxiliary relays.
+
+	An auxiliary relay is considered configured when its pin in
+	settings['platform']['outputs'] is not None.  Relays that are not
+	configured are omitted entirely, which is what hides them from every UI.
+
+	:param settings: Settings dictionary
+	:return: List of dictionaries, i.e. [{'name' : 'aux1', 'label' : 'Work Light'}]
+	"""
+	aux_list = []
+	outputs = settings['platform'].get('outputs', {})
+	labels = settings['platform'].get('aux_labels', {})
+
+	for name in AUX_OUTPUT_NAMES:
+		if outputs.get(name, None) is not None:
+			aux_list.append({
+				'name' : name,
+				'label' : labels.get(name, name)
+			})
+
+	return aux_list
 
 def read_probe_status(probe_info):
 	"""
