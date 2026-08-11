@@ -670,6 +670,26 @@ def test_step_mutations_reject_outer_typo_members_without_writing(client, folder
     assert _read_member_bytes(recipe_dir + name, "recipe.json") == before
 
 
+@pytest.mark.parametrize("action", [["update"], {"value": "update"}], ids=["array", "object"])
+def test_step_mutations_reject_non_string_actions_without_writing(client, folders, action):
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, "Strict-Step-Action", steps=[_step()])
+    before = _read_member_bytes(recipe_dir + name, "recipe.json")
+
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": action, "index": 0},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "result": "Error",
+        "message": "bad_request",
+        "data": {"field": "action"},
+    }
+    assert _read_member_bytes(recipe_dir + name, "recipe.json") == before
+
+
 @pytest.mark.parametrize("location", ["step", "trigger_temps"])
 def test_update_step_rejects_nested_typo_members_without_writing(client, folders, location):
     _history, recipe_dir = folders

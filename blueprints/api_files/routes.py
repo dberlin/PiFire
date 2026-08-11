@@ -633,6 +633,8 @@ def recipe_steps():
     if err:
         return err
     action = body.get("action")
+    if not isinstance(action, str):
+        return error("bad_request", 400, field="action")
     request_model = {
         "insert": RecipeStepInsertRequest,
         "update": RecipeStepUpdateRequest,
