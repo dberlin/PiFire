@@ -43,13 +43,11 @@ describe("wizardApi", () => {
   });
 
   test("saveDraft rejects an error envelope even if the transport status is 200", async () => {
-    globalThis.fetch = rs
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ result: "error", message: "invalid_request" }),
-      }) as never;
+    globalThis.fetch = rs.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ result: "error", message: "invalid_request" }),
+    }) as never;
     const { saveDraft } = await import("../../../../src/helpers/wizard/wizardApi");
 
     const ok = await saveDraft("", {

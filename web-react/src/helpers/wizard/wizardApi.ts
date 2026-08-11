@@ -12,11 +12,11 @@ import type {
   ScanResult,
   ThermoworksRequest,
   ThermoworksRowsResult,
+  WizardActionResponse,
   WizardDraftRequest,
   WizardFinishRequest,
   WizardSection,
   WizardState,
-  WizardActionResponse,
 } from "../contracts/wizard.gen";
 import type { WizardWorking } from "./wizardTypes";
 
@@ -105,7 +105,12 @@ export async function finishWizard(
   // `detail` rides along with bus_conflict: common/i2c_bus.py raises full
   // sentences naming the offending device and the values its bus kind accepts,
   // which no message keyed off the code alone can reconstruct.
-  return { ok: r.ok && body.result === "success", status: r.status, message: body.message, detail: body.detail };
+  return {
+    ok: r.ok && body.result === "success",
+    status: r.status,
+    message: body.message,
+    detail: body.detail,
+  };
 }
 
 export async function getInstallStatus(baseUrl: string): Promise<InstallStatus> {
