@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 import sys
 from typing import TextIO
 
@@ -72,7 +73,6 @@ def _ensure_runtime_dir(path):
     os.chmod(path, 0o700)
 
 
-
 def _is_ignored_sway_stderr(line: str) -> bool:
     message = line.rstrip("\r\n")
     return any(pattern.search(message) for pattern in _SWAY_IGNORED_STDERR_PATTERNS)
@@ -84,6 +84,21 @@ def _relay_sway_stderr(source: Iterable[str], destination: TextIO) -> None:
             continue
         destination.write(line)
         destination.flush()
+
+
+def _run_sway(argv: list[str]) -> int:
+    with subprocess.Popen(
+        argv,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ) as process:
+        if process.stderr is None:
+            raise RuntimeError("Sway stderr pipe was not created")
+        _relay_sway_stderr(process.stderr, sys.stderr)
+        return process.wait()
+
 
 def main():
     # display_launch.py runs as its own standalone process (supervisor's exec
@@ -104,6 +119,8 @@ def main():
             sys.exit(1)
     os.environ.update(env_updates)
     try:
+        if argv[0] == "sway":
+            sys.exit(_run_sway(argv))
         os.execvp(argv[0], argv)
     except OSError:
         log.exception("Failed to exec: %s", " ".join(argv))

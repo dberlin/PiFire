@@ -81,8 +81,7 @@ def test_known_powered_down_output_errors_are_ignored(line):
 @pytest.mark.parametrize(
     "line",
     [
-        "[ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: "
-        "Atomic commit failed: Invalid argument\n",
+        "[ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: Atomic commit failed: Invalid argument\n",
         "[ERROR] [wlr] connector DP-1: Atomic commit failed: Device or resource busy\n",
         "[ERROR] [sway/desktop/output.c:300] Page-flip failed while enabling output DP-1\n",
         "Qt warning: Page-flip failed on output DP-1\n",
@@ -104,3 +103,20 @@ def test_relay_removes_only_known_noise():
     display_launch._relay_sway_stderr(source, destination)
 
     assert destination.getvalue() == "actionable display error\n"
+
+
+def test_run_sway_filters_stderr_and_returns_child_status(capsys):
+    script = (
+        "import sys; "
+        "sys.stderr.write('[ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: "
+        "Atomic commit failed: Device or resource busy\\n'); "
+        "sys.stderr.write('actionable display error\\n'); "
+        "sys.stderr.write('[ERROR] [sway/desktop/output.c:300] "
+        "Page-flip failed on output DP-1\\n'); "
+        "raise SystemExit(7)"
+    )
+
+    returncode = display_launch._run_sway([sys.executable, "-c", script])
+
+    assert returncode == 7
+    assert capsys.readouterr().err == "actionable display error\n"
