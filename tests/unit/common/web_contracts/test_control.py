@@ -139,6 +139,31 @@ def test_notify_entry_retains_device_specific_json_fields():
     assert entry.model_dump(mode="json")["last_check"] == 123
 
 
+def test_notify_entry_omits_legacy_absent_shutdown_from_sparse_dump():
+    payload = {"label": "Only", "type": "probe", "req": True, "target": 165}
+    entry = NotifyEntry.model_validate(payload, strict=True)
+    assert entry.model_dump(mode="json", exclude_unset=True) == payload
+
+
+@pytest.mark.parametrize("shutdown", (False, True))
+def test_notify_entry_accepts_explicit_boolean_shutdown(shutdown):
+    entry = NotifyEntry.model_validate(
+        {"label": "Only", "type": "probe", "req": True, "shutdown": shutdown},
+        strict=True,
+    )
+    assert entry.model_dump(mode="json", exclude_unset=True)["shutdown"] is shutdown
+
+
+def test_notify_entry_rejects_explicit_null_shutdown():
+    with pytest.raises(ValidationError):
+        NotifyEntry.model_validate(
+            {"label": "Only", "type": "probe", "req": True, "shutdown": None},
+            strict=True,
+        )
+
+
+
+
 def test_control_patch_preserves_sparse_rfc7396_members_and_notify_updates():
     patch = ControlPatchRequest.model_validate(
         {

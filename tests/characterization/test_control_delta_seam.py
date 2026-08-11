@@ -222,6 +222,25 @@ def test_post_control_routes_notify_data_through_the_replace_op(client):
     assert read_control()["notify_data"] == entries
 
 
+def test_post_control_rejects_explicit_null_notify_shutdown(client):
+    response = client.post(
+        "/api/control",
+        json={
+            "notify_data": [
+                {"label": "Only", "type": "probe", "req": True, "shutdown": None},
+            ],
+        },
+    )
+    assert response.status_code == 400
+    body = response.get_json()
+    assert set(body) == {"control", "result", "message"}
+    assert body["control"] == "error"
+    assert body["result"] == "error"
+    assert "shutdown" in body["message"]
+
+
+
+
 def test_post_control_routes_notify_updates_through_per_entry_set_ops(client):
     """saveTargetEdit's shape. Names ONE entry and the fields it changes."""
     update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165, "shutdown": True}}

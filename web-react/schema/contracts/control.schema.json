@@ -475,16 +475,9 @@
           "type": "boolean"
         },
         "shutdown": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Shutdown"
+          "default": false,
+          "title": "Shutdown",
+          "type": "boolean"
         },
         "target": {
           "anyOf": [
