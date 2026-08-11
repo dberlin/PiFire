@@ -231,7 +231,7 @@ bun run typecheck
 
 Results:
 
-- Python: `94 passed in 3.58s`.
+- Python: `94 passed in 3.66s`.
 - Rstest: `1 passed` file, `15 passed` tests.
 - Contract drift: all Pydantic artifacts, defaults, and generated TypeScript up to date.
 - TypeScript: exit 0.
@@ -244,3 +244,5 @@ ruff check blueprints/api_files/routes.py common/web_contracts/content.py common
 Results: all 6 files formatted; Ruff `All checks passed`.
 
 The path-limited fix commit also captures the combined `registry.py` and `inventory.py` changes by explicit coordination with Task 6; its focused inventory test remains in the Task 6 commit.
+
+These are the latest results from the additional current-ancestry rerun requested after shared wizard integration was confirmed; the current workspace resolves stable change `qovyuptp` to commit `8abc7ae0`.
