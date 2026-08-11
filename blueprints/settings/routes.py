@@ -569,7 +569,7 @@ def settings_page(action=None):
         for aux in get_aux_list(settings):
             field = f'aux_label_{aux["name"]}'
             if field in response:
-                label = response[field].strip()
+                label = response[field].strip()[:25]
                 if label != '':
                     settings['platform']['aux_labels'][aux['name']] = label
 

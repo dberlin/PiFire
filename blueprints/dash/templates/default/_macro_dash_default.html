@@ -392,7 +392,7 @@
 					{% for aux_name in ['aux1', 'aux2', 'aux3', 'aux4'] %}
 					{% if settings['platform']['outputs'].get(aux_name) is not none %}
 					<td>
-						<span id="{{ aux_name }}_status"><i class="fas fa-plug fa-2x" data-toggle="tooltip" data-placement="top" title="{{ settings['platform']['aux_labels'].get(aux_name, aux_name) }} OFF" style="color:rgb(150, 150, 150)"></i></span>&nbsp;
+						<span id="{{ aux_name }}_status"><i class="fas fa-plug fa-2x" data-toggle="tooltip" data-placement="top" title="{{ settings['platform']['aux_labels'].get(aux_name, aux_name) }} OFF" data-label="{{ settings['platform']['aux_labels'].get(aux_name, aux_name) }}" style="color:rgb(150, 150, 150)"></i></span>&nbsp;
 					</td>
 					{% endif %}
 					{% endfor %}

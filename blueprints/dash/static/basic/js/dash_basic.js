@@ -60,6 +60,29 @@ function initNotifyIndicators(probes) {
 };
 
 // Update temperatures on probe status cards
+// Auxiliary relay icons render as either <i> (before Font Awesome's SVG
+// conversion runs) or <svg> (after conversion, which replaces the <i>
+// element and moves the tooltip text into an inner <title> node). These
+// helpers update whichever form is currently in the DOM using only
+// property/textContent assignment (never innerHTML), so a user-supplied
+// label can never be parsed as markup.
+function getAuxIcon(container) {
+	return container.querySelector('svg, i');
+}
+
+function setAuxIconTooltip(icon, text) {
+	if (icon.tagName.toLowerCase() === 'svg') {
+		var titleEl = icon.querySelector('title');
+		if (titleEl === null) {
+			titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+			icon.insertBefore(titleEl, icon.firstChild);
+		}
+		titleEl.textContent = text;
+	} else {
+		icon.title = text;
+	}
+}
+
 function updateProbeCards() {
 	req = $.ajax({
 		url : '/api/current',
@@ -243,11 +266,17 @@ function updateProbeCards() {
 					if (element === null) {
 						return;
 					}
+					var icon = getAuxIcon(element);
+					if (icon === null) {
+						return;
+					}
 					var label = aux_labels[aux_name] || aux_name;
 					if (last_aux_status[aux_name]) {
-						element.innerHTML = '<i class="fas fa-plug fa-2x" data-toggle="tooltip" data-placement="top" title="' + label + ' ON" style="color:rgb(0, 190, 0)"></i>';
+						setAuxIconTooltip(icon, label + ' ON');
+						icon.style.color = 'rgb(0, 190, 0)';
 					} else {
-						element.innerHTML = '<i class="fas fa-plug fa-2x" data-toggle="tooltip" data-placement="top" title="' + label + ' OFF" style="color:rgb(150, 150, 150)"></i>';
+						setAuxIconTooltip(icon, label + ' OFF');
+						icon.style.color = 'rgb(150, 150, 150)';
 					}
 				}
 			});
@@ -815,7 +844,8 @@ $(document).ready(function(){
 		if (element === null) {
 			return;
 		}
-		aux_labels[aux_name] = element.querySelector('i').getAttribute('title').replace(/ (ON|OFF)$/, '');
+		var icon = getAuxIcon(element);
+		aux_labels[aux_name] = (icon !== null && icon.dataset.label) ? icon.dataset.label : aux_name;
 		$('#' + aux_name + '_status').click(function() {
 			cp_api_set('aux/' + aux_name + '/toggle');
 		});
