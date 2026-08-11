@@ -15,6 +15,8 @@ var notify_status = {}; // store all notify statuses
 var last_fan_status = null;
 var last_auger_status = null;
 var last_igniter_status = null;
+var last_aux_status = {};
+var aux_labels = {};
 var last_pmode_status = null;
 var last_lid_open_status = false;
 var display_mode = null;
@@ -230,6 +232,25 @@ function updateProbeCards() {
 					document.getElementById('igniter_status').innerHTML = '<i class="fas fa-fire fa-2x" data-toggle="tooltip" data-placement="top" title="Igniter OFF" style="color:rgb(150, 150, 150)"></i>';
 				};
 			};
+
+			['aux1', 'aux2', 'aux3', 'aux4'].forEach(function(aux_name) {
+				if (!(aux_name in current.status.outpins)) {
+					return;
+				}
+				if (current.status.outpins[aux_name] != last_aux_status[aux_name]) {
+					last_aux_status[aux_name] = current.status.outpins[aux_name];
+					var element = document.getElementById(aux_name + '_status');
+					if (element === null) {
+						return;
+					}
+					var label = aux_labels[aux_name] || aux_name;
+					if (last_aux_status[aux_name]) {
+						element.innerHTML = '<i class="fas fa-plug fa-2x" data-toggle="tooltip" data-placement="top" title="' + label + ' ON" style="color:rgb(0, 190, 0)"></i>';
+					} else {
+						element.innerHTML = '<i class="fas fa-plug fa-2x" data-toggle="tooltip" data-placement="top" title="' + label + ' OFF" style="color:rgb(150, 150, 150)"></i>';
+					}
+				}
+			});
 
 			if (current.status.p_mode != last_pmode_status) {
 				last_pmode_status = current.status.p_mode;
@@ -785,8 +806,19 @@ function dashClearErrorCounter() {
 $(document).ready(function(){
 	// Setup Listeners 
 	$('#reloadPage').click(function() {
-		// Reload page when server side changes detected. 
-		location.reload(); 
+		// Reload page when server side changes detected.
+		location.reload();
+	});
+
+	['aux1', 'aux2', 'aux3', 'aux4'].forEach(function(aux_name) {
+		var element = document.getElementById(aux_name + '_status');
+		if (element === null) {
+			return;
+		}
+		aux_labels[aux_name] = element.querySelector('i').getAttribute('title').replace(/ (ON|OFF)$/, '');
+		$('#' + aux_name + '_status').click(function() {
+			cp_api_set('aux/' + aux_name + '/toggle');
+		});
 	});
 
 	// Initialize Dashboard Data
