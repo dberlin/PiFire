@@ -246,3 +246,43 @@ Results: all 6 files formatted; Ruff `All checks passed`.
 The path-limited fix commit also captures the combined `registry.py` and `inventory.py` changes by explicit coordination with Task 6; its focused inventory test remains in the Task 6 commit.
 
 These are the latest results from the additional current-ancestry rerun requested after shared wizard integration was confirmed; the current workspace resolves stable change `qovyuptp` to commit `8abc7ae0`.
+
+## Final-review action dispatch fix
+
+Fix commit: `531e637e` (`kynsxowo`) — `fix(content): reject non-string recipe step actions`.
+
+The action-selected request-model dispatch initially used a dictionary lookup before checking the JSON action's scalar type. Array and object actions are unhashable in Python, so they raised `TypeError` instead of retaining the route's 400 `bad_request` action error. The route now rejects every non-string action before lookup; the existing unknown-string path is unchanged.
+
+### RED evidence
+
+```bash
+python -m pytest -q tests/web/test_api_files_recipes_write.py::test_step_mutations_reject_non_string_actions_without_writing
+```
+
+Result: `2 failed`; both the array and object cases raised `TypeError` at the request-model lookup.
+
+### GREEN evidence
+
+The focused regression passed `2 passed in 2.93s` with the exact 400 envelope and unchanged archive bytes. The full current-ancestry gates were then rerun:
+
+```bash
+python -m pytest -q tests/unit/common/web_contracts/test_content.py tests/web/test_api_files_recipes_write.py
+cd web-react
+bunx rstest run tests/unit/helpers/files/recipeApi.test.ts
+bun run gen:types:check
+bun run typecheck
+```
+
+Results:
+
+- Python: `96 passed in 3.70s`, including the pre-existing unknown-string action case.
+- Rstest: `1 passed` file, `15 passed` tests.
+- Contract drift: all Pydantic artifacts, defaults, and generated TypeScript up to date.
+- TypeScript: exit 0.
+
+```bash
+ruff format --check blueprints/api_files/routes.py tests/web/test_api_files_recipes_write.py
+ruff check blueprints/api_files/routes.py tests/web/test_api_files_recipes_write.py
+```
+
+Results: both files formatted; Ruff `All checks passed`.
