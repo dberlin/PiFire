@@ -1,37 +1,29 @@
+import pytest
+
 from controller.runtime.logic.cycle import CycleTimes
 from controller.runtime.logic.smartstart import select_profile, profile_cycle
 
 
-def test_select_profile_below_first_range():
+@pytest.mark.parametrize(
+    ("startup_temp", "expected"),
+    [
+        pytest.param(40, 0, id="below-first-range"),
+        pytest.param(60, 1, id="between-ranges"),
+        pytest.param(50, 1, id="equal-to-first-boundary"),
+        # startup_temp == temp_range_list[i] must NOT match (strict <), so it
+        # falls through to the next index (or len() if it's the last one).
+        pytest.param(70, 2, id="equal-to-middle-boundary-falls-through"),
+        pytest.param(90, 3, id="equal-to-last-boundary"),
+    ],
+)
+def test_select_profile(startup_temp, expected):
     temp_range_list = [50, 70, 90]
-    assert select_profile(40, temp_range_list) == 0
-
-
-def test_select_profile_between_ranges():
-    temp_range_list = [50, 70, 90]
-    assert select_profile(60, temp_range_list) == 1
+    assert select_profile(startup_temp, temp_range_list) == expected
 
 
 def test_select_profile_above_all_ranges():
     temp_range_list = [50, 70, 90]
     assert select_profile(100, temp_range_list) == len(temp_range_list)
-
-
-def test_select_profile_equal_to_boundary_does_not_select_that_index():
-    # startup_temp == temp_range_list[i] must NOT match (strict <), so it
-    # falls through to the next index (or len() if it's the last one).
-    temp_range_list = [50, 70, 90]
-    assert select_profile(70, temp_range_list) == 2
-
-
-def test_select_profile_equal_to_first_boundary():
-    temp_range_list = [50, 70, 90]
-    assert select_profile(50, temp_range_list) == 1
-
-
-def test_select_profile_equal_to_last_boundary():
-    temp_range_list = [50, 70, 90]
-    assert select_profile(90, temp_range_list) == 3
 
 
 def test_select_profile_empty_list_returns_zero():
