@@ -153,6 +153,7 @@ def test_direct_sys_path_mutator_is_reported(
 @pytest.mark.parametrize(
     ("statement", "action"),
     [
+        # --- direct assignment ---
         ("sys.path = []", "sys.path ="),
         ("sys.path: list[str] = []", "sys.path ="),
         ("sys.path += []", "sys.path +="),
@@ -171,29 +172,17 @@ def test_direct_sys_path_mutator_is_reported(
         ('sys.path[(index := 0)] += ["probe"]', "sys.path[(index := 0)] +="),
         ('sys.path[0] = "probe"', "sys.path[0] ="),
         ('sys.path[:] = ["probe"]', "sys.path[:] ="),
-    ],
-)
-def test_direct_sys_path_assignment_is_reported(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    statement: str,
-    action: str,
-) -> None:
-    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
-    path = _write_probe(tmp_path, "probe.py", f"import sys\n{statement}\n")
-
-    assert _mutates_sys_path(path) == [f"probe.py:2:{action}"]
-
-
-@pytest.mark.parametrize(
-    ("statement", "action"),
-    [
+        # --- direct deletion ---
         ("del sys.path", "del sys.path"),
         ("del sys.path[0]", "del sys.path[0]"),
         ("del sys.path[:]", "del sys.path[:]"),
+        # --- unpacking deletion ---
+        ("del (sys.path, marker)", "del sys.path"),
+        ("del [marker, sys.path[0]]", "del sys.path[0]"),
+        ("del (marker, [sys.path[:]])", "del sys.path[:]"),
     ],
 )
-def test_direct_sys_path_deletion_is_reported(
+def test_single_sys_path_mutation_is_reported(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     statement: str,
@@ -231,26 +220,6 @@ def test_unpacking_sys_path_assignment_is_reported(
     path = _write_probe(tmp_path, "probe.py", f"import sys\n{statement}\n")
 
     assert _mutates_sys_path(path) == [f"probe.py:2:{action}" for action in actions]
-
-
-@pytest.mark.parametrize(
-    ("statement", "action"),
-    [
-        ("del (sys.path, marker)", "del sys.path"),
-        ("del [marker, sys.path[0]]", "del sys.path[0]"),
-        ("del (marker, [sys.path[:]])", "del sys.path[:]"),
-    ],
-)
-def test_unpacking_sys_path_deletion_is_reported(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    statement: str,
-    action: str,
-) -> None:
-    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
-    path = _write_probe(tmp_path, "probe.py", f"import sys\n{statement}\n")
-
-    assert _mutates_sys_path(path) == [f"probe.py:2:{action}"]
 
 
 @pytest.mark.parametrize(

@@ -430,27 +430,25 @@ def manifest(server, build):
     return {"metadata": {"versions": {"server": server, "cookfile": "1.5.0", "recipe": "1.0.0", "build": build}}}
 
 
-def test_a_newer_manifest_version_is_recorded(version_store):
+@pytest.mark.parametrize(
+    ("server", "build", "expected_recorded", "expected_server", "expected_build"),
+    [
+        ("1.11.0", 71, True, "1.11.0", 71),
+        # Releases move the build without the version far more often than not.
+        ("1.10.10", 71, True, None, 71),
+        ("1.10.10", 70, False, None, 70),
+    ],
+    ids=["newer_version", "build_bump_alone", "same_version_and_build"],
+)
+def test_manifest_version_build_recorded_or_not(
+    version_store, server, build, expected_recorded, expected_server, expected_build
+):
     import updater
 
-    assert updater.record_installed_version(manifest("1.11.0", 71)) is True
-    assert version_store["versions"]["server"] == "1.11.0"
-    assert version_store["versions"]["build"] == 71
-
-
-def test_a_build_bump_alone_is_recorded(version_store):
-    """Releases move the build without the version far more often than not."""
-    import updater
-
-    assert updater.record_installed_version(manifest("1.10.10", 71)) is True
-    assert version_store["versions"]["build"] == 71
-
-
-def test_the_same_version_and_build_is_left_alone(version_store):
-    import updater
-
-    assert updater.record_installed_version(manifest("1.10.10", 70)) is False
-    assert version_store["versions"]["build"] == 70
+    assert updater.record_installed_version(manifest(server, build)) is expected_recorded
+    if expected_server is not None:
+        assert version_store["versions"]["server"] == expected_server
+    assert version_store["versions"]["build"] == expected_build
 
 
 def test_an_older_manifest_does_not_wind_the_version_back(version_store):

@@ -76,22 +76,19 @@ NUMATO_PORTS = [
 ]
 
 
-def test_discover_accepts_hex_string_ids_as_the_manifest_writes_them():
+@pytest.mark.parametrize(
+    ("vid", "pid"),
+    [
+        ("0x2a19", "0x0c0c"),
+        # USB IDs are hex by convention, so "2a19" is 0x2A19 and never decimal 2419.
+        ("2a19", "0c0c"),
+        (0x2A19, 0x0C0C),
+    ],
+    ids=["prefixed_hex_string", "bare_hex_string", "plain_ints"],
+)
+def test_discover_accepts_the_id_encoding(vid, pid):
     with mock.patch("common.usb_serial.list_ports.comports", return_value=NUMATO_PORTS):
-        result = discover_usb_serial_devices(vid="0x2a19", pid="0x0c0c")
-    assert [d["device"] for d in result] == ["/dev/ttyACM1"]
-
-
-def test_discover_accepts_a_bare_hex_string_without_the_prefix():
-    # USB IDs are hex by convention, so "2a19" is 0x2A19 and never decimal 2419.
-    with mock.patch("common.usb_serial.list_ports.comports", return_value=NUMATO_PORTS):
-        result = discover_usb_serial_devices(vid="2a19", pid="0c0c")
-    assert [d["device"] for d in result] == ["/dev/ttyACM1"]
-
-
-def test_discover_still_accepts_plain_ints():
-    with mock.patch("common.usb_serial.list_ports.comports", return_value=NUMATO_PORTS):
-        result = discover_usb_serial_devices(vid=0x2A19, pid=0x0C0C)
+        result = discover_usb_serial_devices(vid=vid, pid=pid)
     assert [d["device"] for d in result] == ["/dev/ttyACM1"]
 
 

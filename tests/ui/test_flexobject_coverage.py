@@ -786,41 +786,34 @@ def _hopper_status_obj(level, **kw):
     return base
 
 
-def test_hopper_status_zero_level_uses_fg_as_bg():
-    obj = HopperStatus("hopper_status", _hopper_status_obj(0), BG())
-    assert obj.get_object_canvas().size == (400, 200)
-
-
-def test_hopper_status_mid_level():
-    obj = HopperStatus("hopper_status", _hopper_status_obj(50), BG())
-    assert obj.get_object_canvas().size == (400, 200)
-
-
-def test_hopper_status_full_level():
-    # Note: the bar-clamp branch (`current_level_adjusted > 360`) is
-    # unreachable for any level within the documented 0-100 range, since
-    # int((level/100)*320)+40 tops out at exactly 360 when level == 100.
-    obj = HopperStatus("hopper_status", _hopper_status_obj(100), BG())
-    assert obj.get_object_canvas().size == (400, 200)
-
-
-def test_hopper_status_out_of_range_level_clamps_to_top_color():
-    """FIXED: HopperStatus did not clamp data['level'] to 0-100.
-
-    `color_index = int(level // (100/len(color_levels)))` then indexes
-    `color_levels[max(color_index-1, 0)]`. With the 4-entry color_levels
-    used by `_hopper_status_obj` (valid indices 0-3), level=150 gives
-    color_index = int(150 // 25) = 6, so the lookup was
-    color_levels[max(6-1, 0)] == color_levels[5], out of range, and raised
-    IndexError instead of clamping/drawing.
-
-    The index is now also clamped from above
-    (`min(..., len(color_levels) - 1)`), so an out-of-range level renders
-    using the nearest valid (topmost) color level instead of crashing. In-
-    range behavior (test_hopper_status_zero/mid/full_level above) is
-    unchanged.
-    """
-    obj = HopperStatus("hopper_status", _hopper_status_obj(150), BG())
+@pytest.mark.parametrize(
+    "level",
+    [
+        0,
+        50,
+        # Note: the bar-clamp branch (`current_level_adjusted > 360`) is
+        # unreachable for any level within the documented 0-100 range, since
+        # int((level/100)*320)+40 tops out at exactly 360 when level == 100.
+        100,
+        # FIXED: HopperStatus did not clamp data['level'] to 0-100.
+        #
+        # `color_index = int(level // (100/len(color_levels)))` then indexes
+        # `color_levels[max(color_index-1, 0)]`. With the 4-entry color_levels
+        # used by `_hopper_status_obj` (valid indices 0-3), level=150 gives
+        # color_index = int(150 // 25) = 6, so the lookup was
+        # color_levels[max(6-1, 0)] == color_levels[5], out of range, and raised
+        # IndexError instead of clamping/drawing.
+        #
+        # The index is now also clamped from above
+        # (`min(..., len(color_levels) - 1)`), so an out-of-range level renders
+        # using the nearest valid (topmost) color level instead of crashing.
+        # In-range behavior (level 0/50/100 above) is unchanged.
+        150,
+    ],
+    ids=["zero_level", "mid_level", "full_level", "out_of_range_level_clamps_to_top_color"],
+)
+def test_hopper_status_level_renders_at_expected_size(level):
+    obj = HopperStatus("hopper_status", _hopper_status_obj(level), BG())
     assert obj.get_object_canvas().size == (400, 200)
 
 

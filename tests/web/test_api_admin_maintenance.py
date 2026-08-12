@@ -134,18 +134,6 @@ def test_clear_pelletdb_log_empties_it(client):
     assert read_pellet_db()["log"] == {}
 
 
-def test_an_unknown_maintenance_action_is_refused(client):
-    resp = client.post("/api/admin/maintenance", json={"action": "rm_rf_slash"})
-    assert resp.status_code == 400
-    assert resp.get_json()["data"]["field"] == "action"
-
-
-def test_maintenance_action_rejects_extra_json_members(client):
-    resp = client.post("/api/admin/maintenance", json={"action": "clear_history", "extra": True})
-    assert resp.status_code == 400
-    assert resp.get_json()["data"]["field"] == "extra"
-
-
 def test_debug_mode_toggle_persists_and_flags_the_control_process(client):
     """_admin_setting_debugenabled raises settings_update alongside the write;
     without it the running control process never learns the setting changed.
@@ -189,16 +177,20 @@ def test_boot_to_monitor_toggle_passes_schema_validation(client):
     assert read_settings()["globals"]["boot_to_monitor"] is True
 
 
-def test_an_unknown_setting_key_is_refused(client):
-    resp = client.post("/api/admin/settings", json={"grill_name": "pwned"})
+@pytest.mark.parametrize(
+    ("endpoint", "payload", "expected_field"),
+    [
+        ("/api/admin/maintenance", {"action": "rm_rf_slash"}, "action"),
+        ("/api/admin/maintenance", {"action": "clear_history", "extra": True}, "extra"),
+        ("/api/admin/settings", {"grill_name": "pwned"}, "grill_name"),
+        ("/api/admin/settings", {"debug_mode": "yes"}, "debug_mode"),
+    ],
+    ids=["unknown_maintenance_action", "extra_json_member", "unknown_setting_key", "non_boolean_toggle"],
+)
+def test_admin_maintenance_or_settings_rejects_bad_input(client, endpoint, payload, expected_field):
+    resp = client.post(endpoint, json=payload)
     assert resp.status_code == 400
-    assert resp.get_json()["data"]["field"] == "grill_name"
-
-
-def test_a_non_boolean_toggle_is_refused(client):
-    resp = client.post("/api/admin/settings", json={"debug_mode": "yes"})
-    assert resp.status_code == 400
-    assert resp.get_json()["data"]["field"] == "debug_mode"
+    assert resp.get_json()["data"]["field"] == expected_field
 
 
 def test_a_missing_backup_folder_is_an_empty_list_not_a_500(client):

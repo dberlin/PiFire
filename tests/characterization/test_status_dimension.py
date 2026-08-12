@@ -11,6 +11,8 @@ See docs/superpowers/specs/2026-07-18-status-second-dimension-design.md and
 docs/superpowers/plans/2026-07-18-status-dimension.md.
 """
 
+import pytest
+
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.characterization.test_controller_loop_golden import make_controller, _spy_dispatch, _neutralize_externals
 
@@ -20,41 +22,26 @@ from tests.characterization.test_controller_loop_golden import make_controller, 
 # --------------------------------------------------------------------------
 
 
-def test_stop_persists_inactive(monkeypatch):
-    # Mirrors test_tick_stop_mode_cleanup, focused on the status axis.
+@pytest.mark.parametrize(
+    ("mode", "expected_status"),
+    [
+        # Mirrors test_tick_stop_mode_cleanup, focused on the status axis.
+        ("Stop", "inactive"),
+        ("Error", "inactive"),
+        ("Monitor", "monitor"),
+    ],
+)
+def test_status_after_first_tick(monkeypatch, mode, expected_status):
     _neutralize_externals(monkeypatch)
     settings = base_settings()
-    control_data = base_control(mode="Stop")
+    control_data = base_control(mode=mode)
     control_data["updated"] = True
     c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()
-    assert store.read_control()["status"] == "inactive"
 
-
-def test_error_persists_inactive(monkeypatch):
-    _neutralize_externals(monkeypatch)
-    settings = base_settings()
-    control_data = base_control(mode="Error")
-    control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
-    _spy_dispatch(c)
-    c.setup()
-    c.tick()
-    assert store.read_control()["status"] == "inactive"
-
-
-def test_monitor_dispatch_sets_monitor(monkeypatch):
-    _neutralize_externals(monkeypatch)
-    settings = base_settings()
-    control_data = base_control(mode="Monitor")
-    control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
-    _spy_dispatch(c)
-    c.setup()
-    c.tick()
-    assert store.read_control()["status"] == "monitor"
+    assert store.read_control()["status"] == expected_status
 
 
 def test_active_set_when_operating(monkeypatch):

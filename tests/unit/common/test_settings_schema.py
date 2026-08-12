@@ -130,6 +130,9 @@ def test_a_fresh_tree_is_stamped_with_the_current_shape_version():
     assert default_settings()["schema_version"] == SETTINGS_SCHEMA_VERSION
 
 
+# These three are deliberately NOT parametrized: each docstring records why
+# that specific setting was retired and what replaced it. A shared body would
+# delete the only place that reasoning is written down.
 def test_current_schema_omits_retired_fan_pid_setting():
     settings = default_settings()
 
@@ -613,31 +616,31 @@ def test_wled_notify_duration_rejects_negative():
     assert any("notify_duration" in m for m in ei.value.errors)
 
 
-def test_wled_idle_brightness_rejects_out_of_range():
-    # Clamp source: blueprints/settings/routes.py:191-194.
+def _set_nested(tree, path, value):
+    node = tree
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "expected_substrings"),
+    [
+        # Clamp source: blueprints/settings/routes.py:191-194.
+        (("notify_services", "wled", "suggested_config", "idle_brightness"), 0, ("idle_brightness",)),
+        # Clamp source: blueprints/settings/routes.py:195-198.
+        (("notify_services", "wled", "suggested_config", "led_count"), 1001, ("led_count",)),
+        # Clamp source: blueprints/settings/routes.py:212-216.
+        (("notify_services", "wled", "profile_numbers", "idle"), 251, ("profile_numbers", "idle")),
+    ],
+    ids=["idle_brightness", "led_count", "profile_number"],
+)
+def test_wled_field_rejects_out_of_range(path, value, expected_substrings):
     s = default_settings()
-    s["notify_services"]["wled"]["suggested_config"]["idle_brightness"] = 0
+    _set_nested(s, path, value)
     with pytest.raises(SettingsValidationError) as ei:
         validate_settings_tree(s)
-    assert any("idle_brightness" in m for m in ei.value.errors)
-
-
-def test_wled_led_count_rejects_out_of_range():
-    # Clamp source: blueprints/settings/routes.py:195-198.
-    s = default_settings()
-    s["notify_services"]["wled"]["suggested_config"]["led_count"] = 1001
-    with pytest.raises(SettingsValidationError) as ei:
-        validate_settings_tree(s)
-    assert any("led_count" in m for m in ei.value.errors)
-
-
-def test_wled_profile_number_rejects_out_of_range():
-    # Clamp source: blueprints/settings/routes.py:212-216.
-    s = default_settings()
-    s["notify_services"]["wled"]["profile_numbers"]["idle"] = 251
-    with pytest.raises(SettingsValidationError) as ei:
-        validate_settings_tree(s)
-    assert any("profile_numbers" in m and "idle" in m for m in ei.value.errors)
+    assert any(all(sub in m for sub in expected_substrings) for m in ei.value.errors)
 
 
 def test_smartstart_profile_count_invariant():
@@ -1034,38 +1037,21 @@ def test_i2c_bus_rejects_negative_bus_num():
         validate_settings_tree(settings)
 
 
-def test_i2c_bus_rejects_a_blank_adapter():
+@pytest.mark.parametrize(
+    "i2c_bus",
+    [
+        {"kind": "kernel", "adapter": ""},
+        {"kind": "kernel", "adapter": "   "},
+        {"kind": "kernel", "serial": ""},
+        {"kind": "kernel", "adapter": "X", "bus_num": 3},
+    ],
+    ids=["blank_adapter", "whitespace_only_adapter", "blank_serial", "two_selectors_of_the_same_kind"],
+)
+def test_i2c_bus_rejects_a_malformed_selector(i2c_bus):
     from common.settings_schema import SettingsValidationError, validate_settings_tree
 
     settings = copy.deepcopy(default_settings())
-    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "adapter": ""}
-    with pytest.raises(SettingsValidationError):
-        validate_settings_tree(settings)
-
-
-def test_i2c_bus_rejects_a_whitespace_only_adapter():
-    from common.settings_schema import SettingsValidationError, validate_settings_tree
-
-    settings = copy.deepcopy(default_settings())
-    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "adapter": "   "}
-    with pytest.raises(SettingsValidationError):
-        validate_settings_tree(settings)
-
-
-def test_i2c_bus_rejects_a_blank_serial():
-    from common.settings_schema import SettingsValidationError, validate_settings_tree
-
-    settings = copy.deepcopy(default_settings())
-    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "serial": ""}
-    with pytest.raises(SettingsValidationError):
-        validate_settings_tree(settings)
-
-
-def test_i2c_bus_rejects_two_selectors_of_the_same_kind():
-    from common.settings_schema import SettingsValidationError, validate_settings_tree
-
-    settings = copy.deepcopy(default_settings())
-    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "adapter": "X", "bus_num": 3}
+    settings["platform"]["fan_controller"]["i2c_bus"] = i2c_bus
     with pytest.raises(SettingsValidationError):
         validate_settings_tree(settings)
 

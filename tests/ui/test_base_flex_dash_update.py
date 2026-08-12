@@ -310,16 +310,31 @@ def test_hopper_vertical_hidden_when_disabled(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_button_row_for_mode_smoke():
-    button_type, button_list, _ = DisplayBase._button_row_for_mode("Smoke", False, False)
-    assert button_type == ["Set Temp", "Hold", "Stop", "Shutdown"]
-    assert button_list == ["input_hold", "input_hold", "cmd_stop", "cmd_shutdown"]
-
-
-def test_button_row_for_mode_hold():
-    button_type, button_list, _ = DisplayBase._button_row_for_mode("Hold", False, False)
-    assert button_type == ["Set Temp", "Smoke", "Stop", "Shutdown"]
-    assert button_list == ["input_hold", "cmd_smoke", "cmd_stop", "cmd_shutdown"]
+@pytest.mark.parametrize(
+    ("mode", "expected_button_type", "expected_button_list"),
+    [
+        (
+            "Smoke",
+            ["Set Temp", "Hold", "Stop", "Shutdown"],
+            ["input_hold", "input_hold", "cmd_stop", "cmd_shutdown"],
+        ),
+        (
+            "Hold",
+            ["Set Temp", "Smoke", "Stop", "Shutdown"],
+            ["input_hold", "cmd_smoke", "cmd_stop", "cmd_shutdown"],
+        ),
+        (
+            "Shutdown",
+            ["Smoke", "Hold", "Stop", "Shutdown"],
+            ["cmd_smoke", "input_hold", "cmd_stop", "cmd_shutdown"],
+        ),
+    ],
+    ids=["smoke", "hold", "shutdown"],
+)
+def test_button_row_for_mode(mode, expected_button_type, expected_button_list):
+    button_type, button_list, _ = DisplayBase._button_row_for_mode(mode, False, False)
+    assert button_type == expected_button_type
+    assert button_list == expected_button_list
 
 
 def test_button_row_for_mode_startup_reignite():
@@ -327,12 +342,6 @@ def test_button_row_for_mode_startup_reignite():
         button_type, button_list, _ = DisplayBase._button_row_for_mode(mode, False, False)
         assert button_type == ["Startup", "Smoke", "Hold", "Stop"]
         assert button_list == ["cmd_startup", "cmd_smoke", "input_hold", "cmd_stop"]
-
-
-def test_button_row_for_mode_shutdown():
-    button_type, button_list, _ = DisplayBase._button_row_for_mode("Shutdown", False, False)
-    assert button_type == ["Smoke", "Hold", "Stop", "Shutdown"]
-    assert button_list == ["cmd_smoke", "input_hold", "cmd_stop", "cmd_shutdown"]
 
 
 def test_button_row_for_mode_stop_prime_monitor_default():

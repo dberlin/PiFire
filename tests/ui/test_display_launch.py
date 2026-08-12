@@ -7,22 +7,13 @@ import pytest
 import display_launch
 
 
-def test_bare_for_spi_display():
-    settings = {"modules": {"display": "st7789_240x320"}}
-    argv, env_updates = display_launch.build_launch_argv(settings, {})
-    assert argv == [sys.executable, "display_process.py"]
-    assert env_updates == {}
-
-
-def test_bare_for_none_display():
-    settings = {"modules": {"display": "none"}}
-    argv, env_updates = display_launch.build_launch_argv(settings, {})
-    assert argv == [sys.executable, "display_process.py"]
-    assert env_updates == {}
-
-
-def test_bare_for_pygame_display():
-    settings = {"modules": {"display": "dsi_800x480t"}}
+@pytest.mark.parametrize(
+    "display",
+    ["st7789_240x320", "none", "dsi_800x480t"],
+    ids=["spi_display", "none_display", "pygame_display"],
+)
+def test_bare_launch_for_non_qtquick_display(display):
+    settings = {"modules": {"display": display}}
     argv, env_updates = display_launch.build_launch_argv(settings, {})
     assert argv == [sys.executable, "display_process.py"]
     assert env_updates == {}

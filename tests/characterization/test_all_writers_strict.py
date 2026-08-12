@@ -168,37 +168,26 @@ def admin_client(ds, tmp_path):
     flask_app.config["BACKUP_PATH"], backups_module.BACKUP_PATH = saved_backup_path
 
 
-def test_admin_debugenabled_disable_writes_strict(admin_client):
-    resp = admin_client.client.post("/api/admin/settings", json={"debug_mode": False})
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("debug_mode", False),
+        ("debug_mode", True),
+        ("boot_to_monitor", True),
+        # The legacy form route treated an unchecked checkbox (the key entirely
+        # absent from the POST body) as `False`. The kept JSON endpoint has no
+        # such default -- an empty body is refused outright (`if not body: return
+        # error(...)`, blueprints/api_admin/routes.py) -- so the closest surviving
+        # equivalent is an explicit `False`, which exercises the same
+        # `settings["globals"].update(body)` write path with the opposite value.
+        ("boot_to_monitor", False),
+    ],
+    ids=["debug_mode_disable", "debug_mode_enable", "boot_to_monitor_true", "boot_to_monitor_false"],
+)
+def test_admin_flag_writes_strict(admin_client, field, value):
+    resp = admin_client.client.post("/api/admin/settings", json={field: value})
     assert resp.status_code == 200
-    assert read_settings()["globals"]["debug_mode"] is False
-    _assert_strict()
-
-
-def test_admin_debugenabled_enable_writes_strict(admin_client):
-    resp = admin_client.client.post("/api/admin/settings", json={"debug_mode": True})
-    assert resp.status_code == 200
-    assert read_settings()["globals"]["debug_mode"] is True
-    _assert_strict()
-
-
-def test_admin_boot_writes_strict(admin_client):
-    resp = admin_client.client.post("/api/admin/settings", json={"boot_to_monitor": True})
-    assert resp.status_code == 200
-    assert read_settings()["globals"]["boot_to_monitor"] is True
-    _assert_strict()
-
-
-def test_admin_boot_false_writes_strict(admin_client):
-    """The legacy form route treated an unchecked checkbox (the key entirely
-    absent from the POST body) as `False`. The kept JSON endpoint has no
-    such default -- an empty body is refused outright (`if not body: return
-    error(...)`, blueprints/api_admin/routes.py) -- so the closest surviving
-    equivalent is an explicit `False`, which exercises the same
-    `settings["globals"].update(body)` write path with the opposite value."""
-    resp = admin_client.client.post("/api/admin/settings", json={"boot_to_monitor": False})
-    assert resp.status_code == 200
-    assert read_settings()["globals"]["boot_to_monitor"] is False
+    assert read_settings()["globals"][field] is value
     _assert_strict()
 
 
