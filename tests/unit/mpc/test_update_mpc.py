@@ -573,7 +573,23 @@ def test_load_trace_samples_accepts_output_recorded_after_a_newer_result(ds):
 
 
 def test_load_trace_samples_accepts_skipped_numeric_revisions(ds):
-    append_control_trace(_lifecycle_records())
+    # The premise of this test lives in _lifecycle_records(), which emits
+    # revisions 0, 2, 7, 12 -- deliberately non-contiguous. Assert that here,
+    # so renumbering the fixture contiguously fails this test loudly instead
+    # of quietly voiding it (which is what made this a duplicate of
+    # test_load_trace_samples_accepts_an_active_framed_session_without_a_terminal_partial).
+    records = _lifecycle_records()
+    revisions = sorted(
+        {
+            record.payload.result_revision
+            for record in records
+            if isinstance(record.payload, (MpcUpdatePayload, AppliedOutputPayload))
+        }
+    )
+    assert revisions == [0, 2, 7, 12], "fixture no longer exercises skipped revisions"
+    assert revisions != list(range(revisions[0], revisions[-1] + 1))
+
+    append_control_trace(records)
 
     _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
 
