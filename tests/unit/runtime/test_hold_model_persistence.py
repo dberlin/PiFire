@@ -273,7 +273,24 @@ def test_checkpoint_persistence_failure_disables_hold_learning(hold_cycle):
 
 
 def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_snapshot(hold_cycle):
-    """Checkpoint I/O remains owned after nonblocking Hold teardown."""
+    """Checkpoint I/O remains owned after nonblocking Hold teardown.
+
+    "Does not block" used to be measured by wait(timeout=0.2) -- a wall-clock
+    budget assertion of exactly the kind pyproject.toml's addopts comment
+    warns about: under `-n auto` on a loaded machine, a thread that is not
+    actually blocked on anything can still take >200ms just to get scheduled,
+    which fails this test for a reason that has nothing to do with the code.
+    Proof now comes from a recorded happens-before order instead of a
+    stopwatch: `store.order` only gains "write_unblocked" once this test
+    calls `store.allow_first_write.set()`, which happens strictly later in
+    program order than the tick/teardown completion checks below, so
+    `"write_unblocked" not in store.order` there is a structural guarantee,
+    not a timing race. The wait() calls that remain use generous bounds
+    purely as a deadlock safety net (a genuinely blocked on_tick/teardown
+    would hang until this test releases the write, far below -- so any bound
+    that fits comfortably under pytest's own --timeout=120 tells them apart
+    just as well as a tight one, without flaking on a busy machine).
+    """
 
     class _BlockingStore:
         def __init__(self):
@@ -283,6 +300,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
             self.latest_saved = threading.Event()
             self.writer_threads = []
             self.saved_snapshots = []
+            self.order = []
             self._writes = 0
 
         def load(self, _name):
@@ -295,6 +313,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
             if self._writes == 1:
                 self.first_write_started.set()
                 self.allow_first_write.wait()
+                self.order.append("write_unblocked")
             self.models[name] = owned_snapshot
             self.saved_snapshots.append((name, owned_snapshot))
             if owned_snapshot["revision"] == 2:
@@ -315,6 +334,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
         except BaseException as error:
             tick_errors.append(error)
         finally:
+            store.order.append("tick_finished")
             tick_finished.set()
 
     tick_thread = threading.Thread(target=tick)
@@ -324,8 +344,12 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
     tick_thread.start()
     try:
         assert store.first_write_started.wait(timeout=1.0), "checkpoint writer never received the first snapshot"
-        assert tick_finished.wait(timeout=0.2), "on_tick waited for checkpoint I/O"
+        assert tick_finished.wait(timeout=10.0), "on_tick waited for checkpoint I/O"
         assert not tick_errors
+        #  The write cannot have been unblocked yet -- that only happens below
+        #  -- so on_tick returning here proves it did not wait on the write.
+        assert "write_unblocked" not in store.order
+        assert store.writer_threads and store.writer_threads[0] is not tick_thread
 
         runner.snapshot = {"revision": 2, "K": 701.0}
         hold.on_tick(now=101.0, ptemp=200.0, current_output_status=_off())
@@ -339,12 +363,15 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
             except BaseException as error:
                 teardown_errors.append(error)
             finally:
+                store.order.append("teardown_finished")
                 teardown_finished.set()
 
         teardown_thread = threading.Thread(target=teardown)
         teardown_thread.start()
-        assert teardown_finished.wait(timeout=0.2), "teardown waited for blocked checkpoint I/O"
+        assert teardown_finished.wait(timeout=10.0), "teardown waited for blocked checkpoint I/O"
         assert not teardown_errors
+        assert "write_unblocked" not in store.order
+        assert store.writer_threads[0] is not teardown_thread
         store.allow_first_write.set()
         assert store.latest_saved.wait(timeout=1.0), "latest owned snapshot was not persisted"
     finally:
@@ -363,7 +390,22 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
     assert teardown_thread is not None and not teardown_thread.is_alive()
     assert store.models["pid_sp"] == {"revision": 2, "K": 701.0}
     assert [snapshot["revision"] for _, snapshot in store.saved_snapshots] == [1, 2]
+    #  store.latest_saved firing only proves save_outcome returned -- the
+    #  persistence worker's own run loop still needs a moment afterward to
+    #  notice flush_and_stop's earlier stop request and let its thread exit.
+    #  Join (bounded, as a deadlock safety net -- see the module docstring
+    #  above) before checking is_alive() instead of checking instantaneously,
+    #  the same way tick_thread/teardown_thread are joined above: an
+    #  un-joined check here is itself a wall-clock race, just one that only
+    #  shows up under enough concurrent load to widen the window.
+    for writer_thread in {*store.writer_threads}:
+        writer_thread.join(timeout=5.0)
     assert store.writer_threads and all(not thread.is_alive() for thread in store.writer_threads)
+    #  "write_unblocked" was recorded strictly after both completion markers
+    #  above -- proving, by order rather than duration, that neither call
+    #  waited on the checkpoint write.
+    assert store.order.index("tick_finished") < store.order.index("write_unblocked")
+    assert store.order.index("teardown_finished") < store.order.index("write_unblocked")
 
 
 def test_framed_ticks_persist_only_advancing_model_revisions(hold_cycle):

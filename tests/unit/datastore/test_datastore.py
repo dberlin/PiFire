@@ -81,18 +81,26 @@ def test_schema_lazy_without_init(tmp_path):
 
 
 def test_reset_for_tests_restores_db_path_on_none(tmp_path):
-    """Regression test: _reset_for_tests(None) restores original DB_PATH."""
+    """Regression test: _reset_for_tests(None) restores original DB_PATH.
+
+    Establishes its own baseline first: DB_PATH is module-level global state,
+    and a sibling test that left a temp path installed used to make the
+    `endswith("pifire.db")` assertion fail depending on execution order.
+    """
+    datastore._reset_for_tests(None)  # known-good starting point
     original_db_path = datastore.DB_PATH
+    assert original_db_path.endswith("pifire.db")
+
     temp_db_path = str(tmp_path / "temp.db")
+    try:
+        datastore._reset_for_tests(temp_db_path)
+        assert datastore.DB_PATH == temp_db_path
 
-    # Set to temp path
-    datastore._reset_for_tests(temp_db_path)
-    assert datastore.DB_PATH == temp_db_path
-
-    # Reset to None should restore original
-    datastore._reset_for_tests(None)
-    assert datastore.DB_PATH == original_db_path
-    assert datastore.DB_PATH.endswith("pifire.db")
+        datastore._reset_for_tests(None)
+        assert datastore.DB_PATH == original_db_path
+        assert datastore.DB_PATH.endswith("pifire.db")
+    finally:
+        datastore._reset_for_tests(None)
 
 
 def test_blob_roundtrip_and_missing(ds):

@@ -4,12 +4,50 @@ Read-only by construction: this blueprint has no POST, so nothing here can
 change the grill. See docs/superpowers/plans/2026-07-28-react-metrics-page.md.
 """
 
+import contextlib
+import fcntl
+import os
+import tempfile
+
 import pytest
 
 from app import app as flask_app
 from common.web_contracts.content import MetricsPayload
 
 START = 1_700_000_000_000
+
+
+@contextlib.contextmanager
+def _metrics_export_lock():
+    """Serialize a block of code across xdist WORKER PROCESSES, not just
+    within one.
+
+    GET /api/metrics/export writes to a fixed, predictable path --
+    common/app.py's prepare_metrics_csv joins a minute-granularity clock
+    stamp under /tmp (see blueprints/api_metrics/routes.py:82-84) -- shared
+    by every process on the machine, not just within this test file. Two of
+    the four tests below calling that route from different xdist workers in
+    the same real-world minute can write-then-read the SAME file, so
+    whichever write lands last wins and the other test observes that
+    content instead of its own (confirmed: test_export_of_an_empty_table_says_so
+    and test_export_streams_a_csv_attachment both seen failing this way
+    under concurrent execution). The route's temp-file naming is production
+    code and out of scope here.
+
+    `@pytest.mark.xdist_group` looks like the natural fix, but it is
+    silently a no-op unless pytest is invoked with `--dist=loadgroup` --
+    the suite's default addopts use plain `-n auto` (`--dist=load`), which
+    ignores the marker with no warning. A POSIX advisory lock on a
+    well-known /tmp path is dist-mode agnostic: it blocks at the OS level
+    regardless of how xdist chose to schedule the two processes.
+    """
+    lock_path = os.path.join(tempfile.gettempdir(), "pifire-test-lock-metrics_export_tmp_path")
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def seed(mode="Smoke", augerontime=100, duration_ms=60_000):
@@ -147,37 +185,41 @@ def test_the_surface_registers_no_write():
     assert writes == []
 
 
+#  All four tests below hit GET /api/metrics/export and wrap their body in
+#  _metrics_export_lock() -- see that function's docstring for why.
 def test_export_streams_a_csv_attachment(ds, client):
     from common.datastore_accessors import flush_metrics
 
-    flush_metrics()
-    seed()
+    with _metrics_export_lock():
+        flush_metrics()
+        seed()
 
-    resp = client.get("/api/metrics/export")
-    assert resp.status_code == 200
-    disposition = resp.headers.get("Content-Disposition", "")
-    assert "attachment" in disposition
-    #  Werkzeug leaves the filename UNQUOTED when it needs no quoting, so this
-    #  is a containment check: asserting a trailing quote fails on a header
-    #  that is perfectly correct.
-    assert "-PiFire-Metrics-Export.csv" in disposition
-    #  Once, not twice. The Flask route hands prepare_metrics_csv a name that
-    #  already ends in -PiFire-Metrics-Export, and the helper appends its own.
-    assert disposition.count("PiFire-Metrics-Export") == 1
+        resp = client.get("/api/metrics/export")
+        assert resp.status_code == 200
+        disposition = resp.headers.get("Content-Disposition", "")
+        assert "attachment" in disposition
+        #  Werkzeug leaves the filename UNQUOTED when it needs no quoting, so this
+        #  is a containment check: asserting a trailing quote fails on a header
+        #  that is perfectly correct.
+        assert "-PiFire-Metrics-Export.csv" in disposition
+        #  Once, not twice. The Flask route hands prepare_metrics_csv a name that
+        #  already ends in -PiFire-Metrics-Export, and the helper appends its own.
+        assert disposition.count("PiFire-Metrics-Export") == 1
 
-    body = resp.get_data(as_text=True)
-    #  The header row is metrics_items' keys, in order.
-    assert body.splitlines()[0].startswith("id, starttime, starttime_c,")
-    assert "Smoke" in body
+        body = resp.get_data(as_text=True)
+        #  The header row is metrics_items' keys, in order.
+        assert body.splitlines()[0].startswith("id, starttime, starttime_c,")
+        assert "Smoke" in body
 
 
 def test_export_of_an_empty_table_says_so(ds, client):
     from common.datastore_accessors import flush_metrics
 
-    flush_metrics()
-    resp = client.get("/api/metrics/export")
-    assert resp.status_code == 200
-    assert resp.get_data(as_text=True).strip() == "No Data"
+    with _metrics_export_lock():
+        flush_metrics()
+        resp = client.get("/api/metrics/export")
+        assert resp.status_code == 200
+        assert resp.get_data(as_text=True).strip() == "No Data"
 
 
 def test_export_carries_the_derived_columns(ds, client):
@@ -186,12 +228,13 @@ def test_export_carries_the_derived_columns(ds, client):
     processed_metrics() and not read_all_metrics()."""
     from common.datastore_accessors import flush_metrics
 
-    flush_metrics()
-    seed()
+    with _metrics_export_lock():
+        flush_metrics()
+        seed()
 
-    body = client.get("/api/metrics/export").get_data(as_text=True)
-    assert "30 grams" in body
-    assert "60 s" in body
+        body = client.get("/api/metrics/export").get_data(as_text=True)
+        assert "30 grams" in body
+        assert "60 s" in body
 
 
 def test_export_takes_no_client_supplied_name(ds, client):
@@ -203,9 +246,10 @@ def test_export_takes_no_client_supplied_name(ds, client):
     """
     from common.datastore_accessors import flush_metrics
 
-    flush_metrics()
-    resp = client.get("/api/metrics/export?filename=../../etc/passwd")
-    assert resp.status_code == 200
-    disposition = resp.headers["Content-Disposition"]
-    assert "passwd" not in disposition
-    assert "-PiFire-Metrics-Export.csv" in disposition
+    with _metrics_export_lock():
+        flush_metrics()
+        resp = client.get("/api/metrics/export?filename=../../etc/passwd")
+        assert resp.status_code == 200
+        disposition = resp.headers["Content-Disposition"]
+        assert "passwd" not in disposition
+        assert "-PiFire-Metrics-Export.csv" in disposition
