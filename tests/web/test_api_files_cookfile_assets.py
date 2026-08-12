@@ -18,9 +18,9 @@ import tempfile
 import zipfile
 
 import pytest
-from PIL import Image
 from common.web_contracts.content import CookFileAsset
 
+from tests.web._asset_helpers import make_static_img_tmp_cleanup, png_bytes, read_member, upload
 from tests.web.archive_builders import write_cookfile
 
 UPLOAD_URL = "/api/files/cookfiles/assets/upload"
@@ -40,39 +40,7 @@ def folders(api_files_folders):
 
 @pytest.fixture(autouse=True)
 def static_img_tmp_cleanup():
-    """Any read with unpackassets=True symlinks ./static/img/tmp/{id} into the
-    repo tree (file_mgmt/common.py:85-88). Gitignored, but removed anyway so
-    the working tree stays clean."""
-    base = "./static/img/tmp"
-    before = set(os.listdir(base)) if os.path.isdir(base) else set()
-    yield
-    if os.path.isdir(base):
-        for leftover in set(os.listdir(base)) - before:
-            target = os.path.join(base, leftover)
-            if os.path.islink(target):
-                os.unlink(target)
-
-
-def _png(color=(0, 200, 0), size=(16, 16)):
-    buf = io.BytesIO()
-    Image.new("RGB", size, color).save(buf, format="PNG")
-    return buf.getvalue()
-
-
-def _read_member(history_dir, name, member):
-    from file_mgmt.common import read_json_file_data
-
-    data, status = read_json_file_data(history_dir + name, member, unpackassets=False)
-    assert status == "OK"
-    return data
-
-
-def _upload(client, name, asset_name="shot.png", payload=None, mimetype="image/png"):
-    return client.post(
-        UPLOAD_URL,
-        data={"file": name, "assets": (io.BytesIO(payload if payload is not None else _png()), asset_name)},
-        content_type="multipart/form-data",
-    )
+    yield from make_static_img_tmp_cleanup()()
 
 
 def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch):
@@ -94,7 +62,7 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch
 
     monkeypatch.setattr(cookfile_api.tempfile, "mkdtemp", tracked_mkdtemp)
 
-    resp = _upload(client, name)
+    resp = upload(client, UPLOAD_URL, name)
     assert resp.status_code == 200
     stored = resp.get_json()["data"]["assets"]
     assert [CookFileAsset.model_validate(asset, strict=True).model_dump(mode="json") for asset in stored] == stored
@@ -106,13 +74,13 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch
     assert stored[0]["filename"] == arc
     assert f"assets/{arc}" in members
     assert f"assets/thumbs/{arc}" in members
-    assert _read_member(history_dir, name, "assets")[0]["filename"] == arc
+    assert read_member(history_dir, name, "assets")[0]["filename"] == arc
 
     # This request's private staging directory is removed even when other
     # xdist workers are creating their own upload directories concurrently.
     assert staging_paths
     assert all(not os.path.exists(path) for path in staging_paths)
-    parent_id = _read_member(history_dir, name, "metadata")["id"]
+    parent_id = read_member(history_dir, name, "metadata")["id"]
     assert not os.path.exists(f"/tmp/pifire/{parent_id}")
 
 
@@ -124,24 +92,26 @@ def test_asset_upload_accepts_more_than_one_file(client, folders):
         data={
             "file": name,
             "assets": [
-                (io.BytesIO(_png((10, 10, 200))), "one.png"),
-                (io.BytesIO(_png((200, 10, 10))), "two.png"),
+                (io.BytesIO(png_bytes((10, 10, 200))), "one.png"),
+                (io.BytesIO(png_bytes((200, 10, 10))), "two.png"),
             ],
         },
         content_type="multipart/form-data",
     )
     assert resp.status_code == 200
     assert len(resp.get_json()["data"]["assets"]) == 2
-    assert len(_read_member(history_dir, name, "assets")) == 2
+    assert len(read_member(history_dir, name, "assets")) == 2
 
 
 def test_asset_upload_rejects_a_disallowed_extension(client, folders):
     history_dir, _ = folders
     name = write_cookfile(history_dir, "AssetBad-Cook")
-    resp = _upload(client, name, asset_name="evil.svg", payload=b"<svg onload=alert(1)>", mimetype="image/svg+xml")
+    resp = upload(
+        client, UPLOAD_URL, name, asset_name="evil.svg", payload=b"<svg onload=alert(1)>", mimetype="image/svg+xml"
+    )
     assert resp.status_code == 400
     assert resp.get_json()["message"] == "disallowed_file"
-    assert _read_member(history_dir, name, "assets") == []
+    assert read_member(history_dir, name, "assets") == []
 
 
 def test_asset_upload_with_no_asset_part_is_400(client, folders):
@@ -152,7 +122,7 @@ def test_asset_upload_with_no_asset_part_is_400(client, folders):
 
 
 def test_asset_upload_refuses_traversal_on_the_archive_name(client, folders):
-    resp = _upload(client, "../x.pifire")
+    resp = upload(client, UPLOAD_URL, "../x.pifire")
     assert resp.status_code in (400, 404)
 
 
@@ -164,7 +134,7 @@ def test_asset_upload_filename_cannot_escape_the_staging_dir(client, folders):
     parent_before = set(os.listdir(parent))
     before = set(os.listdir(history_dir))
 
-    resp = _upload(client, name, asset_name="../../escape.png")
+    resp = upload(client, UPLOAD_URL, name, asset_name="../../escape.png")
     assert resp.status_code in (200, 400)
     assert set(os.listdir(parent)) == parent_before
     assert set(os.listdir(history_dir)) == before
@@ -176,8 +146,8 @@ def test_uploaded_asset_is_served_from_static_img_tmp(client, folders):
     equal the fullsize asset inside the zip."""
     history_dir, _ = folders
     name = write_cookfile(history_dir, "AssetServe-Cook")
-    parent_id = _read_member(history_dir, name, "metadata")["id"]
-    stored = _upload(client, name, asset_name="served.png", payload=_png((200, 20, 20), (24, 24)))
+    parent_id = read_member(history_dir, name, "metadata")["id"]
+    stored = upload(client, UPLOAD_URL, name, asset_name="served.png", payload=png_bytes((200, 20, 20), (24, 24)))
     arc = stored.get_json()["data"]["assets"][0]["filename"]
 
     #  The symlink is created by a read that unpacks assets; detail does one.
@@ -195,7 +165,7 @@ def test_uploaded_asset_is_served_from_static_img_tmp(client, folders):
 def test_asset_delete_removes_it_from_the_archive_and_from_comments(client, folders):
     history_dir, _ = folders
     name = write_cookfile(history_dir, "AssetDel-Cook")
-    arc = _upload(client, name, asset_name="gone.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="gone.png").get_json()["data"]["assets"][0]["filename"]
 
     cid = client.post("/api/files/cookfiles/comments", json={"file": name, "action": "add", "text": "c"}).get_json()[
         "data"
@@ -204,8 +174,8 @@ def test_asset_delete_removes_it_from_the_archive_and_from_comments(client, fold
 
     resp = client.post(DELETE_URL, json={"file": name, "assets": [arc]})
     assert resp.status_code == 200
-    assert _read_member(history_dir, name, "assets") == []
-    assert _read_member(history_dir, name, "comments")[0]["assets"] == []
+    assert read_member(history_dir, name, "assets") == []
+    assert read_member(history_dir, name, "comments")[0]["assets"] == []
     with zipfile.ZipFile(history_dir + name) as archive:
         assert f"assets/{arc}" not in archive.namelist()
         assert f"assets/thumbs/{arc}" not in archive.namelist()
@@ -214,11 +184,11 @@ def test_asset_delete_removes_it_from_the_archive_and_from_comments(client, fold
 def test_asset_delete_clears_a_thumbnail_pointing_at_it(client, folders):
     history_dir, _ = folders
     name = write_cookfile(history_dir, "AssetThumbDel-Cook")
-    arc = _upload(client, name, asset_name="t.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="t.png").get_json()["data"]["assets"][0]["filename"]
     assert client.post(THUMB_URL, json={"file": name, "asset": arc}).status_code == 200
 
     assert client.post(DELETE_URL, json={"file": name, "assets": [arc]}).status_code == 200
-    assert _read_member(history_dir, name, "metadata")["thumbnail"] == ""
+    assert read_member(history_dir, name, "metadata")["thumbnail"] == ""
 
 
 @pytest.mark.parametrize("bad", ["a.png", [1], {"a": 1}, None])
@@ -241,11 +211,11 @@ def test_asset_delete_refuses_traversal(client, folders):
 def test_thumbnail_is_set_from_an_existing_asset(client, folders):
     history_dir, _ = folders
     name = write_cookfile(history_dir, "Thumb-Cook")
-    arc = _upload(client, name, asset_name="t.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="t.png").get_json()["data"]["assets"][0]["filename"]
 
     resp = client.post(THUMB_URL, json={"file": name, "asset": arc})
     assert resp.status_code == 200
-    assert _read_member(history_dir, name, "metadata")["thumbnail"] == arc
+    assert read_member(history_dir, name, "metadata")["thumbnail"] == arc
 
 
 def test_thumbnail_rejects_an_asset_the_file_does_not_have(client, folders):
@@ -258,7 +228,7 @@ def test_thumbnail_rejects_an_asset_the_file_does_not_have(client, folders):
     resp = client.post(THUMB_URL, json={"file": name, "asset": "does-not-exist.png"})
     assert resp.status_code == 400
     assert resp.get_json()["data"]["field"] == "asset"
-    assert _read_member(history_dir, name, "metadata")["thumbnail"] == ""
+    assert read_member(history_dir, name, "metadata")["thumbnail"] == ""
 
 
 @pytest.mark.parametrize("bad", ["", 5, None])

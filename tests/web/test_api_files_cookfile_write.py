@@ -22,6 +22,7 @@ import os
 
 import pytest
 
+from tests.web._asset_helpers import read_member
 from tests.web.archive_builders import write_cookfile, write_legacy_cookfile
 
 
@@ -223,20 +224,12 @@ def test_delete_with_no_body_is_400(client, folders):
 # --------------------------------------------------------------------------
 
 
-def _read_member(history_dir, name, member):
-    from file_mgmt.common import read_json_file_data
-
-    data, status = read_json_file_data(history_dir + name, member, unpackassets=False)
-    assert status == "OK"
-    return data
-
-
 def test_title_rename_persists(client, folders):
     history_dir, _ = folders
     name = write_cookfile(history_dir, "Title-Cook")
     resp = client.post("/api/files/cookfiles/title", json={"file": name, "title": "Sunday Brisket"})
     assert resp.status_code == 200 and resp.get_json()["result"] == "OK"
-    assert _read_member(history_dir, name, "metadata")["title"] == "Sunday Brisket"
+    assert read_member(history_dir, name, "metadata")["title"] == "Sunday Brisket"
 
 
 def test_title_rename_does_not_rename_the_file(client, folders):
@@ -270,11 +263,11 @@ def test_label_rename_updates_labels_mapper_and_chart_label(client, folders):
     safe = resp.get_json()["data"]["new_label_safe"]
     assert safe == "MainGrill"  # create_safe_name strips non-alnum (common/app.py:325)
 
-    labels = _read_member(history_dir, name, "graph_labels")
+    labels = read_member(history_dir, name, "graph_labels")
     assert labels["probes"][safe] == "Main Grill"
     assert "grill1" not in labels["probes"]
 
-    graph = _read_member(history_dir, name, "graph_data")
+    graph = read_member(history_dir, name, "graph_data")
     assert safe in graph["probe_mapper"]["probes"]
     assert graph["chart_data"][graph["probe_mapper"]["probes"][safe]]["label"] == "Main Grill"
 
@@ -303,12 +296,12 @@ def test_label_rename_refusal_leaves_the_archive_untouched(client, folders):
         "/api/files/cookfiles/label",
         json={"file": name, "old_label": "grill1", "new_label": "Main Grill"},
     )
-    before = _read_member(history_dir, name, "graph_labels")
+    before = read_member(history_dir, name, "graph_labels")
     client.post(
         "/api/files/cookfiles/label",
         json={"file": name, "old_label": "MainGrill", "new_label": "Main Grill"},
     )
-    assert _read_member(history_dir, name, "graph_labels") == before
+    assert read_member(history_dir, name, "graph_labels") == before
 
 
 @pytest.mark.parametrize(
@@ -333,7 +326,7 @@ def test_recover_upgrade_rewrites_a_current_version_file_as_a_no_op(client, fold
     name = write_cookfile(history_dir, "Upgrade-Cook")
     resp = client.post("/api/files/cookfiles/recover", json={"file": name, "action": "upgrade"})
     assert resp.status_code == 200 and resp.get_json()["result"] == "OK"
-    assert _read_member(history_dir, name, "metadata")["title"] == "Upgrade-Cook"
+    assert read_member(history_dir, name, "metadata")["title"] == "Upgrade-Cook"
 
 
 def test_recover_upgrade_makes_a_pre_1_5_file_readable(client, folders):

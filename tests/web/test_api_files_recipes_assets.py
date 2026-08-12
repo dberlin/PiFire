@@ -10,9 +10,9 @@ import tempfile
 import zipfile
 
 import pytest
-from PIL import Image
 from common.web_contracts.content import RecipeAsset
 
+from tests.web._asset_helpers import make_static_img_tmp_cleanup, png_bytes, read_member, upload
 from tests.web.archive_builders import write_recipe
 
 UPLOAD_URL = "/api/files/recipes/assets/upload"
@@ -32,39 +32,7 @@ def folders(api_files_folders):
 
 @pytest.fixture(autouse=True)
 def static_img_tmp_cleanup():
-    """Any read with unpackassets=True symlinks ./static/img/tmp/{id} into the
-    repo tree (file_mgmt/common.py:85-88). Gitignored, but removed anyway so
-    the working tree stays clean."""
-    base = "./static/img/tmp"
-    before = set(os.listdir(base)) if os.path.isdir(base) else set()
-    yield
-    if os.path.isdir(base):
-        for leftover in set(os.listdir(base)) - before:
-            target = os.path.join(base, leftover)
-            if os.path.islink(target):
-                os.unlink(target)
-
-
-def _png(color=(0, 200, 0), size=(16, 16)):
-    buf = io.BytesIO()
-    Image.new("RGB", size, color).save(buf, format="PNG")
-    return buf.getvalue()
-
-
-def _read_member(recipe_dir, name, member):
-    from file_mgmt.common import read_json_file_data
-
-    data, status = read_json_file_data(recipe_dir + name, member, unpackassets=False)
-    assert status == "OK"
-    return data
-
-
-def _upload(client, name, asset_name="shot.png", payload=None, mimetype="image/png"):
-    return client.post(
-        UPLOAD_URL,
-        data={"file": name, "assets": (io.BytesIO(payload if payload is not None else _png()), asset_name)},
-        content_type="multipart/form-data",
-    )
+    yield from make_static_img_tmp_cleanup()()
 
 
 # --- upload ------------------------------------------------------------------
@@ -89,7 +57,7 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch
 
     monkeypatch.setattr(recipes_api.tempfile, "mkdtemp", tracked_mkdtemp)
 
-    resp = _upload(client, name)
+    resp = upload(client, UPLOAD_URL, name)
     assert resp.status_code == 200
     stored = resp.get_json()["data"]["assets"]
     assert [RecipeAsset.model_validate(asset, strict=True).model_dump(mode="json") for asset in stored] == stored
@@ -101,13 +69,13 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch
     assert stored[0]["filename"] == arc
     assert f"assets/{arc}" in members
     assert f"assets/thumbs/{arc}" in members
-    assert _read_member(recipe_dir, name, "assets")[0]["filename"] == arc
+    assert read_member(recipe_dir, name, "assets")[0]["filename"] == arc
 
     # This request's private staging directory is removed even when other
     # xdist workers are creating their own upload directories concurrently.
     assert staging_paths
     assert all(not os.path.exists(path) for path in staging_paths)
-    parent_id = _read_member(recipe_dir, name, "metadata")["id"]
+    parent_id = read_member(recipe_dir, name, "metadata")["id"]
     assert not os.path.exists(f"/tmp/pifire/{parent_id}")
 
 
@@ -119,24 +87,26 @@ def test_asset_upload_accepts_more_than_one_file(client, folders):
         data={
             "file": name,
             "assets": [
-                (io.BytesIO(_png((10, 10, 200))), "one.png"),
-                (io.BytesIO(_png((200, 10, 10))), "two.png"),
+                (io.BytesIO(png_bytes((10, 10, 200))), "one.png"),
+                (io.BytesIO(png_bytes((200, 10, 10))), "two.png"),
             ],
         },
         content_type="multipart/form-data",
     )
     assert resp.status_code == 200
     assert len(resp.get_json()["data"]["assets"]) == 2
-    assert len(_read_member(recipe_dir, name, "assets")) == 2
+    assert len(read_member(recipe_dir, name, "assets")) == 2
 
 
 def test_asset_upload_rejects_a_disallowed_extension(client, folders):
     _history_dir, recipe_dir = folders
     name = write_recipe(recipe_dir, "AssetBad-Recipe")
-    resp = _upload(client, name, asset_name="evil.svg", payload=b"<svg onload=alert(1)>", mimetype="image/svg+xml")
+    resp = upload(
+        client, UPLOAD_URL, name, asset_name="evil.svg", payload=b"<svg onload=alert(1)>", mimetype="image/svg+xml"
+    )
     assert resp.status_code == 400
     assert resp.get_json()["message"] == "disallowed_file"
-    assert _read_member(recipe_dir, name, "assets") == []
+    assert read_member(recipe_dir, name, "assets") == []
 
 
 def test_asset_upload_with_no_asset_part_is_400(client, folders):
@@ -147,7 +117,7 @@ def test_asset_upload_with_no_asset_part_is_400(client, folders):
 
 
 def test_asset_upload_refuses_traversal_on_the_archive_name(client, folders):
-    resp = _upload(client, "../x.pfrecipe")
+    resp = upload(client, UPLOAD_URL, "../x.pfrecipe")
     assert resp.status_code in (400, 404)
 
 
@@ -159,7 +129,7 @@ def test_asset_upload_filename_cannot_escape_the_staging_dir(client, folders):
     parent_before = set(os.listdir(parent))
     before = set(os.listdir(recipe_dir))
 
-    resp = _upload(client, name, asset_name="../../escape.png")
+    resp = upload(client, UPLOAD_URL, name, asset_name="../../escape.png")
     assert resp.status_code in (200, 400)
     assert set(os.listdir(parent)) == parent_before
     assert set(os.listdir(recipe_dir)) == before
@@ -171,8 +141,8 @@ def test_uploaded_asset_is_served_from_static_img_tmp(client, folders):
     equal the fullsize asset inside the zip."""
     _history_dir, recipe_dir = folders
     name = write_recipe(recipe_dir, "AssetServe-Recipe")
-    parent_id = _read_member(recipe_dir, name, "metadata")["id"]
-    stored = _upload(client, name, asset_name="served.png", payload=_png((200, 20, 20), (24, 24)))
+    parent_id = read_member(recipe_dir, name, "metadata")["id"]
+    stored = upload(client, UPLOAD_URL, name, asset_name="served.png", payload=png_bytes((200, 20, 20), (24, 24)))
     arc = stored.get_json()["data"]["assets"][0]["filename"]
 
     #  The symlink is created by a read that unpacks assets; detail does one.
@@ -196,12 +166,12 @@ def test_selecting_a_splash_asset_sets_both_image_and_thumbnail(client, folders)
     header disagree."""
     _history_dir, recipe_dir = folders
     name = write_recipe(recipe_dir, "Splash-Recipe")
-    arc = _upload(client, name, asset_name="splash.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="splash.png").get_json()["data"]["assets"][0]["filename"]
 
     resp = client.post(ASSETS_URL, json={"file": name, "section": "splash", "assets": [arc]})
     assert resp.status_code == 200
     assert resp.get_json()["data"]["assets"] == [arc]
-    metadata = _read_member(recipe_dir, name, "metadata")
+    metadata = read_member(recipe_dir, name, "metadata")
     assert metadata["image"] == arc
     assert metadata["thumbnail"] == arc
 
@@ -210,13 +180,13 @@ def test_clearing_the_splash_clears_both(client, folders):
     """Flask clears both together (blueprints/recipes/routes.py:423-424)."""
     _history_dir, recipe_dir = folders
     name = write_recipe(recipe_dir, "SplashClear-Recipe")
-    arc = _upload(client, name, asset_name="splash.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="splash.png").get_json()["data"]["assets"][0]["filename"]
     assert client.post(ASSETS_URL, json={"file": name, "section": "splash", "assets": [arc]}).status_code == 200
 
     resp = client.post(ASSETS_URL, json={"file": name, "section": "splash", "assets": []})
     assert resp.status_code == 200
     assert resp.get_json()["data"]["assets"] == []
-    metadata = _read_member(recipe_dir, name, "metadata")
+    metadata = read_member(recipe_dir, name, "metadata")
     assert metadata["image"] == ""
     assert metadata["thumbnail"] == ""
 
@@ -260,12 +230,12 @@ def test_setting_an_ingredient_asset_list_replaces_it_wholesale(client, folders)
     )
     assert resp.status_code == 200
     assert resp.get_json()["data"]["assets"] == ["a.png", "b.png"]
-    recipe = _read_member(recipe_dir, name, "recipe")
+    recipe = read_member(recipe_dir, name, "recipe")
     assert recipe["ingredients"][0]["assets"] == ["a.png", "b.png"]
 
     cleared = client.post(ASSETS_URL, json={"file": name, "section": "ingredients", "index": 0, "assets": []})
     assert cleared.status_code == 200
-    recipe = _read_member(recipe_dir, name, "recipe")
+    recipe = read_member(recipe_dir, name, "recipe")
     assert recipe["ingredients"][0]["assets"] == []
 
 
@@ -280,7 +250,7 @@ def test_setting_an_instruction_asset_list_replaces_it_wholesale(client, folders
     resp = client.post(ASSETS_URL, json={"file": name, "section": "instructions", "index": 0, "assets": ["c.png"]})
     assert resp.status_code == 200
     assert resp.get_json()["data"]["assets"] == ["c.png"]
-    recipe = _read_member(recipe_dir, name, "recipe")
+    recipe = read_member(recipe_dir, name, "recipe")
     assert recipe["instructions"][0]["assets"] == ["c.png"]
 
 
@@ -339,11 +309,11 @@ def test_assets_with_no_body_is_400(client, folders):
 def test_asset_delete_removes_it_from_the_archive_and_assets_json(client, folders):
     _history_dir, recipe_dir = folders
     name = write_recipe(recipe_dir, "AssetDel-Recipe")
-    arc = _upload(client, name, asset_name="gone.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="gone.png").get_json()["data"]["assets"][0]["filename"]
 
     resp = client.post(DELETE_URL, json={"file": name, "assets": [arc]})
     assert resp.status_code == 200
-    assert _read_member(recipe_dir, name, "assets") == []
+    assert read_member(recipe_dir, name, "assets") == []
     with zipfile.ZipFile(recipe_dir + name) as archive:
         assert f"assets/{arc}" not in archive.namelist()
         assert f"assets/thumbs/{arc}" not in archive.namelist()
@@ -352,11 +322,11 @@ def test_asset_delete_removes_it_from_the_archive_and_assets_json(client, folder
 def test_asset_delete_clears_the_splash_pointing_at_it(client, folders):
     _history_dir, recipe_dir = folders
     name = write_recipe(recipe_dir, "AssetSplashDel-Recipe")
-    arc = _upload(client, name, asset_name="t.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="t.png").get_json()["data"]["assets"][0]["filename"]
     assert client.post(ASSETS_URL, json={"file": name, "section": "splash", "assets": [arc]}).status_code == 200
 
     assert client.post(DELETE_URL, json={"file": name, "assets": [arc]}).status_code == 200
-    metadata = _read_member(recipe_dir, name, "metadata")
+    metadata = read_member(recipe_dir, name, "metadata")
     assert metadata["image"] == ""
     assert metadata["thumbnail"] == ""
 
@@ -372,12 +342,12 @@ def test_asset_delete_removes_it_from_an_ingredient_and_an_instruction(client, f
         ingredients=[{"name": "Salt", "quantity": "", "assets": []}],
         instructions=[{"text": "Season", "ingredients": [], "assets": [], "step": 0}],
     )
-    arc = _upload(client, name, asset_name="shared.png").get_json()["data"]["assets"][0]["filename"]
+    arc = upload(client, UPLOAD_URL, name, asset_name="shared.png").get_json()["data"]["assets"][0]["filename"]
     client.post(ASSETS_URL, json={"file": name, "section": "ingredients", "index": 0, "assets": [arc]})
     client.post(ASSETS_URL, json={"file": name, "section": "instructions", "index": 0, "assets": [arc]})
 
     assert client.post(DELETE_URL, json={"file": name, "assets": [arc]}).status_code == 200
-    recipe = _read_member(recipe_dir, name, "recipe")
+    recipe = read_member(recipe_dir, name, "recipe")
     assert recipe["ingredients"][0]["assets"] == []
     assert recipe["instructions"][0]["assets"] == []
 
