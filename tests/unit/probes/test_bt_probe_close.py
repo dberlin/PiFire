@@ -116,17 +116,6 @@ def test_ibbq_close_warns_when_a_thread_outlives_the_join(ibbq, caplog):
     assert "device_thread" in caplog.text
 
 
-def test_ibbq_loops_exit_when_closing(ibbq):
-    """Both loops must return promptly once the flag is set -- with it already
-    set they must not touch Bluetooth at all, which is what lets these run in
-    a test at all."""
-    device = _bare(ibbq.iBBQ_Device)
-    device._closing.set()
-
-    device._setup_device()
-    device._sensing_loop()
-
-
 # ===========================================================================
 # probes/bt_meater.py
 # ===========================================================================
@@ -153,15 +142,6 @@ def test_meater_close_stops_the_threads_and_disconnects(meater):
     assert device.device is None
     assert device.meater is None
     assert device.device_setup is False
-
-
-def test_meater_loops_exit_when_closing(meater):
-    device = _bare(meater.Meater_Device)
-    device._closing.set()
-    device.hardware_id = None
-
-    device._setup_device()
-    device._sensing_loop()
 
 
 # ===========================================================================
@@ -211,10 +191,27 @@ def test_meater_exp_close_before_the_setup_thread_ran_is_harmless(meater_exp):
     assert device._closing.is_set()
 
 
-def test_meater_exp_loops_exit_when_closing(meater_exp):
-    device = _bare(meater_exp.Meater_Device)
+@pytest.mark.parametrize(
+    ("fixture_name", "device_attr", "extra_attrs"),
+    [
+        ("ibbq", "iBBQ_Device", {}),
+        ("meater", "Meater_Device", {"hardware_id": None}),
+        ("meater_exp", "Meater_Device", {"address": None}),
+    ],
+    ids=["ibbq", "meater", "meater_exp"],
+)
+def test_loops_exit_promptly_when_closing(request, fixture_name, device_attr, extra_attrs):
+    """Both loops must return promptly once the flag is set -- with it already
+    set they must not touch Bluetooth at all, which is what lets these run in
+    a test at all. Asserting the flag is still set on return is what
+    distinguishes 'exited because closing' from 'exited for some other reason'."""
+    module = request.getfixturevalue(fixture_name)
+    device = _bare(getattr(module, device_attr))
     device._closing.set()
-    device.address = None
+    for name, value in extra_attrs.items():
+        setattr(device, name, value)
 
     device._setup_device()
     device._sensing_loop()
+
+    assert device._closing.is_set(), "the loops must not clear the closing flag on the way out"
