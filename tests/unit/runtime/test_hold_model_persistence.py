@@ -717,33 +717,58 @@ class _CrashRecoverySolver:
         self.closed += 1
 
 
+#: Well above any real stall on a loaded machine, and below the suite's
+#: --timeout=120 ceiling, so a genuinely stuck runner still fails by name rather
+#: than hanging the worker.
+_GATE_TIMEOUT_S = 60.0
+
+
 class _CrashRecoveryRunnerGate:
+    """A barrier the runner thread cannot slip past.
+
+    This used to fall through when its `wait_for` timed out, which made it a
+    suggestion rather than a barrier: under parallel load a five-second stall let
+    the control loop run free, `_arrivals` advanced without the test releasing
+    anything, and `wait_for_arrivals` returned while the loop was mid-iteration.
+    The assertions downstream then read whatever state that free-running loop
+    happened to leave, surfacing as an `active_control_pair` identity mismatch
+    far from the actual cause. A timeout is now recorded and reported instead of
+    being silently ignored.
+    """
+
     def __init__(self):
         self._condition = threading.Condition()
         self._permits = 0
         self._arrivals = 0
         self._open = False
+        self._timed_out = False
 
     def __call__(self, _period):
         with self._condition:
             self._arrivals += 1
             self._condition.notify_all()
-            self._condition.wait_for(
+            released = self._condition.wait_for(
                 lambda: self._open or self._permits > 0,
-                timeout=5.0,
+                timeout=_GATE_TIMEOUT_S,
             )
+            if not released:
+                self._timed_out = True
+                self._condition.notify_all()
+                return
             if not self._open and self._permits > 0:
                 self._permits -= 1
 
     def wait_for_arrivals(self, count, timeout=1.0):
         deadline = time.monotonic() + timeout
         with self._condition:
-            while self._arrivals < count:
+            while self._arrivals < count and not self._timed_out:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0.0:
                     return False
                 self._condition.wait(remaining)
-            return True
+            # A timed-out gate means the runner advanced without being released,
+            # so any arrival count from here on describes an unsequenced loop.
+            return self._arrivals >= count and not self._timed_out
 
     def release(self):
         with self._condition:
