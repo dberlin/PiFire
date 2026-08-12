@@ -1,7 +1,6 @@
 """Hold restores a controller's model at setup and saves it as it changes."""
 
 from copy import deepcopy
-import json
 import time
 from types import SimpleNamespace
 
@@ -11,7 +10,6 @@ import pytest
 from common.control_trace import ActuationMode
 from common.controller_model_state import CheckpointSaveOutcome, ControllerModelStore
 from common.datastore_accessors import (
-    ModelActivationState,
     append_model_evidence,
     commit_model_activation_phase,
     commit_model_rollback,
@@ -43,6 +41,7 @@ from controller.model_learning.activation import (
     canonical_snapshot_digest as grey_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from tests.unit.runtime._persistence_helpers import _pair_phase_state
 from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
 import controller.mpc as _mpc_runtime
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
@@ -159,62 +158,6 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
 
     assert calls[:2] == ["migrate", "restore-load"]
     assert runner.restored[0]["version"] == 4
-
-
-def _pair_phase_state(phase: ActivationPhase = ActivationPhase.PREPARED):
-    incumbent_config = {"schema": "pifire-grey-box-model/v4", "theta": 50.0}
-    candidate_config = {"schema": "pifire-grey-box-model/v4", "theta": 40.0}
-    incumbent = GreyControlPairDescriptor(
-        model_digest=grey_snapshot_digest(incumbent_config),
-        configuration=incumbent_config,
-        estimator_kind="ekf",
-        solver_kind="acados-grey",
-        candidate_generation=3,
-        role_generation=4,
-    )
-    candidate = GreyControlPairDescriptor(
-        model_digest=grey_snapshot_digest(candidate_config),
-        configuration=candidate_config,
-        estimator_kind="ekf",
-        solver_kind="acados-grey",
-        candidate_generation=4,
-        role_generation=5,
-    )
-    prepared = PreparedActivationRecord.prepared(
-        timestamp_ms=1_000,
-        incumbent=incumbent,
-        candidate=candidate,
-        origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
-        decision_id="decision-grey-hold",
-    )
-    record = (
-        prepared
-        if phase is ActivationPhase.PREPARED
-        else prepared.transition(
-            phase,
-            reason="interrupted-activation" if phase is ActivationPhase.ABORTED else None,
-        )
-    )
-    active = candidate if phase is ActivationPhase.ACTIVE else incumbent
-    state = ModelActivationState(
-        active_snapshot_json=json.dumps(active.to_dict()["configuration"]),
-        rollback_snapshot_json=json.dumps(incumbent.to_dict()["configuration"]),
-        evidence_decision_id=record.decision_id,
-        controller_configuration_digest=candidate.ownership_digest,
-        role_generation=active.role_generation,
-        phase=record.phase.value,
-        transaction_id=record.transaction_id,
-        incumbent_pair_json=json.dumps(incumbent.to_dict()),
-        candidate_pair_json=json.dumps(candidate.to_dict()),
-        rollback_pair_json=json.dumps(incumbent.to_dict()),
-        origin=record.origin.value,
-        policy=record.policy.value,
-        candidate_generation=candidate.candidate_generation,
-        candidate_digest=candidate.model_digest,
-        reason=record.reason,
-    )
-    return state, record
 
 
 @pytest.mark.parametrize(

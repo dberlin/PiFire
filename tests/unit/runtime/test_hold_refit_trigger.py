@@ -737,7 +737,7 @@ class _ActivationOrderingCore(_CoreWithoutRefit):
 
 
 def test_completed_frame_feedback_and_observation_reach_incumbent_before_activation_install():
-    from tests.unit.runtime.test_hold_model_persistence import _pair_phase_state
+    from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
     core = _ActivationOrderingCore()
     gate = _StepGate()

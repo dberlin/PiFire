@@ -90,7 +90,7 @@ def test_the_write_interval_leaves_room_under_the_readers_staleness_window():
 
 
 def test_the_idle_tick_stamps(monkeypatch):
-    from tests.characterization.test_controller_loop_golden import _neutralize_externals, make_controller
+    from tests.characterization._controller_harness import _neutralize_externals, make_controller
     from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 
     heartbeat_mod.reset_for_tests()

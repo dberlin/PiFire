@@ -33,7 +33,7 @@ from common.control_delta import control_delta
 from common.modes import Mode
 from controller.runtime.clock import ManualClock
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
-from tests.characterization.test_controller_loop_golden import _neutralize_externals, make_controller
+from tests.characterization._controller_harness import _neutralize_externals, make_controller
 
 
 def _controller(monkeypatch, *, mode, critical_error):

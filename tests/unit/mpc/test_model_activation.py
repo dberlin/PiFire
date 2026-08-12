@@ -34,7 +34,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.runtime.model_fitting import TeardownGreyHistory
 from controller.mpc import Controller as MpcController
 import controller.mpc as mpc_module
-from tests.unit.mpc.test_mpc_solver_options import CYCLE, _config as _mpc_config, _Estimator, _Solver
+from tests.unit.mpc._solver_fixtures import CYCLE, _config as _mpc_config, _Estimator, _Solver
 
 
 _INCUMBENT_CONFIG = {

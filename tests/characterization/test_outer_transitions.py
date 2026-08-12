@@ -21,7 +21,7 @@ assert on what it recorded, which is the only way to test a halt at all.
 
 from common.common import WriteKind
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
-from tests.characterization.test_controller_loop_golden import (
+from tests.characterization._controller_harness import (
     make_controller,
     _neutralize_externals,
     _spy_dispatch,

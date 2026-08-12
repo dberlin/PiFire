@@ -14,7 +14,7 @@ docs/superpowers/plans/2026-07-18-status-dimension.md.
 import pytest
 
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
-from tests.characterization.test_controller_loop_golden import make_controller, _spy_dispatch, _neutralize_externals
+from tests.characterization._controller_harness import make_controller, _spy_dispatch, _neutralize_externals
 
 
 # --------------------------------------------------------------------------

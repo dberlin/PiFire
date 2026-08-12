@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from common.model_evidence import EvidenceKind, ForecastOriginEvidence
 from controller.model_learning.confidence import ConfidenceConfig, evaluate_confidence
-from tests.unit.mpc.test_model_confidence import _qualifying, _rebuild, _state
+from tests.unit.mpc._confidence_helpers import _qualifying, _rebuild, _state
 
 
 def _session_origin(
