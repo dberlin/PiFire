@@ -160,6 +160,32 @@ def test_checkpoint_submission_coalesces_latest_owned_snapshot_without_blocking(
     assert [snapshot["revision"] for _, snapshot in store.saved] == [1, 2]
 
 
+def test_resubmitting_a_revision_already_being_saved_does_not_persist_it_twice():
+    """The de-dup window has to cover the save, not just the queue.
+
+    _next_work_locked pops the pending checkpoint before _run releases the lock
+    and performs the save. A submission arriving inside that window saw no
+    pending entry at all, so it skipped the revision comparison entirely and
+    enqueued a revision that was already on its way to the store -- persisting
+    the same revision twice.
+    """
+    store = _Store()
+    worker = ModelPersistenceWorker(store, _Logger())
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        assert store.first_save_started.wait(timeout=1.0)
+        # The worker has dequeued revision 7 and is blocked inside save_outcome,
+        # so _pending_checkpoints no longer holds it.
+        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        store.release_first_save.set()
+        assert worker.flush_and_stop(timeout=1.0)
+    finally:
+        store.release_first_save.set()
+        worker.flush_and_stop(timeout=1.0)
+
+    assert [snapshot["revision"] for _, snapshot in store.saved] == [7]
+
+
 def test_bounded_evidence_overflow_returns_a_typed_gap_and_never_drops_activation():
     store = _Store()
     written = []

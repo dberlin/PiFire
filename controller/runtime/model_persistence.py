@@ -131,6 +131,11 @@ class ModelPersistenceWorker:
         self._evidence_capacity = evidence_capacity
         self._condition = Condition()
         self._pending_checkpoints: dict[str, dict[str, object]] = {}
+        # A checkpoint leaves _pending_checkpoints when the worker dequeues it, but the
+        # save runs outside the lock. Without a record of what is mid-save, a submission
+        # arriving in that window sees nothing pending, skips the revision comparison,
+        # and re-enqueues a revision already on its way to the store.
+        self._inflight_checkpoints: dict[str, dict[str, object]] = {}
         self._pending_evidence: deque[tuple[ModelEvidenceRecord, ...]] = deque()
         self._pending_recorder_gaps: deque[ModelEvidenceRecord] = deque()
         self._pending_activations: deque[_ActivationWork] = deque()
@@ -168,13 +173,21 @@ class ModelPersistenceWorker:
             if self._stopping:
                 self._logger.error(f"Could not checkpoint {name} model after teardown began")
                 return False
-            pending_snapshot = self._pending_checkpoints.get(name)
-            if pending_snapshot is not None:
-                pending_revision = self._revision(pending_snapshot)
+            accepted_revisions = [
+                revision
+                for revision in (
+                    self._revision(snapshot)
+                    for snapshot in (
+                        self._pending_checkpoints.get(name),
+                        self._inflight_checkpoints.get(name),
+                    )
+                    if snapshot is not None
+                )
+                if revision is not None
+            ]
+            if accepted_revisions:
                 submitted_revision = self._revision(owned_snapshot)
-                if pending_revision is not None and (
-                    submitted_revision is None or submitted_revision <= pending_revision
-                ):
+                if submitted_revision is None or submitted_revision <= max(accepted_revisions):
                     return True
             stage_owned = getattr(self._store, "stage_owned", None)
             if callable(stage_owned):
@@ -359,7 +372,10 @@ class ModelPersistenceWorker:
             return "evidence", (self._pending_recorder_gaps.popleft(),)
         if self._pending_checkpoints:
             name = next(iter(self._pending_checkpoints))
-            return "checkpoint", (name, self._pending_checkpoints.pop(name))
+            snapshot = self._pending_checkpoints.pop(name)
+            # Stays visible to submit_checkpoint until _run finishes the save.
+            self._inflight_checkpoints[name] = snapshot
+            return "checkpoint", (name, snapshot)
         return None
 
     def _fail_pending_activation_fifo_locked(self, error: BaseException) -> None:
@@ -375,6 +391,9 @@ class ModelPersistenceWorker:
                 if work is None:
                     return
             kind, payload = work
+            inflight_checkpoint_name = (
+                payload[0] if kind == "checkpoint" and isinstance(payload, tuple) and len(payload) == 2 else None
+            )
             activation_work = payload if kind == "activation" and isinstance(payload, _ActivationWork) else None
             phase_work = (
                 payload
@@ -433,6 +452,8 @@ class ModelPersistenceWorker:
                     confidence_work.receipt._complete(durable=True)
             finally:
                 with self._condition:
+                    if inflight_checkpoint_name is not None:
+                        self._inflight_checkpoints.pop(inflight_checkpoint_name, None)
                     if activation_work is not None:
                         activation_work.succeeded = succeeded
                         activation_work.completed = True
