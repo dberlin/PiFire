@@ -141,7 +141,7 @@ describe("readTargetEdit", () => {
   // Mirrors the backend's if/elif at notify/notifications.py:142-159: with both
   // flags set the grill shuts down and keep-warm never runs, so "shutdown" is
   // what the user is actually looking at.
-  it("lets shutdown win when the payload somehow carries both", () => {
+  it("readTargetEdit lets shutdown win when the payload somehow carries both", () => {
     expect(readTargetEdit(probe({ targetShutdown: true, targetKeepWarm: true })).action).toBe(
       "shutdown",
     );
@@ -271,7 +271,7 @@ describe("readLimitEdit", () => {
 
   // Mirrors the backend's if/elif: with both flags set the grill shuts down and
   // re-ignite never runs, so "shutdown" is what the user is actually looking at.
-  it("lets shutdown win when the payload somehow carries both", () => {
+  it("readLimitEdit lets shutdown win when the payload somehow carries both", () => {
     expect(
       readLimitEdit(probe({ lowLimitShutdown: true, lowLimitReignite: true }), "low").action,
     ).toBe("shutdown");

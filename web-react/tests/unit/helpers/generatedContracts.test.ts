@@ -259,7 +259,6 @@ describe("generated web contract ownership", () => {
 
   it("keeps migrated helpers free of Python-owned interface and type declarations", () => {
     const residuals = residualMirrors(HELPERS_ROOT, pythonOwnedNames());
-    if (residuals.length > 0)
-      throw new Error(`Python-owned contract mirrors:\n${residuals.join("\n")}`);
+    expect(residuals).toEqual([]);
   });
 });

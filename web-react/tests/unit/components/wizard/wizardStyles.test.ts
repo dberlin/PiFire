@@ -34,14 +34,8 @@ describe("wizard stylesheet coverage", () => {
     expect(used.has("pf-install-progress-bar-reduced-motion")).toBe(true);
   });
 
-  // Guards the guard. Every assertion below is only as good as declaredClasses()
-  // being able to say "no": if prose counts as a declaration, a stylesheet this
-  // heavily commented can lose a rule and stay green.
-  it("does not count a class that is only NAMED IN A COMMENT", () => {
-    const css = "/* .pf-ghost is explained here */\n.pf-real { color: red; }";
-    expect(declaredClasses(css).has("pf-real")).toBe(true);
-    expect(declaredClasses(css).has("pf-ghost")).toBe(false);
-  });
+  // The comment-vs-declaration guard itself is covered once, directly against
+  // declaredClasses(), in cssCoverage.test.ts -- no need to restate it here.
 
   it("has a non-empty CSS rule for every pf-* class the wizard uses", () => {
     expect([...used].filter((c) => !anywhere.has(c)).sort()).toEqual([]);

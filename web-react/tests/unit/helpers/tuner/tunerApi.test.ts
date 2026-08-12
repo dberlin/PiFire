@@ -57,7 +57,7 @@ describe("fetchTr", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/tuner/tr?probe=Probe%201");
   });
 
-  it("keeps a null reading null", async () => {
+  it("fetchTr keeps a null reading null", async () => {
     //  null means "not reporting". Coercing it to 0 would render as a real
     //  zero-ohm reading, which is what a shorted probe looks like.
     fetchMock.mockResolvedValue(OK({ probe: "Grill", trohms: null, tuning: true }));
@@ -138,7 +138,7 @@ describe("fetchAutoStatus", () => {
     });
   });
 
-  it("keeps a null reading null", async () => {
+  it("fetchAutoStatus keeps a null reading null", async () => {
     fetchMock.mockResolvedValue(OK(status({ current_temp: null, samples: 0 })));
     const result = await fetchAutoStatus("Grill", "Missing", "");
     expect(result.data?.current_temp).toBeNull();
