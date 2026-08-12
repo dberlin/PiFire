@@ -161,30 +161,14 @@ def test_a_genuinely_stuck_sensor_still_reinitializes(hcsr04_mod):
         _stop(hopper)
 
 
+# One end-to-end case per transport is deliberate: it proves this transport's
+# reading actually reaches the shared level maths. The maths itself is covered
+# directly in test_sampled_base_levels.py.
 def test_reading_at_or_below_full_is_100_percent(hcsr04_mod):
     _FakeMeasurement.reading_cm = 4.0  # == full
     hopper = _make_hopper(hcsr04_mod)
     try:
         assert _await_sample(hopper) == 100
-    finally:
-        _stop(hopper)
-
-
-def test_reading_at_empty_is_0_percent(hcsr04_mod):
-    _FakeMeasurement.reading_cm = 22.0  # == empty
-    hopper = _make_hopper(hcsr04_mod)
-    try:
-        assert _await_sample(hopper) == 0
-    finally:
-        _stop(hopper)
-
-
-def test_reading_between_full_and_empty_is_interpolated(hcsr04_mod):
-    # Same arithmetic the ToF base is pinned against at 5.0cm.
-    _FakeMeasurement.reading_cm = 5.0
-    hopper = _make_hopper(hcsr04_mod)
-    try:
-        assert _await_sample(hopper) == 94
     finally:
         _stop(hopper)
 

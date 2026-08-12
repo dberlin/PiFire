@@ -134,6 +134,9 @@ def test_invalid_empty_full_forces_defaults(tof_mod):
         _stop(hopper)
 
 
+# One end-to-end case per transport is deliberate: it proves this transport's
+# reading actually reaches the shared level maths. The maths itself is covered
+# directly in test_sampled_base_levels.py.
 def test_reading_at_or_below_full_is_100_percent(tof_mod):
     hopper = _make_hopper(tof_mod, reading_mm=40, empty=22, full=4)  # 4.0cm == full
     try:
@@ -142,26 +145,10 @@ def test_reading_at_or_below_full_is_100_percent(tof_mod):
         _stop(hopper)
 
 
-def test_reading_at_empty_is_0_percent(tof_mod):
-    hopper = _make_hopper(tof_mod, reading_mm=220, empty=22, full=4)  # 22.0cm == empty
-    try:
-        assert _await_sample(hopper) == 0
-    finally:
-        _stop(hopper)
-
-
 def test_reading_above_empty_is_0_percent(tof_mod):
     hopper = _make_hopper(tof_mod, reading_mm=300, empty=22, full=4)  # 30.0cm > empty
     try:
         assert _await_sample(hopper) == 0
-    finally:
-        _stop(hopper)
-
-
-def test_reading_between_full_and_empty_is_interpolated(tof_mod):
-    hopper = _make_hopper(tof_mod, reading_mm=50, empty=22, full=4)  # 5.0cm
-    try:
-        assert _await_sample(hopper) == 94
     finally:
         _stop(hopper)
 
