@@ -186,6 +186,36 @@ def test_resubmitting_a_revision_already_being_saved_does_not_persist_it_twice()
     assert [snapshot["revision"] for _, snapshot in store.saved] == [7]
 
 
+def test_resubmitting_a_revision_already_saved_is_not_saved_again():
+    """De-dup has to outlive the save, not just the queue and the in-flight window.
+
+    Once the save finishes, _pending_checkpoints and _inflight_checkpoints are
+    both empty again, so a resubmission of a revision already durably stored had
+    nothing left to compare against: it was queued and written a second time.
+    The real store answers NONADVANCING for that, so nothing is corrupted -- but
+    the worker should not spend a write to discover it, and a store that simply
+    records what it is asked to save sees the duplicate.
+    """
+    store = _Store()
+    worker = ModelPersistenceWorker(store, _Logger())
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        assert store.first_save_started.wait(timeout=1.0)
+        store.release_first_save.set()
+        # Wait for the worker to finish the save and drop its in-flight record,
+        # which is the exact state the second submission has to survive.
+        with worker._condition:
+            assert worker._condition.wait_for(lambda: not worker._inflight_checkpoints, timeout=1.0)
+
+        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        assert worker.flush_and_stop(timeout=1.0)
+    finally:
+        store.release_first_save.set()
+        worker.flush_and_stop(timeout=1.0)
+
+    assert [snapshot["revision"] for _, snapshot in store.saved] == [7]
+
+
 def test_bounded_evidence_overflow_returns_a_typed_gap_and_never_drops_activation():
     store = _Store()
     written = []

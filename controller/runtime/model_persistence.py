@@ -136,6 +136,10 @@ class ModelPersistenceWorker:
         # arriving in that window sees nothing pending, skips the revision comparison,
         # and re-enqueues a revision already on its way to the store.
         self._inflight_checkpoints: dict[str, dict[str, object]] = {}
+        # Once the save finishes both maps above are empty again, so a resubmission
+        # of a revision already durably stored had nothing left to compare against.
+        # One entry per checkpoint name, so this cannot grow without bound.
+        self._last_saved_revisions: dict[str, int] = {}
         self._pending_evidence: deque[tuple[ModelEvidenceRecord, ...]] = deque()
         self._pending_recorder_gaps: deque[ModelEvidenceRecord] = deque()
         self._pending_activations: deque[_ActivationWork] = deque()
@@ -185,6 +189,9 @@ class ModelPersistenceWorker:
                 )
                 if revision is not None
             ]
+            last_saved = self._last_saved_revisions.get(name)
+            if last_saved is not None:
+                accepted_revisions.append(last_saved)
             if accepted_revisions:
                 submitted_revision = self._revision(owned_snapshot)
                 if submitted_revision is None or submitted_revision <= max(accepted_revisions):
@@ -407,11 +414,13 @@ class ModelPersistenceWorker:
                 else None
             )
             succeeded = False
+            checkpoint_revision = None
             try:
                 if kind == "checkpoint":
                     if not isinstance(payload, tuple) or len(payload) != 2:
                         raise TypeError("checkpoint work is malformed")
                     name, snapshot = payload
+                    checkpoint_revision = self._revision(snapshot)
                     outcome = self._save_checkpoint(name, snapshot)
                     if outcome is CheckpointSaveOutcome.FAILED:
                         raise RuntimeError("checkpoint store failed")
@@ -454,6 +463,12 @@ class ModelPersistenceWorker:
                 with self._condition:
                     if inflight_checkpoint_name is not None:
                         self._inflight_checkpoints.pop(inflight_checkpoint_name, None)
+                        # Only on success, and only forward: a failed save must not
+                        # suppress the retry of the revision it failed to store.
+                        if succeeded and checkpoint_revision is not None:
+                            previous = self._last_saved_revisions.get(inflight_checkpoint_name)
+                            if previous is None or checkpoint_revision > previous:
+                                self._last_saved_revisions[inflight_checkpoint_name] = checkpoint_revision
                     if activation_work is not None:
                         activation_work.succeeded = succeeded
                         activation_work.completed = True
