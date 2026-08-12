@@ -564,8 +564,12 @@ def _refit_after_cook(core):
         "reason": str(verdict.reason),
         "samples": len(getattr(core, "cook_history", list)()),
         "seconds": round(time.perf_counter() - started, 2),
-        "params": None if snapshot is None else dict(snapshot["params"]),
-        "rmse": None if snapshot is None else snapshot.get("rmse"),
+        # The grey-only v4 checkpoint nests these under "active"; the flat
+        # "params"/"rmse" keys belong to a schema that predates it. The old
+        # snapshot["params"] raised KeyError, and snapshot.get("rmse") silently
+        # reported None for every run rather than failing.
+        "params": None if snapshot is None else dict(snapshot["active"]["parameters"]),
+        "rmse": None if snapshot is None else snapshot["active"]["metadata"].get("rmse"),
         "log": buf.getvalue().strip().splitlines(),
     }
 

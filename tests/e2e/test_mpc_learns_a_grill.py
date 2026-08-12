@@ -18,13 +18,16 @@ because that is what it was asked for; those numbers anchor the *shape* expected
 here -- a large fall, concentrated in the first promotion -- but they are not
 imported as thresholds, because a 450 F cook is a different operating point.
 
-THE ACTUATOR FLOOR. `u_min` is the least fuel the auger is allowed to burn, so
-it fixes a temperature the chamber cannot be driven below no matter what the
-controller does -- on this plant, 435 F at the experiment harness's `u_min=0.15`
+THE ACTUATOR FLOOR. The auger's duty floor is the least fuel it is allowed to
+burn, so it fixes a temperature the chamber cannot be driven below no matter what
+the controller does -- on this plant, 435 F at the experiment harness's 0.15
 against 342 F at the 0.1 the product ships. Below that floor "overshoot" is a
 reading of the actuator and every controller looks identical, so these tests run
 the shipped `cycle_data` rather than the harness's, and assert the setpoint
-clears the floor by more than the fall they claim to measure.
+clears the floor by more than the fall they claim to measure. That floor was once
+read from `cycle_data["u_min"]`; the setting was retired because nothing read it,
+and the floor now comes from the pulse geometry (`AUGER_TIMING.pulse_s /
+frame_s`) that always determined it. Same 0.1, different source.
 
 WHAT IS DELIBERATELY NOT DONE HERE. `n_horizon` is never raised by hand. A14
 derives the effective horizon at build time from the model's own braking
@@ -66,6 +69,7 @@ import pytest
 import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
 from controller.mpc import _DEFAULTS, Controller
+from grillplat.actuator_capabilities import AUGER_TIMING
 
 MODEL_KEYS = Controller._MODEL_PARAM_KEYS
 
@@ -76,13 +80,19 @@ SEED = 1
 COOKS = 3
 
 
-#: The cycle data the product ships. `u_min` is the auger's floor, and a floor
-#: sets a temperature the chamber cannot be driven below however the controller
-#: behaves -- on this plant, a setpoint near that floor would make "overshoot"
-#: a reading of the actuator rather than of the controller.
+#: The auger's duty floor: the least fuel it is allowed to burn, which sets a
+#: temperature the chamber cannot be driven below however the controller behaves.
+#: This used to be read from `cycle_data["u_min"]`, but that setting was retired
+#: because nothing read it -- the floor is the pulse geometry, pulse_s/frame_s,
+#: and always was. The value is unchanged at 0.1; only its source moved.
+_AUGER_DUTY_FLOOR = AUGER_TIMING.pulse_s / AUGER_TIMING.frame_s
+
+
+#: The cycle data the product ships. A setpoint near the duty floor above would
+#: make "overshoot" a reading of the actuator rather than of the controller.
 def _shipped_cycle_data():
     settings = default_settings()["cycle_data"]
-    return {key: settings[key] for key in ("u_min", "u_max", "PMode")}
+    return {key: settings[key] for key in ("u_max", "PMode")}
 
 
 #: Long enough past this plant's ~2 h time constant that the chamber has
@@ -129,7 +139,7 @@ def _min_firing_equilibrium_f(fan):
     """
     plant = controller_matrix.MAKGrillSim(seed=SEED)
     for _ in range(_EQUILIBRIUM_S):
-        plant.step(_shipped_cycle_data()["u_min"], fan)
+        plant.step(_AUGER_DUTY_FLOOR, fan)
     return plant.T_c * 9 / 5 + 32
 
 
@@ -149,7 +159,7 @@ def test_overshoot_falls_across_successive_cooks():
     authority_f = SETPOINT_F - floor_f
     assert authority_f > MIN_PEAK_DROP_F, (
         f"the {SETPOINT_F:.0f} F setpoint is only {authority_f:.1f} F above this plant's "
-        f"minimum-firing equilibrium ({floor_f:.1f} F at u_min={_shipped_cycle_data()['u_min']}), so overshoot "
+        f"minimum-firing equilibrium ({floor_f:.1f} F at a duty floor of {_AUGER_DUTY_FLOOR}), so overshoot "
         "here reads the actuator floor rather than the controller"
     )
 
@@ -230,7 +240,10 @@ def test_identification_off_is_invisible():
     flagged = Controller({"enable_identification": True}, "F", _shipped_cycle_data())
     plain = Controller({}, "F", _shipped_cycle_data())
     assert {k: flagged.cfg[k] for k in MODEL_KEYS} == {k: plain.cfg[k] for k in MODEL_KEYS}
-    assert flagged.mpc.settings.n_horizon == plain.mpc.settings.n_horizon == flagged.cfg["n_horizon"]
+    # The acados backend carries the built horizon on its GreyBoxMPCConfig as
+    # horizon_steps, which controller/mpc.py builds from cfg["n_horizon"]; the
+    # old `mpc.settings.n_horizon` belonged to the previous MPC object.
+    assert flagged.mpc.config.horizon_steps == plain.mpc.config.horizon_steps == flagged.cfg["n_horizon"]
 
     learned = _cook({}, refit=True)
     verdict = learned["refit"]
