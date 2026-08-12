@@ -328,8 +328,16 @@ def test_post_update_control_unknown_key(sio):
     assert resp["message"] == "Error: Key not found in control"
 
 
-def test_post_update_invalid_type(sio):
-    resp = sio.mod._post_app_data("update_action", "bogus", json.dumps({"globals": {}}))
+@pytest.mark.parametrize(
+    "action",
+    ["update_action", "pellets_action", "timer_action", "recipes_action", "probes_action", "notify_action"],
+)
+def test_post_invalid_type(sio, action):
+    # update_action keys its request off "globals" (not "update_action"), so its
+    # payload key is the deliberate asymmetry here -- every other action-group's
+    # payload key matches its own action name. Preserved verbatim, not "tidied".
+    payload_key = "globals" if action == "update_action" else action
+    resp = sio.mod._post_app_data(action, "bogus", json.dumps({payload_key: {}}))
     assert resp["result"] == "Error"
     assert resp["message"] == "Error: Received request without valid type"
 
@@ -406,34 +414,22 @@ def test_post_admin_factory_defaults(sio):
     assert list(cleared["log"].values()) == [{"pelletid": cleared["current"]["pelletid"], "deleted": False}]
 
 
-def test_post_admin_reboot(sio):
-    resp = sio.mod._post_app_data("admin_action", "reboot")
+@pytest.mark.parametrize(
+    ("action_type", "expected_call"),
+    [
+        ("reboot", "reboot_system"),
+        ("shutdown", "shutdown_system"),
+        ("restart_control", "restart_control"),
+        ("restart_webapp", "restart_webapp"),
+        # The supervisor action resolves to restart_scripts, not
+        # restart_supervisor -- pinned deliberately.
+        ("restart_supervisor", "restart_scripts"),
+    ],
+)
+def test_post_admin_action(sio, action_type, expected_call):
+    resp = sio.mod._post_app_data("admin_action", action_type)
     assert resp["result"] == "OK"
-    assert any(c[0] == "reboot_system" for c in sio.calls)
-
-
-def test_post_admin_shutdown(sio):
-    resp = sio.mod._post_app_data("admin_action", "shutdown")
-    assert resp["result"] == "OK"
-    assert any(c[0] == "shutdown_system" for c in sio.calls)
-
-
-def test_post_admin_restart_control(sio):
-    resp = sio.mod._post_app_data("admin_action", "restart_control")
-    assert resp["result"] == "OK"
-    assert any(c[0] == "restart_control" for c in sio.calls)
-
-
-def test_post_admin_restart_webapp(sio):
-    resp = sio.mod._post_app_data("admin_action", "restart_webapp")
-    assert resp["result"] == "OK"
-    assert any(c[0] == "restart_webapp" for c in sio.calls)
-
-
-def test_post_admin_restart_supervisor(sio):
-    resp = sio.mod._post_app_data("admin_action", "restart_supervisor")
-    assert resp["result"] == "OK"
-    assert any(c[0] == "restart_scripts" for c in sio.calls)
+    assert any(c[0] == expected_call for c in sio.calls)
 
 
 def test_post_admin_invalid_type(sio):
@@ -487,13 +483,6 @@ def test_post_pellets_load_profile(sio):
     assert read_control()["hopper_check"] is True
 
 
-def test_post_pellets_load_profile_missing(sio):
-    payload = json.dumps({"pellets_action": {}})
-    resp = sio.mod._post_app_data("pellets_action", "load_profile", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Profile not included in request"
-
-
 def test_post_pellets_hopper_check(sio):
     resp = sio.mod._post_app_data("pellets_action", "hopper_check", json.dumps({"pellets_action": {}}))
     assert resp["result"] == "OK"
@@ -515,13 +504,6 @@ def test_post_pellets_edit_brands_delete(sio):
     assert "Generic" not in read_pellets_store()["brands"]
 
 
-def test_post_pellets_edit_brands_unspecified(sio):
-    payload = json.dumps({"pellets_action": {}})
-    resp = sio.mod._post_app_data("pellets_action", "edit_brands", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Function not specified"
-
-
 def test_post_pellets_edit_woods_new(sio):
     payload = json.dumps({"pellets_action": {"new_wood": "Mesquite2"}})
     resp = sio.mod._post_app_data("pellets_action", "edit_woods", payload)
@@ -535,13 +517,6 @@ def test_post_pellets_edit_woods_delete(sio):
     resp = sio.mod._post_app_data("pellets_action", "edit_woods", payload)
     assert resp["result"] == "OK"
     assert existing not in read_pellets_store()["woods"]
-
-
-def test_post_pellets_edit_woods_unspecified(sio):
-    payload = json.dumps({"pellets_action": {}})
-    resp = sio.mod._post_app_data("pellets_action", "edit_woods", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Function not specified"
 
 
 def test_post_pellets_add_profile_no_load(sio):
@@ -622,13 +597,6 @@ def test_post_pellets_edit_profile(sio):
     assert read_pellets_store()["archive"][profile_id]["brand"] == "EditedBrand"
 
 
-def test_post_pellets_edit_profile_missing(sio):
-    payload = json.dumps({"pellets_action": {}})
-    resp = sio.mod._post_app_data("pellets_action", "edit_profile", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Profile not included in request"
-
-
 def test_post_pellets_delete_profile_current_blocked(sio):
     current = read_pellets_store()["current"]["pelletid"]
     payload = json.dumps({"pellets_action": {"profile": current}})
@@ -648,32 +616,12 @@ def test_post_pellets_delete_profile_noncurrent(sio):
     assert "deadbeef" not in read_pellets_store()["archive"]
 
 
-def test_post_pellets_delete_profile_missing(sio):
-    payload = json.dumps({"pellets_action": {}})
-    resp = sio.mod._post_app_data("pellets_action", "delete_profile", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Profile not included in request"
-
-
 def test_post_pellets_delete_log(sio):
     log_key = next(iter(read_pellets_store()["log"].keys()))
     payload = json.dumps({"pellets_action": {"log_item": log_key}})
     resp = sio.mod._post_app_data("pellets_action", "delete_log", payload)
     assert resp["result"] == "OK"
     assert log_key not in read_pellets_store()["log"]
-
-
-def test_post_pellets_delete_log_unspecified(sio):
-    payload = json.dumps({"pellets_action": {}})
-    resp = sio.mod._post_app_data("pellets_action", "delete_log", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Function not specified"
-
-
-def test_post_pellets_invalid_type(sio):
-    resp = sio.mod._post_app_data("pellets_action", "bogus", json.dumps({"pellets_action": {}}))
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Received request without valid type"
 
 
 # =====================================================================
@@ -702,14 +650,6 @@ def test_post_timer_start_fresh(sio):
     assert control["notify_data"][_TIMER_IDX]["req"] is True
     assert control["notify_data"][_TIMER_IDX]["shutdown"] is True
     assert control["notify_data"][_TIMER_IDX]["keep_warm"] is False
-
-
-def test_post_timer_start_fresh_missing_ranges(sio):
-    # paused == 0 but no ranges -> Error (partial in-memory mutation not persisted).
-    payload = json.dumps({"timer_action": {}})
-    resp = sio.mod._post_app_data("timer_action", "start_timer", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Start time not specified"
 
 
 def test_post_timer_start_unpause(sio):
@@ -790,12 +730,6 @@ def test_post_timer_stop(sio):
     assert control["notify_data"][_TIMER_IDX]["keep_warm"] is False
 
 
-def test_post_timer_invalid_type(sio):
-    resp = sio.mod._post_app_data("timer_action", "bogus", json.dumps({"timer_action": {}}))
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Received request without valid type"
-
-
 def test_timer_action_no_timer_entry_returns_error_without_mutation(sio):
     """Fixed behavior: when notify_data has NO ``type == "timer"`` entry, the
     finder loop must not fall back to a stale/last ``index``. The handler
@@ -855,12 +789,6 @@ def test_post_recipe_start_falsy_filename_returns_none(sio):
     assert resp is None
 
 
-def test_post_recipes_invalid_type(sio):
-    resp = sio.mod._post_app_data("recipes_action", "bogus", json.dumps({"recipes_action": {}}))
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Received request without valid type"
-
-
 # =====================================================================
 # _post_app_data -- probes_action
 # =====================================================================
@@ -886,12 +814,6 @@ def test_post_probe_update_label_not_found(sio):
     resp = sio.mod._post_app_data("probes_action", "probe_update", payload)
     assert resp["result"] == "Error"
     assert resp["message"] == "Error: Probe was not found"
-
-
-def test_post_probes_invalid_type(sio):
-    resp = sio.mod._post_app_data("probes_action", "bogus", json.dumps({"probes_action": {}}))
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Received request without valid type"
 
 
 # =====================================================================
@@ -920,17 +842,31 @@ def test_post_notify_update(sio):
     assert grill_probe["req"] is True
 
 
-def test_post_notify_update_missing_label(sio):
-    payload = json.dumps({"notify_action": {}})
-    resp = sio.mod._post_app_data("notify_action", "notify_update", payload)
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Request missing probe label"
+# =====================================================================
+# _post_app_data -- missing required argument (parametrized: 6 pellets_action
+# branches, 1 timer_action branch, 1 notify_action branch)
+# =====================================================================
 
 
-def test_post_notify_invalid_type(sio):
-    resp = sio.mod._post_app_data("notify_action", "bogus", json.dumps({"notify_action": {}}))
+@pytest.mark.parametrize(
+    ("action", "action_type", "message"),
+    [
+        ("pellets_action", "load_profile", "Error: Profile not included in request"),
+        ("pellets_action", "edit_brands", "Error: Function not specified"),
+        ("pellets_action", "edit_woods", "Error: Function not specified"),
+        ("pellets_action", "edit_profile", "Error: Profile not included in request"),
+        ("pellets_action", "delete_profile", "Error: Profile not included in request"),
+        ("pellets_action", "delete_log", "Error: Function not specified"),
+        # paused == 0 but no ranges -> Error (partial in-memory mutation not persisted).
+        ("timer_action", "start_timer", "Error: Start time not specified"),
+        ("notify_action", "notify_update", "Error: Request missing probe label"),
+    ],
+)
+def test_post_missing_required_argument(sio, action, action_type, message):
+    payload = json.dumps({action: {}})
+    resp = sio.mod._post_app_data(action, action_type, payload)
     assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Received request without valid type"
+    assert resp["message"] == message
 
 
 # =====================================================================
