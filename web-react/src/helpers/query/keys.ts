@@ -5,16 +5,23 @@
  * from a module that knows nothing about the pages reading it, and a key
  * spelled inline in two files is a cache that has silently split in two.
  *
- * The settings trio shares the `settings` prefix on purpose: react-query
- * matches keys by prefix, so invalidating `settingsRoot` reaches all three.
- * That preserves today's behaviour exactly -- revalidator.revalidate() re-runs
- * settingsLoader, which refetches settings, mode AND controller metadata.
+ * Each API origin owns its own settings subtree. React-query matches keys by
+ * prefix, so invalidating settingsRoot(baseUrl) reaches the settings blob,
+ * mode and controller metadata for that origin without touching another one.
+ * That preserves revalidation semantics while fencing A → B → A base changes.
  */
+export const normalizeApiBase = (baseUrl: string): string => baseUrl.replace(/\/$/, "");
+
+const settingsRoot = (baseUrl: string) => ["settings", normalizeApiBase(baseUrl)] as const;
+
 export const queryKeys = {
-  settingsRoot: ["settings"] as const,
-  settings: ["settings", "all"] as const,
-  mode: ["settings", "mode"] as const,
-  controllerMetadata: ["settings", "controller-metadata"] as const,
+  /** Deliberate all-origin prefix; ordinary writes invalidate settingsRoot(baseUrl). */
+  allSettings: ["settings"] as const,
+  settingsRoot,
+  settings: (baseUrl: string) => [...settingsRoot(baseUrl), "all"] as const,
+  mode: (baseUrl: string) => [...settingsRoot(baseUrl), "mode"] as const,
+  controllerMetadata: (baseUrl: string) =>
+    [...settingsRoot(baseUrl), "controller-metadata"] as const,
   metrics: ["metrics"] as const,
   webUiBuild: ["webui-build"] as const,
   adminState: ["admin", "state"] as const,

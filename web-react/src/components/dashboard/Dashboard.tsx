@@ -1,17 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
+import { useNow } from "../../helpers/clock";
 import type { DashSocketPayload, ProbeDataPayload } from "../../helpers/contracts/core.gen";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
 import { deriveView, type PillView, reading } from "../../helpers/dashboard/deriveView";
-import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
+import { useFitScale } from "../../helpers/dashboard/hooks";
 import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
-import { queryKeys } from "../../helpers/query/keys";
 import { saveAccent } from "../../helpers/settings/accent";
-import { getSettings } from "../../helpers/settings/settingsApi";
+import { useSettings } from "../../helpers/settings/useSettings";
 import type { AccentName } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { ActionMenu, type MenuItem } from "./ActionMenu";
@@ -27,17 +27,6 @@ import { SystemStatus } from "./SystemStatus";
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
 /** controllers.json's nominal T_amb for settings written before that option existed. */
 const DEFAULT_MPC_AMBIENT_C = 20;
-interface MpcConfig {
-  selectedController: string | null;
-  ambientC: number;
-}
-interface LoadedMpcConfig extends MpcConfig {
-  requestIdentity: symbol;
-}
-const DEFAULT_MPC_CONFIG: MpcConfig = {
-  selectedController: null,
-  ambientC: DEFAULT_MPC_AMBIENT_C,
-};
 // The picker paints all three at once, so it cannot use --accent (which tracks
 // the CURRENT selection); theme.css keeps the three Theme.accentColor branches
 // as constants for exactly this.
@@ -57,8 +46,7 @@ const PMODE_ITEMS: MenuItem[] = Array.from({ length: 10 }, (_, n) => ({
 interface DashboardProps {
   dash: DashSocketPayload;
   command: CommandClient;
-  /** Base URL for the REST writes that do not go through CommandClient --
-   *  currently just the notify round trip, which needs a GET as well as a POST.
+  /** Base URL for settings and the REST calls that do not use CommandClient.
    *  This is the API base (empty in dev, so requests stay same-origin and the
    *  dev proxy forwards them), NOT the human-readable target shown by
    *  ConnectionStatus -- those differ, and fetching the display string sends
@@ -98,44 +86,17 @@ export function Dashboard({
   const view = deriveView(dash);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const now = useClock();
+  const nowSeconds = useNow(true);
   const health = useControlHealth(controlAlive, apiBase);
-  const mpcConfigRequestIdentity = useMemo(() => Symbol(apiBase), [apiBase]);
-  const [loadedMpcConfig, setLoadedMpcConfig] = useState<LoadedMpcConfig | null>(null);
-  // A response belongs only to the specific API-base transition that produced
-  // it. The identity changes even across A → B → A, so a failed second A read
-  // cannot revive the first A response.
-  const mpcConfig =
-    loadedMpcConfig?.requestIdentity === mpcConfigRequestIdentity
-      ? loadedMpcConfig
-      : DEFAULT_MPC_CONFIG;
-  useEffect(() => {
-    let cancelled = false;
-    void queryClient
-      .fetchQuery({
-        queryKey: queryKeys.settings,
-        queryFn: () => getSettings(apiBase),
-      })
-      .then((settings) => {
-        if (cancelled) return;
-        const configuredAmbient = settings.controller?.config?.mpc?.T_amb;
-        setLoadedMpcConfig({
-          requestIdentity: mpcConfigRequestIdentity,
-          selectedController: settings.controller?.selected ?? null,
-          ambientC:
-            typeof configuredAmbient === "number" && Number.isFinite(configuredAmbient)
-              ? configuredAmbient
-              : DEFAULT_MPC_AMBIENT_C,
-        });
-      })
-      .catch(() => {
-        // Unknown selection fails closed: evidence controls never appear for a
-        // controller we cannot prove is MPC.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [apiBase, mpcConfigRequestIdentity, queryClient]);
+  const { data: settings } = useSettings(apiBase);
+  const configuredAmbient = settings?.controller?.config?.mpc?.T_amb;
+  const mpcConfig = {
+    selectedController: settings?.controller?.selected ?? "",
+    ambientC:
+      typeof configuredAmbient === "number" && Number.isFinite(configuredAmbient)
+        ? configuredAmbient
+        : DEFAULT_MPC_AMBIENT_C,
+  };
   // Desktop only. Below 1280px this is inert and the breakpoints in
   // dashboard.css do the work; at 1280px and up the board is fixed and scaled,
   // which is what keeps a literal 1280x720 window from clipping the control
@@ -150,7 +111,8 @@ export function Dashboard({
   // other. Reignite deliberately does not rewrite the timestamp
   // (controller/runtime/modes/reignite.py:17-18), so a reignited cook keeps
   // counting from the original ignition -- which is what Flask has always done.
-  const cookTime = fmtElapsed(cookElapsed(dash.startupTimestamp, now.getTime() / 1000));
+  const cookTime = fmtElapsed(cookElapsed(dash.startupTimestamp, nowSeconds));
+  const now = new Date(nowSeconds * 1000);
   const clock = now.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -159,7 +121,6 @@ export function Dashboard({
   // Status readouts Flask carries and this port had dropped. All three render
   // INSIDE existing boxes -- no new rows -- so the 1280x720 geometry is
   // unchanged when they are absent, which is every frame in the demo fixture.
-  const nowSeconds = now.getTime() / 1000;
   const modeLeft = modeCountdown(dash, nowSeconds);
   const lidLeft = lidCountdown(dash, nowSeconds);
   // A running recipe replaces the gauge's mode badge outright, matching Flask's

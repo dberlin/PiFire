@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { type ReactElement, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
 import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
@@ -13,6 +14,8 @@ import type {
   PidSpLearningReport,
 } from "../../../../src/helpers/contracts/learning.gen";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { createQueryClient } from "../../../../src/helpers/query/queryClient";
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };
@@ -169,6 +172,33 @@ function renderDashboard(
   );
 }
 
+function renderInQueryRouter(ui: ReactElement, client = createQueryClient()) {
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{ui}</MemoryRouter>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
+function dashboardAt(apiBase: string, dash: DashSocketPayload = FIXTURE_DASH) {
+  return (
+    <Dashboard
+      dash={dash}
+      command={makeCommand()}
+      apiBase={apiBase}
+      phase="live"
+      controlAlive={true}
+      accent="ember"
+      setAccent={rs.fn()}
+      animate={false}
+      setAnimate={rs.fn()}
+    />
+  );
+}
+
 function DashboardApiHarness() {
   const [apiBase, setApiBase] = useState("/a");
   return (
@@ -288,12 +318,129 @@ describe("Dashboard MPC settings authority", () => {
     expect(hopper?.nextElementSibling).toBe(trigger);
   });
 
-  it("fails closed when returning to an API base until fresh settings arrive", async () => {
+  it("uses a primed shared settings entry without issuing a second settings transport", async () => {
+    const client = createQueryClient();
+    client.setQueryData(queryKeys.settings("/a"), {
+      controller: { selected: "mpc", config: { mpc: { T_amb: 14.5 } } },
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => {
+        return new Response(JSON.stringify(dashboardLearningReport("collecting", 31)), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+
+    renderInQueryRouter(dashboardAt("/a/"), client);
+
+    expect(
+      await screen.findByRole("button", { name: "MPC learning: collecting" }),
+    ).toBeVisible();
+    expect(getSettingsMock).not.toHaveBeenCalled();
+  });
+
+  it("updates controller authority when the shared settings result changes", async () => {
+    const client = createQueryClient();
+    client.setQueryData(queryKeys.settings("/a"), {
+      controller: { selected: "pid_sp", config: { mpc: { T_amb: 20 } } },
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: string | URL | Request) => {
+        const report = String(input).includes("/api/pid-sp-learning/report")
+          ? DASHBOARD_PID_SP_REPORT
+          : dashboardLearningReport("collecting", 32);
+        return new Response(JSON.stringify(report), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    renderInQueryRouter(dashboardAt("/a"), client);
+    expect(
+      await screen.findByRole("button", { name: "PID-SP learning: idle" }),
+    ).toBeVisible();
+
+    act(() => {
+      client.setQueryData(queryKeys.settings("/a"), {
+        controller: { selected: "mpc", config: { mpc: { T_amb: 16 } } },
+      });
+    });
+
+    expect(
+      await screen.findByRole("button", { name: "MPC learning: collecting" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: /PID-SP learning:/i })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { configuredAmbient: 13.5, expectedAmbient: 13.5, caseName: "configured" },
+    { configuredAmbient: Number.NaN, expectedAmbient: 20, caseName: "non-finite" },
+  ])(
+    "sends the $caseName settings ambient value as $expectedAmbient for MPC calibration",
+    async ({ configuredAmbient, expectedAmbient }) => {
+      const user = userEvent.setup();
+      getSettingsMock.mockResolvedValue({
+        controller: { selected: "mpc", config: { mpc: { T_amb: configuredAmbient } } },
+      });
+      let calibrationBody: Record<string, unknown> | undefined;
+      rs.stubGlobal(
+        "fetch",
+        rs.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          if (String(input).endsWith("/api/set_mpc_calibration")) {
+            calibrationBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+            return new Response(
+              JSON.stringify({
+                result: "OK",
+                message: "accepted",
+                data: { mpc_calibration: calibrationBody },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          return new Response(JSON.stringify(dashboardLearningReport("collecting", 31)), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }),
+      );
+      renderInQueryRouter(dashboardAt("/a"));
+      await user.click(
+        await screen.findByRole("button", { name: "MPC learning: collecting" }),
+      );
+      await user.click(
+        screen.getByLabelText("The grill is empty, with normal grates and drip tray installed."),
+      );
+      await user.click(
+        screen.getByLabelText("Sufficient pellets are loaded for the calibration run."),
+      );
+      await user.click(screen.getByRole("button", { name: "Start calibration" }));
+
+      await waitFor(() => expect(calibrationBody?.ambient_c).toBe(expectedAmbient));
+    },
+  );
+
+  it("shows no learning controls when the shared settings read fails", async () => {
+    getSettingsMock.mockRejectedValue(new Error("offline"));
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(() => new Promise<Response>(() => {})),
+    );
+    const { client } = renderInQueryRouter(dashboardAt("/a"));
+
+    await waitFor(() =>
+      expect(client.getQueryState(queryKeys.settings("/a"))?.status).toBe("error"),
+    );
+    expect(screen.queryByRole("button", { name: /learning:/i })).not.toBeInTheDocument();
+  });
+
+  it("fences A settings while B loads and reuses A's valid cache on return", async () => {
     const user = userEvent.setup();
     const pendingSettings = new Promise<Record<string, never>>(() => {});
-    let apiASettingsRequests = 0;
     getSettingsMock.mockImplementation((baseUrl: string) => {
-      if (baseUrl === "/a" && apiASettingsRequests++ === 0) {
+      if (baseUrl === "/a") {
         return Promise.resolve({
           controller: { selected: "mpc", config: { mpc: { T_amb: 20 } } },
         });
@@ -305,16 +452,20 @@ describe("Dashboard MPC settings authority", () => {
       "fetch",
       rs.fn(() => pendingReport),
     );
-    renderRoute(<DashboardApiHarness />, undefined);
+    renderInQueryRouter(<DashboardApiHarness />);
 
     expect(
       await screen.findByRole("button", { name: "MPC learning: loading" }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Use API B" }));
+    await waitFor(() => expect(getSettingsMock).toHaveBeenCalledWith("/b"));
     expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Use API A" }));
-    expect(screen.queryByRole("button", { name: /MPC learning:/i })).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "MPC learning: loading" }),
+    ).toBeInTheDocument();
+    expect(getSettingsMock.mock.calls.filter(([baseUrl]) => baseUrl === "/a")).toHaveLength(1);
   });
 
   it("uses the live revision only to invalidate one shared pill and panel report immediately", async () => {
@@ -377,6 +528,49 @@ describe("Dashboard", () => {
     // No cook running: startupTimestamp is 0, which Flask renders as "--"
     // (dash_default.js:410). Not "00:00" -- that claimed a cook of zero length.
     expect(screen.getByText("--")).toBeInTheDocument();
+  });
+
+  it("shares one whole-second clock tick with the running timer bar", () => {
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date(2024, 0, 1, 12, 34, 59));
+
+    try {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const timer = {
+        ...FIXTURE_DASH.timer,
+        start: nowSeconds - 10,
+        end: nowSeconds + 2,
+      };
+      const dash = {
+        ...FIXTURE_DASH,
+        currentMode: "Hold",
+        startupTimestamp: nowSeconds - 59,
+        timer,
+      };
+
+      const view = renderInQueryRouter(
+        <>
+          {dashboardAt("", dash)}
+          <TimerBar timer={timer} command={makeCommand()} />
+        </>,
+      );
+      const headerClock = view.container.querySelector('[data-pf="clock"]');
+
+      expect(headerClock).toHaveTextContent("12:34");
+      expect(screen.getByText("59s")).toBeInTheDocument();
+      expect(screen.getByText("00:00:02")).toBeInTheDocument();
+      expect(rs.getTimerCount()).toBe(1);
+
+      act(() => rs.advanceTimersByTime(1_000));
+
+      expect(headerClock).toHaveTextContent("12:35");
+      expect(screen.getByText("01:00")).toBeInTheDocument();
+      expect(screen.getByText("00:00:01")).toBeInTheDocument();
+      expect(rs.getTimerCount()).toBe(1);
+    } finally {
+      cleanup();
+      rs.useRealTimers();
+    }
   });
 
   it("renders the food-probe column when foodProbes are present", () => {

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 
-// These tests exist to pin one relationship later tasks depend on:
-// react-query invalidates by PREFIX, so useSaveSettings (Task 3) can call
-// invalidateQueries({ queryKey: queryKeys.settingsRoot }) and expect it to
-// reach settings, mode AND controllerMetadata in one call. If someone later
-// renames one of those keys so it no longer starts with settingsRoot, the
+// These tests pin the per-origin relationship that settings invalidation
+// depends on: react-query invalidates by PREFIX, so useSaveSettings can call
+// invalidateQueries({ queryKey: queryKeys.settingsRoot(baseUrl) }) and expect
+// it to reach settings, mode AND controllerMetadata for that origin. If
+// someone later renames one of those keys so it no longer starts with the
+// matching settingsRoot(baseUrl), the
 // break is silent: the save appears to succeed while the tab revalidates
 // onto stale values. Asserting the prefix STRUCTURALLY (by slicing) rather
 // than re-spelling the literal arrays is what actually catches that.
@@ -29,20 +30,21 @@ function expectTruePrefix(root: readonly unknown[], key: readonly unknown[]) {
 }
 
 describe("queryKeys settings prefix scheme", () => {
+  const baseUrl = "http://pifire.local:5000";
   const settingsEntries: Array<[string, readonly unknown[]]> = [
-    ["settings", queryKeys.settings],
-    ["mode", queryKeys.mode],
-    ["controllerMetadata", queryKeys.controllerMetadata],
+    ["settings", queryKeys.settings(baseUrl)],
+    ["mode", queryKeys.mode(baseUrl)],
+    ["controllerMetadata", queryKeys.controllerMetadata(baseUrl)],
   ];
 
   it.each(settingsEntries)("settingsRoot is a true prefix of %s", (_name, key) => {
-    expectTruePrefix(queryKeys.settingsRoot, key);
+    expectTruePrefix(queryKeys.settingsRoot(baseUrl), key);
   });
 
   it("settings, mode and controllerMetadata are pairwise distinct", () => {
-    expect(queryKeys.settings).not.toEqual(queryKeys.mode);
-    expect(queryKeys.settings).not.toEqual(queryKeys.controllerMetadata);
-    expect(queryKeys.mode).not.toEqual(queryKeys.controllerMetadata);
+    expect(queryKeys.settings(baseUrl)).not.toEqual(queryKeys.mode(baseUrl));
+    expect(queryKeys.settings(baseUrl)).not.toEqual(queryKeys.controllerMetadata(baseUrl));
+    expect(queryKeys.mode(baseUrl)).not.toEqual(queryKeys.controllerMetadata(baseUrl));
   });
 });
 

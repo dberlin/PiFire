@@ -140,7 +140,9 @@ describe("useSaveSettings", () => {
     // isInvalidated, so this test fails against it even though isInvalidated
     // would report true. It only passes against fetchQuery, which treats an
     // invalidated entry as stale and actually refetches.
-    queryClient.setQueryData(queryKeys.settings, { globals: { grill_name: "before" } });
+    queryClient.setQueryData(queryKeys.settings(import.meta.env.PUBLIC_PIFIRE_URL || ""), {
+      globals: { grill_name: "before" },
+    });
     getSettingsMock.mockResolvedValue({ globals: { grill_name: "after" } });
     getModeMock.mockResolvedValue("Stop");
     getControllerMetadataMock.mockResolvedValue(null);

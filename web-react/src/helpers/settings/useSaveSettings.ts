@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
-import { queryKeys } from "../query/keys";
+import { normalizeApiBase, queryKeys } from "../query/keys";
 import type { SaveFieldError, SettingsFlag } from "./controllerTypes.gen";
 import { applySettings } from "./settingsApi";
 
-const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
+const BASE_URL = normalizeApiBase(import.meta.env.PUBLIC_PIFIRE_URL || "");
 
 export type SaveStatus = { kind: "idle" } | { kind: "saved" } | { kind: "error"; message: string };
 
@@ -51,7 +51,7 @@ export function useSaveSettings() {
         // settingsRoot is the prefix of all three loader keys (settings, mode,
         // controller metadata), which preserves exactly what revalidate() did
         // before this cache existed: refetch all three.
-        await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(BASE_URL) });
         revalidator.revalidate(); // re-run the loader → fresh settings
       }
       return r.ok;

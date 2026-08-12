@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { queryKeys } from "../query/keys";
+import { normalizeApiBase, queryKeys } from "../query/keys";
 import { getSettings } from "./settingsApi";
 import type { SettingsSchema } from "./settingsTypes.gen";
 
@@ -16,9 +16,10 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
  * answer yet or no answer at all" and do nothing, which is the fail-quiet
  * behaviour those call sites already had.
  */
-export function useSettings() {
+export function useSettings(baseUrl = BASE_URL) {
+  const normalizedBaseUrl = normalizeApiBase(baseUrl);
   return useQuery<SettingsSchema>({
-    queryKey: queryKeys.settings,
-    queryFn: () => getSettings(BASE_URL),
+    queryKey: queryKeys.settings(normalizedBaseUrl),
+    queryFn: () => getSettings(normalizedBaseUrl),
   });
 }

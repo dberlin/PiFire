@@ -130,7 +130,11 @@ describe("AppPrefsProvider", () => {
     await userEvent.click(screen.getByRole("button", { name: "pick ice" }));
     expect(screen.getByTestId("accent")).toHaveTextContent("ice");
 
-    await act(() => client.invalidateQueries({ queryKey: queryKeys.settings }));
+    await act(() =>
+      client.invalidateQueries({
+        queryKey: queryKeys.settings(import.meta.env.PUBLIC_PIFIRE_URL || ""),
+      }),
+    );
     await flushObservers();
     expect(screen.getByTestId("accent")).toHaveTextContent("ice");
   });

@@ -87,7 +87,7 @@ export function ProbesTab() {
       // through fetchQuery, which serves a fresh cache entry unchanged, so
       // without invalidating first, revalidate() would re-run settingsLoader
       // AND probeModulesLoader but put the PRE-save probe map back on screen.
-      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(BASE_URL) });
       revalidator.revalidate(); // re-runs settingsLoader AND probeModulesLoader
     } else {
       // Deliberately keeps `working` -- the store is untouched on every

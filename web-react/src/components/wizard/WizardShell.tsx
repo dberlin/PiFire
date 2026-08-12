@@ -136,7 +136,7 @@ export function WizardShell() {
       // click that re-runs saveDraft + cancelWizard -- and getSettings has
       // neither a timeout nor an AbortSignal (settingsApi.ts), so that wait
       // has no bounded failure path to fall back on.
-      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(BASE_URL) });
     } catch (err) {
       // Advisory only, like the gate itself: a failed refetch just leaves the
       // cache stale (DashboardRoute may bounce us back once more), but must

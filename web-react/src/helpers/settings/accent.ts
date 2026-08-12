@@ -29,12 +29,12 @@ export function storedAccentName(a: AccentName): string {
 }
 
 /**
- * Persist an accent chosen somewhere that does not already hold settings.
+ * Persist an accent chosen from the dashboard.
  *
- * The dashboard's swatch row is the caller: it has no settings of its own, and
- * the path depends on which display module is selected, so the module has to be
- * read before the write. Same GET-then-POST shape the dashboard's notify write
- * already uses.
+ * The path depends on the currently selected display module, so the helper
+ * reads the latest settings immediately before writing. This is an intentional
+ * action-time GET-then-POST, unlike the dashboard render path, which consumes
+ * the shared settings query.
  *
  * Advisory: the caller has already applied the accent locally, so a failed
  * write costs the persistence, not the appearance.
@@ -66,7 +66,9 @@ export async function saveAccent(
     // other reader of the settings entry (AppPrefsProvider, /settings' loader,
     // the General tab) is still holding the old one. Only on success: a
     // refused write changed nothing to tell them about.
-    if (result.ok) await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
+    if (result.ok) {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(baseUrl) });
+    }
     return result.ok;
   } catch {
     return false;

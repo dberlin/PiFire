@@ -103,8 +103,8 @@ describe("saveAccent", () => {
     expect(await saveAccent("", "ice", queryClient)).toBe(false);
   });
 
-  it("invalidates the shared settings entry so other readers see the new accent", async () => {
-    queryClient.setQueryData(queryKeys.settings, { modules: { display: "ili9341" } });
+  it("invalidates the empty-origin settings entry so other readers see the new accent", async () => {
+    queryClient.setQueryData(queryKeys.settings(""), { modules: { display: "ili9341" } });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (_url: string, init?: RequestInit) => {
       const payload =
         init?.method === "POST" ? { result: "success" } : { settings: withDisplay("Ember") };
@@ -115,11 +115,11 @@ describe("saveAccent", () => {
     }) as typeof fetch);
 
     expect(await saveAccent("", "crimson", queryClient)).toBe(true);
-    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(queryKeys.settings(""))?.isInvalidated).toBe(true);
   });
 
   it("leaves the cache alone when the write is refused", async () => {
-    queryClient.setQueryData(queryKeys.settings, { modules: { display: "ili9341" } });
+    queryClient.setQueryData(queryKeys.settings(""), { modules: { display: "ili9341" } });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (_url: string, init?: RequestInit) => {
       const payload =
         init?.method === "POST"
@@ -132,6 +132,6 @@ describe("saveAccent", () => {
     }) as typeof fetch);
 
     expect(await saveAccent("", "crimson", queryClient)).toBe(false);
-    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(queryKeys.settings(""))?.isInvalidated).toBe(false);
   });
 });

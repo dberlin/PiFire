@@ -136,7 +136,11 @@ describe("TunerPage", () => {
         },
       },
     });
-    await act(() => client.invalidateQueries({ queryKey: queryKeys.settings }));
+    await act(() =>
+      client.invalidateQueries({
+        queryKey: queryKeys.settings(import.meta.env.PUBLIC_PIFIRE_URL || ""),
+      }),
+    );
     await flushObservers();
 
     expect(screen.getByRole("combobox", { name: /probe/i })).toHaveValue("Probe1");

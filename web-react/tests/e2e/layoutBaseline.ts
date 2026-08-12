@@ -129,7 +129,7 @@ const FIXED_TIME = new Date("2026-07-25T12:00:00Z");
 
 /**
  * Pin the wall clock, so nothing measured here can move with the calendar.
- * helpers/clock.ts's shared interval, useClock and demoDashAt's elapsed-seconds
+ * helpers/clock.ts's shared interval, useNow consumers, and demoDashAt's elapsed-seconds
  * argument all read the date, and the dashboard header's clock changes width
  * with it.
  *

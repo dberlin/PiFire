@@ -275,7 +275,9 @@ describe("AppShell settings invalidation on uiHash change", () => {
     const rerenderWithFrame = frameRenderer(client);
     rerenderWithFrame({ ...FRAME, uiHash: 111 });
     rerenderWithFrame({ ...FRAME, uiHash: 222 });
-    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.settings });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.settings(import.meta.env.PUBLIC_PIFIRE_URL || ""),
+    });
   });
 
   it("does not refetch when the hash is unchanged", async () => {

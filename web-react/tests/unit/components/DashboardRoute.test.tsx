@@ -5,6 +5,7 @@ import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import type { CommandClient, CommandResult } from "../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 import { queryKeys } from "../../../src/helpers/query/keys";
+import { createQueryClient } from "../../../src/helpers/query/queryClient";
 import type { SettingsSchema } from "../../../src/helpers/settings/settingsTypes.gen";
 import type { ShellContext } from "../../../src/helpers/shellContext";
 import { testQueryClient } from "../test-utils";
@@ -17,6 +18,9 @@ rs.mock("../../../src/helpers/settings/settingsApi", () => ({
 
 const { DashboardRoute } = await import("../../../src/components/DashboardRoute");
 const { AppPrefsProvider } = await import("../../../src/components/AppPrefs");
+
+const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
+const NORMALIZED_BASE_URL = BASE_URL.replace(/\/$/, "");
 
 afterEach(cleanup);
 
@@ -57,7 +61,7 @@ function stubCommand(): CommandClient {
 // hook. /wizard is mounted as a sibling stand-in so the first_time_setup
 // redirect can be asserted by where the router actually ends up, rather than
 // by a spy on useNavigate.
-function renderDashboardRoute(over: Partial<ShellContext> = {}) {
+function renderDashboardRoute(over: Partial<ShellContext> = {}, client = testQueryClient()) {
   const context: ShellContext = {
     live: FIXTURE_DASH,
     phase: "live",
@@ -85,7 +89,6 @@ function renderDashboardRoute(over: Partial<ShellContext> = {}) {
   // the mock was invoked -- "called" and "the promise it returned has
   // resolved/rejected" are different moments, and a test asserting on the
   // gate's post-settle behaviour needs the latter.
-  const client = testQueryClient();
   const renderResult = render(
     <QueryClientProvider client={client}>
       <AppPrefsProvider>
@@ -142,17 +145,20 @@ describe("DashboardRoute", () => {
     // "the read hasn't settled yet". Waiting on the query's own status
     // instead proves the rejection actually landed in the cache before the
     // assertions below run.
-    await waitFor(() => expect(client.getQueryState(queryKeys.settings)?.status).toBe("error"));
+    await waitFor(() =>
+      expect(client.getQueryState(queryKeys.settings(NORMALIZED_BASE_URL))?.status).toBe("error"),
+    );
     expect(wizardShowing()).toBe(false);
     expect(screen.getByText("LIVE")).toBeInTheDocument();
   });
 
-  it("issues no settings request of its own when the cache is already warm", async () => {
-    // AppPrefsProvider and /settings' loader read the same entry. The gate must
-    // ride that entry, not add a fourth GET to every dashboard paint.
-    getSettingsMock.mockResolvedValue(OK);
-    renderDashboardRoute();
-    await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
-    expect(getSettingsMock).toHaveBeenCalledTimes(1);
+  it("reuses the base-aware primed settings query without another transport", () => {
+    const client = createQueryClient();
+    client.setQueryData(queryKeys.settings(NORMALIZED_BASE_URL), OK);
+
+    renderDashboardRoute({}, client);
+
+    expect(screen.getByText("LIVE")).toBeInTheDocument();
+    expect(getSettingsMock).not.toHaveBeenCalled();
   });
 });

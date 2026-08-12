@@ -15,6 +15,9 @@ rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
 // Imported after the mock so settingsRoutes picks up the mocked module.
 const { settingsLoader } = await import("../../../../src/helpers/settings/settingsRoutes");
 
+const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
+const NORMALIZED_BASE_URL = BASE_URL.replace(/\/$/, "");
+
 // settingsLoader primes the module-singleton queryClient (it has to: it runs
 // outside React, before any provider exists). That cache persists across
 // tests in this file, so without clearing it here, a later test's
@@ -41,6 +44,24 @@ describe("settingsLoader", () => {
     });
   });
 
+  it("primes settings, mode, and controller metadata under the normalized API base", async () => {
+    const fixtureSettings = { globals: { grill_name: "Base-owned Grill" } };
+    const fixtureMeta = { metadata: { mpc: { friendly_name: "MPC", config: [] } } };
+    getSettingsMock.mockResolvedValueOnce(fixtureSettings);
+    getModeMock.mockResolvedValueOnce("Smoke");
+    getControllerMetadataMock.mockResolvedValueOnce(fixtureMeta);
+
+    await settingsLoader();
+
+    expect(queryClient.getQueryData(queryKeys.settings(NORMALIZED_BASE_URL))).toEqual(
+      fixtureSettings,
+    );
+    expect(queryClient.getQueryData(queryKeys.mode(NORMALIZED_BASE_URL))).toBe("Smoke");
+    expect(queryClient.getQueryData(queryKeys.controllerMetadata(NORMALIZED_BASE_URL))).toEqual(
+      fixtureMeta,
+    );
+  });
+
   it("propagates a getSettings rejection so the route error element renders", async () => {
     getSettingsMock.mockRejectedValueOnce(new Error("boom"));
     getModeMock.mockResolvedValueOnce("Stop");
@@ -62,7 +83,7 @@ describe("settingsLoader", () => {
     getControllerMetadataMock.mockResolvedValueOnce(null);
     await settingsLoader(); // warms the cache
 
-    await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(NORMALIZED_BASE_URL) });
     getSettingsMock.mockRejectedValueOnce(new Error("boom"));
     getModeMock.mockResolvedValueOnce("Stop");
     getControllerMetadataMock.mockResolvedValueOnce(null);

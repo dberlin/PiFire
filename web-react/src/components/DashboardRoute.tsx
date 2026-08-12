@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
+import { normalizeApiBase } from "../helpers/query/keys";
 import { useSettings } from "../helpers/settings/useSettings";
 import { useShellState } from "../helpers/shellContext";
 import { useAppPrefs } from "./AppPrefs";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { Dashboard } from "./dashboard/Dashboard";
 
-const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
+const BASE_URL = normalizeApiBase(import.meta.env.PUBLIC_PIFIRE_URL || "");
 
 export function DashboardRoute() {
   // Takes the shell's subscription rather than calling useLiveState() itself:
@@ -27,7 +28,7 @@ export function DashboardRoute() {
   // already primed, so the gate costs no request of its own. A failed read
   // leaves `data` undefined and the gate simply does not fire -- the same
   // advisory, fail-quiet behaviour it always had.
-  const { data: settings } = useSettings();
+  const { data: settings } = useSettings(BASE_URL);
   const firstTime = settings?.globals?.first_time_setup === true;
   useEffect(() => {
     if (firstTime) navigate("/wizard");
@@ -46,8 +47,8 @@ export function DashboardRoute() {
     <Dashboard
       dash={live}
       command={command}
-      // The notify write is a GET + POST pair rather than a CommandClient call,
-      // so the dashboard needs the base URL as well as the command client.
+      // The dashboard's settings query and direct REST calls share this API
+      // origin; CommandClient owns only command writes.
       apiBase={BASE_URL}
       phase={phase}
       controlAlive={controlAlive}

@@ -1,13 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { Outlet } from "react-router";
-import { queryKeys } from "../../helpers/query/keys";
+import { normalizeApiBase, queryKeys } from "../../helpers/query/keys";
 import { useTimerVisibility } from "../../helpers/timer/timerVisibility";
 import { useLiveState } from "../../helpers/useLiveState";
 import { Banners } from "./Banners";
 import { NavBar } from "./NavBar";
 import { TimerBar } from "./TimerBar";
 import "./shell.css";
+
+const BASE_URL = normalizeApiBase(import.meta.env.PUBLIC_PIFIRE_URL || "");
 
 // The app shell -- a layout route wrapping every ported page, ported from
 // templates/base.html: the navbar, the timer strip, and the global alert strip
@@ -47,7 +49,7 @@ export function AppShell() {
     }
     if (seenUiHash.current === next) return;
     seenUiHash.current = next;
-    queryClient.invalidateQueries({ queryKey: queryKeys.settings });
+    queryClient.invalidateQueries({ queryKey: queryKeys.settings(BASE_URL) });
   }, [live.uiHash, queryClient]);
 
   return (

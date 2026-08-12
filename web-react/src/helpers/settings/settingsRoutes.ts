@@ -1,10 +1,10 @@
-import { queryKeys } from "../query/keys";
+import { normalizeApiBase, queryKeys } from "../query/keys";
 import { queryClient } from "../query/queryClient";
 import type { ControllerCatalog } from "./controllerTypes.gen";
 import { getControllerMetadata, getMode, getSettings } from "./settingsApi";
 import type { SettingsSchema } from "./settingsTypes.gen";
 
-const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
+const BASE_URL = normalizeApiBase(import.meta.env.PUBLIC_PIFIRE_URL || "");
 
 // React Router route loader -- runs on navigation into /settings. Throws on
 // failure so the route's errorElement renders.
@@ -31,12 +31,15 @@ export async function settingsLoader(): Promise<{
 }> {
   const [settings, mode, controllerMeta] = await Promise.all([
     queryClient.fetchQuery({
-      queryKey: queryKeys.settings,
+      queryKey: queryKeys.settings(BASE_URL),
       queryFn: () => getSettings(BASE_URL),
     }),
-    queryClient.fetchQuery({ queryKey: queryKeys.mode, queryFn: () => getMode(BASE_URL) }),
     queryClient.fetchQuery({
-      queryKey: queryKeys.controllerMetadata,
+      queryKey: queryKeys.mode(BASE_URL),
+      queryFn: () => getMode(BASE_URL),
+    }),
+    queryClient.fetchQuery({
+      queryKey: queryKeys.controllerMetadata(BASE_URL),
       queryFn: () => getControllerMetadata(BASE_URL),
     }),
   ]);
