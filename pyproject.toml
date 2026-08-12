@@ -21,10 +21,9 @@ dependencies = [
     "netifaces>=0.11.0",
     # Imported eagerly by controller/fopdt_identifier.py, which controller/pid_sp.py
     # loads at module scope -- the shipped PID Smith Predictor controller depends on
-    # it unconditionally, so unlike the MPC stack's lazy imports this cannot live in
-    # an optional extra. Already present transitively via scikit-learn, so declaring
-    # it changes no resolution -- it stops a future drop of that package from
-    # silently taking numpy with it.
+    # it unconditionally, so it cannot live in an optional extra. scipy (declared in
+    # the dev group) also pulls numpy, but this declaration is what stops a future
+    # drop of that package from silently taking numpy with it.
     "numpy>=1.26",
     "paho-mqtt>=2.1.0",
     "pyftdi>=0.55.0",
@@ -72,6 +71,21 @@ dev = [
     "pytest-cov>=5.0.0",
     "pytest-playwright>=0.7.1",
     "pytest-random-order>=1.2.0",
+    # Imported by the controller/MPC surface but previously undeclared, so a
+    # clean `uv sync --group dev` produced 28 collection errors, almost all
+    # scipy plus one each for pandas and casadi. Pinned to match the `codegen`
+    # group so the two resolve together. scipy is imported by
+    # controller/{grey_box,mpc_model,update_mpc}.py; casadi by
+    # tests/unit/acados/test_grey_box_definition.py; pandas by
+    # tests/unit/mpc/test_mpc_{calibration,refit}.py.
+    "casadi==3.7.2",
+    "scipy==1.18.0",
+    "pandas>=3.0",
+    # A hung test under `-n auto` stalls the whole run with no failing test to
+    # point at. Several probe/display loops retry forever when their exit
+    # condition is broken, so a wall-clock ceiling is the only thing that turns
+    # "CI is stuck" into a named failure.
+    "pytest-timeout>=2.3.0",
     # Restarts control.py on a source change. gunicorn has --reload for the web
     # tier; control.py is a plain long-running process with no equivalent, and a
     # worker serving code the checkout no longer has has cost five separate
@@ -97,7 +111,7 @@ dev = [
 # absorbing a quarter-hour. Run them with `pytest -m slow` (a later `-m` wins
 # over this one), and never alongside the suite's wall-clock budget
 # assertions -- a loaded machine fails those on timing alone.
-addopts = ["--random-order", "-n", "auto", "-m", "not slow"]
+addopts = ["--random-order", "-n", "auto", "-m", "not slow", "--timeout=120", "--timeout-method=thread"]
 markers = [
     "slow: simulates whole cooks and runs for minutes; excluded from the default run by addopts above.",
 ]

@@ -21,3 +21,16 @@ ignore = [
     "F541",  # f-string without placeholders
     "F841",  # unused variables
 ]
+# `line-length` above is only advisory to the formatter unless E501 is selected
+# explicitly -- it is NOT in Ruff's default rule set. It is enabled here scoped
+# to tests/ only: the production tree has a measured backlog of long lines
+# (128 lines / 54 files) that is a repo-wide reformat of its own, not a side
+# effect of this change (same reasoning the ruff 0.16 ceiling above already
+# applies). The `!tests/**` per-file-ignore key ignores E501 everywhere except
+# tests/ -- verified directly: a bare `"*.py"` key matches every file by
+# basename regardless of directory and would have silently ignored E501
+# tests-side too.
+extend-select = ["E501"]
+
+[lint.per-file-ignores]
+"!tests/**" = ["E501"]

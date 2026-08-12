@@ -11,7 +11,16 @@ import pytest
 
 from common.control_trace import AmbientSource
 from controller.acados.contracts import GreyBoxMPCConfig
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FitRequest, FitResult, FitStatus, FitWindowIdentity, FrameObservation, LearningStatus
+from controller.model_learning.contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    FitRequest,
+    FitResult,
+    FitStatus,
+    FitWindowIdentity,
+    FrameObservation,
+    LearningStatus,
+)
 from controller.model_learning.evaluation import EvaluationConfig
 
 from controller.runtime.model_fitting import (
@@ -146,11 +155,16 @@ def test_passive_history_starts_a_fresh_contiguous_segment_after_a_rejected_gap(
 
 
 def test_trigger_retains_minimum_sample_excitation_coverage_continuity_and_identifiability_gates() -> None:
-    config = TriggerConfig(min_samples=9, min_input_variance=0.02, min_input_levels=3, min_temperature_span_c=8.0, min_identifiability=0.5)
+    config = TriggerConfig(
+        min_samples=9, min_input_variance=0.02, min_input_levels=3, min_temperature_span_c=8.0, min_identifiability=0.5
+    )
     informative = tuple(_frame(index) for index in range(12))
     assert fit_trigger(informative, identifiability=0.8, config=config).ready is True
     assert fit_trigger(informative[:8], identifiability=0.8, config=config).blockers == ("minimum-samples",)
-    constant = tuple(_frame(index, requested_q=0.5, realized_q=0.5, requested_auger_duty=0.5, delivered_on_s=12.5) for index in range(12))
+    constant = tuple(
+        _frame(index, requested_q=0.5, realized_q=0.5, requested_auger_duty=0.5, delivered_on_s=12.5)
+        for index in range(12)
+    )
     assert fit_trigger(constant, identifiability=0.8, config=config).blockers == ("insufficient-excitation",)
     narrow = tuple(_frame(index, temp_c=90.0 + index * 0.1) for index in range(12))
     assert fit_trigger(narrow, identifiability=0.8, config=config).blockers == ("insufficient-coverage",)
@@ -172,7 +186,9 @@ def test_trigger_retains_minimum_sample_excitation_coverage_continuity_and_ident
         ({"candidate_generation": 8}, {}, "candidate-generation-changed"),
     ],
 )
-def test_delivery_rechecks_every_frozen_identity_and_discards_stale_results_visibly(result_change, current_change, reason) -> None:
+def test_delivery_rechecks_every_frozen_identity_and_discards_stale_results_visibly(
+    result_change, current_change, reason
+) -> None:
     request = _request()
     result = FitResult(
         request_id=request.request_id,
@@ -591,7 +607,15 @@ def test_candidate_estimator_and_native_handle_are_built_and_dry_solved_off_path
     assert prepared.timing.p99_ms == 4.0
 
 
-@pytest.mark.parametrize("failure, reason", [("estimator", "estimator-build"), ("native", "native-build"), ("solve", "native-dry-solve"), ("timing", "target-timing")])
+@pytest.mark.parametrize(
+    "failure, reason",
+    [
+        ("estimator", "estimator-build"),
+        ("native", "native-build"),
+        ("solve", "native-dry-solve"),
+        ("timing", "target-timing"),
+    ],
+)
 def test_off_path_build_solve_and_timing_failures_reject_only_the_candidate(failure, reason) -> None:
     incumbent = object()
     def estimator_factory(config):
@@ -661,7 +685,9 @@ def _accepted_evaluation(prepared):
 def test_passive_candidate_hands_the_exact_prepared_pair_forward_without_installing_or_transferring_ownership() -> None:
     candidate = _fit()
     pair = object()
-    prepared = CandidatePreparation.accepted_for_test(candidate=candidate, candidate_pair=pair, incumbent_pair=object(), timing=_timing())
+    prepared = CandidatePreparation.accepted_for_test(
+        candidate=candidate, candidate_pair=pair, incumbent_pair=object(), timing=_timing()
+    )
     installed = []
     handed = []
     outcome = handoff_candidate(
@@ -711,7 +737,9 @@ def test_handoff_rechecks_exact_evaluation_model_digests(digest_field, wrong_dig
 
 def test_operator_calibration_always_stops_ready_for_review_even_when_passive_auto_is_enabled() -> None:
     candidate = _fit(CandidateOrigin.OPERATOR_CALIBRATION)
-    prepared = CandidatePreparation.accepted_for_test(candidate=candidate, candidate_pair=object(), incumbent_pair=object(), timing=_timing())
+    prepared = CandidatePreparation.accepted_for_test(
+        candidate=candidate, candidate_pair=object(), incumbent_pair=object(), timing=_timing()
+    )
     handed = []
     outcome = handoff_candidate(
         prepared,

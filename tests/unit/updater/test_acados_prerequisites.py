@@ -116,7 +116,9 @@ def test_historical_migration_uses_native_packages_and_supervisor_path_without_r
     assert "systemctl" not in commands
 
 
-def _run_failed_pre_migration_flow(tmp_path: Path, *, branch_change: bool) -> tuple[Path, Path, str, subprocess.CompletedProcess[str]]:
+def _run_failed_pre_migration_flow(
+    tmp_path: Path, *, branch_change: bool
+) -> tuple[Path, Path, str, subprocess.CompletedProcess[str]]:
     repo, env, target, log = _migration_tree(tmp_path, "debian")
     fake_bin = Path(env["PATH"].split(":", 1)[0])
     prior_branch = "stable" if branch_change else "main"
@@ -182,7 +184,9 @@ def test_manifest_bootstrap_is_the_first_acados_migration_and_uses_no_python_env
     entry = acados_entries[0]
     commands = [command for section in entry["dependencies"].values() for command in section["command_list"]]
     assert commands == [["bash", "/usr/local/bin/pifire/updater/install-acados-prerequisites.sh"]]
-    assert all(not section["py_dependencies"] and not section["apt_dependencies"] for section in entry["dependencies"].values())
+    assert all(
+        not section["py_dependencies"] and not section["apt_dependencies"] for section in entry["dependencies"].values()
+    )
 
 
 @pytest.mark.parametrize(

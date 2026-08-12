@@ -434,7 +434,9 @@ def test_timing_gate_covers_1000_solves_at_every_integer_horizon_with_exact_evid
     )
     assert (
         format_timing_evidence(rows[0])
-        == "horizon=5 solves=1000 failures=0 consecutive_failures=0 recovery=finite-success p99_seconds=0.050000 maximum_seconds=0.050000 p99_threshold_seconds=0.200000 maximum_threshold_seconds=1.000000"
+        == "horizon=5 solves=1000 failures=0 consecutive_failures=0 recovery=finite-success "
+        "p99_seconds=0.050000 maximum_seconds=0.050000 p99_threshold_seconds=0.200000 "
+        "maximum_threshold_seconds=1.000000"
     )
 
 
