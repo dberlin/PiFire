@@ -169,6 +169,59 @@ def _report(core, ratio, source_name, t, requested=None):
     setter(AppliedOutput(ratio=ratio, source=OutputSource(source_name), timestamp=float(t), requested=requested))
 
 
+def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_open, manual_override, revision):
+    """Hand a completed pulse frame to the controller's teardown history.
+
+    `refit_from_cook()` with no arguments fits the frames collected here, which
+    is the path `HoldMode._refit_model` takes in production -- so a harness that
+    never reported frames produced a cook with zero fit samples and a refit that
+    could only ever decline. This mirrors the construction in
+    `controller/runtime/modes/hold.py`, including the flags
+    `TeardownGreyHistory.observe` filters on: a frame that is skipped, reset,
+    discontinuous, lid-open, manual, stale, or carries a role generation other
+    than the history's is dropped AND clears the buffer, as is a frame whose
+    start does not abut its predecessor's end.
+    """
+    observe = getattr(core, "observe_frame", None)
+    history = getattr(core, "_teardown_history", None)
+    if observe is None or history is None:
+        return
+    from controller.mpc_allocator import normalized_load_from_auger_duty
+    from controller.model_learning.contracts import FrameObservation
+
+    duration_s = frame.ended_at_s - frame.nominal_start_s
+    realized_auger_duty = frame.delivered_on_s / duration_s if duration_s > 0 else 0.0
+    u_max = float(getattr(core, "pulse_frame_maximum_duty", None) or 1.0)
+    observe(
+        FrameObservation(
+            frame_start_s=frame.nominal_start_s,
+            frame_end_s=frame.ended_at_s,
+            temp_c=temp_c,
+            setpoint_c=setpoint_c,
+            ambient_c=float(getattr(core, "cfg", {}).get("T_amb", 0.0)),
+            requested_q=frame.latched_request,
+            realized_q=normalized_load_from_auger_duty(realized_auger_duty, u_max=u_max),
+            requested_auger_duty=frame.latched_request,
+            delivered_on_s=frame.delivered_on_s,
+            requested_fan_duty=fan_frac,
+            actual_fan_duty=fan_frac,
+            result_revision=revision,
+            output_source="controller",
+            lid_open=lid_open,
+            safety_inhibited=False,
+            manual_override=manual_override,
+            stale=False,
+            skipped=frame.skipped,
+            reset=frame.reset_reason is not None,
+            continuous=True,
+            role_generation=history.role_generation,
+            observation_sequence=sequence,
+            scheduled_on_s=float(frame.scheduled_on_s),
+            realized_auger_duty=realized_auger_duty,
+        )
+    )
+
+
 class _SimClock:
     """Callable replacement for `time.time`, advanced once per simulated
     second so a controller reading the wall clock for its own `dt` observes
@@ -278,6 +331,9 @@ def run_scenario(
         plant_name = plant
         plant_instance = globals()[plant_name](seed=seed)
         scheduler = PulseScheduler()
+        # TeardownGreyHistory requires strictly consecutive sequence numbers on
+        # abutting frames; a gap clears the buffer rather than being skipped.
+        observation_sequence = 0
         cycle_max, controller_max, effective_max, _ = _authority(core, cycle_data)
         del cycle_max, controller_max
         effective_run = _snapshot(
@@ -429,6 +485,18 @@ def run_scenario(
                         delivered_request_s += frame.latched_request * window_s
                         delivered_actual_s += frame.delivered_on_s
                         delivered_window_s += window_s
+                    observation_sequence += 1
+                    _observe_frame(
+                        core,
+                        frame,
+                        sequence=observation_sequence,
+                        temp_c=plant_instance.measured(),
+                        setpoint_c=(setpoint - 32.0) * 5.0 / 9.0,
+                        fan_frac=fan_frac,
+                        lid_open=lid_open,
+                        manual_override=manual_inhibit,
+                        revision=0 if latest_result is None else latest_result.revision,
+                    )
                 actual_auger_on = decision.command_on
                 if solved and t > feedback_start:
                     delivered = decision.delivered_on_s - feedback_delivered
