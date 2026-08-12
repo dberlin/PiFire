@@ -1,6 +1,7 @@
 """Hold restores a controller's model at setup and saves it as it changes."""
 
 from copy import deepcopy
+import itertools
 import time
 from types import SimpleNamespace
 
@@ -723,6 +724,29 @@ class _CrashRecoverySolver:
 _GATE_TIMEOUT_S = 60.0
 
 
+def _deterministic_monotonic():
+    """A monotonic clock whose steps cannot be stretched by host load.
+
+    `_ResultQualityTracker.completed` calls a solve a deadline miss when its
+    measured `solve_duration_seconds` exceeds the control period, and two
+    consecutive misses make the runner invoke `activation_runtime_failure`,
+    which is a real safety behaviour: it rolls the active pair back to the
+    retained one. Measured against `time.monotonic`, a fake solver that does no
+    work still takes however long a loaded machine takes to get back to it, so
+    running this suite under `-n auto` could induce that rollback and replace
+    `active_control_pair` underneath assertions that pin its identity.
+
+    Steps of a microsecond keep every solve far below any control period here
+    while still advancing, so age and staleness arithmetic sees real progress.
+    """
+    counter = itertools.count()
+
+    def _clock():
+        return next(counter) * 1e-6
+
+    return _clock
+
+
 class _CrashRecoveryRunnerGate:
     """A barrier the runner thread cannot slip past.
 
@@ -957,6 +981,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         first_boundary_runner = ThreadedControllerRunner(
             first_core,
             wait_for_period=first_boundary_gate,
+            monotonic_clock=_deterministic_monotonic(),
         )
         assert first_boundary_gate.wait_for_arrivals(1)
         transition = PreparedPairTransition(
@@ -1070,6 +1095,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         first_boundary_runner = ThreadedControllerRunner(
             first_core,
             wait_for_period=first_boundary_gate,
+            monotonic_clock=_deterministic_monotonic(),
         )
         assert first_boundary_gate.wait_for_arrivals(1)
         assert first_boundary_runner.rollback_activation("operator rollback")
@@ -1132,7 +1158,9 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         ),
     )
     restart_gate = _CrashRecoveryRunnerGate()
-    runner = ThreadedControllerRunner(core, wait_for_period=restart_gate)
+    runner = ThreadedControllerRunner(
+        core, wait_for_period=restart_gate, monotonic_clock=_deterministic_monotonic()
+    )
     assert restart_gate.wait_for_arrivals(1)
     hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
     expected = candidate if durable_phase is ActivationPhase.ACTIVE and lifecycle_kind is None else incumbent
