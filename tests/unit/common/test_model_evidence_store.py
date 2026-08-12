@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from common.control_trace import AllocationClampReason, AmbientSource
-from common.datastore_accessors import (
+from common.persistence.model_evidence import (
     append_model_evidence,
     commit_model_activation,
     invalidate_model_evidence_schema,

@@ -8,7 +8,7 @@ module-level code and collection side effects, and couples the two files).
 
 import json
 
-from common.datastore_accessors import ModelActivationState
+from common.persistence.model_evidence import ModelActivationState
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,

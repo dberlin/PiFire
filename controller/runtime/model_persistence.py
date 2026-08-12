@@ -9,7 +9,11 @@ from threading import Condition, Thread
 from typing import Protocol
 
 from common.controller_model_state import CheckpointSaveOutcome, copy_valid_snapshot
-from common.datastore_accessors import append_model_evidence, commit_model_activation
+from common.persistence.model_evidence import (
+    append_model_evidence,
+    commit_model_activation,
+    commit_model_activation_phase,
+)
 from common.model_evidence import (
     ConfidenceDecisionEvidence,
     EvidenceKind,
@@ -94,8 +98,6 @@ class _ActivationConfidenceWork:
 def _default_persist_activation_phase(
     record: PreparedActivationRecord, expected_phase: ActivationPhase | None
 ) -> None:
-    from common.datastore_accessors import commit_model_activation_phase
-
     commit_model_activation_phase(record, expected_phase=expected_phase)
 
 

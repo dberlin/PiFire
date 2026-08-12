@@ -4,13 +4,15 @@ from types import SimpleNamespace
 import pytest
 from blueprints.api import routes
 from common.datastore_accessors import (
-    append_model_evidence,
     read_status,
     write_status,
-    commit_model_activation_phase,
-    read_model_activation,
     read_settings,
     write_settings,
+)
+from common.persistence.model_evidence import (
+    append_model_evidence,
+    commit_model_activation_phase,
+    read_model_activation,
     read_model_evidence,
 )
 from common.model_evidence import (

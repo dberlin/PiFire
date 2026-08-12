@@ -10,7 +10,7 @@ from common.controller_model_state import (
     CheckpointSaveOutcome,
     ControllerModelStore,
 )
-from common.datastore_accessors import (
+from common.persistence.model_evidence import (
     append_model_evidence,
     commit_model_activation_phase,
     read_model_activation,

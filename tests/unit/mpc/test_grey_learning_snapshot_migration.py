@@ -9,11 +9,8 @@ import pytest
 
 from common import datastore
 from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
-from common.datastore_accessors import (
-    migrate_mpc_learning_authority,
-    read_model_activation,
-    read_model_evidence,
-)
+from common.persistence.model_evidence import read_model_activation, read_model_evidence
+from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.mpc_model import MODEL_SCHEMA
 from controller.model_learning.activation import GreyControlPairDescriptor, canonical_snapshot_digest

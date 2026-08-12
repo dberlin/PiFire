@@ -9,7 +9,6 @@ from flask import Response, abort, jsonify, request
 from common.common import write_log, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
-    commit_model_rollback,
     read_settings,
     write_settings,
     read_control,
@@ -19,6 +18,9 @@ from common.datastore_accessors import (
     read_status,
     read_probe_status,
     clear_warnings_through,
+)
+from common.persistence.model_evidence import (
+    commit_model_rollback,
     read_model_activation,
     read_model_evidence,
 )

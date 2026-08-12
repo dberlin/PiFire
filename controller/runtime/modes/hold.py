@@ -6,11 +6,8 @@ import uuid
 from dataclasses import replace
 
 from common.controller_model_state import ControllerModelStore
-from common.datastore_accessors import (
-    migrate_mpc_learning_authority,
-    read_model_activation,
-    read_model_evidence,
-)
+from common.persistence.model_evidence import read_model_activation, read_model_evidence
+from controller.model_learning.migration import migrate_mpc_learning_authority
 from common.modes import Mode
 from common.model_evidence import (
     AllocationEvidence,

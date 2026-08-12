@@ -28,7 +28,8 @@ from common.control_trace import (
     AmbientSource,
 )
 from common.controller_model_state import ControllerModelStore
-from common.datastore_accessors import read_control_trace_session, read_model_evidence
+from common.datastore_accessors import read_control_trace_session
+from common.persistence.model_evidence import read_model_evidence
 from controller.mpc import Controller, _DEFAULTS
 from controller.model_learning.activation import (
     GreyControlPairDescriptor,

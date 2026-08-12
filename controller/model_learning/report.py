@@ -550,10 +550,9 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
     from common.controller_model_state import ControllerModelStore
     from common.datastore_accessors import (
         mpc_calibration_command_revision,
-        read_model_activation,
-        read_model_evidence,
         read_status,
     )
+    from common.persistence.model_evidence import read_model_activation, read_model_evidence
 
     records = tuple(read_model_evidence())
     status = read_status()
