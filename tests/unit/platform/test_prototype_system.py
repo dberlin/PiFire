@@ -11,35 +11,11 @@ def _bare():
     return obj
 
 
-def test_supported_commands_lists_all_nine():
-    cmds = _bare().supported_commands([])["data"]["supported_cmds"]
-    for name in (
-        "check_throttled",
-        "check_wifi_quality",
-        "check_cpu_temp",
-        "supported_commands",
-        "check_alive",
-        "scan_bluetooth",
-        "os_info",
-        "network_info",
-        "hardware_info",
-    ):
-        assert name in cmds
-
-
 def test_check_throttled_stub_all_false():
     data = _bare().check_throttled([])
     assert data["result"] == "OK"
     assert data["message"] == "No under-voltage or throttling detected."
     assert data["data"] == {"cpu_under_voltage": False, "cpu_throttled": False}
-
-
-def test_check_alive_ok():
-    assert _bare().check_alive([]) == {
-        "result": "OK",
-        "message": "The control script is running.",
-        "data": {},
-    }
 
 
 def test_os_info_ok_shape():

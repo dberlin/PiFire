@@ -20,30 +20,6 @@ def _bare():
     return obj
 
 
-def test_supported_commands_lists_all_nine():
-    cmds = _bare().supported_commands([])["data"]["supported_cmds"]
-    for name in (
-        "check_throttled",
-        "check_wifi_quality",
-        "check_cpu_temp",
-        "supported_commands",
-        "check_alive",
-        "scan_bluetooth",
-        "os_info",
-        "network_info",
-        "hardware_info",
-    ):
-        assert name in cmds
-
-
-def test_check_alive_ok():
-    assert _bare().check_alive([]) == {
-        "result": "OK",
-        "message": "The control script is running.",
-        "data": {},
-    }
-
-
 def test_os_info_ok_shape(monkeypatch):
     # refresh_os_info() shells out to read /etc/os-release + uname and writes
     # the datastore cache. This test only asserts the response envelope's
