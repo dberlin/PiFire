@@ -12,12 +12,12 @@ from collections import deque
 from common.common import ErrorKind, generate_uuid
 from common.control_delta import (
     ControlDeltaError,
-    apply_control_delta,
     is_control_delta,
     validate_control_delta,
 )
-from common.current_schema import build_current, dump_legacy, load_current, snapshot_from, zeroed_current
+from common.current_schema import dump_legacy, load_current, snapshot_from, zeroed_current
 from common.defaults import METRIC_COLUMNS, default_control, default_metrics
+from common.persistence.transforms import apply_control_delta, current_snapshot, initial_status
 
 
 class Queue(ABC):
@@ -204,29 +204,7 @@ class InMemoryStore(Store):
         # dict, PERSIST it, and return it. The old read_status(init=True) on
         # this fake ignored the flag and returned whatever was already there,
         # so a test never saw the seeded-from-settings shape production writes.
-        settings = self._settings
-        pellet_db = self._pellet
-        status = {
-            "s_plus": False,
-            "hopper_level_enabled": settings.get("modules", {}).get("dist", "none") != "none",
-            "hopper_level": pellet_db.get("current", {}).get("hopper_level", 100),
-            "units": settings.get("globals", {}).get("units", "F"),
-            "mode": "Stop",
-            "recipe": False,
-            "startup_timestamp": 0,
-            "start_time": 0,
-            "start_duration": 0,
-            "shutdown_duration": 0,
-            "prime_duration": 0,
-            "prime_amount": 0,
-            "lid_open_detected": False,
-            "lid_open_endtime": 0,
-            "p_mode": 0,
-            "recipe_paused": False,
-            "outpins": {"auger": False, "fan": False, "igniter": False, "power": False},
-            "cycle_ratio": 0,
-            "fan_duty": 0,
-        }
+        status = initial_status(self._settings, self._pellet)
         self.write_status(status)
         return copy.deepcopy(status)
 
@@ -254,7 +232,7 @@ class InMemoryStore(Store):
         # probe_history-shaped data, and what is STORED is the transformed
         # blob.
         previous = load_current(self._current)
-        schema = build_current(in_data, previous, int(time.time() * 1000))
+        schema = current_snapshot(previous, in_data, int(time.time() * 1000))
         self._current = dump_legacy(schema)
 
     def read_history(self, num_items=0):

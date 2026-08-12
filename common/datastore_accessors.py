@@ -29,12 +29,10 @@ from common import datastore
 from common.common import ErrorKind, generate_uuid
 from common.control_delta import (
     ControlDeltaError,
-    apply_control_delta,
     is_control_delta,
     validate_control_delta,
 )
 from common.current_schema import (
-    build_current,
     dump_legacy,
     load_current,
     snapshot_from,
@@ -46,6 +44,12 @@ from common.defaults import (
     default_metrics,
     default_pellets,
     default_settings,
+)
+from common.persistence.transforms import (
+    apply_control_delta,
+    current_snapshot,
+    history_row_to_dict,
+    initial_status,
 )
 from common.pellets_schema import validate_pellet_db
 from common.settings_schema import validate_settings_tree
@@ -1770,15 +1774,9 @@ def read_history(num_items=0):
     if num_items > 0:
         rows = rows[-num_items:]
 
-    return [_history_row_to_dict(row) for row in rows]
+    return [history_row_to_dict(row) for row in rows]
 
 
-def _history_row_to_dict(row):
-    ts, psp, p, f, aux, nt, exd = row
-    d = {"T": ts, "P": json.loads(p), "F": json.loads(f), "PSP": psp, "NT": json.loads(nt), "AUX": json.loads(aux)}
-    if exd is not None:
-        d["EXD"] = json.loads(exd)
-    return d
 
 
 def write_history(in_data, maxsizelines=28800, ext_data=False):
@@ -1821,7 +1819,7 @@ def write_current(in_data):
     :param in_data: dictionary containing current temperatures
     """
     previous = load_current(_read_json_blob("control:current", dict))
-    schema = build_current(in_data, previous, int(time.time() * 1000))
+    schema = current_snapshot(previous, in_data, int(time.time() * 1000))
     _write_json_blob("control:current", dump_legacy(schema))
 
 
@@ -2064,30 +2062,7 @@ def init_status():
 
     :return: The status dictionary now persisted.
     """
-    settings = read_settings()
-    pellet_db = read_pellet_db()
-    hopper_level_enabled = False if settings["modules"]["dist"] == "none" else True
-    status = {
-        "s_plus": False,
-        "hopper_level_enabled": hopper_level_enabled,
-        "hopper_level": pellet_db["current"]["hopper_level"],
-        "units": settings["globals"]["units"],
-        "mode": "Stop",
-        "recipe": False,
-        "startup_timestamp": 0,
-        "start_time": 0,
-        "start_duration": 0,
-        "shutdown_duration": 0,
-        "prime_duration": 0,
-        "prime_amount": 0,
-        "lid_open_detected": False,
-        "lid_open_endtime": 0,
-        "p_mode": 0,
-        "recipe_paused": False,
-        "outpins": {"auger": False, "fan": False, "igniter": False, "power": False},
-        "cycle_ratio": 0,
-        "fan_duty": 0,
-    }
+    status = initial_status(read_settings(), read_pellet_db())
     write_status(status)
     return status
 

@@ -3,6 +3,8 @@
 
 from dataclasses import dataclass
 
+from common.persistence.protocols import ControllerStore
+
 
 @dataclass
 class Devices:
@@ -14,7 +16,7 @@ class Devices:
 @dataclass
 class ControllerContext:
     devices: object  # Devices
-    store: object  # Store
+    store: ControllerStore
     notifications: object  # Notifier
     clock: object  # Clock
     event_log: object = None
