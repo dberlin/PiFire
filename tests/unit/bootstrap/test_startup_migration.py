@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from common import datastore
+from common import backups, datastore, settings_migration
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -205,33 +205,29 @@ def test_control_main_calls_datastore_init_before_first_settings_read():
 
 
 @pytest.fixture
-def backups_dir():
+def backups_dir(tmp_path, monkeypatch):
     """backup_settings()/restore_settings() use hardcoded relative paths
-    ('./backups/...') rather than an injectable path, so this fixture makes
-    the real repo-root './backups/' directory usable for a test and restores
-    it to its prior state afterward (it's gitignored -- a local scratch dir
-    -- but other concurrent processes may be using it, so don't clobber it)."""
-    backups_path = os.path.join(_REPO_ROOT, "backups")
-    manifest_path = os.path.join(backups_path, "manifest.json")
-    dir_existed = os.path.isdir(backups_path)
-    if not dir_existed:
-        os.mkdir(backups_path)
-    manifest_existed = os.path.exists(manifest_path)
-    manifest_orig = open(manifest_path).read() if manifest_existed else None
-    pre_existing = set(os.listdir(backups_path))
+    ('./backups/...') rather than an injectable path. Every xdist worker
+    shares that literal directory (it resolves against the repo-root cwd,
+    not anything test-scoped), so two workers running these tests at the
+    same moment raced an unguarded read-modify-write of backups/manifest.json:
+    one worker's freshly written entry could be silently lost under the
+    other's overwrite, which read back as 'no backup settings files were
+    found' -- the flake this fixture used to produce roughly 1-2 times in 20.
 
-    yield backups_path
+    common/backups.py and common/settings_migration.py each hold their own
+    module-level BACKUP_PATH binding (imported at definition time), so both
+    are monkeypatched to an isolated tmp_path directory -- the same pattern
+    tests/unit/common/test_backups_manifest_path.py already established for
+    common.backups.BACKUP_PATH.
+    """
+    backups_path = tmp_path / "backups"
+    backups_path.mkdir()
+    backup_dir_str = str(backups_path) + os.sep
+    monkeypatch.setattr(backups, "BACKUP_PATH", backup_dir_str)
+    monkeypatch.setattr(settings_migration, "BACKUP_PATH", backup_dir_str)
 
-    for name in set(os.listdir(backups_path)) - pre_existing:
-        os.remove(os.path.join(backups_path, name))
-    if manifest_existed:
-        with open(manifest_path, "w") as fh:
-            fh.write(manifest_orig)
-    if not dir_existed:
-        try:
-            os.rmdir(backups_path)
-        except OSError:
-            pass
+    return str(backups_path)
 
 
 def test_backup_restore_settings_round_trip(fresh, backups_dir):

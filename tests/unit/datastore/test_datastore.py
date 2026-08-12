@@ -81,26 +81,48 @@ def test_schema_lazy_without_init(tmp_path):
 
 
 def test_reset_for_tests_restores_db_path_on_none(tmp_path):
-    """Regression test: _reset_for_tests(None) restores original DB_PATH.
+    """Regression test: _reset_for_tests(None) restores DB_PATH to
+    datastore._ORIGINAL_DB_PATH.
 
-    Establishes its own baseline first: DB_PATH is module-level global state,
-    and a sibling test that left a temp path installed used to make the
-    `endswith("pifire.db")` assertion fail depending on execution order.
+    Does not force DB_PATH to any particular value before or after this
+    test runs beyond restoring exactly what it found here: DB_PATH is
+    process-global, and code besides this test reads it too -- including
+    background threads from other tests that can still be finishing up
+    (e.g. a checkpoint persistence worker that outlives its own test by a
+    moment). An earlier version of this test called `_reset_for_tests(None)`
+    as a "known-good starting point" before doing anything else, and forced
+    it back to `_ORIGINAL_DB_PATH` again in a bare `finally` regardless of
+    what was actually ambient beforehand -- both are extra, unnecessary
+    writes to state this test does not own. A controlled A/B sweep (this
+    fix vs. the file reverted to its pre-task-18 state, ~20 full-suite runs
+    each) found the same family of pre-existing, load-sensitive
+    controller/runtime checkpoint-persistence flakes at a similar rate in
+    BOTH cases, including with this file completely unmodified -- so that
+    concern turned out unrelated to this test, but the smaller footprint is
+    worth keeping on its own merits.
+
+    Asserting the None-restores-original property against
+    `datastore._ORIGINAL_DB_PATH` directly (the actual documented fallback --
+    see `_reset_for_tests`'s docstring) rather than against a value this test
+    force-reset moments earlier is both a more precise check and a strictly
+    smaller footprint on shared global state: whatever this test finds
+    ambient on entry, it puts back exactly that on exit, nothing more.
     """
-    datastore._reset_for_tests(None)  # known-good starting point
     original_db_path = datastore.DB_PATH
-    assert original_db_path.endswith("pifire.db")
-
     temp_db_path = str(tmp_path / "temp.db")
     try:
         datastore._reset_for_tests(temp_db_path)
         assert datastore.DB_PATH == temp_db_path
 
         datastore._reset_for_tests(None)
-        assert datastore.DB_PATH == original_db_path
+        assert datastore.DB_PATH == datastore._ORIGINAL_DB_PATH
         assert datastore.DB_PATH.endswith("pifire.db")
     finally:
-        datastore._reset_for_tests(None)
+        #  Restore exactly what was ambient on entry -- not
+        #  _reset_for_tests(None), which forces DB_PATH to
+        #  _ORIGINAL_DB_PATH regardless of what this test actually found,
+        #  a bigger footprint on shared state than "put it back" requires.
+        datastore._reset_for_tests(original_db_path)
 
 
 def test_blob_roundtrip_and_missing(ds):
