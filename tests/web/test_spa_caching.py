@@ -10,17 +10,8 @@ import hashlib
 import os
 
 import pytest
-
-from app import app as flask_app
 from blueprints.spa import routes as spa_routes
 from common.web_contracts.core import WebUiBuildResponse
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
 
 
 @pytest.fixture

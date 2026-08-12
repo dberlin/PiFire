@@ -2,8 +2,6 @@ import copy
 import json
 
 import pytest
-
-from app import app as flask_app
 from common.common import WriteKind
 from common.datastore_accessors import read_settings, write_settings_store
 from common.web_contracts.wizard import (
@@ -17,13 +15,6 @@ from common.web_contracts.wizard import (
     WizardDraftRequest,
     WizardState,
 )
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
 
 
 def test_state_fresh_returns_metadata_and_selections(ds, client):

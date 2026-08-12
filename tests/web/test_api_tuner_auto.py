@@ -7,15 +7,6 @@ See docs/superpowers/plans/2026-07-28-react-tuner-auto.md.
 
 import pytest
 
-from app import app as flask_app
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
-
 
 def control_now():
     from common.datastore_accessors import execute_control_writes, read_control

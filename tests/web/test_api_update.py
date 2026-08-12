@@ -2,17 +2,8 @@ import json
 import subprocess
 
 import pytest
-
-from app import app as flask_app
 from common.common import WriteKind
 from common.modes import Mode
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
 
 
 def _stub_reads(monkeypatch):

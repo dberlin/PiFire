@@ -1,14 +1,5 @@
 import pytest
-
-from app import app as flask_app
 from common.web_contracts.content import HistoryChartData
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
 
 
 def test_chart_returns_the_series_payload(ds, client):

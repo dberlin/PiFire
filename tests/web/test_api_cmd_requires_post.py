@@ -67,15 +67,6 @@ def _assert_nothing_hazardous_ran(stubs):
         assert not any(token in str(payload) for token in _HAZARD_TOKENS), payload
 
 
-@pytest.fixture
-def client(ds):
-    from app import app as flask_app
-
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as test_client:
-        yield test_client
-
-
 @pytest.mark.parametrize("cmd", ["reboot", "shutdown", "restart"])
 def test_get_cannot_reach_a_lifecycle_command(client, hazard_stubs, cmd):
     """The regression this file exists for. Against the pre-fix code this

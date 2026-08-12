@@ -1,14 +1,5 @@
 import pytest
-
-from app import app as flask_app
 from common.datastore_accessors import read_warnings_snapshot, write_warning
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
 
 
 def test_dismiss_clears_the_warnings_through_the_given_id(client):

@@ -30,14 +30,6 @@ from common.datastore_accessors import (
 )
 
 
-@pytest.fixture
-def client(ds):
-    from app import app as flask_app
-
-    flask_app.config.update(TESTING=True)
-    return flask_app.test_client()
-
-
 def test_settings_update_persists_delta_and_sets_flag(client):
     body = {"settings": {"pwm": {"update_time": 7}}, "flags": ["settings_update"]}
     resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")

@@ -2,8 +2,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-
-from app import app as flask_app
 from blueprints.api import routes
 from common.datastore_accessors import (
     append_model_evidence,
@@ -43,13 +41,6 @@ from controller.runtime.model_fitting import grey_config_digest
 
 _CANDIDATE = "c" * 64
 _INCUMBENT = "a" * 64
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as test_client:
-        yield test_client
 
 
 def _record(evidence_id, payload, timestamp_ms):

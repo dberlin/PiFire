@@ -11,16 +11,6 @@ from common.datastore_accessors import read_settings, write_settings
 REBUILD = "./rebuild-acados.sh --if-needed"
 
 
-@pytest.fixture
-def client(ds):
-    from app import app as flask_app
-
-    flask_app.config.update(TESTING=True)
-    return flask_app.test_client()
-
-
-
-
 def _native_failure(monkeypatch, detail="native publication is missing"):
     def fail():
         raise RuntimeError(f"{detail}. Run {REBUILD}")

@@ -15,16 +15,6 @@ import pytest
 
 
 @pytest.fixture
-def client(ds):
-    """Flask test client over an isolated temp SQLite datastore."""
-    from app import app as flask_app
-
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as test_client:
-        yield test_client
-
-
-@pytest.fixture
 def backup_dir():
     """Redirect BOTH places BACKUP_PATH is read.
 

@@ -12,13 +12,6 @@ from common.web_contracts.content import MetricsPayload
 START = 1_700_000_000_000
 
 
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
-
-
 def seed(mode="Smoke", augerontime=100, duration_ms=60_000):
     """Insert one metrics row with a deterministic span.
 

@@ -1,6 +1,4 @@
 import pytest
-
-from app import app as flask_app
 from common.common import WriteKind
 from common.datastore_accessors import (
     execute_control_writes,
@@ -20,13 +18,6 @@ from common.web_contracts.wizard import (
 )
 
 PROFILE_ID = "TWPS00"
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
 
 
 def test_probe_modules_lists_every_manifest_module(ds, client):

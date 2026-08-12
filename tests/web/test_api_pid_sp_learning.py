@@ -11,8 +11,6 @@ from common.controller_model_state import (
     ControllerModelStore,
 )
 from common.datastore_accessors import write_generic_key
-
-from app import app as flask_app
 from blueprints.api import routes
 from controller.fopdt_identifier import (
     MIN_ACCEPTED,
@@ -24,13 +22,6 @@ from controller.pid_sp_learning import (
     build_pid_sp_live_learning,
     current_pid_sp_learning_report,
 )
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as test_client:
-        yield test_client
 
 
 def _live_status():

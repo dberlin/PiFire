@@ -367,3 +367,23 @@ def api_files_folders():
         recipes_mod.RECIPE_FOLDER,
     ) = saved
     shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def client(ds):
+    """Flask test client over the isolated temp SQLite datastore from `ds`.
+
+    Enters the app's test-request context and exits it on teardown. Nineteen
+    modules each carried their own copy of this; four of them used a bare
+    `return flask_app.test_client()`, which never enters the context manager
+    and so never runs its teardown. This is the single definition.
+
+    Modules needing a differently-seeded client (see test_api_mpc_calibration.py)
+    or the files-API client (`api_files_client`) override `client` locally --
+    a module-level fixture shadows this one, which is intended.
+    """
+    from app import app as flask_app
+
+    flask_app.config["TESTING"] = True
+    with flask_app.test_client() as test_client:
+        yield test_client

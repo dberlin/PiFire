@@ -3,15 +3,6 @@ import re
 
 import pytest
 
-from app import app as flask_app
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
-
 
 def test_declared_manifest_is_served_and_its_icons_resolve(client):
     """Mirrors the favicon test: read the href out of the shipped shell and

@@ -12,8 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from app import app as flask_app
-
 _I2C_BUS_FIELD_TSX = (
     Path(__file__).resolve().parents[2] / "web-react" / "src" / "components" / "wizard" / "fields" / "I2cBusField.tsx"
 )
@@ -29,13 +27,6 @@ def _frontend_group_titles():
     titles = re.findall(r'"([^"]+)"', match.group(1))
     assert titles, "no titles parsed out of GROUP_FOR"
     return titles
-
-
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
 
 
 def test_scan_kernel_group_titles_match_the_frontends_group_for(client, monkeypatch):

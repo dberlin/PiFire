@@ -12,13 +12,6 @@ import pytest
 from app import app as flask_app
 
 
-@pytest.fixture
-def client(ds):
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as c:
-        yield c
-
-
 def control_now():
     """read_control(), after draining any queued writes.
 

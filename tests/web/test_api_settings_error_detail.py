@@ -10,14 +10,6 @@ import pytest
 from common.settings_schema import validate_partial_settings, validate_partial_settings_pairs
 
 
-@pytest.fixture
-def client(ds):
-    from app import app as flask_app
-
-    flask_app.config.update(TESTING=True)
-    return flask_app.test_client()
-
-
 def _post(client, body):
     return client.post("/api/settings_update", json=body)
 
