@@ -174,10 +174,14 @@ def test_start_then_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
 
 @pytest.fixture
 def client(seeded):
+    # Local to this module because it hangs off `seeded`, not `ds`, so it
+    # cannot share tests/web/conftest.py's client. Kept context-managed to
+    # match it.
     from app import app as flask_app
 
-    flask_app.config.update(TESTING=True)
-    return flask_app.test_client()
+    flask_app.config["TESTING"] = True
+    with flask_app.test_client() as test_client:
+        yield test_client
 
 
 @pytest.fixture

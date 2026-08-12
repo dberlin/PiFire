@@ -1,6 +1,5 @@
 import pytest
 
-from app import app as flask_app
 from common.common import WriteKind
 from common.datastore_accessors import (
     execute_control_writes,
@@ -26,7 +25,7 @@ def _command(**overrides):
 
 
 @pytest.fixture
-def client(ds):
+def client(ds, client):  # noqa: F811 -- intentionally wraps the conftest fixture
     settings = read_settings()
     settings["globals"]["units"] = "F"
     settings["safety"]["maxtemp"] = 500
@@ -39,9 +38,7 @@ def client(ds):
     control["mode"] = Mode.HOLD
     control.pop("mpc_calibration", None)
     write_control(control, WriteKind.OVERWRITE, origin="test")
-    flask_app.config["TESTING"] = True
-    with flask_app.test_client() as test_client:
-        yield test_client
+    return client
 
 
 def test_json_post_dispatches_the_validated_calibration_command(client):
