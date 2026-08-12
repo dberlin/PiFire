@@ -253,6 +253,40 @@ def _make_ssd1306():
     return mod, d
 
 
+# _FakeLumaCanvas backs `self.device` (a MagicMock) with a real PIL image and,
+# on context-manager exit, calls device.display(image) exactly like the real
+# luma canvas -- so the last rendered frame is recoverable from
+# device.display.call_args and is real pixel data, not a stand-in.
+#
+# These boxes are generous crops around each icon's draw.text(...) call site
+# in display/ssd1306.py's _display_current (fan/igniter/auger at fixed
+# corners, the notify bell top-right), sized from the real, vendored
+# static/font/FA-Free-Solid.otf glyphs actually drawn there (confirmed via a
+# standalone bbox probe: fan (-1,-1,25,25), igniter (0,25,18,49), auger
+# (107,31,128,48), notify (106,0,128,24)). The grill-temp and mode text use
+# impact.ttf/trebuc.ttf, which _patch_missing_fonts falls back to Pillow's
+# tiny default bitmap font for (missing from the repo) -- their bboxes land
+# at roughly x:[55,73] y:[2,10] and x:[34,94] y:[56,64], well outside every
+# icon box below, so a lit icon can't be mistaken for temp/mode text.
+_ICON_REGIONS = {
+    "fan": (0, 0, 26, 26),
+    "igniter": (0, 24, 20, 50),
+    "auger": (100, 26, 128, 50),
+    "notify": (100, 0, 128, 26),
+}
+
+
+def _rendered_icons(d):
+    """Return the set of icon names whose region in the last frame sent to
+    d.device.display(...) contains any drawn (non-background) pixel."""
+    image = d.device.display.call_args.args[0]
+    lit = set()
+    for name, box in _ICON_REGIONS.items():
+        if image.crop(box).getbbox() is not None:
+            lit.add(name)
+    return lit
+
+
 def test_ssd1306_constructs_and_sizes():
     mod, d = _make_ssd1306()
     assert (d.WIDTH, d.HEIGHT) == (128, 64)
@@ -279,12 +313,17 @@ def test_ssd1306_draw_methods_forward_to_device():
 
 def test_ssd1306_display_current_all_outpins_off_and_no_notify():
     # Cover the "nothing lit up" branches (fan/igniter/auger False, no
-    # notify_data requiring a bell icon).
+    # notify_data requiring a bell icon) -- and assert the outcome, rather
+    # than only that rendering did not raise.
     mod, d = _make_ssd1306()
     status = dict(SAMPLE_STATUS_DATA)
     status["outpins"] = {"fan": False, "igniter": False, "auger": False}
     status["notify_data"] = []
+
     d._display_current(SAMPLE_IN_DATA, status)
+
+    lit = _rendered_icons(d)
+    assert lit == set(), f"nothing should be lit, got {lit}"
 
 
 def test_ssd1306_public_status_methods_set_state_without_touching_device():
@@ -945,6 +984,13 @@ def test_prototype_display_status_draws_probe_and_notify_and_pins(monkeypatch):
 
 
 def test_prototype_display_status_low_and_mid_hopper_levels(monkeypatch):
+    # Cover the hopper-level color branches (<25 red, 25-70 yellow) and
+    # assert they actually select different curses color pairs -- the
+    # "renders differently" behavior the test name promises, rather than
+    # only that display_status() completes without raising. curses.color_pair
+    # is a MagicMock with a fixed return_value (see _curses_stub), so the
+    # *return value* forwarded into addstr can't distinguish the branches;
+    # the call args recorded on the mock can.
     mod, d = _make_prototype()
     status_data = {
         "mode": "Stop",
@@ -954,9 +1000,15 @@ def test_prototype_display_status_low_and_mid_hopper_levels(monkeypatch):
     }
     in_data = {"probe_history": {"primary": {}}, "primary_setpoint": 0, "notify_targets": {}}
     d.display_status(in_data, status_data)  # hopper_level < 25 branch
+    low_pair = mod.curses.color_pair.call_args_list[-1]
 
     status_data["hopper_level"] = 50
     d.display_status(in_data, status_data)  # 25 <= hopper_level < 70 branch
+    mid_pair = mod.curses.color_pair.call_args_list[-1]
+
+    assert low_pair == mock.call(5), f"hopper_level=10 should select the red pair, got {low_pair}"
+    assert mid_pair == mock.call(4), f"hopper_level=50 should select the yellow pair, got {mid_pair}"
+    assert low_pair != mid_pair, "low and mid hopper branches must select different color pairs"
 
 
 def test_prototype_clear_display_and_display_text():
