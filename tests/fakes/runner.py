@@ -1,14 +1,12 @@
-from collections import deque
 from dataclasses import replace
 from typing import Any
 
 from common.control_trace import ActuationMode, ControllerType
 from controller.model_learning.contracts import FrameObservation
+from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 from controller.runtime.runner import (
-    ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
-    ObservationTerminalDrop,
 )
 
 
@@ -43,15 +41,11 @@ class FakeControllerRunner:
         self.observations = []
         self.frame_completions = []
         self._observation_sequence = 0
-        self._observation_outcomes = []
-        self._terminal_drops_since_drain = deque()
+        self._observation_buffer = ObservationOutcomeBuffer(capacity=30)
         self.observation_outcome = None
         # A single ordered log across restore_model()/set_output() calls, since
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
-        self._outcome_drops_since_drain = 0
-        self._outcome_dropped_sequences = deque(maxlen=60)
-        self._evidence_contexts = {}
         self.calls = []
         self.refits = 0
         self.refit_raises = None
@@ -126,10 +120,10 @@ class FakeControllerRunner:
         return self._wants_async
 
     def bind_evidence_context(self, generation, session_id, cook_id):
-        self._evidence_contexts[generation] = (session_id, cook_id)
+        self._observation_buffer.bind_context(generation, session_id, cook_id)
 
     def retire_evidence_context(self, generation):
-        self._evidence_contexts.pop(generation, None)
+        self._observation_buffer.retire_context(generation)
 
     def stop(self):
         self.stops += 1
@@ -148,51 +142,24 @@ class FakeControllerRunner:
         owned = replace(observation)
         self.observations.append(owned)
         if self.observation_outcome is not None:
-            if len(self._observation_outcomes) == 30:
-                dropped = self._observation_outcomes.pop(0)
-                self._outcome_drops_since_drain += 1
-                self._outcome_dropped_sequences.append(dropped.submission_sequence)
-                self._terminal_drops_since_drain.append(
-                    ObservationTerminalDrop(
-                        dropped.submission_sequence,
-                        dropped.configuration_generation,
-                        dropped.observation,
-                        "runner-outcome-evicted",
-                    )
-                )
-            self._observation_outcomes.append(
+            self._observation_buffer.append_outcome(
                 ObservationOutcomeEnvelope(
-                    self._observation_sequence, self._configuration_revision, owned, self.observation_outcome
+                    self._observation_sequence,
+                    self._configuration_revision,
+                    owned,
+                    self.observation_outcome,
                 )
             )
         return ObservationSubmission(self._observation_sequence, self._configuration_revision)
 
+    def append_observation_outcome(
+        self,
+        envelope: ObservationOutcomeEnvelope,
+    ) -> None:
+        self._observation_buffer.append_outcome(envelope)
+
     def drain_observation_outcomes(self):
-        envelopes = []
-        withheld = []
-        for envelope in self._observation_outcomes:
-            if envelope.configuration_generation in self._evidence_contexts:
-                envelopes.append(envelope)
-            else:
-                withheld.append(envelope)
-        self._observation_outcomes = withheld
-        terminal_drops = []
-        withheld_drops = deque()
-        for drop in self._terminal_drops_since_drain:
-            if drop.configuration_generation in self._evidence_contexts:
-                terminal_drops.append(drop)
-            else:
-                withheld_drops.append(drop)
-        self._terminal_drops_since_drain = withheld_drops
-        drain = ObservationOutcomeDrain(
-            tuple(envelopes),
-            tuple(terminal_drops),
-            self._outcome_drops_since_drain,
-            tuple(self._outcome_dropped_sequences),
-        )
-        self._outcome_drops_since_drain = 0
-        self._outcome_dropped_sequences.clear()
-        return drain
+        return self._observation_buffer.drain()
 
     def get_model_snapshot(self):
         return self.snapshot

@@ -269,20 +269,74 @@ class CloseAwarePeriodWait:
         self.release.set()
 
 
-def test_runner_retires_generation_bound_evidence_context_without_default_sleep() -> None:
-    sync = SyncControllerRunner(FakeCore())
+def test_runners_retire_generation_bound_context_until_rebound() -> None:
+    class NoOutcomeCore(FakeCore):
+        def __init__(self):
+            super().__init__()
+            self.observed = threading.Event()
+
+        def observe_frame(self, _observation):
+            self.observed.set()
+            return None
+
+    class ProcessingBarrier:
+        def __init__(self):
+            self.calls = 0
+            self.first_waiting = threading.Event()
+            self.completed_cycle = threading.Event()
+            self.release = threading.Event()
+
+        def __call__(self, _seconds):
+            self.calls += 1
+            if self.calls == 1:
+                self.first_waiting.set()
+            else:
+                self.completed_cycle.set()
+            assert self.release.wait(2.0)
+            self.release.clear()
+
+        def close(self):
+            self.release.set()
+
+
+    sync = SyncControllerRunner(NoOutcomeCore())
     sync.bind_evidence_context(0, "session-sync", "cook-sync")
     sync.retire_evidence_context(0)
-    assert sync._evidence_contexts == {}
+    sync_submission = sync.observe_frame(_frame(0))
 
-    gate = CloseAwarePeriodWait()
-    threaded = ThreadedControllerRunner(FakeCore(), wait_for_period=gate)
-    threaded.bind_evidence_context(0, "session-threaded", "cook-threaded")
-    assert gate.waiting.wait(1.0)
-    threaded.stop()
-    threaded.retire_evidence_context(0)
-    assert gate.closed.is_set()
-    assert threaded._evidence_contexts == {}
+    assert sync.drain_observation_outcomes().terminal_drops == ()
+
+    sync.bind_evidence_context(0, "replacement-sync", "cook-sync")
+    sync_drops = sync.drain_observation_outcomes().terminal_drops
+    assert [drop.submission_sequence for drop in sync_drops] == [
+        sync_submission.submission_sequence
+    ]
+
+    threaded_core = NoOutcomeCore()
+    barrier = ProcessingBarrier()
+    threaded = ThreadedControllerRunner(
+        threaded_core,
+        wait_for_period=barrier,
+    )
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        threaded.bind_evidence_context(0, "session-threaded", "cook-threaded")
+        threaded.retire_evidence_context(0)
+        threaded_submission = threaded.observe_frame(_frame(1))
+        assert threaded_submission is not None
+        barrier.release.set()
+        assert threaded_core.observed.wait(2.0)
+        assert barrier.completed_cycle.wait(2.0)
+
+        assert threaded.drain_observation_outcomes().terminal_drops == ()
+
+        threaded.bind_evidence_context(0, "replacement-threaded", "cook-threaded")
+        threaded_drops = threaded.drain_observation_outcomes().terminal_drops
+        assert [drop.submission_sequence for drop in threaded_drops] == [
+            threaded_submission.submission_sequence
+        ]
+    finally:
+        threaded.stop()
 
 
 def test_threaded_runner_solves_submitted_temp():
@@ -2186,7 +2240,8 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         assert isinstance(recorded[0][1], ModelObservationPayload)
         assert recorded[0][1].eligible is False
         assert recorded[0][1].rejection_reasons == ("observation-outcome-malformed",)
-        assert recorded[1][1] is evaluation
+        assert recorded[1][1] == evaluation
+        assert recorded[1][1] is not evaluation
         assert len(activation_confidence) == 1
         assert activation_confidence[0].payload.decision_id == evaluation.decision_id
         assert all(

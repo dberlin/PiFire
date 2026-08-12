@@ -7,6 +7,7 @@ from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.contracts import FrameObservation
 from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner, build_runner, _build_core
 from common.control_trace import ActuationMode, ResultStaleState
+from common.model_evidence import SessionSummaryEvidence
 from tests.fakes.runner import FakeControllerRunner
 
 
@@ -422,6 +423,65 @@ def test_fake_runner_bounds_outcomes_and_reports_exact_evictions():
     assert [envelope.submission_sequence for envelope in drain] == list(range(2, 32))
 
 
+def test_fake_runner_copies_mutable_outcomes_before_generation_release():
+    outcome = {
+        "eligible": False,
+        "rejection_reasons": ("original-rejection",),
+        "forecast_origin_evidence": (),
+    }
+    runner = FakeControllerRunner()
+    runner.observation_outcome = outcome
+    runner.observe_frame(_frame(0))
+
+    outcome["eligible"] = True
+    outcome["rejection_reasons"] = ()
+    runner.bind_evidence_context(0, "session", "cook")
+    envelope = runner.drain_observation_outcomes().envelopes[0]
+
+    assert envelope.outcome == {
+        "eligible": False,
+        "rejection_reasons": ("original-rejection",),
+        "forecast_origin_evidence": (),
+    }
+    assert len(envelope.evidence) == 1
+    summary = envelope.evidence[0].payload
+    assert isinstance(summary, SessionSummaryEvidence)
+    assert summary.accepted_observations == 0
+    assert summary.rejection_reasons == ("original-rejection",)
+
+
+def test_fake_runner_resets_only_delivered_eviction_counters():
+    runner = FakeControllerRunner()
+    runner.observation_outcome = {
+        "eligible": False,
+        "rejection_reasons": (),
+        "forecast_origin_evidence": (),
+    }
+    for index in range(30):
+        runner.observe_frame(_frame(index))
+    runner.reconfigure({}, {})
+    runner.bind_evidence_context(1, "new-session", "new-cook")
+    runner.observe_frame(_frame(30))
+
+    new_generation = runner.drain_observation_outcomes()
+
+    assert [
+        envelope.submission_sequence for envelope in new_generation.envelopes
+    ] == [31]
+    assert new_generation.terminal_drops == ()
+    assert new_generation.dropped_count == 0
+    assert new_generation.dropped_sequences == ()
+
+    runner.bind_evidence_context(0, "old-session", "old-cook")
+    old_generation = runner.drain_observation_outcomes()
+
+    assert [drop.submission_sequence for drop in old_generation.terminal_drops] == [
+        1
+    ]
+    assert old_generation.dropped_count == 1
+    assert old_generation.dropped_sequences == (1,)
+
+
 def test_sync_runner_reports_exact_outcome_evictions():
     outcome = {"role_generation": 0, "eligible": False}
 
@@ -454,13 +514,15 @@ def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
 
     drain = runner.drain_observation_outcomes()
 
-    assert len(drain.dropped_sequences) == 60
-    assert drain.dropped_sequences == tuple(range(2, 62))
+    assert drain.dropped_count == 0
+    assert drain.dropped_sequences == ()
     assert drain.terminal_drops == ()
 
     runner.bind_evidence_context(0, "session", "cook")
     released = runner.drain_observation_outcomes()
     assert [drop.submission_sequence for drop in released.terminal_drops] == list(range(1, 62))
+    assert released.dropped_count == 61
+    assert released.dropped_sequences == tuple(range(2, 62))
 
 
 def test_sync_runner_forwards_snapshot_and_restore():

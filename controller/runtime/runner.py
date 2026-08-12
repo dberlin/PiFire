@@ -560,21 +560,18 @@ class SyncControllerRunner(ControllerRunner):
         wall_clock: Callable[[], float] = time.time,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
     ):
+        from controller.runtime.observation_buffer import ObservationOutcomeBuffer
+
         self._core = core
         self._temp = None
         self._revision = 0
         self._latest_result = None
-        self._terminal_drops_since_drain: collections.deque[ObservationTerminalDrop] = collections.deque()
-        self._outcome_drops_since_drain = 0
-        self._outcome_dropped_sequences = collections.deque(maxlen=60)
+        self._observation_buffer = ObservationOutcomeBuffer(_MAX_PENDING_OBSERVATIONS)
         self._monotonic_clock = monotonic_clock
         self._wall_clock = wall_clock
         self._warning_callback = warning_callback
         self._controller_type = controller_type
         self._observation_sequence = 0
-        self._observation_outcomes = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
-        self._dropped_observation_outcomes = 0
-        self._evidence_contexts: dict[int, tuple[str, str | None]] = {}
         self._configuration_revision = 0
         period = getattr(core, "get_control_period", lambda: None)()
         self._quality = _ResultQualityTracker(_control_period_seconds(period))
@@ -594,13 +591,13 @@ class SyncControllerRunner(ControllerRunner):
         self._core.cancel_calibration(reason)
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
-        self._evidence_contexts[generation] = (session_id, cook_id)
+        self._observation_buffer.bind_context(generation, session_id, cook_id)
         bind = getattr(self._core, "bind_learning_identity", None)
         if callable(bind):
             bind(session_id, cook_id, generation)
 
     def retire_evidence_context(self, generation: int) -> None:
-        self._evidence_contexts.pop(generation, None)
+        self._observation_buffer.retire_context(generation)
 
     def restore_activation(self, persisted, records):
         restore = getattr(self._core, "restore_activation", None)
@@ -710,24 +707,13 @@ class SyncControllerRunner(ControllerRunner):
         observe = getattr(self._core, "observe_frame", None)
         outcome = observe(observation) if observe is not None else None
         if outcome is None:
-            self._terminal_drops_since_drain.append(
+            self._observation_buffer.append_terminal_drop(
                 ObservationTerminalDrop(sequence, generation, observation, "runner-no-observation-outcome")
             )
         else:
-            if len(self._observation_outcomes) == self._observation_outcomes.maxlen:
-                dropped = self._observation_outcomes.popleft()
-                self._dropped_observation_outcomes += 1
-                self._outcome_drops_since_drain += 1
-                self._outcome_dropped_sequences.append(dropped.submission_sequence)
-                self._terminal_drops_since_drain.append(
-                    ObservationTerminalDrop(
-                        dropped.submission_sequence,
-                        dropped.configuration_generation,
-                        dropped.observation,
-                        "runner-outcome-evicted",
-                    )
-                )
-            self._observation_outcomes.append(ObservationOutcomeEnvelope(sequence, generation, observation, outcome))
+            self._observation_buffer.append_outcome(
+                ObservationOutcomeEnvelope(sequence, generation, observation, outcome)
+            )
         return ObservationSubmission(sequence, generation)
 
     def complete_frame(self, applied, observation: FrameObservation):
@@ -735,43 +721,7 @@ class SyncControllerRunner(ControllerRunner):
         return self.observe_frame(observation)
 
     def drain_observation_outcomes(self) -> ObservationOutcomeDrain:
-        envelopes: list[ObservationOutcomeEnvelope] = []
-        withheld: collections.deque[ObservationOutcomeEnvelope] = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
-        for envelope in self._observation_outcomes:
-            context = self._evidence_contexts.get(envelope.configuration_generation)
-            if context is None:
-                withheld.append(envelope)
-                continue
-            session_id, cook_id = context
-            envelopes.append(
-                replace(
-                    envelope,
-                    evidence=_freeze_evidence(
-                        envelope.outcome,
-                        session_id,
-                        cook_id,
-                        envelope.observation,
-                    ),
-                )
-            )
-        self._observation_outcomes = withheld
-        terminal_drops: list[ObservationTerminalDrop] = []
-        withheld_drops: collections.deque[ObservationTerminalDrop] = collections.deque()
-        for drop in self._terminal_drops_since_drain:
-            if drop.configuration_generation in self._evidence_contexts:
-                terminal_drops.append(drop)
-            else:
-                withheld_drops.append(drop)
-        self._terminal_drops_since_drain = withheld_drops
-        drain = ObservationOutcomeDrain(
-            tuple(envelopes),
-            tuple(terminal_drops),
-            self._outcome_drops_since_drain,
-            tuple(self._outcome_dropped_sequences),
-        )
-        self._outcome_drops_since_drain = 0
-        self._outcome_dropped_sequences.clear()
-        return drain
+        return self._observation_buffer.drain()
 
     def get_model_snapshot(self):
         return self._core.get_model_snapshot()
@@ -890,6 +840,8 @@ class ThreadedControllerRunner(ControllerRunner):
         warning_callback: Callable[[ResultStaleState], None] | None = None,
         wait_for_period: Callable[[float], None] | None = None,
     ):
+        from controller.runtime.observation_buffer import ObservationOutcomeBuffer
+
         self._core = core
         self._lock = threading.Lock()
         self._temp = None
@@ -911,9 +863,6 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_core = None
         self._pending_controller_type = None
         self._configuration_revision = 0
-        self._terminal_drops_since_drain: collections.deque[ObservationTerminalDrop] = collections.deque()
-        self._outcome_drops_since_drain = 0
-        self._outcome_dropped_sequences = collections.deque(maxlen=60)
         self._pending_dispatches: collections.deque[tuple[str, object]] = collections.deque()
         self._latest_delivered_output = None
         self._pending_dropped = 0
@@ -933,9 +882,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._dropped_observations = 0
         self._observations_discontinuous: set[int] = set()
         self._observation_sequence = 0
-        self._observation_outcomes = collections.deque(maxlen=_MAX_PENDING_OBSERVATIONS)
-        self._dropped_observation_outcomes = 0
-        self._evidence_contexts: dict[int, tuple[str, str | None]] = {}
+        self._observation_buffer = ObservationOutcomeBuffer(_MAX_PENDING_OBSERVATIONS)
         self._model_snapshot = _owned_model_snapshot(core.get_model_snapshot())
         self._initial_status = _safe_initial_status(core)
         self._control_period = core.get_control_period()
@@ -960,7 +907,7 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
         with self._lock:
-            self._evidence_contexts[generation] = (session_id, cook_id)
+            self._observation_buffer.bind_context(generation, session_id, cook_id)
             target = (
                 self._pending_core
                 if self._pending_core is not None
@@ -973,7 +920,7 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def retire_evidence_context(self, generation: int) -> None:
         with self._lock:
-            self._evidence_contexts.pop(generation, None)
+            self._observation_buffer.retire_context(generation)
 
     def _terminalize_observation_locked(self, sequence: int, reason: str) -> None:
         accepted = self._accepted_observations.pop(sequence, None)
@@ -981,7 +928,9 @@ class ThreadedControllerRunner(ControllerRunner):
         if accepted is None:
             return
         generation, observation = accepted
-        self._terminal_drops_since_drain.append(ObservationTerminalDrop(sequence, generation, observation, reason))
+        self._observation_buffer.append_terminal_drop(
+            ObservationTerminalDrop(sequence, generation, observation, reason)
+        )
 
     def _complete_observation_locked(
         self, sequence: int, generation: int, observation: FrameObservation, outcome: object
@@ -990,24 +939,13 @@ class ThreadedControllerRunner(ControllerRunner):
             return
         self._inflight_observations.discard(sequence)
         if outcome is None:
-            self._terminal_drops_since_drain.append(
+            self._observation_buffer.append_terminal_drop(
                 ObservationTerminalDrop(sequence, generation, observation, "runner-no-observation-outcome")
             )
             return
-        if len(self._observation_outcomes) == self._observation_outcomes.maxlen:
-            dropped = self._observation_outcomes.popleft()
-            self._dropped_observation_outcomes += 1
-            self._outcome_drops_since_drain += 1
-            self._outcome_dropped_sequences.append(dropped.submission_sequence)
-            self._terminal_drops_since_drain.append(
-                ObservationTerminalDrop(
-                    dropped.submission_sequence,
-                    dropped.configuration_generation,
-                    dropped.observation,
-                    "runner-outcome-evicted",
-                )
-            )
-        self._observation_outcomes.append(ObservationOutcomeEnvelope(sequence, generation, observation, outcome))
+        self._observation_buffer.append_outcome(
+            ObservationOutcomeEnvelope(sequence, generation, observation, outcome)
+        )
 
     def _capture_activation_events(self) -> None:
         drain = getattr(self._core, "drain_activation_events", None)
@@ -1551,7 +1489,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 else:
                     sequence, generation, _, observation = evicted_payload
                     self._accepted_observations.pop(sequence, None)
-                    self._terminal_drops_since_drain.append(
+                    self._observation_buffer.append_terminal_drop(
                         ObservationTerminalDrop(
                             sequence,
                             generation,
@@ -1605,45 +1543,7 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def drain_observation_outcomes(self) -> ObservationOutcomeDrain:
         with self._lock:
-            envelopes: list[ObservationOutcomeEnvelope] = []
-            withheld: collections.deque[ObservationOutcomeEnvelope] = collections.deque(
-                maxlen=_MAX_PENDING_OBSERVATIONS
-            )
-            for envelope in self._observation_outcomes:
-                context = self._evidence_contexts.get(envelope.configuration_generation)
-                if context is None:
-                    withheld.append(envelope)
-                    continue
-                session_id, cook_id = context
-                envelopes.append(
-                    replace(
-                        envelope,
-                        evidence=_freeze_evidence(
-                            envelope.outcome,
-                            session_id,
-                            cook_id,
-                            envelope.observation,
-                        ),
-                    )
-                )
-            self._observation_outcomes = withheld
-            terminal_drops: list[ObservationTerminalDrop] = []
-            withheld_drops: collections.deque[ObservationTerminalDrop] = collections.deque()
-            for drop in self._terminal_drops_since_drain:
-                if drop.configuration_generation in self._evidence_contexts:
-                    terminal_drops.append(drop)
-                else:
-                    withheld_drops.append(drop)
-            self._terminal_drops_since_drain = withheld_drops
-            drain = ObservationOutcomeDrain(
-                tuple(envelopes),
-                tuple(terminal_drops),
-                self._outcome_drops_since_drain,
-                tuple(self._outcome_dropped_sequences),
-            )
-            self._outcome_drops_since_drain = 0
-            self._outcome_dropped_sequences.clear()
-        return drain
+            return self._observation_buffer.drain()
 
     def restore_model(self, snapshot):
         """Queue a snapshot for the worker to attempt to adopt.

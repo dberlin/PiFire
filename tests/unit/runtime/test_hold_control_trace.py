@@ -314,7 +314,7 @@ def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_d
 
     frame = PulseFrameResult(0.0, 20.0, 20.0, True, False, 0.3, 0.0, 0.0, 6, 6.0, 2, False, False, None)
     mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
     mode._reconcile_model_observation_outcomes(now=22.0)
@@ -1491,7 +1491,7 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
 
     assert not [record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
     mode._reconcile_model_observation_outcomes(now=22.0)
@@ -1567,7 +1567,7 @@ def test_framed_learning_trace_uses_generation_latched_with_pulse_frame(hold_cyc
     runner.status = {"adaptation": {"role_generation": 8}}
     mode._advance_framed_pulse(20.0, False, ptemp=212.0)
 
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(
             1, 0, runner.observations[0], _model_observation_outcome(frame_end_ms=20_000, role_generation=7)
         )
@@ -1594,7 +1594,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
 
     frame = PulseFrameResult(0.0, 20.0, 20.0, True, False, 0.3, 0.0, 0.0, 6, 6.0, 2, False, False, None)
     mode._observe_completed_pulse_frame(frame, ptemp=212.0, inhibit=InhibitReason.NONE)
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
     original = mode._trace_record
@@ -1629,11 +1629,11 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
         second_outcome["evaluation_payload"], decision_id="generation-0-evaluation-2"
     )
     second_outcome["lifecycle"] = {**second_outcome["lifecycle"], "detail": "promotion-2"}
-    runner._observation_outcomes.extend(
-        [
-            ObservationOutcomeEnvelope(1, 0, first, first_outcome),
-            ObservationOutcomeEnvelope(2, 0, second, second_outcome),
-        ]
+    runner.append_observation_outcome(
+        ObservationOutcomeEnvelope(1, 0, first, first_outcome)
+    )
+    runner.append_observation_outcome(
+        ObservationOutcomeEnvelope(2, 0, second, second_outcome)
     )
     original = mode._trace_record
     failed = False
@@ -1674,7 +1674,7 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
 
 def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeypatch):
     recorder, runner, mode, first, second = _two_pending_learning_outcomes(hold_cycle, monkeypatch)
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(2, 0, second, _promotion_outcome(frame_end_ms=40_000))
     )
 
@@ -1686,7 +1686,7 @@ def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeyp
         if record.event_kind
         in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
     ]
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, first, _promotion_outcome(frame_end_ms=20_000))
     )
     mode._reconcile_model_observation_outcomes(now=23.0)
@@ -1904,10 +1904,15 @@ def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
         1: (first, mode._trace_session_id, 0, None),
         2: (second, mode._trace_session_id, 0, None),
     }
-    runner._observation_outcomes.extend(
-        (
-            ObservationOutcomeEnvelope(1, generation, first, outcome),
-            ObservationOutcomeEnvelope(2, 0, second, _model_observation_outcome(frame_end_ms=40_000)),
+    runner.append_observation_outcome(
+        ObservationOutcomeEnvelope(1, generation, first, outcome)
+    )
+    runner.append_observation_outcome(
+        ObservationOutcomeEnvelope(
+            2,
+            0,
+            second,
+            _model_observation_outcome(frame_end_ms=40_000),
         )
     )
 
@@ -1957,7 +1962,7 @@ def test_allocation_join_failure_persists_an_ineligible_completed_observation(ho
     mode._ensure_trace_session(0.0)
     observation = replace(_learning_observation(0.0), allocation_join_reason=reason)
     mode._pending_model_observations = {1: (observation, mode._trace_session_id, 0, None)}
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, observation, _model_observation_outcome(frame_end_ms=20_000))
     )
 
@@ -2005,7 +2010,7 @@ def test_invalid_probe_waits_for_an_earlier_learner_outcome_before_trace_publica
 
     assert runner.observations == [first]
     assert not [record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
-    runner._observation_outcomes.append(
+    runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, first, _model_observation_outcome(frame_end_ms=20_000))
     )
     mode._reconcile_model_observation_outcomes(now=41.0)
@@ -2066,7 +2071,9 @@ def test_partial_terminal_frame_with_malformed_outcome_becomes_a_gap(hold_cycle,
     mode._pending_model_observations = {
         1: (observation, mode._trace_session_id, 0, None),
     }
-    runner._observation_outcomes.append(ObservationOutcomeEnvelope(1, 0, observation, {}))
+    runner.append_observation_outcome(
+        ObservationOutcomeEnvelope(1, 0, observation, {})
+    )
 
     mode._reconcile_model_observation_outcomes(now=1.0)
 
