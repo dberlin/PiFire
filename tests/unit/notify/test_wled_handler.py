@@ -109,22 +109,18 @@ def test_init_state_is_none_when_device_unreachable():
 # ---------------------------------------------------------------------------
 
 
-def test_get_control_mode_profiles_takes_priority():
+@pytest.mark.parametrize(
+    ("use_profiles", "use_suggested_presets", "expected"),
+    [
+        (True, True, "profiles"),  # profiles take priority when both are on
+        (False, True, "suggested"),
+        (False, False, "traditional"),
+    ],
+)
+def test_get_control_mode(use_profiles, use_suggested_presets, expected):
     handler = _make_handler()
-    handler.config = {"use_profiles": True, "use_suggested_presets": True}
-    assert handler.get_control_mode() == "profiles"
-
-
-def test_get_control_mode_suggested():
-    handler = _make_handler()
-    handler.config = {"use_profiles": False, "use_suggested_presets": True}
-    assert handler.get_control_mode() == "suggested"
-
-
-def test_get_control_mode_traditional_default():
-    handler = _make_handler()
-    handler.config = {"use_profiles": False, "use_suggested_presets": False}
-    assert handler.get_control_mode() == "traditional"
+    handler.config = {"use_profiles": use_profiles, "use_suggested_presets": use_suggested_presets}
+    assert handler.get_control_mode() == expected
 
 
 # ---------------------------------------------------------------------------
@@ -355,20 +351,28 @@ def test_idle_night_mode_is_dim_amber():
     assert kwargs["color"] == "amber"
 
 
-def test_booting_is_white_breathe():
+@pytest.mark.parametrize(
+    ("preset", "expected_kwargs"),
+    [
+        ("booting", {"color": "white", "effect": "breathe"}),
+        ("preheat", {"color": "orange", "effect": "breathe"}),
+        ("cooldown", {"color": "orange", "effect": "fade"}),
+        ("target_reached", {"color": "green", "effect": "solid"}),
+        # This one pins speed, not effect -- the odd row out.
+        ("probe_alarm", {"color": "red", "speed": 100}),
+        ("low_pellets", {"color": "yellow", "effect": "breathe"}),
+        ("error", {"color": "red", "effect": "solid"}),
+    ],
+)
+def test_send_suggested_preset(preset, expected_kwargs):
     handler = _make_handler()
     handler.send_direct_command = MagicMock()
-    handler.send_suggested_preset("booting", {})
-    kwargs = handler.send_direct_command.call_args.kwargs
-    assert kwargs["color"] == "white" and kwargs["effect"] == "breathe"
 
+    handler.send_suggested_preset(preset, {})
 
-def test_preheat_is_orange_breathe():
-    handler = _make_handler()
-    handler.send_direct_command = MagicMock()
-    handler.send_suggested_preset("preheat", {})
     kwargs = handler.send_direct_command.call_args.kwargs
-    assert kwargs["color"] == "orange" and kwargs["effect"] == "breathe"
+    for key, value in expected_kwargs.items():
+        assert kwargs[key] == value, f"{preset}: {key}"
 
 
 def test_cooking_night_mode_dims_brightness():
@@ -386,44 +390,12 @@ def test_cooking_non_night_mode_full_brightness():
     assert handler.send_direct_command.call_args.kwargs["brightness"] == 255
 
 
-def test_cooldown_is_orange_fade():
-    handler = _make_handler()
-    handler.send_direct_command = MagicMock()
-    handler.send_suggested_preset("cooldown", {})
-    kwargs = handler.send_direct_command.call_args.kwargs
-    assert kwargs["color"] == "orange" and kwargs["effect"] == "fade"
-
-
-def test_target_reached_is_green_solid():
-    handler = _make_handler()
-    handler.send_direct_command = MagicMock()
-    handler.send_suggested_preset("target_reached", {})
-    kwargs = handler.send_direct_command.call_args.kwargs
-    assert kwargs["color"] == "green" and kwargs["effect"] == "solid"
-
-
 def test_overshoot_alarm_is_red_blink():
     handler = _make_handler()
     handler.send_direct_command = MagicMock()
     handler.send_suggested_preset("overshoot_alarm", {})
     kwargs = handler.send_direct_command.call_args.kwargs
     assert kwargs["color"] == "red" and kwargs["effect"] == "blink" and kwargs["speed"] == 255
-
-
-def test_probe_alarm_is_red_blink_slower():
-    handler = _make_handler()
-    handler.send_direct_command = MagicMock()
-    handler.send_suggested_preset("probe_alarm", {})
-    kwargs = handler.send_direct_command.call_args.kwargs
-    assert kwargs["color"] == "red" and kwargs["speed"] == 100
-
-
-def test_low_pellets_is_yellow_breathe():
-    handler = _make_handler()
-    handler.send_direct_command = MagicMock()
-    handler.send_suggested_preset("low_pellets", {})
-    kwargs = handler.send_direct_command.call_args.kwargs
-    assert kwargs["color"] == "yellow" and kwargs["effect"] == "breathe"
 
 
 def test_timer_done_is_rainbow_with_no_explicit_color():
@@ -433,14 +405,6 @@ def test_timer_done_is_rainbow_with_no_explicit_color():
     kwargs = handler.send_direct_command.call_args.kwargs
     assert kwargs["effect"] == "rainbow"
     assert "color" not in kwargs
-
-
-def test_error_is_red_solid():
-    handler = _make_handler()
-    handler.send_direct_command = MagicMock()
-    handler.send_suggested_preset("error", {})
-    kwargs = handler.send_direct_command.call_args.kwargs
-    assert kwargs["color"] == "red" and kwargs["effect"] == "solid"
 
 
 def test_unknown_state_defaults_to_idle():

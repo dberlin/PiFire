@@ -7,6 +7,8 @@ refactor. All network/apprise senders are mocked -- no real
 notification is ever sent by this module.
 """
 
+import pytest
+
 import notify.notifications as N
 
 
@@ -93,12 +95,98 @@ def test_probe_temp_limit_alarm(monkeypatch):
     assert rec["query_args"]["value1"] is True
 
 
-def test_timer_expired(monkeypatch):
-    rec = _capture(monkeypatch, "Timer_Expired")
-    assert rec["title"] == "Timer Complete"
-    assert rec["body"] == "Your timer has expired, time to check your cook!"
-    assert rec["channel"] == "pifire_timer_alerts"
-    assert rec["query_args"] == {"value1": "Your timer has expired."}
+@pytest.mark.parametrize(
+    ("event", "title", "body", "exact", "channel", "query_args"),
+    [
+        pytest.param(
+            "Grill_Error_01",
+            "Grill Error!",
+            # Behavior change: "exceded" -> "exceeded" typo fix.
+            "Grill exceeded maximum temperature limit of 550F! Shutting down. ",
+            False,
+            "pifire_error_alerts",
+            {"value1": "550"},
+            id="grill-error-01",
+        ),
+        pytest.param(
+            "Grill_Error_02",
+            "Grill Error!",
+            "Grill temperature dropped below minimum startup temperature of 100F!"
+            " Shutting down to prevent firepot overload. ",
+            False,
+            "pifire_error_alerts",
+            {"value1": "100"},
+            id="grill-error-02",
+        ),
+        pytest.param(
+            "Grill_Error_03",
+            "Grill Error!",
+            # No trailing <now> suffix -- exact match.
+            "Grill temperature dropped below minimum startup temperature of 100F!"
+            " Starting a re-ignite attempt, per user settings.",
+            True,
+            "pifire_error_alerts",
+            {"value1": "100"},
+            id="grill-error-03",
+        ),
+        pytest.param(
+            "Recipe_Step_Message",
+            "Recipe Message",
+            "Flip the brisket. ",
+            False,
+            "pifire_recipe_message",
+            {"value1": "Flip the brisket. "},
+            id="recipe-step",
+        ),
+        pytest.param(
+            "Timer_Expired",
+            "Timer Complete",
+            "Your timer has expired, time to check your cook!",
+            True,
+            "pifire_timer_alerts",
+            {"value1": "Your timer has expired."},
+            id="timer-expired",
+        ),
+        pytest.param(
+            "Test_Notify",
+            "Test Notification",
+            "This is a test notification from PiFire.",
+            True,
+            "pifire_test_message",
+            {"value1": "This is a test notification from PiFire."},
+            id="test-notify",
+        ),
+        pytest.param(
+            "Control_Process_Stopped",
+            "Control Process Stopped!",
+            "The control process has encountered an issue and has been stopped. "
+            "Check on your grill as soon as possible to prevent damage!",
+            True,
+            "pifire_error_alerts",
+            {"value1": "Control Process Stopped"},
+            id="control-process-stopped",
+        ),
+        pytest.param(
+            "Zzz",
+            "PiFire: Unknown Notification issue",
+            "Whoops! PiFire had the following unhandled notify event: Zzz at ",
+            False,
+            "default",
+            {"value1": "Unknown Notification issue"},
+            id="unmatched-falls-back",
+        ),
+    ],
+)
+def test_notification_event(monkeypatch, event, title, body, exact, channel, query_args):
+    rec = _capture(monkeypatch, event)
+
+    assert rec["title"] == title
+    if exact:
+        assert rec["body"] == body
+    else:
+        assert rec["body"].startswith(body)
+    assert rec["channel"] == channel
+    assert rec["query_args"] == query_args
 
 
 def test_pellet_level_low(monkeypatch):
@@ -107,73 +195,6 @@ def test_pellet_level_low(monkeypatch):
     assert rec["body"] == "Your pellet level is currently at 42%"
     assert rec["channel"] == "pifire_pellet_alerts"
     assert rec["query_args"] == {"value1": rec["body"]}
-
-
-def test_grill_error_01(monkeypatch):
-    rec = _capture(monkeypatch, "Grill_Error_01")
-    assert rec["title"] == "Grill Error!"
-    # Behavior change: "exceded" -> "exceeded" typo fix.
-    assert rec["body"].startswith("Grill exceeded maximum temperature limit of 550F! Shutting down. ")
-    assert rec["channel"] == "pifire_error_alerts"
-    assert rec["query_args"] == {"value1": "550"}
-
-
-def test_grill_error_02(monkeypatch):
-    rec = _capture(monkeypatch, "Grill_Error_02")
-    assert rec["title"] == "Grill Error!"
-    assert rec["body"].startswith(
-        "Grill temperature dropped below minimum startup temperature of 100F!"
-        " Shutting down to prevent firepot overload. "
-    )
-    assert rec["channel"] == "pifire_error_alerts"
-    assert rec["query_args"] == {"value1": "100"}
-
-
-def test_grill_error_03(monkeypatch):
-    rec = _capture(monkeypatch, "Grill_Error_03")
-    assert rec["title"] == "Grill Error!"
-    # No trailing <now> suffix -- exact match.
-    assert rec["body"] == (
-        "Grill temperature dropped below minimum startup temperature of 100F!"
-        " Starting a re-ignite attempt, per user settings."
-    )
-    assert rec["channel"] == "pifire_error_alerts"
-    assert rec["query_args"] == {"value1": "100"}
-
-
-def test_recipe_step_message(monkeypatch):
-    rec = _capture(monkeypatch, "Recipe_Step_Message")
-    assert rec["title"] == "Recipe Message"
-    assert rec["body"].startswith("Flip the brisket. ")
-    assert rec["channel"] == "pifire_recipe_message"
-    assert rec["query_args"] == {"value1": "Flip the brisket. "}
-
-
-def test_test_notify(monkeypatch):
-    rec = _capture(monkeypatch, "Test_Notify")
-    assert rec["title"] == "Test Notification"
-    assert rec["body"] == "This is a test notification from PiFire."
-    assert rec["channel"] == "pifire_test_message"
-    assert rec["query_args"] == {"value1": "This is a test notification from PiFire."}
-
-
-def test_control_process_stopped(monkeypatch):
-    rec = _capture(monkeypatch, "Control_Process_Stopped")
-    assert rec["title"] == "Control Process Stopped!"
-    assert rec["body"] == (
-        "The control process has encountered an issue and has been stopped. "
-        "Check on your grill as soon as possible to prevent damage!"
-    )
-    assert rec["channel"] == "pifire_error_alerts"
-    assert rec["query_args"] == {"value1": "Control Process Stopped"}
-
-
-def test_unmatched_event_falls_back(monkeypatch):
-    rec = _capture(monkeypatch, "Zzz")
-    assert rec["title"] == "PiFire: Unknown Notification issue"
-    assert rec["body"].startswith("Whoops! PiFire had the following unhandled notify event: Zzz at ")
-    assert rec["channel"] == "default"
-    assert rec["query_args"] == {"value1": "Unknown Notification issue"}
 
 
 def test_grill_error_00_is_dropped_and_falls_back(monkeypatch, caplog):

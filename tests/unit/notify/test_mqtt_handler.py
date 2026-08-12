@@ -568,31 +568,23 @@ def test_publish_devices_unrecognized_sensor_is_dropped(patched_client):
     assert handler.client.publish_calls == []
 
 
-def test_publish_pellet_hopper_level(patched_client):
+@pytest.mark.parametrize(
+    ("topic_suffix", "payload"),
+    [
+        ("pellet", {"hopper_level": 42}),
+        ("control_notify_data_ADC1", {"target": 225}),
+        ("probe_data_primary", {"Grill": 225}),
+    ],
+)
+def test_publish_topic_and_payload(patched_client, topic_suffix, payload):
     handler = _make_handler(patched_client)
     handler.last_conn_time = 0
     handler._create_autodiscover = mock.Mock()
-    handler._publish("pellet", {"hopper_level": 42})
-    calls = [c for c in handler.client.publish_calls if c["topic"] == "PiFireTest/pellet"]
-    assert calls and json.loads(calls[-1]["payload"]) == {"hopper_level": 42}
 
+    handler._publish(topic_suffix, payload)
 
-def test_publish_control_notify_data_prefix(patched_client):
-    handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
-    handler._create_autodiscover = mock.Mock()
-    handler._publish("control_notify_data_ADC1", {"target": 225})
-    calls = [c for c in handler.client.publish_calls if c["topic"] == "PiFireTest/control_notify_data_ADC1"]
-    assert calls and json.loads(calls[-1]["payload"]) == {"target": 225}
-
-
-def test_publish_probe_data_prefix_accepts_any_device(patched_client):
-    handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
-    handler._create_autodiscover = mock.Mock()
-    handler._publish("probe_data_primary", {"Grill": 225})
-    calls = [c for c in handler.client.publish_calls if c["topic"] == "PiFireTest/probe_data_primary"]
-    assert calls and json.loads(calls[-1]["payload"]) == {"Grill": 225}
+    calls = [c for c in handler.client.publish_calls if c["topic"] == f"PiFireTest/{topic_suffix}"]
+    assert calls and json.loads(calls[-1]["payload"]) == payload
 
 
 # ---------------------------------------------------------------------------
@@ -726,12 +718,33 @@ def test_autodiscover_pid_context_is_diagnostic(patched_client):
     assert discovery["unit_of_measurement"] == "s"  # PB device-specific override
 
 
-def test_autodiscover_percent_devices(patched_client):
+@pytest.mark.parametrize(
+    ("group", "reading", "key", "expected"),
+    [
+        (
+            "pid",
+            {"u_max": 0.5},
+            "u_max",
+            {"unit_of_measurement": "%", "value_template": "{{ value_json.u_max | round(2)}}"},
+        ),
+        ("system", {"cpu_temp": 45.2}, "cpu_temp", {"device_class": "temperature", "unit_of_measurement": "°C"}),
+        # Uses the global units setting, which the handler fixture pins to F.
+        (
+            "control",
+            {"primary_setpoint": 225},
+            "primary_setpoint",
+            {"device_class": "temperature", "unit_of_measurement": "°F"},
+        ),
+    ],
+)
+def test_autodiscover_fields(patched_client, group, reading, key, expected):
     handler = _make_handler(patched_client)
-    result = _discover(handler, "pid", {"u_max": 0.5})
-    _, discovery = result["u_max"]
-    assert discovery["unit_of_measurement"] == "%"
-    assert discovery["value_template"] == "{{ value_json.u_max | round(2)}}"
+
+    result = _discover(handler, group, reading)
+
+    _, discovery = result[key]
+    for field, value in expected.items():
+        assert discovery[field] == value, field
 
 
 def test_autodiscover_memory_and_duty_cycle_units(patched_client):
@@ -739,22 +752,6 @@ def test_autodiscover_memory_and_duty_cycle_units(patched_client):
     result = _discover(handler, "system", {"available_memory": 1024, "cpu": 12})
     assert result["available_memory"][1]["unit_of_measurement"] == "b"
     assert result["cpu"][1]["unit_of_measurement"] == "%"
-
-
-def test_autodiscover_cpu_temp_device_class(patched_client):
-    handler = _make_handler(patched_client)
-    result = _discover(handler, "system", {"cpu_temp": 45.2})
-    _, discovery = result["cpu_temp"]
-    assert discovery["device_class"] == "temperature"
-    assert discovery["unit_of_measurement"] == "°C"
-
-
-def test_autodiscover_primary_setpoint_uses_global_units(patched_client):
-    handler = _make_handler(patched_client)
-    result = _discover(handler, "control", {"primary_setpoint": 225})
-    _, discovery = result["primary_setpoint"]
-    assert discovery["device_class"] == "temperature"
-    assert discovery["unit_of_measurement"] == "°F"
 
 
 def test_autodiscover_non_scalar_value_defaults_to_plain_sensor(patched_client):
