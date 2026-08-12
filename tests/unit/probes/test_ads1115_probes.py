@@ -13,7 +13,7 @@ temperature independently verified in test_base.py
 (voltage=1500mV, profile=TWPS00, Rd=10000 default, Vs=3.28 default ->
 tempF=193.74864976188468, Tr=8427 ohms).
 
-One test class per module, per the task brief.
+The Adafruit adapters share one parameterized public-module contract.
 """
 
 import sys
@@ -22,6 +22,7 @@ import importlib
 import logging
 
 import pytest
+from common.i2c_bus_config import BasicBus, FT232HBus
 
 
 # --- Reference thermistor profile (real values) + expected math, matching
@@ -238,8 +239,25 @@ class TestADS1115:
 # ===========================================================================
 
 
-def _install_fake_adafruit_ads1x15(monkeypatch, submodule_name, class_name, voltages_by_channel, fail_channels=()):
+def _install_fake_adafruit_ads1x15(
+    monkeypatch,
+    submodule_name,
+    class_name,
+    voltages_by_channel,
+    fail_channels=(),
+    *,
+    channels=(0, 1, 2, 3),
+    observed_channels=None,
+):
+    for module_name in (
+        "adafruit_ads1x15.ads1015",
+        "adafruit_ads1x15.ads1115",
+        "adafruit_ads1x15.analog_in",
+    ):
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+
     pkg = types.ModuleType("adafruit_ads1x15")
+    pkg.__path__ = []
     sub = types.ModuleType(f"adafruit_ads1x15.{submodule_name}")
 
     class FakeADS:
@@ -248,7 +266,8 @@ def _install_fake_adafruit_ads1x15(monkeypatch, submodule_name, class_name, volt
             self.address = address
 
     setattr(sub, class_name, FakeADS)
-    sub.P0, sub.P1, sub.P2, sub.P3 = 0, 1, 2, 3
+    for port_name, channel in zip(("P0", "P1", "P2", "P3"), channels, strict=True):
+        setattr(sub, port_name, channel)
 
     analog_in_mod = types.ModuleType("adafruit_ads1x15.analog_in")
 
@@ -256,6 +275,8 @@ def _install_fake_adafruit_ads1x15(monkeypatch, submodule_name, class_name, volt
         def __init__(self, ads, channel):
             self.ads = ads
             self.channel = channel
+            if observed_channels is not None:
+                observed_channels.append(channel)
 
         @property
         def voltage(self):
@@ -263,7 +284,7 @@ def _install_fake_adafruit_ads1x15(monkeypatch, submodule_name, class_name, volt
                 raise OSError("simulated I2C read failure")
             return voltages_by_channel[self.channel]
 
-    analog_in_mod.AnalogIn = FakeAnalogIn
+    setattr(analog_in_mod, "AnalogIn", FakeAnalogIn)
 
     setattr(pkg, submodule_name, sub)
     monkeypatch.setitem(sys.modules, "adafruit_ads1x15", pkg)
@@ -291,21 +312,205 @@ def _install_fake_adafruit_ads1x15(monkeypatch, submodule_name, class_name, volt
     ids=["ads1115", "ads1015"],
 )
 class TestAdafruitADS:
-    def _load(self, monkeypatch, module_name, chip_module, chip_class, voltages, fail_channels=()):
-        _install_fake_adafruit_ads1x15(monkeypatch, chip_module, chip_class, voltages, fail_channels)
-        probe = importlib.import_module(module_name)
+    def _load(
+        self,
+        monkeypatch,
+        module_name,
+        chip_module,
+        chip_class,
+        voltages,
+        fail_channels=(),
+        *,
+        channels=(0, 1, 2, 3),
+        observed_channels=None,
+        open_bus=None,
+    ):
+        from common import i2c_bus as i2c_bus_module
 
-        importlib.reload(probe)  # bind the fake adafruit_ads1x15
-        monkeypatch.setattr(probe, "open_i2c_bus", lambda bus: "FAKE_I2C_BUS")
-        return probe
+        _install_fake_adafruit_ads1x15(
+            monkeypatch,
+            chip_module,
+            chip_class,
+            voltages,
+            fail_channels,
+            channels=channels,
+            observed_channels=observed_channels,
+        )
+        monkeypatch.setattr(
+            i2c_bus_module,
+            "open_i2c_bus",
+            open_bus or (lambda bus: "FAKE_I2C_BUS"),
+        )
+        for public_module in (
+            "probes.ads1015_adafruit",
+            "probes.ads1115_adafruit",
+            "probes._ads1x15_adafruit",
+        ):
+            monkeypatch.delitem(sys.modules, public_module, raising=False)
+        return importlib.import_module(module_name)
+
+    def test_public_import_requires_only_selected_chip(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {})
+        other_chip = "ads1015" if chip_module == "ads1115" else "ads1115"
+
+        assert probe.__name__ == module_name
+        assert f"adafruit_ads1x15.{chip_module}" in sys.modules
+        assert f"adafruit_ads1x15.{other_chip}" not in sys.modules
+        assert f"probes.{other_chip}_adafruit" not in sys.modules
+
+    def test_public_open_i2c_bus_seam_is_live_after_import(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {})
+        configured_bus = FT232HBus(url="ftdi://ftdi:232h/1")
+        shared_bus = object()
+        opened_buses = []
+
+        def live_open_i2c_bus(bus):
+            opened_buses.append(bus)
+            return shared_bus
+
+        monkeypatch.setattr(probe, "open_i2c_bus", live_open_i2c_bus)
+
+        dev = probe.ADSDevice(i2c_bus_addr=0x49, bus=configured_bus)
+
+        assert opened_buses == [configured_bus]
+        assert dev.i2c is shared_bus
+        assert dev.ads.address == 0x49
+
+    def test_public_analog_in_seam_is_live_after_import(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        channels = tuple(f"{chip_module}.P{index}" for index in range(4))
+        probe = self._load(
+            monkeypatch,
+            module_name,
+            chip_module,
+            chip_class,
+            {},
+            channels=channels,
+        )
+        observed = []
+
+        class LiveAnalogIn:
+            def __init__(self, ads, channel):
+                observed.append((ads, channel))
+
+            @property
+            def voltage(self):
+                return 1.2349
+
+        monkeypatch.setattr(probe, "AnalogIn", LiveAnalogIn)
+        dev = probe.ADSDevice(i2c_bus_addr=0x48)
+
+        voltage = dev.read_voltage("ADC3")
+
+        assert voltage == 1234
+        assert observed == [(dev.ads, channels[3])]
+
+    def test_dynamic_module_and_public_class_names_remain_stable(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        module_key = module_name.removeprefix("probes.")
+        record = {
+            "module": module_key,
+            "module_filename": module_key,
+            "config": {},
+        }
+        self._load(monkeypatch, module_name, chip_module, chip_class, {0: 1.5})
+
+        loaded = importlib.import_module(f"probes.{record['module_filename']}")
+        obj = loaded.ReadProbes(
+            _probe_info([("ADC0", "Probe1", "Primary")]),
+            _device_info(record["config"]),
+            "F",
+        )
+
+        assert loaded.__name__ == module_name
+        assert loaded.ADSDevice.__name__ == "ADSDevice"
+        assert loaded.ADSDevice.__module__ == module_name
+        assert loaded.ReadProbes.__name__ == "ReadProbes"
+        assert loaded.ReadProbes.__module__ == module_name
+        assert type(obj) is loaded.ReadProbes
+
+    def test_public_adsdevice_selects_chip_through_shared_base(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        channels = tuple(f"{chip_module}.P{index}" for index in range(4))
+        probe = self._load(
+            monkeypatch,
+            module_name,
+            chip_module,
+            chip_class,
+            {},
+            channels=channels,
+        )
+        shared_base = probe.ADSDevice.__mro__[1]
+        chip_api = sys.modules[f"adafruit_ads1x15.{chip_module}"]
+
+        assert shared_base.__module__ == "probes._ads1x15_adafruit"
+        assert shared_base.__name__ == "AdafruitADSDevice"
+        assert probe.ADSDevice.CHIP_FACTORY is getattr(chip_api, chip_class)
+        assert probe.ADSDevice.CHANNELS == {
+            "ADC0": channels[0],
+            "ADC1": channels[1],
+            "ADC2": channels[2],
+            "ADC3": channels[3],
+        }
+
+    def test_read_voltage_maps_exact_chip_channels_and_floors_millivolts(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        channels = tuple(f"{chip_module}.P{index}" for index in range(4))
+        observed_channels = []
+        probe = self._load(
+            monkeypatch,
+            module_name,
+            chip_module,
+            chip_class,
+            {
+                channels[0]: 1.2349,
+                channels[1]: 2.3459,
+                channels[2]: 3.4569,
+                channels[3]: 4.5679,
+            },
+            channels=channels,
+            observed_channels=observed_channels,
+        )
+        dev = probe.ADSDevice(i2c_bus_addr=0x48)
+
+        voltages = [
+            dev.read_voltage("ADC0"),
+            dev.read_voltage("ADC1"),
+            dev.read_voltage("ADC2"),
+            dev.read_voltage("ADC3"),
+        ]
+
+        assert voltages == [1234, 2345, 3456, 4567]
+        assert all(isinstance(voltage, int) for voltage in voltages)
+        assert observed_channels == list(channels)
 
     def test_read_all_ports_maps_known_adc_voltage_to_temperature(
         self, monkeypatch, module_name, chip_module, chip_class
     ):
-        # 1.5V -> AnalogIn.voltage -> math.floor(1.5*1000) = 1500mV, matching
+        # 1.5V -> AnalogIn.voltage -> floor(1.5*1000) = 1500mV, matching
         # the reference case computed in test_base.py.
-        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {0: 1.5, 1: 1.5, 2: 1.5})
-        probe_info = _probe_info([("ADC0", "Probe1", "Primary"), ("ADC1", "Probe2", "Food"), ("ADC2", "Probe3", "Aux")])
+        probe = self._load(
+            monkeypatch,
+            module_name,
+            chip_module,
+            chip_class,
+            {0: 1.5, 1: 1.5, 2: 1.5},
+        )
+        probe_info = _probe_info(
+            [
+                ("ADC0", "Probe1", "Primary"),
+                ("ADC1", "Probe2", "Food"),
+                ("ADC2", "Probe3", "Aux"),
+            ]
+        )
         obj = probe.ReadProbes(probe_info, _device_info(), "F")
 
         result = obj.read_all_ports(obj.output_data)
@@ -315,20 +520,29 @@ class TestAdafruitADS:
         assert result["food"]["Probe2"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
         assert result["aux"]["Probe3"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
 
-    def test_read_voltage_error_returns_zero(self, monkeypatch, caplog, module_name, chip_module, chip_class):
-        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {0: 1.5}, fail_channels={0})
+    def test_read_voltage_error_logs_port_and_returns_zero(
+        self, monkeypatch, caplog, module_name, chip_module, chip_class
+    ):
+        probe = self._load(
+            monkeypatch,
+            module_name,
+            chip_module,
+            chip_class,
+            {2: 1.5},
+            fail_channels={2},
+        )
         dev = probe.ADSDevice(i2c_bus_addr=0x48)
 
         with caplog.at_level(logging.ERROR, logger="control"):
-            voltage = dev.read_voltage("ADC0")
+            voltage = dev.read_voltage("ADC2")
 
         assert voltage == 0
-        assert "Exception occurred" in caplog.text
+        assert "Exception occurred while reading probe port ADC2" in caplog.text
 
-    def test_init_device_defaults(self, monkeypatch, module_name, chip_module, chip_class):
-        from common.i2c_bus_config import BasicBus
-
-        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {0: 1.5})
+    def test_init_device_defaults_and_uses_module_local_adsdevice(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {})
         captured = {}
 
         class SpyADSDevice:
@@ -346,8 +560,88 @@ class TestAdafruitADS:
         assert obj.time_delay == 0.008
         assert captured["args"] == (0x48, BasicBus())
 
-    def test_init_device_failure_logs_and_reraises(self, monkeypatch, caplog, module_name, chip_module, chip_class):
-        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {0: 1.5})
+    @pytest.mark.parametrize(
+        ("stored_bus", "expected_bus"),
+        [
+            (None, BasicBus()),
+            (
+                {"kind": "ft232h", "url": "ftdi://ftdi:232h/1"},
+                FT232HBus(url="ftdi://ftdi:232h/1"),
+            ),
+        ],
+        ids=["default-basic", "explicit-ft232h"],
+    )
+    def test_init_device_opens_parsed_bus_once_with_address(
+        self,
+        monkeypatch,
+        module_name,
+        chip_module,
+        chip_class,
+        stored_bus,
+        expected_bus,
+    ):
+        opened_buses = []
+        shared_bus = object()
+
+        def fake_open(bus):
+            opened_buses.append(bus)
+            return shared_bus
+
+        probe = self._load(
+            monkeypatch,
+            module_name,
+            chip_module,
+            chip_class,
+            {},
+            open_bus=fake_open,
+        )
+        config = {"i2c_bus_addr": "0x49"}
+        if stored_bus is not None:
+            config["i2c_bus"] = stored_bus
+        obj = probe.ReadProbes.__new__(probe.ReadProbes)
+        obj.logger = logging.getLogger("control")
+        obj.device_info = {"config": config}
+
+        obj._init_device()
+
+        chip_api = sys.modules[f"adafruit_ads1x15.{chip_module}"]
+        assert opened_buses == [expected_bus]
+        assert obj.device.i2c is shared_bus
+        assert obj.device.ads.address == 0x49
+        assert type(obj.device.ads) is getattr(chip_api, chip_class)
+
+    def test_close_does_not_close_shared_bus(
+        self, monkeypatch, module_name, chip_module, chip_class
+    ):
+        class SharedBus:
+            close_calls = 0
+
+            def close(self):
+                self.close_calls += 1
+
+        shared_bus = SharedBus()
+        probe = self._load(
+            monkeypatch,
+            module_name,
+            chip_module,
+            chip_class,
+            {0: 1.5},
+            open_bus=lambda bus: shared_bus,
+        )
+        obj = probe.ReadProbes(
+            _probe_info([("ADC0", "Probe1", "Primary")]),
+            _device_info(),
+            "F",
+        )
+
+        obj.close()
+
+        assert shared_bus.close_calls == 0
+
+    def test_init_device_failure_logs_chip_and_reraises(
+        self, monkeypatch, caplog, module_name, chip_module, chip_class
+    ):
+        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {})
 
         def boom(**kwargs):
             raise RuntimeError("boom")
@@ -358,59 +652,10 @@ class TestAdafruitADS:
         obj.logger = logging.getLogger("control")
         obj.device_info = {"config": {}}
 
-        with caplog.at_level(logging.ERROR, logger="control"), pytest.raises(RuntimeError, match="boom"):
+        with caplog.at_level(logging.ERROR, logger="control"), pytest.raises(
+            RuntimeError, match="boom"
+        ):
             obj._init_device()
 
-        assert "Something went wrong" in caplog.text
-
-
-# ===========================================================================
-# test_adsdevice_opens_bus_via_factory was NOT byte-identical between the two
-# clone classes -- each chip module opens a different bus class with
-# different constructor kwargs (FT232HBus(url=...) for ads1115_adafruit,
-# MCP2221Bus(serial=...) for ads1015_adafruit). That is a real per-chip
-# difference, not just a literal one, so these stay as two separate,
-# non-parametrized tests rather than being forced into TestAdafruitADS above.
-# ===========================================================================
-
-
-def test_ads1115_adsdevice_opens_bus_via_factory(monkeypatch):
-    from common.i2c_bus_config import FT232HBus
-
-    _install_fake_adafruit_ads1x15(monkeypatch, "ads1115", "ADS1115", {0: 1.5})
-    probe = importlib.import_module("probes.ads1115_adafruit")
-    importlib.reload(probe)  # bind the fake adafruit_ads1x15
-    opened = {}
-
-    def fake_open(bus):
-        opened["bus"] = bus
-        return "FAKE_BUS"
-
-    monkeypatch.setattr(probe, "open_i2c_bus", fake_open)
-
-    dev = probe.ADSDevice(i2c_bus_addr=0x49, bus=FT232HBus(url="1"))
-
-    assert opened["bus"] == FT232HBus(url="1")
-    assert dev.i2c == "FAKE_BUS"
-    assert dev.ads.address == 0x49
-
-
-def test_ads1015_adsdevice_opens_bus_via_factory(monkeypatch):
-    from common.i2c_bus_config import MCP2221Bus
-
-    _install_fake_adafruit_ads1x15(monkeypatch, "ads1015", "ADS1015", {0: 1.5})
-    probe = importlib.import_module("probes.ads1015_adafruit")
-    importlib.reload(probe)  # bind the fake adafruit_ads1x15
-    opened = {}
-
-    def fake_open(bus):
-        opened["bus"] = bus
-        return "FAKE_BUS"
-
-    monkeypatch.setattr(probe, "open_i2c_bus", fake_open)
-
-    dev = probe.ADSDevice(i2c_bus_addr=0x49, bus=MCP2221Bus(serial="XYZ"))
-
-    assert opened["bus"] == MCP2221Bus(serial="XYZ")
-    assert dev.i2c == "FAKE_BUS"
-    assert dev.ads.address == 0x49
+        assert f"trying to initialize the {chip_class} device" in caplog.text
+        assert "address=0x48" in caplog.text
