@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from common.app import api_response
 from common.backups import backup_pellet_db, backup_settings, read_pellet_db_file
-from common.common import WriteKind, write_log
+from common.common import write_log
 from common.control_delta import control_delta
 from common.file_browser import resolve_managed_file
 from common.settings_migration import read_settings_file
@@ -33,7 +33,7 @@ from common.datastore_accessors import (
     read_control,
     read_pellet_db,
     read_settings,
-    write_control,
+    enqueue_control_delta,
     write_pellet_db,
     write_settings,
 )
@@ -209,14 +209,10 @@ def admin_factory_reset():
     control = default_control()
     notify_entries = control.pop("notify_data")
     control.pop("timer")
-    write_control(
-        control_delta(
-            set_values=control,
-            ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],
-        ),
-        WriteKind.DELTA,
-        origin="api-admin",
-    )
+    enqueue_control_delta(control_delta(
+        set_values=control,
+        ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],
+    ), origin="api-admin")
     set_server_status("restarting")
     restart_scripts()
     return jsonify(api_response("OK", None, dump_wire(FactoryResetResponse, {"action": "factory_reset"}))), 200
@@ -258,7 +254,7 @@ def admin_settings():
     settings["globals"].update(body)
     write_settings(settings)
     if "debug_mode" in body:
-        write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin="api-admin")
+        enqueue_control_delta(control_delta(set_values={"settings_update": True}), origin="api-admin")
         write_log(f"Debug Mode {'Enabled' if body['debug_mode'] else 'Disabled'}.")
     return jsonify(api_response("OK", None, dump_wire(AdminSettingsUpdate, body))), 200
 

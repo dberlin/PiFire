@@ -58,10 +58,9 @@ async function firstFoodProbe(
 }
 
 /** Count of the null-stripping diagnostic in control.log. The harness's own
- *  whole-array postNotify above round-trips each probe entry's `"eta": null`,
- *  and execute_control_writes logs at ERROR when it strips nulls from a MERGE
- *  partial, naming /api/control as a suspected source
- *  (common/datastore_accessors.py:106-119). It should not fire:
+ *  whole-array postNotify above round-trips each probe entry's `"eta": null`.
+ *  The delta queue must preserve those JSON nulls rather than misclassify the
+ *  array payload as a malformed partial update.
  *  strip_null_members returns lists unchanged (common/common.py:188-191).
  *  (The production client never sends eta at all now -- it names four fields.) */
 function nullStripCount(): number {

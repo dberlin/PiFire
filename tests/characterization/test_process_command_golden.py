@@ -69,13 +69,10 @@ Third and final pass, same rules again: the remaining 44 entries -- psp, units,
 mode (all four branches), pmode, splus, lid_open, pwm, duty_cycle, tuning_mode
 and every manual case. After it NO entry records a legacy "diff" any more, which
 is the fixture-level statement that no writer on this path queues a whole
-control dict. Two details worth naming: set_manual_unknown_stale_write queues a
+control dict. One detail worth naming: set_manual_unknown_stale_write queues a
 bare envelope (the write guard deliberately sits outside the if/elif chain, so a
 rejected request still writes -- the wart is preserved, but as a no-op rather
-than a stale snapshot); and kind_overwrite_splus is UNCHANGED, queued_writes
-still [], because process_command's kind=OVERWRITE escape hatch still writes the
-blob directly. A delta cannot honour "land now", so that caller keeps the
-whole-dict write it asked for.
+than a stale snapshot).
 
 DELIBERATE RE-BASELINE (hold retargeting): set/psp converts from a `set` of
 {mode, primary_setpoint, updated} to the `hold.set_setpoint` op, for the same
@@ -96,7 +93,7 @@ only where the mode-change decision is made moved.
 WHAT IS OBSERVED (per case, see `_run_case`):
   * the returned dict (result/message/data)
   * `arglist` AFTER the call -- process_command mutates its caller's list
-  * every MERGE partial queued to `queue_control_write` (as a diff vs the
+  * every validated delta queued to `queue_control_write` (as a diff vs the
     pre-call control), including its `origin`
   * the control blob diff after `execute_control_writes()` drains that queue
   * the settings blob diff (set/units and set/pmode write settings)
@@ -158,10 +155,8 @@ characterization captures warts):
   7. set/manual's error branch still writes control when
      `control['manual']['change']` holds a stale value from a previous command,
      even though the request was rejected with result == 'ERROR'.
-  8. set/pmode, set/duty_cycle and the notify/limit_* branch hard-code
-     `WriteKind.MERGE`, ignoring the caller's `kind`. The timer start/pause/stop
-     branches hard-code `origin='app'`, ignoring the caller's `origin`. See the
-     `kind`/`origin` cases below.
+  8. The timer start/pause/stop branches hard-code `origin='app'`, ignoring the
+     caller's `origin`; other control commands honor their caller's origin.
   9. get/timer and set/timer locate the timer notify object with a bare
      `for index, notify_obj in enumerate(...)` + `break`, then use `index`
      outside the loop -- if no timer object existed, `index` would silently be
@@ -169,6 +164,7 @@ characterization captures warts):
 """
 
 import hashlib
+import inspect
 import json
 import os
 from unittest import mock
@@ -179,7 +175,6 @@ import common.api_commands as api_commands
 import common.common as c
 import common.datastore_accessors as dsa
 import common.defaults as defaults
-from common.common import WriteKind
 from common.control_delta import is_control_delta
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_golden.json")
@@ -328,20 +323,6 @@ CANONICAL_HOPPER_LEVEL = 42
 # | <else> | -           | unknown action -> ERROR             | unknown_action                 |
 # | None   | -           | action=None -> ERROR                | none_action                    |
 #
-# kind/origin coverage:
-# | kind=OVERWRITE honored (set/splus)          | kind_overwrite_splus           |
-# | kind=OVERWRITE ignored by set/pmode (#8)    | kind_overwrite_ignored_pmode   |
-# | kind=OVERWRITE ignored by set/duty_cycle    | kind_overwrite_ignored_duty    |
-# | kind=OVERWRITE ignored by set/notify (#8)   | kind_overwrite_ignored_notify  |
-# | origin ignored by set/timer start (#8)      | set_timer_start (origin=api)   |
-# | origin honored by set/timer shutdown        | set_timer_shutdown_true        |
-#
-# DELIBERATELY NOT COVERED:
-#   * WriteKind.OVERWRITE on get/hopper -- get/hopper's write is incidental to
-#     the read it performs; the OVERWRITE-vs-MERGE dispatch itself is already
-#     pinned by kind_overwrite_splus and by tests/unit/common/test_common_blobs.py.
-#   * An invalid `kind` (write_control raises TypeError) -- that is write_control's
-#     contract, covered at its own level, not process_command's.
 #   * The real restart_scripts/reboot_system/shutdown_system bodies -- they run
 #     `sudo systemctl reboot`. process_command's contract is "calls this function";
 #     the bodies are out of scope and must never execute under test.
@@ -681,17 +662,21 @@ CASES += [
     _case("unknown_action", "bogus", ["whatever"]),
     _case("none_action", None, ["whatever"]),
     _case("empty_string_action", "", ["whatever"]),
-    # ---- kind= parameter ----------------------------------------------
-    _case("kind_overwrite_splus", "set", ["splus", "true"], kind=WriteKind.OVERWRITE),
-    _case("kind_overwrite_ignored_pmode", "set", ["pmode", "5"], kind=WriteKind.OVERWRITE),
-    _case("kind_overwrite_ignored_duty", "set", ["duty_cycle", "60"], kind=WriteKind.OVERWRITE),
-    _case("kind_overwrite_ignored_notify", "set", ["notify", "Grill", "req", "true"], kind=WriteKind.OVERWRITE),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Observation harness
 # ---------------------------------------------------------------------------
+_RETIRED_GOLDEN_CASES = frozenset(
+    {
+        "kind_overwrite_splus",
+        "kind_overwrite_ignored_pmode",
+        "kind_overwrite_ignored_duty",
+        "kind_overwrite_ignored_notify",
+    }
+)
+
 
 
 def _deep_merge(base, patch):
@@ -831,7 +816,7 @@ def _run_case(case):
         # For seeding inside notify_data, whose elements _deep_merge cannot
         # reach (lists are replaced wholesale, matching json_patch semantics).
         case["control_fn"](control)
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
 
     c.SqliteQueue("queue_control_write").flush()
     c.SqliteQueue("queue_systemq").flush()
@@ -853,8 +838,6 @@ def _run_case(case):
         # and CASES is module-level and reused across the golden + inline tests.
         arglist = list(case["arglist"])
         kwargs = {"action": case["action"], "arglist": arglist, "origin": case.get("origin", "test")}
-        if "kind" in case:
-            kwargs["kind"] = case["kind"]
         result = api_commands.process_command(**kwargs)
 
         cmd_calls = [
@@ -944,10 +927,11 @@ def test_process_command_matches_golden(ds, case):
     )
 
 
-def test_golden_covers_exactly_the_enumerated_cases():
-    """No case may be silently dropped from CASES and no golden entry orphaned."""
+def test_golden_covers_the_enumerated_cases_except_retired_kind_escape_hatches():
+    """The immutable oracle retains rows for the deliberately deleted API."""
     golden = _load_golden()
-    assert sorted(golden) == sorted(c_["id"] for c_ in CASES)
+    assert _RETIRED_GOLDEN_CASES <= set(golden)
+    assert sorted(set(golden) - _RETIRED_GOLDEN_CASES) == sorted(c_["id"] for c_ in CASES)
 
 
 def test_case_ids_are_unique():
@@ -1033,7 +1017,7 @@ def test_manual_toggle_rewrites_the_callers_arglist(seeded):
     dsa.write_status(status)
     control = dsa.read_control()
     control["mode"] = "Manual"
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
 
     arglist = ["manual", "fan", "toggle"]
     api_commands.process_command(action="set", arglist=arglist, origin="test")
@@ -1054,7 +1038,7 @@ def test_only_the_fan_branch_resets_manual_pwm_to_100(seeded):
         control = dsa.read_control()
         control["mode"] = "Manual"
         control["manual"]["pwm"] = 55
-        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        dsa.write_control_snapshot(control, origin="seed")
 
         api_commands.process_command(action="set", arglist=["manual", output, "false"], origin="test")
         dsa.execute_control_writes()
@@ -1064,7 +1048,7 @@ def test_only_the_fan_branch_resets_manual_pwm_to_100(seeded):
     control = dsa.read_control()
     control["mode"] = "Manual"
     control["manual"]["pwm"] = 55
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     api_commands.process_command(action="set", arglist=["manual", "fan", "true"], origin="test")
     dsa.execute_control_writes()
     assert dsa.read_control()["manual"]["pwm"] == 55
@@ -1084,7 +1068,7 @@ def test_get_status_reads_each_field_from_the_right_blob(seeded):
     """
     control = dsa.read_control()
     _deep_merge(control, _STATUS_A_CONTROL)
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     status = dsa.read_status()
     _deep_merge(status, _STATUS_A_STATUS)
     dsa.write_status(status)
@@ -1115,7 +1099,7 @@ def test_get_timer_does_not_swap_shutdown_and_keep_warm(seeded):
     control = dsa.read_control()
     control["timer"] = {"start": 111.0, "paused": 222.0, "end": 333.0}
     _timer_notify(shutdown=True, keep_warm=False)(control)
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
 
     data = api_commands.process_command(action="get", arglist=["timer"], origin="test")["data"]
     assert data == {"start": 111.0, "paused": 222.0, "end": 333.0, "shutdown": True, "keep_warm": False}
@@ -1128,18 +1112,13 @@ def test_sys_pushes_the_padded_arglist(seeded):
     assert c.SqliteQueue("queue_systemq").list() == [["restart", "control", None, None]]
 
 
-def test_kind_overwrite_is_honored_by_splus_but_ignored_by_pmode(seeded):
-    """Wart #8: some branches hard-code WriteKind.MERGE and ignore `kind`.
-    A refactor must not "consistently" thread `kind` through -- that is a change."""
-    c.SqliteQueue("queue_control_write").flush()
-    api_commands.process_command(action="set", arglist=["splus", "true"], origin="test", kind=WriteKind.OVERWRITE)
-    # OVERWRITE writes control:general directly; nothing is queued.
-    assert c.SqliteQueue("queue_control_write").length() == 0
-    assert dsa.read_control()["s_plus"] is True
+def test_process_command_has_no_control_write_kind_escape_hatch(seeded):
+    signature = inspect.signature(api_commands.process_command)
+    assert list(signature.parameters) == ["action", "arglist", "origin"]
+    assert signature.parameters["action"].default is None
+    assert signature.parameters["arglist"].default is None
+    assert signature.parameters["origin"].default == "unknown"
 
-    api_commands.process_command(action="set", arglist=["pmode", "5"], origin="test", kind=WriteKind.OVERWRITE)
-    # pmode hard-codes MERGE, so it queues despite kind=OVERWRITE.
-    assert c.SqliteQueue("queue_control_write").length() == 1
 
 
 def test_timer_start_hardcodes_origin_app(seeded):
@@ -1237,7 +1216,7 @@ def test_timer_start_with_options_queues_one_op_carrying_both_flags(seeded):
         control = dsa.read_control()
         _timer_notify(shutdown=not shutdown, keep_warm=not keep_warm)(control)
         control["timer"] = {"start": 0, "paused": 0, "end": 0}
-        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        dsa.write_control_snapshot(control, origin="seed")
         c.SqliteQueue("queue_control_write").flush()
 
         assert _start_with_options("600", options)["result"] == "OK"
@@ -1277,7 +1256,7 @@ def test_timer_start_with_options_leaves_the_other_notifications_alone(seeded):
     grill = next(obj for obj in control["notify_data"] if obj["label"] == "Grill" and obj["type"] == "probe")
     grill["req"] = True
     grill["target"] = 203
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     before = [dict(obj) for obj in control["notify_data"] if obj["type"] != "timer"]
 
     assert _start_with_options("600", "shutdown,keep_warm")["result"] == "OK"
@@ -1298,7 +1277,7 @@ def test_timer_start_with_options_rejects_a_paused_timer(seeded):
     """
     control = dsa.read_control()
     control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     result = _start_with_options("600", "shutdown")
@@ -1327,7 +1306,7 @@ def test_timer_start_with_options_rejects_bad_input_without_writing(seeded):
     ):
         control = dsa.read_control()
         control["timer"] = {"start": 0, "paused": 0, "end": 0}
-        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        dsa.write_control_snapshot(control, origin="seed")
         c.SqliteQueue("queue_control_write").flush()
 
         result = _start_with_options(seconds, options)
@@ -1350,7 +1329,7 @@ def test_three_argument_timer_start_still_resumes_and_ignores_seconds(seeded):
     behavior, unpause semantics included."""
     control = dsa.read_control()
     control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
 
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         result = api_commands.process_command(action="set", arglist=["timer", "start", "300"], origin="api")
@@ -1391,9 +1370,8 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
 # The seam these tests pin: TWO control writes inside ONE cycle, and what the
 # second does to the first.
 #
-# It falls out of the write model itself: write_control queues the WHOLE
-# control dict, read_control() serves the persisted blob and never the queue,
-# so every writer in a cycle sends a full copy built from the same stale read.
+# Under the retired whole-snapshot model, read_control() served the persisted
+# blob and never the queue, so every writer in a cycle sent a full stale copy.
 #
 # For the timer commands this is now CLOSED at the source rather than patched
 # at the seam. They no longer queue a computed timer state at all: each queues
@@ -1446,7 +1424,7 @@ def test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer(se
     """
     control = dsa.read_control()
     control["timer"] = {"start": 0, "paused": 0, "end": 0}
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
@@ -1490,7 +1468,7 @@ def test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
     _timer_notify(shutdown=True, keep_warm=False)(control)
     _timer_entry(control)["req"] = True
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
@@ -1508,7 +1486,7 @@ def test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
     control = dsa.read_control()
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
     _timer_notify(shutdown=True, keep_warm=False)(control)
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
         dsa.execute_control_writes()
@@ -1540,7 +1518,7 @@ def test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer(seeded):
     control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
     _timer_notify(shutdown=True, keep_warm=False)(control)
     _timer_entry(control)["req"] = True
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
@@ -1557,7 +1535,7 @@ def test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer(seeded):
     # reads the stopped blob, sees paused == 0, and arms a fresh 500s timer.
     control = dsa.read_control()
     control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
-    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
         dsa.execute_control_writes()
@@ -1593,7 +1571,7 @@ def test_lid_open_always_sets_true_regardless_of_arg(seeded):
     for arg in ("toggle", "false", "anything"):
         control = dsa.read_control()
         control["lid_open_toggle"] = False
-        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        dsa.write_control_snapshot(control, origin="seed")
         api_commands.process_command(action="set", arglist=["lid_open", arg], origin="test")
         dsa.execute_control_writes()
         assert dsa.read_control()["lid_open_toggle"] is True, f"arg={arg}"

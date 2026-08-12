@@ -1,11 +1,10 @@
 import pytest
 
-from common.common import WriteKind
 from common.datastore_accessors import (
     execute_control_writes,
     read_control,
     read_settings,
-    write_control,
+    write_control_snapshot,
     write_settings,
 )
 from common.modes import Mode
@@ -37,7 +36,7 @@ def client(ds, client):  # noqa: F811 -- intentionally wraps the conftest fixtur
     control = read_control()
     control["mode"] = Mode.HOLD
     control.pop("mpc_calibration", None)
-    write_control(control, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(control, origin="test")
     return client
 
 
@@ -123,7 +122,7 @@ def test_retargeting_an_active_hold_does_not_ask_the_control_loop_to_rebuild(cli
     control = read_control()
     control["mode"] = Mode.HOLD
     control["updated"] = False
-    write_control(control, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(control, origin="test")
 
     assert client.get("/api/set/psp/275").status_code == 201
     execute_control_writes()
@@ -138,7 +137,7 @@ def test_entering_hold_from_another_mode_still_asks_for_the_mode_change(client):
     control = read_control()
     control["mode"] = Mode.STOP
     control["updated"] = False
-    write_control(control, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(control, origin="test")
 
     assert client.get("/api/set/psp/225").status_code == 201
     execute_control_writes()

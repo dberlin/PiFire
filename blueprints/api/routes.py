@@ -6,14 +6,14 @@ from typing import get_args
 
 from pydantic import ValidationError
 from flask import Response, abort, jsonify, request
-from common.common import WriteKind, write_log, read_generic_json, read_wizard
+from common.common import write_log, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
     commit_model_rollback,
     read_settings,
     write_settings,
     read_control,
-    write_control,
+    enqueue_control_delta,
     read_pellet_db,
     read_current,
     read_status,
@@ -704,7 +704,7 @@ def _api_post_control(settings, request_json):
         return jsonify(payload.model_dump(mode="json", by_alias=True)), 400
     try:
         members, ops = notify_ops_from_post(patch.model_dump(mode="python", exclude_unset=True))
-        write_control(control_delta(set_values=members, ops=ops), WriteKind.DELTA, origin="app")
+        enqueue_control_delta(control_delta(set_values=members, ops=ops), origin="app")
         payload = ControlPatchResponse(
             control="success",
             result="success",

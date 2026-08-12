@@ -776,8 +776,8 @@ def _cn_control(notify_data=None, mode=Mode.SMOKE):
     }
 
 
-def _patch_check_notify_deps(monkeypatch, write_control_mock=None, send_notifications_mock=None):
-    monkeypatch.setattr(N, "write_control", write_control_mock or MagicMock())
+def _patch_check_notify_deps(monkeypatch, write_control_snapshot_mock=None, send_notifications_mock=None):
+    monkeypatch.setattr(N, "write_control_snapshot", write_control_snapshot_mock or MagicMock())
     monkeypatch.setattr(N, "send_notifications", send_notifications_mock or MagicMock())
 
 
@@ -1229,12 +1229,12 @@ def test_check_notify_item_not_requested_is_skipped(monkeypatch):
     control = _cn_control(notify_data=[item])
     send_mock = MagicMock()
     write_mock = MagicMock()
-    _patch_check_notify_deps(monkeypatch, write_control_mock=write_mock, send_notifications_mock=send_mock)
+    _patch_check_notify_deps(monkeypatch, write_control_snapshot_mock=write_mock, send_notifications_mock=send_mock)
 
     N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
 
     send_mock.assert_not_called()
-    write_mock.assert_not_called()  # the whole item body (incl. write_control) is skipped
+    write_mock.assert_not_called()  # the whole item body, including its snapshot, is skipped
 
 
 def test_check_notify_shutdown_flag_transitions_mode_to_shutdown(monkeypatch):
@@ -1289,8 +1289,8 @@ def test_check_notify_writes_control_after_each_processed_item(monkeypatch):
     item = {"req": True, "type": "test", "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item])
     write_mock = MagicMock()
-    _patch_check_notify_deps(monkeypatch, write_control_mock=write_mock)
+    _patch_check_notify_deps(monkeypatch, write_control_snapshot_mock=write_mock)
 
     N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
 
-    write_mock.assert_called_once_with(control, N.WriteKind.OVERWRITE, origin="notifications")
+    write_mock.assert_called_once_with(control, origin="notifications")

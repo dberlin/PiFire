@@ -23,11 +23,11 @@ import json
 import apprise
 import logging
 import math
-from common.common import WriteKind, create_logger
+from common.common import create_logger
 from common.modes import Mode
 from common.datastore_accessors import (
     write_settings,
-    write_control,
+    write_control_snapshot,
     read_history,
     read_settings,
     read_control,
@@ -173,7 +173,7 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
                 control["mode"] = Mode.REIGNITE
                 control["updated"] = True
 
-            write_control(control, WriteKind.OVERWRITE, origin="notifications")
+            write_control_snapshot(control, origin="notifications")
 
     return control
 

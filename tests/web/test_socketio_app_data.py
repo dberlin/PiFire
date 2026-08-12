@@ -48,7 +48,7 @@ from flask import request as flask_request
 
 from app import app as flask_app
 from common import datastore
-from common.common import ErrorKind, WriteKind
+from common.common import ErrorKind
 from common.web_contracts.core import PelletSocketPayload
 from common.datastore_accessors import (
     CONTROL_HEARTBEAT_KEY,
@@ -64,7 +64,7 @@ from common.datastore_accessors import (
     init_status,
     read_status,
     write_connected_user,
-    write_control,
+    write_control_snapshot,
     write_errors,
     write_generic_key,
     write_pellet_db,
@@ -79,11 +79,10 @@ _TIMER_IDX = 12
 
 
 def _drain():
-    """Apply queued MERGE control writes so a read_control() reflects them.
+    """Apply queued control deltas so a read_control() reflects them.
 
-    ``write_control(..., WriteKind.MERGE, ...)`` only queues a partial; in
-    production the control-loop drains it each tick. This harness has no
-    control loop, so drain by hand before asserting on control state.
+    Production drains the validated delta queue on each control-loop tick. This
+    harness has no control loop, so it drains by hand before asserting state.
     """
     execute_control_writes()
 
@@ -97,7 +96,7 @@ def sio(ds):
     (an ordered list every reboot/shutdown/restart/os.system stub appends to).
     """
     write_settings_store(default_settings())
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(default_control(), origin="test-socketio")
     write_pellet_db(default_pellets())
     init_status()
     # dash_data reads this generic key (normally written by the control
@@ -658,7 +657,7 @@ def test_post_timer_start_unpause(sio):
     control["timer"]["paused"] = 100.0
     control["timer"]["end"] = 500.0
     control["timer"]["start"] = 50.0
-    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(control, origin="test-socketio")
     resp = sio.mod._post_app_data("timer_action", "start_timer", json.dumps({"timer_action": {}}))
     assert resp["result"] == "OK"
     _drain()
@@ -672,7 +671,7 @@ def test_post_timer_start_unpause(sio):
 def test_post_timer_pause_on_a_running_timer(sio):
     control = read_control()
     control["timer"] = {"start": 10.0, "paused": 0, "end": 900.0}
-    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(control, origin="test-socketio")
     resp = sio.mod._post_app_data("timer_action", "pause_timer", json.dumps({"timer_action": {}}))
     assert resp["result"] == "OK"
     _drain()
@@ -699,7 +698,7 @@ def test_post_timer_pause_on_a_stopped_timer_clears_instead_of_stamping_paused(s
     """
     control = read_control()
     control["timer"] = {"start": 0, "paused": 0, "end": 0}
-    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(control, origin="test-socketio")
     resp = sio.mod._post_app_data("timer_action", "pause_timer", json.dumps({"timer_action": {}}))
     assert resp["result"] == "OK"
     _drain()
@@ -717,7 +716,7 @@ def test_post_timer_stop(sio):
     control["notify_data"][_TIMER_IDX]["req"] = True
     control["notify_data"][_TIMER_IDX]["shutdown"] = True
     control["notify_data"][_TIMER_IDX]["keep_warm"] = True
-    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(control, origin="test-socketio")
     resp = sio.mod._post_app_data("timer_action", "stop_timer", json.dumps({"timer_action": {}}))
     assert resp["result"] == "OK"
     _drain()
@@ -736,7 +735,7 @@ def test_timer_action_no_timer_entry_returns_error_without_mutation(sio):
     returns an Error envelope and leaves the (non-timer) entry untouched."""
     control = read_control()
     control["notify_data"] = [{"type": "probe", "label": "X", "req": True, "shutdown": True, "keep_warm": True}]
-    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(control, origin="test-socketio")
     resp = sio.mod._post_app_data("timer_action", "stop_timer", json.dumps({"timer_action": {}}))
     assert resp["result"] == "Error"
     _drain()
@@ -1153,7 +1152,7 @@ def test_get_dash_data_and_probe_data_full_structure(sio):
     for entry in control["notify_data"]:
         if entry["label"] == "Grill":
             entry["req"] = True
-    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(control, origin="test-socketio")
 
     # Seed `current` the way the control-loop does at startup (read_current()
     # with no init returns a bare {} -- KeyError otherwise; see
@@ -1429,7 +1428,7 @@ def test_get_system_info_maps_control_and_system_info_fields(sio):
         "cpu_under_voltage": True,
         "cpu_temp": 61.2,
     }
-    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    write_control_snapshot(control, origin="test-socketio")
     canned_system_info = {
         "network_info": {"iface": "eth0"},
         "hardware_info": {"cpu_info": {}},

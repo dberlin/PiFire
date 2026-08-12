@@ -18,9 +18,9 @@ import subprocess
 import threading
 import time
 
-from common.common import WriteKind, write_log
+from common.common import write_log
 from common.control_delta import control_delta
-from common.datastore_accessors import load_os_info, read_settings, store_os_info, write_control
+from common.datastore_accessors import enqueue_control_delta, load_os_info, read_settings, store_os_info
 
 
 def is_real_hardware(settings=None):
@@ -295,10 +295,9 @@ def gather_system_info(control, origin="unknown"):
     :param control: Control dictionary; control["system"][...] keys are populated
         in place with the gathered wifi/throttle/cpu-temp readings, mirroring both
         callers' original behavior.
-    :param origin: Forwarded to write_control()'s `origin` label. Defaults to
-        write_control's own default ("unknown"), matching admin_page's original
-        unlabeled write_control() call; socket_io passes origin="app-socketio" to
-        preserve its original labeled call.
+    :param origin: Forwarded to enqueue_control_delta() as the queued writer's
+        source label. The default preserves the historical unlabeled admin
+        writer; socket_io supplies ``"app-socketio"``.
     :return: (system_info, failures) -- system_info is a dict with keys
         uptime/os_info/network_info/hardware_info; failures is a list of
         human-readable messages for any 'sys' subcommand that did not report
@@ -395,7 +394,7 @@ def gather_system_info(control, origin="unknown"):
     # failed probe silently left the previous reading in place. Writing null is
     # the honest answer to "we asked and got nothing" and is what the admin page
     # renders as Unknown; a stale reading presented as current is worse.
-    write_control(control_delta(set_values={"system": assigned}), WriteKind.DELTA, origin=origin)
+    enqueue_control_delta(control_delta(set_values={"system": assigned}), origin=origin)
 
     return system_info, failures
 

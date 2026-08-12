@@ -1,4 +1,3 @@
-from common.common import WriteKind
 from common.modes import Mode
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
@@ -67,7 +66,7 @@ class StartupMode(ControlMode):
         self.state.startup.raw_temp = ptemp
         self.control["safety"]["startuptemp"] = startup_temp_bounds(ptemp, self.settings["safety"])
         self.control["safety"]["afterstarttemp"] = ptemp
-        self.ctx.store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        self.ctx.store.write_control_snapshot(self.control, origin="control")
 
         # Apply Smart Start Settings if Enabled
         if self.settings["startup"]["smartstart"]["enabled"]:
@@ -78,7 +77,7 @@ class StartupMode(ControlMode):
             self.control["smartstart"]["profile_selected"] = select_profile(
                 self.control["smartstart"]["startuptemp"], self.settings["startup"]["smartstart"]["temp_range_list"]
             )
-            self.ctx.store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            self.ctx.store.write_control_snapshot(self.control, origin="control")
 
             # Apply the profile
             profile_selected = self.control["smartstart"]["profile_selected"]
@@ -110,7 +109,7 @@ class StartupMode(ControlMode):
         rather than reading self.state.timers.start_time (which is still its 0.0
         default at this point)."""
         self.control["startup_timestamp"] = self.ctx.clock.now()
-        self.ctx.store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        self.ctx.store.write_control_snapshot(self.control, origin="control")
 
     def on_settings_reload(self):
         # Shared with Smoke (and inherited by Reignite): re-derive from the
@@ -161,4 +160,4 @@ class StartupMode(ControlMode):
 
     def teardown(self, ptemp):
         self.control["safety"]["afterstarttemp"] = ptemp
-        self.ctx.store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        self.ctx.store.write_control_snapshot(self.control, origin="control")

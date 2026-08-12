@@ -36,14 +36,6 @@ from common.sqlite_log_handler import SqliteLogHandler
 # *****************************************
 
 
-class WriteKind(Enum):
-    OVERWRITE = "overwrite"  # replace control:general wholesale (legacy True)
-    MERGE = "merge"  # queue a partial change, deep-merged on execute (legacy False)
-    # queue a validated intent envelope (common/control_delta.py): the writer
-    # states what it MEANT, not the whole snapshot it read. MERGE keeps its
-    # meaning; the two coexist on one queue for the whole migration.
-    DELTA = "delta"
-
 
 class ErrorKind(Enum):
     """Which process owns a dashboard error banner.
@@ -205,36 +197,6 @@ def generate_uuid():
 
     return str(generated_uuid)
 
-
-def strip_null_members(obj, _stripped=None, _prefix=""):
-    """Recursively drop dict keys whose value is None so a json_patch() merge
-    ignores them instead of deleting the target key.
-
-    json_patch() implements RFC 7386 JSON Merge Patch, where a null MEMBER of the
-    patch object deletes that key from the target. PiFire's merge contract (which
-    historically used deep_update) only ever adds or overwrites keys -- it never
-    deletes -- so nulls are stripped before patching.
-
-    Lists are returned unchanged: json_patch replaces arrays atomically and never
-    walks their elements, so nulls nested inside arrays (e.g. notify_data[*].eta)
-    are preserved exactly, matching the old deep_update behavior of overwriting a
-    list wholesale.
-
-    If `_stripped` (a list) is passed in, the dotted path of every dropped key is
-    appended to it, so callers can report which partials still carry nulls. After
-    the base.py None->False cleanup no PiFire-internal path should trip this, so a
-    non-empty result flags a source still to be fixed (see execute_control_writes).
-    """
-    if isinstance(obj, Mapping):
-        result = {}
-        for key, value in obj.items():
-            if value is None:
-                if _stripped is not None:
-                    _stripped.append(f"{_prefix}{key}")
-                continue
-            result[key] = strip_null_members(value, _stripped, f"{_prefix}{key}.")
-        return result
-    return obj
 
 
 def _load_json_file(filename, default, retry_count=0, max_retries=None):

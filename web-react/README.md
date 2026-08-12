@@ -9,8 +9,8 @@ This spike is the highest-signal slice — it de-risks the two hard problems:
 1. **The data/command contract** — it binds to PiFire's *existing* API (no backend
    change) with a read/write split: `listen_app_data` → `socket_dash_data` (SocketIO)
    for live data, and the REST command grammar `POST /api/set|cmd/…` → `process_command`
-   → `write_control` for commands. See `src/helpers/useDashData.ts`, `src/helpers/command.ts`,
-   `blueprints/mobile/socket_io.py`, and `common/api_commands.py`.
+   → validated control deltas for commands. See `src/helpers/useDashData.ts`,
+   `src/helpers/command.ts`, `blueprints/mobile/socket_io.py`, and `common/api_commands.py`.
 2. **Animation fidelity** — the signature **270° gauge** (`src/components/dashboard/GrillGauge.tsx`)
    with value-arc easing (250 ms OutCubic), pulsing glow, and setpoint marker,
    plus the accent-theme token system (`src/theme.css`, ported from

@@ -16,7 +16,7 @@ from flask import jsonify, request
 from pydantic import ValidationError
 
 from common.app import api_response
-from common.common import WriteKind, generate_uuid
+from common.common import generate_uuid
 from common.control_delta import control_delta
 from common.datastore_accessors import (
     autotune_length,
@@ -27,7 +27,7 @@ from common.datastore_accessors import (
     read_settings,
     read_tr,
     write_autotune,
-    write_control,
+    enqueue_control_delta,
     write_settings,
 )
 from common.modes import Mode
@@ -76,7 +76,7 @@ def validate_json(model, *, fallback_field=None):
 
 
 def set_control(**values):
-    write_control(control_delta(set_values=values), WriteKind.DELTA, origin="api-tuner")
+    enqueue_control_delta(control_delta(set_values=values), origin="api-tuner")
 
 
 def require_tunable():

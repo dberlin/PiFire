@@ -5,7 +5,6 @@ import time
 import uuid
 from dataclasses import replace
 
-from common.common import WriteKind
 from common.controller_model_state import ControllerModelStore
 from common.datastore_accessors import (
     migrate_mpc_learning_authority,
@@ -2313,7 +2312,7 @@ class HoldMode(ControlMode):
                 active_calibration_reset = True
                 self._runner.cancel_calibration("reset")
             control["controller_update"] = False
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
             settings = self.settings
             self._reset_framed_pulse(
@@ -2431,7 +2430,7 @@ class HoldMode(ControlMode):
                 if result.fan is not None and controller_fan_authority(settings, control):
                     controller.fan_duty = result.fan["duty"]
                     control["duty_cycle"] = controller.fan_duty
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                    ctx.store.write_control_snapshot(control, origin="control")
             controller.pulse_stale_command = result.stale_state is ResultStaleState.STALE
             if controller.pulse_stale_command:
                 self._reset_framed_pulse(
@@ -2518,7 +2517,7 @@ class HoldMode(ControlMode):
             start_fan(grill_platform, settings, control["duty_cycle"])
         if control["lid_open_toggle"]:
             control["lid_open_toggle"] = False
-            self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            self.ctx.store.write_control_snapshot(control, origin="control")
             if self.state.lid.open_detected:
                 self.state.lid.open_detected = False
                 self._trace_safety(SafetyEventType.LID_CLEARED, now, "lid open cleared by operator", InhibitReason.NONE)
@@ -2565,7 +2564,7 @@ class HoldMode(ControlMode):
             _duty = hold_duty_cycle(control["primary_setpoint"], ptemp, settings["pwm"])
             if _duty is not None:
                 control["duty_cycle"] = _duty
-                self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                self.ctx.store.write_control_snapshot(control, origin="control")
 
         self._smoke_plus_fan_tick(now, ptemp, current_output_status)
 

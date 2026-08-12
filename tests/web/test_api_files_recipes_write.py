@@ -184,15 +184,15 @@ def test_delete_with_no_body_is_400(client, folders):
 # --------------------------------------------------------------------------
 # run
 #
-# G1/G6 SAFETY: every test below stubs both write_control and read_control on
-# the routes module -- none of them may reach the real control store, and
-# none of them may read live state.
+# G1/G6 SAFETY: every test below stubs both enqueue_control_delta and
+# read_control on the routes module -- none may reach the real control store or
+# read live state.
 # --------------------------------------------------------------------------
 
 
 def test_run_refuses_unless_stopped(client, folders, monkeypatch):
     writes = []
-    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "enqueue_control_delta", lambda *a, **k: writes.append((a, k)))
     monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Hold"})
     name = write_recipe(folders[1], "Brisket")
     resp = client.post("/api/files/recipes/run", json={"file": name})
@@ -202,10 +202,10 @@ def test_run_refuses_unless_stopped(client, folders, monkeypatch):
 
 
 def test_run_sends_start_step_and_step_explicitly(client, folders, monkeypatch):
-    """_api_post_control deep-merges, so a bare {filename} inherits the previous
-    run's step and starts mid-recipe."""
+    """The command must explicitly reset step and start_step so a previous run
+    cannot make the next recipe start in the middle."""
     writes = []
-    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "enqueue_control_delta", lambda *a, **k: writes.append((a, k)))
     monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Stop"})
     _history, recipe_dir = folders
     name = write_recipe(recipe_dir, "Brisket")
@@ -214,8 +214,8 @@ def test_run_sends_start_step_and_step_explicitly(client, folders, monkeypatch):
 
     assert resp.status_code == 200
     assert resp.get_json()["data"]["filename"] == name
-    envelope, kind = writes[0][0], writes[0][1]
-    assert kind is routes.WriteKind.DELTA
+    envelope = writes[0][0][0]
+    assert writes[0][1] == {"origin": "api-files"}
     delta = envelope["set"]
     assert delta["mode"] == routes.Mode.RECIPE
     assert delta["recipe"] == {"filename": ANY, "start_step": 0, "step": 0}
@@ -229,16 +229,16 @@ def test_run_sends_start_step_and_step_explicitly(client, folders, monkeypatch):
 
 def test_run_of_an_unknown_file_is_404(client, folders, monkeypatch):
     writes = []
-    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "enqueue_control_delta", lambda *a, **k: writes.append((a, k)))
     monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Stop"})
     resp = client.post("/api/files/recipes/run", json={"file": "Nope.pfrecipe"})
     assert resp.status_code == 404
     assert writes == []
 
 
-def test_run_refuses_traversal_and_never_writes_control(client, folders, monkeypatch):
+def test_run_refuses_traversal_and_never_enqueues_control_delta(client, folders, monkeypatch):
     writes = []
-    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "enqueue_control_delta", lambda *a, **k: writes.append((a, k)))
     monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Stop"})
     resp = client.post("/api/files/recipes/run", json={"file": "../../../etc/passwd"})
     assert resp.status_code == 404

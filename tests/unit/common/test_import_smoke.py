@@ -28,7 +28,8 @@ def test_public_names_resolve_from_new_homes():
     from common.api_commands import process_command  # noqa: F401
     from common.datastore_accessors import (  # noqa: F401
         read_control,
-        write_control,
+        write_control_snapshot,
+        enqueue_control_delta,
         read_settings,
         read_probe_status,
     )
@@ -46,7 +47,6 @@ def test_common_common_no_longer_re_exports_moved_names():
     for name in (
         "process_command",
         "read_control",
-        "write_control",
         "default_settings",
         "is_real_hardware",
         "read_settings_file",
@@ -60,14 +60,13 @@ def test_common_package_has_no_star_facade():
     """common/__init__.py must not re-export common.common's names."""
     import common
 
-    for name in ("process_command", "read_control", "default_settings", "write_log", "WriteKind"):
+    for name in ("process_command", "read_control", "default_settings", "write_log"):
         assert not hasattr(common, name), f"common package still re-exports {name!r}"
 
 
 def test_residual_utilities_still_live_in_common_common():
     """The bottom utility layer stayed in common.common."""
     from common.common import (  # noqa: F401
-        WriteKind,
         write_log,
         read_generic_json,
         write_generic_json,

@@ -38,7 +38,7 @@ def test_smoke_plus_reachable_in_active_menu(qml_engine):
 def test_cmd_splus_toggles_s_plus_both_directions(monkeypatch):
     writes = []
     # Records what the delta SET (common/control_delta.py).
-    monkeypatch.setattr(qmod, "write_control", lambda data, kind=None, origin=None: writes.append(data.get("set", {})))
+    monkeypatch.setattr(qmod, "enqueue_control_delta", lambda data, *, origin=None: writes.append(data.get("set", {})))
     disp = qmod.Display.for_dispatch({"display_data_filename": "./display/qtquick_dsi_1280x720t.json"}, "F")
 
     monkeypatch.setattr(qmod, "read_status", lambda: {"s_plus": False})

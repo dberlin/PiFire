@@ -4,8 +4,9 @@ import pytest
 
 from common import datastore_accessors as c
 from common import defaults
-from common.common import ErrorKind, WriteKind, strip_null_members, read_events_records, flush_events_records
+from common.common import ErrorKind, read_events_records, flush_events_records
 from common import datastore
+from common.control_delta import control_delta
 
 
 def test_default_control_manual_has_only_change_and_pwm_keys():
@@ -16,100 +17,44 @@ def test_default_control_manual_has_only_change_and_pwm_keys():
     assert set(defaults.default_control()["manual"].keys()) == {"change", "pwm"}
 
 
-def test_control_overwrite_and_read(ds):
-    c.write_control({"mode": "Stop", "n": {"a": 1}}, WriteKind.OVERWRITE, origin="t")
-    assert c.read_control() == {"mode": "Stop", "n": {"a": 1}}
-
-
-def test_control_merge_matches_oracle(ds, oracle):
-    exp = oracle("control_merge")
-    c.write_control({"mode": "Stop", "nested": {"a": 1, "b": 2}}, WriteKind.OVERWRITE, origin="test")
-    c.write_control({"nested": {"b": 9, "c": 3}}, WriteKind.MERGE, origin="webapp")
-    assert c.read_control() == exp["before_execute"]  # MERGE deferred
-    c.execute_control_writes()
-    assert c.read_control() == exp["after_execute"]  # deep-merge, origin stripped
-
-
-def test_control_merge_preserves_list_nested_nulls(ds):
-    # notify_data is a list; its elements carry eta=None. json_patch replaces
-    # arrays atomically without walking them, so a null nested inside a list
-    # element must survive the merge verbatim (not be treated as a delete).
-    c.write_control({"mode": "Stop", "notify_data": []}, WriteKind.OVERWRITE, origin="test")
-    c.write_control({"notify_data": [{"label": "Grill", "eta": None, "target": 0}]}, WriteKind.MERGE, origin="notify")
-    c.execute_control_writes()
-    nd = c.read_control()["notify_data"]
-    assert nd == [{"label": "Grill", "eta": None, "target": 0}]  # eta:None preserved, key present
-
-
-def test_control_merge_does_not_delete_dict_nested_null_key(ds):
-    # A partial carrying a dict-nested null (e.g. manual.change=None) must NOT
-    # delete the key -- json_patch would (RFC 7386), but strip_null_members drops
-    # the null first, so the stored value is left intact. This guards the
-    # controller's unconditional control['manual']['change'] access from KeyError.
-    c.write_control({"mode": "Stop", "manual": {"change": "pwm", "output": True}}, WriteKind.OVERWRITE, origin="test")
-    c.write_control(
-        {"primary_setpoint": 225, "manual": {"change": None, "output": None}}, WriteKind.MERGE, origin="app"
+def test_control_snapshot_replaces_immediately_without_consuming_the_delta_queue(ds):
+    c.write_control_snapshot(
+        {"mode": "Stop", "primary_setpoint": 100, "nested": {"kept": True}},
+        origin="seed",
     )
+    c.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="web")
+
+    c.write_control_snapshot(
+        {"mode": "Startup", "primary_setpoint": 150, "nested": {"replacement": True}},
+        origin="control",
+    )
+
+    assert c.read_control() == {
+        "mode": "Startup",
+        "primary_setpoint": 150,
+        "nested": {"replacement": True},
+    }
+    assert c.read_pending_control_writes() == (
+        {"__control_delta__": 1, "set": {"primary_setpoint": 225}, "origin": "web"},
+    )
+
     c.execute_control_writes()
-    control = c.read_control()
-    assert control["primary_setpoint"] == 225  # non-null keys still merge
-    assert "change" in control["manual"] and "output" in control["manual"]  # keys NOT deleted
-    assert control["manual"] == {"change": "pwm", "output": True}  # prior values preserved
+
+    assert c.read_control() == {
+        "mode": "Startup",
+        "primary_setpoint": 225,
+        "nested": {"replacement": True},
+    }
 
 
-def test_control_merge_ignores_client_supplied_nulls(ds):
-    # The generic /api/control passthrough merges arbitrary client JSON. A client
-    # sending a null is ignored (no-op), never deleting or nulling a stored key.
-    c.write_control({"mode": "Stop", "primary_setpoint": 225}, WriteKind.OVERWRITE, origin="test")
-    c.write_control({"mode": None, "primary_setpoint": 300}, WriteKind.MERGE, origin="app")
-    c.execute_control_writes()
-    control = c.read_control()
-    assert control["mode"] == "Stop"  # client null ignored, prior value kept
-    assert control["primary_setpoint"] == 300  # non-null client value applied
+def test_control_snapshot_copies_the_callers_mapping(ds):
+    snapshot = {"mode": "Hold", "manual": {"pwm": 50}}
 
+    c.write_control_snapshot(snapshot, origin="control")
+    snapshot["manual"]["pwm"] = 99
+    snapshot["mode"] = "Stop"
 
-def test_control_merge_on_empty_db_seeds_default(ds):
-    # With no control:general row yet, a MERGE must still land (seed default, then
-    # patch) rather than being silently dropped by the UPDATE.
-    assert datastore.get_blob("control:general") is None
-    c.write_control({"primary_setpoint": 275}, WriteKind.MERGE, origin="app")
-    c.execute_control_writes()
-    control = c.read_control()
-    assert control["primary_setpoint"] == 275
-    assert control["mode"] == "Stop"  # rest of default_control present
-
-
-def test_strip_null_members_recurses_dicts_but_not_lists():
-    # Unit coverage for the helper: dict keys with None dropped at any depth;
-    # lists (and nulls inside them) returned untouched.
-    src = {"a": 1, "b": None, "nested": {"x": None, "y": 2}, "items": [{"eta": None}], "z": None}
-    stripped = []
-    assert strip_null_members(src, stripped) == {"a": 1, "nested": {"y": 2}, "items": [{"eta": None}]}
-    # dotted paths of dropped keys reported; list-nested nulls not walked/reported
-    assert sorted(stripped) == ["b", "nested.x", "z"]
-
-
-def test_control_merge_logs_error_when_stripping_nulls(ds, caplog):
-    # A MERGE partial carrying a null trips a diagnostic (ERROR level, so it
-    # survives control.log's production ERROR gate) naming the stripped path and
-    # origin, so the still-sending-nulls source can be found.
-    c.write_control({"mode": "Stop", "manual": {"change": "pwm"}}, WriteKind.OVERWRITE, origin="test")
-    c.write_control({"manual": {"change": None}}, WriteKind.MERGE, origin="app")
-    with caplog.at_level("ERROR", logger="control"):
-        c.execute_control_writes()
-    hits = [r for r in caplog.records if "stripped null member" in r.message]
-    assert hits and hits[0].levelname == "ERROR"
-    assert "manual.change" in hits[0].message
-    assert any("origin='app'" in r.getMessage() for r in caplog.records)
-
-
-def test_control_merge_null_free_partial_logs_nothing(ds, caplog):
-    # The common case (no nulls) must stay quiet -- no diagnostic noise.
-    c.write_control({"mode": "Stop"}, WriteKind.OVERWRITE, origin="test")
-    c.write_control({"primary_setpoint": 225}, WriteKind.MERGE, origin="app")
-    with caplog.at_level("ERROR", logger="control"):
-        c.execute_control_writes()
-    assert not [r for r in caplog.records if "stripped null member" in r.message]
+    assert c.read_control() == {"mode": "Hold", "manual": {"pwm": 50}}
 
 
 def test_errors_and_current_status_roundtrip(ds):
@@ -271,8 +216,8 @@ def test_flush_control_clears_only_control_not_history(ds):
     c.write_history(
         {"probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}}, "primary_setpoint": 1, "notify_targets": {}}
     )
-    c.write_control({"mode": "Hold"}, WriteKind.OVERWRITE, origin="t")
-    c.write_control({"x": 1}, WriteKind.MERGE, origin="t")
+    c.write_control_snapshot({"mode": "Hold"}, origin="t")
+    c.enqueue_control_delta(control_delta(set_values={"x": 1}), origin="t")
     control = c.flush_control()
     assert control == defaults.default_control()  # reseeded default
     from common.sqlite_queue import SqliteQueue

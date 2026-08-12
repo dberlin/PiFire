@@ -146,7 +146,7 @@ def test_debug_mode_toggle_persists_and_flags_the_control_process(client):
     import blueprints.api_admin.routes as admin_routes
     from common.datastore_accessors import read_settings
 
-    with mock.patch.object(admin_routes, "write_control") as m_write:
+    with mock.patch.object(admin_routes, "enqueue_control_delta") as m_write:
         resp = client.post("/api/admin/settings", json={"debug_mode": True})
 
     assert resp.status_code == 200
@@ -162,7 +162,7 @@ def test_boot_to_monitor_alone_does_not_flag_the_control_process(client):
     """Only debug_mode needs the control process to re-read settings."""
     import blueprints.api_admin.routes as admin_routes
 
-    with mock.patch.object(admin_routes, "write_control") as m_write:
+    with mock.patch.object(admin_routes, "enqueue_control_delta") as m_write:
         client.post("/api/admin/settings", json={"boot_to_monitor": True})
     m_write.assert_not_called()
 

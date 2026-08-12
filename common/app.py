@@ -4,7 +4,6 @@ Common PiFire WebApp Functions Shared Between Blueprints
 
 from common.common import (
     seconds_to_string,
-    WriteKind,
     epoch_to_time,
     guard_none_metric_field,
     # Re-exported, not redefined: this module used to carry a byte-identical
@@ -14,7 +13,13 @@ from common.common import (
 )
 from common.modes import Mode
 from common.control_delta import control_delta
-from common.datastore_accessors import read_settings, read_all_metrics, read_history, write_settings, write_control
+from common.datastore_accessors import (
+    enqueue_control_delta,
+    read_all_metrics,
+    read_history,
+    read_settings,
+    write_settings,
+)
 from common.defaults import metrics_items
 from common.api_commands import process_command
 from flask import current_app, render_template
@@ -444,7 +449,7 @@ def save_settings_and_flag_update(settings, control, *flags, origin="app", ops=N
     write_settings(settings)
     for flag in flags:
         control[flag] = True
-    write_control(control_delta(set_values={flag: True for flag in flags}, ops=ops), WriteKind.DELTA, origin=origin)
+    enqueue_control_delta(control_delta(set_values={flag: True for flag in flags}, ops=ops), origin=origin)
 
 
 def api_response(result, message=None, data=None):

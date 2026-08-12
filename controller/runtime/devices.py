@@ -10,12 +10,12 @@ one's whole-list write erases the other's banners."""
 
 import importlib
 
-from common.common import ErrorKind, get_probe_info, WriteKind
+from common.common import ErrorKind, get_probe_info
 from common.datastore_accessors import (
     read_control,
     read_pellet_db,
     write_pellet_db,
-    write_control,
+    write_control_snapshot,
     write_errors,
     write_generic_key,
 )
@@ -140,7 +140,7 @@ def build_devices(settings, *, errors, event_log, control_log):
     except:
         control = read_control()
         control["critical_error"] = True
-        write_control(control, WriteKind.OVERWRITE, origin="control")
+        write_control_snapshot(control, origin="control")
         control_log.exception(
             f"Error occurred importing grillplatform module ({settings['modules']['grillplat']}). Trace dump: "
         )
@@ -161,7 +161,7 @@ def build_devices(settings, *, errors, event_log, control_log):
     except Exception as exc:
         control = read_control()
         control["critical_error"] = True
-        write_control(control, WriteKind.OVERWRITE, origin="control")
+        write_control_snapshot(control, origin="control")
         control_log.exception(
             f"Error occurred configuring grillplatform module ({settings['modules']['grillplat']}). Trace dump: "
         )

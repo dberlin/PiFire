@@ -19,7 +19,6 @@ import time
 from common import server_revision
 from common.common import (
     MODE_MAP,
-    WriteKind,
     convert_settings_units,
     epoch_to_time,
     is_float,
@@ -37,29 +36,16 @@ from common.datastore_accessors import (
     read_pellet_db,
     read_settings,
     read_status,
-    write_control,
+    enqueue_control_delta,
     write_settings,
 )
 from common.sqlite_queue import SqliteQueue
 from common.system import reboot_system, restart_scripts, shutdown_system
 
 
-def _write_control_delta(control, delta, kind, origin):
-    """Queue `delta`, unless the caller explicitly asked for an OVERWRITE.
-
-    `kind` is process_command's escape hatch for a caller that wants its write
-    to land NOW rather than on the next drain: WriteKind.OVERWRITE replaces the
-    control blob directly. A delta cannot honour that -- it is by construction a
-    queued statement of intent -- so an OVERWRITE caller still gets the
-    whole-dict write it asked for. That is pinned by the golden's
-    `kind_overwrite_splus` (queued_writes == []).
-
-    No PRODUCTION call site passes `kind`; every one of them takes the delta.
-    """
-    if kind is WriteKind.OVERWRITE:
-        write_control(control, kind, origin=origin)
-    else:
-        write_control(delta, WriteKind.DELTA, origin=origin)
+def _write_control_delta(delta, origin):
+    """Queue one validated control-delta intent."""
+    enqueue_control_delta(delta, origin=origin)
 
 
 def _manual_toggle(control, pin_name, arglist, reset_pwm_when_off=False):
@@ -98,7 +84,7 @@ def _manual_toggle(control, pin_name, arglist, reset_pwm_when_off=False):
     return assigned
 
 
-def _cmd_get_uuid(data, control, settings, arglist, origin, kind):
+def _cmd_get_uuid(data, control, settings, arglist, origin):
     """
     Get Server Uuid
     /api/get/uuid
@@ -111,7 +97,7 @@ def _cmd_get_uuid(data, control, settings, arglist, origin, kind):
     data["data"]["uuid"] = settings["server_info"]["uuid"]
 
 
-def _cmd_get_versions(data, control, settings, arglist, origin, kind):
+def _cmd_get_versions(data, control, settings, arglist, origin):
     """
     Get Server Versions
     /api/get/versions
@@ -130,7 +116,7 @@ def _cmd_get_versions(data, control, settings, arglist, origin, kind):
     data["data"]["build"] = settings["versions"]["build"]
 
 
-def _cmd_get_revision(data, control, settings, arglist, origin, kind):
+def _cmd_get_revision(data, control, settings, arglist, origin):
     """
     Get the source revision this server process is actually running
     /api/get/revision
@@ -151,7 +137,7 @@ def _cmd_get_revision(data, control, settings, arglist, origin, kind):
     data["data"].update(server_revision.status())
 
 
-def _cmd_get_hopper(data, control, settings, arglist, origin, kind):
+def _cmd_get_hopper(data, control, settings, arglist, origin):
     """
     Get Hopper Level
     /api/get/hopper
@@ -177,12 +163,12 @@ def _cmd_get_hopper(data, control, settings, arglist, origin, kind):
     # two flags (with settings_update) that a concurrent writer's stale snapshot
     # could revert to False before the control loop ever saw it -- i.e. the user
     # action simply never happened. Named, it cannot be.
-    write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin=origin)
+    enqueue_control_delta(control_delta(set_values={"hopper_check": True}), origin=origin)
     pelletdb = read_pellet_db()
     data["data"]["hopper"] = pelletdb["current"]["hopper_level"]
 
 
-def _cmd_get_timer(data, control, settings, arglist, origin, kind):
+def _cmd_get_timer(data, control, settings, arglist, origin):
     """
     Get Timer Data
     /api/get/timer
@@ -207,7 +193,7 @@ def _cmd_get_timer(data, control, settings, arglist, origin, kind):
     data["data"]["keep_warm"] = control["notify_data"][index]["keep_warm"]
 
 
-def _cmd_get_notify(data, control, settings, arglist, origin, kind):
+def _cmd_get_notify(data, control, settings, arglist, origin):
     """
     Get Notify Data
     /api/get/notify
@@ -238,7 +224,7 @@ def _cmd_get_notify(data, control, settings, arglist, origin, kind):
     data["data"] = control["notify_data"]
 
 
-def _cmd_get_status(data, control, settings, arglist, origin, kind):
+def _cmd_get_status(data, control, settings, arglist, origin):
     """
     Get Status Information for Key Items
     /api/get/status
@@ -290,7 +276,7 @@ def _cmd_get_status(data, control, settings, arglist, origin, kind):
     data["data"]["ui_hash"] = hash(json.dumps(settings["probe_settings"]["probe_map"]["probe_info"]))
 
 
-def _cmd_get_temp(data, control, settings, arglist, origin, kind):
+def _cmd_get_temp(data, control, settings, arglist, origin):
     """
     Get Temperature
     /api/get/temp/{probe label}
@@ -312,7 +298,7 @@ def _cmd_get_temp(data, control, settings, arglist, origin, kind):
     data["message"] = f"Probe {arglist[1]} not found or not specified."
 
 
-def _cmd_get_current(data, control, settings, arglist, origin, kind):
+def _cmd_get_current(data, control, settings, arglist, origin):
     """
     Get Current Temp Data Structure
     /api/get/current
@@ -341,7 +327,7 @@ def _cmd_get_current(data, control, settings, arglist, origin, kind):
     data["data"] = current_temps
 
 
-def _cmd_get_mode(data, control, settings, arglist, origin, kind):
+def _cmd_get_mode(data, control, settings, arglist, origin):
     """
     Get Current Mode
     /api/get/mode
@@ -354,7 +340,7 @@ def _cmd_get_mode(data, control, settings, arglist, origin, kind):
     data["data"]["mode"] = control["mode"]
 
 
-def _cmd_set_psp(data, control, settings, arglist, origin, kind):
+def _cmd_set_psp(data, control, settings, arglist, origin):
     """
     Primary Setpoint
     /api/set/psp/{integer/float temperature}
@@ -372,9 +358,7 @@ def _cmd_set_psp(data, control, settings, arglist, origin, kind):
         control["mode"] = Mode.HOLD
         control["primary_setpoint"] = setpoint
         _write_control_delta(
-            control,
             control_delta(ops=[{"op": "hold.set_setpoint", "setpoint": setpoint}]),
-            kind,
             origin,
         )
     else:
@@ -382,7 +366,7 @@ def _cmd_set_psp(data, control, settings, arglist, origin, kind):
         data["message"] = f"Primary set point should be an integer or float in degrees {settings['globals']['units']}"
 
 
-def _cmd_set_units(data, control, settings, arglist, origin, kind):
+def _cmd_set_units(data, control, settings, arglist, origin):
     """
     Units
     /api/set/units/{C/F}
@@ -397,13 +381,13 @@ def _cmd_set_units(data, control, settings, arglist, origin, kind):
         settings = convert_settings_units(arglist[1], settings)
         write_settings(settings)
         control["settings_update"] = True
-        _write_control_delta(control, control_delta(set_values={"settings_update": True}), kind, origin)
+        _write_control_delta(control_delta(set_values={"settings_update": True}), origin)
         control["updated"] = True
         control["units_change"] = True
         # The second write states only ITS two members. The old whole-dict form
         # re-sent settings_update as well, which was harmless but was also the
         # shape that let any writer re-impose a flag it never set.
-        _write_control_delta(control, control_delta(set_values={"updated": True, "units_change": True}), kind, origin)
+        _write_control_delta(control_delta(set_values={"updated": True, "units_change": True}), origin)
         # Notify targets live in control["notify_data"], which convert_settings_units
         # cannot reach, so a 203 F target used to read as 203 after a switch to C.
         # Convert them here as addressed notify.set ops (never a whole-array replace,
@@ -412,14 +396,14 @@ def _cmd_set_units(data, control, settings, arglist, origin, kind):
         if units_changed:
             notify_ops = notify_target_conversion_ops(control.get("notify_data", []), arglist[1])
             if notify_ops:
-                _write_control_delta(control, control_delta(ops=notify_ops), kind, origin)
+                _write_control_delta(control_delta(ops=notify_ops), origin)
         # print(f'Settings Units Changed to {arglist[1]}')
     else:
         data["result"] = "ERROR"
         data["message"] = f"Set Units {arglist[1]} not recognized."
 
 
-def _cmd_set_mode(data, control, settings, arglist, origin, kind):
+def _cmd_set_mode(data, control, settings, arglist, origin):
     """
     Mode
     /api/set/mode/{mode} where mode = 'startup', 'smoke', 'shutdown', 'stop', 'reignite', 'monitor', 'error'
@@ -430,9 +414,7 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
         control["mode"] = MODE_MAP[arglist[1]]
         control["updated"] = True
         _write_control_delta(
-            control,
             control_delta(set_values={"mode": MODE_MAP[arglist[1]], "updated": True}),
-            kind,
             origin,
         )
     elif arglist[1] == "prime":
@@ -447,7 +429,6 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
                     else:
                         control["next_mode"] = "Stop"
                     _write_control_delta(
-                        control,
                         control_delta(
                             set_values={
                                 "mode": control["mode"],
@@ -456,7 +437,6 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
                                 "next_mode": control["next_mode"],
                             }
                         ),
-                        kind,
                         origin,
                     )
                 else:
@@ -478,7 +458,6 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
                     control["primary_setpoint"] = float(arglist[2])
                 control["updated"] = True
                 _write_control_delta(
-                    control,
                     control_delta(
                         set_values={
                             "mode": control["mode"],
@@ -486,7 +465,6 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
                             "updated": True,
                         }
                     ),
-                    kind,
                     origin,
                 )
             else:
@@ -500,13 +478,12 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
         data["message"] = f"Get API Argument: {arglist[2]} not recognized."
 
 
-def _cmd_set_pmode(data, control, settings, arglist, origin, kind):
+def _cmd_set_pmode(data, control, settings, arglist, origin):
     """
     PMode
     /api/set/pmode/{pmode value} where pmode value is between 0-9
 
-    NOTE: always queues, ignoring the caller's `kind` (it hard-coded
-    WriteKind.MERGE before the delta conversion). Preserved.
+    The settings update is always queued as a delta.
     """
     if arglist[1] is not None:
         if arglist[1].isdigit():
@@ -514,7 +491,7 @@ def _cmd_set_pmode(data, control, settings, arglist, origin, kind):
                 settings["cycle_data"]["PMode"] = int(arglist[1])
                 write_settings(settings)
                 control["settings_update"] = True
-                write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin=origin)
+                enqueue_control_delta(control_delta(set_values={"settings_update": True}), origin=origin)
             else:
                 data["result"] = "ERROR"
                 data["message"] = f"Set PMode out of range(0-9): {arglist[1]}"
@@ -526,16 +503,16 @@ def _cmd_set_pmode(data, control, settings, arglist, origin, kind):
         data["message"] = f"Set PMode invalid arguments."
 
 
-def _cmd_set_splus(data, control, settings, arglist, origin, kind):
+def _cmd_set_splus(data, control, settings, arglist, origin):
     """
     Smoke Plus
     /api/set/splus/{true/false}
     """
     control["s_plus"] = arglist[1] == "true"
-    _write_control_delta(control, control_delta(set_values={"s_plus": control["s_plus"]}), kind, origin)
+    _write_control_delta(control_delta(set_values={"s_plus": control["s_plus"]}), origin)
 
 
-def _cmd_set_lid_open(data, control, settings, arglist, origin, kind):
+def _cmd_set_lid_open(data, control, settings, arglist, origin):
     """
     Lid Open Toggle
     /api/set/lid_open/toggle
@@ -545,10 +522,10 @@ def _cmd_set_lid_open(data, control, settings, arglist, origin, kind):
     """
     control["lid_open_toggle"] = True
 
-    _write_control_delta(control, control_delta(set_values={"lid_open_toggle": True}), kind, origin)
+    _write_control_delta(control_delta(set_values={"lid_open_toggle": True}), origin)
 
 
-def _cmd_set_notify(data, control, settings, arglist, origin, kind):
+def _cmd_set_notify(data, control, settings, arglist, origin):
     """
     Notify Settings
     /api/set/[notify:limit_high:limit_low]/{object}/ where object = probe label, 'Timer', 'Hopper'
@@ -558,9 +535,7 @@ def _cmd_set_notify(data, control, settings, arglist, origin, kind):
     /api/set/notify/{object}/shutdown/{true/false}
     /api/set/notify/{object}/keep_warm/{true/false}
 
-    NOTE: always queues, ignoring the caller's `kind` (it hard-coded
-    WriteKind.MERGE before the delta conversion). Preserved
-    as-is.
+    Notify updates are always queued as addressed delta operations.
     """
     if arglist[1] is not None:
         if arglist[0] == "limit_high":
@@ -615,36 +590,35 @@ def _cmd_set_notify(data, control, settings, arglist, origin, kind):
                 if fields
                 else None
             )
-            write_control(control_delta(ops=ops), WriteKind.DELTA, origin=origin)
+            enqueue_control_delta(control_delta(ops=ops), origin=origin)
     else:
         data["result"] = "ERROR"
         data["message"] = f"Notify object label was not specified."
 
 
-def _cmd_set_pwm(data, control, settings, arglist, origin, kind):
+def _cmd_set_pwm(data, control, settings, arglist, origin):
     """
     PWM Control
 
     /api/set/pwm/{true/false}
     """
     control["pwm_control"] = arglist[1] == "true"
-    _write_control_delta(control, control_delta(set_values={"pwm_control": control["pwm_control"]}), kind, origin)
+    _write_control_delta(control_delta(set_values={"pwm_control": control["pwm_control"]}), origin)
 
 
-def _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind):
+def _cmd_set_duty_cycle(data, control, settings, arglist, origin):
     """
     Duty Cycle
 
     /api/set/duty_cycle/{0-100 percent}
 
-    NOTE: always queues, ignoring the caller's `kind` (it hard-coded
-    WriteKind.MERGE before the delta conversion). Preserved.
+    Duty-cycle updates are always queued as deltas.
     """
     if is_float(arglist[1]):
         duty_cycle = int(arglist[1])
         if duty_cycle >= 0 and duty_cycle <= 100:
             control["duty_cycle"] = duty_cycle
-            write_control(control_delta(set_values={"duty_cycle": duty_cycle}), WriteKind.DELTA, origin=origin)
+            enqueue_control_delta(control_delta(set_values={"duty_cycle": duty_cycle}), origin=origin)
         else:
             data["result"] = "ERROR"
             data["message"] = f"Duty cycle must be an integer between 0-100."
@@ -653,14 +627,14 @@ def _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind):
         data["message"] = f"Duty cycle must be specified as an integer between 0-100 percent."
 
 
-def _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind):
+def _cmd_set_tuning_mode(data, control, settings, arglist, origin):
     """
     Tuning Mode Enable
 
     /api/set/tuning_mode/{true/false}
     """
     control["tuning_mode"] = arglist[1] == "true"
-    _write_control_delta(control, control_delta(set_values={"tuning_mode": control["tuning_mode"]}), kind, origin)
+    _write_control_delta(control_delta(set_values={"tuning_mode": control["tuning_mode"]}), origin)
 
 
 def _mpc_grey_box_active(settings):
@@ -688,7 +662,7 @@ def _mpc_online_adaptation_active(settings):
     return isinstance(selected, dict) and selected.get("enable_online_adaptation") is True
 
 
-def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
+def _cmd_set_mpc_calibration(data, control, settings, arglist, origin):
     """Validate and queue one revisioned calibration intent for the live drain."""
     try:
         command = validated_mpc_calibration_command(arglist[1])
@@ -709,15 +683,12 @@ def _cmd_set_mpc_calibration(data, control, settings, arglist, origin, kind):
             )
             return
     delta = control_delta(ops=[{"op": "mpc_calibration.set", "command": command}])
-    if kind is not WriteKind.OVERWRITE:
-        try:
-            queue_mpc_calibration_command(delta, command, origin)
-        except ControlDeltaError as error:
-            data["result"] = "ERROR"
-            data["message"] = str(error)
-            return
-    else:
-        _write_control_delta(control, delta, kind, origin)
+    try:
+        queue_mpc_calibration_command(delta, command, origin)
+    except ControlDeltaError as error:
+        data["result"] = "ERROR"
+        data["message"] = str(error)
+        return
     data["data"]["mpc_calibration"] = command
 
 
@@ -754,7 +725,7 @@ def _parse_timer_expiry_options(spec):
     return {name: name in tokens for name in _TIMER_EXPIRY_OPTIONS}
 
 
-def _timer_start_with_options(data, control, arglist, index, now, kind):
+def _timer_start_with_options(data, control, arglist, index, now):
     """
     Arm a NEW timer for a DURATION, with both expiry flags.
 
@@ -813,21 +784,17 @@ def _timer_start_with_options(data, control, arglist, index, now, kind):
         return
 
     write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
-    write_control(
-        control_delta(
-            ops=[
-                {
-                    "op": "timer.start_with_options",
-                    "at": now,
-                    "seconds": seconds,
-                    "shutdown": options["shutdown"],
-                    "keep_warm": options["keep_warm"],
-                }
-            ]
-        ),
-        WriteKind.DELTA,
-        origin="app",
-    )
+    enqueue_control_delta(control_delta(
+        ops=[
+            {
+                "op": "timer.start_with_options",
+                "at": now,
+                "seconds": seconds,
+                "shutdown": options["shutdown"],
+                "keep_warm": options["keep_warm"],
+            }
+        ]
+    ), origin="app")
 
 
 # NOTE: the log line is still computed HERE, from this request's (possibly
@@ -837,7 +804,7 @@ def _timer_start_with_options(data, control, arglist, index, now, kind):
 # moving the logging into the drain would move it into a different PROCESS and
 # flip `log_calls` in six golden entries, for a diagnostic line. The drain logs
 # the op it actually applied at DEBUG (common/control_delta.py).
-def _cmd_set_timer(data, control, settings, arglist, origin, kind):
+def _cmd_set_timer(data, control, settings, arglist, origin):
     """
     Timer Control
 
@@ -864,7 +831,7 @@ def _cmd_set_timer(data, control, settings, arglist, origin, kind):
             separate from the 3-argument form below, which other clients (the
             Flask dashboard, mobile) still use and which doubles as the unpause
             command. """
-        _timer_start_with_options(data, control, arglist, index, now, kind)
+        _timer_start_with_options(data, control, arglist, index, now)
     elif arglist[1] == "start":
         seconds = int(float(arglist[2])) if is_float(arglist[2]) else None
         # The BRANCH is not decided here. `start` is also the unpause command and
@@ -878,41 +845,33 @@ def _cmd_set_timer(data, control, settings, arglist, origin, kind):
                 "Timer unpaused.  Ends at: "
                 + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
             )
-        write_control(
-            control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]),
-            WriteKind.DELTA,
-            origin="app",
-        )
+        enqueue_control_delta(control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]), origin="app")
     elif arglist[1] == "pause":
         if control["timer"]["start"] != 0:
             write_log("Timer paused.")
         else:
             write_log("Timer cleared.")
-        write_control(control_delta(ops=[{"op": "timer.pause", "at": now}]), WriteKind.DELTA, origin="app")
+        enqueue_control_delta(control_delta(ops=[{"op": "timer.pause", "at": now}]), origin="app")
     elif arglist[1] == "stop":
         write_log("Timer stopped.")
-        write_control(control_delta(ops=[{"op": "timer.clear"}]), WriteKind.DELTA, origin="app")
+        enqueue_control_delta(control_delta(ops=[{"op": "timer.clear"}]), origin="app")
     elif arglist[1] in ("shutdown", "keep_warm"):
-        write_control(
-            control_delta(
-                ops=[
-                    {
-                        "op": "notify.set",
-                        "label": control["notify_data"][index]["label"],
-                        "type": "timer",
-                        "fields": {arglist[1]: arglist[2] == "true"},
-                    }
-                ]
-            ),
-            WriteKind.DELTA,
-            origin=origin,
-        )
+        enqueue_control_delta(control_delta(
+            ops=[
+                {
+                    "op": "notify.set",
+                    "label": control["notify_data"][index]["label"],
+                    "type": "timer",
+                    "fields": {arglist[1]: arglist[2] == "true"},
+                }
+            ]
+        ), origin=origin)
     else:
         data["result"] = "ERROR"
         data["message"] = f"Timer command not recognized."
 
 
-def _cmd_set_manual(data, control, settings, arglist, origin, kind):
+def _cmd_set_manual(data, control, settings, arglist, origin):
     """
     Manual Control
     Note: Must already be in Manual mode (see set/mode command)
@@ -922,7 +881,7 @@ def _cmd_set_manual(data, control, settings, arglist, origin, kind):
     /api/set/manual/auger/{true/false/toggle}
     /api/set/manual/pwm/{speed}
 
-    NOTE: the write_control below is outside the if/elif chain, so a rejected
+    NOTE: the delta write below is outside the if/elif chain, so a rejected
     (ERROR) request still writes control when control['manual']['change'] holds
     a stale value from a previous command. Preserved as-is.
     """
@@ -951,9 +910,7 @@ def _cmd_set_manual(data, control, settings, arglist, origin, kind):
         # queued no-op instead of as something that can revert another writer.
         if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
             _write_control_delta(
-                control,
                 control_delta(set_values={"manual": assigned} if assigned else None),
-                kind,
                 origin,
             )
 
@@ -962,7 +919,7 @@ def _cmd_set_manual(data, control, settings, arglist, origin, kind):
         data["message"] = f"Before changing manual outputs, system must be put into Manual mode."
 
 
-def _cmd_cmd_restart(data, control, settings, arglist, origin, kind):
+def _cmd_cmd_restart(data, control, settings, arglist, origin):
     """
     Restart Scripts
     /api/cmd/restart
@@ -970,7 +927,7 @@ def _cmd_cmd_restart(data, control, settings, arglist, origin, kind):
     restart_scripts()
 
 
-def _cmd_cmd_reboot(data, control, settings, arglist, origin, kind):
+def _cmd_cmd_reboot(data, control, settings, arglist, origin):
     """
     Reboot System
     /api/cmd/reboot
@@ -978,7 +935,7 @@ def _cmd_cmd_reboot(data, control, settings, arglist, origin, kind):
     reboot_system()
 
 
-def _cmd_cmd_shutdown(data, control, settings, arglist, origin, kind):
+def _cmd_cmd_shutdown(data, control, settings, arglist, origin):
     """
     Shutdown System
     /api/cmd/shutdown
@@ -986,7 +943,7 @@ def _cmd_cmd_shutdown(data, control, settings, arglist, origin, kind):
     shutdown_system()
 
 
-def _cmd_sys(data, control, settings, arglist, origin, kind):
+def _cmd_sys(data, control, settings, arglist, origin):
     """
     System Control Commands
 
@@ -1059,7 +1016,7 @@ _ACTION_DISPATCH = {
 }
 
 
-def process_command(action=None, arglist=None, origin="unknown", kind=WriteKind.MERGE):
+def process_command(action=None, arglist=None, origin="unknown"):
     """
     Process incoming command from API or elsewhere
     """
@@ -1090,6 +1047,6 @@ def process_command(action=None, arglist=None, origin="unknown", kind=WriteKind.
     if handler is None:
         _process_command_unknown(data, action, arglist)
     else:
-        handler(data, control, settings, arglist, origin, kind)
+        handler(data, control, settings, arglist, origin)
 
     return data

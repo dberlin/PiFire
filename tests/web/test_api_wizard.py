@@ -2,7 +2,6 @@ import copy
 import json
 
 import pytest
-from common.common import WriteKind
 from common.datastore_accessors import read_settings, write_settings_store
 from common.web_contracts.wizard import (
     BusKindsValidationResponse,
@@ -500,11 +499,11 @@ def test_finish_blocked_when_not_stopped(ds, client, monkeypatch):
 
     fired = []
     monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))  # neutralize installer
-    from common.datastore_accessors import read_control, write_control
+    from common.datastore_accessors import read_control, write_control_snapshot
 
     ctrl = read_control()
     ctrl["mode"] = "Hold"
-    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(ctrl, origin="test")
     resp = client.post(
         "/api/wizard/finish",
         data=json.dumps({"selections": {}, "settings_dep_values": {}, "display_config": {}}),

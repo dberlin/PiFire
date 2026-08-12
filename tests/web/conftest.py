@@ -156,10 +156,9 @@ def _seed_fresh_db(db_path, grill_name):
     init_status baseline every live_server needs before app.py can even be
     imported (app.py reads settings at import time for log-level setup)."""
     from common import datastore
-    from common.common import WriteKind
     from common.datastore_accessors import (
         init_status,
-        write_control,
+        write_control_snapshot,
         write_pellets_store,
         write_settings_store,
     )
@@ -175,7 +174,7 @@ def _seed_fresh_db(db_path, grill_name):
     write_settings_store(settings)
     write_pellets_store(default_pellets())
     init_status()
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test-web-e2e")
+    write_control_snapshot(default_control(), origin="test-web-e2e")
 
 
 @pytest.fixture(scope="module")
@@ -240,20 +239,11 @@ def read_control_from_server():
 
 
 def drain_control_writes():
-    """Apply any queued `WriteKind.MERGE` control writes to `control:general`.
+    """Apply queued control deltas to ``control:general``.
 
-    `write_control(..., WriteKind.MERGE, ...)` (used by several routes --
-    e.g. pellets' `hopperlevel`/`loadprofile`, tuner's mode toggles -- and
-    by `apply_control` below) only *queues* the partial; per
-    common.datastore_accessors.execute_control_writes()'s docstring, the
-    deep-merge into `control:general` is applied when that function runs.
-    In production that happens every iteration of the real control-runtime
-    loop (controller/runtime/controller.py). This test harness's
-    `live_server` runs only the Flask app -- no control loop -- so queued
-    merges never drain on their own. Call this after driving a UI action
-    or POST that performs a MERGE write, before reading back via
-    `read_control_from_server()`, to observe the result the next real
-    control-loop tick would have produced."""
+    In production this happens every iteration of the real control-runtime
+    loop. This test harness runs only Flask, so call this after a UI action or
+    POST that queues intent and before reading back the resulting live state."""
     from common.datastore_accessors import execute_control_writes
 
     execute_control_writes()
@@ -279,22 +269,15 @@ def apply_settings(mutate):
 
 
 def apply_control(mutate, *, origin="test-web-e2e"):
-    """Read current control, apply `mutate(control)` in place (or have it
-    return a replacement dict), write the result back (MERGE), and return
-    it. See apply_settings() for the pattern.
-
-    The MERGE write is drained immediately (see drain_control_writes()) so
-    the read-back the caller does right after this call sees the change --
-    without that, it would sit queued forever in this control-loop-less
-    harness."""
-    from common.common import WriteKind
-    from common.datastore_accessors import read_control, write_control
+    """Read current control, apply ``mutate(control)`` in place (or use its
+    replacement result), write that authoritative test snapshot immediately,
+    and return it. See :func:`apply_settings` for the pattern."""
+    from common.datastore_accessors import read_control, write_control_snapshot
 
     control = read_control()
     result = mutate(control)
     final = result if result is not None else control
-    write_control(final, WriteKind.MERGE, origin=origin)
-    drain_control_writes()
+    write_control_snapshot(final, origin=origin)
     return final
 
 

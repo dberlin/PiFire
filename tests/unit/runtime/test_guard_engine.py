@@ -32,9 +32,9 @@ class _FakeStore:
     def read_control(self):
         return self._control
 
-    def write_control(self, control, kind, origin=None):
+    def write_control_snapshot(self, control, *, origin=None):
         self._control = control
-        self.writes.append((kind, origin))
+        self.writes.append(origin)
 
     def display_commands(self):
         return self._display

@@ -66,7 +66,7 @@ PYGAME_CMDS, PYGAME_MENUS, PYGAME_INPUTS = _pygame_actions()
 def _dispatch_probe(monkeypatch):
     effects = []
     monkeypatch.setattr(
-        qmod, "write_control", lambda data, kind=None, origin=None: effects.append(("write_control", data))
+        qmod, "enqueue_control_delta", lambda data, *, origin=None: effects.append(("enqueue_control_delta", data))
     )
     monkeypatch.setattr(qmod, "read_status", lambda: {"s_plus": False})
     # A notify entry the cmd_notify probe below can actually match. It used to be
@@ -87,7 +87,7 @@ def _dispatch_probe(monkeypatch):
     import display._base_flex as bf
 
     monkeypatch.setattr(
-        bf, "write_control", lambda data, kind=None, origin=None: effects.append(("write_control", data))
+        bf, "enqueue_control_delta", lambda data, *, origin=None: effects.append(("enqueue_control_delta", data))
     )
     monkeypatch.setattr(bf, "read_control", lambda: {"notify_data": [], "recipe": {"step_data": {}}, "updated": False})
     monkeypatch.setattr(bf, "read_settings", lambda: {"cycle_data": {}})

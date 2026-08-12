@@ -26,9 +26,9 @@ import time
 import threading
 import subprocess
 import logging
-from common.common import create_logger, log_path, WriteKind
+from common.common import create_logger, log_path
 from common.modes import Mode
-from common.datastore_accessors import write_control, read_control
+from common.datastore_accessors import read_control, write_control_snapshot
 from common.system import is_real_hardware
 from notify.notifications import send_notifications
 
@@ -106,7 +106,7 @@ class Process_Monitor:
                     control["updated"] = True
                     control["mode"] = Mode.ERROR
                     control["critical_error"] = True
-                    write_control(control, WriteKind.OVERWRITE, origin="process_monitor")
+                    write_control_snapshot(control, origin="process_monitor")
                     # Send notification
                     send_notifications("Control_Process_Stopped")
                     # Log error

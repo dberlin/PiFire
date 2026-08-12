@@ -12,8 +12,8 @@ Smoke (steady state), Hold, Monitor, and Manual have NO such natural exit --
 they run forever under real hardware (the outer process is killed/restarted
 instead). To bound those scenarios without changing control.py, `run_mode`
 accepts `probe_cap`: after that many `read_probes()` calls, the harness
-injects a MERGE write of `{'updated': True}` into the store. The loop reads
-that at the *top* of its next iteration (`execute_control_writes()` +
+enqueues a validated delta setting `updated=True`. The loop reads that at the
+*top* of its next iteration (`execute_control_writes()` +
 `read_control()`), sees `control['updated']` is True, and breaks cleanly --
 so post-loop cleanup (auger/igniter off, metrics, monitor.stop_monitor())
 still runs, exactly as it would for any other mode-change request.
@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
-from common.common import WriteKind
+from common.control_delta import control_delta
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
@@ -76,8 +76,8 @@ class CaptureResult:
 
 
 class _CappedProbes:
-    """Wraps a probe fake; after `cap` reads, injects `{'updated': True}` into
-    the store (MERGE) so the work-cycle loop breaks cleanly on its next
+    """Wraps a probe fake; after `cap` reads, enqueue `updated=True` so the
+    work-cycle loop breaks cleanly on its next
     top-of-iteration read_control(). This is the belt-and-suspenders bound for
     modes with no natural timer/temp exit (Smoke steady-state, Hold, Monitor,
     Manual)."""
@@ -91,7 +91,7 @@ class _CappedProbes:
     def read_probes(self):
         self._n += 1
         if self._n >= self._cap:
-            self._store.write_control({"updated": True}, WriteKind.MERGE, origin="test-cap")
+            self._store.enqueue_control_delta(control_delta(set_values={"updated": True}), origin="test-cap")
         return self._probes.read_probes()
 
     def __getattr__(self, name):

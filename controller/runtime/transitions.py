@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Callable, Optional
 
-from common.common import WriteKind
 from common.modes import Mode, StatusState
 from controller.runtime.logic.safety import evaluate_flameout, over_max_temp, SafetyVerdict
 
@@ -140,7 +139,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
         if setpoint is not _UNSET:
             control["primary_setpoint"] = setpoint if to_mode == Mode.HOLD else 0
         control["updated"] = True
-        store.write_control(control, WriteKind.OVERWRITE, origin="control")
+        store.write_control_snapshot(control, origin="control")
         return control
 
     # authoritative: safety / terminal
@@ -152,7 +151,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
         control["safety"]["reigniteretries"] -= 1
         control["safety"]["reignitelaststate"] = reignite_from
     control["updated"] = True
-    store.write_control(control, WriteKind.OVERWRITE, origin="control")
+    store.write_control_snapshot(control, origin="control")
     if notify is not None:
         ctx.notifications.send(notify)
     return control

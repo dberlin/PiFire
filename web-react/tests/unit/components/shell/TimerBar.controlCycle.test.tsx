@@ -14,9 +14,9 @@ import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.g
 // tests/characterization/test_process_command_golden.py):
 //
 //  1. A timer command does NOT queue a computed timer state. It queues a named
-//     OP carrying the request's clock as `at` (common/control_delta.py,
-//     WriteKind.DELTA) -- `timer.clear`, `timer.pause`,
-//     `timer.start_or_resume`, `timer.start_with_options`.
+//     OP carrying the request's clock as `at` (common/control_delta.py):
+//     `timer.clear`, `timer.pause`, `timer.start_or_resume`,
+//     `timer.start_with_options`.
 //  2. read_control() still serves the PERSISTED blob and never the pending
 //     queue, so a command's REQUEST-time answer (the API envelope) is still
 //     computed from pre-write state. That is why the paused-timer rejection in

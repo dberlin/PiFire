@@ -7,10 +7,10 @@ displays run in their own process and are the writer most likely to be sitting
 on a stale read (a menu is open for as long as a human takes to use it), so this
 is the module group where a whole-dict write costs the most.
 
-Rather than drive 43 menu handlers, this pins the property at the source: no
-display module may name WriteKind.MERGE, and every write_control call in one
-must hand over an envelope. That is checked structurally (ast), so a new site
-added tomorrow is caught whether or not anyone writes a test for its menu.
+Rather than drive 43 menu handlers, this pins the property at the source: every
+display call to `enqueue_control_delta` must hand over a `control_delta`
+envelope. That is checked structurally (ast), so a new site added tomorrow is
+caught whether or not anyone writes a test for its menu.
 """
 
 import ast
@@ -28,26 +28,20 @@ DISPLAY_WRITERS = [
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
-def _write_control_calls(tree):
+def _enqueue_control_delta_calls(tree):
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "write_control":
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "enqueue_control_delta":
             yield node
 
 
-@pytest.mark.parametrize("relpath", DISPLAY_WRITERS)
-def test_no_display_module_queues_a_whole_control_dict(relpath):
-    source = (ROOT / relpath).read_text(encoding="utf-8")
-    assert "WriteKind.MERGE" not in source, (
-        f"{relpath} still queues a whole control dict. Name what changed instead (common/control_delta.py)."
-    )
 
 
 @pytest.mark.parametrize("relpath", DISPLAY_WRITERS)
 def test_every_display_write_hands_over_a_delta_envelope(relpath):
     path = ROOT / relpath
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    calls = list(_write_control_calls(tree))
-    assert calls, f"{relpath} has no write_control calls -- did the test's assumption go stale?"
+    calls = list(_enqueue_control_delta_calls(tree))
+    assert calls, f"{relpath} has no enqueue_control_delta calls -- did the test's assumption go stale?"
 
     offenders = []
     for call in calls:
@@ -55,7 +49,7 @@ def test_every_display_write_hands_over_a_delta_envelope(relpath):
         ok = isinstance(first, ast.Call) and isinstance(first.func, ast.Name) and first.func.id == "control_delta"
         if not ok:
             offenders.append(f"{relpath}:{call.lineno}")
-    assert offenders == [], f"write_control calls not passing a control_delta() envelope: {offenders}"
+    assert offenders == [], f"enqueue_control_delta calls not passing a control_delta() envelope: {offenders}"
 
 
 @pytest.mark.parametrize("relpath", DISPLAY_WRITERS)
@@ -66,7 +60,7 @@ def test_no_display_delta_names_more_than_four_top_level_members(relpath):
     next_mode, updated)."""
     tree = ast.parse((ROOT / relpath).read_text(encoding="utf-8"))
     wide = []
-    for call in _write_control_calls(tree):
+    for call in _enqueue_control_delta_calls(tree):
         first = call.args[0] if call.args else None
         if not (isinstance(first, ast.Call) and getattr(first.func, "id", None) == "control_delta"):
             continue

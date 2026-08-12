@@ -54,12 +54,12 @@ from display.flexobject import (
     ButtonRow,  # noqa: F401  # dynamic-dispatch
 )
 from PIL import Image, ImageFilter
-from common.common import WriteKind, read_generic_json, display_sleep_timeout
+from common.common import read_generic_json, display_sleep_timeout
 from common.modes import Mode
 from common.control_delta import control_delta
 from common.datastore_accessors import (
     read_control,
-    write_control,
+    enqueue_control_delta,
     read_settings,
     write_settings,
     read_status,
@@ -1339,21 +1339,21 @@ class DisplayBase:
         # print(' > Command Handler Called < ')
         if "monitor" in self.command:
             data = {"updated": True, "mode": "Monitor"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             # print('Sent Monitor Mode Command!')
             self.display_active = "dash"
             self.display_init = True
 
         if "startup" in self.command:
             data = {"updated": True, "mode": "Startup"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             # print('Sent Startup Mode Command!')
             self.display_active = "dash"
             self.display_init = True
 
         if "smoke" in self.command:
             data = {"updated": True, "mode": "Smoke"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
             self.display_init = True
 
@@ -1368,7 +1368,7 @@ class DisplayBase:
 
             if primary_setpoint:
                 data = {"updated": True, "mode": "Hold", "primary_setpoint": primary_setpoint}
-                write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+                enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
             self.display_init = True
 
@@ -1388,23 +1388,19 @@ class DisplayBase:
             control = read_control()
             for notify_source in control["notify_data"]:
                 if notify_source["name"] == self.input_origin:
-                    write_control(
-                        control_delta(
-                            ops=[
-                                {
-                                    "op": "notify.set",
-                                    "label": notify_source["label"],
-                                    "type": notify_source["type"],
-                                    "fields": {
-                                        "target": notify_target,
-                                        "req": True if notify_target else False,
-                                    },
-                                }
-                            ]
-                        ),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(
+                        ops=[
+                            {
+                                "op": "notify.set",
+                                "label": notify_source["label"],
+                                "type": notify_source["type"],
+                                "fields": {
+                                    "target": notify_target,
+                                    "req": True if notify_target else False,
+                                },
+                            }
+                        ]
+                    ), origin="display")
                     break
 
             self.input_origin = None
@@ -1413,13 +1409,13 @@ class DisplayBase:
 
         if "shutdown" in self.command:
             data = {"updated": True, "mode": "Shutdown"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "stop" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
 
             self._init_framework()
             self._zero_dash_data()
@@ -1430,19 +1426,19 @@ class DisplayBase:
         if "splus" in self.command:
             toggle = False if self.last_status_data.get("s_plus", False) else True
             data = {"s_plus": toggle}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "primestartup" in self.command:
             data = {"updated": True, "mode": "Prime", "prime_amount": self.command_data, "next_mode": "Startup"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "primeonly" in self.command:
             data = {"updated": True, "mode": "Prime", "prime_amount": self.command_data, "next_mode": "Stop"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
             self.display_init = True
 
@@ -1452,7 +1448,7 @@ class DisplayBase:
             settings["cycle_data"]["PMode"] = self.command_data
             write_settings(settings)
             data = {"settings_update": True}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
 
             self.display_active = "dash"
             self.display_init = True
@@ -1465,23 +1461,19 @@ class DisplayBase:
             if "triggered" in data["recipe"]["step_data"] and "pause" in data["recipe"]["step_data"]:
                 if data["recipe"]["step_data"]["triggered"] and data["recipe"]["step_data"]["pause"]:
                     # 'Unpause' Recipe
-                    write_control(
-                        control_delta(set_values={"recipe": {"step_data": {"pause": False}}}),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(set_values={"recipe": {"step_data": {"pause": False}}}), origin="display")
                 else:
                     # User is forcing next step
-                    write_control(control_delta(set_values={"updated": True}), WriteKind.DELTA, origin="display")
+                    enqueue_control_delta(control_delta(set_values={"updated": True}), origin="display")
             else:
                 # User is forcing next step
-                write_control(control_delta(set_values={"updated": True}), WriteKind.DELTA, origin="display")
+                enqueue_control_delta(control_delta(set_values={"updated": True}), origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "reboot" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             if self.real_hardware:
                 os.system("sleep 3 && sudo reboot &")
             else:
@@ -1492,7 +1484,7 @@ class DisplayBase:
 
         if "poweroff" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             if self.real_hardware:
                 os.system("sleep 3 && sudo shutdown -h now &")
             else:
@@ -1503,7 +1495,7 @@ class DisplayBase:
 
         if "restart" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             if self.real_hardware:
                 # supervisorctl, like common/system.py's restart_scripts and
                 # restart_webapp. `sudo service supervisor restart` named a unit
@@ -1522,7 +1514,7 @@ class DisplayBase:
 
         if "hopper" in self.command:
             data = {"hopper_check": True}
-            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
             self.display_init = True
 

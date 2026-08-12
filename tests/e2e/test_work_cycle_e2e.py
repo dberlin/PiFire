@@ -6,7 +6,7 @@ living in a real on-disk SQLite database via `SqliteStore`, instead of the
 hermetic `InMemoryStore`. Everything else stays a fake: grill/probes/distance
 devices, the notifier (`FakeNotifier`), and the clock (`ManualClock`). Only the
 STORE is real -- this is the seam that exercises common.common's live
-SQLite-backed funcs (deferred deep-merge control writes, metrics replace-last,
+SQLite-backed funcs (queued control deltas, metrics replace-last,
 the display queue).
 
 WHY THESE PROVE PARITY: each scenario asserts the exact same outcomes the
@@ -36,7 +36,6 @@ are fully isolated and hermetic -- no shared server, no residue to restore.
 import pytest
 
 import common.datastore_accessors as _ccommon
-from common.common import WriteKind
 
 from tests.characterization.harness import run_mode
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
@@ -74,7 +73,7 @@ def run_sqlite_scenario(
     store.system_output().flush()
     store.display_commands().flush()
     store.flush_metrics()
-    store.write_control(control_data, WriteKind.OVERWRITE)
+    store.write_control_snapshot(control_data, origin="test-e2e")
     store.write_pellet_db(pellet_db)
 
     return run_mode(
@@ -157,7 +156,7 @@ def test_e2e_smoke_flameout_without_retries_triggers_error(monkeypatch, store):
 
 def test_e2e_hold_pwm_duty_from_temp_profile(monkeypatch, store):
     # Hold cycle: pwm_control + dc_fan -> duty_cycle set from the temp-profile
-    # table and pushed to the grill. Exercises the deferred control MERGE
+    # table and pushed to the grill. Exercises the deferred control delta
     # (duty_cycle) landing in the real store via execute_control_writes.
     settings = base_settings()
     settings["platform"]["dc_fan"] = True

@@ -416,6 +416,7 @@ def test_pygame_240x320b_display_loop_drives_each_command_and_menu_timeout_branc
 
 
 def _fake_control_pair(initial_mode=Mode.STOP):
+    from common.control_delta import apply_control_delta
     from common.defaults import default_control
 
     state = default_control()
@@ -425,11 +426,11 @@ def _fake_control_pair(initial_mode=Mode.STOP):
     def read_control():
         return dict(state)
 
-    def write_control(control, kind=None, origin=None):
-        calls.append((dict(control), kind, origin))
-        state.update(control)
+    def enqueue_control_delta(delta, *, origin=None):
+        calls.append((dict(delta.get("set", {})), origin))
+        apply_control_delta(state, delta)
 
-    return state, read_control, write_control, calls
+    return state, read_control, enqueue_control_delta, calls
 
 
 def test_pygame_240x320b_event_detect_unknown_command_is_a_noop():
@@ -446,9 +447,9 @@ def test_pygame_240x320b_event_detect_opens_menu_and_renders_it(monkeypatch):
     import display._base_fixed as base_fixed_mod
 
     with _fixed_driver_guarded(mod_320b) as (d, mock_os_system):
-        _state, read_control, write_control, _calls = _fake_control_pair(Mode.STOP)
+        _state, read_control, enqueue_control_delta, _calls = _fake_control_pair(Mode.STOP)
         monkeypatch.setattr(base_fixed_mod, "read_control", read_control)
-        monkeypatch.setattr(base_fixed_mod, "write_control", write_control)
+        monkeypatch.setattr(base_fixed_mod, "enqueue_control_delta", enqueue_control_delta)
 
         pygame.init()
         try:

@@ -17,7 +17,6 @@
 import time
 
 from common.common import (  # Common Library for writing settings
-    WriteKind,
     convert_settings_units,
     set_nested_key_value,
     read_wizard,
@@ -31,7 +30,7 @@ from common.datastore_accessors import (
     set_updater_install_status,
     read_control,
     read_settings,
-    write_control,
+    enqueue_control_delta,
     write_settings,
     load_wizard_install_info,
 )
@@ -321,11 +320,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
     # ends with is what the user comes back to (ruling 6, 2026-07-26).
     # notify_data is array-addressed, so it travels as a notify.replace op
     # rather than a `set` member (common/control_delta.py:34).
-    write_control(
-        control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
-        WriteKind.DELTA,
-        origin="wizard",
-    )
+    enqueue_control_delta(control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]), origin="wizard")
 
     percent = 10
     status = "Updating Settings..."

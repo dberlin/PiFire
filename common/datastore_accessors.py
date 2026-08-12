@@ -13,9 +13,10 @@ Description: Read/write accessors for the SQLite-backed datastore -- the
 ==============================================================================
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+import copy
 import hashlib
 import json
 import logging
@@ -25,12 +26,7 @@ from pathlib import Path
 import sqlite3
 import time
 from common import datastore
-from common.common import (
-    ErrorKind,
-    WriteKind,
-    generate_uuid,
-    strip_null_members,
-)
+from common.common import ErrorKind, generate_uuid
 from common.control_delta import (
     ControlDeltaError,
     apply_control_delta,
@@ -85,7 +81,7 @@ def flush_control():
     for key in ("control:general", "control:command"):
         datastore.delete_blob(key)
     control = default_control()
-    write_control(control, WriteKind.OVERWRITE, origin="common")
+    write_control_snapshot(control, origin="common")
     return control
 
 
@@ -98,34 +94,23 @@ def read_control():
     return _read_json_blob("control:general", default_control)
 
 
-def write_control(control, kind, origin="unknown"):
-    """
-    Write control to SQLite DB.
+def write_control_snapshot(control: Mapping[str, object], *, origin: str) -> None:
+    """Replace the authoritative live control value immediately.
 
-    :param control: for OVERWRITE/MERGE, a control dictionary or partial; for
-                    DELTA, an envelope from common.control_delta.control_delta().
-    :param kind: WriteKind.OVERWRITE writes control:general directly.
-                 WriteKind.MERGE queues a partial change for deep-merge on execute.
-                 WriteKind.DELTA queues a validated intent envelope.
-    :param origin: Source label recorded on queued writes.
+    Snapshot writes are owned by the control process and intentionally bypass
+    the queued intent FIFO. Copy before serialization so this operation has the
+    same caller-ownership contract as the in-memory adapter.
     """
-    if kind is WriteKind.OVERWRITE:
-        _write_json_blob("control:general", control)
-    elif kind is WriteKind.MERGE:
-        control["origin"] = origin
-        SqliteQueue("queue_control_write").push(control)
-    elif kind is WriteKind.DELTA:
-        # Validate HERE, in the writing process: a malformed envelope caught at
-        # drain time surfaces as a control-loop log line in a different process.
-        # Note the asymmetry with MERGE, and keep it: MERGE stamps `origin` into
-        # the caller's dict (observed behaviour the golden fixture records); a
-        # delta envelope is an immutable value, so it is copied first.
-        validate_control_delta(control)
-        payload = dict(control)
-        payload["origin"] = origin
-        SqliteQueue("queue_control_write").push(payload)
-    else:
-        raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
+    del origin
+    _write_json_blob("control:general", copy.deepcopy(dict(control)))
+
+
+def enqueue_control_delta(delta: Mapping[str, object], *, origin: str) -> None:
+    """Validate and enqueue one versioned control delta without aliasing it."""
+    validate_control_delta(delta)
+    payload = copy.deepcopy(dict(delta))
+    payload["origin"] = origin
+    SqliteQueue("queue_control_write").push(payload)
 
 
 def read_pending_control_writes():
@@ -188,7 +173,7 @@ def mpc_calibration_command_revision(control=None, pending_writes=None):
 def queue_mpc_calibration_command(delta, command, origin):
     """Atomically admit one revisioned calibration delta to the control FIFO."""
     validate_control_delta(delta)
-    payload = dict(delta)
+    payload = copy.deepcopy(dict(delta))
     payload["origin"] = origin
     with datastore.transaction() as connection:
         row = connection.execute("SELECT value FROM kv WHERE key = 'control:general'").fetchone()
@@ -213,81 +198,48 @@ def queue_mpc_calibration_command(delta, command, origin):
 
 
 def execute_control_writes():
+    """Apply queued version-1 deltas FIFO, rejecting every other row.
+
+    Each admission decision, live-state replacement, and dequeue happens in
+    one SQLite transaction. Invalid persisted rows are logged and removed
+    without ever mutating the authoritative control value.
     """
-    Execute Control Writes in Queue from SQLite DB.
-
-    Every PiFire writer now queues a DELTA envelope
-    (common/control_delta.py): a statement of what it MEANT rather than the
-    whole control snapshot it happened to read. Nothing is inferred, so nothing
-    is reduced -- the envelope is applied directly to the live blob, and ops
-    inside it are evaluated against whatever earlier writes in this same batch
-    already left.
-
-    WriteKind.MERGE survives as the raw primitive: a partial, null-stripped and
-    deep-merged via SQLite's json_patch(). Nulls are stripped because json_patch
-    implements RFC 7386, where a null MEMBER deletes the key, and the merge
-    contract only ever adds or overwrites. It has no production call site any
-    more (pinned by tests/characterization/test_control_delta_seam.py::
-    test_no_production_writer_still_queues_a_whole_control_dict), and what it
-    does NOT have any more is the three-way merge that used to sit on top of it:
-    reduce_control_patch and merge_notify_data existed to reconstruct a writer's
-    intent by diffing its stale snapshot against a common ancestor. A delta
-    carries that intent outright, so there is nothing left to reconstruct. The
-    primitive itself is pinned by tests/oracle/fixtures/control_merge.json.
-
-    A queued payload carrying ``__control_delta__`` is a DELTA envelope
-    (common/control_delta.py): the writer stated what it meant, so it is applied
-    directly and never reduced. Everything else is a legacy whole-dict partial and
-    takes the three-way-merge path below, unchanged, for as long as any writer
-    still sends one. ``base`` stays the pre-drain ancestor for those patches even
-    when a delta has landed in between -- it is what THEY read.
-
-    :param None
-
-    :return status : 'OK', 'ERROR'
-    """
+    log = logging.getLogger("control")
     while True:
         with datastore.transaction() as conn:
             row = conn.execute("SELECT id, value FROM queue_control_write ORDER BY id LIMIT 1").fetchone()
             if row is None:
                 return "OK"
-            command = json.loads(row[1])
-            control_row = conn.execute("SELECT value FROM kv WHERE key = 'control:general'").fetchone()
-            if control_row is None:
-                control = default_control()
-                conn.execute(
-                    "INSERT INTO kv(key, value) VALUES ('control:general', ?)",
-                    (json.dumps(control),),
-                )
-            else:
-                control = json.loads(control_row[0])
-            if is_control_delta(command):
-                # Admission, dequeue, and live-state replacement share this
-                # write transaction. A revision checker can therefore observe
-                # either the queued command or its applied live value, never
-                # the gap between two independent commits.
+
+            origin = None
+            try:
+                command = json.loads(row[1])
+                origin = command.get("origin") if isinstance(command, Mapping) else None
+                if not is_control_delta(command):
+                    raise ControlDeltaError("unversioned legacy control write")
+                validate_control_delta(command)
+
+                control_row = conn.execute("SELECT value FROM kv WHERE key = 'control:general'").fetchone()
+                control = json.loads(control_row[0]) if control_row is not None else default_control()
                 apply_control_delta(control, command)
-                conn.execute(
-                    "UPDATE kv SET value=? WHERE key='control:general'",
-                    (json.dumps(control),),
-                )
-            else:
-                origin = command.pop("origin", None)
-                stripped = []
-                patch = strip_null_members(command, stripped)
-                if stripped:
-                    logging.getLogger("control").error(
-                        "execute_control_writes: stripped null member(s) %s from MERGE partial "
-                        "(origin=%r); json_patch would delete these keys. Fix the source to stop "
-                        "sending nulls.",
-                        stripped,
-                        origin,
-                    )
-                if patch:
+                if control_row is None:
                     conn.execute(
-                        "UPDATE kv SET value = json_patch(value, ?) WHERE key = 'control:general'",
-                        (json.dumps(patch),),
+                        "INSERT INTO kv(key, value) VALUES ('control:general', ?)",
+                        (json.dumps(control),),
                     )
+                else:
+                    conn.execute(
+                        "UPDATE kv SET value=? WHERE key='control:general'",
+                        (json.dumps(control),),
+                    )
+            except (ControlDeltaError, TypeError, ValueError, KeyError, IndexError, AttributeError) as error:
+                log.error(
+                    "execute_control_writes: rejected queued control write id=%s origin=%r: %s",
+                    row[0],
+                    origin,
+                    error,
+                )
+
             conn.execute("DELETE FROM queue_control_write WHERE id=?", (row[0],))
 
 

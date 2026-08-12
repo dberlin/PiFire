@@ -2,7 +2,6 @@ import json
 import subprocess
 
 import pytest
-from common.common import WriteKind
 from common.modes import Mode
 
 
@@ -131,11 +130,11 @@ def test_status_preserves_idle_null_triplet(ds, client, monkeypatch):
 
 
 def _set_mode(mode):
-    from common.datastore_accessors import read_control, write_control
+    from common.datastore_accessors import read_control, write_control_snapshot
 
     ctrl = read_control()
     ctrl["mode"] = mode
-    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(ctrl, origin="test")
 
 
 def _set_real_hw(value):

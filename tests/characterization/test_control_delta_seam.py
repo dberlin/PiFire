@@ -1,5 +1,5 @@
-"""The drain must handle a queue that mixes legacy whole-dict patches and delta
-envelopes, in push order, for the whole migration."""
+"""Queued control writes are versioned deltas only; persisted legacy rows are
+rejected rather than guessed at startup."""
 
 import json
 
@@ -7,12 +7,10 @@ import pytest
 
 from common import common as c
 from common import datastore_accessors as dsa
-from common.common import WriteKind
 from common.control_delta import CONTROL_DELTA_KEY, control_delta
 from common.datastore_accessors import (
     default_control,
     read_control,
-    write_control,
     write_settings_store,
 )
 from common.defaults import default_settings
@@ -23,73 +21,83 @@ NOW = 1_700_000_000.0
 @pytest.fixture
 def seeded(ds):
     write_settings_store(default_settings())
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test-delta-seam")
+    dsa.write_control_snapshot(default_control(), origin="test-delta-seam")
     c.SqliteQueue("queue_control_write").flush()
     return ds
 
 
 def test_a_delta_is_queued_verbatim_with_an_origin_stamp(seeded):
-    write_control(control_delta(set_values={"mode": "Hold"}), WriteKind.DELTA, origin="app")
+    dsa.enqueue_control_delta(control_delta(set_values={"mode": "Hold"}), origin="app")
     rows = c.datastore.connection().execute("SELECT value FROM queue_control_write ORDER BY id").fetchall()
     assert json.loads(rows[0][0]) == {CONTROL_DELTA_KEY: 1, "set": {"mode": "Hold"}, "origin": "app"}
 
 
 def test_a_delta_write_lands_on_the_blob(seeded):
-    write_control(control_delta(set_values={"mode": "Hold", "primary_setpoint": 225}), WriteKind.DELTA, origin="app")
+    dsa.enqueue_control_delta(
+        control_delta(set_values={"mode": "Hold", "primary_setpoint": 225}),
+        origin="app",
+    )
     dsa.execute_control_writes()
     control = read_control()
     assert control["mode"] == "Hold"
     assert control["primary_setpoint"] == 225
 
 
-def test_a_legacy_whole_dict_write_is_unaffected_by_the_delta_branch(seeded):
-    control = read_control()
-    control["mode"] = "Startup"
-    write_control(control, WriteKind.MERGE, origin="legacy")
+def test_delta_rows_apply_in_fifo_order(seeded):
+    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="first")
+    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 275}), origin="second")
+
     dsa.execute_control_writes()
-    assert read_control()["mode"] == "Startup"
+
+    assert read_control()["primary_setpoint"] == 275
+    assert c.SqliteQueue("queue_control_write").length() == 0
 
 
-def test_a_delta_and_a_legacy_patch_in_one_cycle_apply_in_push_order(seeded):
-    """The MERGE primitive survives; the three-way merge on top of it does not.
+def test_a_malformed_versioned_row_is_rejected_atomically_and_dequeued(seeded, caplog):
+    opening = read_control()
+    queue = c.SqliteQueue("queue_control_write")
+    queue.push({CONTROL_DELTA_KEY: 1, "set": [], "origin": "malformed-writer"})
+    row_id, _ = queue.list_with_ids()[0]
 
-    While both writer styles coexisted, reduce_control_patch kept a legacy
-    patch's stale snapshot from reverting a delta queued ahead of it. That
-    reduction is deleted, so a whole-dict MERGE now applies verbatim and CAN
-    revert an earlier write -- which is exactly why it could only be deleted
-    once every production writer had been converted. That no writer sends one
-    is not an assumption here; it is pinned by
-    test_no_production_writer_still_queues_a_whole_control_dict below.
-    """
-    write_control(control_delta(set_values={"primary_setpoint": 225}), WriteKind.DELTA, origin="delta")
-    stale = read_control()
-    stale["s_plus"] = True
-    write_control(stale, WriteKind.MERGE, origin="legacy")
-    assert c.SqliteQueue("queue_control_write").length() == 2
-    dsa.execute_control_writes()
-    control = read_control()
-    assert control["s_plus"] is True
-    assert control["primary_setpoint"] == stale["primary_setpoint"], (
-        "a raw MERGE applies verbatim now -- no production writer may send one"
+    with caplog.at_level("ERROR", logger="control"):
+        dsa.execute_control_writes()
+
+    assert read_control() == opening
+    assert queue.length() == 0
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        f"id={row_id}" in message
+        and "origin='malformed-writer'" in message
+        and "set must be a mapping, got list" in message
+        for message in messages
     )
 
 
-def test_a_legacy_patch_queued_first_does_not_stop_a_later_delta(seeded):
-    stale = read_control()
-    stale["s_plus"] = True
-    write_control(stale, WriteKind.MERGE, origin="legacy")
-    write_control(control_delta(set_values={"primary_setpoint": 225}), WriteKind.DELTA, origin="delta")
-    dsa.execute_control_writes()
-    control = read_control()
-    assert control["s_plus"] is True
-    assert control["primary_setpoint"] == 225
+def test_an_unversioned_legacy_row_is_rejected_dequeued_and_logged(seeded, caplog):
+    opening = read_control()
+    queue = c.SqliteQueue("queue_control_write")
+    queue.push({"mode": "Startup", "origin": "legacy-web"})
+    row_id, _ = queue.list_with_ids()[0]
+
+    with caplog.at_level("ERROR", logger="control"):
+        dsa.execute_control_writes()
+
+    assert read_control() == opening
+    assert queue.length() == 0
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        f"id={row_id}" in message
+        and "origin='legacy-web'" in message
+        and "unversioned legacy control write" in message
+        for message in messages
+    )
 
 
 def test_two_deltas_restoring_the_opening_value_are_not_confused_with_silence(seeded):
     """Residual 2 at the seam."""
     opening = read_control()["primary_setpoint"]
-    write_control(control_delta(set_values={"primary_setpoint": 225}), WriteKind.DELTA, origin="a")
-    write_control(control_delta(set_values={"primary_setpoint": opening}), WriteKind.DELTA, origin="b")
+    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="a")
+    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": opening}), origin="b")
     dsa.execute_control_writes()
     assert read_control()["primary_setpoint"] == opening
 
@@ -98,15 +106,27 @@ def test_a_delta_on_a_fresh_store_is_not_silently_dropped(ds):
     """Mirrors the seed guard at common/datastore_accessors.py:120-121."""
     write_settings_store(default_settings())
     c.datastore.delete_blob("control:general")
-    write_control(control_delta(set_values={"mode": "Hold"}), WriteKind.DELTA, origin="app")
+    dsa.enqueue_control_delta(control_delta(set_values={"mode": "Hold"}), origin="app")
     dsa.execute_control_writes()
     assert read_control()["mode"] == "Hold"
 
 
-def test_a_future_version_envelope_is_dropped_rather_than_applied(seeded, caplog):
-    c.SqliteQueue("queue_control_write").push({CONTROL_DELTA_KEY: 99, "set": {"mode": "Hold"}, "origin": "future"})
-    dsa.execute_control_writes()
+def test_a_future_version_envelope_is_rejected_and_dequeued(seeded, caplog):
+    queue = c.SqliteQueue("queue_control_write")
+    queue.push({CONTROL_DELTA_KEY: 99, "set": {"mode": "Hold"}, "origin": "future"})
+    row_id, _ = queue.list_with_ids()[0]
+
+    with caplog.at_level("ERROR", logger="control"):
+        dsa.execute_control_writes()
+
     assert read_control()["mode"] != "Hold"
+    assert queue.length() == 0
+    assert any(
+        f"id={row_id}" in record.getMessage()
+        and "origin='future'" in record.getMessage()
+        and "__control_delta__ must be 1, got 99" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def _cmd(*args, origin="test"):
@@ -121,7 +141,7 @@ def _cmd(*args, origin="test"):
 def test_stop_then_pause_in_one_cycle_leaves_the_timer_stopped(seeded):
     control = read_control()
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
-    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     assert _cmd("timer", "stop")["result"] == "OK"
@@ -134,7 +154,7 @@ def test_stop_then_pause_in_one_cycle_leaves_the_timer_stopped(seeded):
 def test_stop_then_resume_in_one_cycle_does_not_bring_back_the_old_end_time(seeded):
     control = read_control()
     control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
-    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     assert _cmd("timer", "stop")["result"] == "OK"
@@ -318,7 +338,7 @@ def test_socket_timer_stop_then_pause_leaves_the_timer_stopped(sio):
     composes here exactly as it does over REST."""
     control = read_control()
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
-    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     payload = json.dumps({"timer_action": {}})
@@ -374,7 +394,7 @@ def test_a_manual_pwm_change_and_a_fan_toggle_in_one_cycle_both_land(seeded):
     the pwm the cycle began with. It now names only change/output."""
     control = read_control()
     control["mode"] = "Manual"
-    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
     assert _cmd("manual", "pwm", "50")["result"] == "OK"
     assert _cmd("manual", "fan", "true")["result"] == "OK"
@@ -400,9 +420,8 @@ def test_a_background_system_write_does_not_hide_a_restore_to_the_opening_value(
     assert _cmd("notify", "Grill", "target", str(opening))["result"] == "OK"
     # A background writer naming only its own slice, exactly as gather_system_info
     # now does.
-    write_control(
+    dsa.enqueue_control_delta(
         control_delta(set_values={"system": {"cpu_temp": 42.0}}),
-        WriteKind.DELTA,
         origin="app-socketio",
     )
     dsa.execute_control_writes()
@@ -410,53 +429,6 @@ def test_a_background_system_write_does_not_hide_a_restore_to_the_opening_value(
     control = read_control()
     assert _notify_entry("Grill", "probe")["target"] == opening
     assert control["system"]["cpu_temp"] == 42.0
-
-
-def test_no_production_writer_still_queues_a_whole_control_dict():
-    """The reduce is gone. Its safety net was that a stale whole dict could not
-    revert an earlier writer; without a whole-dict writer there is nothing to
-    net, and this is what keeps it that way.
-
-    Checked with ast rather than a text scan: `WriteKind.MERGE` still appears in
-    docstrings, in process_command's default `kind=` argument and in a block of
-    commented-out code in notify/mqtt_handler.py, none of which queue anything.
-    What matters is a CALL to write_control whose kind argument is MERGE.
-    """
-    import ast
-    import pathlib
-
-    root = pathlib.Path(__file__).resolve().parents[2]
-    skip = {"tests", ".jj", ".git", ".venv", "node_modules", "web-react"}
-    allowed = {"common/datastore_accessors.py", "controller/runtime/store.py"}
-
-    def _is_merge(node):
-        return (
-            isinstance(node, ast.Attribute)
-            and node.attr == "MERGE"
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "WriteKind"
-        )
-
-    hits = []
-    for path in sorted(root.rglob("*.py")):
-        rel = path.relative_to(root).as_posix()
-        if rel.split("/")[0] in skip or rel in allowed:
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover - not expected in this repo
-            continue
-        for node in ast.walk(tree):
-            if not (
-                isinstance(node, ast.Call)
-                and getattr(node.func, "attr", node.func.__dict__.get("id", None)) in ("write_control",)
-            ):
-                continue
-            args = list(node.args) + [kw.value for kw in node.keywords]
-            if any(_is_merge(a) for a in args):
-                hits.append(f"{rel}:{node.lineno}")
-
-    assert hits == [], f"still queueing whole control dicts: {hits}"
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +461,7 @@ def test_two_commands_in_one_cycle_match_the_same_two_one_cycle_apart(seeded, fi
     """
 
     def _run(drain_between):
-        write_control(default_control(), WriteKind.OVERWRITE, origin="prop")
+        dsa.write_control_snapshot(default_control(), origin="prop")
         c.SqliteQueue("queue_control_write").flush()
         assert _cmd(*first)["result"] == "OK"
         if drain_between:

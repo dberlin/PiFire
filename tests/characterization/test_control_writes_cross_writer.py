@@ -2,8 +2,7 @@
 
 The seam
 --------
-A control write does not land when it is made. It is queued
-(``common/datastore_accessors.py::write_control``) and applied by the control
+A control delta does not land when it is enqueued. It is applied by the control
 loop in ``execute_control_writes``. ``read_control()`` serves the persisted
 ``control:general`` blob and never the pending queue, so two writers inside one
 control cycle both read pre-write state.
@@ -49,11 +48,9 @@ from common.control_delta import control_delta
 from common import api_commands
 from common import common as c
 from common import datastore_accessors as dsa
-from common.common import WriteKind
 from common.datastore_accessors import (
     default_control,
     read_control,
-    write_control,
     write_settings_store,
 )
 from common.defaults import default_settings
@@ -65,7 +62,7 @@ FIXED_NOW = 1_700_000_000.0
 def seeded(ds):
     """A datastore with default settings + a freshly written control blob."""
     write_settings_store(default_settings())
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test-cross-writer")
+    dsa.write_control_snapshot(default_control(), origin="test-cross-writer")
     c.SqliteQueue("queue_control_write").flush()
     return ds
 
@@ -174,9 +171,8 @@ def test_post_api_control_whole_array_is_a_replace_and_says_so(seeded):
 
     assert _start_timer("900", "keep_warm")["result"] == "OK"
 
-    write_control(
+    dsa.enqueue_control_delta(
         control_delta(ops=[{"op": "notify.replace", "entries": client_view["notify_data"]}]),
-        WriteKind.DELTA,
         origin="app",
     )
 
@@ -199,7 +195,7 @@ def test_post_api_control_per_entry_edit_does_not_eat_a_concurrent_command(seede
     """
     assert _start_timer("900", "keep_warm")["result"] == "OK"
 
-    write_control(
+    dsa.enqueue_control_delta(
         control_delta(
             ops=[
                 {
@@ -210,7 +206,6 @@ def test_post_api_control_per_entry_edit_does_not_eat_a_concurrent_command(seede
                 }
             ]
         ),
-        WriteKind.DELTA,
         origin="app",
     )
 
@@ -236,9 +231,8 @@ def test_background_full_control_write_does_not_eat_a_notify_write(seeded):
     # gather_system_info's shape: it names only the slice it assigns, so it has
     # nothing stale to impose. It used to queue the whole dict from a pre-queue
     # read and revert whatever the user had just armed.
-    write_control(
+    dsa.enqueue_control_delta(
         control_delta(set_values={"system": {"cpu_temp": 42.0}}),
-        WriteKind.DELTA,
         origin="app-socketio",
     )
 
@@ -250,7 +244,7 @@ def test_background_full_control_write_does_not_eat_a_notify_write(seeded):
 
 
 # ---------------------------------------------------------------------------
-# Contract the merge must preserve.
+# Contracts explicit delta operations must preserve.
 # ---------------------------------------------------------------------------
 
 
@@ -272,7 +266,10 @@ def test_a_lone_writer_still_replaces_the_array_exactly(seeded):
     control = read_control()
     for e in control["notify_data"]:
         e["req"] = True
-    write_control({"notify_data": control["notify_data"]}, WriteKind.MERGE, origin="app")
+    dsa.enqueue_control_delta(
+        control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
+        origin="app",
+    )
     dsa.execute_control_writes()
     assert all(e["req"] is True for e in read_control()["notify_data"])
 
@@ -286,7 +283,10 @@ def test_writer_that_drops_entries_still_removes_them(seeded):
     """
     control = read_control()
     kept = [e for e in control["notify_data"] if e["label"] != "Probe3"]
-    write_control({"notify_data": kept}, WriteKind.MERGE, origin="app")
+    dsa.enqueue_control_delta(
+        control_delta(ops=[{"op": "notify.replace", "entries": kept}]),
+        origin="app",
+    )
     dsa.execute_control_writes()
     labels = {e["label"] for e in read_control()["notify_data"]}
     assert "Probe3" not in labels
@@ -296,16 +296,17 @@ def test_writer_that_drops_entries_still_removes_them(seeded):
 def test_writer_that_adds_an_entry_still_adds_it(seeded):
     control = read_control()
     control["notify_data"].append({"label": "Probe9", "type": "probe", "req": True, "target": 99})
-    write_control({"notify_data": control["notify_data"]}, WriteKind.MERGE, origin="app")
+    dsa.enqueue_control_delta(
+        control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
+        origin="app",
+    )
     dsa.execute_control_writes()
     assert _entry(read_control(), "Probe9", "probe")["target"] == 99
 
 
 # ===========================================================================
-# The rest of the control dict. notify_data was the loudest instance of this
-# bug, not the only one: nearly every MERGE call site queues the WHOLE control
-# dict it read (`write_control(control, WriteKind.MERGE)`), so a stale copy of
-# every scalar flag and every nested object rides along with each write.
+# The rest of the control dict. Every writer names only the members it intends
+# to change, so stale snapshots cannot ride along with unrelated writes.
 # ===========================================================================
 
 
@@ -420,9 +421,8 @@ def test_background_system_info_write_does_not_eat_a_scalar_command(seeded):
     """
     assert _command("psp", "225")["result"] == "OK"
 
-    write_control(
+    dsa.enqueue_control_delta(
         control_delta(set_values={"system": {"cpu_temp": 42.0, "cpu_throttled": False}}),
-        WriteKind.DELTA,
         origin="app-socketio",
     )
 
@@ -435,7 +435,7 @@ def test_background_system_info_write_does_not_eat_a_scalar_command(seeded):
 
 
 # ---------------------------------------------------------------------------
-# Contract the whole-dict merge must preserve.
+# Contract scalar deltas must preserve.
 # ---------------------------------------------------------------------------
 
 
@@ -461,7 +461,7 @@ def test_a_partial_patch_never_deletes_unmentioned_keys(seeded):
     This is the asymmetry with notify_data: arrays travel whole, so a missing
     ELEMENT is a deletion; dicts travel partial, so a missing KEY is silence.
     """
-    write_control({"s_plus": True}, WriteKind.MERGE, origin="app")
+    dsa.enqueue_control_delta(control_delta(set_values={"s_plus": True}), origin="app")
     dsa.execute_control_writes()
     control = read_control()
     assert control["s_plus"] is True
@@ -469,7 +469,10 @@ def test_a_partial_patch_never_deletes_unmentioned_keys(seeded):
 
 
 def test_a_writer_may_add_a_key_the_ancestor_never_had(seeded):
-    write_control({"system": {"cpu_temp": 51.5}}, WriteKind.MERGE, origin="app")
+    dsa.enqueue_control_delta(
+        control_delta(set_values={"system": {"cpu_temp": 51.5}}),
+        origin="app",
+    )
     dsa.execute_control_writes()
     assert read_control()["system"]["cpu_temp"] == 51.5
 

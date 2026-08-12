@@ -63,128 +63,79 @@ def test_sqlite_append_metric_without_metrics_does_not_crash(store):
     assert "starttime" in current  # populated from default_metrics() + starttime
 
 
-def test_sqlite_control_write_semantics_parity(store):
-    # Proves SqliteStore's OVERWRITE / MERGE / execute_control_writes match the
-    # deferred deep-merge semantics that InMemoryStore replicates, against a
-    # real (temp-DB) SQLite backend.
-    from common.common import WriteKind
-
-    store.write_control({"mode": "Stop", "nested": {"x": 1, "y": 2}}, WriteKind.OVERWRITE)
-    assert store.read_control() == {"mode": "Stop", "nested": {"x": 1, "y": 2}}
-    # MERGE is deferred until execute_control_writes
-    store.write_control({"nested": {"x": 9}}, WriteKind.MERGE, origin="test")
-    assert store.read_control()["nested"] == {"x": 1, "y": 2}
-    store.execute_control_writes()
-    # deep-merged: x replaced, y preserved, mode untouched, origin stripped
-    assert store.read_control()["nested"] == {"x": 9, "y": 2}
-    assert store.read_control()["mode"] == "Stop"
-    assert "origin" not in store.read_control()
-
-
-def test_control_merge_null_handling_parity(store):
-    # SqliteStore (real json_patch) and InMemoryStore (deep_update) must agree on
-    # null handling: dict-nested nulls are ignored (key kept), list-nested nulls
-    # are preserved. This is the contract that keeps the two backends swappable.
-    from common.common import WriteKind
-    from controller.runtime.store import InMemoryStore
-
-    seed = {"mode": "Stop", "manual": {"change": "pwm"}, "notify_data": [{"eta": 0}]}
-    partial = {"mode": None, "primary_setpoint": 275, "manual": {"change": None}, "notify_data": [{"eta": None}]}
-    expected = {
-        "mode": "Stop",  # client null ignored
-        "primary_setpoint": 275,  # non-null applied
-        "manual": {"change": "pwm"},  # dict-nested null ignored, key kept
-        "notify_data": [{"eta": None}],  # list replaced atomically, null preserved
-    }
-
-    mem = InMemoryStore()
-    for st in (store, mem):
-        st.write_control(dict(seed), WriteKind.OVERWRITE)
-        st.write_control(dict(partial), WriteKind.MERGE, origin="app")
-        st.execute_control_writes()
-        assert st.read_control() == expected
-
-
-def test_notify_data_cross_writer_delta_parity(store):
-    # SqliteStore and InMemoryStore must agree that two writers in ONE cycle,
-    # each addressing a DIFFERENT notify_data entry with a notify.set op, both
-    # survive. This is the cross-process seam: the web process queues, the
-    # control process drains, and the two stores are swappable only if they
-    # resolve identically.
-    from common.common import WriteKind
+def test_control_delta_fifo_and_snapshot_bypass_parity(store):
     from common.control_delta import control_delta
     from controller.runtime.store import InMemoryStore
 
-    base = [
-        {"label": "Grill", "type": "probe", "req": False, "target": 0},
-        {"label": "Grill", "type": "probe_limit_high", "req": False, "target": 0},
-        {"label": "Timer", "type": "timer", "req": False, "shutdown": False},
-    ]
-    expected = [
-        {"label": "Grill", "type": "probe", "req": True, "target": 203},
-        {"label": "Grill", "type": "probe_limit_high", "req": False, "target": 0},
-        {"label": "Timer", "type": "timer", "req": True, "shutdown": True},
-    ]
-
-    arm_probe = control_delta(
-        ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"req": True, "target": 203}}]
-    )
-    arm_timer = control_delta(
-        ops=[{"op": "notify.set", "label": "Timer", "type": "timer", "fields": {"req": True, "shutdown": True}}]
-    )
-
     for st in (store, InMemoryStore()):
-        st.write_control({"mode": "Stop", "notify_data": [dict(e) for e in base]}, WriteKind.OVERWRITE)
-        st.write_control(arm_probe, WriteKind.DELTA, origin="app")
-        st.write_control(arm_timer, WriteKind.DELTA, origin="app-socketio")
+        st.write_control_snapshot({"mode": "Stop", "primary_setpoint": 100}, origin="seed")
+        st.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="first")
+        st.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 275}), origin="second")
+
+        assert st.read_control() == {"mode": "Stop", "primary_setpoint": 100}
+
+        st.write_control_snapshot({"mode": "Startup", "primary_setpoint": 150}, origin="control")
+        assert st.read_control() == {"mode": "Startup", "primary_setpoint": 150}
+
         st.execute_control_writes()
-        assert st.read_control()["notify_data"] == expected
+        assert st.read_control() == {"mode": "Startup", "primary_setpoint": 275}
 
 
-def test_whole_dict_cross_writer_delta_parity(store):
-    # The same seam for every member of the control dict rather than just the
-    # notify_data array. Each writer names ONLY what it changed, so nothing it
-    # never touched can be imposed -- which is what makes the order below
-    # irrelevant and the two backends agree.
-    from common.common import WriteKind
+def test_control_writers_copy_their_callers_inputs_on_both_stores(store):
     from common.control_delta import control_delta
     from controller.runtime.store import InMemoryStore
 
-    base = {
-        "mode": "Stop",
-        "updated": False,
-        "s_plus": False,
-        "primary_setpoint": 0,
-        "settings_update": False,
-        "manual": {"change": False, "output": False, "pwm": 100},
-        "timer": {"start": 0, "paused": 0, "end": 0},
-    }
-    expected = {
-        "mode": "Hold",
-        "updated": True,
-        "s_plus": True,
-        "primary_setpoint": 225,
-        "settings_update": True,
-        "manual": {"change": "fan", "output": True, "pwm": 100},
-        "timer": {"start": 500.0, "paused": 0, "end": 1100.0},
-    }
-
-    writes = [
-        control_delta(set_values={"mode": "Hold", "primary_setpoint": 225, "updated": True}),
-        control_delta(set_values={"s_plus": True}),
-        control_delta(set_values={"settings_update": True}),
-        control_delta(set_values={"manual": {"change": "fan", "output": True}}),
-        # `timer` may not travel under `set` -- it is a coupled value object, so
-        # it is expressed as an op the drain evaluates against live state.
-        control_delta(ops=[{"op": "timer.start_or_resume", "at": 500.0, "seconds": 600}]),
-    ]
-
     for st in (store, InMemoryStore()):
-        st.write_control(copy.deepcopy(base), WriteKind.OVERWRITE)
-        for envelope in writes:
-            st.write_control(envelope, WriteKind.DELTA, origin="parity")
+        snapshot = {"mode": "Hold", "manual": {"pwm": 50}}
+        st.write_control_snapshot(snapshot, origin="control")
+        snapshot["manual"]["pwm"] = 99
+
+        delta = control_delta(set_values={"manual": {"pwm": 60}})
+        st.enqueue_control_delta(delta, origin="display")
+        delta_set = delta["set"]
+        assert isinstance(delta_set, dict)
+        manual = delta_set["manual"]
+        assert isinstance(manual, dict)
+        manual["pwm"] = 100
+
+        assert st.read_control()["manual"]["pwm"] == 50
         st.execute_control_writes()
-        assert st.read_control() == expected
+        assert st.read_control()["manual"]["pwm"] == 60
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ({"__control_delta__": 1, "set": []}, "set must be a mapping, got list"),
+        ({"mode": "Startup"}, "unversioned legacy control write"),
+    ],
+)
+def test_invalid_queued_control_rows_are_rejected_and_dequeued_with_store_parity(store, caplog, payload, reason):
+    from common.sqlite_queue import SqliteQueue
+    from controller.runtime.store import InMemoryStore
+
+    stores = (store, InMemoryStore())
+    for st in stores:
+        st.write_control_snapshot({"mode": "Stop", "primary_setpoint": 100}, origin="seed")
+        queued = copy.deepcopy(payload)
+        queued["origin"] = "persisted-writer"
+        if st is store:
+            SqliteQueue("queue_control_write").push(queued)
+        else:
+            st._write_queue.append(queued)
+
+        with caplog.at_level("ERROR", logger="control"):
+            st.execute_control_writes()
+
+        assert st.read_control() == {"mode": "Stop", "primary_setpoint": 100}
+        if st is store:
+            assert SqliteQueue("queue_control_write").length() == 0
+        else:
+            assert not st._write_queue
+
+    matching = [record.getMessage() for record in caplog.records if reason in record.getMessage()]
+    assert len(matching) == len(stores)
+    assert all("origin='persisted-writer'" in message for message in matching)
 
 
 def test_sqlite_update_metrics_amend_last_parity(store):
@@ -234,7 +185,6 @@ def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
     applies the same envelope to its dict. A drift between them is a
     cross-process bug that would only show on real hardware.
     """
-    from common.common import WriteKind
     from common.control_delta import control_delta
     from controller.runtime.store import InMemoryStore
 
@@ -257,8 +207,8 @@ def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
 
     results = []
     for st in (store, InMemoryStore()):
-        st.write_control(copy.deepcopy(base), WriteKind.OVERWRITE)
-        st.write_control(envelope, WriteKind.DELTA, origin="parity")
+        st.write_control_snapshot(copy.deepcopy(base), origin="seed")
+        st.enqueue_control_delta(envelope, origin="parity")
         st.execute_control_writes()
         results.append(st.read_control())
 
@@ -345,3 +295,97 @@ def test_read_current_snapshot_parity(store):
     assert real.food == fake_snap.food == {"PinkProbe": 140}
     assert real.primary_setpoint == fake_snap.primary_setpoint == 225
     assert real.last_readings.keys() == fake_snap.last_readings.keys()
+
+
+def test_status_initialization_and_snapshot_ownership_parity(store):
+    from common import datastore_accessors as dsa
+    from controller.runtime.store import InMemoryStore
+
+    settings = store.read_settings()
+    settings["globals"]["units"] = "C"
+    settings["modules"]["dist"] = "ultrasonic"
+    dsa.write_settings(settings)
+    pellet_db = store.read_pellet_db()
+    pellet_db["current"]["hopper_level"] = 37
+    store.write_pellet_db(pellet_db)
+
+    statuses = []
+    for st in (store, InMemoryStore(settings=settings, pellet_db=pellet_db)):
+        status = st.init_status()
+        statuses.append(copy.deepcopy(status))
+        assert status["units"] == "C"
+        assert status["hopper_level_enabled"] is True
+        assert status["hopper_level"] == 37
+        assert st.read_status() == status
+
+        status["outpins"]["fan"] = True
+        assert st.read_status()["outpins"]["fan"] is False
+
+    assert statuses[0] == statuses[1]
+
+
+def test_history_write_and_flush_coupling_parity(store):
+    from common import datastore_accessors as dsa
+    from controller.runtime.store import InMemoryStore
+
+    settings = _settings_with_probe_map(store)
+    dsa.write_settings(settings)
+    history_projections = []
+
+    for st in (store, InMemoryStore(settings=settings)):
+        current_input = copy.deepcopy(_PARITY_IN_DATA)
+        history_input = {
+            **copy.deepcopy(_PARITY_IN_DATA),
+            "ext_data": {"mode": "Hold", "cycle": 3},
+        }
+        st.write_current(current_input)
+        st.append_metric()
+        st.write_history(history_input, maxsizelines=10, ext_data=True)
+
+        persisted = st.read_history()
+        assert len(persisted) == 1
+        row = persisted[0]
+        if "probe_history" in row:
+            history_projections.append(
+                {
+                    "P": row["probe_history"]["primary"],
+                    "F": row["probe_history"]["food"],
+                    "AUX": row["probe_history"]["aux"],
+                    "PSP": row["primary_setpoint"],
+                    "NT": row["notify_targets"],
+                    "EXD": row["ext_data"],
+                }
+            )
+        else:
+            history_projections.append(
+                {key: row[key] for key in ("P", "F", "AUX", "PSP", "NT", "EXD")}
+            )
+        history_input["probe_history"]["primary"]["PitProbe"] = 999
+        history_input["ext_data"]["cycle"] = 99
+        assert st.read_history() == persisted
+
+        st.flush_history()
+        assert st.read_history() == []
+        assert st.read_all_metrics() == []
+        assert st.read_current()["P"] == {"PitProbe": 0}
+        assert st.read_current()["F"] == {"PinkProbe": 0}
+        assert st.read_current()["LAST"] == {}
+
+    assert history_projections[0] == history_projections[1]
+
+
+def test_error_owner_read_flush_and_all_order_parity(store):
+    from common.common import ErrorKind
+    from controller.runtime.store import InMemoryStore
+
+    for st in (store, InMemoryStore()):
+        st.write_errors(ErrorKind.CONTROL, ["control-a", "control-b"])
+        st.write_errors(ErrorKind.DISPLAY, ["display-a"])
+
+        assert st.read_errors(ErrorKind.CONTROL) == ["control-a", "control-b"]
+        assert st.read_errors(ErrorKind.ALL) == ["control-a", "control-b", "display-a"]
+        assert st.flush_errors(ErrorKind.CONTROL) == []
+        assert st.read_errors(ErrorKind.ALL) == ["display-a"]
+
+        with pytest.raises(ValueError, match="read-only selector"):
+            st.write_errors(ErrorKind.ALL, ["not-owned"])

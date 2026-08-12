@@ -7,25 +7,23 @@ Playwright/live server needed for plain JSON POSTs), wrapped in a local
 `client` fixture built on the shared `ds` fixture (tests/conftest.py) for an
 isolated temp-SQLite datastore per test.
 
-`write_control(..., WriteKind.MERGE, ...)` (used by `save_settings_and_flag_update`,
-same as the existing `_api_post_control` action) only *queues* the partial --
-see tests/web/conftest.py's `drain_control_writes()` docs and
-test_page_api.py's `test_post_control_merges_via_write_control`, which drains
-via `execute_control_writes()` before reading back. This module does the same
-directly (no live_server here, so no `drain_control_writes()` helper import).
+`save_settings_and_flag_update` queues a validated control delta, just like the
+existing `_api_post_control` action. See tests/web/conftest.py's
+`drain_control_writes()` docs and test_page_api.py's POST-control coverage,
+which drains via `execute_control_writes()` before reading back. This module
+does the same directly (no live_server here, so no helper import).
 """
 
 import json
 
 import pytest
 
-from common.common import WriteKind
 from common.common import display_sleep_timeout
 from common.datastore_accessors import (
     execute_control_writes,
     read_control,
     read_settings,
-    write_control,
+    write_control_snapshot,
     write_settings,
 )
 
@@ -44,7 +42,7 @@ def test_settings_update_persists_delta_and_sets_flag(client):
 def test_settings_update_empty_flags_sets_none(client):
     ctrl = read_control()
     ctrl["settings_update"] = False
-    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(ctrl, origin="test")
     body = {"settings": {"globals": {"grill_name": "Smokey"}}, "flags": []}
     resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
     assert resp.status_code == 200
@@ -58,7 +56,7 @@ def test_settings_update_empty_flags_sets_none(client):
 def test_settings_update_normalizes_legacy_falsy_flags_to_empty(client, flags):
     ctrl = read_control()
     ctrl["settings_update"] = False
-    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(ctrl, origin="test")
 
     response = client.post(
         "/api/settings_update",
@@ -288,7 +286,7 @@ def _settings_update(client, body):
 def _reset_settings_update_flag():
     ctrl = read_control()
     ctrl["settings_update"] = False
-    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(ctrl, origin="test")
 
 
 def test_settings_update_table_save_flag_does_not_alter_stored_settings(client):

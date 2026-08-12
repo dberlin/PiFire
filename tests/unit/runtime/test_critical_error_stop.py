@@ -14,7 +14,7 @@ THE REQUEST PATH these tests model, key by key:
                                                   arglist=["mode","stop",...])
       -> common/api_commands.py _cmd_set_mode: control_delta(
              set_values={"mode": Mode.STOP, "updated": True})
-      -> write_control(delta, WriteKind.DELTA)   [queue_control_write]
+      -> enqueue_control_delta(delta)   [queue_control_write]
       -> controller.tick(): store.execute_control_writes()   (controller.py:297)
       -> controller.tick(): self.control = store.read_control()          (:298)
       -> the dispatch gate reads self.control["mode"]                    (:394)
@@ -28,7 +28,6 @@ apply it, so both ends of that seam are exercised rather than assumed.
 
 import pytest
 
-from common.common import WriteKind
 from common.control_delta import control_delta
 from common.modes import Mode
 from controller.runtime.clock import ManualClock
@@ -60,9 +59,8 @@ def _controller(monkeypatch, *, mode, critical_error):
 
 def _request_mode(store, mode):
     """Queue exactly what `_cmd_set_mode` queues for `/api/set/mode/<mode>`."""
-    store.write_control(
+    store.enqueue_control_delta(
         control_delta(set_values={"mode": mode, "updated": True}),
-        WriteKind.DELTA,
         origin="api",
     )
 

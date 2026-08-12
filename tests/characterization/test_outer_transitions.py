@@ -19,7 +19,6 @@ completed one still does. Both re-patch os through the recorder first and
 assert on what it recorded, which is the only way to test a halt at all.
 """
 
-from common.common import WriteKind
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.characterization._controller_harness import (
     make_controller,
@@ -51,7 +50,7 @@ def test_next_mode_transitions_when_not_updated(monkeypatch):
     c, store = build_controller(monkeypatch)
     control = store.read_control()
     control["updated"] = False
-    store.write_control(control, WriteKind.OVERWRITE, origin="test")
+    store.write_control_snapshot(control, origin="test")
     c.next_mode("Hold", setpoint=225)
     out = store.read_control()
     assert out["mode"] == "Hold"
@@ -64,7 +63,7 @@ def test_next_mode_is_noop_when_already_updated(monkeypatch):
     control = store.read_control()
     control["updated"] = True
     control["mode"] = "Error"
-    store.write_control(control, WriteKind.OVERWRITE, origin="test")
+    store.write_control_snapshot(control, origin="test")
     c.next_mode("Smoke")  # guard: must NOT overwrite an already-requested transition
     out = store.read_control()
     assert out["mode"] == "Error"  # safety trip survives
@@ -75,7 +74,7 @@ def test_next_mode_forces_setpoint_zero_when_not_hold(monkeypatch):
     control = store.read_control()
     control["updated"] = False
     control["primary_setpoint"] = 300
-    store.write_control(control, WriteKind.OVERWRITE, origin="test")
+    store.write_control_snapshot(control, origin="test")
     c.next_mode("Smoke", setpoint=225)
     out = store.read_control()
     assert out["mode"] == "Smoke"
@@ -121,7 +120,7 @@ def _install_recipe(monkeypatch, c, store, steps, *, units="F", exists=True):
 
     control = store.read_control()
     control["recipe"]["filename"] = "/tmp/fake_recipe.json"
-    store.write_control(control, WriteKind.OVERWRITE, origin="test")
+    store.write_control_snapshot(control, origin="test")
 
     monkeypatch.setattr(controller_mod, "exists", lambda p: exists)
 
@@ -183,7 +182,7 @@ def test_recipe_reignite_during_step_handshake_then_retries_step(monkeypatch):
             state["tripped"] = True
             cur["mode"] = "Reignite"
             cur["updated"] = True
-            store.write_control(cur, WriteKind.OVERWRITE, origin="test")
+            store.write_control_snapshot(cur, origin="test")
         elif mode == "Reignite":
             # Captured AFTER the handshake write (clear updated, set Recipe), BEFORE retry.
             handshake["mode"] = cur["mode"]
@@ -209,7 +208,7 @@ def test_recipe_cancel_on_mode_change_leaves_requested_mode(monkeypatch):
         cur = store.read_control()
         cur["mode"] = "Monitor"
         cur["updated"] = True
-        store.write_control(cur, WriteKind.OVERWRITE, origin="test")
+        store.write_control_snapshot(cur, origin="test")
 
     c.work_cycle = _wc
     c.recipe_mode(start_step=0)
@@ -316,7 +315,7 @@ def test_reignite_dispatch_carries_last_state_and_setpoint(monkeypatch):
     )
     control = store.read_control()
     control["safety"]["reignitelaststate"] = "Hold"
-    store.write_control(control, WriteKind.OVERWRITE, origin="test")
+    store.write_control_snapshot(control, origin="test")
     calls = _spy_dispatch(c)
     c.tick()
     out = store.read_control()
@@ -339,7 +338,7 @@ def _abort_shutdown_mid_cycle(c, store, to_mode):
         control = store.read_control()
         control["mode"] = to_mode
         control["updated"] = True
-        store.write_control(control, WriteKind.OVERWRITE, origin="test")
+        store.write_control_snapshot(control, origin="test")
 
     c.work_cycle = fake_work_cycle
 

@@ -13,7 +13,6 @@ the manual-override block) and threaded through the whole tick.
 
 import logging
 
-from common.common import WriteKind
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
@@ -253,7 +252,7 @@ class ControlMode:
             and self.state.manual_override["fan"] < now
         ):
             control["duty_cycle"] = settings["pwm"]["max_duty_cycle"]
-            self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            self.ctx.store.write_control_snapshot(control, origin="control")
             grill_platform.set_duty_cycle(control["duty_cycle"])
             _control.eventLogger.debug("Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle")
 
@@ -316,7 +315,7 @@ class ControlMode:
                     )
                     profile_selected = clamped
                     control["smartstart"]["profile_selected"] = profile_selected
-                    self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                    self.ctx.store.write_control_snapshot(control, origin="control")
 
                 profile = profiles[profile_selected]
                 _ct, startup_timer, _mbits = profile_cycle(profile, settings["cycle_data"])
@@ -375,7 +374,7 @@ class ControlMode:
                                 break
 
                 if recipe_trigger_set:
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                    ctx.store.write_control_snapshot(control, origin="control")
                 else:
                     _control.eventLogger.warning("No trigger set for Hold/Smoke mode in recipe.")
 
@@ -391,7 +390,7 @@ class ControlMode:
         # Check if user changed settings and reload
         if control["settings_update"]:
             control["settings_update"] = False
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
             if self.settings["globals"]["debug_mode"]:
                 _control.eventLogger.setLevel(logging.DEBUG)
@@ -405,7 +404,7 @@ class ControlMode:
             full = self.settings["pelletlevel"]["full"]
             dist_device.update_distances(empty, full)
             control["distance_update"] = False
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            ctx.store.write_control_snapshot(control, origin="control")
 
         # A requested check ASKS the sampling thread for a fresh reading and
         # returns immediately -- mid-cook, this loop is timing the auger and
@@ -414,7 +413,7 @@ class ControlMode:
         # deliberately not restamped here.
         if control["hopper_check"]:
             control["hopper_check"] = False
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            ctx.store.write_control_snapshot(control, origin="control")
             dist_device.request_sample()
             _control.eventLogger.info("Hopper Level Check requested.")
 
@@ -521,7 +520,7 @@ class ControlMode:
                 # identical, and a null here would be a delete under json_patch merge.
                 control["manual"]["change"] = False
                 control["manual"]["output"] = False
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                ctx.store.write_control_snapshot(control, origin="control")
 
     def _build_status_data(self, control, pelletdb, start_time):
         """Build the per-0.5s display status dict (extracted from run()). Returns a
@@ -598,7 +597,7 @@ class ControlMode:
                 if control["recipe"]["step_data"]["notify"]:
                     ctx.notifications.send("Recipe_Step_Message")
                     control["recipe"]["step_data"]["notify"] = False
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                    ctx.store.write_control_snapshot(control, origin="control")
                 # Continue until 'pause' variable is cleared
         return False
 
@@ -624,7 +623,7 @@ class ControlMode:
         self.control = control
         pelletdb = ctx.store.read_pellet_db()
         control["hopper_check"] = True
-        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+        ctx.store.write_control_snapshot(control, origin="control")
 
         _control.eventLogger.info(f"{mode} Mode started.")
 
@@ -736,7 +735,7 @@ class ControlMode:
             if control["probe_profile_update"]:
                 self.settings = ctx.store.read_settings()
                 control["probe_profile_update"] = False
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                ctx.store.write_control_snapshot(control, origin="control")
                 probe_complex.update_probe_profiles(self.settings["probe_settings"]["probe_map"]["probe_info"])
 
             # Get probe device info for frontend

@@ -3,7 +3,8 @@ the control process reads it. Both ends are pinned here."""
 
 import pytest
 
-from common.common import WriteKind
+from common import datastore_accessors as dsa
+from common.sqlite_queue import SqliteQueue
 from common.control_delta import (
     CONTROL_DELTA_KEY,
     CONTROL_DELTA_VERSION,
@@ -15,9 +16,32 @@ from common.control_delta import (
 )
 
 
-def test_write_kind_has_a_delta_member_distinct_from_merge():
-    assert WriteKind.DELTA is not WriteKind.MERGE
-    assert WriteKind.DELTA is not WriteKind.OVERWRITE
+def test_enqueue_control_delta_validates_and_copies_before_queueing(ds):
+    envelope = control_delta(set_values={"manual": {"pwm": 50}})
+
+    dsa.enqueue_control_delta(envelope, origin="display")
+    queued_set = envelope["set"]
+    assert isinstance(queued_set, dict)
+    manual = queued_set["manual"]
+    assert isinstance(manual, dict)
+    manual["pwm"] = 99
+
+    assert SqliteQueue("queue_control_write").list() == [
+        {
+            CONTROL_DELTA_KEY: CONTROL_DELTA_VERSION,
+            "set": {"manual": {"pwm": 50}},
+            "origin": "display",
+        }
+    ]
+
+
+def test_enqueue_control_delta_rejects_an_invalid_envelope_without_queueing(ds):
+    malformed = {CONTROL_DELTA_KEY: CONTROL_DELTA_VERSION, "set": []}
+
+    with pytest.raises(ControlDeltaError, match="set must be a mapping, got list"):
+        dsa.enqueue_control_delta(malformed, origin="display")
+
+    assert SqliteQueue("queue_control_write").length() == 0
 
 
 def test_a_set_only_delta_has_exactly_the_expected_wire_shape():

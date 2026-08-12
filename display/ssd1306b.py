@@ -25,10 +25,9 @@ from luma.core.interface.serial import i2c
 from luma.core.render import canvas
 from luma.oled.device import ssd1306
 from PIL import Image, ImageFont
-from common.common import WriteKind  # Common Library for WebUI and Control Program
 from common.modes import Mode
 from common.control_delta import control_delta
-from common.datastore_accessors import read_control, write_control
+from common.datastore_accessors import enqueue_control_delta, read_control
 from gpiozero import Button
 
 """
@@ -379,17 +378,13 @@ class Display:
                 if self.menu["current"]["option"] > maxTemp:
                     self.menu["current"]["option"] = minTemp  # Roll over to minTemp if you go greater than 500.
             elif action == "ENTER":
-                write_control(
-                    control_delta(
-                        set_values={
-                            "primary_setpoint": self.menu["current"]["option"],
-                            "updated": True,
-                            "mode": Mode.HOLD,
-                        }
-                    ),
-                    WriteKind.DELTA,
-                    origin="display",
-                )
+                enqueue_control_delta(control_delta(
+                    set_values={
+                        "primary_setpoint": self.menu["current"]["option"],
+                        "updated": True,
+                        "mode": Mode.HOLD,
+                    }
+                ), origin="display")
                 self.menu["current"]["mode"] = "none"
                 self.menu["current"]["option"] = 0
                 self.menu_active = False
@@ -438,32 +433,20 @@ class Display:
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    write_control(
-                        control_delta(set_values={"updated": True, "mode": Mode.STARTUP}),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.STARTUP}), origin="display")
                 elif selected == "Monitor":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    write_control(
-                        control_delta(set_values={"updated": True, "mode": Mode.MONITOR}),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.MONITOR}), origin="display")
                 elif selected == "Stop":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    write_control(
-                        control_delta(set_values={"updated": True, "mode": Mode.STOP}),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display")
                 # Active Mode
                 elif selected == "Shutdown":
                     self.menu["current"]["mode"] = "none"
@@ -471,11 +454,7 @@ class Display:
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    write_control(
-                        control_delta(set_values={"updated": True, "mode": Mode.SHUTDOWN}),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.SHUTDOWN}), origin="display")
                 elif selected == "Hold":
                     self.menu["current"]["mode"] = "grill_hold_value"
                     if self.units == "F":
@@ -488,11 +467,7 @@ class Display:
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    write_control(
-                        control_delta(set_values={"updated": True, "mode": Mode.SMOKE}),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.SMOKE}), origin="display")
                 elif selected == "SmokePlus":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
@@ -502,11 +477,7 @@ class Display:
                     # The read stays: this toggles the LIVE value rather than
                     # setting a known one. Only the toggled member is stated.
                     control = read_control()
-                    write_control(
-                        control_delta(set_values={"s_plus": not control["s_plus"]}),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(set_values={"s_plus": not control["s_plus"]}), origin="display")
                 elif selected == "Network":
                     self.display_network()
 

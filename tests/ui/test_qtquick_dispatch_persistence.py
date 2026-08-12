@@ -3,16 +3,15 @@ UI's hamburger menu (display/qml/Menus.js + Actions.js) can send through
 Display._dispatch_command (display/qtquick_flex.py).
 
 The existing test_dispatch_delegates_pmode_to_command_handler in
-test_qtquick_display.py monkeypatches `write_control`/`_command_handler`
-away entirely, so it only proves routing -- never that a command actually
-persists anywhere. These tests run the real dispatch chain against a real
-(isolated, temp-file) SQLite-backed datastore, including draining
+test_qtquick_display.py monkeypatches `enqueue_control_delta` and
+`_command_handler` away entirely, so it only proves routing -- never that a
+command actually persists anywhere. These tests run the real dispatch chain
+against a real (isolated, temp-file) SQLite-backed datastore, including draining
 `queue_control_write` via `execute_control_writes()` -- the same call
-controller/runtime/controller.py's loop makes -- since `WriteKind.MERGE`
-control writes are queued, not applied synchronously. Without that drain
-step, EVERY MERGE-based command (all of them except PMode, which writes
-settings directly) looks like a no-op, which is what makes an ad hoc
-"just call _dispatch_command and read back" check misleading.
+controller/runtime/controller.py's loop makes. Validated control deltas are
+queued, not applied synchronously, so without that drain every delta-based
+command (all of them except PMode, which writes settings directly) looks like a
+no-op.
 """
 
 import os
@@ -21,14 +20,13 @@ import tempfile
 import pytest
 
 from common import datastore
-from common.common import WriteKind
 from common.datastore_accessors import (
     execute_control_writes,
     read_control,
     read_settings,
     init_status,
     read_status,
-    write_control,
+    write_control_snapshot,
     write_settings_store,
     write_status,
 )
@@ -44,7 +42,7 @@ def isolated_store():
     datastore._reset_for_tests(db_path)
     datastore.init()
     write_settings_store(default_settings())
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(default_control(), origin="test")
     init_status()
     yield
     datastore._reset_for_tests(None)

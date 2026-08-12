@@ -24,11 +24,10 @@ def grill_left_stopped(ds):
 
 
 def set_mode(mode):
-    from common.common import WriteKind
     from common.control_delta import control_delta
-    from common.datastore_accessors import execute_control_writes, write_control
+    from common.datastore_accessors import enqueue_control_delta, execute_control_writes
 
-    write_control(control_delta(set_values={"mode": mode}), WriteKind.DELTA, origin="test")
+    enqueue_control_delta(control_delta(set_values={"mode": mode}), origin="test")
     execute_control_writes()
 
 

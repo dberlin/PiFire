@@ -116,7 +116,7 @@ def control_delta(set_values=None, delete_paths=None, ops=None):
 
 
 def is_control_delta(payload):
-    """True when a queued payload is a delta envelope rather than a legacy partial."""
+    """True when a payload declares a control-delta envelope of any version."""
     return isinstance(payload, Mapping) and CONTROL_DELTA_KEY in payload
 
 

@@ -25,7 +25,7 @@ import pytest
 
 import wizard
 from common import datastore_accessors, defaults
-from common.common import WriteKind, read_wizard
+from common.common import read_wizard
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ def _seeded_settings():
 
     control = defaults.default_control()
     control["notify_data"] = defaults.default_notify(settings)
-    datastore_accessors.write_control(control, WriteKind.OVERWRITE, origin="test")
+    datastore_accessors.write_control_snapshot(control, origin="test")
     return settings
 
 

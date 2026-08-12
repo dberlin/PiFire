@@ -16,7 +16,7 @@ Hold, Monitor, Manual) via the harness's capped-probe injection. No scenario
 here can loop indefinitely.
 """
 
-from common.common import WriteKind
+from common.control_delta import control_delta
 from controller.runtime.store import InMemoryStore
 
 from tests.characterization.harness import run_mode
@@ -239,9 +239,8 @@ class _InjectManualPwm:
     def read_probes(self):
         self._reads += 1
         if self._reads == 2:
-            self._store.write_control(
-                {"manual": {"change": "pwm", "pwm": self._pwm}},
-                WriteKind.MERGE,
+            self._store.enqueue_control_delta(
+                control_delta(set_values={"manual": {"change": "pwm", "pwm": self._pwm}}),
                 origin="test-manual-pwm",
             )
         return self._probes.read_probes()

@@ -2,19 +2,20 @@
 global SQLite-backed funcs; InMemoryStore is the hermetic test double."""
 
 import copy
+import logging
 import time
 import threading
+from collections.abc import Mapping
 from abc import ABC, abstractmethod
 from collections import deque
 
-from common.common import (
-    ErrorKind,
-    WriteKind,
-    deep_update,
-    generate_uuid,
-    strip_null_members,
+from common.common import ErrorKind, generate_uuid
+from common.control_delta import (
+    ControlDeltaError,
+    apply_control_delta,
+    is_control_delta,
+    validate_control_delta,
 )
-from common.control_delta import apply_control_delta, is_control_delta, validate_control_delta
 from common.current_schema import build_current, dump_legacy, load_current, snapshot_from, zeroed_current
 from common.defaults import METRIC_COLUMNS, default_control, default_metrics
 
@@ -65,7 +66,9 @@ class Store(ABC):
     @abstractmethod
     def flush_control(self): ...
     @abstractmethod
-    def write_control(self, control, kind, origin="control"): ...
+    def write_control_snapshot(self, control, *, origin="control"): ...
+    @abstractmethod
+    def enqueue_control_delta(self, delta, *, origin="control"): ...
     @abstractmethod
     def execute_control_writes(self): ...
     # --- settings/status/current ---
@@ -142,7 +145,7 @@ class InMemoryStore(Store):
         self._errors = {}
         self._generic = {}
         self._tr = []
-        self._write_queue = deque()  # pending MERGE partials
+        self._write_queue = deque()  # pending versioned control deltas
         self._systemq = _DequeQueue()
         self._systemo = _DequeQueue()
         self._displayq = _DequeQueue()
@@ -161,34 +164,34 @@ class InMemoryStore(Store):
         self._systemo.flush()
         return copy.deepcopy(self._control)
 
-    def write_control(self, control, kind, origin="control"):
-        if kind is WriteKind.OVERWRITE:
-            self._control = copy.deepcopy(control)
-        elif kind is WriteKind.MERGE:
-            self._write_queue.append(copy.deepcopy(control))
-        elif kind is WriteKind.DELTA:
-            # Mirror common.datastore_accessors.write_control: validate in the
-            # writing process, then queue a copy stamped with origin.
-            validate_control_delta(control)
-            payload = copy.deepcopy(dict(control))
-            payload["origin"] = origin
-            self._write_queue.append(payload)
-        else:
-            raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
+    def write_control_snapshot(self, control, *, origin="control"):
+        del origin
+        self._control = copy.deepcopy(control)
+
+    def enqueue_control_delta(self, delta, *, origin="control"):
+        validate_control_delta(delta)
+        payload = copy.deepcopy(dict(delta))
+        payload["origin"] = origin
+        self._write_queue.append(payload)
 
     def execute_control_writes(self):
+        log = logging.getLogger("control")
         while self._write_queue:
-            partial = self._write_queue.popleft()
-            if is_control_delta(partial):
-                # A delta states intent: applied directly against live state,
-                # never reduced. Mirrors common.execute_control_writes.
-                apply_control_delta(self._control, partial)
-                continue
-            partial.pop("origin", None)
-            # Mirror common.execute_control_writes: strip null members so the
-            # merge only adds/overwrites keys (json_patch parity), never deletes.
-            partial = strip_null_members(partial)
-            self._control = deep_update(self._control, partial)
+            command = self._write_queue.popleft()
+            origin = command.get("origin") if isinstance(command, Mapping) else None
+            try:
+                if not is_control_delta(command):
+                    raise ControlDeltaError("unversioned legacy control write")
+                validate_control_delta(command)
+                updated = copy.deepcopy(self._control)
+                apply_control_delta(updated, command)
+                self._control = updated
+            except (ControlDeltaError, TypeError, ValueError, KeyError, IndexError, AttributeError) as error:
+                log.error(
+                    "execute_control_writes: rejected queued control write id=in-memory origin=%r: %s",
+                    origin,
+                    error,
+                )
 
     def read_settings(self):
         return copy.deepcopy(self._settings)
@@ -422,8 +425,11 @@ class SqliteStore(Store):
     def flush_control(self):
         return _c.flush_control()
 
-    def write_control(self, control, kind, origin="control"):
-        _c.write_control(control, kind, origin=origin)
+    def write_control_snapshot(self, control, *, origin="control"):
+        _c.write_control_snapshot(control, origin=origin)
+
+    def enqueue_control_delta(self, delta, *, origin="control"):
+        _c.enqueue_control_delta(delta, origin=origin)
 
     def execute_control_writes(self):
         _c.execute_control_writes()

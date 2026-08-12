@@ -38,14 +38,14 @@ from unittest import mock
 import pytest
 
 from common.app import CONTROL_DOWN_ERROR
-from common.common import ErrorKind, WriteKind
+from common.common import ErrorKind
 from common.datastore_accessors import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
     default_control,
     init_status,
     read_errors,
-    write_control,
+    write_control_snapshot,
     write_errors,
     write_generic_key,
     write_pellet_db,
@@ -61,7 +61,7 @@ _DURABLE = "Grill Platform Error: Could not load the grill platform module."
 def consumers(ds):
     """Seed a datastore the socket emitter can build a real payload against."""
     write_settings_store(default_settings())
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test-liveness")
+    write_control_snapshot(default_control(), origin="test-liveness")
     write_pellet_db(default_pellets())
     init_status()
     write_generic_key("probe_device_info", {})
@@ -164,9 +164,9 @@ def test_a_control_process_error_survives_a_failed_check_and_is_reported_alongsi
 _SEED = """
 import os
 from common import datastore
-from common.common import ErrorKind, WriteKind
+from common.common import ErrorKind
 from common.datastore_accessors import (
-    init_status, write_control, write_errors, write_pellets_store, write_settings_store,
+    init_status, write_control_snapshot, write_errors, write_pellets_store, write_settings_store,
 )
 from common.defaults import default_control, default_pellets, default_settings
 
@@ -175,7 +175,7 @@ datastore.init()
 write_settings_store(default_settings())
 write_pellets_store(default_pellets())
 init_status()
-write_control(default_control(), WriteKind.OVERWRITE, origin="test")
+write_control_snapshot(default_control(), origin="test")
 write_errors(ErrorKind.CONTROL, ["control banner"])
 write_errors(ErrorKind.DISPLAY, ["display banner"])
 write_errors(ErrorKind.WEB, ["web banner"])

@@ -23,9 +23,8 @@ from pydantic import ValidationError
 from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
-from common.common import WriteKind
 from common.control_delta import control_delta
-from common.datastore_accessors import read_control, write_control
+from common.datastore_accessors import enqueue_control_delta, read_control
 from common.file_browser import browse_files, resolve_managed_file
 from common.modes import Mode
 from common.web_contracts.content import (
@@ -520,7 +519,7 @@ def recipe_run():
     control = read_control()
     if control.get("mode") != Mode.STOP:
         return error("not_stopped", 409, mode=control.get("mode"))
-    write_control(
+    enqueue_control_delta(
         # The path rule (bare filenames) governs what the client SENDS; the
         # resolved absolute path is what gets stored here, because that is
         # what controller.py opens the recipe from.
@@ -531,7 +530,6 @@ def recipe_run():
                 "recipe": {"filename": path, "start_step": 0, "step": 0},
             }
         ),
-        WriteKind.DELTA,
         origin="api-files",
     )
     data = validated_content_json(FilenameData, {"filename": os.path.basename(path)})

@@ -128,10 +128,10 @@ def test_post_settings_deep_merges_nested_keys(live_server, page):
     assert settings["globals"]["units"] == original_units
 
 
-# --- api_page: POST /api/control (MERGE write) --------------------------
+# --- api_page: POST /api/control (validated delta) ---------------------
 
 
-def test_post_control_merges_via_write_control(live_server, page):
+def test_post_control_queues_validated_delta(live_server, page):
     resp = page.request.post(
         f"{live_server}/api/control",
         data={"mode": "Startup", "s_plus": True},

@@ -77,7 +77,6 @@ from unittest import mock
 
 import pytest
 
-from common.common import WriteKind
 from common.datastore_accessors import read_settings, write_settings_store
 from common.defaults import default_control, default_settings
 from common.settings_schema import validate_settings_tree
@@ -254,10 +253,10 @@ def test_admin_restoresettings_invalid_backup_rejected_no_crash(admin_client):
 @pytest.fixture
 def sio(ds):
     write_settings_store(default_settings())
-    from common.datastore_accessors import write_control, write_pellet_db, init_status
+    from common.datastore_accessors import init_status, write_control_snapshot, write_pellet_db
     from common.defaults import default_pellets
 
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test-writer-matrix")
+    write_control_snapshot(default_control(), origin="test-writer-matrix")
     write_pellet_db(default_pellets())
     init_status()
 
@@ -477,7 +476,7 @@ def test_save_settings_and_flag_update_writes_strict(ds):
     control = default_control()
 
     save_settings_and_flag_update(settings, control, "settings_update", origin="test")
-    execute_control_writes()  # write_control queues a MERGE partial; drain it to read back.
+    execute_control_writes()  # the validated delta is queued; drain it to read back.
 
     assert read_settings()["globals"]["grill_name"] == "Direct App Helper"
     assert read_control()["settings_update"] is True
@@ -520,10 +519,10 @@ def test_onesignal_invalid_player_id_cleanup_writes_strict(ds):
 @pytest.fixture
 def flex_display(ds, tmp_path):
     write_settings_store(default_settings())
-    from common.datastore_accessors import write_control
+    from common.datastore_accessors import write_control_snapshot
     from common.defaults import default_control as _default_control
 
-    write_control(_default_control(), WriteKind.OVERWRITE, origin="test-writer-matrix")
+    write_control_snapshot(_default_control(), origin="test-writer-matrix")
 
     from display._base_flex import DisplayBase
 

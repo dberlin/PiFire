@@ -351,21 +351,19 @@ def test_ssd1306_public_status_methods_set_state_without_touching_device():
 
 # ---------------------------------------------------------------------------
 # ssd1306b.py -- adds gpiozero button input + a full _menu_display state
-# machine driven off common.datastore_accessors.read_control/write_control.
+# machine driven off common.datastore_accessors.read_control/enqueue_control_delta.
 # ---------------------------------------------------------------------------
 
 
 def _fake_control_pair(initial_mode=Mode.STOP):
     """A stand-in control process for the fixed-layout drivers.
 
-    Displays queue DELTA envelopes now (common/control_delta.py), so this
-    applies them the way the real drain does rather than dict.update()-ing a
-    whole snapshot. What it RECORDS in `calls` is the members the write actually
-    changed -- for a delta that is its `set`, which is the whole payload's
-    meaning; a legacy whole dict is recorded as-is. So an assertion like
-    calls[-1][0]["mode"] still reads "the write said mode".
+    Displays queue delta envelopes (common/control_delta.py), so this applies
+    them the way the real drain does. What it records in `calls` is the members
+    the delta actually changed, so an assertion like calls[-1][0]["mode"] still
+    reads "the write said mode".
     """
-    from common.control_delta import apply_control_delta, is_control_delta
+    from common.control_delta import apply_control_delta
     from common.defaults import default_control
 
     state = default_control()
@@ -375,24 +373,20 @@ def _fake_control_pair(initial_mode=Mode.STOP):
     def read_control():
         return dict(state)
 
-    def write_control(control, kind=None, origin=None):
-        if is_control_delta(control):
-            calls.append((dict(control.get("set", {})), kind, origin))
-            apply_control_delta(state, control)
-        else:
-            calls.append((dict(control), kind, origin))
-            state.update(control)
+    def enqueue_control_delta(delta, *, origin=None):
+        calls.append((dict(delta.get("set", {})), origin))
+        apply_control_delta(state, delta)
 
-    return state, read_control, write_control, calls
+    return state, read_control, enqueue_control_delta, calls
 
 
 def _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP):
     overlay = dict(_luma_oled_stubs())
     overlay.update(_gpiozero_stub())
     mod = _load_driver("display.ssd1306b", overlay)
-    state, read_control, write_control, calls = _fake_control_pair(initial_mode)
+    state, read_control, enqueue_control_delta, calls = _fake_control_pair(initial_mode)
     monkeypatch.setattr(mod, "read_control", read_control)
-    monkeypatch.setattr(mod, "write_control", write_control)
+    monkeypatch.setattr(mod, "enqueue_control_delta", enqueue_control_delta)
     with _no_bg_threads() as mock_thread, _no_os_system("ssd1306b"):
         mock_thread.return_value.start = lambda: None
         d = mod.Display(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
@@ -461,7 +455,7 @@ def test_ssd1306b_menu_navigates_and_selects_startup(monkeypatch):
     d._event_detect()  # back to "Startup"
 
     d.input_event = "ENTER"
-    d._event_detect()  # selects "Startup" -> write_control(mode=Mode.STARTUP)
+    d._event_detect()  # selects "Startup" -> enqueue_control_delta(mode=Mode.STARTUP)
     assert d.menu["current"]["mode"] == "none"
     assert calls[-1][0]["mode"] == Mode.STARTUP
 

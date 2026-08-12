@@ -14,7 +14,7 @@ from common.defaults import default_pellets
 
 @pytest.fixture
 def db(ds, monkeypatch):
-    monkeypatch.setattr(pellets_actions, "write_control", lambda *a, **k: None)
+    monkeypatch.setattr(pellets_actions, "enqueue_control_delta", lambda *a, **k: None)
     monkeypatch.setattr(pellets_actions, "backup_pellet_db", lambda *a, **k: None)
     pelletdb = default_pellets()
     write_pellets_store(pelletdb)

@@ -22,9 +22,8 @@ import os
 import threading
 
 from display._base_flex import DisplayBase
-from common.common import WriteKind
 from common.control_delta import control_delta
-from common.datastore_accessors import read_control, read_status, write_control
+from common.datastore_accessors import enqueue_control_delta, read_control, read_status
 from common.system import is_real_hardware
 
 
@@ -104,11 +103,7 @@ class Display(DisplayBase):
         if "hold" in command:
             temp = int(command_data) if command_data else 0
             if temp:
-                write_control(
-                    control_delta(set_values={"updated": True, "mode": "Hold", "primary_setpoint": temp}),
-                    WriteKind.DELTA,
-                    origin="display",
-                )
+                enqueue_control_delta(control_delta(set_values={"updated": True, "mode": "Hold", "primary_setpoint": temp}), origin="display")
             return
         if "notify" in command:
             origin = command_data.get("origin") if isinstance(command_data, dict) else None
@@ -119,61 +114,45 @@ class Display(DisplayBase):
             control = read_control()
             for entry in control["notify_data"]:
                 if entry["name"] == origin:
-                    write_control(
-                        control_delta(
-                            ops=[
-                                {
-                                    "op": "notify.set",
-                                    "label": entry["label"],
-                                    "type": entry["type"],
-                                    "fields": {"target": target, "req": bool(target)},
-                                }
-                            ]
-                        ),
-                        WriteKind.DELTA,
-                        origin="display",
-                    )
+                    enqueue_control_delta(control_delta(
+                        ops=[
+                            {
+                                "op": "notify.set",
+                                "label": entry["label"],
+                                "type": entry["type"],
+                                "fields": {"target": target, "req": bool(target)},
+                            }
+                        ]
+                    ), origin="display")
                     break
             return
         if command == "cmd_stop":
-            write_control(
-                control_delta(set_values={"updated": True, "mode": "Stop"}),
-                WriteKind.DELTA,
-                origin="display",
-            )
+            enqueue_control_delta(control_delta(set_values={"updated": True, "mode": "Stop"}), origin="display")
             return
         if command == "cmd_splus":
             status = read_status()
             toggle = not bool(status.get("s_plus", False)) if status else True
-            write_control(control_delta(set_values={"s_plus": toggle}), WriteKind.DELTA, origin="display")
+            enqueue_control_delta(control_delta(set_values={"s_plus": toggle}), origin="display")
             return
         if command == "cmd_primestartup":
-            write_control(
-                control_delta(
-                    set_values={
-                        "updated": True,
-                        "mode": "Prime",
-                        "prime_amount": command_data,
-                        "next_mode": "Startup",
-                    }
-                ),
-                WriteKind.DELTA,
-                origin="display",
-            )
+            enqueue_control_delta(control_delta(
+                set_values={
+                    "updated": True,
+                    "mode": "Prime",
+                    "prime_amount": command_data,
+                    "next_mode": "Startup",
+                }
+            ), origin="display")
             return
         if command == "cmd_primeonly":
-            write_control(
-                control_delta(
-                    set_values={
-                        "updated": True,
-                        "mode": "Prime",
-                        "prime_amount": command_data,
-                        "next_mode": "Stop",
-                    }
-                ),
-                WriteKind.DELTA,
-                origin="display",
-            )
+            enqueue_control_delta(control_delta(
+                set_values={
+                    "updated": True,
+                    "mode": "Prime",
+                    "prime_amount": command_data,
+                    "next_mode": "Stop",
+                }
+            ), origin="display")
             return
         # Everything else: reuse the inherited handler verbatim.
         self.command = command

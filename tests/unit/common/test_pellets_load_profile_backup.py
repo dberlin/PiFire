@@ -16,7 +16,7 @@ def _pelletdb():
 
 def test_load_profile_backs_up_the_pellet_db(monkeypatch):
     calls = []
-    monkeypatch.setattr(pa, "write_control", lambda *a, **k: calls.append("write_control"))
+    monkeypatch.setattr(pa, "enqueue_control_delta", lambda *a, **k: calls.append("enqueue_control_delta"))
     monkeypatch.setattr(pa, "write_pellet_db", lambda *a, **k: calls.append("write_pellet_db"))
     monkeypatch.setattr(pa, "backup_pellet_db", lambda **k: calls.append(("backup", k)))
 
@@ -31,7 +31,7 @@ def test_load_profile_backs_up_the_pellet_db(monkeypatch):
 
 def test_load_profile_without_a_profile_does_not_back_up(monkeypatch):
     calls = []
-    monkeypatch.setattr(pa, "write_control", lambda *a, **k: calls.append("write_control"))
+    monkeypatch.setattr(pa, "enqueue_control_delta", lambda *a, **k: calls.append("enqueue_control_delta"))
     monkeypatch.setattr(pa, "write_pellet_db", lambda *a, **k: calls.append("write_pellet_db"))
     monkeypatch.setattr(pa, "backup_pellet_db", lambda **k: calls.append("backup"))
 

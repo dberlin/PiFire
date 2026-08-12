@@ -13,7 +13,7 @@ def make_display(monkeypatch):
     sent = []
     # Displays queue delta envelopes now; record what each one SET, which is the
     # whole payload's meaning for these commands (none of them use ops).
-    monkeypatch.setattr(mod, "write_control", lambda data, kind=None, origin=None: sent.append(data.get("set", {})))
+    monkeypatch.setattr(mod, "enqueue_control_delta", lambda data, *, origin=None: sent.append(data.get("set", {})))
     cfg = {
         "display_data_filename": "./display/qtquick_dsi_1280x720t.json",
         "probe_info": {"primary": {"name": "Grill", "max_temp": 600}, "food": [], "aux": []},

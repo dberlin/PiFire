@@ -1,10 +1,9 @@
 import pytest
-from common.common import WriteKind
 from common.datastore_accessors import (
     execute_control_writes,
     read_control,
     read_settings,
-    write_control,
+    write_control_snapshot,
     write_settings_store,
 )
 from common.defaults import default_notify, default_probe_config
@@ -94,7 +93,7 @@ def _probe(name, device, port, probe_type="Primary"):
 def _set_mode(mode):
     control = read_control()
     control["mode"] = mode
-    write_control(control, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(control, origin="test")
 
 
 def _stop_mode():
@@ -282,7 +281,7 @@ def _seed_two_probes():
         if entry["label"] == "Grill" and entry["type"] == "probe":
             entry["req"] = True
             entry["target"] = 225
-    write_control(control, WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(control, origin="test")
     return settings
 
 

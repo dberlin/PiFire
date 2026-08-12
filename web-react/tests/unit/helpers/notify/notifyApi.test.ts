@@ -30,10 +30,8 @@ describe("postNotifyUpdates", () => {
     expect(opts.body).toBe(JSON.stringify({ notify_updates: UPDATES }));
   });
 
-  // The single-key body is what keeps this write from reverting the controller:
-  // a MERGE queues the WHOLE posted patch, so any extra key (mode,
-  // primary_setpoint, ...) would be patched back over whatever the control loop
-  // set in the meantime.
+  // The single-key body is the request contract: this helper owns only
+  // notify_updates and must not send unrelated control members.
   it("sends ONLY the notify_updates key", async () => {
     respond({ result: "success" });
     await postNotifyUpdates("", UPDATES);

@@ -141,14 +141,13 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
 //     expiry action the moment it is armed), and a paused timer is rejected
 //     rather than unpaused with the duration thrown away.
 //
-// It was ALSO built to force ONE write_control() on the server, because the
-// countdown (control.timer) and the flags (control.notify_data) split across
-// two requests in one control cycle used to lose the first. That reason is
-// gone, at both ends: every timer write now queues a named OP that the server
-// evaluates at DRAIN time against live state rather than a timer state computed
-// from a stale read (common/control_delta.py), so two timer writes in one cycle
-// compose instead of racing. The form is kept on the two reasons above, which
-// have nothing to do with the write seam.
+// It was ALSO built to force one atomic server command, because splitting the
+// countdown (control.timer) and flags (control.notify_data) across two requests
+// in one control cycle used to lose the first. That reason is gone at both
+// ends: every timer write now queues a named delta operation that the server
+// evaluates at drain time against live state (common/control_delta.py), so two
+// timer writes in one cycle compose instead of racing. The form is kept for the
+// two reasons above, which have nothing to do with the write seam.
 // --------------------------------------------------------------------------
 
 /** Name the ticked flags for the option segment of the start command; 'none'

@@ -26,9 +26,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from common.app import api_response
 from common.backups import backup_pellet_db
-from common.common import WriteKind
 from common.control_delta import control_delta
-from common.datastore_accessors import write_control, write_pellet_db
+from common.datastore_accessors import enqueue_control_delta, write_pellet_db
 from common.defaults import default_pellets
 from common.web_contracts.control import PelletActionRequest, PelletActionResponse
 
@@ -83,7 +82,7 @@ def pellets_load_profile(pelletdb, action_data):
         # This handler changes one boolean, so one boolean is what it states.
         # Queuing the whole control dict would carry a stale snapshot of every
         # other member through the queue, and a delta says only what it means.
-        write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
+        enqueue_control_delta(control_delta(set_values={"hopper_check": True}), origin="app")
         write_pellet_db(pelletdb)
         # Snapshot the new load, exactly as Flask's _pellets_loadprofile does
         # (blueprints/pellets/routes.py). The React "Load New Pellets" path
@@ -96,7 +95,7 @@ def pellets_load_profile(pelletdb, action_data):
 
 def pellets_hopper_check(pelletdb, action_data):
     # MINIMAL patch -- see pellets_load_profile for the full rationale.
-    write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
+    enqueue_control_delta(control_delta(set_values={"hopper_check": True}), origin="app")
     return api_response(result="OK")
 
 
@@ -158,7 +157,7 @@ def pellets_add_profile(pelletdb, action_data):
     if action_data["add_and_load"]:
         pelletdb["current"]["pelletid"] = profile_id
         # MINIMAL patch -- see pellets_load_profile for the full rationale.
-        write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
+        enqueue_control_delta(control_delta(set_values={"hopper_check": True}), origin="app")
         pelletdb["current"]["date_loaded"] = str(datetime.now())[0:19]
         pelletdb["current"]["est_usage"] = 0.0
         pelletdb["log"][_log_key(pelletdb["log"])] = {"pelletid": profile_id, "deleted": False}

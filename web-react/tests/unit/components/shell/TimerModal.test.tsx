@@ -213,13 +213,11 @@ describe("TimerModal", () => {
 // ---------------------------------------------------------------------------
 // Cross-process pin: what actually reaches the control process.
 //
-// The single request is /api/set/timer/start/{seconds}/{options}, which does
-// exactly one write_control() on the server (common/api_commands.py
-// _cmd_set_timer). Splitting it into a start plus two flag writes used to lose
-// the flags -- every MERGE write queued the WHOLE control blob, read_control()
-// never saw the pending queue, and the last patch of a control cycle imposed
-// its stale snapshot on the rest. Writers now state what they changed
-// (common/control_delta.py), so a split write would survive.
+// The single request is /api/set/timer/start/{seconds}/{options}, which queues
+// exactly one named timer operation on the server. Splitting it into a start
+// plus two flag writes used to lose the flags under the retired whole-snapshot
+// queue model. Writers now state what they changed (common/control_delta.py), so
+// a split write would survive.
 //
 // The form is kept, and this pin with it, for reasons independent of that seam.
 // It carries a DURATION: the control process compares control.timer.end against

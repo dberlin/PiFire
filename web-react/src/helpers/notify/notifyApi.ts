@@ -29,8 +29,8 @@ import type {
 // next read after ~110 ms -- it is queued, not immediate.
 
 /** POST a minimal control patch. Keep the patch to the keys you actually own:
- *  the server queues it as a MERGE of the whole posted object, so any extra key
- *  is a value patched back over whatever the control loop set meanwhile. */
+ *  the server converts it to validated named delta operations, so unrelated
+ *  control-loop updates remain untouched when the queue drains. */
 export async function postControl(baseUrl: string, patch: ControlPatchRequest): Promise<void> {
   const res = await fetch(`${baseUrl}/api/control`, {
     method: "POST",

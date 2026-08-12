@@ -26,7 +26,6 @@ from common.common import (
     read_events_records,
     flush_events_records,
     read_generic_json,
-    WriteKind,
     write_log,
     convert_settings_units,
     epoch_to_time,
@@ -46,7 +45,7 @@ from common.datastore_accessors import (
     read_generic_key,
     read_control_heartbeat,
     CONTROL_HEARTBEAT_STALE_AFTER,
-    write_control,
+    enqueue_control_delta,
     flush_history,
     write_pellet_db,
     write_connected_user,
@@ -556,7 +555,7 @@ def _post_app_data_update(settings, type, request):
                     payload, ops = notify_ops_from_post(patch.model_dump(mode="python", exclude_unset=True))
                 except (ControlDeltaError, ValidationError) as exc:
                     return _response(result="Error", message=f"Error: {exc}")
-                write_control(control_delta(set_values=payload, ops=ops), WriteKind.DELTA, origin="app-socketio")
+                enqueue_control_delta(control_delta(set_values=payload, ops=ops), origin="app-socketio")
                 return _response(result="OK", data=control)
             else:
                 return _response(result="Error", message="Error: Key not found in control")
@@ -636,11 +635,7 @@ def _post_app_data_units(settings, type, request):
         _write_settings(settings, control)
         control["updated"] = True
         control["units_change"] = True
-        write_control(
-            control_delta(set_values={"updated": True, "units_change": True}),
-            WriteKind.DELTA,
-            origin="app-socketio",
-        )
+        enqueue_control_delta(control_delta(set_values={"updated": True, "units_change": True}), origin="app-socketio")
         write_log("Changed units to Fahrenheit")
         return _response(result="OK", data=settings)
     elif type == "c_units" and settings["globals"]["units"] == "F":
@@ -649,11 +644,7 @@ def _post_app_data_units(settings, type, request):
         _write_settings(settings, control)
         control["updated"] = True
         control["units_change"] = True
-        write_control(
-            control_delta(set_values={"updated": True, "units_change": True}),
-            WriteKind.DELTA,
-            origin="app-socketio",
-        )
+        enqueue_control_delta(control_delta(set_values={"updated": True, "units_change": True}), origin="app-socketio")
         write_log("Changed units to Celsius")
         return _response(result="OK", data=settings)
     else:
@@ -694,21 +685,17 @@ def _post_app_data_timer(settings, type, request):
                 seconds = request["timer_action"]["hours_range"] * 60 * 60
                 seconds = seconds + request["timer_action"]["minutes_range"] * 60
                 write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
-                write_control(
-                    control_delta(
-                        ops=[
-                            {
-                                "op": "timer.start_with_options",
-                                "at": now,
-                                "seconds": seconds,
-                                "shutdown": request["timer_action"]["timer_shutdown"],
-                                "keep_warm": request["timer_action"]["timer_keep_warm"],
-                            }
-                        ]
-                    ),
-                    WriteKind.DELTA,
-                    origin="app-socketio",
-                )
+                enqueue_control_delta(control_delta(
+                    ops=[
+                        {
+                            "op": "timer.start_with_options",
+                            "at": now,
+                            "seconds": seconds,
+                            "shutdown": request["timer_action"]["timer_shutdown"],
+                            "keep_warm": request["timer_action"]["timer_keep_warm"],
+                        }
+                    ]
+                ), origin="app-socketio")
                 return _response(result="OK")
             else:
                 return _response(result="Error", message="Error: Start time not specified")
@@ -720,23 +707,15 @@ def _post_app_data_timer(settings, type, request):
                 "Timer unpaused.  Ends at: "
                 + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
             )
-            write_control(
-                control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": None}]),
-                WriteKind.DELTA,
-                origin="app-socketio",
-            )
+            enqueue_control_delta(control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": None}]), origin="app-socketio")
             return _response(result="OK")
     elif type == "pause_timer":
         write_log("Timer paused.")
-        write_control(
-            control_delta(ops=[{"op": "timer.pause", "at": time.time()}]),
-            WriteKind.DELTA,
-            origin="app-socketio",
-        )
+        enqueue_control_delta(control_delta(ops=[{"op": "timer.pause", "at": time.time()}]), origin="app-socketio")
         return _response(result="OK")
     elif type == "stop_timer":
         write_log("Timer stopped.")
-        write_control(control_delta(ops=[{"op": "timer.clear"}]), WriteKind.DELTA, origin="app-socketio")
+        enqueue_control_delta(control_delta(ops=[{"op": "timer.clear"}]), origin="app-socketio")
         return _response(result="OK")
     else:
         return _response(result="Error", message="Error: Received request without valid type")
@@ -761,17 +740,13 @@ def _post_app_data_recipes(settings, type, request):
             filename = request["recipes_action"]["filename"]
             # recipe.filename is stated as a nested `set`, which deep-merges --
             # step/step_data are the control loop's and are not touched here.
-            write_control(
-                control_delta(
-                    set_values={
-                        "updated": True,
-                        "mode": Mode.RECIPE,
-                        "recipe": {"filename": recipe_folder + filename},
-                    }
-                ),
-                WriteKind.DELTA,
-                origin="app-socketio",
-            )
+            enqueue_control_delta(control_delta(
+                set_values={
+                    "updated": True,
+                    "mode": Mode.RECIPE,
+                    "recipe": {"filename": recipe_folder + filename},
+                }
+            ), origin="app-socketio")
             return _response(result="OK")
     else:
         return _response(result="Error", message="Error: Received request without valid type")
@@ -1093,7 +1068,7 @@ def _update_notify_data(control, request):
         for entry in control["notify_data"]
         if entry["label"] == label and entry["type"] in _NOTIFY_DTO_FIELDS
     ]
-    write_control(control_delta(ops=ops or None), WriteKind.DELTA, origin="app-socketio")
+    enqueue_control_delta(control_delta(ops=ops or None), origin="app-socketio")
     return _response(result="OK")
 
 

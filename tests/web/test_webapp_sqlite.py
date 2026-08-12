@@ -21,7 +21,6 @@ _DB_PATH = os.path.join(_TMP_DIR, "webapp_test.db")
 os.environ["PIFIRE_DB_PATH"] = _DB_PATH
 
 from common import datastore  # noqa: E402
-from common.common import WriteKind  # noqa: E402
 from common.datastore_accessors import (  # noqa: E402
     read_connected_users,
     read_current,
@@ -30,7 +29,7 @@ from common.datastore_accessors import (  # noqa: E402
     init_status,
     remove_connected_user,
     write_connected_user,
-    write_control,
+    write_control_snapshot,
     write_current,
     write_generic_key,
     write_history,
@@ -48,7 +47,7 @@ def _seed_database():
     write_settings_store(settings)
     write_pellets_store(default_pellets())
     init_status()
-    write_control(default_control(), WriteKind.OVERWRITE, origin="test")
+    write_control_snapshot(default_control(), origin="test")
     # read_probe_status() (used by the /api/current route) reads this generic
     # key; in production it's populated by the control loop's probe discovery.
     write_generic_key("probe_device_info", {})

@@ -16,7 +16,6 @@ what actually takes effect.
 from unittest import mock
 
 import common.system as cc
-from common.common import WriteKind
 from common.control_delta import CONTROL_DELTA_KEY
 
 
@@ -40,7 +39,7 @@ def test_gather_system_info_empty_supported_cmds_keeps_defaults_and_writes_contr
     with (
         mock.patch("common.app.get_supported_cmds", return_value=[]),
         mock.patch("common.api_commands.process_command") as process_command,
-        mock.patch.object(cc, "write_control") as write_control,
+        mock.patch.object(cc, "enqueue_control_delta") as enqueue_control_delta,
         mock.patch.object(cc, "get_display_os_info", return_value={"PRETTY_NAME": "Test OS"}),
         mock.patch.object(cc.os, "popen", return_value=popen_result),
     ):
@@ -57,8 +56,8 @@ def test_gather_system_info_empty_supported_cmds_keeps_defaults_and_writes_contr
     # Nothing was probed, so the delta names nothing under "system". It is still
     # WRITTEN -- the call itself is the observable this pins -- but it imposes no
     # stale reading on a concurrent writer, which the old whole-dict write did.
-    write_control.assert_called_once_with(
-        {CONTROL_DELTA_KEY: 1, "set": {"system": {}}}, WriteKind.DELTA, origin="unit-test"
+    enqueue_control_delta.assert_called_once_with(
+        {CONTROL_DELTA_KEY: 1, "set": {"system": {}}}, origin="unit-test"
     )
 
 
@@ -83,7 +82,7 @@ def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
         mock.patch("common.app.get_supported_cmds", return_value=supported),
         mock.patch("common.api_commands.process_command") as process_command,
         mock.patch("common.app.get_system_command_output", side_effect=lambda requested, **kw: outputs[requested]),
-        mock.patch.object(cc, "write_control") as write_control,
+        mock.patch.object(cc, "enqueue_control_delta") as enqueue_control_delta,
         mock.patch.object(cc, "get_display_os_info", return_value={}),
         mock.patch.object(cc.os, "popen", return_value=mock.Mock(readline=mock.Mock(return_value="up\n"))),
     ):
@@ -104,7 +103,7 @@ def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
 
     # The delta names exactly the six members this call assigned -- not the whole
     # control dict, and not the system members it never probed.
-    write_control.assert_called_once_with(
+    enqueue_control_delta.assert_called_once_with(
         {
             CONTROL_DELTA_KEY: 1,
             "set": {
@@ -118,7 +117,6 @@ def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
                 }
             },
         },
-        WriteKind.DELTA,
         origin="admin",
     )
 
@@ -133,7 +131,7 @@ def test_gather_system_info_throttled_or_undervoltage_adds_failure_message():
         mock.patch("common.app.get_supported_cmds", return_value=["check_throttled"]),
         mock.patch("common.api_commands.process_command"),
         mock.patch("common.app.get_system_command_output", side_effect=lambda requested, **kw: outputs[requested]),
-        mock.patch.object(cc, "write_control"),
+        mock.patch.object(cc, "enqueue_control_delta"),
         mock.patch.object(cc, "get_display_os_info", return_value={}),
         mock.patch.object(cc.os, "popen", return_value=mock.Mock(readline=mock.Mock(return_value="up\n"))),
     ):
@@ -158,7 +156,7 @@ def test_gather_system_info_command_error_results_append_message_and_null_data()
         mock.patch("common.app.get_supported_cmds", return_value=supported),
         mock.patch("common.api_commands.process_command"),
         mock.patch("common.app.get_system_command_output", side_effect=lambda requested, **kw: outputs[requested]),
-        mock.patch.object(cc, "write_control"),
+        mock.patch.object(cc, "enqueue_control_delta"),
         mock.patch.object(cc, "get_display_os_info", return_value={}),
         mock.patch.object(cc.os, "popen", return_value=mock.Mock(readline=mock.Mock(return_value="up\n"))),
     ):
@@ -191,7 +189,7 @@ def test_gather_system_info_network_info_ok_but_empty_data_keeps_default():
         mock.patch("common.app.get_supported_cmds", return_value=["network_info"]),
         mock.patch("common.api_commands.process_command"),
         mock.patch("common.app.get_system_command_output", side_effect=lambda requested, **kw: outputs[requested]),
-        mock.patch.object(cc, "write_control"),
+        mock.patch.object(cc, "enqueue_control_delta"),
         mock.patch.object(cc, "get_display_os_info", return_value={}),
         mock.patch.object(cc.os, "popen", return_value=mock.Mock(readline=mock.Mock(return_value="up\n"))),
     ):

@@ -22,7 +22,7 @@ monkeypatch them.
 import copy
 import os
 
-from common.common import ErrorKind, WriteKind
+from common.common import ErrorKind
 from common.defaults import default_control
 from common.modes import COOK_MODES, SAFE_MODES, Mode, StatusState
 from notify.notifications import check_notify, send_notifications
@@ -165,7 +165,7 @@ class Controller:
             control["recipe"]["step_data"]["triggered"] = False
             control["primary_setpoint"] = recipe["steps"][step_num]["hold_temp"]  # Set Hold Temp if applicable.
             control["updated"] = False  # Clear Updated Flag if Set
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            ctx.store.write_control_snapshot(control, origin="control")
             # 4b. Start the recipe step work cycle
             self.work_cycle(recipe["steps"][step_num]["mode"])
 
@@ -175,7 +175,7 @@ class Controller:
             if control["mode"] == Mode.REIGNITE and control["updated"]:
                 control["updated"] = False
                 control["mode"] = Mode.RECIPE
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                ctx.store.write_control_snapshot(control, origin="control")
                 self.work_cycle(Mode.REIGNITE)
                 control = ctx.store.read_control()
                 if control["updated"] and control["mode"] != Mode.RECIPE:
@@ -206,7 +206,7 @@ class Controller:
         else:
             # Cancel/break case: no mode transition here (the requested mode is
             # already in control); just persist the recipe-field cleanup.
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            ctx.store.write_control_snapshot(control, origin="control")
 
         return ()
 
@@ -244,7 +244,7 @@ class Controller:
             control = store.read_control()
             control["mode"] = Mode.MONITOR
             control["updated"] = True
-            store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(control, origin="control")
 
         """ Initialize the status data on first run. """
         self.status = store.init_status()
@@ -278,7 +278,7 @@ class Controller:
                 self.controlLogger.info(f"Switch set to off, going to stop mode.")
                 self.control["updated"] = True  # Change mode
                 self.control["mode"] = Mode.STOP
-                store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+                store.write_control_snapshot(self.control, origin="control")
 
         self.status = store.read_status()
 
@@ -303,7 +303,7 @@ class Controller:
         # Check if there were updates to any of the settings that were flagged
         if self.control["settings_update"]:
             self.control["settings_update"] = False
-            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(self.control, origin="control")
             self.settings = settings = store.read_settings()
 
         # Check if there are any notifications pending
@@ -320,7 +320,7 @@ class Controller:
                     self.control["timer"]["end"] = 0
                     self.control["notify_data"][index]["shutdown"] = False
                     self.control["notify_data"][index]["keep_warm"] = False
-                    store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+                    store.write_control_snapshot(self.control, origin="control")
 
         # Check if user changed hopper levels and update if required
         if self.control["distance_update"]:
@@ -328,7 +328,7 @@ class Controller:
             full = settings["pelletlevel"]["full"]
             self.dist_device.update_distances(empty, full)
             self.control["distance_update"] = False
-            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(self.control, origin="control")
 
         if self.control["hopper_check"]:
             # Something asked for a fresh reading (the attached display, the
@@ -340,7 +340,7 @@ class Controller:
             # was just requested.
             self.dist_device.request_sample()
             self.control["hopper_check"] = False
-            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(self.control, origin="control")
             self.eventLogger.info("Hopper Level Check requested.")
         if (ctx.clock.now() - self._hopper_refresh_time) > HOPPER_LEVEL_REFRESH_INTERVAL:
             # Automatic refresh: the only thing that publishes a hopper level
@@ -375,7 +375,7 @@ class Controller:
         if self.control.get("probe_map_update"):
             self.settings = settings = store.read_settings()
             self.control["probe_map_update"] = False
-            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(self.control, origin="control")
             errors = self.probe_complex.update_probe_map(settings["probe_settings"]["probe_map"])
             store.write_generic_key("probe_device_info", self.probe_complex.get_device_info())
             for error in errors or []:
@@ -386,7 +386,7 @@ class Controller:
         if self.control["probe_profile_update"]:
             self.settings = settings = store.read_settings()
             self.control["probe_profile_update"] = False
-            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(self.control, origin="control")
             # Add new probe profiles to probe complex object
             self.probe_complex.update_probe_profiles(settings["probe_settings"]["probe_map"]["probe_info"])
             self.eventLogger.info("Active probe profiles updated in control script.")
@@ -407,9 +407,7 @@ class Controller:
             )
             # Clear control flag
             self.control["updated"] = False  # Reset Control Updated to False
-            store.write_control(
-                self.control, WriteKind.OVERWRITE, origin="control"
-            )  # Commit change in 'updated' status to the file
+            store.write_control_snapshot(self.control, origin="control")  # Commit change in 'updated' status to the file
 
             if self.control["units_change"]:
                 self.eventLogger.debug("Changing Base Units.")
@@ -424,7 +422,7 @@ class Controller:
             # Check if there was an Error flagged in Monitor Mode - If no, then change status to active
             if self.control["status"] != StatusState.MONITOR and self.control["mode"] != Mode.ERROR:
                 self.control["status"] = StatusState.ACTIVE  # Set status to active
-                store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+                store.write_control_snapshot(self.control, origin="control")
 
             if self.control["mode"] in (Mode.STOP, Mode.ERROR):
                 grill_platform.auger_off()
@@ -531,7 +529,7 @@ class Controller:
                         "reigniteretries"
                     ]  # Reset retry counter to default
                     self.control["startup_timestamp"] = 0  # Reset the startup timestamp to 0
-                    store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+                    store.write_control_snapshot(self.control, origin="control")
                 else:
                     self.eventLogger.error("An error has occurred, Stop Mode enabled.")
                     self.controlLogger.error("An error has occurred, Stop Mode enabled.")
@@ -546,7 +544,7 @@ class Controller:
                     self.control["safety"]["reigniteretries"] = settings["safety"][
                         "reigniteretries"
                     ]  # Reset retry counter to default
-                    store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+                    store.write_control_snapshot(self.control, origin="control")
                     ctx.clock.sleep(3)
                     store.display_commands().push(("clear", None))
 
@@ -605,7 +603,7 @@ class Controller:
         if settings["startup"]["prime_on_startup"] > 0:
             self.control["prime_amount"] = settings["startup"]["prime_on_startup"]
             self.control["mode"] = Mode.PRIME
-            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(self.control, origin="control")
             # Call Work Cycle for Prime Mode
             self.work_cycle(Mode.PRIME)
             self.control = store.read_control()  # Refresh control in case any changes were made during the cycle
@@ -616,7 +614,7 @@ class Controller:
         if self.control["mode"] == Mode.STARTUP:
             # Setup Next Mode (after startup mode)
             self.control["next_mode"] = settings["startup"].get("start_to_mode", {}).get("after_startup_mode", "Smoke")
-            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            store.write_control_snapshot(self.control, origin="control")
             # Call Work Cycle for Startup Mode
             self.work_cycle(Mode.STARTUP)
             # Select Next Mode
@@ -641,7 +639,7 @@ class Controller:
         store = self.ctx.store
         settings = self.settings
         self.control["next_mode"] = Mode.STOP
-        store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        store.write_control_snapshot(self.control, origin="control")
         self.work_cycle(Mode.SHUTDOWN)
         self.next_mode(self.control["next_mode"])
         # Powering the host off is conditional on the shutdown having actually
@@ -660,7 +658,7 @@ class Controller:
         # Monitor (monitor the OEM controller)
         store = self.ctx.store
         self.control["status"] = StatusState.MONITOR  # Set status to monitor
-        store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        store.write_control_snapshot(self.control, origin="control")
         self.work_cycle(Mode.MONITOR)
 
     def _dispatch_manual(self):
@@ -682,7 +680,7 @@ class Controller:
             )
         self.control["next_mode"] = self.control["safety"]["reignitelaststate"]
         setpoint = self.control["primary_setpoint"]
-        store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        store.write_control_snapshot(self.control, origin="control")
         self.work_cycle(Mode.REIGNITE)
         self.next_mode(self.control["next_mode"], setpoint=setpoint)
 

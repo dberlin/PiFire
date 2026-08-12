@@ -5,7 +5,7 @@ prototype-fallback logic for the grill platform, probe complex, distance
 Mocks the hardware-factory boundary (importlib.import_module, and
 probes.main.ProbesMain for the probe-setup-failure path) and uses the `ds`
 fixture (a throwaway sqlite datastore, see tests/conftest.py) so that
-read_control/write_control/read_pellet_db/write_pellet_db/write_errors/
+read_control/write_control_snapshot/read_pellet_db/write_pellet_db/write_errors/
 write_generic_key calls never touch the repo's real pifire.db.
 
 Two genuinely broken code paths were found while writing these tests and are

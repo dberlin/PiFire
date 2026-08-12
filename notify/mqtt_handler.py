@@ -22,7 +22,6 @@ from socket import getfqdn
 from common.common import create_logger
 from common.modes import Mode
 import psutil
-# from common import write_control
 
 
 def _connack_text(reason_code):
@@ -216,35 +215,6 @@ class MqttNotificationHandler:
 
     def _on_message(self, client, userdata, msg):
 
-        # Ignore if we haven't finished intializing or haven't enabled control
-        # if self.control == None: return
-        # if self._mqtt_settings['control'] == False: return
-
-        # element = msg.topic.split('/')[-1]
-        # payload = msg.payload.decode('utf-8')
-
-        # self._mqttLogger.debug(f"Recieved message {payload} for {element}")
-
-        # if element == "mode":
-        # 		# If going into Hold mode we need to set the setpoint as well.  Default to 150 if not set.
-        # 		if payload == 'Hold':
-        # 			self.control['primary_setpoint'] = max(self.control['primary_setpoint'], 150)
-
-        # 		self.control[element] = payload
-        # 		self.control['updated'] = 'yes'
-        # 		write_control(self.control, WriteKind.MERGE, origin='mqtt')
-
-        # 		#TODO when switching to HOLD mode we also need to send a setpoint
-
-        # elif element == "primary_setpoint":
-        # 		#Only adjust the setpoint if we are in Hold mode
-        # 		if (self.control['mode']) == 'Hold':
-        # 			self.control[element] = int(payload)
-        # 			self.control['updated'] = 'yes'
-        # 			write_control(self.control, WriteKind.MERGE, origin='mqtt')
-
-        # 	else:
-        # 		pass
         pass
 
     def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
