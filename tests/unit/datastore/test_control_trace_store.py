@@ -14,7 +14,7 @@ from common.control_trace import (
     TraceEventKind,
     TraceSetting,
 )
-from common.datastore_accessors import (
+from common.persistence.control_trace import (
     CONTROL_TRACE_MAX_LIMIT,
     append_control_trace,
     delete_control_trace_session,
@@ -134,6 +134,68 @@ def test_identifiers_are_normalized_for_session_cook_reads_and_session_deletion(
     assert read_control_trace_session("session-a") == []
 
 
+@pytest.mark.parametrize("identifier", ["", "   ", 1, None])
+def test_trace_identifiers_must_be_non_blank_strings(ds, identifier):
+    with pytest.raises(ValueError, match="session_id"):
+        read_control_trace_session(identifier)
+    with pytest.raises(ValueError, match="cook_id"):
+        read_control_trace_cook(identifier)
+    with pytest.raises(ValueError, match="session_id"):
+        delete_control_trace_session(identifier)
+
+
+def test_session_and_cook_reads_accept_an_alternate_database_path(ds, tmp_path):
+    alternate_path = tmp_path / "alternate.db"
+    record = _record(1_000, "alternate-session", "alternate-cook")
+    row = record.to_db_row()
+    connection = sqlite3.connect(alternate_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE control_trace(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts_ms INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                cook_id TEXT,
+                controller TEXT NOT NULL,
+                event_kind TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                payload TEXT NOT NULL CHECK(json_valid(payload))
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO control_trace(
+                ts_ms, session_id, cook_id, controller, event_kind, schema_version, payload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row.ts_ms,
+                row.session_id,
+                row.cook_id,
+                row.controller,
+                row.event_kind,
+                row.schema_version,
+                row.payload,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert read_control_trace_session(record.session_id) == []
+    assert read_control_trace_session(record.session_id, database_path=alternate_path) == [record]
+    assert read_control_trace_cook(record.cook_id, database_path=alternate_path) == [record]
+
+
+def test_alternate_database_path_must_name_an_existing_file(ds, tmp_path):
+    missing_path = tmp_path / "missing.db"
+
+    with pytest.raises(FileNotFoundError, match="control trace database does not exist"):
+        read_control_trace_session("session-a", database_path=missing_path)
+
+
 def test_invalid_record_is_rejected_before_transaction(ds, monkeypatch):
     valid = _record(1_000, "session-a")
     invalid = valid.model_copy(update={"schema_version": 1})
@@ -194,6 +256,62 @@ def test_range_limit_is_bounded(ds):
         read_control_trace_range(0, 2_000, limit=0)
     with pytest.raises(ValueError, match="limit"):
         read_control_trace_range(0, 2_000, limit=CONTROL_TRACE_MAX_LIMIT + 1)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(lambda limit: read_control_trace_range(0, 0, limit=limit), id="range"),
+        pytest.param(lambda limit: prune_control_trace(0, limit=limit), id="age-prune"),
+        pytest.param(
+            lambda limit: prune_incompatible_control_trace(TRACE_SCHEMA_VERSION, limit=limit),
+            id="schema-prune",
+        ),
+    ],
+)
+@pytest.mark.parametrize("invalid_limit", [True, 0, -1, 1.0, CONTROL_TRACE_MAX_LIMIT + 1])
+def test_all_trace_limits_are_strict_bounded_integers(ds, operation, invalid_limit):
+    with pytest.raises(ValueError, match="limit"):
+        operation(invalid_limit)
+
+
+def test_trace_limit_maximum_is_accepted_by_reads_and_prunes(ds):
+    assert read_control_trace_range(0, 0, limit=CONTROL_TRACE_MAX_LIMIT) == []
+    assert prune_control_trace(0, limit=CONTROL_TRACE_MAX_LIMIT) == 0
+    assert prune_incompatible_control_trace(TRACE_SCHEMA_VERSION, limit=CONTROL_TRACE_MAX_LIMIT) == 0
+
+
+@pytest.mark.parametrize(
+    ("start_ms", "end_ms", "error_name"),
+    [
+        (-1, 0, "start_ms"),
+        (0, -1, "end_ms"),
+        (True, 0, "start_ms"),
+        (0, False, "end_ms"),
+        (0.0, 0, "start_ms"),
+        (0, 0.0, "end_ms"),
+    ],
+)
+def test_range_timestamps_are_strict_non_negative_integers(ds, start_ms, end_ms, error_name):
+    with pytest.raises(ValueError, match=error_name):
+        read_control_trace_range(start_ms, end_ms, limit=1)
+
+
+def test_range_start_must_not_exceed_end(ds):
+    with pytest.raises(ValueError, match="start_ms must not exceed end_ms"):
+        read_control_trace_range(2, 1, limit=1)
+
+
+@pytest.mark.parametrize("before_ms", [-1, True, 1.0])
+def test_prune_timestamp_is_a_strict_non_negative_integer(ds, before_ms):
+    with pytest.raises(ValueError, match="before_ms"):
+        prune_control_trace(before_ms, limit=1)
+
+
+@pytest.mark.parametrize("before_schema_version", [True, 1.0, "5", None])
+def test_incompatible_prune_schema_version_is_a_strict_integer(ds, before_schema_version):
+    with pytest.raises(ValueError, match="before_schema_version"):
+        prune_incompatible_control_trace(before_schema_version, limit=1)
 
 
 def test_query_timestamps_must_fit_sqlite_signed_integers(ds):
