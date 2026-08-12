@@ -13,9 +13,8 @@ from unittest import mock
 
 import pytest
 
-import time as _real_time
-
 import distance._sampled_base as sampled_base
+from tests.unit.distance._sampling_helpers import await_sample
 
 
 class _FakeClock:
@@ -87,28 +86,13 @@ def _stop(hopper):
     hopper.sensor_thread.join(timeout=2)
 
 
-def _await_sample(hopper, count=1, timeout=2.0):
-    """Wait until the sampling thread has completed `count` samples.
-
-    Polls `sample_count` rather than waiting on the driver, because the driver
-    deliberately offers NO way to wait for a measurement -- that blocking
-    primitive was removed so the control loop cannot reacquire it. Tests are
-    allowed to wait; the control loop is not."""
-    deadline = _real_time.monotonic() + timeout
-    while hopper.sample_count < count:
-        if _real_time.monotonic() > deadline:
-            raise AssertionError(f"sampling thread produced {hopper.sample_count} samples, wanted {count}")
-        _real_time.sleep(0.005)
-    return hopper.get_level()
-
-
 def test_measures_on_a_background_thread_not_the_callers(hcsr04_mod):
     """THE POINT OF THIS FILE. get_level() used to call raw_distance()
     synchronously on whatever thread asked -- which, now that the control loop
     refreshes the hopper on a timer, would be the loop timing the auger."""
     hopper = _make_hopper(hcsr04_mod)
     try:
-        _await_sample(hopper)  # let the thread take its first sample
+        await_sample(hopper)  # let the thread take its first sample
         reads_before = _FakeMeasurement.instances[0].reads
         assert reads_before > 0  # the thread, not the caller, did the measuring
         for _ in range(5):
@@ -131,7 +115,7 @@ def test_one_raw_distance_call_per_sample_cycle(hcsr04_mod):
     3-reading average would triple a ~1.1s call for nothing."""
     hopper = _make_hopper(hcsr04_mod)
     try:
-        _await_sample(hopper)
+        await_sample(hopper)
         assert hopper.samples_per_cycle == 1
         assert _FakeMeasurement.instances[0].reads == 1
     finally:
@@ -145,7 +129,7 @@ def test_a_normal_slow_ultrasonic_read_does_not_trigger_reinit(hcsr04_mod):
     _FakeMeasurement.read_delay = 1.1
     hopper = _make_hopper(hcsr04_mod)
     try:
-        _await_sample(hopper)
+        await_sample(hopper)
         assert len(_FakeMeasurement.instances) == 1  # constructed once, never re-inited
     finally:
         _stop(hopper)
@@ -155,7 +139,7 @@ def test_a_genuinely_stuck_sensor_still_reinitializes(hcsr04_mod):
     _FakeMeasurement.read_delay = 3.0  # > slow_cycle_seconds
     hopper = _make_hopper(hcsr04_mod)
     try:
-        _await_sample(hopper)
+        await_sample(hopper)
         assert len(_FakeMeasurement.instances) == 2
     finally:
         _stop(hopper)
@@ -168,7 +152,7 @@ def test_reading_at_or_below_full_is_100_percent(hcsr04_mod):
     _FakeMeasurement.reading_cm = 4.0  # == full
     hopper = _make_hopper(hcsr04_mod)
     try:
-        assert _await_sample(hopper) == 100
+        assert await_sample(hopper) == 100
     finally:
         _stop(hopper)
 

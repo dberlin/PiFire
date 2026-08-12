@@ -5,6 +5,7 @@ import pytest
 import time as _real_time
 
 import distance._sampled_base as sampled_base
+from tests.unit.distance._sampling_helpers import await_sample
 
 
 class _FakeClock:
@@ -110,21 +111,6 @@ def _stop(hopper):
     hopper.sensor_thread.join(timeout=2)
 
 
-def _await_sample(hopper, count=1, timeout=2.0):
-    """Wait until the sampling thread has completed `count` samples.
-
-    Polls `sample_count` rather than waiting on the driver, because the driver
-    deliberately offers NO way to wait for a measurement -- that blocking
-    primitive was removed so the control loop cannot reacquire it. Tests are
-    allowed to wait; the control loop is not."""
-    deadline = _real_time.monotonic() + timeout
-    while hopper.sample_count < count:
-        if _real_time.monotonic() > deadline:
-            raise AssertionError(f"sampling thread produced {hopper.sample_count} samples, wanted {count}")
-        _real_time.sleep(0.005)
-    return hopper.get_level()
-
-
 def test_invalid_empty_full_forces_defaults(tof_mod):
     hopper = _make_hopper(tof_mod, empty=4, full=22)
     try:
@@ -140,7 +126,7 @@ def test_invalid_empty_full_forces_defaults(tof_mod):
 def test_reading_at_or_below_full_is_100_percent(tof_mod):
     hopper = _make_hopper(tof_mod, reading_mm=40, empty=22, full=4)  # 4.0cm == full
     try:
-        assert _await_sample(hopper) == 100
+        assert await_sample(hopper) == 100
     finally:
         _stop(hopper)
 
@@ -148,7 +134,7 @@ def test_reading_at_or_below_full_is_100_percent(tof_mod):
 def test_reading_above_empty_is_0_percent(tof_mod):
     hopper = _make_hopper(tof_mod, reading_mm=300, empty=22, full=4)  # 30.0cm > empty
     try:
-        assert _await_sample(hopper) == 0
+        assert await_sample(hopper) == 0
     finally:
         _stop(hopper)
 
@@ -156,7 +142,7 @@ def test_reading_above_empty_is_0_percent(tof_mod):
 def test_slow_read_cycle_reinitializes_sensor(tof_mod):
     hopper = _make_hopper(tof_mod, reading_mm=100, read_delay=0.2)  # 3 * 0.2s > 0.5s threshold
     try:
-        _await_sample(hopper)
+        await_sample(hopper)
         assert hopper.open_calls == 2
     finally:
         _stop(hopper)
@@ -207,7 +193,7 @@ def test_get_level_takes_no_arguments_and_cannot_block(tof_mod):
 
     hopper = _make_hopper(tof_mod)
     try:
-        _await_sample(hopper)
+        await_sample(hopper)
         assert hopper.get_level() == hopper.distance_read
         # And the read is pure: it does not secretly queue a measurement either.
         hopper.sample_requested = False
@@ -226,13 +212,13 @@ def test_a_request_arriving_mid_cycle_is_not_swallowed(tof_mod):
     vanish with nothing to show for it."""
     hopper = _make_hopper(tof_mod)
     try:
-        _await_sample(hopper)
+        await_sample(hopper)
         # Simulate the arrival landing inside a cycle: set the flag, then let
         # the loop run. It must produce a sample and leave the flag cleared,
         # never the other way round.
         before = hopper.sample_count
         hopper.request_sample()
-        _await_sample(hopper, before + 1)
+        await_sample(hopper, before + 1)
         assert hopper.sample_requested is False
     finally:
         _stop(hopper)
@@ -245,13 +231,13 @@ def test_request_sample_asks_but_does_not_wait(tof_mod):
     timed refresh."""
     hopper = _make_hopper(tof_mod, reading_mm=50, empty=22, full=4)
     try:
-        _await_sample(hopper)
+        await_sample(hopper)
         before = hopper.sample_count
         started = _real_time.monotonic()
         hopper.request_sample()
         assert _real_time.monotonic() - started < 0.1  # returned immediately
         assert hopper.sample_requested is True
-        _await_sample(hopper, before + 1)  # ... and the thread does honour it
+        await_sample(hopper, before + 1)  # ... and the thread does honour it
         assert hopper.get_level() == 94
     finally:
         _stop(hopper)

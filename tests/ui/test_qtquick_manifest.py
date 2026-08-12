@@ -1,6 +1,8 @@
 import json
 import os
 
+from tests.conftest import manifest_config_default
+
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
@@ -9,18 +11,11 @@ def _manifest():
         return json.load(f)
 
 
-def _config_default(entry, option_name):
-    for opt in entry["config"]:
-        if opt["option_name"] == option_name:
-            return opt["default"]
-    raise AssertionError(f"{option_name} not in config")
-
-
 def test_manifest_entry_present():
     entry = _manifest()["modules"]["display"]["qtquick_dsi_1280x720t"]
     assert entry["filename"] == "qtquick_dsi_1280x720t"
-    assert _config_default(entry, "display_data_filename") == "./display/qtquick_dsi_1280x720t.json"
-    assert _config_default(entry, "input_types_supported") == ["button", "touch"]
+    assert manifest_config_default(entry, "display_data_filename") == "./display/qtquick_dsi_1280x720t.json"
+    assert manifest_config_default(entry, "input_types_supported") == ["button", "touch"]
     assert "pyside6>=6.11.1" in entry["py_dependencies"]
     assert entry["config"] != []
 
@@ -64,7 +59,7 @@ def test_every_qtquick_module_has_its_layout_and_module_file():
     for name in modules:
         entry = _manifest()["modules"]["display"][name]
         assert entry["filename"] == name
-        assert _config_default(entry, "display_data_filename") == f"./display/{name}.json"
+        assert manifest_config_default(entry, "display_data_filename") == f"./display/{name}.json"
         assert "pyside6>=6.11.1" in entry["py_dependencies"]
 
         assert os.path.exists(os.path.join(BASE, "display", f"{name}.py")), name

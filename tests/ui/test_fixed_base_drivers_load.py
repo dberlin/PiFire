@@ -35,10 +35,7 @@ overlay fixes it every time). Pre-warming below avoids that whole hazard
 rather than chasing it further.
 """
 
-import importlib
 import os
-import sys
-import threading
 import types
 from unittest import mock
 
@@ -47,11 +44,7 @@ import pytest
 import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
 
 from tests.conftest import REPO_BASE, load_wizard_manifest
-
-FULL_DEV_PINS = {
-    "display": {"dc": 24, "led": 5, "rst": 25},
-    "input": {"up_clk": 16, "down_dt": 20, "enter_sw": 21},
-}
+from tests.ui._driver_helpers import instantiate, load_driver
 
 # Expected (WIDTH, HEIGHT) at rotation=0 per the shim's _NOMINAL_WIDTH/_NOMINAL_HEIGHT.
 EXPECTED_DIMENSIONS = {
@@ -114,39 +107,6 @@ def _hardware_stubs(*, luma=False, st7789_pimoroni=False, gpiozero=False, pyky04
     return overlay
 
 
-def _load_driver(module_path, **stub_kwargs):
-    """Import a driver module with its hardware libraries stubbed for the
-    duration of the import only. The module then stays cached in
-    sys.modules exactly like any normal import (a second call is a cache hit
-    and does not need the overlay any more)."""
-    overlay = _hardware_stubs(**stub_kwargs)
-    with mock.patch.dict(sys.modules, overlay):
-        return importlib.import_module(module_path)
-
-
-def _instantiate(mod, **overrides):
-    """Construct mod.Display with the display/encoder thread(s) and
-    os.system blocked, so no real SPI/pygame thread ever starts and no
-    `sudo reboot` can be shelled out.
-
-    Patches the shared `threading` module's `Thread` attribute directly
-    (rather than `mod.threading.Thread`): every driver module's own
-    `import threading` binds the same singleton `threading` module object,
-    so this one patch covers every `threading.Thread(...)` call site --
-    whether it lives in the driver itself (e.g. st7789e, the pygame/st7789
-    drivers) or in a shared mixin module (`display._luma_panel`,
-    `display._encoder_input`) -- without requiring each driver to keep its
-    own `import threading` around just so tests can reach it."""
-    kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
-    kwargs.update(overrides)
-    with (
-        mock.patch.object(threading, "Thread") as mock_thread,
-        mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {mod.__name__}")),
-    ):
-        mock_thread.return_value.start = lambda: None
-        return mod.Display(**kwargs)
-
-
 # (short id, module path, resolution family, hardware-stub kwargs)
 DRIVERS = [
     ("st7789e", "display.st7789e", "240x240", dict(luma=True, pyky040=True)),
@@ -173,10 +133,10 @@ assert len(DRIVERS) == 16, "expected exactly 16 fixed-base drivers (verified-fac
 @pytest.mark.parametrize("case", DRIVERS, ids=[c[0] for c in DRIVERS])
 def test_driver_imports_and_instantiates(case):
     _short, module_path, resolution, stub_kwargs = case
-    mod = _load_driver(module_path, **stub_kwargs)
+    mod = load_driver(module_path, _hardware_stubs(**stub_kwargs))
     assert hasattr(mod, "Display"), f"{module_path} has no Display class"
 
-    d = _instantiate(mod)
+    d = instantiate(mod)
 
     assert (d.WIDTH, d.HEIGHT) == EXPECTED_DIMENSIONS[resolution], (
         f"{module_path}: expected {EXPECTED_DIMENSIONS[resolution]} at rotation 0, got {(d.WIDTH, d.HEIGHT)}"
@@ -193,8 +153,8 @@ def test_non_square_driver_swaps_dimensions_at_rotation_90():
     # the parametrized test above), 240x320 portrait at rotation 90 --
     # proving _init_globals' rotation branch still reaches the driver
     # through the shim unchanged.
-    mod = _load_driver("display.ili9341", luma=True)
-    d = _instantiate(mod, rotation=90)
+    mod = load_driver("display.ili9341", _hardware_stubs(luma=True))
+    d = instantiate(mod, rotation=90)
     assert (d.WIDTH, d.HEIGHT) == (240, 320)
 
 
@@ -204,10 +164,10 @@ def test_st7789_device_geometry_override_still_works():
     # *after* the shim's _init_globals has already set WIDTH/HEIGHT from
     # _NOMINAL_WIDTH/_NOMINAL_HEIGHT. Confirm that override still reaches
     # through the shim by giving the mocked device a non-default geometry.
-    mod = _load_driver("display.st7789_240x320", st7789_pimoroni=True)
+    mod = load_driver("display.st7789_240x320", _hardware_stubs(st7789_pimoroni=True))
     mod.ST7789.ST7789.return_value.width = 111
     mod.ST7789.ST7789.return_value.height = 222
-    d = _instantiate(mod)
+    d = instantiate(mod)
     assert (d.WIDTH, d.HEIGHT) == (111, 222)
 
 
@@ -238,7 +198,7 @@ def test_manifest_lists_all_16_driver_identifiers():
         assert os.path.exists(os.path.join(REPO_BASE, "display", f"{filename}.py")), (
             f"manifest entry {filename!r} does not resolve to a display/ module"
         )
-        mod = _load_driver(f"display.{filename}", **STUB_KWARGS_BY_FILENAME[filename])
+        mod = load_driver(f"display.{filename}", _hardware_stubs(**STUB_KWARGS_BY_FILENAME[filename]))
         assert isinstance(getattr(mod, "Display", None), type), (
             f"manifest entry {filename!r} does not resolve to a module exposing class Display"
         )

@@ -142,6 +142,13 @@ def test_upload_with_no_file_part_is_400(client, folders):
     assert resp.status_code == 400
 
 
+# Byte-identical to test_api_files_cookfile_write.py's test of the same name
+# (Task 15 audit). NOT redundant: both files' `client` fixture resolves to the
+# same api_files_client, but each module's own `_upload()` posts to a
+# different URL with a different form field (recipes/upload+"recipe" here vs.
+# cookfiles/upload+"file" there) -- so this exercises the recipes upload
+# route's 400-on-empty-filename behavior specifically. Intentionally kept
+# duplicated; allowlist both in Task 16's duplicate-test guard.
 def test_upload_with_an_empty_filename_is_400(client, folders):
     resp = _upload(client, "")
     assert resp.status_code == 400

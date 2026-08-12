@@ -65,6 +65,7 @@ import display.pygame_64x128 as mod_64
 import display.qtapp as qtapp_mod
 from common.modes import Mode
 from display.qtbackend import PiFireBackend
+from tests.ui._driver_helpers import instantiate
 from tests.ui._menu_walk import build_dash_menu_input_touch_steps, run_menu_walk
 
 FULL_DEV_PINS = {
@@ -162,17 +163,6 @@ def test_pygame_64x128_public_status_methods():
 # ---------------------------------------------------------------------------
 
 
-def _instantiate_fixed(mod, **overrides):
-    kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
-    kwargs.update(overrides)
-    with (
-        mock.patch.object(threading, "Thread") as mock_thread,
-        mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {mod.__name__}")),
-    ):
-        mock_thread.return_value.start = lambda: None
-        return mod.Display(**kwargs)
-
-
 @contextlib.contextmanager
 def _fixed_driver_guarded(mod, **overrides):
     """Constructs a _base_fixed-family driver (pygame_240x320/240x320b) with
@@ -187,8 +177,8 @@ def _fixed_driver_guarded(mod, **overrides):
     on one of these drivers must keep `os.system` patched for as long as it
     can reach `_menu_display` -- constructing under the patch and then
     letting it expire before the real risk (menu navigation) happens is
-    avoidance-by-design, not a guard. Use `_instantiate_fixed` instead for
-    tests that never touch `_event_detect`/`_display_loop`/menu state."""
+    avoidance-by-design, not a guard. Use `instantiate` (tests/ui/_driver_helpers.py)
+    instead for tests that never touch `_event_detect`/`_display_loop`/menu state."""
     kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
     kwargs.update(overrides)
     with (
@@ -307,13 +297,13 @@ def _assert_fixed_status_render_drew_something(snapshots):
 
 
 def test_pygame_240x320_constructs():
-    d = _instantiate_fixed(mod_320)
+    d = instantiate(mod_320)
     assert (d.WIDTH, d.HEIGHT) == (320, 240)
     assert d.min_transition_delay == 0.1
 
 
 def test_pygame_240x320_draw_status_render_path():
-    d = _instantiate_fixed(mod_320)
+    d = instantiate(mod_320)
     snapshots = _drive_fixed_status_render(d)
     _assert_fixed_status_render_drew_something(snapshots)
 
@@ -374,14 +364,14 @@ def test_pygame_240x320_display_loop_drives_each_command_branch(monkeypatch):
 
 
 def test_pygame_240x320b_constructs_with_menu():
-    d = _instantiate_fixed(mod_320b)
+    d = instantiate(mod_320b)
     assert d.input_enabled is True
     assert "inactive" in d.menu and "active" in d.menu
     assert d.eventLogger is not None
 
 
 def test_pygame_240x320b_draw_status_render_path():
-    d = _instantiate_fixed(mod_320b)
+    d = instantiate(mod_320b)
     snapshots = _drive_fixed_status_render(d)
     _assert_fixed_status_render_drew_something(snapshots)
 

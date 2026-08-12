@@ -35,20 +35,13 @@ assignment clobber the earlier ones and silently break the test's ability
 to recover which callback is wired to which button.
 """
 
-import importlib
-import sys
-import threading
 import types
 from unittest import mock
 
 import pytest
 
 import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see test_fixed_base_drivers_load.py
-
-FULL_DEV_PINS = {
-    "display": {"dc": 24, "led": 5, "rst": 25},
-    "input": {"up_clk": 16, "down_dt": 20, "enter_sw": 21},
-}
+from tests.ui._driver_helpers import instantiate, load_driver
 
 
 def _hardware_stubs(*, luma=False, gpiozero=False, pyky040=False, st7789_pimoroni=False):
@@ -99,31 +92,6 @@ def _hardware_stubs(*, luma=False, gpiozero=False, pyky040=False, st7789_pimoron
     return overlay
 
 
-def _load_driver(module_path, **stub_kwargs):
-    overlay = _hardware_stubs(**stub_kwargs)
-    with mock.patch.dict(sys.modules, overlay):
-        return importlib.import_module(module_path)
-
-
-def _instantiate(mod, **overrides):
-    """Construct mod.Display with the display/encoder thread(s) and
-    os.system blocked -- identical safety net to
-    test_fixed_base_drivers_load.py's `_instantiate`. Patches the shared
-    `threading` module's `Thread` attribute directly (not `mod.threading`):
-    every module's `import threading` binds the same singleton object, and
-    some drivers here (e.g. ili9341e, ili9341b) no longer keep their own
-    `import threading` around now that thread-starting lives in the shared
-    mixins (`display._encoder_input`, `display._luma_panel`)."""
-    kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
-    kwargs.update(overrides)
-    with (
-        mock.patch.object(threading, "Thread") as mock_thread,
-        mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {mod.__name__}")),
-    ):
-        mock_thread.return_value.start = lambda: None
-        return mod.Display(**kwargs)
-
-
 # ---------------------------------------------------------------------------
 # Group A: debounced rotary encoder (ili9341e representative)
 # ---------------------------------------------------------------------------
@@ -131,8 +99,8 @@ def _instantiate(mod, **overrides):
 
 @pytest.fixture
 def group_a_driver():
-    mod = _load_driver("display.ili9341e", luma=True, pyky040=True)
-    return _instantiate(mod)
+    mod = load_driver("display.ili9341e", _hardware_stubs(luma=True, pyky040=True))
+    return instantiate(mod)
 
 
 def test_group_a_inc_callback_sets_up_event_and_bumps_counter(group_a_driver):
@@ -320,8 +288,8 @@ def test_group_a_setup_wires_callbacks_via_encoder_setup(group_a_driver):
 
 @pytest.fixture
 def group_b_driver():
-    mod = _load_driver("display.st7789_240x320e", st7789_pimoroni=True, pyky040=True)
-    return _instantiate(mod)
+    mod = load_driver("display.st7789_240x320e", _hardware_stubs(st7789_pimoroni=True, pyky040=True))
+    return instantiate(mod)
 
 
 def test_group_b_inc_callback_has_no_debounce_state(group_b_driver):
@@ -395,8 +363,8 @@ def test_group_b_event_detect_invokes_menu_display_and_resets_counter(group_b_dr
 
 @pytest.fixture
 def button_driver():
-    mod = _load_driver("display.ili9341b", luma=True, gpiozero=True)
-    return _instantiate(mod)
+    mod = load_driver("display.ili9341b", _hardware_stubs(luma=True, gpiozero=True))
+    return instantiate(mod)
 
 
 def test_button_up_down_enter_callbacks_just_set_input_event(button_driver):
@@ -491,8 +459,8 @@ def test_button_event_detect_ignores_unknown_command(button_driver):
 
 @pytest.fixture
 def st7789e_driver():
-    mod = _load_driver("display.st7789e", luma=True, pyky040=True)
-    return _instantiate(mod)
+    mod = load_driver("display.st7789e", _hardware_stubs(luma=True, pyky040=True))
+    return instantiate(mod)
 
 
 def test_st7789e_is_otherwise_a_group_a_debounced_encoder(st7789e_driver):
