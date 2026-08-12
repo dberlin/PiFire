@@ -6,6 +6,9 @@ import { AppPrefsProvider } from "../../../../src/components/AppPrefs";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";
 import { PwmTab } from "../../../../src/components/settings/tabs/PwmTab";
 import { SafetyTab } from "../../../../src/components/settings/tabs/SafetyTab";
+import { useSettingsDraft } from "../../../../src/helpers/settings/settingsDrafts";
+import type { SettingsDrafts } from "../../../../src/helpers/settings/settingsDrafts";
+import type { EditableSettingsTabId } from "../../../../src/helpers/settings/settingsTabs";
 import { testQueryClient } from "../../test-utils";
 
 // Ruling 3, 2026-07-26 (docs/superpowers/backlogs/react-migration-backlog.md): a
@@ -47,6 +50,17 @@ const SETTINGS = {
     manual_override_time: 30,
   },
 };
+
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
+
+const draftStoreKeysMatchEditableTabs: Equal<keyof SettingsDrafts, EditableSettingsTabId> = true;
+const draftHookKeyMatchesEditableTabs: Equal<
+  Parameters<typeof useSettingsDraft>[0],
+  EditableSettingsTabId
+> = true;
 
 function renderSettings() {
   let loaderCalls = 0;
@@ -104,6 +118,11 @@ afterEach(() => {
 });
 
 describe("settings drafts survive a tab switch", () => {
+  it("keys the draft store and hook by exactly the editable tab identities", () => {
+    expect(draftStoreKeysMatchEditableTabs).toBe(true);
+    expect(draftHookKeyMatchesEditableTabs).toBe(true);
+  });
+
   it("keeps an unsaved table edit when the user visits another tab and comes back", async () => {
     renderSettings();
 

@@ -1,6 +1,7 @@
 import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
 import type { SettingsSchema } from "./settingsTypes.gen";
+import type { EditableSettingsTabId } from "./settingsTabs";
 
 /**
  * Where a settings tab's in-progress edit lives while the user is somewhere
@@ -31,7 +32,7 @@ export type SettingsDraft = {
   saved: boolean;
 };
 
-export type SettingsDrafts = Record<string, SettingsDraft>;
+export type SettingsDrafts = Partial<Record<EditableSettingsTabId, SettingsDraft>>;
 
 export type SettingsDraftStore = {
   drafts: SettingsDrafts;
@@ -75,7 +76,10 @@ export function useSettingsDraftStore(settings: unknown): SettingsDraftStore {
  * used whenever there is no draft -- so an untouched tab always shows what the
  * server last returned, with no copy of it kept anywhere.
  */
-export function useSettingsDraft<T>(key: string, read: (settings: SettingsSchema) => T) {
+export function useSettingsDraft<T>(
+  key: EditableSettingsTabId,
+  read: (settings: SettingsSchema) => T,
+) {
   const { settings, drafts, setDrafts } = useOutletContext<SettingsDraftContext>();
   const entry = drafts[key];
   const value = entry ? (entry.value as T) : read(settings);

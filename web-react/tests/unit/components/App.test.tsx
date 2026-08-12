@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import type { RouteObject } from "react-router";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
+import { queryClient } from "../../../src/helpers/query/queryClient";
+import { SETTINGS_TABS } from "../../../src/helpers/settings/settingsTabs";
 import { testQueryClient } from "../test-utils";
 
 // AppShell -- the layout route wrapping /, /history and /settings -- is the one
@@ -53,6 +56,8 @@ rs.mock("../../../src/helpers/wizard/wizardApi", () => ({
   scan: rs.fn().mockResolvedValue({ groups: [], error: null }),
 }));
 
+// Route modules load only after their API mocks above are registered.
+const { probeModulesLoader } = await import("../../../src/helpers/probes/probeMapRoutes");
 const { AppPrefsProvider } = await import("../../../src/components/AppPrefs");
 const { default: App } = await import("../../../src/components/App");
 const { routes } = await import("../../../src/components/appRoutes");
@@ -91,6 +96,7 @@ const fetchMock = rs
   .mockResolvedValue({ ok: true, json: () => Promise.resolve({ build: "test-build" }) });
 
 beforeEach(() => {
+  queryClient.clear();
   useLiveStateMock.mockReset();
   useLiveStateMock.mockReturnValue({
     live: FIXTURE_DASH,
@@ -106,13 +112,21 @@ beforeEach(() => {
 
 function renderApp(initialEntry: string) {
   const router = createMemoryRouter(routes, { initialEntries: [initialEntry] });
-  return render(
+  const view = render(
     <QueryClientProvider client={testQueryClient()}>
       <AppPrefsProvider>
         <RouterProvider router={router} />
       </AppPrefsProvider>
     </QueryClientProvider>,
   );
+  return { ...view, router };
+}
+
+function settingsChildren(): RouteObject[] {
+  const shellChildren = (routes as RouteObject[]).flatMap(({ children }) => children ?? []);
+  const settingsRoute = shellChildren.find(({ path }) => path === "/settings");
+  if (!settingsRoute?.children) throw new Error("The /settings route has no child routes");
+  return settingsRoute.children;
 }
 
 describe("App routing", () => {
@@ -144,6 +158,54 @@ describe("App routing", () => {
     expect(screen.getByDisplayValue("Backyard Smoker")).toBeInTheDocument();
     expect(getSettingsMock).toHaveBeenCalled();
     expect(getModeMock).toHaveBeenCalled();
+  });
+
+  it("redirects the settings index to the General tab", async () => {
+    getSettingsMock.mockResolvedValue({
+      globals: { grill_name: "Backyard Smoker" },
+      platform: { dc_fan: true },
+    });
+    getModeMock.mockResolvedValue("Stop");
+
+    const { router } = renderApp("/settings");
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings/general");
+  });
+
+  it("defines exactly one ordered child route for every manifest ID and no extras", () => {
+    const children = settingsChildren();
+    const indexed = children.filter(({ index }) => index === true);
+    const addressed = children.filter(
+      (route): route is RouteObject & { path: string } => typeof route.path === "string",
+    );
+
+    expect(indexed).toHaveLength(1);
+    expect(children).toHaveLength(SETTINGS_TABS.length + 1);
+    expect(addressed.map(({ path }) => path)).toEqual(SETTINGS_TABS.map(({ id }) => id));
+  });
+
+  it("keeps probes as the only settings child with a loader", () => {
+    const loaded = settingsChildren().filter(({ loader }) => loader !== undefined);
+
+    expect(loaded.map(({ path }) => path)).toEqual(["probes"]);
+    expect(loaded[0]?.loader).toBe(probeModulesLoader);
+  });
+
+  it("keeps the hidden PWM route addressable on an AC-fan build", async () => {
+    getSettingsMock.mockResolvedValue({
+      globals: { grill_name: "Backyard Smoker" },
+      platform: { dc_fan: false },
+    });
+    getModeMock.mockResolvedValue("Stop");
+
+    renderApp("/settings/pwm");
+
+    expect(await screen.findByRole("heading", { name: "PWM Fan" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "PWM Fan" })).toBeNull();
+    expect(
+      screen.getByText(/PWM fan control is unavailable on this grill/),
+    ).toBeInTheDocument();
   });
 
   it("renders the Probes settings tab at /settings/probes", async () => {

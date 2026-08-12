@@ -4,25 +4,9 @@ import { readAccent } from "../../helpers/settings/accent";
 import type { ControllerCatalog } from "../../helpers/settings/controllerTypes.gen";
 import { hasDcFan } from "../../helpers/settings/platform";
 import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";
+import { SETTINGS_TABS } from "../../helpers/settings/settingsTabs";
 import type { SettingsSchema } from "../../helpers/settings/settingsTypes.gen";
 import { useAppPrefs } from "../AppPrefs";
-
-const SETTINGS_TABS = [
-  { path: "general", label: "General" },
-  { path: "work-mode", label: "Work Mode" },
-  { path: "controller", label: "Controller" },
-  { path: "pwm", label: "PWM Fan" },
-  { path: "startup", label: "Startup / Shutdown" },
-  { path: "safety", label: "Safety" },
-  { path: "pellets", label: "Pellet Levels" },
-  { path: "history", label: "History" },
-  { path: "notifications", label: "Notifications" },
-  { path: "units", label: "Units" },
-  { path: "platform", label: "Platform" },
-  // Last deliberately: it is the most destructive tab in the group, and `tabs`
-  // below is a .filter() over this array, so order here is display order.
-  { path: "probes", label: "Probes" },
-];
 
 export function SettingsShell() {
   const { settings, mode, controllerMeta } = useLoaderData() as {
@@ -54,9 +38,11 @@ export function SettingsShell() {
   // the user is on another pill (helpers/settings/settingsDrafts.ts).
   const draftStore = useSettingsDraftStore(settings);
   // Flask hides the PWM pill on an AC-fan build (settings/index.html:63-65).
-  // Only the PILL goes; the /settings/pwm route stays registered in App.tsx so
-  // a bookmarked URL still resolves, and PwmTab explains why it is inert.
-  const tabs = SETTINGS_TABS.filter((t) => t.path !== "pwm" || hasDcFan(settings));
+  // Only the PILL goes; the /settings/pwm route stays registered so a
+  // bookmarked URL still resolves, and PwmTab explains why it is inert.
+  const tabs = SETTINGS_TABS.filter(
+    ({ hideWithoutDcFan }) => !hideWithoutDcFan || hasDcFan(settings),
+  );
   return (
     <div className="pf-settings">
       <aside className="pf-settings-nav">
@@ -64,17 +50,17 @@ export function SettingsShell() {
           ← Dashboard
         </button>
         <div className="pf-settings-title">Settings</div>
-        {tabs.map((t) => (
+        {tabs.map((tab) => (
           <NavLink
-            key={t.path}
-            to={t.path}
+            key={tab.id}
+            to={tab.id}
             className={({ isActive }) => `pf-settings-link ${isActive ? "active" : ""}`}
           >
-            {t.label}
+            {tab.label}
             {/* The only thing still on screen once the user navigates away
                 from the tab holding the edit -- without it, "preserved across
                 the switch" would be indistinguishable from "discarded". */}
-            {draftStore.drafts[t.path]?.saved === false && (
+            {tab.editable && draftStore.drafts[tab.id]?.saved === false && (
               <span
                 className="pf-settings-unsaved"
                 role="img"

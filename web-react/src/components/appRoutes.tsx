@@ -1,6 +1,8 @@
-import { Navigate } from "react-router";
+import { Navigate, type RouteObject } from "react-router";
 import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
+import { SETTINGS_TABS } from "../helpers/settings/settingsTabs";
+import type { SettingsTabId } from "../helpers/settings/settingsTabs";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AdminPage } from "./admin/AdminPage";
 import { CookFilePage } from "./cookfiles/CookFilePage";
@@ -34,6 +36,25 @@ import {
   HydrateFallback as WizardHydrateFallback,
   WizardShell,
 } from "./wizard/WizardShell";
+
+const settingsRoutes = {
+  general: { path: "general", element: <GeneralTab /> },
+  "work-mode": { path: "work-mode", element: <WorkModeTab /> },
+  controller: { path: "controller", element: <ControllerTab /> },
+  pwm: { path: "pwm", element: <PwmTab /> },
+  startup: { path: "startup", element: <StartupTab /> },
+  safety: { path: "safety", element: <SafetyTab /> },
+  pellets: { path: "pellets", element: <PelletsTab /> },
+  history: { path: "history", element: <HistoryTab /> },
+  notifications: { path: "notifications", element: <NotificationsTab /> },
+  units: { path: "units", element: <UnitsTab /> },
+  platform: { path: "platform", element: <PlatformTab /> },
+  // The only settings child with its own loader: the probes MODULE MANIFEST
+  // is nothing settingsLoader fetches, and inlining it there would make every
+  // other tab pay for it. Running as a sibling loader also means
+  // useSaveSettings' revalidate() refreshes both.
+  probes: { path: "probes", element: <ProbesTab />, loader: probeModulesLoader },
+} satisfies Record<SettingsTabId, RouteObject>;
 
 // Exported (not just used to build `router` below) so App.test.tsx can drive
 // the same route tree through `createMemoryRouter` without a real browser
@@ -109,23 +130,7 @@ export const routes = [
         HydrateFallback,
         children: [
           { index: true, element: <Navigate to="general" replace /> },
-          { path: "general", element: <GeneralTab /> },
-          { path: "work-mode", element: <WorkModeTab /> },
-          { path: "controller", element: <ControllerTab /> },
-          { path: "pwm", element: <PwmTab /> },
-          { path: "startup", element: <StartupTab /> },
-          { path: "safety", element: <SafetyTab /> },
-          { path: "pellets", element: <PelletsTab /> },
-          { path: "history", element: <HistoryTab /> },
-          { path: "notifications", element: <NotificationsTab /> },
-          { path: "units", element: <UnitsTab /> },
-          { path: "platform", element: <PlatformTab /> },
-          // The only settings child with its own loader: the probes MODULE
-          // MANIFEST (18 entries with per-field config metadata and vendor
-          // photos) is nothing settingsLoader fetches, and inlining it there
-          // would make every other tab pay for it. Running as a sibling loader
-          // also means useSaveSettings' revalidate() refreshes both.
-          { path: "probes", element: <ProbesTab />, loader: probeModulesLoader },
+          ...SETTINGS_TABS.map(({ id }) => settingsRoutes[id]),
         ],
       },
     ],

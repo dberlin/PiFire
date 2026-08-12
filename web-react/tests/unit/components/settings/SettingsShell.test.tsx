@@ -43,23 +43,24 @@ function renderShell(dcFan = true) {
   );
 }
 
-// Every tab in SettingsShell's nav, in nav order. Keep in sync with TABS there
-// (the title deliberately does NOT hardcode a count -- it drifted from 8 to 9
-// to 11 while still claiming "8").
-const TAB_LABELS = [
-  "General",
-  "Work Mode",
-  "Controller",
-  "PWM Fan",
-  "Startup / Shutdown",
-  "Safety",
-  "Pellet Levels",
-  "History",
-  "Notifications",
-  "Units",
-  "Platform",
-  "Probes",
-];
+// Every tab in SettingsShell's nav, in nav order. Literal IDs as well as
+// labels make the route identity observable without inspecting implementation
+// source. The title deliberately does not hardcode a count: it drifted while
+// still claiming "8".
+const TAB_LINKS = [
+  { id: "general", label: "General" },
+  { id: "work-mode", label: "Work Mode" },
+  { id: "controller", label: "Controller" },
+  { id: "pwm", label: "PWM Fan" },
+  { id: "startup", label: "Startup / Shutdown" },
+  { id: "safety", label: "Safety" },
+  { id: "pellets", label: "Pellet Levels" },
+  { id: "history", label: "History" },
+  { id: "notifications", label: "Notifications" },
+  { id: "units", label: "Units" },
+  { id: "platform", label: "Platform" },
+  { id: "probes", label: "Probes" },
+] as const;
 
 describe("SettingsShell", () => {
   it("renders every nav tab and the back-to-dashboard control", async () => {
@@ -67,10 +68,15 @@ describe("SettingsShell", () => {
     // Loader data resolves asynchronously even though the loader itself is
     // synchronous — wait for the first tab link before asserting on the rest.
     await screen.findByRole("link", { name: "General" });
-    for (const label of TAB_LABELS) {
-      expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    for (const { id, label } of TAB_LINKS) {
+      expect(screen.getByRole("link", { name: label })).toHaveAttribute(
+        "href",
+        `/settings/${id}`,
+      );
     }
-    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(TAB_LABELS);
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(
+      TAB_LINKS.map(({ label }) => label),
+    );
     expect(screen.getByRole("button", { name: /Dashboard/ })).toBeInTheDocument();
   });
 
@@ -83,11 +89,15 @@ describe("SettingsShell", () => {
     await screen.findByRole("link", { name: "General" });
 
     expect(screen.queryByRole("link", { name: "PWM Fan" })).toBeNull();
-    for (const label of TAB_LABELS.filter((l) => l !== "PWM Fan")) {
-      expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    const visibleTabs = TAB_LINKS.filter(({ id }) => id !== "pwm");
+    for (const { id, label } of visibleTabs) {
+      expect(screen.getByRole("link", { name: label })).toHaveAttribute(
+        "href",
+        `/settings/${id}`,
+      );
     }
     const rendered = screen.getAllByRole("link").map((a) => a.textContent);
-    expect(rendered).toEqual(TAB_LABELS.filter((l) => l !== "PWM Fan"));
+    expect(rendered).toEqual(visibleTabs.map(({ label }) => label));
   });
 
   // A string `name` is a FULL accessible-name match, so this cannot start
