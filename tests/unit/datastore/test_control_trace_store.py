@@ -160,6 +160,33 @@ def test_out_of_range_append_timestamp_is_rejected_before_transaction_without_pa
     assert read_control_trace_session("accepted") == []
 
 
+def test_batch_append_runtime_failure_rolls_back_every_trace_row(ds):
+    accepted = _record(1_000, "accepted")
+    rejected = _record(2_000, "trigger-runtime-failure")
+    ds.connection().execute(
+        """
+        CREATE TEMP TRIGGER fail_second_control_trace_row
+        BEFORE INSERT ON control_trace
+        WHEN NEW.session_id = 'trigger-runtime-failure'
+        BEGIN
+            SELECT RAISE(ABORT, 'simulated trace append failure');
+        END
+        """
+    )
+
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="simulated trace append failure"):
+            append_control_trace([accepted, rejected])
+    finally:
+        ds.connection().execute("DROP TRIGGER fail_second_control_trace_row")
+
+    assert read_control_trace_session("accepted") == []
+    assert read_control_trace_session("trigger-runtime-failure") == []
+
+    append_control_trace([accepted])
+    assert read_control_trace_session("accepted") == [accepted]
+
+
 def test_range_limit_is_bounded(ds):
     append_control_trace([_record(1_000, "session-a")])
 

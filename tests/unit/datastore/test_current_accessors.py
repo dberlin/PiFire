@@ -1,3 +1,4 @@
+import copy
 import json
 
 import pytest
@@ -118,6 +119,25 @@ def test_write_current_carries_a_stale_probe_across_passes(db):
     assert stored["LAST"]["PinkProbe"] == first
 
 
+def test_current_write_and_read_snapshots_do_not_alias_inputs_or_each_other(db):
+    from common import datastore_accessors as dsa
+
+    _seed_probe_map(db)
+    current_input = copy.deepcopy(IN_DATA)
+    dsa.write_current(current_input)
+    committed = dsa.read_current()
+
+    current_input["probe_history"]["primary"]["PitProbe"] = 999
+    current_input["notify_targets"]["PinkProbe"] = 999
+    detached_blob = dsa.read_current()
+    detached_blob["P"]["PitProbe"] = 888
+    detached_snapshot = dsa.read_current_snapshot()
+    detached_snapshot.primary["PitProbe"] = 777
+
+    assert dsa.read_current() == committed
+    assert dsa.read_current_snapshot().primary["PitProbe"] == 210
+
+
 def test_get_temp_reports_a_stale_probe_as_none(db):
     # A probe with no reading must reach the API as null, not as 0, and an
     # unknown label must be an error rather than a null reading.
@@ -132,14 +152,14 @@ def test_get_temp_reports_a_stale_probe_as_none(db):
         }
     )
     data = {"data": {}, "result": "OK"}
-    api_commands._cmd_get_temp(data, None, None, ["temp", "PinkProbe"], None, None)
+    api_commands._cmd_get_temp(data, None, None, ["temp", "PinkProbe"], None)
     assert data["result"] == "OK"
     assert data["data"]["temp"] is None
 
     data = {"data": {}, "result": "OK"}
-    api_commands._cmd_get_temp(data, None, None, ["temp", "PitProbe"], None, None)
+    api_commands._cmd_get_temp(data, None, None, ["temp", "PitProbe"], None)
     assert data["data"]["temp"] == 210
 
     data = {"data": {}, "result": "OK"}
-    api_commands._cmd_get_temp(data, None, None, ["temp", "NoSuchProbe"], None, None)
+    api_commands._cmd_get_temp(data, None, None, ["temp", "NoSuchProbe"], None)
     assert data["result"] == "ERROR"
