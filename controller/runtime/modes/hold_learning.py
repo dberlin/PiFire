@@ -8,6 +8,8 @@ from dataclasses import dataclass, replace
 from typing import Literal, Protocol, cast
 
 from common.control_trace import (
+    CalibrationEventType,
+    CalibrationTracePayload,
     AllocationPayload,
     ControlTracePayload,
     ModelEvaluationPayload,
@@ -38,6 +40,7 @@ from controller.applied_output import (
     FrameFeedbackDisposition,
     OutputSource,
 )
+from controller.model_learning.calibration import CalibrationDecision
 from controller.model_learning.contracts import FrameObservation
 from controller.mpc_allocator import AllocationResult
 from controller.runtime.control_trace_session import (
@@ -239,6 +242,18 @@ class HoldRefitResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CalibrationHandoff:
+    status: _CalibrationStatus
+    reason: str | None
+    probe_load: float
+    stage: _CalibrationStage | None
+    command_revision: int
+    command_action: _CalibrationCommandAction
+    command_generation: int
+    completed_stages: tuple[_CalibrationStage, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _PendingObservation:
     frame_key: _FrameKey
     observation: FrameObservation
@@ -251,6 +266,14 @@ class HoldLearningRuntime:
     """Own Hold's observation, model, persistence, and teardown lifecycle."""
 
     _PENDING_CAPACITY = 60
+
+    _CALIBRATION_OUTCOME_STATUS: Mapping[str, _CalibrationStatus] = {
+        "start_rejected": "rejected",
+        "safety_aborted": "cancelled",
+        "stage_timeout": "cancelled",
+        "stopped": "cancelled",
+        "completed": "accepted",
+    }
 
     def __init__(
         self,
@@ -294,6 +317,95 @@ class HoldLearningRuntime:
 
     def mark_evidence_unavailable(self) -> None:
         self._evidence_available = False
+
+    def handoff_calibration(
+        self,
+        decision: CalibrationDecision | None,
+        *,
+        result_revision: int,
+        timestamp_ms: int,
+    ) -> CalibrationHandoff:
+        trace = self._trace
+        if decision is not None and trace is not None:
+            command_action = cast(
+                _CalibrationCommandAction,
+                decision.command_action,
+            )
+            for event in decision.events:
+                try:
+                    event_type = CalibrationEventType(event.kind)
+                except ValueError:
+                    continue
+                trace.record(
+                    TraceEventKind.CALIBRATION,
+                    CalibrationTracePayload(
+                        event=event_type,
+                        command_revision=decision.command_revision,
+                        command_action=command_action,
+                        result_revision=result_revision,
+                        stage=event.stage,
+                        intended_probe_load=event.intended_probe_q,
+                        bounded_probe_load=event.bounded_probe_q,
+                        cumulative_probe_load=event.realized_probe_sum,
+                        eligible_observations=(
+                            decision.progress.eligible_observations
+                        ),
+                        positive_observations=(
+                            decision.progress.positive_observations
+                        ),
+                        negative_observations=(
+                            decision.progress.negative_observations
+                        ),
+                        reasons=event.reasons,
+                    ),
+                    timestamp_ms,
+                )
+        if decision is None:
+            return CalibrationHandoff(
+                "inactive",
+                None,
+                0.0,
+                None,
+                0,
+                "none",
+                0,
+                (),
+            )
+        status = (
+            "active"
+            if decision.active
+            else self._CALIBRATION_OUTCOME_STATUS.get(
+                decision.outcome or "",
+                (
+                    "accepted"
+                    if any(
+                        event.kind == "start_accepted"
+                        for event in decision.events
+                    )
+                    else "inactive"
+                ),
+            )
+        )
+        return CalibrationHandoff(
+            status=status,
+            reason=(
+                ", ".join(decision.outcome_reasons)
+                if decision.outcome_reasons
+                else None
+            ),
+            probe_load=decision.probe_q,
+            stage=cast(
+                _CalibrationStage | None,
+                decision.stage if decision.active else None,
+            ),
+            command_revision=decision.command_revision,
+            command_action=cast(_CalibrationCommandAction, decision.command_action),
+            command_generation=decision.command_generation,
+            completed_stages=cast(
+                tuple[_CalibrationStage, ...],
+                tuple(decision.completed_stages),
+            ),
+        )
 
     def restore_model(
         self,

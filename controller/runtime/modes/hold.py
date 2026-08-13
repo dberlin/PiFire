@@ -11,8 +11,6 @@ from common.modes import Mode
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
-    CalibrationEventType,
-    CalibrationTracePayload,
     ControllerType,
     InhibitReason,
     RecorderGapPayload,
@@ -29,6 +27,7 @@ from controller.applied_output import (
     seed_output,
 )
 from controller.runtime.modes.hold_learning import (
+    CalibrationHandoff,
     HoldLearningRuntime,
     parse_model_lifecycle_payload,
 )
@@ -87,6 +86,7 @@ class _HoldTickContext:
     trace: ControlTraceSession | None
     active_calibration_reset: bool
     runner_adopted: bool
+    calibration_handled: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +94,33 @@ class _HoldRunnerResult:
     result: _runner_mod.ControllerUpdateResult | None
     controller_interval: float
     cancellation_reason: str | None
+    calibration: CalibrationHandoff | None
+    calibration_handled: bool
+    calibration_pending: bool
+
+@dataclass(frozen=True, slots=True)
+class _CalibrationCancellation:
+    reason: str
+    reset_reason: PulseResetReason
+    inhibit_reason: InhibitReason
+    cancellation_command_revision: int
+    cancellation_command_action: Literal[
+        "pause",
+        "stop",
+        "reset-progress",
+        "safety-cancel",
+    ]
+    notify_runner: bool
+    terminal_feedback: bool
+    report_feedback: bool
+    safety_event: SafetyEventType | None
+    safety_detail: str
+    safety_result_revision: int | None
+    calibration_command_revision: int
+    calibration_command_action: str
+    calibration_command_generation: int
+    calibration_stage: str | None
+    calibration_completed_stages: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,13 +854,31 @@ class HoldMode(ControlMode):
                     controls_fan=self.state.controller.controls_fan,
                 )
             )
-        self._inhibit_framed_pulse(
-            PulseResetReason.MODE_CHANGE,
-            now,
-            InhibitReason.SAFETY,
-            ptemp=self._last_ptemp,
-            terminal_feedback=False,
+        controller = self.state.controller
+        already_reset = (
+            controller.pulse_frame_calibration_status == "cancelled"
         )
+        if (
+            not already_reset
+            and not self._cancel_active_framed_calibration(
+                "reset",
+                now=now,
+                ptemp=self._last_ptemp,
+                reset_reason=PulseResetReason.MODE_CHANGE,
+                inhibit_reason=InhibitReason.SAFETY,
+                terminal_feedback=False,
+                safety_event=None,
+                safety_detail="",
+                notify_runner=False,
+            )
+        ):
+            self._inhibit_framed_pulse(
+                PulseResetReason.MODE_CHANGE,
+                now,
+                InhibitReason.SAFETY,
+                ptemp=self._last_ptemp,
+                terminal_feedback=False,
+            )
         _control.eventLogger.info("Controller reinitialized with updated settings")
         learning = self._hold_learning
         if learning is not None:
@@ -995,59 +1040,31 @@ class HoldMode(ControlMode):
         self._calibration_command_high_water = revision
         controller.calibration_command_revision = revision
 
-    #: How a finished run is named in the operator's report. "inactive" is
-    #: reserved for a run that never began, so a stopped or aborted one is never
-    #: reported as though the operator had not asked for anything.
-    _CALIBRATION_OUTCOME_STATUS = {
-        "start_rejected": "rejected",
-        "safety_aborted": "cancelled",
-        "stage_timeout": "cancelled",
-        "stopped": "cancelled",
-        "completed": "accepted",
-    }
 
-    @classmethod
-    def _calibration_status(cls, calibration) -> str:
-        if calibration is None:
-            return "inactive"
-        if calibration.active:
-            return "active"
-        named = cls._CALIBRATION_OUTCOME_STATUS.get(calibration.outcome or "")
-        if named is not None:
-            return named
-        return "accepted" if any(event.kind == "start_accepted" for event in calibration.events) else "inactive"
-
-    @staticmethod
-    def _calibration_reason(calibration) -> str | None:
-        """The coordinator's own terminal reasons.
-
-        They reach the control trace but nothing else, so the report can say a
-        run stopped without ever saying why.
-        """
-        if calibration is None or not calibration.outcome_reasons:
-            return None
-        return ", ".join(calibration.outcome_reasons)
-
-    def _calibration_cancellation_reason(
+    def _admit_calibration_cancellation(
         self,
         result: _runner_mod.ControllerUpdateResult,
         now: float,
-    ) -> str | None:
+    ) -> _CalibrationCancellation | None:
         calibration = result.calibration
-        if calibration is None or not calibration.active or calibration.probe_q == 0.0:
+        if (
+            calibration is None
+            or not calibration.active
+            or calibration.probe_q == 0.0
+        ):
             return None
-        if self.state.lid.open_detected:
-            return "lid_open"
-        if self.state.manual_override["auger"] >= now:
-            return "manual_override"
-        if result.stale_state is ResultStaleState.STALE:
-            return "stale_result"
-        if self.control.get("controller_update"):
-            return "reset"
-        if self.control.get("mode") != Mode.HOLD:
-            return "safety"
         raw = self.control.get("mpc_calibration")
-        if isinstance(raw, dict):
+        if self.state.lid.open_detected:
+            reason = "lid_open"
+        elif self.state.manual_override["auger"] >= now:
+            reason = "manual_override"
+        elif result.stale_state is ResultStaleState.STALE:
+            reason = "stale_result"
+        elif self.control.get("controller_update"):
+            reason = "reset"
+        elif self.control.get("mode") != Mode.HOLD:
+            reason = "safety"
+        elif isinstance(raw, dict):
             revision = raw.get("revision")
             action = raw.get("action")
             if (
@@ -1055,8 +1072,212 @@ class HoldMode(ControlMode):
                 and revision > calibration.command_revision
                 and action in {"pause", "stop", "reset-progress"}
             ):
-                return f"operator_{action}"
-        return None
+                reason = f"operator_{action}"
+            else:
+                return None
+        else:
+            return None
+        operator_action = reason.removeprefix("operator_")
+        if (
+            reason.startswith("operator_")
+            and isinstance(raw, dict)
+            and isinstance(raw.get("revision"), int)
+            and operator_action in {"pause", "stop", "reset-progress"}
+        ):
+            cancellation_command_revision = raw["revision"]
+            cancellation_command_action = cast(
+                Literal["pause", "stop", "reset-progress"],
+                operator_action,
+            )
+        else:
+            cancellation_command_revision = 0
+            cancellation_command_action = "safety-cancel"
+        return _CalibrationCancellation(
+            reason=reason,
+            reset_reason=PulseResetReason.SAFETY,
+            inhibit_reason=InhibitReason.SAFETY,
+            cancellation_command_revision=cancellation_command_revision,
+            cancellation_command_action=cancellation_command_action,
+            notify_runner=not reason.startswith("operator_"),
+            terminal_feedback=True,
+            report_feedback=True,
+            safety_event=SafetyEventType.SCHEDULER_RESET,
+            safety_detail=f"calibration probe cancelled: {reason}",
+            safety_result_revision=result.revision,
+            calibration_command_revision=calibration.command_revision,
+            calibration_command_action=calibration.command_action,
+            calibration_command_generation=calibration.command_generation,
+            calibration_stage=calibration.stage,
+            calibration_completed_stages=tuple(calibration.completed_stages),
+        )
+
+    def _result_matches_cancelled_frame(
+        self,
+        result: _runner_mod.ControllerUpdateResult,
+    ) -> bool:
+        calibration = result.calibration
+        controller = self.state.controller
+        return (
+            calibration is not None
+            and calibration.active
+            and calibration.probe_q != 0.0
+            and controller.pulse_frame_calibration_status == "cancelled"
+            and controller.pulse_frame_calibration_cancellation_reason is not None
+            and controller.pulse_frame_calibration_command_revision
+            == calibration.command_revision
+            and controller.pulse_frame_calibration_command_action
+            == calibration.command_action
+            and controller.pulse_frame_calibration_command_generation
+            == calibration.command_generation
+        )
+
+    def _route_calibration_cancellation(
+        self,
+        cancellation: _CalibrationCancellation,
+        *,
+        now: float,
+        ptemp: float | None,
+    ) -> None:
+        self._inhibit_framed_pulse(
+            cancellation.reset_reason,
+            now,
+            cancellation.inhibit_reason,
+            ptemp=ptemp,
+            terminal_feedback=cancellation.terminal_feedback,
+            report_feedback=cancellation.report_feedback,
+            cancellation_reason=cancellation.reason,
+            cancellation_command_revision=(
+                cancellation.cancellation_command_revision
+            ),
+            cancellation_command_action=(
+                cancellation.cancellation_command_action
+            ),
+            safety_event=cancellation.safety_event,
+            safety_detail=cancellation.safety_detail,
+            safety_result_revision=cancellation.safety_result_revision,
+        )
+        if cancellation.notify_runner:
+            self._runner.cancel_calibration(cancellation.reason)
+    def _result_matches_cancelled_projection(
+        self,
+        result: _runner_mod.ControllerUpdateResult,
+    ) -> bool:
+        calibration = result.calibration
+        controller = self.state.controller
+        return (
+            calibration is not None
+            and calibration.active
+            and calibration.probe_q != 0.0
+            and controller.pulse_calibration_cancellation_reason is not None
+            and controller.pulse_calibration_command_revision
+            == calibration.command_revision
+            and controller.pulse_calibration_command_action
+            == calibration.command_action
+            and controller.pulse_calibration_command_generation
+            == calibration.command_generation
+        )
+
+    def _cancel_active_framed_calibration(
+        self,
+        reason: str,
+        *,
+        now: float,
+        ptemp: float | None,
+        reset_reason: PulseResetReason,
+        inhibit_reason: InhibitReason,
+        terminal_feedback: bool,
+        safety_event: SafetyEventType | None,
+        safety_detail: str,
+        notify_runner: bool = True,
+        cancellation_command_revision: int = 0,
+        cancellation_command_action: Literal[
+            "pause",
+            "stop",
+            "reset-progress",
+            "safety-cancel",
+        ] = "safety-cancel",
+    ) -> bool:
+        controller = self.state.controller
+        probe_load = controller.pulse_frame_calibration_probe_load
+        if (
+            controller.pulse_frame_calibration_status != "active"
+            or isinstance(probe_load, bool)
+            or not isinstance(probe_load, int | float)
+            or probe_load == 0.0
+        ):
+            return False
+        self._route_calibration_cancellation(
+            _CalibrationCancellation(
+                reason=reason,
+                reset_reason=reset_reason,
+                inhibit_reason=inhibit_reason,
+                cancellation_command_revision=cancellation_command_revision,
+                cancellation_command_action=cancellation_command_action,
+                notify_runner=notify_runner,
+                terminal_feedback=terminal_feedback,
+                report_feedback=False,
+                safety_event=safety_event,
+                safety_detail=safety_detail,
+                safety_result_revision=(
+                    controller.pulse_frame_result_revision
+                ),
+                calibration_command_revision=(
+                    controller.pulse_frame_calibration_command_revision
+                ),
+                calibration_command_action=(
+                    controller.pulse_frame_calibration_command_action
+                ),
+                calibration_command_generation=(
+                    controller.pulse_frame_calibration_command_generation
+                ),
+                calibration_stage=controller.pulse_frame_calibration_stage,
+                calibration_completed_stages=tuple(
+                    controller.pulse_frame_calibration_completed_stages
+                ),
+            ),
+            now=now,
+            ptemp=ptemp,
+        )
+        return True
+
+    def _cancel_newer_operator_command(
+        self,
+        *,
+        now: float,
+        ptemp: float,
+    ) -> bool:
+        controller = self.state.controller
+        control = self.control
+        if control is None:
+            return False
+        raw = control.get("mpc_calibration")
+        if not isinstance(raw, dict):
+            return False
+        revision = raw.get("revision")
+        action = raw.get("action")
+        if (
+            not isinstance(revision, int)
+            or revision <= controller.pulse_frame_calibration_command_revision
+            or action not in {"pause", "stop", "reset-progress"}
+        ):
+            return False
+        return self._cancel_active_framed_calibration(
+            f"operator_{action}",
+            now=now,
+            ptemp=ptemp,
+            reset_reason=PulseResetReason.SAFETY,
+            inhibit_reason=InhibitReason.SAFETY,
+            terminal_feedback=True,
+            safety_event=SafetyEventType.SCHEDULER_RESET,
+            safety_detail=f"calibration probe cancelled: operator_{action}",
+            notify_runner=False,
+            cancellation_command_revision=revision,
+            cancellation_command_action=cast(
+                Literal["pause", "stop", "reset-progress"],
+                action,
+            ),
+        )
+
 
     @staticmethod
     def _without_calibration_probe(
@@ -1077,84 +1298,18 @@ class HoldMode(ControlMode):
     def _cancel_calibration_probe(
         self,
         result: _runner_mod.ControllerUpdateResult,
-        reason: str,
+        cancellation: _CalibrationCancellation,
         now: float,
         ptemp: float,
-        *,
-        notify_runner: bool,
     ) -> _runner_mod.ControllerUpdateResult:
-        """Close completed frames before marking the scheduler-reset partial."""
-        raw = self.control.get("mpc_calibration")
-        if reason.startswith("operator_") and isinstance(raw, dict) and isinstance(raw.get("revision"), int):
-            cancellation_command_revision = raw["revision"]
-            cancellation_command_action = reason.removeprefix("operator_")
-        else:
-            cancellation_command_revision = 0
-            cancellation_command_action = "safety-cancel"
-        self._inhibit_framed_pulse(
-            PulseResetReason.SAFETY,
-            now,
-            InhibitReason.SAFETY,
+        """Route one admitted cancellation before restoring the exact baseline."""
+        self._route_calibration_cancellation(
+            cancellation,
+            now=now,
             ptemp=ptemp,
-            terminal_feedback=True,
-            report_feedback=True,
-            cancellation_reason=reason,
-            cancellation_command_revision=cancellation_command_revision,
-            cancellation_command_action=cancellation_command_action,
-            safety_event=SafetyEventType.SCHEDULER_RESET,
-            safety_detail=f"calibration probe cancelled: {reason}",
-            safety_result_revision=result.revision,
         )
-        if notify_runner:
-            self._runner.cancel_calibration(reason)
         return self._without_calibration_probe(result)
 
-    def _trace_calibration_result(
-        self,
-        result: _runner_mod.ControllerUpdateResult,
-        now: float,
-    ) -> None:
-        decision = result.calibration
-        if decision is None:
-            return
-        trace = self._control_trace
-        if trace is None:
-            return
-        command_action = cast(
-            Literal[
-                "none",
-                "start",
-                "pause",
-                "resume",
-                "stop",
-                "reset-progress",
-                "safety-cancel",
-            ],
-            decision.command_action,
-        )
-        for event in decision.events:
-            try:
-                event_type = CalibrationEventType(event.kind)
-            except ValueError:
-                continue
-            trace.record(
-                TraceEventKind.CALIBRATION,
-                CalibrationTracePayload(
-                    event=event_type,
-                    command_revision=decision.command_revision,
-                    command_action=command_action,
-                    result_revision=result.revision,
-                    stage=event.stage,
-                    intended_probe_load=event.intended_probe_q,
-                    bounded_probe_load=event.bounded_probe_q,
-                    cumulative_probe_load=event.realized_probe_sum,
-                    eligible_observations=decision.progress.eligible_observations,
-                    positive_observations=decision.progress.positive_observations,
-                    negative_observations=decision.progress.negative_observations,
-                    reasons=event.reasons,
-                ),
-                int(now * 1_000),
-            )
 
     def on_tick(
         self,
@@ -1169,8 +1324,18 @@ class HoldMode(ControlMode):
             current_output_status,
         )
         context = self._release_expired_manual_auger(context)
-        self._publish_safety_ceiling_and_consume_calibration(context)
-        runner_result = self._submit_obtain_and_handle_calibration_cancellation(context)
+        calibration_handled = (
+            self._publish_safety_ceiling_and_consume_calibration(context)
+        )
+        context = replace(
+            context,
+            calibration_handled=(
+                context.calibration_handled or calibration_handled
+            ),
+        )
+        runner_result = self._submit_obtain_and_handle_calibration_cancellation(
+            context
+        )
         inhibition = self._decide_safety_manual_lid_inhibition(context, runner_result)
         framed_pulse = self._advance_or_reset_framed_pulse(
             context,
@@ -1218,27 +1383,30 @@ class HoldMode(ControlMode):
         active_calibration_reset = False
 
         if control["controller_update"]:
-            controller = self.state.controller
-            latched_probe = getattr(controller, "pulse_frame_calibration_probe_load", 0.0)
-            if (
-                getattr(controller, "pulse_frame_calibration_status", "inactive") == "active"
-                and isinstance(latched_probe, (int, float))
-                and not isinstance(latched_probe, bool)
-                and latched_probe != 0.0
-            ):
-                active_calibration_reset = True
-                self._runner.cancel_calibration("reset")
+            active_calibration_reset = (
+                self._cancel_active_framed_calibration(
+                    "reset",
+                    now=now,
+                    ptemp=ptemp,
+                    reset_reason=PulseResetReason.MODE_CHANGE,
+                    inhibit_reason=InhibitReason.SAFETY,
+                    terminal_feedback=False,
+                    safety_event=None,
+                    safety_detail="",
+                )
+            )
             control["controller_update"] = False
             ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
-            self._inhibit_framed_pulse(
-                PulseResetReason.MODE_CHANGE,
-                now,
-                InhibitReason.SAFETY,
-                ptemp=ptemp,
-                terminal_feedback=False,
-                report_feedback=False,
-            )
+            if not active_calibration_reset:
+                self._inhibit_framed_pulse(
+                    PulseResetReason.MODE_CHANGE,
+                    now,
+                    InhibitReason.SAFETY,
+                    ptemp=ptemp,
+                    terminal_feedback=False,
+                    report_feedback=False,
+                )
             self._controller_status = self._runner.reconfigure(
                 self.settings,
                 control,
@@ -1272,6 +1440,11 @@ class HoldMode(ControlMode):
             ),
             trace=trace,
             active_calibration_reset=active_calibration_reset,
+            calibration_handled=(
+                self.state.controller.pulse_frame_calibration_status
+                == "cancelled"
+                and self.state.controller.pulse_calibration_status != "inactive"
+            ),
             runner_adopted=runner_adopted,
         )
 
@@ -1300,11 +1473,15 @@ class HoldMode(ControlMode):
     def _publish_safety_ceiling_and_consume_calibration(
         self,
         context: _HoldTickContext,
-    ) -> None:
+    ) -> bool:
         self._retarget_running_controller()
         self._publish_safety_ceiling(context.now)
+        calibration_handled = self._cancel_newer_operator_command(
+            now=context.now,
+            ptemp=context.ptemp,
+        )
         self._consume_calibration_command(context.now)
-
+        return calibration_handled
     def _submit_obtain_and_handle_calibration_cancellation(
         self,
         context: _HoldTickContext,
@@ -1323,32 +1500,66 @@ class HoldMode(ControlMode):
         if (context.now - self.state.controller.cycle_start) <= controller_interval:
             return _HoldRunnerResult(
                 result=None,
+                calibration_pending=context.calibration_handled,
                 controller_interval=controller_interval,
                 cancellation_reason=None,
+                calibration=None,
+                calibration_handled=context.calibration_handled,
             )
-
         result = self._runner.latest()
         if learning is not None:
             learning.drain_activation_events()
-        cancellation_reason = None
-        if context.active_calibration_reset:
+        cancellation: _CalibrationCancellation | None = None
+        matched_cancelled_identity = (
+            self._result_matches_cancelled_frame(result)
+            or self._result_matches_cancelled_projection(result)
+        )
+        calibration = result.calibration
+        inactive_acknowledgement = (
+            context.calibration_handled
+            and (calibration is None or not calibration.active)
+        )
+        calibration_handled = (
+            context.active_calibration_reset
+            or inactive_acknowledgement
+            or matched_cancelled_identity
+        )
+        calibration_pending = matched_cancelled_identity
+        if calibration_handled:
             result = self._without_calibration_probe(result)
         else:
-            cancellation_reason = self._calibration_cancellation_reason(result, context.now)
-            if cancellation_reason is not None:
+            cancellation = self._admit_calibration_cancellation(
+                result,
+                context.now,
+            )
+            if cancellation is not None:
                 result = self._cancel_calibration_probe(
                     result,
-                    cancellation_reason,
+                    cancellation,
                     context.now,
                     context.ptemp,
-                    notify_runner=not cancellation_reason.startswith("operator_"),
                 )
+        cancellation_reason = (
+            None if cancellation is None else cancellation.reason
+        )
+        calibration = (
+            learning.handoff_calibration(
+                result.calibration,
+                result_revision=result.revision,
+                timestamp_ms=int(context.now * 1_000),
+            )
+            if learning is not None
+            else None
+        )
         if isinstance(result.diagnostics, MpcTraceDiagnostics):
             self._observe_reachability_advisory(result.diagnostics)
         return _HoldRunnerResult(
             result=result,
+            calibration_pending=calibration_pending,
             controller_interval=controller_interval,
             cancellation_reason=cancellation_reason,
+            calibration=calibration,
+            calibration_handled=calibration_handled,
         )
 
     def _decide_safety_manual_lid_inhibition(
@@ -1360,6 +1571,7 @@ class HoldMode(ControlMode):
         control = self.control
         settings = self.settings
         result = runner_result.result
+        calibration = runner_result.calibration
         framed_feedback_due = result is not None
         if result is not None:
             controller = self.state.controller
@@ -1367,6 +1579,7 @@ class HoldMode(ControlMode):
             if result.revision > 0 and (
                 result.revision > controller.pulse_result_revision
                 or runner_result.cancellation_reason is not None
+                or runner_result.calibration_handled
             ):
                 controller.output = result.cycle_ratio
                 controller.pulse_result_revision = result.revision
@@ -1382,17 +1595,13 @@ class HoldMode(ControlMode):
                     else controller.pulse_combustion_load or 0.0
                 )
                 controller.pulse_calibration_probe_load = (
-                    result.calibration.probe_q if result.calibration is not None else 0.0
+                    0.0 if calibration is None else calibration.probe_load
                 )
                 controller.pulse_calibration_stage = (
-                    result.calibration.stage
-                    if result.calibration is not None and result.calibration.active
-                    else None
+                    None if calibration is None else calibration.stage
                 )
                 controller.pulse_calibration_completed_stages = (
-                    result.calibration.completed_stages
-                    if result.calibration is not None
-                    else ()
+                    () if calibration is None else calibration.completed_stages
                 )
                 controller.pulse_maximum_duty = (
                     result.allocation.u_max if result.allocation is not None else 1.0
@@ -1415,18 +1624,25 @@ class HoldMode(ControlMode):
                 controller.pulse_baseline_allocation = result.baseline_allocation
                 controller.pulse_combined_allocation = result.allocation
                 controller.pulse_calibration_command_revision = (
-                    result.calibration.command_revision if result.calibration is not None else 0
+                    0 if calibration is None else calibration.command_revision
                 )
                 controller.pulse_calibration_command_action = (
-                    result.calibration.command_action if result.calibration is not None else "none"
+                    "none" if calibration is None else calibration.command_action
                 )
                 controller.pulse_calibration_command_generation = (
-                    result.calibration.command_generation if result.calibration is not None else 0
+                    0 if calibration is None else calibration.command_generation
                 )
-                controller.pulse_calibration_cancellation_reason = (
-                    runner_result.cancellation_reason or self._calibration_reason(result.calibration)
+                if runner_result.cancellation_reason is not None:
+                    controller.pulse_calibration_cancellation_reason = (
+                        runner_result.cancellation_reason
+                    )
+                elif not runner_result.calibration_handled:
+                    controller.pulse_calibration_cancellation_reason = (
+                        None if calibration is None else calibration.reason
+                    )
+                controller.pulse_calibration_status = (
+                    "inactive" if calibration is None else calibration.status
                 )
-                controller.pulse_calibration_status = self._calibration_status(result.calibration)
                 controller.pulse_allocation_evidence_checked = True
                 controller.pulse_allocation_result_revision = (
                     result.revision if result.allocation is not None else None
@@ -1451,6 +1667,7 @@ class HoldMode(ControlMode):
             not self.state.controller.pulse_stale_command
             and self.state.manual_override["auger"] < context.now
             and not self.state.lid.open_detected
+            and not runner_result.calibration_pending
         )
         return _HoldInhibitionDecision(
             lid_will_open=lid_will_open,
@@ -1469,7 +1686,11 @@ class HoldMode(ControlMode):
         if result is not None:
             controller = self.state.controller
             control = self.control
-            if controller.pulse_stale_command:
+            if (
+                controller.pulse_stale_command
+                and runner_result.cancellation_reason is None
+                and not runner_result.calibration_handled
+            ):
                 self._inhibit_framed_pulse(
                     PulseResetReason.SAFETY,
                     context.now,
@@ -1505,10 +1726,15 @@ class HoldMode(ControlMode):
                         lifecycle_event=lifecycle,
                     )
                 )
-            self._trace_calibration_result(result, context.now)
             snapshot = self._runner.get_model_snapshot()
             if isinstance(snapshot, dict) and learning is not None:
                 learning.submit_online_checkpoint(snapshot)
+        if runner_result.calibration_pending:
+            return _HoldFramedPulse(
+                result=None,
+                lid_will_open=inhibition.lid_will_open,
+                report_feedback=inhibition.framed_feedback_due,
+            )
         if not inhibition.permit_framed_pulse:
             return _HoldFramedPulse(
                 result=None,
@@ -1611,15 +1837,25 @@ class HoldMode(ControlMode):
                         controls_fan=self.state.controller.controls_fan,
                     )
                 )
-            self._inhibit_framed_pulse(
-                PulseResetReason.LID,
-                now,
-                InhibitReason.LID_OPEN,
+            if not self._cancel_active_framed_calibration(
+                "lid_open",
+                now=now,
                 ptemp=ptemp,
+                reset_reason=PulseResetReason.LID,
+                inhibit_reason=InhibitReason.LID_OPEN,
                 terminal_feedback=True,
                 safety_event=SafetyEventType.LID_DETECTED,
                 safety_detail="lid open detected",
-            )
+            ):
+                self._inhibit_framed_pulse(
+                    PulseResetReason.LID,
+                    now,
+                    InhibitReason.LID_OPEN,
+                    ptemp=ptemp,
+                    terminal_feedback=True,
+                    safety_event=SafetyEventType.LID_DETECTED,
+                    safety_detail="lid open detected",
+                )
             self._set_output(
                 AppliedOutput(
                     ratio=0.0,
@@ -1676,15 +1912,25 @@ class HoldMode(ControlMode):
                             controls_fan=self.state.controller.controls_fan,
                         )
                     )
-                self._inhibit_framed_pulse(
-                    PulseResetReason.LID,
-                    now,
-                    InhibitReason.LID_OPEN,
+                if not self._cancel_active_framed_calibration(
+                    "lid_open",
+                    now=now,
                     ptemp=ptemp,
+                    reset_reason=PulseResetReason.LID,
+                    inhibit_reason=InhibitReason.LID_OPEN,
                     terminal_feedback=True,
                     safety_event=SafetyEventType.LID_DETECTED,
                     safety_detail="lid open set by operator",
-                )
+                ):
+                    self._inhibit_framed_pulse(
+                        PulseResetReason.LID,
+                        now,
+                        InhibitReason.LID_OPEN,
+                        ptemp=ptemp,
+                        terminal_feedback=True,
+                        safety_event=SafetyEventType.LID_DETECTED,
+                        safety_detail="lid open set by operator",
+                    )
                 self._set_output(
                     AppliedOutput(
                         ratio=0.0,
@@ -1733,15 +1979,25 @@ class HoldMode(ControlMode):
                     controls_fan=self.state.controller.controls_fan,
                 )
             )
-        self._inhibit_framed_pulse(
-            PulseResetReason.MANUAL,
-            self._last_now,
-            InhibitReason.MANUAL_OVERRIDE,
+        if not self._cancel_active_framed_calibration(
+            "manual_override",
+            now=self._last_now,
             ptemp=self._last_ptemp,
+            reset_reason=PulseResetReason.MANUAL,
+            inhibit_reason=InhibitReason.MANUAL_OVERRIDE,
             terminal_feedback=False,
             safety_event=SafetyEventType.MANUAL_TAKEOVER,
             safety_detail="manual auger output applied",
-        )
+        ):
+            self._inhibit_framed_pulse(
+                PulseResetReason.MANUAL,
+                self._last_now,
+                InhibitReason.MANUAL_OVERRIDE,
+                ptemp=self._last_ptemp,
+                terminal_feedback=False,
+                safety_event=SafetyEventType.MANUAL_TAKEOVER,
+                safety_detail="manual auger output applied",
+            )
         if output and not self.grill.get_output_status()["auger"]:
             self.grill.auger_on()
         elif not output and self.grill.get_output_status()["auger"]:
@@ -1767,11 +2023,24 @@ class HoldMode(ControlMode):
     ) -> None:
         if name != "auger":
             return
+        calibration_cancelled = (
+            self._runner is not None
+            and self._cancel_active_framed_calibration(
+                "manual_override",
+                now=now,
+                ptemp=self._last_ptemp,
+                reset_reason=PulseResetReason.MANUAL,
+                inhibit_reason=InhibitReason.MANUAL_OVERRIDE,
+                terminal_feedback=False,
+                safety_event=SafetyEventType.MANUAL_RELEASE,
+                safety_detail="manual auger override expired",
+            )
+        )
         if self.grill.get_output_status()["auger"]:
             self.grill.auger_off()
         self.state.manual_override["auger"] = 0
         trace = self._control_trace
-        if trace is not None:
+        if trace is not None and not calibration_cancelled:
             trace.record_safety(
                 TraceSafetyContext(
                     event=SafetyEventType.MANUAL_RELEASE,
@@ -1819,15 +2088,25 @@ class HoldMode(ControlMode):
                 and learning is not None
             ):
                 learning.bind_generation(self._runner_configuration_revision)
-            self._inhibit_framed_pulse(
-                PulseResetReason.SAFETY,
-                now,
-                InhibitReason.SAFETY,
+            if not self._cancel_active_framed_calibration(
+                "safety",
+                now=now,
                 ptemp=self._last_ptemp,
+                reset_reason=PulseResetReason.SAFETY,
+                inhibit_reason=InhibitReason.SAFETY,
                 terminal_feedback=True,
                 safety_event=event_type,
                 safety_detail=event.replace("_", " "),
-            )
+            ):
+                self._inhibit_framed_pulse(
+                    PulseResetReason.SAFETY,
+                    now,
+                    InhibitReason.SAFETY,
+                    ptemp=self._last_ptemp,
+                    terminal_feedback=True,
+                    safety_event=event_type,
+                    safety_detail=event.replace("_", " "),
+                )
 
     # check_safety is now a declarative pre_act guard (GUARDS["Hold"]); the base
     # ControlMode default (return False) applies here.

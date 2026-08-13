@@ -174,6 +174,67 @@ def test_complete_frame_suppresses_duplicate_observation_identity() -> None:
     assert duplicate.duplicate is True
 
 
+def test_reset_keeps_running_interval_latch_when_current_request_changes() -> None:
+    runtime, controller = _runtime()
+    _latch_controller_frame(runtime, controller)
+    runtime.advance(6.0, False, sample=_sample())
+    controller.pulse_result_revision = 10
+    controller.pulse_requested_duty = 0.8
+    controller.pulse_combustion_load = 0.9
+    controller.pulse_baseline_combustion_load = 0.7
+
+    result = runtime.reset(
+        PulseResetReason.SAFETY,
+        10.0,
+        InhibitReason.SAFETY,
+        actual_auger_on=False,
+        sample=_sample(),
+        terminal_feedback=True,
+    )
+
+    assert len(result.completions) == 1
+    completion = result.completions[0]
+    assert completion.result_revision == 9
+    assert completion.requested_combustion_load == pytest.approx(0.4)
+    assert completion.frame.latched_request == pytest.approx(0.3)
+    assert completion.observation is not None
+    assert completion.observation.result_revision == 9
+    assert completion.observation.requested_q == pytest.approx(0.4)
+    assert completion.observation.requested_auger_duty == pytest.approx(0.3)
+
+
+def test_reset_at_frame_boundary_keeps_prior_credit_with_prior_identity() -> None:
+    runtime, controller = _runtime()
+    _latch_controller_frame(runtime, controller)
+    runtime.advance(6.0, False, sample=_sample())
+    controller.pulse_result_revision = 10
+    controller.pulse_requested_duty = 0.8
+    controller.pulse_combustion_load = 0.9
+    controller.pulse_baseline_combustion_load = 0.7
+
+    result = runtime.reset(
+        PulseResetReason.SAFETY,
+        20.0,
+        InhibitReason.SAFETY,
+        actual_auger_on=False,
+        sample=_sample(),
+        terminal_feedback=True,
+        cancellation_reason="stale_result",
+    )
+
+    assert len(result.completions) == 2
+    completed, boundary_reset = result.completions
+    assert completed.result_revision == 9
+    assert completed.frame.delivered_on_s == pytest.approx(6.0)
+    assert completed.requested_combustion_load == pytest.approx(0.4)
+    assert completed.observation is not None
+    assert completed.observation.requested_q == pytest.approx(0.4)
+    assert completed.observation.requested_auger_duty == pytest.approx(0.3)
+    assert boundary_reset.result_revision == 10
+    assert boundary_reset.observation is None
+    assert boundary_reset.frame.delivered_on_s == 0.0
+
+
 @pytest.mark.parametrize("terminal_feedback", [False, True])
 def test_reset_returns_interrupted_observation_with_optional_terminal_feedback(terminal_feedback: bool) -> None:
     runtime, controller = _runtime()

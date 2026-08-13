@@ -7,6 +7,8 @@ from typing import cast
 import pytest
 
 from common.control_trace import (
+    CalibrationEventType,
+    CalibrationTracePayload,
     ControllerType,
     HorizonScorePayload,
     ModelEvaluationPayload,
@@ -29,6 +31,11 @@ from common.model_evidence import (
 )
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import ActivationPhase
+from controller.model_learning.calibration import (
+    CalibrationDecision,
+    CalibrationEvent,
+    CalibrationProgress,
+)
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_session import (
@@ -800,6 +807,246 @@ def test_runner_submission_exception_is_not_hidden_or_partially_accepted() -> No
 
     assert persistence.batches == []
     assert _records(recorder, TraceEventKind.MODEL_OBSERVATION) == []
+
+
+def test_calibration_handoff_projects_public_terminal_decision() -> None:
+    runtime, _runner, _persistence, _trace_session, _recorder = _runtime()
+    decision = CalibrationDecision(
+        active=False,
+        probe_q=0.0,
+        stage=None,
+        progress=CalibrationProgress(),
+        command_revision=17,
+        command_action="start",
+        command_generation=4,
+        completed_stages=("low",),
+        outcome="start_rejected",
+        outcome_reasons=("lid_open", "safety"),
+    )
+
+    handoff = runtime.handoff_calibration(
+        decision,
+        result_revision=41,
+        timestamp_ms=12_500,
+    )
+
+    assert (
+        handoff.status,
+        handoff.reason,
+        handoff.command_revision,
+        handoff.command_action,
+        handoff.command_generation,
+        handoff.completed_stages,
+    ) == ("rejected", "lid_open, safety", 17, "start", 4, ("low",))
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected"),
+    (
+        (None, ("inactive", None, 0.0, None, 0, "none", 0, ())),
+        (
+            CalibrationDecision(
+                True,
+                0.08,
+                "middle",
+                CalibrationProgress(),
+                command_revision=8,
+                command_action="resume",
+                command_generation=3,
+                completed_stages=("low",),
+            ),
+            ("active", None, 0.08, "middle", 8, "resume", 3, ("low",)),
+        ),
+        (
+            CalibrationDecision(
+                False,
+                0.0,
+                None,
+                CalibrationProgress(),
+                command_revision=9,
+                command_action="safety-cancel",
+                outcome="safety_aborted",
+                outcome_reasons=("lid_open",),
+            ),
+            ("cancelled", "lid_open", 0.0, None, 9, "safety-cancel", 0, ()),
+        ),
+        (
+            CalibrationDecision(
+                False,
+                0.0,
+                "low",
+                CalibrationProgress(),
+                outcome="stage_timeout",
+                outcome_reasons=("insufficient_excitation",),
+            ),
+            ("cancelled", "insufficient_excitation", 0.0, None, 0, "none", 0, ()),
+        ),
+        (
+            CalibrationDecision(
+                False,
+                0.0,
+                None,
+                CalibrationProgress(),
+                command_revision=10,
+                command_action="stop",
+                outcome="stopped",
+            ),
+            ("cancelled", None, 0.0, None, 10, "stop", 0, ()),
+        ),
+        (
+            CalibrationDecision(
+                False,
+                0.0,
+                "high",
+                CalibrationProgress(),
+                command_revision=11,
+                command_action="start",
+                completed_stages=("low", "middle", "high"),
+                outcome="completed",
+            ),
+            ("accepted", None, 0.0, None, 11, "start", 0, ("low", "middle", "high")),
+        ),
+        (
+            CalibrationDecision(
+                False,
+                0.0,
+                None,
+                CalibrationProgress(),
+                events=(CalibrationEvent("start_accepted", "low", 0.08, 0.08, 0.0),),
+            ),
+            ("accepted", None, 0.0, None, 0, "none", 0, ()),
+        ),
+        (
+            CalibrationDecision(
+                False,
+                0.0,
+                None,
+                CalibrationProgress(),
+                outcome="future_terminal",
+                outcome_reasons=("future_reason",),
+            ),
+            ("inactive", "future_reason", 0.0, None, 0, "none", 0, ()),
+        ),
+    ),
+    ids=(
+        "absent",
+        "active",
+        "safety-aborted",
+        "stage-timeout",
+        "stopped",
+        "completed",
+        "accepted-event",
+        "unknown",
+    ),
+)
+def test_calibration_handoff_projects_every_public_outcome(
+    decision: CalibrationDecision | None,
+    expected: tuple[object, ...],
+) -> None:
+    runtime, _runner, _persistence, _trace_session, _recorder = _runtime()
+
+    handoff = runtime.handoff_calibration(
+        decision,
+        result_revision=41,
+        timestamp_ms=12_500,
+    )
+
+    assert (
+        handoff.status,
+        handoff.reason,
+        handoff.probe_load,
+        handoff.stage,
+        handoff.command_revision,
+        handoff.command_action,
+        handoff.command_generation,
+        handoff.completed_stages,
+    ) == expected
+
+
+def test_calibration_handoff_returns_immutable_frame_projection() -> None:
+    runtime, _runner, _persistence, _trace_session, _recorder = _runtime()
+    decision = CalibrationDecision(
+        True,
+        0.08,
+        "middle",
+        CalibrationProgress(),
+        command_revision=8,
+        command_action="resume",
+        command_generation=3,
+        completed_stages=("low",),
+    )
+
+    handoff = runtime.handoff_calibration(
+        decision,
+        result_revision=41,
+        timestamp_ms=12_500,
+    )
+
+    assert handoff.completed_stages == ("low",)
+    assert isinstance(handoff.completed_stages, tuple)
+    with pytest.raises(FrozenInstanceError):
+        setattr(handoff, "status", "cancelled")
+
+
+def test_calibration_handoff_records_known_events_in_order_and_ignores_unknown() -> None:
+    runtime, _runner, _persistence, _trace_session, recorder = _runtime()
+    progress = CalibrationProgress(
+        eligible_observations=12,
+        positive_observations=7,
+        negative_observations=5,
+    )
+    decision = CalibrationDecision(
+        True,
+        0.08,
+        "low",
+        progress,
+        events=(
+            CalibrationEvent("start_requested", None, 0.0, 0.0, 0.0),
+            CalibrationEvent("future_event", "low", 0.08, 0.07, 0.15, ("future",)),
+            CalibrationEvent("stage_timeout", "low", 0.08, 0.07, 0.15, ("bounded",)),
+        ),
+        command_revision=17,
+        command_action="start",
+    )
+
+    runtime.handoff_calibration(
+        decision,
+        result_revision=41,
+        timestamp_ms=12_500,
+    )
+
+    calibration = _records(recorder, TraceEventKind.CALIBRATION)
+    assert [record.ts_ms for record in calibration] == [12_500, 12_500]
+    assert [record.payload for record in calibration] == [
+        CalibrationTracePayload(
+            event=CalibrationEventType.START_REQUESTED,
+            command_revision=17,
+            command_action="start",
+            result_revision=41,
+            stage=None,
+            intended_probe_load=0.0,
+            bounded_probe_load=0.0,
+            cumulative_probe_load=0.0,
+            eligible_observations=12,
+            positive_observations=7,
+            negative_observations=5,
+            reasons=(),
+        ),
+        CalibrationTracePayload(
+            event=CalibrationEventType.STAGE_TIMEOUT,
+            command_revision=17,
+            command_action="start",
+            result_revision=41,
+            stage="low",
+            intended_probe_load=0.08,
+            bounded_probe_load=0.07,
+            cumulative_probe_load=0.15,
+            eligible_observations=12,
+            positive_observations=7,
+            negative_observations=5,
+            reasons=("bounded",),
+        ),
+    ]
 
 
 def test_valid_and_invalid_calibration_frames_persist_without_invalid_learner_submission() -> None:
