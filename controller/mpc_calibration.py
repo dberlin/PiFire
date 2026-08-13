@@ -26,6 +26,12 @@ from controller.mpc_allocator import AllocationResult, normalized_load_from_auge
 FloatArray: TypeAlias = npt.NDArray[np.float64]
 CalibrationClock = Callable[[], float]
 
+def _forecast_unavailable(
+    _q_future: FloatArray,
+    _ambient_future: FloatArray,
+) -> FloatArray:
+    raise RuntimeError("calibration forecast is unavailable")
+
 
 class TemperatureForecast(Protocol):
     """Forecast temperatures from explicit future load and ambient vectors."""
@@ -129,7 +135,7 @@ class MpcCalibrationRuntime:
         self._realized_q = 0.0
         self._generation = 0
         self._last_feedback_timestamp: float | None = None
-        self._forecast: TemperatureForecast | None = None
+        self._forecast: TemperatureForecast = _forecast_unavailable
         self._decision = CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
     @property
@@ -192,7 +198,7 @@ class MpcCalibrationRuntime:
                     continue
                 if feedback.disposition is FrameFeedbackDisposition.DISCARDED:
                     decision = self._coordinator.cancel_probe("discarded_frame")
-                elif feedback.disposition is FrameFeedbackDisposition.COMPLETE:
+                else:
                     decision = replace(
                         self._coordinator.advance(
                             self._runtime_context(
@@ -207,8 +213,6 @@ class MpcCalibrationRuntime:
                         command_action=provenance.command_action,
                         command_generation=provenance.command_generation,
                     )
-                else:
-                    continue
                 self._decision = decision
 
             while self._operations:
@@ -249,7 +253,7 @@ class MpcCalibrationRuntime:
             self._decision = decision
             return decision
         finally:
-            self._forecast = None
+            self._forecast = _forecast_unavailable
 
     def register_result(self, result: CompletedCalibrationResult) -> None:
         """Associate a completed runner result with the frame that may latch it."""
@@ -355,8 +359,6 @@ class MpcCalibrationRuntime:
         _runtime: CalibrationRuntimeContext,
     ) -> float:
         forecast = self._forecast
-        if forecast is None:
-            raise RuntimeError("calibration forecast is unavailable")
         requested_q = float(np.clip(baseline_q + probe_q, 0.0, 1.0))
         temperatures = np.asarray(
             forecast(

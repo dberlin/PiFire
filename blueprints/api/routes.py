@@ -97,10 +97,12 @@ from controller.model_learning.activation import (
     GreyControlPairDescriptor,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.model_learning.report import backend_learning_report, build_learning_artifact
 from controller.pid_sp_learning import backend_pid_sp_learning_report
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_calibration import TemperatureForecast
 from . import api_bp
 
 
@@ -315,6 +317,22 @@ def _model_activation_configuration(settings):
     }
 
 
+_INACTIVE_MANUAL_CALIBRATION = CalibrationDecision(
+    False,
+    0.0,
+    None,
+    CalibrationProgress(),
+)
+
+
+def _inactive_manual_calibration(
+    _baseline_q: float,
+    _temperature_c: float,
+    _forecast: TemperatureForecast,
+) -> CalibrationDecision:
+    return _INACTIVE_MANUAL_CALIBRATION
+
+
 def _manual_pair_factory() -> MpcPairFactory:
     activation_configuration = _model_activation_configuration(read_settings())
     configured = activation_configuration["config"]
@@ -326,7 +344,7 @@ def _manual_pair_factory() -> MpcPairFactory:
         configured,
         units,
         cycle_data,
-        adjust_load=lambda load, _temperature_c: load,
+        advance_calibration=_inactive_manual_calibration,
         model_authority=lambda: (0, None),
         on_policy_failure=lambda _error: None,
     )

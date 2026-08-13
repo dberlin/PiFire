@@ -124,6 +124,48 @@ def test_command_validation_requires_revision_confirmations_and_finite_ambient()
         replace(_command(), pellets_confirmed=False)
 
 
+def test_command_validation_rejects_non_integer_seed() -> None:
+    with pytest.raises(ValueError, match="seed must be an integer"):
+        replace(_command(), seed=True)
+    with pytest.raises(ValueError, match="seed must be an integer"):
+        replace(_command(), seed=1.5)
+
+
+@pytest.mark.parametrize("horizon_steps", (0, True, 1.5))
+def test_runtime_rejects_invalid_horizon(horizon_steps) -> None:
+    with pytest.raises(ValueError, match="horizon_steps must be a positive integer"):
+        MpcCalibrationRuntime(horizon_steps=horizon_steps, u_max=0.9)
+
+
+@pytest.mark.parametrize("u_max", (0.0, True, float("nan")))
+def test_runtime_rejects_invalid_output_ceiling(u_max) -> None:
+    with pytest.raises(ValueError, match="u_max must be finite and positive"):
+        MpcCalibrationRuntime(horizon_steps=4, u_max=u_max)
+
+
+def test_runtime_rejects_non_callable_clock() -> None:
+    with pytest.raises(TypeError, match="clock must be callable"):
+        MpcCalibrationRuntime(horizon_steps=4, u_max=0.9, clock=0)
+
+
+def test_runtime_rejects_nonfinite_dynamic_temperatures() -> None:
+    runtime, _clock = _runtime()
+    with pytest.raises(ValueError, match="target must be finite"):
+        runtime.set_target_c(float("inf"))
+    with pytest.raises(ValueError, match="safety ceiling must be finite"):
+        runtime.set_safety_ceiling_c(float("nan"))
+
+
+def test_runtime_rejects_wrong_public_boundary_types() -> None:
+    runtime, _clock = _runtime()
+    with pytest.raises(TypeError, match="command must be CalibrationCommand"):
+        runtime.request("start")
+    with pytest.raises(TypeError, match="forecast must be callable"):
+        runtime.advance(0.4, 100.0, 7)
+    with pytest.raises(TypeError, match="applied must be AppliedOutput"):
+        runtime.register_output("output")
+
+
 def test_revision_ordering_rejects_stale_and_ignores_duplicate_commands() -> None:
     runtime, _clock = _runtime()
     runtime.request(_command(2))

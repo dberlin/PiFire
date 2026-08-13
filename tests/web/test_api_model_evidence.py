@@ -435,6 +435,26 @@ def test_manual_policy_is_rejected_from_real_backend_candidate_assessment(client
     assert response.get_json()["detail"] == "manual activation requires operator-reviewed policy"
 
 
+def test_manual_activation_factory_constructs_real_inactive_calibration_seam():
+    settings = read_settings()
+    settings["controller"]["selected"] = "mpc"
+    settings["controller"]["config"]["mpc"] = dict(DEFAULT_MPC_CONFIG)
+    write_settings(settings)
+
+    factory = routes._manual_pair_factory()
+    forecast_calls = []
+
+    def forecast(_q_future, _ambient_future):
+        forecast_calls.append(True)
+        raise AssertionError("inactive calibration must not forecast")
+
+    decision = factory._advance_calibration(0.4, 100.0, forecast)
+
+    assert decision.active is False
+    assert decision.probe_q == 0.0
+    assert forecast_calls == []
+
+
 def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
     estimator = _ApiHandle()
     solver = _ApiHandle()
