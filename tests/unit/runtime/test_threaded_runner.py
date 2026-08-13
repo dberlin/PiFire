@@ -2051,7 +2051,7 @@ def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker
 
 
 def test_learning_process_starts_during_safe_construction_not_on_controller_worker(monkeypatch):
-    import controller.mpc as mpc_module
+    import controller.model_learning.grey_runtime as grey_runtime_module
 
     instances = []
 
@@ -2096,7 +2096,7 @@ def test_learning_process_starts_during_safe_construction_not_on_controller_work
         def close(self):
             return None
 
-    monkeypatch.setattr(mpc_module, "GreyLearningOrchestrator", LazyLearning)
+    monkeypatch.setattr(grey_runtime_module, "GreyLearningOrchestrator", LazyLearning)
     constructing_thread = threading.get_ident()
     core = MpcController(
         dict(MPC_DEFAULTS, enable_online_adaptation=True, control_period=0.001),
@@ -2110,7 +2110,6 @@ def test_learning_process_starts_during_safe_construction_not_on_controller_work
             runner._thread.is_alive(),
             runner.controller_state(),
             tuple(runner._pending_observations),
-            core._learning is instances[0],
             instances[0].start_thread,
         )
         assert instances[0].start_thread == constructing_thread
@@ -2119,7 +2118,7 @@ def test_learning_process_starts_during_safe_construction_not_on_controller_work
         runner.stop()
 
 
-def test_real_completed_forecast_survives_controller_to_runner_evidence_drain():
+def test_real_completed_forecast_survives_controller_to_runner_evidence_drain(monkeypatch):
     completed = CompletedForecastOrigin(
         forecast=ForecastOrigin(
             origin_sequence=0,
@@ -2139,30 +2138,38 @@ def test_real_completed_forecast_survives_controller_to_runner_evidence_drain():
         completion_time_s=80.0,
         observed_temperature_c=102.0,
     )
-    learning = type(
-        "Learning",
-        (),
-        {
-            "observe_completed_frame": lambda self, _frame, *, identifiability: type(
-                "Observation",
-                (),
-                {
-                    "history": type("History", (), {"accepted": True, "reasons": ()})(),
-                    "completed_forecasts": (completed,),
-                    "request": None,
-                },
-            )(),
-            "register_causal_forecasts": lambda *_args, **_kwargs: (),
-            "update_identity": lambda *_args, **_kwargs: None,
-            "close": lambda self: None,
+    forecast_evidence = ForecastOriginEvidence(
+        origin_sequence=completed.origin_sequence,
+        origin_time_ms=int(completed.forecast.origin_time_s * 1_000),
+        completion_time_ms=int(completed.completion_time_s * 1_000),
+        horizon_steps=completed.horizon_steps,
+        incumbent_digest=completed.incumbent_digest,
+        challenger_digest=completed.challenger_digest,
+        incumbent_prediction_c=completed.forecast.incumbent_prediction_c,
+        challenger_prediction_c=completed.forecast.challenger_prediction_c,
+        observed_temperature_c=completed.observed_temperature_c,
+        incumbent_error_c=completed.incumbent_error_c,
+        challenger_error_c=completed.challenger_error_c,
+        temperature_band=completed.temperature_band,
+        phase=completed.forecast.phase,
+        ambient_source=completed.ambient_source,
+        calibration_fit=completed.calibration_fit,
+    )
+    monkeypatch.setattr(
+        "controller.model_learning.grey_runtime.GreyLearningRuntime.observe_frame",
+        lambda _self, observation: {
+            "role_generation": observation.role_generation,
+            "eligible": True,
+            "rejection_reasons": (),
+            "model_digest": "a" * 64,
+            "forecast_origin_evidence": (forecast_evidence,),
         },
-    )()
+    )
     core = MpcController(
         dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
         "C",
         {"u_min": 0.1, "u_max": 0.9},
     )
-    core._learning = learning
     runner = ThreadedControllerRunner(core)
     drained = []
     try:
@@ -2187,7 +2194,7 @@ def test_real_completed_forecast_survives_controller_to_runner_evidence_drain():
         runner.stop()
 
 
-def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_trace_valid():
+def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_trace_valid(monkeypatch):
     evaluation = ModelEvaluationPayload(
         decision_id="c" * 64,
         evaluated_at_ms=80_000,
@@ -2214,15 +2221,18 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         evaluation_duration_ms=1.0,
         challenger_model_kind="grey-box",
     )
-    learning = SimpleNamespace(
-        observe_completed_frame=lambda _frame, *, identifiability: SimpleNamespace(
-            history=SimpleNamespace(accepted=True, reasons=()),
-            completed_forecasts=(),
-            request=None,
-        ),
-        register_causal_forecasts=lambda *_args, **_kwargs: (),
-        update_identity=lambda *_args, **_kwargs: None,
-        close=lambda: None,
+    monkeypatch.setattr(
+        "controller.model_learning.grey_runtime.GreyLearningRuntime.observe_frame",
+        lambda _self, observation: {
+            "role_generation": observation.role_generation,
+            "eligible": True,
+            "rejection_reasons": (),
+            "model_digest": evaluation.challenger_digest,
+            "forecast_origin_evidence": (),
+            "evaluation_payload": evaluation,
+            "confidence_accepted": False,
+            "confidence_already_persisted": False,
+        },
     )
     activation_confidence = []
 
@@ -2253,8 +2263,6 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         {"u_min": 0.1, "u_max": 0.9},
         activation_persistence=_Worker(),
     )
-    core._learning = learning
-    core._learning_pending_evaluation = evaluation
     runner = SyncControllerRunner(core)
     recorded = []
     try:
@@ -2272,7 +2280,7 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         assert confidence[0].payload.decision_id == evaluation.decision_id
         assert confidence[0].payload.blocked is True
         assert confidence[0].payload.reason == "no-completed-window"
-        core._learning_pending_evaluation = evaluation
+
         submission = runner.observe_frame(observation)
         mode = HoldMode.__new__(HoldMode)
         mode._runner = runner

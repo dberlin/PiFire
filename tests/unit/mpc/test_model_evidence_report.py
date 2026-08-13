@@ -41,8 +41,13 @@ from controller.model_learning.report import (
     build_learning_report,
     current_learning_report,
 )
-from controller.runtime.model_fitting import grey_config_digest
-from tests.unit.mpc._solver_fixtures import owned_pair
+from controller.runtime.model_fitting import (
+    CandidatePair,
+    CandidatePreparation,
+    GreyFitSuccess,
+    TargetTimingEvidence,
+    grey_config_digest,
+)
 
 
 _CANDIDATE = "b" * 64
@@ -452,11 +457,11 @@ def test_manual_policy_comes_from_matching_current_candidate_assessment() -> Non
 
 def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason() -> None:
     controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
-    controller._activation_terminated_reason = "native solver crashed"
+    controller.terminate_mpc_activation("native solver crashed")
 
     checkpoint = controller.get_model_snapshot()
     active_digest = checkpoint["identities"]["active_digest"]
-    live = controller._learning_live_status()
+    live = controller._grey_learning_runtime.learning_status()
     payload = build_learning_report(
         (),
         activation_state={
@@ -530,21 +535,21 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
             configuration_digest="c" * 64,
         ),
     )
-    preparation = SimpleNamespace(
-        accepted=True,
-        candidate_digest=candidate_digest,
-        candidate_pair=owned_pair(candidate_descriptor, object(), object()),
-        candidate=SimpleNamespace(
-            request=request,
-            config=native_config,
-            rmse_c=1.0,
-            sample_count=12,
-            temperature_band_c=(80.0, 120.0),
-            nfev=4,
-        ),
-        blockers=(),
-        dry_solve_finite=True,
-        timing=SimpleNamespace(accepted=True),
+    candidate = GreyFitSuccess(
+        request=request,
+        config=native_config,
+        rmse_c=1.0,
+        max_error_c=1.5,
+        identifiability=0.9,
+        sample_count=12,
+        temperature_band_c=(80.0, 120.0),
+        nfev=4,
+    )
+    preparation = CandidatePreparation.accepted_for_test(
+        candidate=candidate,
+        candidate_pair=CandidatePair(object(), object()),
+        incumbent_pair=CandidatePair(object(), object()),
+        timing=TargetTimingEvidence("candidate-dry-solve", 3, 1.0, 25.0),
     )
     evaluation = SimpleNamespace(
         decision_id="operator-decision",
@@ -567,16 +572,17 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
 
         def evaluate_ready_off_path(self):
             return evaluation
+        def close(self):
+            return None
 
-    controller._learning = _Learning()
-    controller._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
-    controller._poll_learning_off_path_locked(
+
+    controller._grey_learning_runtime._learning = _Learning()
+    controller._grey_learning_runtime._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
+    controller.poll_learning_off_path(
         live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
     )
 
-    worker = getattr(controller, "_activation_persistence_worker", None)
-    if worker is not None:
-        worker.flush_and_stop(timeout=2.0)
+    controller.close()
     checkpoint = ControllerModelStore().load("mpc")
     assert checkpoint is not None
     assert checkpoint["revision"] == 1
@@ -629,9 +635,18 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
                 completed_forecasts=(),
             )
 
+        def poll_fit_off_path(self, **_kwargs):
+            return None
+
+        def evaluate_ready_off_path(self):
+            return None
+        def close(self):
+            return None
+
+
     assert ControllerModelStore().save("mpc", controller.get_model_snapshot()) is True
-    controller._learning = _Learning()
-    controller._register_learning_forecasts = lambda _observation: ()
+    controller._grey_learning_runtime._learning = _Learning()
+    controller._grey_learning_runtime._register_learning_forecasts = lambda _observation: ()
     controller.observe_frame(
         FrameObservation(
             frame_start_s=25.0,
@@ -659,9 +674,10 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
             ambient_source=AmbientSource.CONFIGURED,
         )
     )
-    worker = getattr(controller, "_activation_persistence_worker", None)
-    if worker is not None:
-        worker.flush_and_stop(timeout=2.0)
+    controller.poll_learning_off_path(
+        live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
+    )
+    controller.close()
 
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
@@ -753,16 +769,17 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
 
         def evaluate_ready_off_path(self):
             return None
+        def close(self):
+            return None
+
 
     checkpoint = controller.get_model_snapshot()
     assert ControllerModelStore().save("mpc", checkpoint) is True
-    controller._learning = _Learning()
-    controller._poll_learning_off_path_locked(
+    controller._grey_learning_runtime._learning = _Learning()
+    controller.poll_learning_off_path(
         live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
     )
-    worker = getattr(controller, "_activation_persistence_worker", None)
-    if worker is not None:
-        worker.flush_and_stop(timeout=2.0)
+    controller.close()
 
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
@@ -855,17 +872,19 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
         def retire_evaluated_candidate(self, retired):
             self.retired.append(retired)
             self.prepared = None
+        def close(self):
+            return None
+
 
     learning = _Learning()
     checkpoint = controller.get_model_snapshot()
     assert ControllerModelStore().save("mpc", checkpoint) is True
-    controller._learning = learning
-    controller._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
-    controller._poll_learning_off_path_locked(
+    controller._grey_learning_runtime._learning = learning
+    controller._grey_learning_runtime._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
+    controller.poll_learning_off_path(
         live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
     )
-    worker = controller._activation_persistence_worker
-    worker.flush_and_stop(timeout=2.0)
+    controller.close()
 
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))

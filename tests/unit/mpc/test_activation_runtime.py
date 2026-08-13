@@ -55,11 +55,14 @@ class _Persistence(ModelPersistenceWorker):
         self.confidence_records = []
         self.evidence_records = []
         self.close_count = 0
+        self.events: list[str] = []
+        self.phase_error: BaseException | None = None
         self.next_phase_error: BaseException | None = None
         self.reject_next_phase = False
         self.reject_evidence = False
         self.raise_evidence: BaseException | None = None
         self.complete_phase_immediately = False
+        self.complete_phase_durable = True
 
     def submit_activation_phase(
         self,
@@ -67,6 +70,8 @@ class _Persistence(ModelPersistenceWorker):
         *,
         expected_phase: ActivationPhase | None,
     ) -> DurableActivationReceipt:
+        if self.phase_error is not None:
+            raise self.phase_error
         if self.next_phase_error is not None:
             error = self.next_phase_error
             self.next_phase_error = None
@@ -76,8 +81,9 @@ class _Persistence(ModelPersistenceWorker):
             return DurableActivationReceipt(accepted=False)
         receipt = DurableActivationReceipt(accepted=True)
         self.phase_submissions.append(_PhaseSubmission(record, expected_phase, receipt))
+        self.events.append(f"phase:{record.phase.value}")
         if self.complete_phase_immediately:
-            receipt._complete(durable=True)
+            receipt._complete(durable=self.complete_phase_durable)
         return receipt
 
     def submit_activation_confidence(self, record):
@@ -91,6 +97,7 @@ class _Persistence(ModelPersistenceWorker):
         return EvidenceSubmission(accepted=not self.reject_evidence)
 
     def flush_and_stop(self, *, timeout: float = 0.1) -> bool:
+        self.events.append("flush")
         self.close_count += 1
         return True
 
@@ -142,7 +149,7 @@ def _factory() -> MpcPairFactory:
     )
 
 
-def _runtime() -> tuple[
+def _runtime(*, receipt_timeout: float = 2.0) -> tuple[
     ActivationRuntime,
     OwnedMpcPair,
     OwnedMpcPair,
@@ -162,7 +169,13 @@ def _runtime() -> tuple[
     )
     factory = _factory()
     persistence = _Persistence()
-    runtime = ActivationRuntime(factory, incumbent, persistence, clock_ms=lambda: 2_000)
+    runtime = ActivationRuntime(
+        factory,
+        incumbent,
+        persistence,
+        clock_ms=lambda: 2_000,
+        receipt_timeout=receipt_timeout,
+    )
     return runtime, incumbent, candidate, prepared, persistence
 
 
@@ -452,6 +465,155 @@ def test_pending_candidate_and_every_retained_pair_close_exactly_once() -> None:
     assert incumbent.closed
     assert candidate.closed
     assert persistence.close_count == 1
+
+
+@pytest.mark.parametrize("first_failure", ("exception", "rejected", "non-durable"))
+def test_pending_abort_retries_automatically_on_later_lifecycle_advancement(
+    first_failure,
+) -> None:
+    runtime, incumbent, candidate, prepared, persistence = _runtime()
+    assert runtime.queue_prepared_activation(prepared, candidate, _durable())
+    if first_failure == "exception":
+        persistence.next_phase_error = RuntimeError("abort unavailable")
+    elif first_failure == "rejected":
+        persistence.reject_next_phase = True
+    else:
+        persistence.complete_phase_immediately = True
+        persistence.complete_phase_durable = False
+
+    assert not runtime.abort_prepared_activation(
+        prepared,
+        "learning-lifecycle-persistence-failed",
+    )
+    assert runtime.pending_abort_count == 1
+    assert candidate.closed
+    assert runtime.active_pair is incumbent
+    assert incumbent.authorized
+
+    persistence.complete_phase_immediately = True
+    persistence.complete_phase_durable = True
+    assert runtime.advance_activation()
+    assert runtime.pending_abort_count == 0
+    assert persistence.phase_submissions[-1].record.phase is ActivationPhase.ABORTED
+    assert persistence.phase_submissions[-1].expected is ActivationPhase.PREPARED
+    runtime.close()
+
+
+def test_pending_abort_reuses_accepted_receipt_until_it_becomes_durable() -> None:
+    runtime, _incumbent, candidate, prepared, persistence = _runtime(
+        receipt_timeout=0.0
+    )
+    assert runtime.queue_prepared_activation(prepared, candidate, _durable())
+
+    assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+    assert runtime.pending_abort_count == 1
+    assert len(persistence.phase_submissions) == 1
+    assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+    assert len(persistence.phase_submissions) == 1
+    receipt = persistence.phase_submissions[0].receipt
+
+    receipt._complete(durable=True)
+    assert runtime.advance_activation()
+    assert runtime.pending_abort_count == 0
+    assert len(persistence.phase_submissions) == 1
+    runtime.close()
+
+
+def test_activation_advancement_never_waits_on_an_incomplete_abort_receipt(
+    monkeypatch,
+) -> None:
+    waits = []
+    original_wait = DurableActivationReceipt.wait
+
+    def count_wait(receipt, timeout=None):
+        waits.append(receipt)
+        return original_wait(receipt, timeout)
+
+    monkeypatch.setattr(DurableActivationReceipt, "wait", count_wait)
+    runtime, _incumbent, _candidate, prepared, persistence = _runtime(
+        receipt_timeout=0.0
+    )
+    assert runtime.queue_prepared_activation(prepared, _candidate, _durable())
+    assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+    assert len(waits) == 1
+
+    assert not runtime.advance_activation()
+    assert len(waits) == 1
+    persistence.phase_submissions[0].receipt._complete(durable=True)
+    assert runtime.advance_activation()
+    runtime.close()
+
+
+def test_abort_is_type_safe_transaction_exact_and_idempotent() -> None:
+    runtime, _incumbent, candidate, prepared, persistence = _runtime(
+        receipt_timeout=0.0
+    )
+    with pytest.raises(TypeError, match="PreparedActivationRecord"):
+        runtime.abort_prepared_activation(SimpleNamespace(), "lifecycle-failed")
+    assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+
+    assert runtime.queue_prepared_activation(prepared, candidate, _durable())
+    persistence.complete_phase_immediately = True
+    assert runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+    assert runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+    assert not runtime.abort_prepared_activation(prepared, "different-reason")
+    runtime.close()
+
+
+def test_closed_runtime_rejects_every_activation_advancement_boundary() -> None:
+    runtime, _incumbent, candidate, prepared, _persistence = _runtime()
+    assert runtime.retry_pending_aborts()
+    runtime.close()
+
+    assert not runtime.submit_prepared_phase(prepared).accepted
+    assert not runtime.queue_prepared_activation(prepared, candidate, _durable())
+    assert not runtime.advance_activation()
+    assert runtime.retry_pending_aborts()
+    candidate.close()
+
+
+def test_close_retries_pending_abort_before_persistence_flush() -> None:
+    runtime, _incumbent, candidate, prepared, persistence = _runtime()
+    assert runtime.queue_prepared_activation(prepared, candidate, _durable())
+    persistence.next_phase_error = RuntimeError("abort unavailable")
+    assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+    persistence.complete_phase_immediately = True
+    persistence.complete_phase_durable = True
+
+    runtime.close()
+
+    assert candidate.closed
+    assert runtime.pending_abort_count == 0
+    assert persistence.events[-2:] == ["phase:aborted", "flush"]
+
+
+def test_close_reports_permanently_unresolved_abort_after_all_owner_cleanup(
+    monkeypatch,
+) -> None:
+    runtime, incumbent, candidate, prepared, persistence = _runtime()
+    close_calls = []
+    original_close = OwnedMpcPair.close
+
+    def count_close(pair):
+        if pair is candidate:
+            close_calls.append(pair)
+        return original_close(pair)
+
+    monkeypatch.setattr(OwnedMpcPair, "close", count_close)
+    assert runtime.queue_prepared_activation(prepared, candidate, _durable())
+    persistence.reject_next_phase = True
+    assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
+    persistence.phase_error = RuntimeError("abort permanently unavailable")
+
+    with pytest.raises(RuntimeError, match="unresolved activation abort"):
+        runtime.close()
+
+    assert candidate.closed
+    assert incumbent.closed
+    assert close_calls == [candidate]
+    assert runtime.pending_abort_count == 1
+    assert persistence.close_count == 1
+    assert persistence.events[-1] == "flush"
 
 
 def test_public_boundary_validation_rejects_invalid_ownership_inputs() -> None:

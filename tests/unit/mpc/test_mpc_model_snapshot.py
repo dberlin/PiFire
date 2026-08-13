@@ -17,6 +17,7 @@ from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_s
 from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
 
 from controller.runtime.model_fitting import TeardownRefitOutcome
+from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
 
 CURRENT_SCHEMA = 4
@@ -57,7 +58,7 @@ def _adopt(
         ),
         authorized=False,
     )
-    controller._adopt_model(
+    controller._grey_learning_runtime.adopt_model(
         pair,
         rmse=rmse,
         samples=samples,
@@ -279,8 +280,8 @@ def test_restore_rotates_learning_to_the_restored_pair_generation():
 
     try:
         assert restored.restore_model(snapshot) is True
-        assert restored._learning_role_generation == 7
-        assert restored._teardown_history.role_generation == 7
+        assert restored._grey_learning_runtime._learning_role_generation == 7
+        assert restored._grey_learning_runtime._teardown_history.role_generation == 7
     finally:
         restored.close()
         source.close()
@@ -376,7 +377,7 @@ def test_status_exposes_live_learning_state_separately_from_durable_activation_i
 
 def test_terminal_activation_failure_remains_visible_in_status_and_checkpoint():
     controller = _controller()
-    controller._activation_terminated_reason = "active-receipt-ambiguous"
+    controller.terminate_mpc_activation("active-receipt-ambiguous")
 
     live = controller.get_status()["learning"]
     snapshot = controller.get_model_snapshot()
@@ -444,10 +445,11 @@ def test_every_nested_v4_section_is_validated_before_atomic_restore(section, cor
 
 def test_real_live_status_failure_overrides_prior_active_activation():
     controller = _controller()
-    controller._active_activation_record = SimpleNamespace(phase=ActivationPhase.ACTIVE)
-    controller._activation_terminated_reason = "native solver crashed"
+    state, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    assert controller.restore_activation(state, ())
+    controller.terminate_mpc_activation("native solver crashed")
 
-    live = controller._learning_live_status()
+    live = controller._grey_learning_runtime.learning_status()
 
     assert live["status"] == "error"
     assert live["activation_phase"] == "active"

@@ -37,6 +37,12 @@ class _PendingActivation:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingAbort:
+    record: PreparedActivationRecord
+    receipt: DurableActivationReceipt | None
+
+
+@dataclass(frozen=True, slots=True)
 class _ActivationFlight:
     pending: _PendingActivation
     phase: ActivationPhase
@@ -82,6 +88,7 @@ class ActivationRuntime:
         self._flight: _ActivationFlight | None = None
         self._retired_pairs: list[OwnedMpcPair] = []
         self._transaction_ids: dict[str, PreparedActivationRecord] = {}
+        self._pending_aborts: dict[str, _PendingAbort] = {}
         self._confidence_receipts: dict[str, DurableActivationReceipt] = {}
         self._persisted_decision_ids: set[str] = set()
         self._failed_role_generations: set[int] = set()
@@ -129,6 +136,13 @@ class ActivationRuntime:
     def role_generation(self) -> int:
         with self._lock:
             return self._role_generation
+
+    @property
+    def pending_abort_count(self) -> int:
+        """Return the number of fenced PREPARED owners awaiting durable ABORTED."""
+        with self._lock:
+            return len(self._pending_aborts)
+
 
     @property
     def activation_terminated(self) -> bool:
@@ -227,6 +241,7 @@ class ActivationRuntime:
             known = self._transaction_ids.get(record.transaction_id)
             if known is not None:
                 if known != record:
+                    candidate_pair.close()
                     return False
                 owned_pair = (
                     self._pending is not None
@@ -263,6 +278,102 @@ class ActivationRuntime:
             self._pending = _PendingActivation(record, candidate_pair, prepared_receipt)
             self._transaction_ids[record.transaction_id] = record
             return True
+
+    def abort_prepared_activation(
+        self,
+        record: PreparedActivationRecord,
+        reason: str,
+    ) -> bool:
+        """Fence, close, and durably abort one exact owned PREPARED transition."""
+        if not isinstance(record, PreparedActivationRecord):
+            raise TypeError("record must be a PreparedActivationRecord")
+        normalized_reason = self._reason(reason, "activation abort reason")
+        aborted = record.transition(
+            ActivationPhase.ABORTED,
+            reason=normalized_reason,
+        )
+        with self._lock:
+            known = self._transaction_ids.get(record.transaction_id)
+            if known is not None and known.phase is ActivationPhase.ABORTED:
+                if known != aborted:
+                    return False
+                if record.transaction_id not in self._pending_aborts:
+                    return True
+            pending = self._pending
+            if pending is not None and pending.record == record:
+                self._pending = None
+                try:
+                    pending.candidate_pair.close()
+                finally:
+                    self._failed_role_generations.add(
+                        record.candidate.role_generation
+                    )
+                    self._transaction_ids[record.transaction_id] = aborted
+                    self._pending_aborts[record.transaction_id] = _PendingAbort(
+                        aborted,
+                        None,
+                    )
+            elif record.transaction_id not in self._pending_aborts:
+                return False
+            return self._retry_pending_aborts_locked(
+                transaction_id=record.transaction_id,
+                wait_for_completion=True,
+            )
+
+    def retry_pending_aborts(self) -> bool:
+        """Retry every fenced durable abort without releasing its transaction."""
+        with self._lock:
+            if self._closed:
+                return not self._pending_aborts
+            return self._retry_pending_aborts_locked(wait_for_completion=True)
+
+    def _retry_pending_aborts_locked(
+        self,
+        *,
+        transaction_id: str | None = None,
+        wait_for_completion: bool,
+    ) -> bool:
+        pending_aborts = tuple(self._pending_aborts.items())
+        for pending_id, pending_abort in pending_aborts:
+            if transaction_id is not None and pending_id != transaction_id:
+                continue
+            receipt = pending_abort.receipt
+            if receipt is None:
+                try:
+                    receipt = self._persistence.submit_activation_phase(
+                        pending_abort.record,
+                        expected_phase=ActivationPhase.PREPARED,
+                    )
+                except Exception:
+                    continue
+                if not receipt.accepted:
+                    continue
+                self._pending_aborts[pending_id] = _PendingAbort(
+                    pending_abort.record,
+                    receipt,
+                )
+            completed = receipt.completed and receipt.durable
+            if wait_for_completion and not receipt.completed:
+                try:
+                    completed = receipt.wait(self._receipt_timeout)
+                except Exception:
+                    if receipt.completed:
+                        self._pending_aborts[pending_id] = _PendingAbort(
+                            pending_abort.record,
+                            None,
+                        )
+                    continue
+            if completed is True and self._receipt_is_durable(receipt):
+                self._pending_aborts.pop(pending_id, None)
+            elif receipt.completed:
+                self._pending_aborts[pending_id] = _PendingAbort(
+                    pending_abort.record,
+                    None,
+                )
+        if transaction_id is None:
+            return not self._pending_aborts
+        return transaction_id not in self._pending_aborts
+
 
     def _submit_aborted(
         self,
@@ -309,7 +420,13 @@ class ActivationRuntime:
     def advance_activation(self) -> bool:
         """Advance activation without waiting; true alone permits the next solve."""
         with self._lock:
-            if self._closed or self._terminated_reason is not None:
+            if self._closed:
+                return False
+            if not self._retry_pending_aborts_locked(
+                wait_for_completion=False
+            ):
+                return False
+            if self._terminated_reason is not None:
                 return False
             flight = self._flight
             if flight is not None:
@@ -798,6 +915,9 @@ class ActivationRuntime:
         with self._lock:
             if self._closed:
                 return
+            aborts_durable = self._retry_pending_aborts_locked(
+                wait_for_completion=True
+            )
             self._closed = True
             self._active_pair.revoke_output()
             pairs: list[OwnedMpcPair] = [self._active_pair]
@@ -812,6 +932,12 @@ class ActivationRuntime:
             pairs.extend(self._retired_pairs)
             self._flight = None
             errors: list[BaseException] = []
+            if not aborts_durable:
+                errors.append(
+                    RuntimeError(
+                        "unresolved activation abort transactions remain"
+                    )
+                )
             try:
                 self._persistence.flush_and_stop(timeout=0.1)
             except BaseException as error:
@@ -827,6 +953,9 @@ class ActivationRuntime:
                 except BaseException as error:
                     errors.append(error)
             if errors:
-                raise RuntimeError(
-                    "could not close complete activation runtime ownership"
-                ) from errors[0]
+                message = (
+                    "unresolved activation abort transactions remain"
+                    if not aborts_durable
+                    else "could not close complete activation runtime ownership"
+                )
+                raise RuntimeError(message) from errors[0]

@@ -990,6 +990,10 @@ class CandidateHandoff:
     active_pair: Any
     blockers: tuple[str, ...] = ()
 
+class CandidateOwnershipTransferredError(RuntimeError):
+    """Preparation failed after the activation runtime accepted pair ownership."""
+
+
 
 def handoff_candidate(
     prepared: CandidatePreparation,
@@ -1484,16 +1488,21 @@ class GreyLearningOrchestrator:
             return self._handoff
         if self._prepared is None or self._last_evaluation is None:
             return None
-        self._handoff = handoff_candidate(
-            self._prepared,
-            evaluation=self._last_evaluation,
-            confidence_accepted=confidence_accepted,
-            online_enabled=online_enabled,
-            prepare=prepare,
-            install=lambda _pair: (_ for _ in ()).throw(
-                AssertionError("Task 7 cannot install a runtime pair")
-            ),
-        )
+        try:
+            self._handoff = handoff_candidate(
+                self._prepared,
+                evaluation=self._last_evaluation,
+                confidence_accepted=confidence_accepted,
+                online_enabled=online_enabled,
+                prepare=prepare,
+                install=lambda _pair: (_ for _ in ()).throw(
+                    AssertionError("Task 7 cannot install a runtime pair")
+                ),
+            )
+        except CandidateOwnershipTransferredError:
+            self._ownership_transferred = True
+            self._release_prepared()
+            raise
         if not self._handoff.blockers:
             self._ownership_transferred = True
         return self._handoff

@@ -11,7 +11,8 @@ import pytest
 import controller.update_mpc as update_mpc
 from common.controller_model_state import ControllerModelStore
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR, PROMOTION_BOUNDS, evaluate
-from controller.mpc import _HISTORY_MAX, _REFIT_INIT, Controller
+from controller.model_learning.grey_runtime import GreyLearningRuntime, _HISTORY_MAX, _REFIT_INIT
+from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_model import simulate_grey_box
 from tools.experiments import promotion_signal
@@ -195,7 +196,7 @@ def test_an_uninformative_cook_is_refused_because_it_determines_nothing():
         t, temp, Q, T_amb=T_amb, init=dict(_REFIT_INIT), sigma=float(c.cfg["sigma"]), n_delay=int(c.cfg["n_delay"])
     )
     cand_rmse, _ = update_mpc.fit_quality(t, temp, Q, fitted, T_amb=T_amb)
-    incumbent = {k: float(c.cfg[k]) for k in Controller._MODEL_PARAM_KEYS}
+    incumbent = {k: float(c.cfg[k]) for k in GreyLearningRuntime.MODEL_PARAM_KEYS}
     inc_rmse, _ = update_mpc.fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
     assert cand_rmse < 0.5 * inc_rmse
     # Handed an identifiability that clears the floor and nothing else changed,
@@ -653,7 +654,7 @@ def test_an_incumbent_the_model_cannot_be_simulated_at_ends_the_cook_with_a_verd
 
     c = _c()
     c.cfg["C_c"] = 1e-9
-    incumbent = {k: float(c.cfg[k]) for k in Controller._MODEL_PARAM_KEYS}
+    incumbent = {k: float(c.cfg[k]) for k in GreyLearningRuntime.MODEL_PARAM_KEYS}
     # The premise: this really is an incumbent no score can be taken against.
     assert math.isinf(update_mpc.fit_quality(t, temp, Q, incumbent, T_amb=float(c.cfg["T_amb"]))[0])
 
@@ -755,7 +756,7 @@ def test_an_infinite_error_never_reaches_the_store(model_store):
         ),
         authorized=False,
     )
-    c._adopt_model(
+    c._grey_learning_runtime.adopt_model(
         pair,
         rmse=math.inf,
         samples=1200,
@@ -775,7 +776,7 @@ def test_solver_bookkeeping_never_becomes_part_of_the_model():
     snapshot = c.get_model_snapshot()
     parameters = snapshot["active"]["parameters"]
     metadata = snapshot["active"]["metadata"]
-    assert set(parameters) == set(Controller._MODEL_PARAM_KEYS)
+    assert set(parameters) == set(GreyLearningRuntime.MODEL_PARAM_KEYS)
     assert "converged" not in parameters
     assert "nfev" not in parameters
     # Provenance, beside the model rather than inside it.
@@ -813,7 +814,7 @@ def test_an_unmeasured_error_is_none_and_survives_the_store(model_store):
     # And an error nobody measured cannot be compared against.
     verdict = evaluate(
         dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4),
-        {k: float(restored.cfg[k]) for k in Controller._MODEL_PARAM_KEYS},
+        {k: float(restored.cfg[k]) for k in GreyLearningRuntime.MODEL_PARAM_KEYS},
         candidate_rmse=1.0,
         incumbent_rmse=out["active"]["metadata"]["rmse"],
         # Clear of the floor: what is being pinned is the missing incumbent

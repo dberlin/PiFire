@@ -29,8 +29,9 @@ from controller.model_learning.activation import (
     recover_startup_activation,
 )
 from controller.model_learning.activation_runtime import ActivationRuntime
+from controller.model_learning.grey_runtime import GreyLearningRuntime
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from controller.runtime.model_fitting import TeardownGreyHistory
+from controller.runtime.model_fitting import CandidatePair
 from controller.mpc import Controller as MpcController
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
@@ -43,7 +44,7 @@ from tests.unit.mpc._solver_fixtures import (
 )
 from controller.mpc_core import MpcCore
 from controller.acados import GreyBoxMPCConfig
-from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_config import DEFAULT_MPC_CONFIG, MpcConfig
 from controller.mpc_factory import MpcPairFactory
 from controller.mpc_factory import OwnedMpcPair
 
@@ -508,7 +509,7 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
     assert core.rollback_control_pair is None
     assert core.activation_output_authorized
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
-    assert core._teardown_history.role_generation == core._model_revision
+    assert core._grey_learning_runtime.teardown_role_generation == core._grey_learning_runtime.model_authority()[0]
     core.close()
 
 
@@ -530,17 +531,13 @@ def _bare_mpc_pair_owner(
     incumbent.authorize_output()
     core = MpcController.__new__(MpcController)
     incumbent.core._last_combustion_load = 0.35
-    core._model_revision = 4
-    core._learning_role_generation = 4
-    core._teardown_history = TeardownGreyHistory(role_generation=4, max_observations=120)
     core._closed = False
-    core._learning = None
     core._pair_factory = MpcPairFactory(
         DEFAULT_MPC_CONFIG,
         "C",
         dict(CYCLE),
         advance_calibration=inactive_calibration,
-        model_authority=lambda: (core._model_revision, None),
+        model_authority=lambda: (4, None),
         on_policy_failure=lambda _error: None,
     )
     if persistence is None:
@@ -555,6 +552,24 @@ def _bare_mpc_pair_owner(
         incumbent,
         persistence,
     )
+    core._grey_learning_runtime = GreyLearningRuntime(
+        pair_factory=core._pair_factory,
+        activation_runtime=core._activation_runtime,
+        learning_enabled=False,
+        units="C",
+        cycle_data=dict(CYCLE),
+        active_pair=lambda: core._activation_runtime.active_pair,
+        active_components=lambda: CandidatePair(
+            core._activation_runtime.active_pair.estimator,
+            core._activation_runtime.active_pair.solver,
+        ),
+        configuration=lambda: MpcConfig(core._activation_runtime.active_pair.core.config),
+        snapshot_parameters=lambda: core._activation_runtime.active_pair.core.snapshot_parameters(),
+        cook_history=lambda: tuple(core._activation_runtime.active_pair.core.history),
+        sync_configuration=lambda: None,
+        append_trace=lambda _records: None,
+    )
+    core._grey_learning_runtime.sync_activation_generation(exact=True)
     return core, incumbent, candidate, prepared
 
 
@@ -619,10 +634,12 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
         candidate_digest=canonical_snapshot_digest(configuration),
         dry_solve_finite=True,
     )
-    core.cfg = {"estimator": "ekf"}
-    core._learning = SimpleNamespace(_last_evaluation=evaluation)
-
-    core._prepare_automatic_pair_activation(preparation, ActivationPolicy.PASSIVE_AUTO)
+    core._activation_runtime.active_pair.core.cfg = {"estimator": "ekf"}
+    core._grey_learning_runtime.prepare_automatic_activation(
+        preparation,
+        ActivationPolicy.PASSIVE_AUTO,
+        evaluation,
+    )
 
     assert [kind for kind, *_ in calls] == [
         "confidence",
@@ -633,7 +650,7 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     assert isinstance(confidence.payload, ConfidenceDecisionEvidence)
     assert confidence.payload.decision_id == evaluation.decision_id
     assert confidence.payload.blocked is False
-    core._learning = None
+    core._grey_learning_runtime.close()
     core.close()
 
 
@@ -687,7 +704,7 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> N
         incumbent_digest=core.active_control_pair.descriptor.model_digest,
         challenger_digest=canonical_snapshot_digest(configuration),
     )
-    core._learning = SimpleNamespace(_last_evaluation=evaluation)
+
     preparation = SimpleNamespace(
         candidate_pair=SimpleNamespace(
             estimator=_Estimator(),
@@ -721,14 +738,15 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> N
     )
 
     core.submit_activation_confidence(hold_confidence)
-    core._prepare_automatic_pair_activation(
+    core._grey_learning_runtime.prepare_automatic_activation(
         preparation,
         ActivationPolicy.PASSIVE_AUTO,
+        evaluation,
     )
 
     phase_index = next(index for index, call in enumerate(calls) if call[0] == "phase")
     assert any(call[0] == "confidence" for call in calls[:phase_index])
-    core._learning = None
+    core._grey_learning_runtime.close()
     core.close()
 
 
@@ -747,7 +765,7 @@ def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_rece
     assert core.active_control_pair is candidate
     assert candidate.authorized
     assert not incumbent.authorized
-    assert core._teardown_history.role_generation == prepared.candidate.role_generation
+    assert core._grey_learning_runtime.teardown_role_generation == prepared.candidate.role_generation
     core.close()
 
 
@@ -815,7 +833,7 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
     assert candidate.estimator.closed == candidate.solver.closed == 1
     assert incumbent.estimator.closed == incumbent.solver.closed == 0
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
-    assert core._teardown_history.role_generation == core._model_revision == 6
+    assert core._grey_learning_runtime.teardown_role_generation == core._grey_learning_runtime.model_authority()[0] == 6
     events = core.drain_activation_events()
     assert incumbent.authorized
     assert not candidate.authorized
@@ -893,7 +911,7 @@ def test_operator_rollback_restores_only_the_recorded_in_memory_rollback_owner()
     )
     core.install_candidate_pair_inert(candidate, prepared)
     core.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
-    core._learning_candidate_pair = unrelated
+
 
     assert core.rollback_activation("operator exact rollback")
 
@@ -902,5 +920,5 @@ def test_operator_rollback_restores_only_the_recorded_in_memory_rollback_owner()
     assert core.mpc is incumbent.solver
     assert incumbent.estimator.closed == incumbent.solver.closed == 0
     assert candidate.estimator.closed == candidate.solver.closed == 1
-    assert core._teardown_history.role_generation == core._model_revision == 6
+    assert core._grey_learning_runtime.teardown_role_generation == core._grey_learning_runtime.model_authority()[0] == 6
     assert unrelated.estimator.closed == unrelated.solver.closed == 0

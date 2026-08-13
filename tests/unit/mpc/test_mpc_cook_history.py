@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.mpc import _HISTORY_MAX, Controller
+from controller.model_learning.grey_runtime import _HISTORY_MAX
+from controller.mpc import Controller
 
 CONFIG = dict(
     n_horizon=20,

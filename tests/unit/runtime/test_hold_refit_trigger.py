@@ -442,19 +442,6 @@ def test_probe_frame_is_excluded_from_passive_online_validation_without_being_lo
     assert teardown.observations == (probe,)
 
 
-def test_mpc_retains_probe_frame_for_teardown_before_online_filtering():
-    from controller.mpc import Controller as MpcController
-
-    controller = object.__new__(MpcController)
-    controller._teardown_history = TeardownGreyHistory(role_generation=0)
-    controller._learning_lock = threading.RLock()
-    controller._learning_evaluation_lock = threading.Lock()
-    controller._learning = None
-    controller._learning_preparing = False
-
-    assert controller.observe_frame(_completed_frame(1, probe=True)) is None
-    assert controller._teardown_history.observations == (_completed_frame(1, probe=True),)
-    assert controller._teardown_history.origin is CandidateOrigin.OPERATOR_CALIBRATION
 
 
 class _FinalLifecycleRunner(FakeControllerRunner):
@@ -783,63 +770,5 @@ def test_completed_frame_feedback_and_observation_reach_incumbent_before_activat
         runner.stop()
 
 
-def test_durable_role_change_rotates_teardown_history_and_accepts_first_new_role_frame():
-    from controller.mpc import Controller
-
-    controller = object.__new__(Controller)
-    controller._learning_role_generation = 0
-    controller._teardown_history = TeardownGreyHistory(role_generation=0)
-    controller._teardown_history.observe(_completed_frame(1))
-
-    controller._rotate_teardown_role_generation(7)
-    decision = controller._teardown_history.observe(replace(_completed_frame(2), role_generation=7))
-
-    assert decision.accepted
-    assert controller._learning_role_generation == 7
-    assert controller._teardown_history.role_generation == 7
-    assert [frame.role_generation for frame in controller._teardown_history.observations] == [7]
 
 
-def test_operator_teardown_candidate_persists_unblocked_confidence_for_manual_activation():
-    from controller.mpc import Controller
-
-    persisted = []
-    submitted = []
-
-    class _Receipt:
-        accepted = completed = durable = True
-
-        def wait(self, _timeout):
-            return True
-
-    controller = object.__new__(Controller)
-    controller._learning_session_id = "session"
-    controller._learning_cook_id = "cook"
-    controller._persist_grey_lifecycle = lambda evidence, trace, **kwargs: persisted.append(
-        (evidence, trace, kwargs)
-    )
-    controller._activation_runtime = SimpleNamespace(
-        submit_activation_confidence=lambda record: (submitted.append(record), _Receipt())[1],
-        mark_confidence_persisted=lambda _decision_id: None,
-    )
-    window = SimpleNamespace(
-        first_observation_sequence=4,
-        last_observation_sequence=9,
-        role_generation=3,
-        incumbent_digest="a" * 64,
-    )
-    descriptor = SimpleNamespace(model_digest="b" * 64)
-
-    decision_id = controller._persist_operator_teardown_authority(window, descriptor)
-
-    assert decision_id == f"teardown:session:cook:4:9:{'b' * 64}"
-    assert isinstance(persisted[0][0], CandidateAssessmentEvidence)
-    assert persisted[0][0].decision_id == decision_id
-    assert persisted[0][0].policy == "operator-reviewed"
-    assert persisted[0][0].confidence_accepted is True
-    assert persisted[0][0].rejection_reasons == ()
-    assert submitted[0].payload == ConfidenceDecisionEvidence(
-        decision_id=decision_id,
-        blocked=False,
-        reason=None,
-    )

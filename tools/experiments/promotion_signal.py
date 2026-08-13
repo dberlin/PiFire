@@ -107,7 +107,12 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 from controller import model_promotion as promo  # noqa: E402
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
-from controller.mpc import _REFIT_INIT, _REFIT_MIN_SAMPLES, Controller  # noqa: E402
+from controller.model_learning.grey_runtime import (
+    GreyLearningRuntime,
+    _REFIT_INIT,
+    _REFIT_MIN_SAMPLES,
+)  # noqa: E402
+from controller.mpc import Controller  # noqa: E402
 from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
 from controller.mpc_model import simulate_grey_box  # noqa: E402
 from controller.update_mpc import _FREE, _SIM_KEYS, fit_params, fit_quality  # noqa: E402
@@ -120,7 +125,7 @@ N_DELAY = int(DEFAULT_MPC_CONFIG["n_delay"])
 LOG_PERIOD_S = float(DEFAULT_MPC_CONFIG["control_period"])
 LOG_STRIDE = int(round(LOG_PERIOD_S / DT))
 
-MODEL_KEYS = Controller._MODEL_PARAM_KEYS
+MODEL_KEYS = GreyLearningRuntime.MODEL_PARAM_KEYS
 SHIPPED = {k: float(DEFAULT_MPC_CONFIG[k]) for k in MODEL_KEYS}
 
 #: Where a record is split for the held-out measurement. Two thirds fitted, one

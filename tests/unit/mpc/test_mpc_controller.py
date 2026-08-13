@@ -234,7 +234,7 @@ def test_close_releases_learning_then_exactly_one_complete_pair(monkeypatch):
     controller, estimator, solver = _make(monkeypatch)
     estimator.close = lambda: events.append("estimator")
     solver.close = lambda: events.append("solver")
-    controller._learning = SimpleNamespace(close=lambda: events.append("learning"))
+    controller._grey_learning_runtime._learning = SimpleNamespace(close=lambda: events.append("learning"))
 
     controller.close()
     controller.close()
@@ -288,7 +288,7 @@ def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkey
         evaluate_ready_off_path=lambda: None,
         close=lambda: None,
     )
-    controller._learning = orchestrator
+    controller._grey_learning_runtime._learning = orchestrator
     passive = _frame(sequence=1)
     operator = _frame(sequence=2, operator=True)
 
@@ -325,7 +325,7 @@ def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(mon
         completion_time_s=80.0,
         observed_temperature_c=82.0,
     )
-    controller._learning = SimpleNamespace(
+    controller._grey_learning_runtime._learning = SimpleNamespace(
         observe_completed_frame=lambda _frame, *, identifiability: SimpleNamespace(
             history=SimpleNamespace(accepted=True, reasons=()),
             completed_forecasts=(completed,),
@@ -392,7 +392,7 @@ def test_task7_evaluation_is_published_through_the_established_runner_payload(mo
         scores=(HorizonScore(3, 3.0, 1.0, 1), HorizonScore(15, 0.0, 0.0, 0)),
         completed_origins=(completed,),
     )
-    controller._learning = SimpleNamespace(
+    controller._grey_learning_runtime._learning = SimpleNamespace(
         poll_fit_off_path=lambda **_kwargs: None,
         evaluate_ready_off_path=lambda: decision,
         observe_completed_frame=lambda _frame, *, identifiability: SimpleNamespace(
@@ -426,7 +426,7 @@ def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch)
         assert release.wait(2.0)
         return None
 
-    controller._learning = SimpleNamespace(
+    controller._grey_learning_runtime._learning = SimpleNamespace(
         poll_fit_off_path=slow_poll,
         evaluate_ready_off_path=lambda: None,
         observe_completed_frame=lambda _frame, *, identifiability: (
@@ -441,7 +441,7 @@ def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch)
         register_causal_forecasts=lambda *_args, **_kwargs: (),
         close=lambda: None,
     )
-    controller._learning_pending_origin = "passive-online"
+    controller._grey_learning_runtime._learning_pending_origin = "passive-online"
     polling = threading.Thread(target=controller.poll_learning_off_path)
     observing = threading.Thread(target=controller.observe_frame, args=(_frame(sequence=6),))
     polling.start()
@@ -501,8 +501,8 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
             return None
 
     learning = RacingLearning()
-    controller._learning = learning
-    controller._learning_pending_origin = "passive-online"
+    controller._grey_learning_runtime._learning = learning
+    controller._grey_learning_runtime._learning_pending_origin = "passive-online"
     polling = threading.Thread(target=controller.poll_learning_off_path)
     rebinding = threading.Thread(
         target=lambda: (
@@ -523,13 +523,13 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
     assert rebound.is_set()
     assert old_pair.controller.closed is True
     assert old_pair.estimator.closed is True
-    assert controller._learning_candidate_pair is None
+    assert controller._grey_learning_runtime._learning_candidate_pair is None
     assert learning.identities[-1].role_generation == 1
 
-    controller._learning_pending_origin = "passive-online"
+    controller._grey_learning_runtime._learning_pending_origin = "passive-online"
     delivery, _evaluation = controller.poll_learning_off_path()
     assert delivery.preparation.candidate_pair is new_pair
-    assert controller._learning_candidate_pair is new_pair
+    assert controller._grey_learning_runtime._learning_candidate_pair is new_pair
 
 
 def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(monkeypatch):
@@ -600,7 +600,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
         def close(self):
             self.closed = True
 
-    identity = controller._learning_identity()
+    identity = controller._grey_learning_runtime.learning_identity()
     learning = GreyLearningOrchestrator(
         identity=identity,
         config=solver.config,
@@ -623,7 +623,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
         worker=ImmediateWorker(),
         max_observations=200,
     ).start()
-    controller._learning = learning
+    controller._grey_learning_runtime._learning = learning
 
     def exciting_frame(sequence, temperature):
         q = (0.15, 0.5, 0.85)[sequence % 3]
@@ -646,7 +646,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
             exciting_frame(sequence, 69.0 + sequence),
             identifiability=1.0,
         )
-    controller._learning_pending_origin = submitted.request.origin
+    controller._grey_learning_runtime._learning_pending_origin = submitted.request.origin
     first_delivery, _ = controller.poll_learning_off_path()
     first_candidate = first_delivery.preparation.candidate_pair.controller
     assert first_delivery.preparation.accepted is True
@@ -674,7 +674,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
             exciting_frame(sequence, 70.0 + sequence - 300),
             identifiability=1.0,
         )
-    controller._learning_pending_origin = later.request.origin
+    controller._grey_learning_runtime._learning_pending_origin = later.request.origin
     later_delivery, _ = controller.poll_learning_off_path()
     assert later_delivery.preparation.accepted is True
 

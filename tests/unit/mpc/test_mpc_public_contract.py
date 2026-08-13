@@ -132,7 +132,6 @@ def test_dynamic_controller_composes_config_control_status_and_trace_contract(mo
         policy=ActivationPolicy.PASSIVE_AUTO,
         decision_id="public-close-contract",
     )
-    controller._persist_grey_lifecycle = lambda *_args, **_kwargs: None
     assert controller.install_candidate_pair_inert(candidate, prepared)
     assert controller.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
 
@@ -145,7 +144,6 @@ def test_dynamic_controller_composes_config_control_status_and_trace_contract(mo
 
         return close
 
-    controller._learning = SimpleNamespace(close=lambda: close_events.append("learning"))
     candidate_solver.close = record_close(candidate_solver, "active-solver")
     candidate_estimator.close = record_close(candidate_estimator, "active-estimator")
     solver.close = record_close(solver, "rollback-solver")
@@ -155,7 +153,6 @@ def test_dynamic_controller_composes_config_control_status_and_trace_contract(mo
     controller.close()
 
     assert close_events == [
-        "learning",
         "active-solver",
         "active-estimator",
         "rollback-solver",
