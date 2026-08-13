@@ -277,10 +277,9 @@ def test_update_dash_lid_alert_tracks_lid_open_detected(tmp_path):
     assert _obj_data(display, "lid_alert")["active"] is True
 
 
-def test_update_dash_cook_time_elapsed_when_no_active_timer(tmp_path):
-    import time
-
-    now = time.time()
+def test_update_dash_cook_time_elapsed_when_no_active_timer(tmp_path, monkeypatch):
+    now = 10_000.0
+    monkeypatch.setattr("display._base_flex.time.time", lambda: now)
     display = _make_display(tmp_path, status_data=_status_data(mode="Hold", startup_timestamp=now - 125))
     display.in_data = _in_data()
     display._update_dash_objects()

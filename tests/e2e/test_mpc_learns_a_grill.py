@@ -69,10 +69,9 @@ import pytest
 import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
 from controller.mpc import Controller
-from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_config import DEFAULT_MPC_CONFIG, MODEL_PARAMETER_KEYS
 from grillplat.actuator_capabilities import AUGER_TIMING
 
-MODEL_KEYS = Controller._MODEL_PARAM_KEYS
 
 SCENARIO = controller_matrix.SCENARIOS["steady_450"]
 SETPOINT_F = SCENARIO.setpoints[0][1]
@@ -240,7 +239,9 @@ def test_identification_off_is_invisible():
     # the wrong switch and must be rewritten around the new one.
     flagged = Controller({"enable_identification": True}, "F", _shipped_cycle_data())
     plain = Controller({}, "F", _shipped_cycle_data())
-    assert {k: flagged.cfg[k] for k in MODEL_KEYS} == {k: plain.cfg[k] for k in MODEL_KEYS}
+    assert {k: flagged.cfg[k] for k in MODEL_PARAMETER_KEYS} == {
+        k: plain.cfg[k] for k in MODEL_PARAMETER_KEYS
+    }
     # The acados backend carries the built horizon on its GreyBoxMPCConfig as
     # horizon_steps, which controller/mpc.py builds from cfg["n_horizon"]; the
     # old `mpc.settings.n_horizon` belonged to the previous MPC object.

@@ -42,6 +42,10 @@ const shared = {
 };
 
 export default defineConfig({
+  // Rstest otherwise scales workers to every logical CPU. On high-core hosts
+  // that starves jsdom/user-event tests until their 5-second deadlines while
+  // adding no throughput: four workers run the full suite in the same 45s.
+  pool: { maxWorkers: 4 },
   coverage: {
     provider: "istanbul",
     all: true,

@@ -50,6 +50,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 
 import numpy as np  # noqa: E402
 
+from controller.mpc_config import MODEL_PARAMETER_KEYS  # noqa: E402
+
 from tools.experiments.controller_matrix import SCENARIOS, run_scenario  # noqa: E402
 
 PLANT = "MAKGrillSim"
@@ -99,7 +101,7 @@ def _adopt_midcook(core, *, mode):
             # No refit at all: snapshot whatever is already configured so the
             # rebuild happens with the parameters the run already had.
             core._adopt_model(
-                {k: float(core.cfg[k]) for k in core._MODEL_PARAM_KEYS},
+                {k: float(core.cfg[k]) for k in MODEL_PARAMETER_KEYS},
                 rmse=0.0,
                 samples=0,
                 band_c=(0.0, 0.0),
