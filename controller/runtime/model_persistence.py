@@ -15,6 +15,7 @@ from common.persistence.model_evidence import (
     commit_model_activation_phase,
 )
 from common.model_evidence import (
+    CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
@@ -92,9 +93,8 @@ class _ActivationPhaseWork:
 
 @dataclass(slots=True)
 class _ActivationConfidenceWork:
-    record: ModelEvidenceRecord
+    records: tuple[ModelEvidenceRecord, ...]
     receipt: DurableActivationReceipt
-
 def _default_persist_activation_phase(
     record: PreparedActivationRecord, expected_phase: ActivationPhase | None
 ) -> None:
@@ -272,22 +272,67 @@ class ModelPersistenceWorker:
     def submit_activation_confidence(
         self,
         decision: ModelEvidenceRecord,
+        *,
+        preceding_evidence: Sequence[ModelEvidenceRecord] = (),
     ) -> DurableActivationReceipt:
-        """Queue the exact confidence authority in the activation FIFO."""
+        """Queue preceding assessment evidence and confidence in the activation FIFO."""
         if not isinstance(decision, ModelEvidenceRecord):
             raise TypeError("decision must be ModelEvidenceRecord")
+        if not isinstance(preceding_evidence, Sequence) or isinstance(
+            preceding_evidence,
+            (str, bytes),
+        ):
+            raise TypeError(
+                "preceding_evidence must be a sequence of ModelEvidenceRecord"
+            )
+        owned_preceding: list[ModelEvidenceRecord] = []
+        for record in preceding_evidence:
+            if not isinstance(record, ModelEvidenceRecord):
+                raise TypeError(
+                    "preceding_evidence records must be ModelEvidenceRecord"
+                )
+            owned_record = ModelEvidenceRecord.model_validate_json(
+                record.model_dump_json()
+            )
+            if (
+                owned_record.kind is not EvidenceKind.CANDIDATE_ASSESSMENT
+                or not isinstance(
+                    owned_record.payload,
+                    CandidateAssessmentEvidence,
+                )
+            ):
+                raise ValueError(
+                    "preceding_evidence requires candidate-assessment evidence"
+                )
+            owned_preceding.append(owned_record)
         owned = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
         if (
             owned.kind is not EvidenceKind.CONFIDENCE_DECISION
             or not isinstance(owned.payload, ConfidenceDecisionEvidence)
         ):
-            raise ValueError("activation confidence requires confidence-decision evidence")
+            raise ValueError(
+                "activation confidence requires confidence-decision evidence"
+            )
+        if any(
+            record.payload.decision_id != owned.payload.decision_id
+            for record in owned_preceding
+            if isinstance(record.payload, CandidateAssessmentEvidence)
+        ):
+            raise ValueError(
+                "preceding candidate-assessment decision_id must match confidence"
+            )
         receipt = DurableActivationReceipt(accepted=True)
         with self._condition:
             if self._failed or self._stopping:
                 return DurableActivationReceipt(accepted=False)
             self._pending_activation_fifo.append(
-                ("activation-confidence", _ActivationConfidenceWork(owned, receipt))
+                (
+                    "activation-confidence",
+                    _ActivationConfidenceWork(
+                        (*owned_preceding, owned),
+                        receipt,
+                    ),
+                )
             )
             self._start_locked()
             self._condition.notify()
@@ -431,7 +476,7 @@ class ModelPersistenceWorker:
                 elif kind == "evidence":
                     self._append_evidence(self._durable_evidence_batch(payload))
                 elif confidence_work is not None:
-                    self._append_evidence((confidence_work.record,))
+                    self._append_evidence(confidence_work.records)
                 elif activation_work is not None:
                     result = self._commit_activation(activation_work.decision)
                     if result is False:

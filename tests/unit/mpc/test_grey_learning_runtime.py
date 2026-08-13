@@ -51,6 +51,7 @@ class _Persistence(ModelPersistenceWorker):
         self.close_count = 0
         self.evidence = []
         self.confidence = []
+        self.confidence_preceding = []
         self.accept_confidence = True
         self.accept_evidence = True
         self.accept_phase = True
@@ -59,8 +60,9 @@ class _Persistence(ModelPersistenceWorker):
         self.evidence.append(record)
         return SimpleNamespace(accepted=self.accept_evidence)
 
-    def submit_activation_confidence(self, record):
+    def submit_activation_confidence(self, record, *, preceding_evidence=()):
         self.confidence.append(record)
+        self.confidence_preceding.append(preceding_evidence)
         receipt = DurableActivationReceipt(accepted=self.accept_confidence)
         if self.accept_confidence:
             receipt._complete(durable=True)
@@ -103,6 +105,8 @@ class _CandidateEstimator(_Estimator):
 
     def close(self) -> None:
         self.closed = True
+
+
 
 
 
@@ -734,6 +738,20 @@ def test_orchestrator_start_failure_closes_partial_learning_owner(monkeypatch) -
     assert instances[0].closed
 
 
+def test_rejected_combined_confidence_submission_does_not_trace_assessment() -> None:
+    traces = []
+    harness = _harness(append_trace=lambda records: traces.extend(records))
+    preparation, evaluation, _components = _automatic_candidate(harness)
+    harness.persistence.accept_confidence = False
+
+    with pytest.raises(RuntimeError, match="activation-confidence-not-durable"):
+        harness.runtime._persist_candidate_evaluation(evaluation, preparation)
+
+    assert traces == []
+    harness.runtime.close()
+    harness.activation.close()
+
+
 def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypatch) -> None:
     evaluation = EvaluationDecision(
         decision_id="c" * 64,
@@ -803,7 +821,7 @@ def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypat
     assert projected is not None
     assert outcome["evaluation_payload"] == projected
     assert outcome["confidence_accepted"] is False
-    assessment = harness.persistence.evidence[-1].payload
+    assessment = harness.persistence.confidence_preceding[-1][0].payload
     assert assessment.rejection_reasons == (
         "candidate-confidence-low",
         "native-build-failed",
@@ -817,7 +835,9 @@ def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypat
     harness.runtime.bind_learning_identity("next", "cook", 1)
     harness.runtime.close()
     harness.activation.close()
-def test_lifecycle_evidence_rejection_aborts_evaluation_before_confidence(monkeypatch) -> None:
+def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_rejected(
+    monkeypatch,
+) -> None:
     evaluation = EvaluationDecision(
         decision_id="e" * 64,
         accepted=True,
@@ -866,10 +886,15 @@ def test_lifecycle_evidence_rejection_aborts_evaluation_before_confidence(monkey
     harness = _harness(learning_enabled=True)
     harness.persistence.accept_evidence = False
 
-    with pytest.raises(RuntimeError, match="learning-lifecycle-evidence-not-accepted"):
-        harness.runtime.poll_learning_off_path()
+    harness.runtime.poll_learning_off_path()
 
-    assert harness.persistence.confidence == []
+    assert harness.persistence.evidence == []
+    assert len(harness.persistence.confidence) == 1
+    assert len(harness.persistence.confidence_preceding) == 1
+    assert (
+        harness.persistence.confidence_preceding[0][0].payload.decision_id
+        == evaluation.decision_id
+    )
     assert harness.activation.active_pair is harness.active
     harness.runtime.close()
     harness.activation.close()
@@ -964,11 +989,19 @@ def test_trace_projection_failure_terminates_activation_without_losing_evidence(
 
     harness.runtime.poll_learning_off_path()
 
-    assert len(harness.persistence.evidence) == 1
+    assert harness.persistence.evidence == []
+    assert len(harness.persistence.confidence_preceding) == 1
+    assert len(harness.persistence.confidence_preceding[0]) == 1
+    assert (
+        harness.persistence.confidence_preceding[0][0].payload.decision_id
+        == evaluation.decision_id
+    )
     assert harness.activation.terminated_reason == (
         "learning lifecycle trace failed: trace unavailable"
     )
     harness.runtime.close()
+
+
 def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
     monkeypatch,
 ) -> None:
@@ -1011,6 +1044,13 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
 
     assert len(store.snapshots) == 1
     assert len(harness.persistence.confidence) == 1
+    assert harness.persistence.evidence == []
+    assert len(harness.persistence.confidence_preceding) == 1
+    assessment = harness.persistence.confidence_preceding[0][0]
+    confidence = harness.persistence.confidence[0]
+    assert assessment.kind.value == "candidate_assessment"
+    assert assessment.payload.decision_id == evaluation.decision_id
+    assert confidence.payload.decision_id == evaluation.decision_id
     assert harness.runtime.model_authority()[0] == 1
     assert store.snapshots[0][1]["evidence"]["confidence_decision_id"] == (
         evaluation.decision_id

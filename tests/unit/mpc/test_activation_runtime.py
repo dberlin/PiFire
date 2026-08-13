@@ -8,6 +8,7 @@ import pytest
 from types import SimpleNamespace
 
 from common.model_evidence import (
+    CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
     FallbackEvidence,
     EvidenceKind,
@@ -53,6 +54,7 @@ class _Persistence(ModelPersistenceWorker):
     def __init__(self) -> None:
         self.phase_submissions: list[_PhaseSubmission] = []
         self.confidence_records = []
+        self.confidence_preceding = []
         self.evidence_records = []
         self.close_count = 0
         self.events: list[str] = []
@@ -86,8 +88,9 @@ class _Persistence(ModelPersistenceWorker):
             receipt._complete(durable=self.complete_phase_durable)
         return receipt
 
-    def submit_activation_confidence(self, record):
+    def submit_activation_confidence(self, record, *, preceding_evidence=()):
         self.confidence_records.append(record)
+        self.confidence_preceding.append(preceding_evidence)
         return DurableActivationReceipt(accepted=True)
 
     def submit_evidence(self, record):
@@ -262,6 +265,31 @@ def _confidence(evidence_id: str = "confidence-runtime") -> ModelEvidenceRecord:
     )
 
 
+def _assessment(evidence_id: str = "assessment-runtime") -> ModelEvidenceRecord:
+    return ModelEvidenceRecord(
+        evidence_id=evidence_id,
+        kind=EvidenceKind.CANDIDATE_ASSESSMENT,
+        session_id="runtime",
+        cook_id=None,
+        timestamp_ms=1_000,
+        role_generation=5,
+        model_digest="a" * 64,
+        provenance_digest=None,
+        payload=CandidateAssessmentEvidence(
+            decision_id="decision-runtime",
+            origin="passive-online",
+            policy="passive-auto",
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=True,
+            rejection_reasons=(),
+        ),
+    )
+
+
 def _activate(runtime, candidate, prepared, persistence) -> None:
     assert runtime.queue_prepared_activation(prepared, candidate, _durable())
     assert runtime.advance_activation() is False
@@ -272,10 +300,16 @@ def _activate(runtime, candidate, prepared, persistence) -> None:
 def test_confidence_fifo_copy_receipt_and_event_copy_ownership() -> None:
     runtime, _incumbent, _candidate, prepared, persistence = _runtime()
     confidence = _confidence()
-    first = runtime.submit_activation_confidence(confidence)
+    assessment = _assessment()
+    first = runtime.submit_activation_confidence(
+        confidence,
+        preceding_evidence=(assessment,),
+    )
     assert runtime.submit_activation_confidence(confidence) is first
     assert persistence.confidence_records == [confidence]
     assert persistence.confidence_records[0] is not confidence
+    assert persistence.confidence_preceding == [(assessment,)]
+    assert persistence.confidence_preceding[0][0] is not assessment
     assert runtime.submit_evidence(confidence)
     assert persistence.evidence_records[-1] == confidence
     assert persistence.evidence_records[-1] is not confidence
@@ -307,6 +341,16 @@ def test_confidence_fifo_copy_receipt_and_event_copy_ownership() -> None:
     with pytest.raises(TypeError):
         runtime.submit_activation_confidence(wrong_kind)
     runtime.close()
+    with pytest.raises(TypeError, match="ModelEvidenceRecord"):
+        runtime.submit_activation_confidence(
+            _confidence("confidence-invalid-preceding-type"),
+            preceding_evidence=(SimpleNamespace(),),
+        )
+    with pytest.raises(ValueError, match="candidate-assessment"):
+        runtime.submit_activation_confidence(
+            _confidence("confidence-invalid-preceding-kind"),
+            preceding_evidence=(wrong_kind,),
+        )
     assert not runtime.submit_activation_confidence(_confidence("closed-confidence")).accepted
     assert not runtime.submit_evidence(confidence)
 

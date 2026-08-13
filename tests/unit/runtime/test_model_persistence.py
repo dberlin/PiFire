@@ -18,6 +18,7 @@ from common.persistence.model_evidence import (
 from common.control_trace import AmbientSource
 from common.model_evidence import (
     ActivationEvidence,
+    CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
@@ -558,6 +559,87 @@ def test_activation_confidence_and_phase_share_one_fifo_with_separate_durable_re
         ("confidence-durable", "confidence-before-prepared"),
         ("phase-durable", prepared.transaction_id, None),
     ]
+
+
+def test_activation_confidence_appends_preceding_assessment_in_one_durable_fifo_work() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    batches = []
+    assessment = ModelEvidenceRecord(
+        evidence_id="assessment-before-confidence",
+        kind=EvidenceKind.CANDIDATE_ASSESSMENT,
+        session_id="session-activation",
+        cook_id=None,
+        timestamp_ms=900,
+        role_generation=4,
+        model_digest="b" * 64,
+        provenance_digest="a" * 64,
+        payload=CandidateAssessmentEvidence(
+            decision_id="decision-activation",
+            origin="passive-online",
+            policy="passive-auto",
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=True,
+            rejection_reasons=(),
+        ),
+    )
+    confidence = ModelEvidenceRecord(
+        evidence_id="confidence-after-assessment",
+        kind=EvidenceKind.CONFIDENCE_DECISION,
+        session_id="session-activation",
+        cook_id=None,
+        timestamp_ms=900,
+        role_generation=4,
+        model_digest="b" * 64,
+        provenance_digest="a" * 64,
+        payload=ConfidenceDecisionEvidence(
+            decision_id="decision-activation",
+            blocked=False,
+            reason=None,
+        ),
+    )
+
+    def append(records):
+        batches.append(records)
+        started.set()
+        release.wait(timeout=1.0)
+
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        append_evidence=append,
+    )
+    with pytest.raises(TypeError, match="ModelEvidenceRecord"):
+        worker.submit_activation_confidence(
+            confidence,
+            preceding_evidence=(object(),),
+        )
+    with pytest.raises(ValueError, match="candidate-assessment"):
+        worker.submit_activation_confidence(
+            confidence,
+            preceding_evidence=(_evidence("wrong-preceding-kind"),),
+        )
+    try:
+        receipt = worker.submit_activation_confidence(
+            confidence,
+            preceding_evidence=(assessment,),
+        )
+        assert started.wait(timeout=1.0)
+        assert not receipt.completed
+        assert not receipt.durable
+        release.set()
+        assert receipt.wait(timeout=1.0)
+    finally:
+        release.set()
+        worker.flush_and_stop(timeout=1.0)
+
+    assert batches == [(assessment, confidence)]
+    assert batches[0][0] is not assessment
+    assert batches[0][1] is not confidence
 
 
 def test_failed_phase_write_completes_receipt_without_durability_and_blocks_later_work() -> None:

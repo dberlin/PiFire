@@ -1,6 +1,5 @@
 import json
 import math
-import logging
 import time
 from typing import get_args
 
@@ -21,15 +20,8 @@ from common.persistence.runtime import (
     read_probe_status,
     clear_warnings_through,
 )
-from common.persistence.model_evidence import (
-    commit_model_rollback,
-    read_model_activation,
-    read_model_evidence,
-)
 from common.api_commands import mpc_calibration_command_revision, process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
-from common.controller_model_state import ControllerModelStore
-from common.model_evidence import EvidenceKind, FallbackEvidence, ModelEvidenceRecord, RollbackEvidence
 from common.pellets_actions import dispatch_pellet_action
 from blueprints.api.probe_map_actions import (
     module_requires_install,
@@ -92,17 +84,17 @@ from common.web_contracts.wizard import (
     ProbeMapErrorResponse,
     ProbeMapRequest,
 )
-from controller.model_learning.activation import (
-    ActivationManager,
-    GreyControlPairDescriptor,
+from controller.model_learning.activation_service import (
+    ActivationAccepted,
+    ActivationRejected,
+    ActivationRejectionCategory,
+    ModelActivationService,
+    RollbackAccepted,
+    RollbackRejected,
+    RollbackRejectionCategory,
 )
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.model_learning.report import backend_learning_report, build_learning_artifact
 from controller.pid_sp_learning import backend_pid_sp_learning_report
-from controller.runtime.model_persistence import ModelPersistenceWorker
-from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
-from controller.mpc_calibration import TemperatureForecast
 from . import api_bp
 
 
@@ -300,84 +292,27 @@ def api_model_evidence_artifact():
     return Response(artifact, status=200, content_type="application/json; charset=utf-8")
 
 
-def _model_activation_configuration(settings):
-    selected = settings.get("controller", {}).get("selected")
-    config = settings.get("controller", {}).get("config", {}).get(selected)
-    if selected != "mpc" or not isinstance(config, dict):
-        raise ValueError("MPC must be the selected controller")
-    cycle_data = settings.get("cycle_data")
-    units = settings.get("globals", {}).get("units")
-    if not isinstance(cycle_data, dict) or not isinstance(units, str):
-        raise ValueError("controller configuration is incomplete")
-    return {
-        "controller": selected,
-        "config": config,
-        "cycle_data": cycle_data,
-        "units": units,
-    }
-
-
-_INACTIVE_MANUAL_CALIBRATION = CalibrationDecision(
-    False,
-    0.0,
-    None,
-    CalibrationProgress(),
-)
-
-
-def _inactive_manual_calibration(
-    _baseline_q: float,
-    _temperature_c: float,
-    _forecast: TemperatureForecast,
-) -> CalibrationDecision:
-    return _INACTIVE_MANUAL_CALIBRATION
-
-
-def _manual_pair_factory() -> MpcPairFactory:
-    activation_configuration = _model_activation_configuration(read_settings())
-    configured = activation_configuration["config"]
-    cycle_data = activation_configuration["cycle_data"]
-    units = activation_configuration["units"]
-    if not isinstance(configured, dict) or not isinstance(cycle_data, dict) or not isinstance(units, str):
-        raise ValueError("controller configuration is incomplete")
-    return MpcPairFactory(
-        configured,
-        units,
-        cycle_data,
-        advance_calibration=_inactive_manual_calibration,
-        model_authority=lambda: (0, None),
-        on_policy_failure=lambda _error: None,
-    )
-
-
-def _build_manual_candidate_pair(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
-    """Build an inert pair from the exact reviewed durable configuration."""
-    return _manual_pair_factory().restore(descriptor)
-
-
-def _manual_candidate_dry_solve(pair: OwnedMpcPair) -> bool:
-    timing = _manual_pair_factory().dry_solve(
-        pair,
-        temperature_c=float(pair.solver.config.T_amb),
-    )
-    return timing.accepted
-
-
-def _activation_checkpoint():
-    checkpoint = ControllerModelStore().load("mpc")
-    if not isinstance(checkpoint, dict):
-        raise ValueError("candidate-snapshot-not-found")
-    return checkpoint
-
-
-def _activation_rejection(reason, status=409):
+def _model_action_rejection(reason: str, status: int):
     payload = ModelActionRejected(
         accepted=False,
         active_kind="grey-box",
         error="model-activation-rejected",
-        detail=str(reason),
+        detail=reason,
     )
     return jsonify(payload.model_dump(mode="json")), status
+
+
+_ACTIVATION_REJECTION_STATUS = {
+    ActivationRejectionCategory.CONFLICT: 409,
+    ActivationRejectionCategory.INVALID_DATA: 422,
+    ActivationRejectionCategory.PERSISTENCE_UNAVAILABLE: 503,
+    ActivationRejectionCategory.CLEANUP_FAILED: 503,
+}
+
+_ROLLBACK_REJECTION_STATUS = {
+    RollbackRejectionCategory.CONFLICT: 409,
+    RollbackRejectionCategory.PERSISTENCE_UNAVAILABLE: 503,
+}
 
 
 @api_bp.post("/model-evidence/activate")
@@ -385,86 +320,32 @@ def api_model_evidence_activate():
     """Durably prepare the exact reviewed grey pair; runtime alone may activate it."""
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or set(body) != {"candidate_digest", "decision_id"}:
-        return _activation_rejection(
+        return _model_action_rejection(
             "request must contain exactly candidate_digest and decision_id",
             422,
         )
     try:
         activation_request = ModelActivationRequest.model_validate(body, strict=True)
     except ValidationError as error:
-        return _activation_rejection(str(error), 422)
-    try:
-        report, _records = _model_evidence_projection()
-        projection = report.to_dict()
-        if projection["status"] != "ready-for-review":
-            raise ValueError("confidence decision is not ready-for-review")
-        if projection["candidate"]["digest"] != activation_request.candidate_digest:
-            raise ValueError("candidate-digest-changed")
-        if projection["candidate"].get("policy") != ActivationPolicy.OPERATOR_REVIEWED.value:
-            raise ValueError("manual activation requires operator-reviewed policy")
-        if projection["decision_id"] != activation_request.decision_id:
-            raise ValueError("stale-confidence-decision")
-        checkpoint = _activation_checkpoint()
-        incumbent_value = checkpoint.get("active_pair")
-        candidate_value = checkpoint.get("candidate_pair")
-        if not isinstance(incumbent_value, dict) or not isinstance(candidate_value, dict):
-            raise ValueError("candidate-pair-not-found")
-        incumbent = MpcPairFactory.migrate_legacy_descriptor(
-            GreyControlPairDescriptor.from_dict(incumbent_value)
-        )
-        candidate = MpcPairFactory.migrate_legacy_descriptor(
-            GreyControlPairDescriptor.from_dict(candidate_value)
-        )
-        if candidate.model_digest != activation_request.candidate_digest:
-            raise ValueError("candidate-digest-changed")
-    except (KeyError, TypeError, ValueError) as error:
-        return _activation_rejection(str(error), 422 if isinstance(error, (KeyError, TypeError)) else 409)
+        return _model_action_rejection(str(error), 422)
 
-    pair_factory = _manual_pair_factory()
-    worker = ModelPersistenceWorker(
-        ControllerModelStore(),
-        logging.getLogger("control"),
+    outcome = ModelActivationService().activate(
+        activation_request,
+        now_ms=int(time.time() * 1_000),
     )
-    try:
-        incumbent_owner = pair_factory.restore(incumbent)
-    except (TypeError, ValueError, RuntimeError) as error:
-        worker.flush_and_stop(timeout=2.0)
-        return _activation_rejection(str(error), 409)
-    manager = ActivationManager(
-        incumbent_pair=incumbent_owner,
-        build_candidate=_build_manual_candidate_pair,
-        validate_candidate=lambda pair: pair.descriptor == candidate,
-        native_dry_solve=_manual_candidate_dry_solve,
-        persist_prepared=lambda record: worker.submit_activation_phase(
-            record,
-            expected_phase=None,
-        ),
-        receipt_timeout=2.0,
-    )
-    try:
-        decision = manager.prepare(
-            activation_request,
-            candidate,
-            origin=CandidateOrigin.OPERATOR_CALIBRATION,
-            policy=ActivationPolicy.OPERATOR_REVIEWED,
+    if isinstance(outcome, ActivationRejected):
+        return _model_action_rejection(
+            outcome.reason,
+            _ACTIVATION_REJECTION_STATUS[outcome.category],
         )
-    finally:
-        incumbent_owner.close()
-        worker.flush_and_stop(timeout=2.0)
-    if not decision.accepted:
-        status = 503 if decision.reason.startswith("activation-persistence") else 409
-        return _activation_rejection(decision.reason, status)
-    if decision.candidate_pair is not None:
-        decision.candidate_pair.close()
-    record = decision.record
-    assert record is not None
+    assert isinstance(outcome, ActivationAccepted)
     payload = ModelActivationAccepted(
         accepted=True,
         phase="prepared",
-        transaction_id=record.transaction_id,
-        decision_id=record.decision_id,
-        candidate_digest=record.candidate.model_digest,
-        role_generation=record.candidate.role_generation,
+        transaction_id=outcome.transaction_id,
+        decision_id=outcome.decision_id,
+        candidate_digest=outcome.candidate_digest,
+        role_generation=outcome.role_generation,
     )
     return jsonify(payload.model_dump(mode="json")), 200
 
@@ -474,48 +355,29 @@ def api_model_evidence_rollback():
     """Record an explicit operator rollback reason for immediate runtime fallback."""
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or set(body) != {"reason"}:
-        return _activation_rejection("request must contain exactly reason", 422)
+        return _model_action_rejection("request must contain exactly reason", 422)
     try:
         rollback_request = ModelRollbackRequest.model_validate(body, strict=True)
     except ValidationError as error:
-        return _activation_rejection(str(error), 422)
-    reason = rollback_request.reason.strip()
-    activation = read_model_activation()
-    if activation is None or activation.phase != "active":
-        return _activation_rejection("there is no active grey generation", 409)
-    active_pair = activation.active_pair
-    rollback_pair = activation.rollback_pair
-    if active_pair is None or rollback_pair is None:
-        return _activation_rejection("activation-lineage-missing", 409)
-    now_ms = int(time.time() * 1_000)
-    decision = ModelEvidenceRecord(
-        evidence_id=f"rollback:{activation.evidence_decision_id}:{activation.role_generation + 1}:{now_ms}",
-        kind=EvidenceKind.ROLLBACK,
-        session_id="api-manual-rollback",
-        cook_id=None,
-        timestamp_ms=now_ms,
-        role_generation=activation.role_generation + 1,
-        model_digest=active_pair.model_digest,
-        provenance_digest=rollback_pair.model_digest,
-        payload=RollbackEvidence(
-            decision_id=activation.evidence_decision_id,
-            reason=reason.strip(),
-        ),
+        return _model_action_rejection(str(error), 422)
+
+    outcome = ModelActivationService().rollback(
+        rollback_request,
+        now_ms=int(time.time() * 1_000),
     )
-    try:
-        outcome = commit_model_rollback(decision, expected_activation=activation)
-    except ValueError as error:
-        return _activation_rejection(str(error), 409)
-    except Exception as error:
-        return _activation_rejection(f"rollback-persistence-failed: {error}", 503)
-    lifecycle = outcome.record.payload
+    if isinstance(outcome, RollbackRejected):
+        return _model_action_rejection(
+            outcome.reason,
+            _ROLLBACK_REJECTION_STATUS[outcome.category],
+        )
+    assert isinstance(outcome, RollbackAccepted)
     payload = ModelRollbackAccepted(
         accepted=True,
         active_kind="grey-box",
-        decision_id=activation.evidence_decision_id,
-        reason=lifecycle.reason,
-        role_generation=outcome.record.role_generation,
-        rollback_digest=rollback_pair.model_digest,
+        decision_id=outcome.decision_id,
+        reason=outcome.reason,
+        role_generation=outcome.role_generation,
+        rollback_digest=outcome.rollback_digest,
     )
     return jsonify(payload.model_dump(mode="json")), 200
 

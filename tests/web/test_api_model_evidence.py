@@ -29,20 +29,32 @@ from controller.model_learning.activation import (
     PreparedActivationRecord,
     canonical_snapshot_digest,
 )
+from controller.model_learning.activation_service import (
+    ActivationAccepted,
+    ActivationRejected,
+    ActivationRejectionCategory,
+    RollbackAccepted,
+    RollbackRejected,
+    RollbackRejectionCategory,
+)
 from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
     FitRequest,
     FitWindowIdentity,
 )
-from tests.unit.mpc._solver_fixtures import owned_pair
 from common.controller_model_state import ControllerModelStore
 
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_core import MpcCore
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
-from controller.runtime.model_fitting import grey_config_digest
+from controller.runtime.model_fitting import (
+    CandidatePair,
+    CandidatePreparation,
+    GreyFitSuccess,
+    TargetTimingEvidence,
+)
 
 _CANDIDATE = "c" * 64
 _INCUMBENT = "a" * 64
@@ -246,34 +258,7 @@ def test_calibration_route_uses_the_existing_error_envelope_for_pydantic_request
     assert response.get_json()["data"] == {}
 
 
-class _ReadyReport:
-    def __init__(
-        self,
-        candidate_digest: str,
-        decision_id: str,
-        policy: str = ActivationPolicy.OPERATOR_REVIEWED.value,
-    ) -> None:
-        self._candidate_digest = candidate_digest
-        self._decision_id = decision_id
-        self._policy = policy
 
-    def to_dict(self):
-        return {
-            "status": "ready-for-review",
-            "candidate": {
-                "digest": self._candidate_digest,
-                "policy": self._policy,
-            },
-            "decision_id": self._decision_id,
-        }
-
-
-class _ApiHandle:
-    def __init__(self) -> None:
-        self.closed = 0
-
-    def close(self) -> None:
-        self.closed += 1
 
 
 def _api_descriptor(theta, candidate_generation, role_generation, *, legacy=False):
@@ -435,100 +420,6 @@ def test_manual_policy_is_rejected_from_real_backend_candidate_assessment(client
     assert response.get_json()["detail"] == "manual activation requires operator-reviewed policy"
 
 
-def test_manual_activation_factory_constructs_real_inactive_calibration_seam():
-    settings = read_settings()
-    settings["controller"]["selected"] = "mpc"
-    settings["controller"]["config"]["mpc"] = dict(DEFAULT_MPC_CONFIG)
-    write_settings(settings)
-
-    factory = routes._manual_pair_factory()
-    forecast_calls = []
-
-    def forecast(_q_future, _ambient_future):
-        forecast_calls.append(True)
-        raise AssertionError("inactive calibration must not forecast")
-
-    decision = factory._advance_calibration(0.4, 100.0, forecast)
-
-    assert decision.active is False
-    assert decision.probe_q == 0.0
-    assert forecast_calls == []
-
-
-def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
-    estimator = _ApiHandle()
-    solver = _ApiHandle()
-    pair = owned_pair(candidate, estimator, solver)
-    monkeypatch.setattr(
-        routes,
-        "_model_evidence_projection",
-        lambda: (_ReadyReport(candidate.model_digest, prepared.decision_id), ()),
-    )
-    monkeypatch.setattr(
-        routes,
-        "_activation_checkpoint",
-        lambda: {
-            "active_pair": incumbent.to_dict(),
-            "candidate_pair": candidate.to_dict(),
-        },
-    )
-    monkeypatch.setattr(routes, "_build_manual_candidate_pair", lambda _descriptor: pair)
-    monkeypatch.setattr(routes, "_manual_candidate_dry_solve", lambda value: value is pair)
-    incumbent_owner = owned_pair(incumbent, _ApiHandle(), _ApiHandle())
-    monkeypatch.setattr(
-        routes,
-        "_manual_pair_factory",
-        lambda: SimpleNamespace(restore=lambda _descriptor: incumbent_owner),
-    )
-    return pair, estimator, solver
-
-
-def test_activate_route_does_not_start_worker_when_pair_factory_creation_fails(
-    client,
-    monkeypatch,
-):
-    incumbent, candidate, prepared, _confidence = _api_activation()
-    monkeypatch.setattr(
-        routes,
-        "_model_evidence_projection",
-        lambda: (_ReadyReport(candidate.model_digest, prepared.decision_id), ()),
-    )
-    monkeypatch.setattr(
-        routes,
-        "_activation_checkpoint",
-        lambda: {
-            "active_pair": incumbent.to_dict(),
-            "candidate_pair": candidate.to_dict(),
-        },
-    )
-    worker_events = []
-
-    class _Worker:
-        def __init__(self, *_args):
-            worker_events.append("started")
-
-        def flush_and_stop(self, *, timeout):
-            worker_events.append(("stopped", timeout))
-            return True
-
-    def fail_pair_factory():
-        raise RuntimeError("pair factory unavailable")
-
-    monkeypatch.setattr(routes, "ModelPersistenceWorker", _Worker)
-    monkeypatch.setattr(routes, "_manual_pair_factory", fail_pair_factory)
-    monkeypatch.setitem(client.application.config, "PROPAGATE_EXCEPTIONS", False)
-
-    response = client.post(
-        "/api/model-evidence/activate",
-        json={
-            "candidate_digest": candidate.model_digest,
-            "decision_id": prepared.decision_id,
-        },
-    )
-
-    assert response.status_code == 500
-    assert worker_events == []
-    assert read_model_activation() is None
 
 
 def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_activation_route(
@@ -559,7 +450,6 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
         role_generation=1,
         ownership_digest="",
     )
-    candidate_pair = owned_pair(candidate, _ApiHandle(), _ApiHandle())
     candidate_digest = candidate.model_digest
     request = FitRequest(
         request_id="request-api-operator",
@@ -575,21 +465,21 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
             role_generation=0,
         ),
     )
-    preparation = SimpleNamespace(
-        accepted=True,
-        candidate_digest=candidate_digest,
-        candidate_pair=candidate_pair,
-        candidate=SimpleNamespace(
-            request=request,
-            config=candidate_config,
-            rmse_c=1.0,
-            sample_count=12,
-            temperature_band_c=(80.0, 120.0),
-            nfev=4,
-        ),
-        blockers=(),
-        dry_solve_finite=True,
-        timing=SimpleNamespace(accepted=True),
+    fit = GreyFitSuccess(
+        request=request,
+        config=candidate_config,
+        rmse_c=1.0,
+        max_error_c=1.5,
+        identifiability=0.9,
+        sample_count=12,
+        temperature_band_c=(80.0, 120.0),
+        nfev=4,
+    )
+    preparation = CandidatePreparation.accepted_for_test(
+        candidate=fit,
+        candidate_pair=CandidatePair(object(), object()),
+        incumbent_pair=CandidatePair(object(), object()),
+        timing=TargetTimingEvidence("candidate-dry-solve", 3, 1.0, 25.0),
     )
     evaluation = SimpleNamespace(
         decision_id="decision-api-operator",
@@ -613,12 +503,14 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
         def evaluate_ready_off_path(self):
             return evaluation
 
-    controller._learning = _Learning()
-    controller._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
-    controller._poll_learning_off_path_locked(
+        def close(self):
+            return None
+
+    controller._grey_learning_runtime._learning = _Learning()
+    controller._grey_learning_runtime._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
+    controller.poll_learning_off_path(
         live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
     )
-    controller._activation_persistence_worker.flush_and_stop(timeout=2.0)
     checkpoint = ControllerModelStore().load("mpc")
     assert checkpoint is not None
     assert checkpoint["revision"] == 1
@@ -639,10 +531,6 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
         rebuilt_controller.active_control_pair.descriptor.configuration
         == candidate.configuration
     )
-    rebuilt = routes._build_manual_candidate_pair(candidate)
-    assert rebuilt.descriptor == candidate
-    assert routes._manual_candidate_dry_solve(rebuilt) is True
-    rebuilt.close()
 
     response = client.post(
         "/api/model-evidence/activate",
@@ -655,137 +543,47 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["phase"] == "prepared"
     assert read_model_activation().candidate_pair == candidate
+    controller.close()
+    candidate_controller.close()
+    rebuilt_controller.close()
 
 
-def test_activate_route_persists_only_prepared_after_exact_manual_validation(client, monkeypatch):
-    incumbent, candidate, prepared, confidence = _api_activation()
-    append_model_evidence((confidence,))
-    _pair, estimator, solver = _patch_manual_candidate(
-        monkeypatch, incumbent, candidate, prepared
-    )
-
-    response = client.post(
-        "/api/model-evidence/activate",
-        json={
-            "candidate_digest": candidate.model_digest,
-            "decision_id": prepared.decision_id,
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.get_json() == {
-        "accepted": True,
-        "phase": "prepared",
-        "transaction_id": prepared.transaction_id,
-        "decision_id": prepared.decision_id,
-        "candidate_digest": candidate.model_digest,
-        "role_generation": candidate.role_generation,
-    }
-    state = read_model_activation()
-    assert state is not None
-    assert state.phase == "prepared"
-    assert state.active_pair == incumbent
-    assert state.candidate_pair == candidate
-    assert estimator.closed == solver.closed == 1
 
 
-def test_activate_route_explicitly_migrates_legacy_checkpoint_pairs_before_equality(
+def test_activate_route_requires_exact_body_and_preserves_stale_rejection(
     client,
     monkeypatch,
 ):
-    legacy_incumbent, legacy_candidate, legacy_prepared, confidence = _api_activation(
-        legacy=True
-    )
-    incumbent = routes.MpcPairFactory.migrate_legacy_descriptor(legacy_incumbent)
-    candidate = routes.MpcPairFactory.migrate_legacy_descriptor(legacy_candidate)
-    prepared = PreparedActivationRecord.prepared(
-        timestamp_ms=legacy_prepared.timestamp_ms,
-        incumbent=incumbent,
-        candidate=candidate,
-        origin=legacy_prepared.origin,
-        policy=legacy_prepared.policy,
-        decision_id=legacy_prepared.decision_id,
-    )
-    append_model_evidence((confidence,))
-    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
-    monkeypatch.setattr(
-        routes,
-        "_activation_checkpoint",
-        lambda: {
-            "active_pair": legacy_incumbent.to_dict(),
-            "candidate_pair": legacy_candidate.to_dict(),
-        },
-    )
+    calls = []
 
-    response = client.post(
-        "/api/model-evidence/activate",
-        json={
-            "candidate_digest": legacy_candidate.model_digest,
-            "decision_id": legacy_prepared.decision_id,
-        },
-    )
-
-    assert response.status_code == 200
-    state = read_model_activation()
-    assert state is not None
-    assert state.active_pair == incumbent
-    assert state.candidate_pair == candidate
-
-
-def test_activate_route_rechecks_latest_confidence_inside_prepared_transaction(client, monkeypatch):
-    incumbent, candidate, prepared, confidence = _api_activation()
-    append_model_evidence((confidence,))
-    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
-    original_checkpoint = routes._activation_checkpoint
-
-    def race_confidence():
-        checkpoint = original_checkpoint()
-        append_model_evidence(
-            (
-                confidence.model_copy(
-                    update={
-                        "evidence_id": "confidence-api-raced",
-                        "timestamp_ms": 1_001,
-                        "payload": ConfidenceDecisionEvidence(
-                            decision_id=prepared.decision_id,
-                            blocked=True,
-                            reason="confidence-regressed",
-                        ),
-                    }
-                ),
+    class _Service:
+        def activate(self, request, *, now_ms):
+            calls.append((request, now_ms))
+            return ActivationRejected(
+                ActivationRejectionCategory.CONFLICT,
+                "stale-confidence-decision",
             )
-        )
-        return checkpoint
 
-    monkeypatch.setattr(routes, "_activation_checkpoint", race_confidence)
-
-    response = client.post(
+    monkeypatch.setattr(routes, "ModelActivationService", _Service)
+    malformed = client.post(
         "/api/model-evidence/activate",
-        json={
-            "candidate_digest": candidate.model_digest,
-            "decision_id": prepared.decision_id,
-        },
+        json={"decision_id": "decision-api-grey"},
     )
-
-    assert response.status_code == 409
-    assert response.get_json()["detail"] == "activation-authority-changed"
-    assert read_model_activation() is None
-
-
-def test_activate_route_requires_exact_body_digest_decision_and_operator_policy(client, monkeypatch):
-    incumbent, candidate, prepared, confidence = _api_activation()
-    append_model_evidence((confidence,))
-    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
-
-    malformed = client.post("/api/model-evidence/activate", json={"decision_id": prepared.decision_id})
     stale = client.post(
         "/api/model-evidence/activate",
-        json={"candidate_digest": candidate.model_digest, "decision_id": "stale"},
+        json={"candidate_digest": "c" * 64, "decision_id": "stale"},
     )
 
     assert malformed.status_code == 422
+    assert malformed.get_json() == {
+        "accepted": False,
+        "active_kind": "grey-box",
+        "error": "model-activation-rejected",
+        "detail": "request must contain exactly candidate_digest and decision_id",
+    }
     assert stale.status_code == 409
-    assert read_model_activation() is None
+    assert stale.get_json()["detail"] == "stale-confidence-decision"
+    assert len(calls) == 1
 
 
 def test_activate_route_treats_typed_contract_failures_as_unprocessable(client):
@@ -798,33 +596,26 @@ def test_activate_route_treats_typed_contract_failures_as_unprocessable(client):
     assert response.get_json()["error"] == "model-activation-rejected"
 
 
-def test_activate_route_rejects_non_operator_reviewed_candidate_policy(client, monkeypatch):
-    incumbent, candidate, prepared, _confidence = _api_activation()
-    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
-    monkeypatch.setattr(
-        routes,
-        "_model_evidence_projection",
-        lambda: (
-            _ReadyReport(
-                candidate.model_digest,
-                prepared.decision_id,
-                ActivationPolicy.PASSIVE_AUTO.value,
-            ),
-            (),
-        ),
-    )
+def test_activate_route_preserves_non_operator_policy_rejection(client, monkeypatch):
+    class _Service:
+        def activate(self, _request, *, now_ms):
+            assert isinstance(now_ms, int)
+            return ActivationRejected(
+                ActivationRejectionCategory.CONFLICT,
+                "manual activation requires operator-reviewed policy",
+            )
 
+    monkeypatch.setattr(routes, "ModelActivationService", _Service)
     response = client.post(
         "/api/model-evidence/activate",
         json={
-            "candidate_digest": candidate.model_digest,
-            "decision_id": prepared.decision_id,
+            "candidate_digest": "c" * 64,
+            "decision_id": "decision-api-grey",
         },
     )
 
     assert response.status_code == 409
     assert response.get_json()["detail"] == "manual activation requires operator-reviewed policy"
-    assert read_model_activation() is None
 
 
 def test_rollback_is_atomic_idempotent_and_names_exact_recorded_owner(client):
@@ -851,3 +642,168 @@ def test_rollback_is_atomic_idempotent_and_names_exact_recorded_owner(client):
     rollbacks = [record for record in read_model_evidence() if isinstance(record.payload, RollbackEvidence)]
     assert len(rollbacks) == 1
     assert rollbacks[0].model_digest == candidate.model_digest
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status", "payload"),
+    (
+        (
+            ActivationAccepted("1" * 64, "decision-adapter", "2" * 64, 7),
+            200,
+            {
+                "accepted": True,
+                "phase": "prepared",
+                "transaction_id": "1" * 64,
+                "decision_id": "decision-adapter",
+                "candidate_digest": "2" * 64,
+                "role_generation": 7,
+            },
+        ),
+        (
+            ActivationRejected(
+                ActivationRejectionCategory.CONFLICT,
+                "conflict",
+                cleanup_failed=True,
+            ),
+            409,
+            {
+                "accepted": False,
+                "active_kind": "grey-box",
+                "error": "model-activation-rejected",
+                "detail": "conflict",
+            },
+        ),
+        (
+            ActivationRejected(ActivationRejectionCategory.INVALID_DATA, "invalid"),
+            422,
+            {
+                "accepted": False,
+                "active_kind": "grey-box",
+                "error": "model-activation-rejected",
+                "detail": "invalid",
+            },
+        ),
+        (
+            ActivationRejected(
+                ActivationRejectionCategory.PERSISTENCE_UNAVAILABLE,
+                "unavailable",
+            ),
+            503,
+            {
+                "accepted": False,
+                "active_kind": "grey-box",
+                "error": "model-activation-rejected",
+                "detail": "unavailable",
+            },
+        ),
+        (
+            ActivationRejected(ActivationRejectionCategory.CLEANUP_FAILED, "cleanup"),
+            503,
+            {
+                "accepted": False,
+                "active_kind": "grey-box",
+                "error": "model-activation-rejected",
+                "detail": "cleanup",
+            },
+        ),
+    ),
+)
+def test_activate_route_exhaustively_maps_typed_service_outcomes(
+    client,
+    monkeypatch,
+    outcome,
+    status,
+    payload,
+):
+    calls = []
+
+    class _Service:
+        def activate(self, request, *, now_ms):
+            calls.append((request, now_ms))
+            return outcome
+
+    monkeypatch.setattr(routes, "ModelActivationService", _Service)
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={"candidate_digest": "2" * 64, "decision_id": "decision-adapter"},
+    )
+
+    assert response.status_code == status
+    assert response.content_type == "application/json"
+    assert response.data == (
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    assert response.get_json() == payload
+    assert len(calls) == 1
+    assert calls[0][0].candidate_digest == "2" * 64
+    assert isinstance(calls[0][1], int)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status", "payload"),
+    (
+        (
+            RollbackAccepted("decision-adapter", "operator rollback", 8, "3" * 64),
+            200,
+            {
+                "accepted": True,
+                "active_kind": "grey-box",
+                "decision_id": "decision-adapter",
+                "reason": "operator rollback",
+                "role_generation": 8,
+                "rollback_digest": "3" * 64,
+            },
+        ),
+        (
+            RollbackRejected(RollbackRejectionCategory.CONFLICT, "stale"),
+            409,
+            {
+                "accepted": False,
+                "active_kind": "grey-box",
+                "error": "model-activation-rejected",
+                "detail": "stale",
+            },
+        ),
+        (
+            RollbackRejected(
+                RollbackRejectionCategory.PERSISTENCE_UNAVAILABLE,
+                "unavailable",
+            ),
+            503,
+            {
+                "accepted": False,
+                "active_kind": "grey-box",
+                "error": "model-activation-rejected",
+                "detail": "unavailable",
+            },
+        ),
+    ),
+)
+def test_rollback_route_exhaustively_maps_typed_service_outcomes(
+    client,
+    monkeypatch,
+    outcome,
+    status,
+    payload,
+):
+    calls = []
+
+    class _Service:
+        def rollback(self, request, *, now_ms):
+            calls.append((request, now_ms))
+            return outcome
+
+    monkeypatch.setattr(routes, "ModelActivationService", _Service)
+
+    response = client.post(
+        "/api/model-evidence/rollback",
+        json={"reason": "operator rollback"},
+    )
+
+    assert response.status_code == status
+    assert response.content_type == "application/json"
+    assert response.get_json() == payload
+    assert len(calls) == 1
+    assert calls[0][0].reason == "operator rollback"
+    assert isinstance(calls[0][1], int)

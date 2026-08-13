@@ -472,10 +472,9 @@ class GreyLearningRuntime:
         with self._learning_lifecycle_lock:
             return self._poll_learning_off_path_locked(live_origin=live_origin)
 
-    def _persist_grey_lifecycle(
+    def _grey_lifecycle_record(
         self,
         evidence_payload,
-        trace_payload,
         *,
         timestamp_ms,
         role_generation,
@@ -483,20 +482,22 @@ class GreyLearningRuntime:
         provenance_digest,
     ):
         session_id = getattr(self, "_learning_session_id", None) or "mpc-learning"
-        cook_id = getattr(self, "_learning_cook_id", None)
-        evidence = ModelEvidenceRecord(
-            evidence_id=(f"{session_id}:{evidence_payload.payload_type}:{timestamp_ms}:{role_generation}"),
+        return ModelEvidenceRecord(
+            evidence_id=(
+                f"{session_id}:{evidence_payload.payload_type}:"
+                f"{timestamp_ms}:{role_generation}"
+            ),
             kind=EvidenceKind(evidence_payload.payload_type),
             session_id=session_id,
-            cook_id=cook_id,
+            cook_id=getattr(self, "_learning_cook_id", None),
             timestamp_ms=timestamp_ms,
             role_generation=role_generation,
             model_digest=model_digest,
             provenance_digest=provenance_digest,
             payload=evidence_payload,
         )
-        if not self._activation_runtime.submit_evidence(evidence):
-            raise RuntimeError("learning-lifecycle-evidence-not-accepted")
+
+    def _trace_grey_lifecycle(self, evidence, trace_payload):
         try:
             event_kind = {
                 "fit_lifecycle": TraceEventKind.FIT_LIFECYCLE,
@@ -507,9 +508,9 @@ class GreyLearningRuntime:
             self._append_trace(
                 (
                     ControlTraceRecord(
-                        ts_ms=timestamp_ms,
-                        session_id=session_id,
-                        cook_id=cook_id,
+                        ts_ms=evidence.timestamp_ms,
+                        session_id=evidence.session_id,
+                        cook_id=evidence.cook_id,
                         controller=ControllerType.MPC,
                         event_kind=event_kind,
                         payload=trace_payload,
@@ -517,7 +518,30 @@ class GreyLearningRuntime:
                 )
             )
         except Exception as error:
-            self._activation_runtime.terminate(f"learning lifecycle trace failed: {error}")
+            self._activation_runtime.terminate(
+                f"learning lifecycle trace failed: {error}"
+            )
+
+    def _persist_grey_lifecycle(
+        self,
+        evidence_payload,
+        trace_payload,
+        *,
+        timestamp_ms,
+        role_generation,
+        model_digest,
+        provenance_digest,
+    ):
+        evidence = self._grey_lifecycle_record(
+            evidence_payload,
+            timestamp_ms=timestamp_ms,
+            role_generation=role_generation,
+            model_digest=model_digest,
+            provenance_digest=provenance_digest,
+        )
+        if not self._activation_runtime.submit_evidence(evidence):
+            raise RuntimeError("learning-lifecycle-evidence-not-accepted")
+        self._trace_grey_lifecycle(evidence, trace_payload)
         return evidence
 
     @staticmethod
@@ -642,20 +666,20 @@ class GreyLearningRuntime:
             ),
             default=self._clock_ms(),
         )
-        persisted = self._persist_grey_lifecycle(
+        assessment_trace = GreyCandidateAssessmentPayload(
+            decision_id=assessment.decision_id,
+            origin=assessment.origin,
+            policy=assessment.policy,
+            fit_accepted=assessment.fit_accepted,
+            identifiability_accepted=assessment.identifiability_accepted,
+            native_build=assessment.native_build,
+            native_dry_solve=assessment.native_dry_solve,
+            target_timing=assessment.target_timing,
+            confidence_accepted=assessment.confidence_accepted,
+            rejection_reasons=assessment.rejection_reasons,
+        )
+        persisted = self._grey_lifecycle_record(
             assessment,
-            GreyCandidateAssessmentPayload(
-                decision_id=assessment.decision_id,
-                origin=assessment.origin,
-                policy=assessment.policy,
-                fit_accepted=assessment.fit_accepted,
-                identifiability_accepted=assessment.identifiability_accepted,
-                native_build=assessment.native_build,
-                native_dry_solve=assessment.native_dry_solve,
-                target_timing=assessment.target_timing,
-                confidence_accepted=assessment.confidence_accepted,
-                rejection_reasons=assessment.rejection_reasons,
-            ),
             timestamp_ms=timestamp_ms,
             role_generation=evaluation.role_generation,
             model_digest=evaluation.challenger_digest,
@@ -676,8 +700,14 @@ class GreyLearningRuntime:
                 reason=None if confidence_accepted else reasons[0],
             ),
         )
-        receipt = self._activation_runtime.submit_activation_confidence(confidence)
-        if not receipt.accepted or receipt.wait(2.0) is not True or receipt.durable is not True:
+        receipt = self._activation_runtime.submit_activation_confidence(
+            confidence,
+            preceding_evidence=(persisted,),
+        )
+        if not receipt.accepted:
+            raise RuntimeError("activation-confidence-not-durable")
+        self._trace_grey_lifecycle(persisted, assessment_trace)
+        if receipt.wait(2.0) is not True or receipt.durable is not True:
             raise RuntimeError("activation-confidence-not-durable")
         self._activation_runtime.mark_confidence_persisted(
             evaluation.decision_id

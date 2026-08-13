@@ -9,6 +9,8 @@ import threading
 import time
 
 from common.model_evidence import (
+    CandidateAssessmentEvidence,
+    ConfidenceDecisionEvidence,
     ActivationLifecycleEvidence,
     EvidenceKind,
     FallbackEvidence,
@@ -167,17 +169,60 @@ class ActivationRuntime:
     def submit_activation_confidence(
         self,
         record: ModelEvidenceRecord,
+        *,
+        preceding_evidence: Sequence[ModelEvidenceRecord] = (),
     ) -> DurableActivationReceipt:
         owned = self._copy_record(record)
-        if owned.kind is not EvidenceKind.CONFIDENCE_DECISION:
-            raise TypeError("activation confidence must be confidence-decision evidence")
+        if (
+            owned.kind is not EvidenceKind.CONFIDENCE_DECISION
+            or not isinstance(owned.payload, ConfidenceDecisionEvidence)
+        ):
+            raise TypeError(
+                "activation confidence must be confidence-decision evidence"
+            )
+        if not isinstance(preceding_evidence, Sequence) or isinstance(
+            preceding_evidence,
+            (str, bytes),
+        ):
+            raise TypeError(
+                "preceding_evidence must be a sequence of ModelEvidenceRecord"
+            )
+        owned_preceding = tuple(
+            self._copy_record(preceding) for preceding in preceding_evidence
+        )
+        if any(
+            preceding.kind is not EvidenceKind.CANDIDATE_ASSESSMENT
+            or not isinstance(
+                preceding.payload,
+                CandidateAssessmentEvidence,
+            )
+            for preceding in owned_preceding
+        ):
+            raise ValueError(
+                "preceding_evidence requires candidate-assessment evidence"
+            )
+        if any(
+            preceding.payload.decision_id != owned.payload.decision_id
+            for preceding in owned_preceding
+            if isinstance(preceding.payload, CandidateAssessmentEvidence)
+        ):
+            raise ValueError(
+                "preceding candidate-assessment decision_id must match confidence"
+            )
         with self._lock:
             if self._closed:
                 return DurableActivationReceipt(accepted=False)
             receipt = self._confidence_receipts.get(owned.evidence_id)
             if receipt is not None:
                 return receipt
-            receipt = self._persistence.submit_activation_confidence(owned)
+            receipt = (
+                self._persistence.submit_activation_confidence(
+                    owned,
+                    preceding_evidence=owned_preceding,
+                )
+                if owned_preceding
+                else self._persistence.submit_activation_confidence(owned)
+            )
             if receipt.accepted:
                 self._confidence_receipts[owned.evidence_id] = receipt
             return receipt
