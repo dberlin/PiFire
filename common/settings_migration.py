@@ -9,7 +9,7 @@ Description: Reading a settings JSON FILE and migrating its contents across
 
   Note: this is the FILE reader/migrator, and it is IMPORT-ONLY. SQLite
   (pifire.db) is the sole settings store -- see
-  common/datastore_accessors.py. The only files this ever reads are the
+  common.persistence.runtime. The only files this ever reads are the
   one-time first-boot import source (a settings.json left behind by a
   pre-SQLite install; see common/datastore.py::_first_boot_import) and the
   backup files the admin page restores from. Nothing writes a settings.json

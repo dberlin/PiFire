@@ -1,6 +1,7 @@
 import copy
 
 import pytest
+from common.persistence import runtime as runtime_persistence
 
 
 @pytest.fixture
@@ -245,16 +246,15 @@ def test_write_current_shape_parity(store, monkeypatch):
     # The control loop hands write_current() probe_history-shaped data, and what
     # gets STORED is the transformed blob. A fake that kept the input verbatim
     # would let a test write and then read a shape production never produces.
-    from common import datastore_accessors as dsa
     from controller.runtime.store import InMemoryStore
 
     settings = _settings_with_probe_map(store)
-    dsa.write_settings(settings)
+    runtime_persistence.write_settings(settings)
     fake = InMemoryStore(settings=settings)
     # Both writers call the shared stdlib time module independently. Freeze it
     # so this parity assertion tests their transformation rather than whether
     # both calls happened within the same millisecond.
-    monkeypatch.setattr(dsa.time, "time", lambda: 1_700_000_000.123)
+    monkeypatch.setattr(runtime_persistence.time, "time", lambda: 1_700_000_000.123)
 
     store.write_current(_PARITY_IN_DATA)
     fake.write_current(_PARITY_IN_DATA)
@@ -268,22 +268,20 @@ def test_write_current_shape_parity(store, monkeypatch):
 
 
 def test_flush_current_shape_parity(store):
-    from common import datastore_accessors as dsa
     from controller.runtime.store import InMemoryStore
 
     settings = _settings_with_probe_map(store)
-    dsa.write_settings(settings)
+    runtime_persistence.write_settings(settings)
     fake = InMemoryStore(settings=settings)
 
     assert store.flush_current() == fake.flush_current()
 
 
 def test_read_current_snapshot_parity(store):
-    from common import datastore_accessors as dsa
     from controller.runtime.store import InMemoryStore
 
     settings = _settings_with_probe_map(store)
-    dsa.write_settings(settings)
+    runtime_persistence.write_settings(settings)
     fake = InMemoryStore(settings=settings)
 
     store.write_current(_PARITY_IN_DATA)
@@ -298,13 +296,12 @@ def test_read_current_snapshot_parity(store):
 
 
 def test_status_initialization_and_snapshot_ownership_parity(store):
-    from common import datastore_accessors as dsa
     from controller.runtime.store import InMemoryStore
 
     settings = store.read_settings()
     settings["globals"]["units"] = "C"
     settings["modules"]["dist"] = "ultrasonic"
-    dsa.write_settings(settings)
+    runtime_persistence.write_settings(settings)
     pellet_db = store.read_pellet_db()
     pellet_db["current"]["hopper_level"] = 37
     store.write_pellet_db(pellet_db)
@@ -325,11 +322,10 @@ def test_status_initialization_and_snapshot_ownership_parity(store):
 
 
 def test_history_write_and_flush_coupling_parity(store):
-    from common import datastore_accessors as dsa
     from controller.runtime.store import InMemoryStore
 
     settings = _settings_with_probe_map(store)
-    dsa.write_settings(settings)
+    runtime_persistence.write_settings(settings)
     history_projections = []
 
     for st in (store, InMemoryStore(settings=settings)):

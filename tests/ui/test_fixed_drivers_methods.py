@@ -351,7 +351,7 @@ def test_ssd1306_public_status_methods_set_state_without_touching_device():
 
 # ---------------------------------------------------------------------------
 # ssd1306b.py -- adds gpiozero button input + a full _menu_display state
-# machine driven off common.datastore_accessors.read_control/enqueue_control_delta.
+# machine driven off common.persistence.control.read_control/enqueue_control_delta.
 # ---------------------------------------------------------------------------
 
 

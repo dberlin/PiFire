@@ -119,7 +119,7 @@ def test_hopper_check_does_not_clobber_notify_data(live_server, page):
     2. `execute_control_writes` three-way merges every queued partial against
        the pre-drain blob -- `reduce_control_patch` drops members equal to that
        ancestor and `merge_notify_data` merges the notify array element-wise
-       (common/datastore_accessors.py, common/common.py).
+       (the pre-delta accessor implementation and common/common.py).
 
     Layer 2 alone is already sufficient: this test passed BEFORE the minimal
     patch landed, because the whole-dict snapshot's notify_data was identical

@@ -7,9 +7,9 @@ from common.control_delta import ControlDeltaError
 
 @pytest.mark.parametrize("api_name", ["write_control_snapshot", "enqueue_control_delta"])
 def test_control_write_apis_require_keyword_only_origin(api_name):
-    from common import datastore_accessors
+    from common.persistence import control as control_persistence
 
-    api = getattr(datastore_accessors, api_name)
+    api = getattr(control_persistence, api_name)
     parameters = list(signature(api).parameters.values())
     expected_payload_name = "control" if api_name == "write_control_snapshot" else "delta"
     assert [parameter.name for parameter in parameters] == [expected_payload_name, "origin"]

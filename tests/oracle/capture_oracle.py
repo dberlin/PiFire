@@ -11,7 +11,8 @@ import os
 
 from common import common as c
 from common.control_delta import control_delta
-from common import datastore_accessors, defaults
+from common import defaults
+from common.persistence import control as control_persistence
 from common.persistence import history as history_persistence
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -26,15 +27,15 @@ def _dump(name, value):
 def scenario_control_delta():
     c.datastore.delete_blob("control:general")
     c.SqliteQueue("queue_control_write").flush()
-    datastore_accessors.write_control_snapshot(
+    control_persistence.write_control_snapshot(
         {"mode": "Stop", "nested": {"a": 1, "b": 2}}, origin="test"
     )
-    datastore_accessors.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(set_values={"nested": {"b": 9, "c": 3}}), origin="webapp"
     )
-    before = datastore_accessors.read_control()
-    datastore_accessors.execute_control_writes()
-    after = datastore_accessors.read_control()
+    before = control_persistence.read_control()
+    control_persistence.execute_control_writes()
+    after = control_persistence.read_control()
     return {"before_execute": before, "after_execute": after}
 
 

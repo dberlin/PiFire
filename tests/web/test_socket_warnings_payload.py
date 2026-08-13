@@ -18,7 +18,7 @@ def _dash_data():
     # "control:current" and "probe_device_info"; none of these self-heal like
     # the settings/pellets blobs do, so seed them the way the control-loop
     # does at startup (see init_status()/flush_current() in
-    # datastore_accessors).
+    # common.persistence.runtime).
     init_status()
     flush_current()
     write_generic_key("probe_device_info", {})

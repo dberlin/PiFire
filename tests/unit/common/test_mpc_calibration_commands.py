@@ -4,7 +4,8 @@ from threading import Barrier, Event
 
 import pytest
 
-from common import api_commands, datastore_accessors
+from common import api_commands
+from common.persistence import control as control_persistence
 from common.control_delta import ControlDeltaError, control_delta
 from common.persistence.control import (
     execute_control_writes,
@@ -163,14 +164,14 @@ def test_fifo_drain_serializes_live_revision_and_high_water_reads(ds, monkeypatc
     )
     entered = Event()
     release = Event()
-    apply_control_delta = datastore_accessors.apply_control_delta
+    apply_control_delta = control_persistence.apply_control_delta
 
     def pause_inside_drain(control, delta):
         entered.set()
         assert release.wait(2)
         return apply_control_delta(control, delta)
 
-    monkeypatch.setattr(datastore_accessors, "apply_control_delta", pause_inside_drain)
+    monkeypatch.setattr(control_persistence, "apply_control_delta", pause_inside_drain)
     with ThreadPoolExecutor(max_workers=3) as executor:
         drain = executor.submit(execute_control_writes)
         assert entered.wait(2)

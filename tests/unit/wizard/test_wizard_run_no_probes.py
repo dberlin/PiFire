@@ -16,7 +16,8 @@ import logging
 import pytest
 
 import wizard
-from common import datastore_accessors, defaults
+from common import defaults
+from common.persistence import runtime as runtime_persistence
 from common.persistence import install_state as install_persistence
 from common.common import read_wizard
 
@@ -40,7 +41,7 @@ def no_install(monkeypatch):
 def test_run_wizard_no_probe_devices(ds, no_install):
     settings = defaults.default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
-    datastore_accessors.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     wizard_data = read_wizard()
     install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
@@ -56,7 +57,7 @@ def test_run_wizard_no_probe_devices(ds, no_install):
 def test_run_wizard_dev_mode_resolves_to_restart_not_reboot(ds, no_install):
     settings = defaults.default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
-    datastore_accessors.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     wizard_data = read_wizard()
     install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
@@ -79,7 +80,7 @@ def test_run_wizard_skips_unknown_setting_key(ds, no_install):
     """
     settings = defaults.default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
-    datastore_accessors.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     wizard_data = read_wizard()
     install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
@@ -102,7 +103,7 @@ def test_run_wizard_skips_unknown_module_name(ds, no_install):
     """
     settings = defaults.default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
-    datastore_accessors.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     wizard_data = read_wizard()
     install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)

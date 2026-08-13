@@ -640,12 +640,12 @@ def no_install(monkeypatch):
 
 def test_run_wizard_writes_strict(ds, no_install):
     import wizard
-    from common import datastore_accessors
+    from common.persistence import runtime as runtime_persistence
     from common.common import read_wizard
 
     settings = default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
-    datastore_accessors.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     wizard_data = read_wizard()
     install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)

@@ -67,15 +67,16 @@ def test_boot_path_import_reaches_public_readers(fresh, monkeypatch):
     """FIX 1: the import must be visible through the same public accessors
     (read_settings()/read_pellet_db()) that every caller in the codebase
     actually uses -- not just the raw kv blob."""
-    from common import backups, datastore_accessors, settings_migration
+    from common import backups, settings_migration
+    from common.persistence import runtime as runtime_persistence
 
     monkeypatch.setattr(
         settings_migration, "read_settings_file", lambda *a, **k: {"globals": {"units": "F", "grill_name": "sentinel"}}
     )
     monkeypatch.setattr(backups, "read_pellet_db_file", lambda *a, **k: {"current": {"hopper_level": 100}})
     datastore.init()
-    assert datastore_accessors.read_settings()["globals"]["grill_name"] == "sentinel"
-    assert datastore_accessors.read_pellet_db()["current"]["hopper_level"] == 100
+    assert runtime_persistence.read_settings()["globals"]["grill_name"] == "sentinel"
+    assert runtime_persistence.read_pellet_db()["current"]["hopper_level"] == 100
 
 
 def test_first_boot_import_calls_read_settings_file_with_init_true(fresh, monkeypatch):
@@ -235,12 +236,13 @@ def test_backup_restore_settings_round_trip(fresh, backups_dir):
     the backup file (not a stale settings.json copy); restore_settings()
     must read that backup FILE back and make it the new current SQLite
     state (not silently re-read whatever is already current)."""
-    from common import backups, datastore_accessors, defaults, settings_migration
+    from common import backups, defaults, settings_migration
+    from common.persistence import runtime as runtime_persistence
 
     datastore.init()
     settings = defaults.default_settings()
     settings["globals"]["grill_name"] = "BACKUP_ROUND_TRIP_SENTINEL"
-    datastore_accessors.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     backup_file = backups.backup_settings()
     assert os.path.exists(backup_file)
@@ -251,13 +253,13 @@ def test_backup_restore_settings_round_trip(fresh, backups_dir):
 
     # Blow away the current SQLite state to prove restore reads the file,
     # not whatever happens to already be current.
-    datastore_accessors.write_settings_store(defaults.default_settings())
-    assert datastore_accessors.read_settings()["globals"]["grill_name"] == ""
+    runtime_persistence.write_settings_store(defaults.default_settings())
+    assert runtime_persistence.read_settings()["globals"]["grill_name"] == ""
 
     restored = settings_migration.restore_settings(defaults.default_settings())
     assert restored["globals"]["grill_name"] == "BACKUP_ROUND_TRIP_SENTINEL"
     # Restore direction: made the recovered settings the new current state.
-    assert datastore_accessors.read_settings()["globals"]["grill_name"] == "BACKUP_ROUND_TRIP_SENTINEL"
+    assert runtime_persistence.read_settings()["globals"]["grill_name"] == "BACKUP_ROUND_TRIP_SENTINEL"
 
 
 def test_read_pellet_db_file_corrupt_backup_does_not_recurse_infinitely(fresh, backups_dir):
@@ -297,12 +299,13 @@ def test_backup_restore_pellet_db_round_trip(fresh, backups_dir):
     """FIX 3: backup_pellet_db('backup') must write the CURRENT SQLite pellet
     DB out to the backup file (not a stale pelletdb.json copy);
     backup_pellet_db('restore') must read that backup FILE back."""
-    from common import backups, datastore_accessors, defaults
+    from common import backups, defaults
+    from common.persistence import runtime as runtime_persistence
 
     datastore.init()
     pelletdb = defaults.default_pellets()
     pelletdb["current"]["hopper_level"] = 13
-    datastore_accessors.write_pellets_store(pelletdb)
+    runtime_persistence.write_pellets_store(pelletdb)
 
     backup_file = backups.backup_pellet_db(action="backup")
     assert os.path.exists(backup_file)
@@ -310,9 +313,9 @@ def test_backup_restore_pellet_db_round_trip(fresh, backups_dir):
         backed_up = json.load(fh)
     assert backed_up["current"]["hopper_level"] == 13
 
-    datastore_accessors.write_pellets_store(defaults.default_pellets())
-    assert datastore_accessors.read_pellet_db()["current"]["hopper_level"] != 13
+    runtime_persistence.write_pellets_store(defaults.default_pellets())
+    assert runtime_persistence.read_pellet_db()["current"]["hopper_level"] != 13
 
     restored = backups.backup_pellet_db(action="restore")
     assert restored["current"]["hopper_level"] == 13
-    assert datastore_accessors.read_pellet_db()["current"]["hopper_level"] == 13
+    assert runtime_persistence.read_pellet_db()["current"]["hopper_level"] == 13

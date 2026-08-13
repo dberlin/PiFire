@@ -21,7 +21,8 @@ import logging
 import pytest
 
 import wizard
-from common import datastore_accessors, defaults
+from common import defaults
+from common.persistence import runtime as runtime_persistence
 from common.persistence import install_state as install_persistence
 from common.common import read_wizard
 
@@ -62,9 +63,9 @@ def install_info(module, settings):
 
 
 def run(info):
-    datastore_accessors.write_settings_store(defaults.default_settings())
-    wizard.run_wizard(datastore_accessors.read_settings(), read_wizard(), info)
-    return datastore_accessors.read_settings()
+    runtime_persistence.write_settings_store(defaults.default_settings())
+    wizard.run_wizard(runtime_persistence.read_settings(), read_wizard(), info)
+    return runtime_persistence.read_settings()
 
 
 def test_ft232h_install_writes_named_pins_and_a_string_url(ds, no_install):
@@ -125,11 +126,11 @@ def test_a_failing_install_is_published_rather_than_dying_silently(ds, no_instal
     which reads only "above 100" as finished, polled that forever."""
     from common.install_log import INSTALL_FAILED_PERCENT
 
-    datastore_accessors.write_settings_store(defaults.default_settings())
+    runtime_persistence.write_settings_store(defaults.default_settings())
     monkeypatch.setattr(wizard, "run_wizard", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full")))
 
     code = wizard.run_wizard_reporting_failure(
-        datastore_accessors.read_settings(), read_wizard(), install_info("custom", {})
+        runtime_persistence.read_settings(), read_wizard(), install_info("custom", {})
     )
 
     assert code == 1
@@ -141,10 +142,10 @@ def test_a_failing_install_is_published_rather_than_dying_silently(ds, no_instal
 
 
 def test_a_successful_install_reports_no_failure(ds, no_install):
-    datastore_accessors.write_settings_store(defaults.default_settings())
+    runtime_persistence.write_settings_store(defaults.default_settings())
 
     code = wizard.run_wizard_reporting_failure(
-        datastore_accessors.read_settings(), read_wizard(), install_info("custom", {})
+        runtime_persistence.read_settings(), read_wizard(), install_info("custom", {})
     )
 
     assert code == 0

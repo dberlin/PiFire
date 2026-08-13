@@ -11,14 +11,11 @@ Description: Backup/restore of the settings and pellet databases, plus the
   install) and the backup files this module writes.
 
   Extracted from common/common.py. These functions sit ABOVE
-  common/datastore_accessors.py (they read/write the live SQLite state in
+  common.persistence.runtime (they read/write the live SQLite state in
   order to back it up), which is why they cannot stay in common/common.py:
-  common/common.py is the bottom utility layer that datastore_accessors
-  imports from, so leaving them there means the bottom layer calls upward --
-  a module-level cycle once the compatibility facade below is deleted.
-
-  common/common.py re-imports these names for now so that existing
-  `common.common.X` call sites keep resolving.
+  common/common.py is the bottom utility layer that persistence.runtime
+  imports from, so leaving them there would make the bottom layer call upward
+  and create a module-level cycle.
 
 ==============================================================================
 """

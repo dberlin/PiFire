@@ -12,7 +12,7 @@ CONTRACT (see docs/superpowers/plans/2026-07-25-react-pellets-page.md):
 every handler takes an INTENT -- one action plus its arguments -- and does its
 own read-modify-write of the pellet blob inside the request. write_pellet_db()
 is a whole-blob set_blob() with no merge and no queue
-(common/datastore_accessors.py:465-471, :702-703), and the control process
+(common.persistence.runtime.write_pellet_db), and the control process
 writes the same blob (controller/runtime/modes/base.py:374-375, :761-763), so
 any caller that holds a database across a round trip and posts it back WILL
 discard the controller's est_usage/hopper_level updates. Never add a handler

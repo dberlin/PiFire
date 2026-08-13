@@ -1158,7 +1158,7 @@ def test_get_dash_data_and_probe_data_full_structure(sio):
 
     # Seed `current` the way the control-loop does at startup (read_current()
     # with no init returns a bare {} -- KeyError otherwise; see
-    # flush_current() in common/datastore_accessors.py).
+    # flush_current() in common.persistence.runtime).
     current = flush_current()
     current["P"]["Grill"] = 225
     current["F"]["Probe1"] = 150

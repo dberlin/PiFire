@@ -16,7 +16,7 @@ from common.web_contracts.learning import (
 )
 from controller import pid_sp_learning as learning
 from common import controller_model_state
-from common import datastore_accessors
+from common.persistence import runtime as runtime_persistence
 
 from controller.fopdt_identifier import (
     CONFIRM_WINDOW,
@@ -476,7 +476,7 @@ def test_backend_report_uses_a_strict_checkpoint_load(monkeypatch):
             assert name == "pid_sp"
             raise ValueError("malformed stored snapshot for 'pid_sp'")
 
-    monkeypatch.setattr(datastore_accessors, "read_status", lambda: {})
+    monkeypatch.setattr(runtime_persistence, "read_status", lambda: {})
     monkeypatch.setattr(
         controller_model_state,
         "ControllerModelStore",

@@ -473,7 +473,7 @@ def test_round_trips_through_the_real_datastore_seam(ds):
     # The fake in every other test matches read_generic_key's documented
     # behavior on purpose, but only this test exercises the actual seam:
     # ControllerModelStore() with no injected reader/writer, backed by a real
-    # (temp-file) SQLite datastore via common.datastore_accessors.
+    # (temp-file) SQLite datastore via common.persistence.runtime.
     store = ControllerModelStore()
     assert store.load("pid_sp") is None
     assert store.save("pid_sp", FOPDT) is True

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from common import controller_model_state
-from common import datastore_accessors
+from common.persistence import runtime as runtime_persistence
 from common.controller_model_state import (
     MODEL_STATE_KEY,
     SCHEMA_VERSION,
@@ -165,7 +165,7 @@ def test_corrupt_persisted_checkpoint_returns_an_explicit_422(client, monkeypatc
             assert name == "pid_sp"
             raise ValueError("malformed stored snapshot for 'pid_sp'")
 
-    monkeypatch.setattr(datastore_accessors, "read_status", lambda: {})
+    monkeypatch.setattr(runtime_persistence, "read_status", lambda: {})
     monkeypatch.setattr(
         controller_model_state,
         "ControllerModelStore",

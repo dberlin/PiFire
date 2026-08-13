@@ -24,7 +24,9 @@ import logging
 import pytest
 
 import wizard
-from common import datastore_accessors, defaults
+from common import defaults
+from common.persistence import control as control_persistence
+from common.persistence import runtime as runtime_persistence
 from common.common import read_wizard
 
 
@@ -54,11 +56,11 @@ def _seeded_settings():
     ]
     settings["history_page"]["probe_config"] = defaults.default_probe_config(settings)
     settings["recipe"]["probe_map"] = {"primary": "Grill", "food": ["Probe1"]}
-    datastore_accessors.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     control = defaults.default_control()
     control["notify_data"] = defaults.default_notify(settings)
-    datastore_accessors.write_control_snapshot(control, origin="test")
+    control_persistence.write_control_snapshot(control, origin="test")
     return settings
 
 
@@ -77,7 +79,7 @@ def test_installer_rename_updates_the_recipe_probe_map(ds, no_install):
 
     _run_with_renamed_probe(settings)
 
-    assert datastore_accessors.read_settings()["recipe"]["probe_map"] == {
+    assert runtime_persistence.read_settings()["recipe"]["probe_map"] == {
         "primary": "Grill",
         "food": ["Brisket"],
     }
@@ -88,8 +90,8 @@ def test_installer_rename_leaves_no_stale_notify_entry(ds, no_install):
 
     _run_with_renamed_probe(settings)
 
-    datastore_accessors.execute_control_writes()
-    notify_data = datastore_accessors.read_control()["notify_data"]
+    control_persistence.execute_control_writes()
+    notify_data = control_persistence.read_control()["notify_data"]
     probe_labels = {e["label"] for e in notify_data if e["type"].startswith("probe")}
     assert probe_labels == {"Grill", "Brisket"}
 
@@ -101,4 +103,4 @@ def test_installer_still_regenerates_the_history_probe_config(ds, no_install):
 
     _run_with_renamed_probe(settings)
 
-    assert set(datastore_accessors.read_settings()["history_page"]["probe_config"]) == {"Grill", "Brisket"}
+    assert set(runtime_persistence.read_settings()["history_page"]["probe_config"]) == {"Grill", "Brisket"}

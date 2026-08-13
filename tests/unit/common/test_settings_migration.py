@@ -33,7 +33,8 @@ import os
 
 import pytest
 
-from common import datastore, datastore_accessors
+from common import datastore
+from common.persistence import runtime as runtime_persistence
 from common.defaults import default_settings
 from common.settings_migration import (
     downgrade_settings,
@@ -434,7 +435,7 @@ def test_read_settings_file_no_migration_when_build_higher(tmp_path):
 
 def test_read_settings_file_upgrade_path_backs_up_and_upgrades(fresh, real_backups_dir):
     d = default_settings()
-    datastore_accessors.write_settings_store(d)
+    runtime_persistence.write_settings_store(d)
 
     old = copy.deepcopy(d)
     old["versions"]["server"] = "1.10.9"  # just below current -- avoids the ancient cascade blocks
@@ -452,7 +453,7 @@ def test_read_settings_file_upgrade_path_backs_up_and_upgrades(fresh, real_backu
 
 def test_read_settings_file_downgrade_path_resets_to_defaults_when_no_backup(fresh, real_backups_dir):
     d = default_settings()
-    datastore_accessors.write_settings_store(d)
+    runtime_persistence.write_settings_store(d)
 
     old = copy.deepcopy(d)
     old["versions"]["server"] = "99.99.99"  # newer than current code -> downgrade path
@@ -534,7 +535,7 @@ def test_restore_settings_creates_manifest_and_resets_to_defaults_when_none_exis
         written = json.load(fh)
     assert written == {"server_settings": {}, "pelletdb": {"current": ""}}
     # restore_settings() makes the recovered settings the new current state.
-    assert datastore_accessors.read_settings()["globals"]["grill_name"] == d["globals"]["grill_name"]
+    assert runtime_persistence.read_settings()["globals"]["grill_name"] == d["globals"]["grill_name"]
 
 
 def test_restore_settings_uses_existing_manifest_and_matching_backup(fresh, real_backups_dir):
@@ -559,7 +560,7 @@ def test_restore_settings_uses_existing_manifest_and_matching_backup(fresh, real
     result = restore_settings(d)
 
     assert result["globals"]["grill_name"] == "SENTINEL_RESTORE_BACKUP"
-    assert datastore_accessors.read_settings()["globals"]["grill_name"] == "SENTINEL_RESTORE_BACKUP"
+    assert runtime_persistence.read_settings()["globals"]["grill_name"] == "SENTINEL_RESTORE_BACKUP"
 
 
 # ---------------------------------------------------------------------------

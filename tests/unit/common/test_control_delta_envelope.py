@@ -3,7 +3,7 @@ the control process reads it. Both ends are pinned here."""
 
 import pytest
 
-from common import datastore_accessors as dsa
+from common.persistence import control as control_persistence
 from common.sqlite_queue import SqliteQueue
 from common.control_delta import (
     CONTROL_DELTA_KEY,
@@ -19,7 +19,7 @@ from common.control_delta import (
 def test_enqueue_control_delta_validates_and_copies_before_queueing(ds):
     envelope = control_delta(set_values={"manual": {"pwm": 50}})
 
-    dsa.enqueue_control_delta(envelope, origin="display")
+    control_persistence.enqueue_control_delta(envelope, origin="display")
     queued_set = envelope["set"]
     assert isinstance(queued_set, dict)
     manual = queued_set["manual"]
@@ -39,7 +39,7 @@ def test_enqueue_control_delta_rejects_an_invalid_envelope_without_queueing(ds):
     malformed = {CONTROL_DELTA_KEY: CONTROL_DELTA_VERSION, "set": []}
 
     with pytest.raises(ControlDeltaError, match="set must be a mapping, got list"):
-        dsa.enqueue_control_delta(malformed, origin="display")
+        control_persistence.enqueue_control_delta(malformed, origin="display")
 
     assert SqliteQueue("queue_control_write").length() == 0
 

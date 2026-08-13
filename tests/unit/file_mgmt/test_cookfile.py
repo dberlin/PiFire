@@ -1248,7 +1248,7 @@ def test_create_cookfile_survives_poisoned_none_starttime_row(ds, isolated_histo
 
     append_metric(dict(default_metrics(), id=0, mode="Smoke", augerontime=120))
     # append_metric(...) always force-stamps 'starttime' (see
-    # common/datastore_accessors.py), so a None starttime can only reach the DB
+    # common.persistence.history), so a None starttime can only reach the DB
     # via the "replace last record" path (new_metric=False) -- exactly how the
     # real corruption happens (a dict missing/None on 'starttime' overwrites the
     # last row wholesale). Poison the row just written the same way.

@@ -167,8 +167,9 @@ _SEED = """
 import os
 from common import datastore
 from common.common import ErrorKind
-from common.datastore_accessors import (
-    init_status, write_control_snapshot, write_errors, write_pellets_store, write_settings_store,
+from common.persistence.control import write_control_snapshot
+from common.persistence.runtime import (
+    init_status, write_errors, write_pellets_store, write_settings_store,
 )
 from common.defaults import default_control, default_pellets, default_settings
 

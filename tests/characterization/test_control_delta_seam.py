@@ -6,7 +6,7 @@ import json
 import pytest
 
 from common import common as c
-from common import datastore_accessors as dsa
+from common.persistence import control as control_persistence
 from common.control_delta import CONTROL_DELTA_KEY, control_delta
 from common.persistence.control import (
     default_control,
@@ -23,33 +23,33 @@ NOW = 1_700_000_000.0
 @pytest.fixture
 def seeded(ds):
     write_settings_store(default_settings())
-    dsa.write_control_snapshot(default_control(), origin="test-delta-seam")
+    control_persistence.write_control_snapshot(default_control(), origin="test-delta-seam")
     c.SqliteQueue("queue_control_write").flush()
     return ds
 
 
 def test_a_delta_is_queued_verbatim_with_an_origin_stamp(seeded):
-    dsa.enqueue_control_delta(control_delta(set_values={"mode": "Hold"}), origin="app")
+    control_persistence.enqueue_control_delta(control_delta(set_values={"mode": "Hold"}), origin="app")
     rows = c.datastore.connection().execute("SELECT value FROM queue_control_write ORDER BY id").fetchall()
     assert json.loads(rows[0][0]) == {CONTROL_DELTA_KEY: 1, "set": {"mode": "Hold"}, "origin": "app"}
 
 
 def test_a_delta_write_lands_on_the_blob(seeded):
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(set_values={"mode": "Hold", "primary_setpoint": 225}),
         origin="app",
     )
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     control = read_control()
     assert control["mode"] == "Hold"
     assert control["primary_setpoint"] == 225
 
 
 def test_delta_rows_apply_in_fifo_order(seeded):
-    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="first")
-    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 275}), origin="second")
+    control_persistence.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="first")
+    control_persistence.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 275}), origin="second")
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     assert read_control()["primary_setpoint"] == 275
     assert c.SqliteQueue("queue_control_write").length() == 0
@@ -62,7 +62,7 @@ def test_a_malformed_versioned_row_is_rejected_atomically_and_dequeued(seeded, c
     row_id, _ = queue.list_with_ids()[0]
 
     with caplog.at_level("ERROR", logger="control"):
-        dsa.execute_control_writes()
+        control_persistence.execute_control_writes()
 
     assert read_control() == opening
     assert queue.length() == 0
@@ -82,7 +82,7 @@ def test_an_unversioned_legacy_row_is_rejected_dequeued_and_logged(seeded, caplo
     row_id, _ = queue.list_with_ids()[0]
 
     with caplog.at_level("ERROR", logger="control"):
-        dsa.execute_control_writes()
+        control_persistence.execute_control_writes()
 
     assert read_control() == opening
     assert queue.length() == 0
@@ -98,18 +98,18 @@ def test_an_unversioned_legacy_row_is_rejected_dequeued_and_logged(seeded, caplo
 def test_two_deltas_restoring_the_opening_value_are_not_confused_with_silence(seeded):
     """Residual 2 at the seam."""
     opening = read_control()["primary_setpoint"]
-    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="a")
-    dsa.enqueue_control_delta(control_delta(set_values={"primary_setpoint": opening}), origin="b")
-    dsa.execute_control_writes()
+    control_persistence.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="a")
+    control_persistence.enqueue_control_delta(control_delta(set_values={"primary_setpoint": opening}), origin="b")
+    control_persistence.execute_control_writes()
     assert read_control()["primary_setpoint"] == opening
 
 
 def test_a_delta_on_a_fresh_store_is_not_silently_dropped(ds):
-    """Mirrors the seed guard at common/datastore_accessors.py:120-121."""
+    """Mirrors the fresh-store seed guard in ``common.persistence.control``."""
     write_settings_store(default_settings())
     c.datastore.delete_blob("control:general")
-    dsa.enqueue_control_delta(control_delta(set_values={"mode": "Hold"}), origin="app")
-    dsa.execute_control_writes()
+    control_persistence.enqueue_control_delta(control_delta(set_values={"mode": "Hold"}), origin="app")
+    control_persistence.execute_control_writes()
     assert read_control()["mode"] == "Hold"
 
 
@@ -119,7 +119,7 @@ def test_a_future_version_envelope_is_rejected_and_dequeued(seeded, caplog):
     row_id, _ = queue.list_with_ids()[0]
 
     with caplog.at_level("ERROR", logger="control"):
-        dsa.execute_control_writes()
+        control_persistence.execute_control_writes()
 
     assert read_control()["mode"] != "Hold"
     assert queue.length() == 0
@@ -143,12 +143,12 @@ def _cmd(*args, origin="test"):
 def test_stop_then_pause_in_one_cycle_leaves_the_timer_stopped(seeded):
     control = read_control()
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
-    dsa.write_control_snapshot(control, origin="seed")
+    control_persistence.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     assert _cmd("timer", "stop")["result"] == "OK"
     assert _cmd("timer", "pause")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
 
@@ -156,12 +156,12 @@ def test_stop_then_pause_in_one_cycle_leaves_the_timer_stopped(seeded):
 def test_stop_then_resume_in_one_cycle_does_not_bring_back_the_old_end_time(seeded):
     control = read_control()
     control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
-    dsa.write_control_snapshot(control, origin="seed")
+    control_persistence.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     assert _cmd("timer", "stop")["result"] == "OK"
     assert _cmd("timer", "start", "500")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     assert read_control()["timer"] == {"start": NOW, "paused": 0, "end": NOW + 500}
 
@@ -179,7 +179,7 @@ def test_start_then_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
     """
     assert _cmd("timer", "start", "600")["result"] == "OK"
     assert _cmd("timer", "stop")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
 
@@ -233,7 +233,7 @@ def test_post_control_rejects_a_timer_value(client):
 
 def test_post_control_still_accepts_ordinary_members(client):
     assert client.post("/api/control", json={"mode": "Startup", "s_plus": True}).status_code == 201
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     control = read_control()
     assert control["mode"] == "Startup"
     assert control["s_plus"] is True
@@ -244,7 +244,7 @@ def test_post_control_routes_notify_data_through_the_replace_op(client):
     by name. No in-repo client posts this; it is kept for ones that already do."""
     entries = [{"label": "Only", "type": "probe", "req": True, "target": 165}]
     assert client.post("/api/control", json={"notify_data": entries}).status_code == 201
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert read_control()["notify_data"] == entries
 
 
@@ -271,7 +271,7 @@ def test_post_control_routes_notify_updates_through_per_entry_set_ops(client):
     """saveTargetEdit's shape. Names ONE entry and the fields it changes."""
     update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165, "shutdown": True}}
     assert client.post("/api/control", json={"notify_updates": [update]}).status_code == 201
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     entry = _notify_entry("Grill", "probe")
     assert (entry["req"], entry["target"], entry["shutdown"]) == (True, 165, True)
 
@@ -289,7 +289,7 @@ def test_a_posted_notify_update_does_not_clobber_a_concurrent_timer_arm(client):
     assert _cmd("timer", "start", "600")["result"] == "OK"
     update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165}}
     assert client.post("/api/control", json={"notify_updates": [update]}).status_code == 201
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     assert _notify_entry("Grill", "probe")["target"] == 165
     assert _notify_entry("Timer", "timer")["req"] is True, "the timer arm was clobbered"
@@ -298,7 +298,7 @@ def test_a_posted_notify_update_does_not_clobber_a_concurrent_timer_arm(client):
     # And the same pair through the OLD door still loses the timer arm, which is
     # why no in-repo client posts it any more.
     assert client.post("/api/control", json={"notify_data": stale}).status_code == 201
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert _notify_entry("Timer", "timer")["req"] is False
 
 
@@ -317,7 +317,7 @@ def test_socket_control_door_takes_notify_updates_too(sio):
     update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165}}
     resp = sio._post_app_data("update_action", "control", json.dumps({"notify_updates": [update]}))
     assert resp["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert _notify_entry("Grill", "probe")["target"] == 165
 
 
@@ -330,7 +330,7 @@ def test_socket_control_door_rejects_a_timer_value(sio):
 
 def test_socket_control_door_still_accepts_ordinary_members(sio):
     assert sio._post_app_data("update_action", "control", json.dumps({"s_plus": True}))["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert read_control()["s_plus"] is True
 
 
@@ -340,13 +340,13 @@ def test_socket_timer_stop_then_pause_leaves_the_timer_stopped(sio):
     composes here exactly as it does over REST."""
     control = read_control()
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
-    dsa.write_control_snapshot(control, origin="seed")
+    control_persistence.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     payload = json.dumps({"timer_action": {}})
     assert sio._post_app_data("timer_action", "stop_timer", payload)["result"] == "OK"
     assert sio._post_app_data("timer_action", "pause_timer", payload)["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
 
@@ -368,7 +368,7 @@ def test_a_notify_target_set_back_to_the_cycles_opening_value_still_lands(seeded
     opening = _notify_entry("Grill", "probe")["target"]
     assert _cmd("notify", "Grill", "target", "203")["result"] == "OK"
     assert _cmd("notify", "Grill", "target", str(opening))["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert _notify_entry("Grill", "probe")["target"] == opening
 
 
@@ -376,7 +376,7 @@ def test_a_notify_write_is_not_reverted_by_a_concurrent_whole_dict_writer(seeded
     """The other half: a notify op and an unrelated command sharing one cycle."""
     assert _cmd("notify", "Grill", "target", "203")["result"] == "OK"
     assert _cmd("splus", "true")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert _notify_entry("Grill", "probe")["target"] == 203
     assert read_control()["s_plus"] is True
 
@@ -387,7 +387,7 @@ def test_a_setpoint_set_back_to_its_opening_value_survives_a_concurrent_writer(s
     opening = read_control()["primary_setpoint"]
     assert _cmd("psp", "225")["result"] == "OK"
     assert _cmd("psp", str(opening))["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert read_control()["primary_setpoint"] == opening
 
 
@@ -396,11 +396,11 @@ def test_a_manual_pwm_change_and_a_fan_toggle_in_one_cycle_both_land(seeded):
     the pwm the cycle began with. It now names only change/output."""
     control = read_control()
     control["mode"] = "Manual"
-    dsa.write_control_snapshot(control, origin="seed")
+    control_persistence.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
     assert _cmd("manual", "pwm", "50")["result"] == "OK"
     assert _cmd("manual", "fan", "true")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     manual = read_control()["manual"]
     assert manual["pwm"] == 50
     assert manual["change"] == "fan"
@@ -422,11 +422,11 @@ def test_a_background_system_write_does_not_hide_a_restore_to_the_opening_value(
     assert _cmd("notify", "Grill", "target", str(opening))["result"] == "OK"
     # A background writer naming only its own slice, exactly as gather_system_info
     # now does.
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(set_values={"system": {"cpu_temp": 42.0}}),
         origin="app-socketio",
     )
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert _notify_entry("Grill", "probe")["target"] == opening
@@ -463,13 +463,13 @@ def test_two_commands_in_one_cycle_match_the_same_two_one_cycle_apart(seeded, fi
     """
 
     def _run(drain_between):
-        dsa.write_control_snapshot(default_control(), origin="prop")
+        control_persistence.write_control_snapshot(default_control(), origin="prop")
         c.SqliteQueue("queue_control_write").flush()
         assert _cmd(*first)["result"] == "OK"
         if drain_between:
-            dsa.execute_control_writes()
+            control_persistence.execute_control_writes()
         assert _cmd(*second)["result"] == "OK"
-        dsa.execute_control_writes()
+        control_persistence.execute_control_writes()
         return read_control()
 
     assert _run(drain_between=False) == _run(drain_between=True)

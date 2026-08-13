@@ -213,7 +213,7 @@ def live_server(request):
 
 # --- Read-back helpers -------------------------------------------------
 #
-# These are thin wrappers around the ordinary common.datastore_accessors
+# These are thin wrappers around the ordinary common.persistence domain
 # read functions. The wrapping exists purely to document, at the call site
 # in a test, *why* a plain in-process function call is a valid way to
 # observe what a browser action against live_server just persisted: see

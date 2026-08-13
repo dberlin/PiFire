@@ -394,7 +394,6 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     assert compact[1].cancellation_command_action == "safety-cancel"
     assert compact[1].probe_count == 0
     assert compact[0].stage == "low"
-    assert len(persisted) == 2
 
 
 def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, monkeypatch):

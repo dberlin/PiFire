@@ -16,7 +16,7 @@ def control_now():
     """read_control(), after draining any queued writes.
 
     The session endpoint writes control DELTAS, which only take effect when the
-    control loop drains them (common.datastore_accessors.execute_control_writes).
+    control loop drains them (common.persistence.control.execute_control_writes).
     In production the real loop ticks every second; this Flask-only harness has
     no loop, so a read-back must drain first to see what the next tick would
     have produced. The endpoint's own RESPONSE is computed from intent and needs

@@ -14,7 +14,8 @@ import os
 import pytest
 
 import wizard
-from common import datastore, datastore_accessors, defaults
+from common import datastore, defaults
+from common.persistence import runtime as runtime_persistence
 from common.common import read_wizard
 
 
@@ -85,21 +86,21 @@ def test_the_installer_writes_the_composite_into_a_legacy_tree(ds, no_install):
     """Build a legacy-shaped tree, run the migration, then drive the
     installer's per-dependency write for the i2c_bus dependency and assert it
     lands."""
-    datastore_accessors.write_settings_store(_legacy_settings())
+    runtime_persistence.write_settings_store(_legacy_settings())
     wizard_data = read_wizard()
     info = _x86_numato_install_info()
 
     # Proves the regression: driving the installer against the unmigrated
     # tree still crashes writing the composite key.
     with pytest.raises(KeyError):
-        wizard.run_wizard(datastore_accessors.read_settings(), wizard_data, info)
+        wizard.run_wizard(runtime_persistence.read_settings(), wizard_data, info)
 
     datastore._upgrade_settings_in_store()
 
     # Migrated: the very same write now lands instead of crashing.
-    wizard.run_wizard(datastore_accessors.read_settings(), wizard_data, info)
+    wizard.run_wizard(runtime_persistence.read_settings(), wizard_data, info)
 
-    stored = datastore_accessors.read_settings()
+    stored = runtime_persistence.read_settings()
     assert stored["platform"]["devices"]["distance"]["i2c_bus"] == {"kind": "kernel", "adapter": "CP2112"}
     assert stored["platform"]["fan_controller"]["i2c_bus"] == {"kind": "basic"}
     assert not no_install  # os.system was never called

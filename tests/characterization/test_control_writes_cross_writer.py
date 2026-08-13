@@ -47,7 +47,8 @@ from common.control_delta import control_delta
 
 from common import api_commands
 from common import common as c
-from common import datastore_accessors as dsa
+from common.persistence import control as control_persistence
+from common.persistence import runtime as runtime_persistence
 from common.persistence.control import (
     default_control,
     read_control,
@@ -64,7 +65,7 @@ FIXED_NOW = 1_700_000_000.0
 def seeded(ds):
     """A datastore with default settings + a freshly written control blob."""
     write_settings_store(default_settings())
-    dsa.write_control_snapshot(default_control(), origin="test-cross-writer")
+    control_persistence.write_control_snapshot(default_control(), origin="test-cross-writer")
     c.SqliteQueue("queue_control_write").flush()
     return ds
 
@@ -106,7 +107,7 @@ def test_two_commands_in_one_cycle_both_survive_the_drain(seeded):
 
     # All three queued BEFORE any drain -- one control cycle.
     assert c.SqliteQueue("queue_control_write").length() == 3
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     grill = _entry(control, "Grill", "probe")
@@ -122,7 +123,7 @@ def test_two_commands_in_one_cycle_survive_in_either_order(seeded):
     assert _start_timer("600", "shutdown")["result"] == "OK"
     assert _set_notify("Probe1", "target", "165")["result"] == "OK"
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert _entry(control, "Probe1", "probe")["target"] == 165
@@ -134,7 +135,7 @@ def test_limit_writers_do_not_eat_each_other(seeded):
     assert _set_notify("Grill", "target", "203")["result"] == "OK"
     assert _set_notify("Grill", "target", "350", subcommand="limit_high")["result"] == "OK"
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert _entry(control, "Grill", "probe")["target"] == 203
@@ -173,12 +174,12 @@ def test_post_api_control_whole_array_is_a_replace_and_says_so(seeded):
 
     assert _start_timer("900", "keep_warm")["result"] == "OK"
 
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(ops=[{"op": "notify.replace", "entries": client_view["notify_data"]}]),
         origin="app",
     )
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert _entry(control, "Probe2", "probe")["target"] == 145
@@ -197,7 +198,7 @@ def test_post_api_control_per_entry_edit_does_not_eat_a_concurrent_command(seede
     """
     assert _start_timer("900", "keep_warm")["result"] == "OK"
 
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(
             ops=[
                 {
@@ -211,7 +212,7 @@ def test_post_api_control_per_entry_edit_does_not_eat_a_concurrent_command(seede
         origin="app",
     )
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert _entry(control, "Probe2", "probe")["target"] == 145
@@ -233,12 +234,12 @@ def test_background_full_control_write_does_not_eat_a_notify_write(seeded):
     # gather_system_info's shape: it names only the slice it assigns, so it has
     # nothing stale to impose. It used to queue the whole dict from a pre-queue
     # read and revert whatever the user had just armed.
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(set_values={"system": {"cpu_temp": 42.0}}),
         origin="app-socketio",
     )
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert _entry(control, "Probe3", "probe")["target"] == 180
@@ -259,7 +260,7 @@ def test_same_entry_same_field_last_writer_wins(seeded):
     """
     assert _set_notify("Grill", "target", "203")["result"] == "OK"
     assert _set_notify("Grill", "target", "225")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert _entry(read_control(), "Grill", "probe")["target"] == 225
 
 
@@ -268,11 +269,11 @@ def test_a_lone_writer_still_replaces_the_array_exactly(seeded):
     control = read_control()
     for e in control["notify_data"]:
         e["req"] = True
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
         origin="app",
     )
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert all(e["req"] is True for e in read_control()["notify_data"])
 
 
@@ -285,11 +286,11 @@ def test_writer_that_drops_entries_still_removes_them(seeded):
     """
     control = read_control()
     kept = [e for e in control["notify_data"] if e["label"] != "Probe3"]
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(ops=[{"op": "notify.replace", "entries": kept}]),
         origin="app",
     )
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     labels = {e["label"] for e in read_control()["notify_data"]}
     assert "Probe3" not in labels
     assert "Grill" in labels
@@ -298,11 +299,11 @@ def test_writer_that_drops_entries_still_removes_them(seeded):
 def test_writer_that_adds_an_entry_still_adds_it(seeded):
     control = read_control()
     control["notify_data"].append({"label": "Probe9", "type": "probe", "req": True, "target": 99})
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
         origin="app",
     )
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert _entry(read_control(), "Probe9", "probe")["target"] == 99
 
 
@@ -333,7 +334,7 @@ def test_two_scalar_writers_in_one_cycle_both_survive(seeded):
     assert _command("splus", "true")["result"] == "OK"
 
     assert c.SqliteQueue("queue_control_write").length() == 2
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert control["primary_setpoint"] == 225
@@ -349,7 +350,7 @@ def test_three_scalar_writers_in_one_cycle_all_survive(seeded):
     assert _command("lid_open", "toggle")["result"] == "OK"
     assert _command("tuning_mode", "true")["result"] == "OK"
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert control["duty_cycle"] == 50
@@ -369,7 +370,7 @@ def test_one_shot_request_flags_are_not_reverted_by_a_later_writer(seeded):
     assert _command("hopper", action="get")["result"] == "OK"  # -> hopper_check = True
     assert _command("splus", "true")["result"] == "OK"  # touches neither
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert control["settings_update"] is True
@@ -386,7 +387,7 @@ def test_a_flag_write_after_a_timer_start_no_longer_destroys_the_timer(seeded):
     assert _command("timer", "start", "600")["result"] == "OK"
     assert _command("timer", "shutdown", "true")["result"] == "OK"
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert control["timer"]["start"] == FIXED_NOW
@@ -401,14 +402,14 @@ def test_nested_object_writers_do_not_eat_each_other(seeded):
     The merge has to descend: whole-object replacement at the top level would
     make the second manual command revert the first's pwm value.
     """
-    settings = dsa.read_settings()
+    settings = runtime_persistence.read_settings()
     settings["safety"]["allow_manual_changes"] = True
-    dsa.write_settings_store(settings)
+    runtime_persistence.write_settings_store(settings)
 
     assert _command("manual", "pwm", "40")["result"] == "OK"
     assert _command("manual", "fan", "true")["result"] == "OK"
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     manual = read_control()["manual"]
     assert manual["pwm"] == 40, "the fan command reverted the pwm value"
@@ -423,12 +424,12 @@ def test_background_system_info_write_does_not_eat_a_scalar_command(seeded):
     """
     assert _command("psp", "225")["result"] == "OK"
 
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(set_values={"system": {"cpu_temp": 42.0, "cpu_throttled": False}}),
         origin="app-socketio",
     )
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert control["primary_setpoint"] == 225
@@ -445,14 +446,14 @@ def test_two_writers_setting_the_same_scalar_last_one_wins(seeded):
     """A genuine conflict: nothing in the queue can resolve it. Unchanged."""
     assert _command("psp", "225")["result"] == "OK"
     assert _command("psp", "180")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert read_control()["primary_setpoint"] == 180
 
 
 def test_a_lone_writer_still_applies_every_field_it_changed(seeded):
     """One writer per cycle: indistinguishable from the json_patch behaviour."""
     assert _command("psp", "275")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     control = read_control()
     assert (control["primary_setpoint"], control["mode"], control["updated"]) == (275, "Hold", True)
 
@@ -463,19 +464,19 @@ def test_a_partial_patch_never_deletes_unmentioned_keys(seeded):
     This is the asymmetry with notify_data: arrays travel whole, so a missing
     ELEMENT is a deletion; dicts travel partial, so a missing KEY is silence.
     """
-    dsa.enqueue_control_delta(control_delta(set_values={"s_plus": True}), origin="app")
-    dsa.execute_control_writes()
+    control_persistence.enqueue_control_delta(control_delta(set_values={"s_plus": True}), origin="app")
+    control_persistence.execute_control_writes()
     control = read_control()
     assert control["s_plus"] is True
     assert "notify_data" in control and "timer" in control and "safety" in control
 
 
 def test_a_writer_may_add_a_key_the_ancestor_never_had(seeded):
-    dsa.enqueue_control_delta(
+    control_persistence.enqueue_control_delta(
         control_delta(set_values={"system": {"cpu_temp": 51.5}}),
         origin="app",
     )
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert read_control()["system"]["cpu_temp"] == 51.5
 
 
@@ -507,7 +508,7 @@ def test_a_reset_to_the_ancestor_value_is_now_distinguishable_because_the_writer
     assert _command("timer", "start", "600")["result"] == "OK"
     assert _command("timer", "stop")["result"] == "OK"
 
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
 
     control = read_control()
     assert control["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
@@ -517,10 +518,10 @@ def test_a_reset_to_the_ancestor_value_is_now_distinguishable_because_the_writer
     # every iteration -- the same pair lands identically. That equality IS the
     # invariant the delta seam exists to restore.
     assert _command("timer", "start", "600")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     assert read_control()["timer"]["end"] == FIXED_NOW + 600
     assert _command("timer", "stop")["result"] == "OK"
-    dsa.execute_control_writes()
+    control_persistence.execute_control_writes()
     control = read_control()
     assert control["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
     assert _entry(control, "Timer", "timer")["req"] is False

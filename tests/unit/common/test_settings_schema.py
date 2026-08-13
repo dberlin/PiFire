@@ -16,7 +16,8 @@ import os
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from common import datastore, datastore_accessors
+from common import datastore
+from common.persistence import runtime as runtime_persistence
 from common.defaults import default_settings
 from common.settings_migration import read_settings_file
 from common.settings_schema import (
@@ -215,7 +216,7 @@ def _migrate_ancient_settings(migration_env):
     so both exercise an identical migrated-tree shape.
     """
     d = default_settings()
-    datastore_accessors.write_settings_store(d)
+    runtime_persistence.write_settings_store(d)
 
     old = copy.deepcopy(d)
     old["versions"] = {"server": "1.4.0", "build": 0}
@@ -736,7 +737,7 @@ def test_partial_schema_accepts_one_wire_by_alias_strict():
 # _Section.model_config is ConfigDict(extra="forbid") -- raw
 # model_validate() rejects any unmodeled key (see
 # test_extra_keys_rejected_by_raw_model_validate above). But validate_settings_tree()
-# (the write_settings() gate, common/datastore_accessors.py:262) wraps that
+# (the write_settings() gate, ``common.persistence.runtime.write_settings``) wraps that
 # with a repair pass: if EVERY error a failed validation produces is
 # "extra_forbidden", it strips exactly those dotted paths from a COPY of the
 # input, logs each stripped path via common.common.write_log, and retries
