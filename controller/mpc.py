@@ -294,15 +294,6 @@ class Controller(ControllerBase):
             self._core.close()
             raise
 
-    def _build_for(self, cfg, *, model_identified=None):
-        """Build one complete estimator/native-solver pair through the numerical owner."""
-        if model_identified is None:
-            model_identified = model_is_identified(cfg, self._model_meta)
-        return MpcCore.build_components(cfg, model_identified=model_identified)
-
-    def _build_estimator(self, cfg, n_delay):
-        """Build a candidate estimator through the numerical owner."""
-        return MpcCore.build_estimator(cfg, n_delay)
 
     @staticmethod
     def _close_component(component):
@@ -388,7 +379,7 @@ class Controller(ControllerBase):
         candidate = dict(self.cfg)
         for name in ("C_c", "h_amb", "T_amb", "theta", "K_Q", "sigma"):
             candidate[name] = getattr(native_config, name)
-        return self._build_estimator(candidate, 8)
+        return MpcCore.build_estimator(candidate, 8)
 
     def _candidate_timing(self, solver):
         state = np.zeros(10, dtype=float)
@@ -711,7 +702,10 @@ class Controller(ControllerBase):
                 if source in configuration:
                     candidate_cfg[target] = configuration[source]
         candidate_cfg["estimator"] = descriptor.estimator_kind
-        estimator, solver = self._build_for(candidate_cfg)
+        estimator, solver = MpcCore.build_components(
+            candidate_cfg,
+            model_identified=model_is_identified(candidate_cfg, self._model_meta),
+        )
         actual_digest = grey_config_digest(solver.config)
         if actual_digest != descriptor.model_digest:
             self._close_component(solver)
@@ -2001,7 +1995,7 @@ class Controller(ControllerBase):
         # model it already had.
         try:
             restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
-            rebuilt = self._build_for(
+            rebuilt = MpcCore.build_components(
                 merged,
                 model_identified=owned["identification"]["status"] == "identified",
             )

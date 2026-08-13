@@ -904,7 +904,10 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     incumbent = incumbent_pair.descriptor
     candidate_controller_config = dict(first_core.cfg)
     candidate_controller_config["theta"] = float(candidate_controller_config["theta"]) + 1.0
-    candidate_estimator, candidate_solver = first_core._build_for(candidate_controller_config)
+    candidate_estimator, candidate_solver = _mpc_core.MpcCore.build_components(
+        candidate_controller_config,
+        model_identified=True,
+    )
     candidate_configuration = {
         name: getattr(candidate_solver.config, name) for name in candidate_solver.config.__dataclass_fields__
     }

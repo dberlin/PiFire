@@ -274,6 +274,8 @@ def test_config_helpers_cover_absent_invalid_nonfinite_and_warning_branches(caps
     assert optional_float("bad") is None
     assert optional_float(float("inf")) is None
     assert optional_float("2.5") == 2.5
+    assert optional_float([]) is None
+    assert optional_float({"not": "numeric"}) is None
     assert sanitized_copy(
         {"finite": 1.5, "bad": float("inf"), "integer": 2}
     ) == {"finite": 1.5, "bad": None, "integer": 2}
@@ -552,17 +554,43 @@ def test_close_attempts_every_owned_handle_once_when_one_close_fails():
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        (dict(CONFIG, C_c=True), "C_c must be numeric"),
+        (dict(CONFIG, C_c=True), "C_c must be a finite number"),
+        (dict(CONFIG, C_c=float("inf")), "C_c must be a finite number"),
         (dict(CONFIG, n_delay=8.0), "n_delay must be an integer"),
         (dict(CONFIG, estimator=5), "estimator must be a string"),
+        (dict(CONFIG, enable_fan_input=2), "enable_fan_input must be a boolean"),
+        (
+            dict(CONFIG, enable_online_adaptation="yes"),
+            "enable_online_adaptation must be a boolean",
+        ),
     ],
 )
-def test_construction_rejects_wrong_typed_settings(
+def test_normalization_rejects_unsound_runtime_setting_types(
     config: dict[str, JsonValue],
     message: str,
 ):
     with pytest.raises(ValueError, match=message):
-        MpcCore(config, "C", dict(CYCLE))
+        normalize_config(config)
+
+
+def test_normalization_preserves_legacy_zero_one_booleans_as_actual_booleans():
+    enabled = normalize_config(
+        dict(CONFIG, enable_fan_input=1, enable_online_adaptation=1)
+    )
+    disabled = normalize_config(
+        dict(CONFIG, enable_fan_input=0, enable_online_adaptation=0)
+    )
+
+    assert enabled["enable_fan_input"] is True
+    assert enabled["enable_online_adaptation"] is True
+    assert disabled["enable_fan_input"] is False
+    assert disabled["enable_online_adaptation"] is False
+
+    core, _estimator, _solver = make_core(
+        config=dict(CONFIG, enable_fan_input=1),
+        results=(solve_result(5, 0.5),),
+    )
+    assert core.update(72.0).fan["duty"] is not None
 
 
 def test_partial_build_accepts_nonclosable_estimator_without_masking_solver_error():

@@ -85,13 +85,65 @@ MODEL_PARAMETER_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sig
 PHYSICAL_PARAMETER_KEYS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
 RETIRED_PARAMETER_KEYS = ("C_f", "h_fc")
 
+def _validated_float(value: JsonValue, key: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{key} must be a finite number")
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        raise ValueError(f"{key} must be a finite number")
+    return normalized
+
+
+def _validated_int(value: JsonValue, key: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be an integer")
+    return value
+
+
+def _validated_bool(value: JsonValue, key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"{key} must be a boolean or legacy 0/1")
+
+
+def _validated_estimator(value: JsonValue) -> str:
+    if not isinstance(value, str):
+        raise ValueError("estimator must be a string")
+    return value
+
+
 
 def normalize_config(config: Mapping[str, JsonValue] | None) -> MpcConfig:
     """Return an owned complete MPC configuration with obsolete input removed."""
 
+    supplied = {} if config is None else config
     normalized = MpcConfig(DEFAULT_MPC_CONFIG)
-    normalized.update(config or {})
+    normalized.update(supplied)
     normalized.pop("feed_forward", None)
+    for key in (
+        "control_period",
+        "Q_w",
+        "R_dQ",
+        "C_c",
+        "h_amb",
+        "T_amb",
+        "theta",
+        "K_Q",
+        "sigma",
+        "fan_min_pct",
+        "fan_max_pct",
+        "est_q_temp",
+        "est_q_dist",
+        "est_r_meas",
+    ):
+        normalized[key] = _validated_float(normalized[key], key)
+    for key in ("n_horizon", "n_delay"):
+        normalized[key] = _validated_int(normalized[key], key)
+    for key in ("enable_fan_input", "enable_online_adaptation"):
+        normalized[key] = _validated_bool(normalized[key], key)
+    normalized["estimator"] = _validated_estimator(normalized["estimator"])
     return normalized
 
 
@@ -108,14 +160,14 @@ def finite_float(value: bool | int | float | str) -> float | None:
     return normalized if math.isfinite(normalized) else None
 
 
-def optional_float(value: bool | int | float | str | None) -> float | None:
+def optional_float(value: JsonValue) -> float | None:
     """Cast to a finite float, or return ``None`` when no number is reportable."""
 
     if value is None:
         return None
     try:
         normalized = float(value)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     return normalized if math.isfinite(normalized) else None
 
