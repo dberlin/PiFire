@@ -6,6 +6,7 @@ from collections.abc import Callable
 import numpy as np
 import numpy.typing as npt
 import pytest
+import controller.mpc_core as mpc_core_module
 
 from controller.acados import GreyBoxMPCConfig, SolverDiagnostics, SolverError
 from controller.applied_output import AppliedOutput, OutputSource
@@ -51,6 +52,17 @@ class FakeEstimator:
 
     def close(self) -> None:
         self.closed += 1
+
+
+class NonClosableEstimator:
+    def update(
+        self,
+        normalized_combustion_load: float,
+        y_measured: float,
+    ) -> npt.NDArray[np.float64]:
+        del normalized_combustion_load, y_measured
+        return np.zeros(10, dtype=float)
+
 
 
 class FakeEstimatorFactory:
@@ -535,3 +547,124 @@ def test_close_attempts_every_owned_handle_once_when_one_close_fails():
 
     assert solver_box[0].closed == 1
     assert estimator_factory.estimator.closed == 1
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        (dict(CONFIG, C_c=True), "C_c must be numeric"),
+        (dict(CONFIG, n_delay=8.0), "n_delay must be an integer"),
+        (dict(CONFIG, estimator=5), "estimator must be a string"),
+    ],
+)
+def test_construction_rejects_wrong_typed_settings(
+    config: dict[str, JsonValue],
+    message: str,
+):
+    with pytest.raises(ValueError, match=message):
+        MpcCore(config, "C", dict(CYCLE))
+
+
+def test_partial_build_accepts_nonclosable_estimator_without_masking_solver_error():
+    estimator = NonClosableEstimator()
+
+    def build_estimator(
+        *,
+        C_c: float,
+        h_amb: float,
+        T_amb: float,
+        t_step: float,
+        q_temp: float,
+        q_dist: float,
+        r_meas: float,
+        theta: float,
+        n_delay: int,
+        K_Q: float,
+        sigma: float,
+    ) -> NonClosableEstimator:
+        del C_c, h_amb, T_amb, t_step, q_temp, q_dist
+        del r_meas, theta, n_delay, K_Q, sigma
+        return estimator
+
+    def fail_solver(config: GreyBoxMPCConfig) -> MpcSolver:
+        del config
+        raise RuntimeError("native unavailable")
+
+    with pytest.raises(RuntimeError, match="native unavailable"):
+        MpcCore(
+            dict(CONFIG),
+            "C",
+            dict(CYCLE),
+            ekf_factory=build_estimator,
+            solver_factory=fail_solver,
+        )
+
+
+def test_default_callbacks_repeat_failure_without_repeat_log_and_expose_state(capsys):
+    estimator_factory = FakeEstimatorFactory()
+    solver_factory = FakeSolverFactory(
+        (RuntimeError("first"), RuntimeError("second"))
+    )
+    core = MpcCore(
+        dict(CONFIG),
+        "C",
+        dict(CYCLE),
+        ekf_factory=estimator_factory,
+        solver_factory=solver_factory,
+    )
+    core.set_target(100.0)
+
+    first = core.update(72.0)
+    second = core.update(73.0)
+
+    assert first.diagnostics.consecutive_policy_failures == 1
+    assert second.diagnostics.consecutive_policy_failures == 2
+    assert capsys.readouterr().out.count("native solver has failed") == 1
+    assert core.estimator is estimator_factory.estimator
+    assert core.solver is solver_factory.solver
+    assert core.set_point_c == 100.0
+    assert core.applied_combustion_load == 0.0
+    assert core.last_combustion_load == 0.0
+    assert core.last_raw_combustion_load is None
+    assert core.last_equilibrium_load is None
+    assert core.last_residual_load is None
+    assert core.last_feasibility is not None
+    assert core.estimate is not None
+    assert core.consecutive_policy_failures == 2
+    assert core.native_failure_diagnostics is None
+    assert len(core.history) == 2
+    core.clear_estimate()
+    assert core.estimate is None
+
+
+def test_rebinding_preserves_or_resets_estimate_and_closes_transferred_pair_once():
+    core, estimator, solver = make_core(results=(solve_result(5, 0.4),))
+    core.update(72.0)
+    assert core.estimate is not None
+    closed: list[str] = []
+
+    def close_pair() -> None:
+        closed.append("pair")
+        estimator.close()
+        solver.close()
+
+    core.bind_resources(estimator, solver, close_pair)
+    assert core.estimate is not None
+    core.bind_resources(estimator, solver, close_pair, reset_estimate=True)
+    assert core.estimate is None
+    core.close()
+    core.close()
+    assert closed == ["pair"]
+
+
+def test_default_numerical_factories_use_real_construction_symbols(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", FakeSolver)
+    solver = MpcCore.build_solver(GreyBoxMPCConfig())
+    assert isinstance(solver, FakeSolver)
+
+    ekf = MpcCore.build_estimator(dict(CONFIG, estimator="ekf"), 8)
+    kf = MpcCore.build_estimator(dict(CONFIG, estimator="kf"), 8)
+    assert ekf is not None
+    assert kf is not None

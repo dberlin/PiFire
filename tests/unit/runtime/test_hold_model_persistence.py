@@ -45,7 +45,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
-import controller.mpc as _mpc_runtime
+import controller.mpc_core as _mpc_core
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_fitting import grey_config_digest
 
@@ -892,8 +892,8 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     _CrashRecoverySolver.created.clear()
     _CrashRecoverySolver.solve_order.clear()
     database_path = tmp_path / f"{crash_boundary}.sqlite"
-    monkeypatch.setattr(_mpc_runtime, "GreyBoxEKF", _CrashRecoveryEstimator)
-    monkeypatch.setattr(_mpc_runtime, "AcadosGreyBoxMPC", _CrashRecoverySolver)
+    monkeypatch.setattr(_mpc_core, "GreyBoxEKF", _CrashRecoveryEstimator)
+    monkeypatch.setattr(_mpc_core, "AcadosGreyBoxMPC", _CrashRecoverySolver)
 
     first_core = MpcController(
         dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
