@@ -593,6 +593,31 @@ def test_normalization_preserves_legacy_zero_one_booleans_as_actual_booleans():
     assert core.update(72.0).fan["duty"] is not None
 
 
+
+
+def test_public_factories_reject_unvalidated_direct_caller_settings():
+    estimator_factory = FakeEstimatorFactory()
+
+    with pytest.raises(ValueError, match="C_c must be numeric"):
+        MpcCore.build_estimator(
+            dict(CONFIG, C_c=True),
+            8,
+            ekf_factory=estimator_factory,
+        )
+    with pytest.raises(ValueError, match="n_delay must be an integer"):
+        MpcCore.build_components(
+            dict(CONFIG, n_delay=8.0),
+            ekf_factory=estimator_factory,
+            solver_factory=FakeSolver,
+        )
+    with pytest.raises(ValueError, match="estimator must be a string"):
+        MpcCore.build_estimator(
+            dict(CONFIG, estimator=5),
+            8,
+            ekf_factory=estimator_factory,
+        )
+
+
 def test_partial_build_accepts_nonclosable_estimator_without_masking_solver_error():
     estimator = NonClosableEstimator()
 
