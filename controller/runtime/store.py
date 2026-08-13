@@ -1,13 +1,11 @@
-"""State-access seam. SqliteStore is the ONLY production code touching common's
-global SQLite-backed funcs; InMemoryStore is the hermetic test double."""
+"""Concrete SQLite and in-memory persistence adapters for the controller runtime."""
 
 import copy
 import logging
-import time
 import threading
-from collections.abc import Mapping
-from abc import ABC, abstractmethod
+import time
 from collections import deque
+from collections.abc import Mapping
 
 from common.common import ErrorKind, generate_uuid
 from common.control_delta import (
@@ -17,29 +15,22 @@ from common.control_delta import (
 )
 from common.current_schema import dump_legacy, load_current, snapshot_from, zeroed_current
 from common.defaults import METRIC_COLUMNS, default_control, default_metrics
+from common.persistence import control as control_persistence
+from common.persistence import history as history_persistence
+from common.persistence import runtime as runtime_persistence
+from common.persistence.protocols import PersistentQueue, QueueValue
 from common.persistence.transforms import apply_control_delta, current_snapshot, initial_status
+from common.sqlite_queue import SqliteQueue
 
 
-class Queue(ABC):
-    @abstractmethod
-    def push(self, item): ...
-    @abstractmethod
-    def pop(self): ...
-    @abstractmethod
-    def length(self): ...
-    @abstractmethod
-    def list(self): ...
-    @abstractmethod
-    def flush(self): ...
-
-    def drain(self):
-        out = []
-        while self.length() > 0:
-            out.append(self.pop())
-        return out
+def _drain(queue: PersistentQueue) -> list[QueueValue]:
+    drained = []
+    while queue.length() > 0:
+        drained.append(queue.pop())
+    return drained
 
 
-class _DequeQueue(Queue):
+class _DequeQueue:
     def __init__(self):
         self._d = deque()
 
@@ -58,82 +49,13 @@ class _DequeQueue(Queue):
     def flush(self):
         self._d.clear()
 
-
-class Store(ABC):
-    # --- control ---
-    @abstractmethod
-    def read_control(self): ...
-    @abstractmethod
-    def flush_control(self): ...
-    @abstractmethod
-    def write_control_snapshot(self, control, *, origin="control"): ...
-    @abstractmethod
-    def enqueue_control_delta(self, delta, *, origin="control"): ...
-    @abstractmethod
-    def execute_control_writes(self): ...
-    # --- settings/status/current ---
-    @abstractmethod
-    def read_settings(self): ...
-    @abstractmethod
-    def read_status(self): ...
-    @abstractmethod
-    def init_status(self): ...
-    @abstractmethod
-    def write_status(self, status): ...
-    @abstractmethod
-    def read_current(self): ...
-    @abstractmethod
-    def read_current_snapshot(self): ...
-    @abstractmethod
-    def flush_current(self): ...
-    @abstractmethod
-    def write_current(self, in_data): ...
-    # --- history/metrics ---
-    @abstractmethod
-    def read_history(self, num_items=0): ...
-    @abstractmethod
-    def flush_history(self): ...
-    @abstractmethod
-    def write_history(self, in_data, maxsizelines=28800, ext_data=False): ...
-    @abstractmethod
-    def read_metrics(self): ...
-    @abstractmethod
-    def read_all_metrics(self): ...
-    @abstractmethod
-    def flush_metrics(self): ...
-    @abstractmethod
-    def append_metric(self, metrics=None): ...
-    @abstractmethod
-    def update_metrics(self, metrics): ...
-    @abstractmethod
-    def write_tr(self, tr): ...
-    # --- pellet/errors/misc ---
-    @abstractmethod
-    def read_pellet_db(self): ...
-    @abstractmethod
-    def write_pellet_db(self, db): ...
-    @abstractmethod
-    def read_errors(self, kind): ...
-    @abstractmethod
-    def flush_errors(self, kind): ...
-    @abstractmethod
-    def write_errors(self, kind, errors): ...
-    @abstractmethod
-    def read_generic_key(self, key): ...
-    @abstractmethod
-    def write_generic_key(self, key, value): ...
-    @abstractmethod
-    def save_model_checkpoint(self, name, snapshot): ...
-    # --- queues ---
-    @abstractmethod
-    def system_commands(self): ...
-    @abstractmethod
-    def system_output(self): ...
-    @abstractmethod
-    def display_commands(self): ...
+    def drain(self):
+        return _drain(self)
 
 
-class InMemoryStore(Store):
+
+
+class InMemoryStore:
     def __init__(self, control=None, settings=None, status=None, current=None, pellet_db=None, metrics=None):
         self._control = copy.deepcopy(control) if control is not None else default_control()
         self._settings = copy.deepcopy(settings) if settings is not None else {}
@@ -155,7 +77,7 @@ class InMemoryStore(Store):
         return copy.deepcopy(self._control)
 
     def flush_control(self):
-        # Mirror common.datastore_accessors.flush_control: reset control to
+        # Mirror control_persistence.flush_control: reset control to
         # defaults and discard pending writes + system-command queues. (The
         # datastore persistence-config toggle is a no-op for the in-memory fake.)
         self._control = default_control()
@@ -200,7 +122,7 @@ class InMemoryStore(Store):
         return copy.deepcopy(self._status)
 
     def init_status(self):
-        # Mirror common.datastore_accessors.init_status: build a fresh status
+        # Mirror runtime_persistence.init_status: build a fresh status
         # dict, PERSIST it, and return it. The old read_status(init=True) on
         # this fake ignored the flag and returned whatever was already there,
         # so a test never saw the seeded-from-settings shape production writes.
@@ -221,14 +143,14 @@ class InMemoryStore(Store):
         return self._settings.get("probe_settings", {}).get("probe_map", {}).get("probe_info", [])
 
     def flush_current(self):
-        # Mirror common.datastore_accessors.flush_current: rebuild a zeroed
+        # Mirror runtime_persistence.flush_current: rebuild a zeroed
         # structure from the configured probe_map rather than blanking in
         # place, so a probe added or removed since the last write is reflected.
         self._current = dump_legacy(zeroed_current(self._probe_info()), exclude_timestamp=True)
         return copy.deepcopy(self._current)
 
     def write_current(self, in_data):
-        # Mirror common.datastore_accessors.write_current: the caller hands in
+        # Mirror runtime_persistence.write_current: the caller hands in
         # probe_history-shaped data, and what is STORED is the transformed
         # blob.
         previous = load_current(self._current)
@@ -239,7 +161,7 @@ class InMemoryStore(Store):
         return list(self._history)
 
     def flush_history(self):
-        # Mirror common.datastore_accessors.flush_history: history, current and
+        # Mirror history_persistence.flush_history: history, current and
         # metrics all go. The old read_history(flushhistory=True) on this fake
         # dropped only history, so a test could see stale current/metrics that
         # production would have cleared.
@@ -253,7 +175,7 @@ class InMemoryStore(Store):
             self._history = self._history[-maxsizelines:]
 
     def read_metrics(self):
-        # Mirror common.datastore_accessors.read_metrics: an empty store reads
+        # Mirror history_persistence.read_metrics: an empty store reads
         # back as default_metrics(), not {}. The fake used to return {}, so a
         # consumer that indexes a metrics column would KeyError against the fake
         # and quietly succeed in production (or vice versa).
@@ -266,7 +188,7 @@ class InMemoryStore(Store):
         self._metrics_list = []
 
     def append_metric(self, metrics=None):
-        # Mirror common.datastore_accessors.append_metric: a fresh record starts
+        # Mirror history_persistence.append_metric: a fresh record starts
         # from default_metrics() when none is given, is projected onto
         # METRIC_COLUMNS (unknown keys dropped, omitted columns None -- it is an
         # INSERT, there is no prior row to inherit from), and gets a stamped
@@ -280,7 +202,7 @@ class InMemoryStore(Store):
         self._metrics_list.append(row)
 
     def update_metrics(self, metrics):
-        # Mirror common.datastore_accessors.update_metrics: presence, not
+        # Mirror history_persistence.update_metrics: presence, not
         # truthiness, decides which columns move, and an explicit {"col": None}
         # still nulls it. The old fake REPLACED the last record wholesale, so a
         # partial dict left the fake holding a one-key row while production kept
@@ -313,7 +235,7 @@ class InMemoryStore(Store):
         return list(self._errors.get(kind, []))
 
     def flush_errors(self, kind):
-        # Mirror common.datastore_accessors.flush_errors: returns the NEW
+        # Mirror runtime_persistence.flush_errors: returns the NEW
         # (empty) list, not the discarded contents -- callers use it as a fresh
         # accumulator.
         self.write_errors(kind, [])
@@ -327,7 +249,7 @@ class InMemoryStore(Store):
         self._errors[kind] = list(errors)
 
     def read_generic_key(self, key):
-        # Mirrors common.datastore_accessors.read_generic_key: an absent key
+        # Mirror runtime_persistence.read_generic_key: an absent key
         # raises TypeError (that function calls json.loads(None)), not KeyError
         # -- callers like ControllerModelStore._read_state() catch precisely
         # that to distinguish "nothing written yet" from "read failed".
@@ -364,11 +286,9 @@ class InMemoryStore(Store):
         return self._displayq
 
 
-from common import datastore_accessors as _c
-from common.sqlite_queue import SqliteQueue
 
 
-class _SqliteQueueAdapter(Queue):
+class _SqliteQueueAdapter:
     def __init__(self, table):
         self._q = SqliteQueue(table)
 
@@ -387,10 +307,12 @@ class _SqliteQueueAdapter(Queue):
     def flush(self):
         self._q.flush()
 
+    def drain(self):
+        return _drain(self)
 
-class SqliteStore(Store):
-    """Thin pass-through to common.common — the only production code that touches
-    the module-level SQLite connection."""
+
+class SqliteStore:
+    """Queues plus direct delegation to the extracted SQLite domain modules."""
 
     def __init__(self):
         self._systemq = _SqliteQueueAdapter("queue_systemq")
@@ -398,99 +320,99 @@ class SqliteStore(Store):
         self._displayq = _SqliteQueueAdapter("queue_displayq")
 
     def read_control(self):
-        return _c.read_control()
+        return control_persistence.read_control()
 
     def flush_control(self):
-        return _c.flush_control()
+        return control_persistence.flush_control()
 
     def write_control_snapshot(self, control, *, origin="control"):
-        _c.write_control_snapshot(control, origin=origin)
+        control_persistence.write_control_snapshot(control, origin=origin)
 
     def enqueue_control_delta(self, delta, *, origin="control"):
-        _c.enqueue_control_delta(delta, origin=origin)
+        control_persistence.enqueue_control_delta(delta, origin=origin)
 
     def execute_control_writes(self):
-        _c.execute_control_writes()
+        control_persistence.execute_control_writes()
 
     def read_settings(self):
-        return _c.read_settings()
+        return runtime_persistence.read_settings()
 
     def read_status(self):
-        return _c.read_status()
+        return runtime_persistence.read_status()
 
     def init_status(self):
-        return _c.init_status()
+        return runtime_persistence.init_status()
 
     def write_status(self, status):
-        _c.write_status(status)
+        runtime_persistence.write_status(status)
 
     def read_current(self):
-        return _c.read_current()
+        return runtime_persistence.read_current()
 
     def read_current_snapshot(self):
-        return _c.read_current_snapshot()
+        return runtime_persistence.read_current_snapshot()
 
     def flush_current(self):
-        return _c.flush_current()
+        return runtime_persistence.flush_current()
 
     def write_current(self, in_data):
-        _c.write_current(in_data)
+        runtime_persistence.write_current(in_data)
 
     def read_history(self, num_items=0):
-        return _c.read_history(num_items)
+        return history_persistence.read_history(num_items)
 
     def flush_history(self):
-        _c.flush_history()
+        history_persistence.flush_history()
 
     def write_history(self, in_data, maxsizelines=28800, ext_data=False):
-        _c.write_history(in_data, maxsizelines=maxsizelines, ext_data=ext_data)
+        history_persistence.write_history(
+            in_data, maxsizelines=maxsizelines, ext_data=ext_data
+        )
 
     def read_metrics(self):
-        return _c.read_metrics()
+        return history_persistence.read_metrics()
 
     def read_all_metrics(self):
-        return _c.read_all_metrics()
+        return history_persistence.read_all_metrics()
 
     def flush_metrics(self):
-        _c.flush_metrics()
+        history_persistence.flush_metrics()
 
     def append_metric(self, metrics=None):
-        # metrics=None is passed straight through: append_metric() supplies its
-        # own default_metrics() (handing it None would crash on metrics['starttime']).
-        _c.append_metric(metrics)
+        history_persistence.append_metric(metrics)
 
     def update_metrics(self, metrics):
-        _c.update_metrics(metrics)
+        history_persistence.update_metrics(metrics)
 
     def write_tr(self, tr):
-        _c.write_tr(tr)
+        history_persistence.write_tr(tr)
 
     def read_pellet_db(self):
-        return _c.read_pellet_db()
+        return runtime_persistence.read_pellet_db()
 
     def write_pellet_db(self, db):
-        _c.write_pellet_db(db)
+        runtime_persistence.write_pellet_db(db)
 
     def read_errors(self, kind):
-        return _c.read_errors(kind)
+        return runtime_persistence.read_errors(kind)
 
     def flush_errors(self, kind):
-        return _c.flush_errors(kind)
+        return runtime_persistence.flush_errors(kind)
 
     def write_errors(self, kind, errors):
-        _c.write_errors(kind, errors)
+        runtime_persistence.write_errors(kind, errors)
 
     def read_generic_key(self, key):
-        return _c.read_generic_key(key)
+        return runtime_persistence.read_generic_key(key)
 
     def write_generic_key(self, key, value):
-        _c.write_generic_key(key, value)
+        runtime_persistence.write_generic_key(key, value)
 
     def system_commands(self):
         return self._systemq
 
     def save_model_checkpoint(self, name, snapshot):
-        return _c.write_controller_model_checkpoint(name, snapshot)
+        return runtime_persistence.write_controller_model_checkpoint(name, snapshot)
 
     def system_output(self):
         return self._systemo

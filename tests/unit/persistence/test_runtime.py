@@ -342,3 +342,39 @@ def test_generic_keys_round_trip_detached_json_values_and_absence_raises(ds):
     detached["nested"]["items"].append(4)
 
     assert runtime.read_generic_key("runtime:test") == {"nested": {"items": [1, 2]}}
+
+
+def test_controller_model_checkpoint_is_owned_monotonic_and_atomic(ds):
+    snapshot = {"revision": 3, "model": {"gain": 1.5}}
+    assert runtime.write_controller_model_checkpoint("pid_sp", snapshot) is True
+    snapshot["model"]["gain"] = 99
+
+    assert runtime.write_controller_model_checkpoint(
+        "pid_sp", {"revision": 3, "model": {"gain": 2.0}}
+    ) is False
+    assert runtime.read_generic_key("controller_model_state") == {
+        "version": 1,
+        "models": {"pid_sp": {"revision": 3, "model": {"gain": 1.5}}},
+    }
+
+    ds.connection().execute(
+        """
+        CREATE TRIGGER fail_controller_model_checkpoint
+        BEFORE UPDATE ON kv
+        WHEN NEW.key = 'controller_model_state'
+        BEGIN
+            SELECT RAISE(ABORT, 'simulated checkpoint failure');
+        END
+        """
+    )
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="simulated checkpoint failure"):
+            runtime.write_controller_model_checkpoint(
+                "pid_sp", {"revision": 4, "model": {"gain": 2.0}}
+            )
+        assert runtime.read_generic_key("controller_model_state") == {
+            "version": 1,
+            "models": {"pid_sp": {"revision": 3, "model": {"gain": 1.5}}},
+        }
+    finally:
+        ds.connection().execute("DROP TRIGGER fail_controller_model_checkpoint")

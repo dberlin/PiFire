@@ -25,7 +25,6 @@ Description: This script starts at boot, initializes the datastore and
 import logging
 import atexit
 from common.common import ErrorKind, create_logger  # Common Module for WebUI and Control Program
-from common.datastore_accessors import read_settings, flush_control, flush_history, flush_metrics, flush_errors
 from common import datastore
 from controller.runtime.context import ControllerContext
 from controller.runtime.devices import build_devices
@@ -68,6 +67,7 @@ if __name__ == "__main__":
     # idempotent, so running it from both independently-supervised processes,
     # in either order, is safe).
     datastore.init()
+    store = SqliteStore()
 
     # NOTE: this used to read `read_settings(init=True)`, but that `init` flag
     # has been dead since the JSON->SQLite move -- it never seeded anything, so
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     # common/datastore.py's init(), which upserts them after importing the
     # legacy JSON files. app.py runs the same init() at import, so either
     # process can start first.
-    settings = read_settings()
+    settings = store.read_settings()
 
     # Setup logging
     log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.ERROR
@@ -99,14 +99,14 @@ if __name__ == "__main__":
     controlLogger.info(event_message)
 
     # Flush datastore and create JSON structure
-    control = flush_control()
+    control = store.flush_control()
     # Delete datastore entries for history / current
-    flush_history()
+    store.flush_history()
     # Flush metrics DB for tracking certain metrics
-    flush_metrics()
+    store.flush_metrics()
     # Clear the errors list; flush_errors() hands back the fresh (empty)
     # accumulator that build_devices() appends into below.
-    errors = flush_errors(ErrorKind.CONTROL)
+    errors = store.flush_errors(ErrorKind.CONTROL)
 
     eventLogger.info("Flushing datastore and creating new control structure")
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     # Build the injected context used by the controller / mode functions instead of bare globals
     ctx = ControllerContext(
         devices=devices,
-        store=SqliteStore(),
+        store=store,
         notifications=LiveNotifier(),
         clock=RealClock(),
         event_log=eventLogger,

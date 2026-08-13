@@ -14,7 +14,6 @@ import logging
 
 from common import datastore
 from common.common import ErrorKind, create_logger
-from common.datastore_accessors import flush_errors, read_settings
 from controller.runtime.devices import build_display
 from controller.runtime.store import SqliteStore
 from controller.runtime.clock import RealClock
@@ -49,7 +48,8 @@ if __name__ == "__main__":
     # from their init() calls. Must run before the first read_settings() call
     # below -- see app.py:39 and control.py:70, which do the same.
     datastore.init()
-    settings = read_settings()
+    store = SqliteStore()
+    settings = store.read_settings()
 
     log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.ERROR
     controlLogger = create_logger(
@@ -68,9 +68,12 @@ if __name__ == "__main__":
     # control.py's boot path: a repaired display drops its stale banner, a
     # still-broken one re-reports. Other kinds are untouched.
     display_device, _errors = build_display(
-        settings, errors=flush_errors(ErrorKind.DISPLAY), event_log=eventLogger, control_log=controlLogger
+        settings,
+        errors=store.flush_errors(ErrorKind.DISPLAY),
+        event_log=eventLogger,
+        control_log=controlLogger,
     )
 
     eventLogger.info("PiFire Display Process started.")
 
-    DisplayFeeder(display_device, SqliteStore(), RealClock()).run()
+    DisplayFeeder(display_device, store, RealClock()).run()
