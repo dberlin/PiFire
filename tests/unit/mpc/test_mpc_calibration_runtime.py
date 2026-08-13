@@ -1,10 +1,12 @@
-from dataclasses import dataclass, replace
+from functools import partial
 from types import SimpleNamespace
 
 import numpy as np
 
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
+from controller.acados import GreyBoxMPCConfig
 from controller.mpc import CalibrationCommand, Controller
+from controller.mpc_factory import MpcPairFactory
 from controller.runtime.runner import SyncControllerRunner
 
 
@@ -13,15 +15,10 @@ class _Estimator:
         return np.array([20.0, 0.0])
 
 
-@dataclass(frozen=True)
-class _NativeConfig:
-    theta: float = 50.0
-
-
 class _Policy:
-    def __init__(self, horizon):
-        self.config = _NativeConfig()
-        self.horizon = horizon
+    def __init__(self, config: GreyBoxMPCConfig):
+        self.config = config
+        self.horizon = config.horizon_steps
 
     def solve(self, _state, **_kwargs):
         diagnostics = SimpleNamespace(
@@ -44,9 +41,13 @@ class _Policy:
 
 def _controller(monkeypatch, *, safe_forecast=True):
     monkeypatch.setattr(
-        Controller,
-        "_build_for",
-        lambda self, cfg: (_Estimator(), _Policy(int(cfg["n_horizon"]))),
+        "controller.mpc.MpcPairFactory",
+        partial(
+            MpcPairFactory,
+            ekf_factory=lambda **_parameters: _Estimator(),
+            kf_factory=lambda **_parameters: _Estimator(),
+            solver_factory=_Policy,
+        ),
     )
     if safe_forecast:
 

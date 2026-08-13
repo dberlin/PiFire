@@ -86,3 +86,11 @@ uv run pyright controller/mpc_factory.py controller/mpc.py controller/runtime/ru
 - Added typed checkpoint metadata for origin, policy, and rollback digest/generation. Restore hydrates those fields from the validated v4 document so a write after restore preserves the durable ownership metadata exactly.
 - Refit adoption supplies the factory-created descriptor and exact origin/policy while atomically advancing the active pair. Generation-only descriptor rotation remains valid because restore reconstructs using the durable descriptor generations while comparing the same model/native configuration.
 - Per parent instruction, this worker ran no tests, builds, linters, formatters, or coverage commands during the fix round.
+
+## Fix round 3
+
+- Parent validation reported 12 calibration-runtime failures from the removed private `Controller._build_for` monkeypatch; the preceding 280 tests passed.
+- Migrated `tests/unit/mpc/test_mpc_calibration_runtime.py` to replace the controller's imported public `MpcPairFactory` constructor with a `functools.partial` that supplies the fixture's fake EKF/KF factories and native policy factory. The real factory still owns configuration normalization, descriptor validation, `MpcCore` construction, authorization, and pair lifecycle.
+- The fake policy now retains the complete `GreyBoxMPCConfig`, allowing the real factory's descriptor/native-configuration validation to execute instead of bypassing it through a private controller wrapper.
+- Searched `tests/` and `controller/`; no `_build_for` references remain.
+- Parent should rerun `uv run pytest -q tests/unit/mpc/test_mpc_calibration_runtime.py` and then the broader MPC suite. Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands.
