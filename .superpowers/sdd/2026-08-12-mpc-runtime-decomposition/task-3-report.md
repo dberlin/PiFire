@@ -78,3 +78,11 @@ uv run pyright controller/mpc_factory.py controller/mpc.py controller/runtime/ru
 - Expanded public factory behavioral coverage for every configuration identity validator, owner type validation, KF configuration/build/restore, invalid authorization, authorized adoption, descriptor reconstruction mismatch, post-construction validation failure, invalid timing, dual cleanup failures, and non-closable protocol components.
 - Extracted `MpcCore.native_configuration` so numerical construction and descriptor-only mapping share the exact same native configuration transform instead of duplicating constants.
 - Per parent instruction, this worker ran no tests, builds, linters, formatters, or coverage commands during the fix round.
+
+## Fix round 2
+
+- Removed the parallel `_next_cook_descriptor` snapshot seam. `OwnedMpcPair.descriptor` is now the single authoritative active identity and advances in the same `_adopt_model` operation as the pair-owned configuration.
+- Snapshot writing serializes `active_control_pair.descriptor` directly. It no longer substitutes a separately synthesized learned descriptor.
+- Added typed checkpoint metadata for origin, policy, and rollback digest/generation. Restore hydrates those fields from the validated v4 document so a write after restore preserves the durable ownership metadata exactly.
+- Refit adoption supplies the factory-created descriptor and exact origin/policy while atomically advancing the active pair. Generation-only descriptor rotation remains valid because restore reconstructs using the durable descriptor generations while comparing the same model/native configuration.
+- Per parent instruction, this worker ran no tests, builds, linters, formatters, or coverage commands during the fix round.

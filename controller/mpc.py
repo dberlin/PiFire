@@ -263,7 +263,9 @@ class Controller(ControllerBase):
         self._teardown_candidate = None
         self._teardown_candidate_descriptor: GreyControlPairDescriptor | None = None
         self._teardown_fit_window: FitWindowIdentity | None = None
-        self._next_cook_descriptor: GreyControlPairDescriptor | None = None
+        self._checkpoint_origin: CandidateOrigin | None = None
+        self._checkpoint_policy: ActivationPolicy | None = None
+        self._checkpoint_rollback_identity: tuple[str, int] | None = None
         self._teardown_decision_id: str | None = None
         try:
             self._learning = self._build_learning() if self._learning_enabled else None
@@ -1683,25 +1685,40 @@ class Controller(ControllerBase):
     _MODEL_SCHEMA = MODEL_SCHEMA
     _MODEL_PARAM_KEYS = _snapshot.MODEL_PARAM_KEYS
 
-    def _adopt_model(self, params, *, rmse, samples, band_c, nfev=None):
-        """Take fitted parameters into the next-cook checkpoint.
+    def _adopt_model(
+        self,
+        params,
+        *,
+        rmse,
+        samples,
+        band_c,
+        nfev=None,
+        descriptor: GreyControlPairDescriptor | None = None,
+        origin: CandidateOrigin = CandidateOrigin.COOK_REFIT,
+        policy: ActivationPolicy = ActivationPolicy.COOK_REFIT,
+    ):
+        """Adopt fitted parameters and atomically advance the active owner identity.
 
-        Only `_MODEL_PARAM_KEYS` cross into the config, so a fitter's own
-        bookkeeping -- `converged`, `nfev` -- travels alongside a fit without
-        ever becoming part of the model.
-
-        Rebuilding the native estimator/solver pair is the caller's business:
-        adoption between cooks needs no rebuild because the next Hold's
-        `restore_model` builds against the model it restores.
+        Only `_MODEL_PARAM_KEYS` cross into the numerical configuration. The
+        pair descriptor advances in the same operation, so persistence never
+        publishes a model identity different from the one owned by the pair.
         """
+
+        previous = self._active_control_pair.descriptor
         self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
-        active_identity = self._active_control_pair.descriptor
-        self._next_cook_descriptor = self._pair_factory.descriptor(
+        active = descriptor or self._pair_factory.descriptor(
             self._pair_factory.configured(
                 self.cfg,
-                candidate_generation=active_identity.candidate_generation,
-                role_generation=active_identity.role_generation,
+                candidate_generation=previous.candidate_generation,
+                role_generation=previous.role_generation,
             )
+        )
+        self._active_control_pair.descriptor = active
+        self._checkpoint_origin = origin
+        self._checkpoint_policy = policy
+        self._checkpoint_rollback_identity = (
+            previous.model_digest,
+            previous.role_generation,
         )
         self._model_meta = {
             # Provenance, not a comparison input: what this model achieved on
@@ -1734,16 +1751,16 @@ class Controller(ControllerBase):
                 metadata=metadata,
             )
             live = self._learning_live_status()
-            runtime_active = self._active_control_pair.descriptor
-            active = self._next_cook_descriptor or runtime_active
+            active = self._active_control_pair.descriptor
             candidate = self._inert_activation.candidate if self._inert_activation is not None else None
-            rollback = (
-                runtime_active
-                if self._next_cook_descriptor is not None
-                else self._rollback_control_pair.descriptor
-                if self._rollback_control_pair is not None
-                else None
-            )
+            if self._rollback_control_pair is not None:
+                rollback_digest = self._rollback_control_pair.descriptor.model_digest
+                rollback_generation = self._rollback_control_pair.descriptor.role_generation
+            elif self._checkpoint_rollback_identity is not None:
+                rollback_digest, rollback_generation = self._checkpoint_rollback_identity
+            else:
+                rollback_digest = None
+                rollback_generation = None
             learning = self._learning
             prepared = None if learning is None else learning.prepared
             if candidate is None and prepared is not None:
@@ -1801,19 +1818,17 @@ class Controller(ControllerBase):
                     else self._active_activation_record.decision_id
                 ),
             }
-            teardown_origin = (
+            checkpoint_origin = (
                 CandidateOrigin.OPERATOR_CALIBRATION
                 if self._teardown_candidate is not None
-                else CandidateOrigin.COOK_REFIT
-                if self._next_cook_descriptor is not None
-                else None
+                else self._checkpoint_origin
             )
-            snapshot["origin"] = teardown_origin.value if teardown_origin is not None else live["origin"]
+            snapshot["origin"] = checkpoint_origin.value if checkpoint_origin is not None else live["origin"]
             snapshot["policy"] = (
                 ActivationPolicy.OPERATOR_REVIEWED.value
                 if self._teardown_candidate is not None
-                else ActivationPolicy.COOK_REFIT.value
-                if self._next_cook_descriptor is not None
+                else self._checkpoint_policy.value
+                if self._checkpoint_policy is not None
                 else self._inert_activation.policy.value
                 if self._inert_activation is not None
                 else self._active_activation_record.policy.value
@@ -1860,8 +1875,8 @@ class Controller(ControllerBase):
                     if isinstance(candidate_descriptor, GreyControlPairDescriptor)
                     else live["candidate_generation"]
                 ),
-                "rollback_digest": None if rollback is None else rollback.model_digest,
-                "rollback_generation": None if rollback is None else rollback.role_generation,
+                "rollback_digest": rollback_digest,
+                "rollback_generation": rollback_generation,
             }
             snapshot["activation"] = {
                 "phase": live["activation_phase"],
@@ -1957,6 +1972,21 @@ class Controller(ControllerBase):
             "band_c": list(metadata["band_c"]),
             "nfev": metadata["nfev"],
         }
+        restored_origin = owned["origin"]
+        self._checkpoint_origin = (
+            None if restored_origin is None else CandidateOrigin(restored_origin)
+        )
+        restored_policy = owned["policy"]
+        self._checkpoint_policy = (
+            None if restored_policy is None else ActivationPolicy(restored_policy)
+        )
+        rollback_digest = owned["identities"]["rollback_digest"]
+        rollback_generation = owned["identities"]["rollback_generation"]
+        self._checkpoint_rollback_identity = (
+            None
+            if rollback_digest is None or rollback_generation is None
+            else (rollback_digest, rollback_generation)
+        )
         if owned["identification"]["status"] != "identified":
             self._model_meta = None
         self._learning_eligible_updates = owned["evidence"]["eligible"]
@@ -2148,8 +2178,14 @@ class Controller(ControllerBase):
                 samples=success.sample_count,
                 band_c=success.temperature_band_c,
                 nfev=success.nfev,
+                descriptor=descriptor,
+                origin=origin,
+                policy=(
+                    ActivationPolicy.PASSIVE_AUTO
+                    if origin is CandidateOrigin.PASSIVE_ONLINE
+                    else ActivationPolicy.COOK_REFIT
+                ),
             )
-            self._next_cook_descriptor = descriptor
             return TeardownRefitResult.accepted_next_cook(
                 verdict.reason,
                 candidate_digest=descriptor.model_digest,
