@@ -12,7 +12,8 @@ from controller.runtime.runner import SyncControllerRunner
 
 class _Estimator:
     def update(self, load, temperature):
-        return np.array([20.0, 0.0])
+        delay_states = np.full(8, float(load))
+        return np.concatenate((delay_states, np.array([float(temperature), 0.0])))
 
 
 class _Policy:
@@ -59,7 +60,7 @@ def _controller(monkeypatch, *, safe_forecast=True):
             "controller.mpc.GreyBoxPredictionAdapter.from_controller",
             lambda controller: SafeForecast(),
         )
-    controller = Controller({"n_delay": 0, "enable_fan_input": False}, "C", {"u_max": 0.9})
+    controller = Controller({"n_delay": 8, "enable_fan_input": False}, "C", {"u_max": 0.9})
     controller.set_target(110.0)
     # Hold publishes the grill's configured maximum every tick; without it the
     # controller has no ceiling and fails closed on every probe.

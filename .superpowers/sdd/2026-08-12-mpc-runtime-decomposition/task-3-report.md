@@ -94,3 +94,10 @@ uv run pyright controller/mpc_factory.py controller/mpc.py controller/runtime/ru
 - The fake policy now retains the complete `GreyBoxMPCConfig`, allowing the real factory's descriptor/native-configuration validation to execute instead of bypassing it through a private controller wrapper.
 - Searched `tests/` and `controller/`; no `_build_for` references remain.
 - Parent should rerun `uv run pytest -q tests/unit/mpc/test_mpc_calibration_runtime.py` and then the broader MPC suite. Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands.
+
+## Fix round 4
+
+- Parent validation reported the same 12 calibration-runtime failures with 308 broader tests passing because the migrated fixture still requested the obsolete zero-delay configuration.
+- Updated the fixture to request the generated controller's exact eight-delay contract. The fake estimator now emits all eight delayed-load states followed by chamber temperature and disturbance, matching the native `state_size == 10` boundary.
+- The fake policy continues to size command and residual sequences from the complete validated `GreyBoxMPCConfig.horizon_steps`; no production validation was relaxed.
+- Parent should rerun `uv run pytest -q tests/unit/mpc/test_mpc_calibration_runtime.py` and then the broader MPC suite. Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands.
