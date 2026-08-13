@@ -240,7 +240,10 @@ class HoldMode(ControlMode):
         self._trace_pulse_frame(completion)
         if completion.applied is not None and record_terminal_trace:
             self._trace_terminal_framed_output(completion)
-        if completion.missing_observation_reason is not None:
+        if (
+            completion.missing_observation_reason is not None
+            and completion.result_revision > 0
+        ):
             self._trace_missing_frame_observation(completion)
 
     def _deliver_framed_completion(self, completion: FramedPulseCompletion) -> None:
@@ -2127,6 +2130,8 @@ class HoldMode(ControlMode):
                     self.grill.auger_on()
                 else:
                     self.grill.auger_off()
+            if lid_will_open:
+                self.grill.auger_off()
             self._dispatch_framed_result(
                 pulse_result,
                 record_terminal_trace=False,
@@ -2563,6 +2568,7 @@ class HoldMode(ControlMode):
                 sample=self._framed_sample(ptemp),
                 prior_output_source=self.state.controller.trace_prior_output_source,
             )
+            self.grill.auger_off()
             self._dispatch_framed_result(pulse_result, record_terminal_trace=False)
             feedback = runtime.report_feedback(
                 now,

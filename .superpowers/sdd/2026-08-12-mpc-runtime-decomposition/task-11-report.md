@@ -21,7 +21,7 @@ After implementation, the direct suite and strict branch gate are GREEN:
 ```text
 uv run coverage run --branch --source=controller.runtime.framed_pulse \
   -m pytest -q -n0 tests/unit/runtime/test_framed_pulse_runtime.py
-16 passed in 0.06s
+16 passed in 0.07s
 
 uv run coverage json -o /tmp/task11-coverage.json
 uv run python scripts/check_branch_coverage.py \
@@ -31,6 +31,30 @@ PASS controller/runtime/framed_pulse.py: 92.0% (46/50) > 90.0%
 ```
 
 Direct contracts cover unconfigured/configured behavior, scheduler presence, latch/advance transitions, completed frames, delivery accounting, maximum duty and inverse realized load, calibration identity and cancellation, duplicate identity suppression, reset with and without terminal feedback, missing observations, and stale/manual/lid/safety source and disposition.
+
+Reviewer fix round 1 added four focused contracts before the fixes: public missing-revision and
+missing-temperature gap deduplication, lid-opening actuator-off before advance-result dispatch, and
+teardown actuator-off before final progress/completion dispatch. The focused RED run observed all
+four fail against the committed extraction:
+
+```text
+4 failed
+```
+
+The fixes make all four GREEN:
+
+```text
+4 passed in 0.15s
+```
+
+The runtime now classifies a latched nonpositive revision as missing, consumes every
+nonduplicate positive-duration frame key even when observation construction has a temperature or
+revision gap, and suppresses the repeated gap as a duplicate. Cancellation coverage uses public
+`reset()` and the gap contracts use public `complete_frame()`; the direct suite no longer calls
+runtime-private helpers or mutates `_frame`. Hold commands auger-off before dispatching
+lid-opening and teardown advance results, while the later lid reset still stamps terminal reset
+metadata. Hold records an observation gap only for a positive controller revision, so an expected
+revision-zero seed frame remains replay-valid.
 
 ## LSP callsite and caller migration inventory
 
@@ -73,7 +97,7 @@ uv run pytest -q -n0 \
   tests/unit/runtime/test_hold_control_trace.py \
   tests/unit/runtime/test_hold_calibration.py \
   tests/unit/runtime/test_hold_orchestration.py
-9 failed, 133 passed in 3.15s
+9 failed, 135 passed in 3.04s
 ```
 
 All nine failures are intentional later-task contracts: manual-release reseed (1), activation close ordering (1), teardown success/failure matrix (6), and partial-setup repeated teardown (1). No Task 11 pulse-owned failure remains.
@@ -107,7 +131,7 @@ Task 11 result:
 
 ```text
 uv run pytest -q -n0 tests/unit/runtime/test_hold_*.py tests/unit/runtime/test_threaded_runner.py
-15 failed, 242 passed in 6.61s
+15 failed, 244 passed in 6.57s
 ```
 
 Exact remaining intentional REDs:
@@ -128,7 +152,7 @@ Exact remaining intentional REDs:
 14. `tests/unit/runtime/test_hold_refit_trigger.py::test_teardown_emits_one_final_checkpoint_for_every_refit_outcome[True-result3-None-ready-for-review]`
 15. `tests/unit/runtime/test_hold_refit_trigger.py::test_teardown_emits_one_final_checkpoint_for_every_refit_outcome[True-result4-None-accepted-next-cook]`
 
-Relative to Task 10, the six pulse-owned REDs are closed: normal tick order (1), frame-boundary order (1), framed reset metadata (1), and lid/safety/stale inhibit order/terminalization (3). The remaining 15 are the exact later-task categories and form a strict subset of Task 10's 21.
+Relative to Task 10, the six pulse-owned REDs are closed: normal tick order (1), frame-boundary order (1), framed reset metadata (1), and lid/safety/stale inhibit order/terminalization (3). The remaining 15 are the exact later-task categories and form a strict subset of Task 10's 21. Reviewer fix round 1 added two focused passing contracts, so the aggregate pass count increased from 242 to 244; the failure identity set is unchanged and the added RED set is empty.
 
 ## Concerns
 

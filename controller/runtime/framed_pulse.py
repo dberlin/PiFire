@@ -554,26 +554,23 @@ class FramedPulseRuntime:
         observation = None
         missing_reason = None
         sequence = None
-        if not duplicate and duration_s > 0.0 and sample.temperature is not None and latched.result_revision > 0:
+        if not duplicate and duration_s > 0.0:
             self._observation_sequence += 1
             sequence = self._observation_sequence
-            observation = self._observation(
-                frame,
-                latched=latched,
-                sample=sample,
-                sample_at_s=sample_at_s,
-                inhibit=inhibit,
-                sequence=sequence,
-            )
             self._last_observation_key = frame_key
-        elif not duplicate and duration_s > 0.0 and sample.temperature is None:
-            self._observation_sequence += 1
-            sequence = self._observation_sequence
-            missing_reason = "missing-temperature"
-        elif not duplicate and duration_s > 0.0 and latched.result_revision < 0:
-            self._observation_sequence += 1
-            sequence = self._observation_sequence
-            missing_reason = "missing-result-revision"
+            if sample.temperature is None:
+                missing_reason = "missing-temperature"
+            elif latched.result_revision <= 0:
+                missing_reason = "missing-result-revision"
+            else:
+                observation = self._observation(
+                    frame,
+                    latched=latched,
+                    sample=sample,
+                    sample_at_s=sample_at_s,
+                    inhibit=inhibit,
+                    sequence=sequence,
+                )
 
         applied = None
         realized_load = None

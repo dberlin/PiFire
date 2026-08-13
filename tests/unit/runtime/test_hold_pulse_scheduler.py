@@ -188,6 +188,33 @@ def test_result_is_adopted_once_and_latched_at_next_frame(hold_cycle):
     assert hold.grill.get_output_status()["auger"] is True
 
 
+
+def test_lid_opening_turns_auger_off_before_dispatching_frame_progress(hold_cycle, monkeypatch):
+    events = []
+    runner = _OrderedTickRunner(events, [_output(1, 0.1), _output(1, 0.1), _output(1, 0.1)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.on_tick(2.0, 200.0, _status(hold))
+    hold.on_tick(4.0, 200.0, _status(hold))
+    hold.state.target_temp_achieved = True
+    hold.settings["cycle_data"]["LidOpenDetectEnabled"] = True
+    hold.control["primary_setpoint"] = 225.0
+    events.clear()
+    auger_off = hold.grill.auger_off
+
+    def record_auger_off():
+        events.append("auger-off")
+        auger_off()
+
+    monkeypatch.setattr(hold.grill, "auger_off", record_auger_off)
+
+    hold.on_tick(22.0, 0.0, _status(hold))
+    feedback_index = next(
+        index for index, event in enumerate(events) if isinstance(event, tuple) and event[0] == "feedback"
+    )
+    assert events.index("auger-off") < feedback_index
+
+
 def test_stale_result_continues_last_command_and_measured_feedback(hold_cycle):
     result = _output(1, 0.1)
     runner = FakeControllerRunner(period=1.0).script([result, result, result])
@@ -500,6 +527,40 @@ def test_teardown_reports_final_observed_pulse_delivery_before_reset(hold_cycle)
     hold.teardown(200.0)
 
     assert any(applied.requested == 0.1 and applied.ratio == 1.0 for applied in runner.applied)
+
+
+def test_teardown_turns_auger_off_before_dispatching_final_frame_progress(hold_cycle, monkeypatch):
+    events = []
+    runner = FakeControllerRunner()
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    controller = hold.state.controller
+    controller.pulse_result_revision = 1
+    controller.pulse_requested_duty = 0.1
+    _advance_runtime(hold, 0.0, False)
+    hold.grill.auger_on()
+    runner.applied.clear()
+    hold.ctx.clock.advance(2.0)
+    auger_off = hold.grill.auger_off
+    set_output = runner.set_output
+
+    def record_auger_off():
+        events.append("auger-off")
+        auger_off()
+
+    def record_output(applied):
+        events.append(("feedback", applied.feedback_disposition))
+        set_output(applied)
+
+    monkeypatch.setattr(hold.grill, "auger_off", record_auger_off)
+    monkeypatch.setattr(runner, "set_output", record_output)
+
+    hold.teardown(200.0)
+
+    feedback_index = next(
+        index for index, event in enumerate(events) if isinstance(event, tuple) and event[0] == "feedback"
+    )
+    assert events.index("auger-off") < feedback_index
 
 
 class _ObservationStatusRunner(FakeControllerRunner):

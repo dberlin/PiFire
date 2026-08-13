@@ -330,12 +330,20 @@ def test_reset_and_completion_edge_branches() -> None:
     )
     assert completed.completions
 
+    missing_frame = replace(_frame(), nominal_start_s=40.0, nominal_end_s=60.0, ended_at_s=60.0)
     missing = runtime.complete_frame(
-        replace(_frame(), nominal_start_s=40.0, nominal_end_s=60.0, ended_at_s=60.0),
+        missing_frame,
+        sample=replace(_sample(), temperature=None),
+        inhibit=InhibitReason.NONE,
+    )
+    duplicate_gap = runtime.complete_frame(
+        missing_frame,
         sample=replace(_sample(), temperature=None),
         inhibit=InhibitReason.NONE,
     )
     assert missing.missing_observation_reason == "missing-temperature"
+    assert missing.duplicate is False
+    assert duplicate_gap.duplicate is True
     controller.pulse_result_revision = -1
     runtime.latch(0)
     missing_revision = runtime.complete_frame(
@@ -344,31 +352,44 @@ def test_reset_and_completion_edge_branches() -> None:
         inhibit=InhibitReason.NONE,
     )
     assert missing_revision.observation is None
-    assert FramedPulseRuntime._fan_fraction(None) is None
+    assert missing_revision.missing_observation_reason == "missing-result-revision"
 
 
-def test_calibration_cancellation_and_missing_revision_branches() -> None:
+def test_reset_cancels_active_calibration_and_missing_revision_gap_is_deduplicated() -> None:
     runtime, controller = _runtime()
-    runtime._stamp_calibration_cancellation("none", command_revision=0, command_action="none")
     controller.pulse_result_revision = 2
     controller.pulse_calibration_status = "active"
     controller.pulse_calibration_probe_load = 0.1
     runtime.latch(0)
-    runtime._stamp_calibration_cancellation(
-        "safety",
-        command_revision=9,
-        command_action="safety-cancel",
+
+    runtime.reset(
+        PulseResetReason.SAFETY,
+        10.0,
+        InhibitReason.SAFETY,
+        actual_auger_on=False,
+        terminal_feedback=False,
+        sample=_sample(),
+        cancellation_reason="safety",
+        cancellation_command_revision=9,
+        cancellation_command_action="safety-cancel",
     )
+
     assert controller.pulse_frame_calibration_cancellation_reason == "safety"
 
     controller.pulse_result_revision = -1
     controller.pulse_combustion_load = None
     runtime.latch(0)
-    assert runtime._frame is not None
-    runtime._frame = replace(runtime._frame, result_revision=-1)
+    gap_frame = replace(_frame(), nominal_start_s=80.0, nominal_end_s=100.0, ended_at_s=100.0)
     missing = runtime.complete_frame(
-        replace(_frame(), nominal_start_s=80.0, nominal_end_s=100.0, ended_at_s=100.0),
+        gap_frame,
+        sample=_sample(),
+        inhibit=InhibitReason.NONE,
+    )
+    duplicate = runtime.complete_frame(
+        gap_frame,
         sample=_sample(),
         inhibit=InhibitReason.NONE,
     )
     assert missing.missing_observation_reason == "missing-result-revision"
+    assert missing.duplicate is False
+    assert duplicate.duplicate is True
