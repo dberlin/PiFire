@@ -87,6 +87,12 @@ def _descriptor(
     )
 
 
+def _migrated_descriptor(
+    descriptor: GreyControlPairDescriptor,
+) -> GreyControlPairDescriptor:
+    return MpcPairFactory.migrate_legacy_descriptor(descriptor)
+
+
 def _owned_with_handles(
     descriptor: GreyControlPairDescriptor,
     estimator,
@@ -376,9 +382,14 @@ def test_startup_aborts_prepared_before_restoring_only_the_incumbent() -> None:
         receipt_timeout=0.1,
     )
 
-    assert recovery.restore == incumbent.descriptor
-    assert recovery.rollback == incumbent.descriptor
+    migrated_incumbent = _migrated_descriptor(incumbent.descriptor)
+    assert recovery.restore == migrated_incumbent
+    assert recovery.rollback == migrated_incumbent
     assert recovery.phase is ActivationPhase.ABORTED
+    assert recovery.record.transaction_id == prepared.transaction_id
+    assert recovery.record.incumbent == migrated_incumbent
+    assert recovery.source_candidate_digest == descriptor.model_digest
+    assert recovery.record.candidate == _migrated_descriptor(descriptor)
     assert writes[0].reason == "interrupted-activation"
     assert receipt.waits == 1
 
@@ -402,11 +413,18 @@ def test_startup_restores_candidate_only_from_active_and_never_replays_a_swap() 
         persist_aborted=lambda record: writes.append(record),
     )
 
-    assert active.restore == candidate.descriptor
-    assert active.rollback == incumbent.descriptor
+    migrated_incumbent = _migrated_descriptor(incumbent.descriptor)
+    migrated_candidate = _migrated_descriptor(candidate.descriptor)
+    assert active.restore == migrated_candidate
+    assert active.rollback == migrated_incumbent
     assert active.phase is ActivationPhase.ACTIVE
-    assert aborted.restore == incumbent.descriptor
+    assert active.source_candidate_digest == candidate.descriptor.model_digest
+    assert active.record.transaction_id == prepared.transaction_id
+    assert aborted.restore == migrated_incumbent
+    assert aborted.rollback == migrated_incumbent
     assert aborted.phase is ActivationPhase.ABORTED
+    assert aborted.source_candidate_digest == candidate.descriptor.model_digest
+    assert aborted.record.transaction_id == prepared.transaction_id
     assert writes == []
 
 
@@ -430,6 +448,7 @@ def test_startup_refuses_ambiguous_prepared_compensation_without_a_durable_abort
 @pytest.mark.parametrize("lifecycle_kind", ("fallback", "rollback"))
 def test_startup_applies_persisted_fallback_before_candidate_output_is_authorized(
     lifecycle_kind,
+    monkeypatch,
 ) -> None:
     core, _incumbent, _candidate, prepared = _bare_mpc_pair_owner()
     active = prepared.transition(ActivationPhase.ACTIVE)
@@ -471,16 +490,19 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
         return _owned(descriptor, f"restored-{len(built)}")
 
     core._activation_persistence_worker = object()
-    core._pair_factory = SimpleNamespace(restore=build)
+    monkeypatch.setattr(core._pair_factory, "restore", build)
 
     assert core.restore_activation(persisted, (lifecycle,))
 
-    assert built == [prepared.rollback]
-    assert core.active_control_pair.descriptor == prepared.rollback
+    migrated_rollback = _migrated_descriptor(prepared.rollback)
+    assert built == [migrated_rollback]
+    assert core.active_control_pair.descriptor == migrated_rollback
     assert core.rollback_control_pair is None
     assert core.activation_output_authorized
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
     assert core._teardown_history.role_generation == core._model_revision
+    core._activation_persistence_worker = None
+    core.close()
 
 
 def _bare_mpc_pair_owner():
@@ -510,6 +532,9 @@ def _bare_mpc_pair_owner():
     core._model_revision = 4
     core._learning_role_generation = 4
     core._teardown_history = TeardownGreyHistory(role_generation=4, max_observations=120)
+    core._closed = False
+    core._learning = None
+    core._activation_persistence_worker = None
     core._pair_factory = MpcPairFactory(
         DEFAULT_MPC_CONFIG,
         "C",

@@ -64,6 +64,17 @@ _LEGACY_ESTIMATOR_CONFIGURATION: dict[str, JsonValue] = {
     "est_q_dist": 0.05,
     "est_r_meas": 0.04,
 }
+_LEGACY_V4_CONFIGURATION_FIELDS = frozenset({"schema", "n_delay", "parameters"})
+_LEGACY_V4_PARAMETER_FIELDS = frozenset(
+    {"C_c", "K_Q", "theta", "h_amb", "T_amb", "sigma"}
+)
+_LEGACY_V4_IDENTIFICATION_DEFAULTS = {
+    "C_c": 320.0,
+    "K_Q": 350.0,
+    "theta": 50.0,
+    "h_amb": 0.5,
+    "sigma": 1.4e-9,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -590,13 +601,82 @@ class MpcPairFactory:
         fields = frozenset(descriptor.configuration)
         if fields == _PAIR_CONFIGURATION_FIELDS:
             return descriptor
-        if fields != _NATIVE_CONFIGURATION_FIELDS:
-            MpcPairFactory._require_complete_descriptor(descriptor)
-        configuration = dict(descriptor.configuration)
-        configuration.update(_LEGACY_ESTIMATOR_CONFIGURATION)
+        if fields == _LEGACY_V4_CONFIGURATION_FIELDS:
+            return MpcPairFactory._migrate_nested_v4_descriptor(descriptor)
+        if fields == _NATIVE_CONFIGURATION_FIELDS:
+            configuration = dict(descriptor.configuration)
+            configuration.update(_LEGACY_ESTIMATOR_CONFIGURATION)
+            return GreyControlPairDescriptor(
+                model_digest=descriptor.model_digest,
+                configuration=configuration,
+                estimator_kind=descriptor.estimator_kind,
+                solver_kind=descriptor.solver_kind,
+                candidate_generation=descriptor.candidate_generation,
+                role_generation=descriptor.role_generation,
+            )
+        MpcPairFactory._require_complete_descriptor(descriptor)
+        return descriptor
+
+    @staticmethod
+    def _migrate_nested_v4_descriptor(
+        descriptor: GreyControlPairDescriptor,
+    ) -> GreyControlPairDescriptor:
+        configuration = descriptor.configuration
+        if configuration.get("schema") != "pifire-grey-box-model/v4":
+            raise ValueError("unsupported legacy descriptor schema")
+        n_delay = configuration.get("n_delay")
+        if isinstance(n_delay, bool) or not isinstance(n_delay, Integral) or n_delay != 8:
+            raise ValueError("legacy descriptor n_delay must be the integer 8")
+        parameters = configuration.get("parameters")
+        if (
+            not isinstance(parameters, Mapping)
+            or frozenset(parameters) != _LEGACY_V4_PARAMETER_FIELDS
+        ):
+            raise ValueError("legacy descriptor parameters do not match the v4 schema")
+        normalized_parameters: dict[str, float] = {}
+        for name in _LEGACY_V4_PARAMETER_FIELDS:
+            value = parameters.get(name)
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise ValueError(f"legacy descriptor parameter {name} must be numeric")
+            normalized = float(value)
+            if not math.isfinite(normalized):
+                raise ValueError(f"legacy descriptor parameter {name} must be finite")
+            normalized_parameters[name] = normalized
+        model_identified = any(
+            normalized_parameters[name] != expected
+            for name, expected in _LEGACY_V4_IDENTIFICATION_DEFAULTS.items()
+        )
+        native = GreyBoxMPCConfig(
+            C_c=normalized_parameters["C_c"],
+            h_amb=normalized_parameters["h_amb"],
+            T_amb=normalized_parameters["T_amb"],
+            theta=normalized_parameters["theta"],
+            K_Q=normalized_parameters["K_Q"],
+            sigma=normalized_parameters["sigma"],
+            horizon_steps=24,
+            delay_states=8,
+            state_size=10,
+            timestep_s=25.0,
+            temperature_weight=1.0,
+            terminal_weight=1.0,
+            move_weight=0.1,
+            residual_weight=1_000.0 if model_identified else 0.0,
+            max_iterations=10,
+        )
+        settings = MpcPairFactory._settings_for_native(
+            native,
+            descriptor.estimator_kind,
+            control_period=5.0,
+            est_q_temp=1e-2,
+            est_q_dist=0.05,
+            est_r_meas=0.04,
+        )
+        migrated_configuration = MpcPairFactory._descriptor_mapping(settings, native)
         return GreyControlPairDescriptor(
-            model_digest=descriptor.model_digest,
-            configuration=configuration,
+            model_digest=canonical_snapshot_digest(
+                MpcPairFactory._native_mapping(native)
+            ),
+            configuration=migrated_configuration,
             estimator_kind=descriptor.estimator_kind,
             solver_kind=descriptor.solver_kind,
             candidate_generation=descriptor.candidate_generation,

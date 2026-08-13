@@ -442,32 +442,49 @@ class StartupActivationRecovery:
     restore: GreyControlPairDescriptor
     rollback: GreyControlPairDescriptor
     record: PreparedActivationRecord
+    source_candidate_digest: str
 
 
-def _record_from_persisted_state(state: object) -> PreparedActivationRecord:
+def _record_from_persisted_state(
+    state: object,
+) -> tuple[PreparedActivationRecord, str]:
     from controller.mpc_factory import MpcPairFactory
 
-    def pair(name: str) -> GreyControlPairDescriptor:
+    def pair(
+        name: str,
+    ) -> tuple[GreyControlPairDescriptor, GreyControlPairDescriptor]:
         raw = getattr(state, f"{name}_pair_json", None)
         if not isinstance(raw, str):
             raise ValueError(f"persisted activation is missing {name} pair")
         decoded = json.loads(raw)
         if not isinstance(decoded, dict):
             raise ValueError(f"persisted {name} pair must be an object")
-        descriptor = GreyControlPairDescriptor.from_dict(decoded)
-        return MpcPairFactory.migrate_legacy_descriptor(descriptor)
+        source = GreyControlPairDescriptor.from_dict(decoded)
+        return source, MpcPairFactory.migrate_legacy_descriptor(source)
 
-    return PreparedActivationRecord(
-        phase=ActivationPhase(getattr(state, "phase", None)),
-        transaction_id=_digest(getattr(state, "transaction_id", None), "transaction_id"),
-        timestamp_ms=0,
-        incumbent=pair("incumbent"),
-        candidate=pair("candidate"),
-        rollback=pair("rollback"),
-        origin=CandidateOrigin(getattr(state, "origin", None)),
-        policy=ActivationPolicy(getattr(state, "policy", None)),
-        decision_id=_nonblank(getattr(state, "evidence_decision_id", None), "decision_id"),
-        reason=getattr(state, "reason", None),
+    _source_incumbent, incumbent = pair("incumbent")
+    source_candidate, candidate = pair("candidate")
+    _source_rollback, rollback = pair("rollback")
+    return (
+        PreparedActivationRecord(
+            phase=ActivationPhase(getattr(state, "phase", None)),
+            transaction_id=_digest(
+                getattr(state, "transaction_id", None),
+                "transaction_id",
+            ),
+            timestamp_ms=0,
+            incumbent=incumbent,
+            candidate=candidate,
+            rollback=rollback,
+            origin=CandidateOrigin(getattr(state, "origin", None)),
+            policy=ActivationPolicy(getattr(state, "policy", None)),
+            decision_id=_nonblank(
+                getattr(state, "evidence_decision_id", None),
+                "decision_id",
+            ),
+            reason=getattr(state, "reason", None),
+        ),
+        source_candidate.model_digest,
     )
 
 
@@ -478,7 +495,7 @@ def recover_startup_activation(
     receipt_timeout: float | None = None,
 ) -> StartupActivationRecovery:
     """Converge a process restart to the pair selected by durable phase authority."""
-    record = _record_from_persisted_state(state)
+    record, source_candidate_digest = _record_from_persisted_state(state)
     if record.phase is ActivationPhase.PREPARED:
         aborted = record.transition(
             ActivationPhase.ABORTED,
@@ -505,4 +522,5 @@ def recover_startup_activation(
         restore=restore,
         rollback=record.rollback,
         record=record,
+        source_candidate_digest=source_candidate_digest,
     )

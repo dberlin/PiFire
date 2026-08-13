@@ -120,3 +120,13 @@ uv run pyright controller/mpc_factory.py controller/mpc.py controller/runtime/ru
 - Snapshot restore now hydrates validated challenger, candidate, window, cook-refit, activation, failure, evidence, origin/policy, and rollback state so the next snapshot round-trips the complete durable checkpoint.
 - Added focused ownership/digest/state-layout/restored-cadence/legacy migration/successive activation/refit-transfer/snapshot-roundtrip/API tests. LSP reference inventory was refreshed for `Controller` (69 references) and `GreyControlPairDescriptor` (119 references); the factory server snapshot remained stale after reload, so its production/test import inventory was confirmed with the repository fallback search and recorded as a tooling risk.
 - Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands. Parent validation commands remain those above.
+
+## Fix round 7
+
+- Parent validation reported nine focused activation/snapshot/API failures after 66 passes.
+- Added a versioned migration for the pre-Task3 nested descriptor shape `{schema, n_delay, parameters}`. It strictly validates the historical v4 fields, derives the complete flat native contract with the historical estimator/native defaults, preserves generations and transaction/phase authority, and recomputes the new native `model_digest` plus complete `ownership_digest`.
+- Startup recovery now retains the validated source candidate digest alongside the migrated descriptor identity. Historical rollback/fallback evidence may match only that source digest or the migrated digest from the same durable activation record; unrelated evidence remains excluded.
+- Updated prepared, active, aborted, rollback, and fallback startup expectations to the migrated identities. Restore tests now monkeypatch the concrete factory's public `restore` method rather than replacing `_pair_factory` with a partial `SimpleNamespace`.
+- Completed the `Controller.__new__` ownership fixture state with `_closed=False`, no learning owner, and no persistence worker so post-assertion `close()` exercises production ownership teardown rather than failing on missing fixture fields.
+- Expanded factory coverage for identified/unidentified nested migration, historical estimator cadence/noise defaults, exact restore, and every malformed nested schema/delay/parameter branch.
+- Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands. Parent should rerun the focused activation/snapshot/API group and factory branch gate.

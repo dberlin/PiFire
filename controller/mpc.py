@@ -658,6 +658,10 @@ class Controller(ControllerBase):
                 ),
                 receipt_timeout=2.0,
             )
+            candidate_digests = {
+                recovery.record.candidate.model_digest,
+                recovery.source_candidate_digest,
+            }
             lifecycle = max(
                 (
                     record
@@ -665,11 +669,11 @@ class Controller(ControllerBase):
                     if (
                         isinstance(record.payload, RollbackEvidence)
                         and record.payload.decision_id == recovery.record.decision_id
-                        and record.model_digest == recovery.record.candidate.model_digest
+                        and record.model_digest in candidate_digests
                     )
                     or (
                         isinstance(record.payload, FallbackEvidence)
-                        and record.payload.failed_digest == recovery.record.candidate.model_digest
+                        and record.payload.failed_digest in candidate_digests
                         and record.payload.failed_generation == recovery.record.candidate.role_generation
                     )
                 ),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Literal, Never
@@ -264,7 +265,7 @@ def factory(
     return pair_factory, ekf, kf, solver
 
 
-def descriptor(configuration: dict[str, object], *, estimator: str = "ekf") -> GreyControlPairDescriptor:
+def descriptor(configuration: Mapping[str, object], *, estimator: str = "ekf") -> GreyControlPairDescriptor:
     model_configuration = {
         key: value
         for key, value in configuration.items()
@@ -645,6 +646,111 @@ def test_restore_explicitly_migrates_the_exact_legacy_native_descriptor() -> Non
     }
     assert ekf.construction_inputs == [(5.0, 1e-2, 0.05, 0.04)]
     restored.close()
+
+
+@pytest.mark.parametrize(
+    ("theta", "residual_weight"),
+    ((50.0, 0.0), (40.0, 1_000.0)),
+)
+def test_restore_explicitly_migrates_pre_task3_nested_v4_descriptor(
+    theta: float,
+    residual_weight: float,
+) -> None:
+    events: list[str] = []
+    pair_factory, ekf, _kf, _solvers = factory(
+        events,
+        base_overrides={
+            "control_period": 9.0,
+            "est_q_temp": 0.91,
+            "est_q_dist": 0.92,
+            "est_r_meas": 0.93,
+        },
+    )
+    legacy_configuration = {
+        "schema": "pifire-grey-box-model/v4",
+        "n_delay": 8,
+        "parameters": {
+            "C_c": 320.0,
+            "K_Q": 350.0,
+            "theta": theta,
+            "h_amb": 0.5,
+            "T_amb": 20.0,
+            "sigma": 1.4e-9,
+        },
+    }
+    legacy = descriptor(legacy_configuration)
+
+    migrated = pair_factory.migrate_legacy_descriptor(legacy)
+    restored = pair_factory.restore(migrated)
+
+    assert restored.descriptor == migrated
+    assert migrated.model_digest != legacy.model_digest
+    assert migrated.configuration["theta"] == theta
+    assert migrated.configuration["residual_weight"] == residual_weight
+    assert migrated.configuration["horizon_steps"] == DEFAULT_MPC_CONFIG["n_horizon"]
+    assert migrated.configuration["delay_states"] == 8
+    assert migrated.configuration["state_size"] == 10
+    assert migrated.configuration["timestep_s"] == 25.0
+    assert migrated.configuration["control_period"] == 5.0
+    assert migrated.configuration["est_q_temp"] == 1e-2
+    assert migrated.configuration["est_q_dist"] == 0.05
+    assert migrated.configuration["est_r_meas"] == 0.04
+    assert ekf.construction_inputs == [(5.0, 1e-2, 0.05, 0.04)]
+    restored.close()
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    (
+        ("schema", "schema"),
+        ("boolean-delay", "integer 8"),
+        ("float-delay", "integer 8"),
+        ("wrong-delay", "integer 8"),
+        ("nonmapping-parameters", "parameters"),
+        ("missing-parameter", "parameters"),
+        ("boolean-parameter", "numeric"),
+        ("string-parameter", "numeric"),
+    ),
+)
+def test_nested_v4_migration_rejects_every_malformed_legacy_shape(
+    case: str,
+    message: str,
+) -> None:
+    legacy_configuration: dict[str, JsonValue] = {
+        "schema": "pifire-grey-box-model/v4",
+        "n_delay": 8,
+        "parameters": {
+            "C_c": 320.0,
+            "K_Q": 350.0,
+            "theta": 50.0,
+            "h_amb": 0.5,
+            "T_amb": 20.0,
+            "sigma": 1.4e-9,
+        },
+    }
+    if case == "schema":
+        legacy_configuration["schema"] = "other"
+    elif case == "boolean-delay":
+        legacy_configuration["n_delay"] = True
+    elif case == "float-delay":
+        legacy_configuration["n_delay"] = 8.0
+    elif case == "wrong-delay":
+        legacy_configuration["n_delay"] = 7
+    elif case == "nonmapping-parameters":
+        legacy_configuration["parameters"] = []
+    else:
+        parameters = legacy_configuration["parameters"]
+        assert isinstance(parameters, dict)
+        if case == "missing-parameter":
+            parameters.pop("theta")
+        elif case == "boolean-parameter":
+            parameters["theta"] = True
+        else:
+            parameters["theta"] = "bad"
+    legacy = descriptor(legacy_configuration)
+
+    with pytest.raises(ValueError, match=message):
+        MpcPairFactory.migrate_legacy_descriptor(legacy)
 
 
 def test_startup_recovery_migrates_every_legacy_pair_before_exact_restore() -> None:
