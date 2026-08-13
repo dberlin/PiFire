@@ -209,9 +209,9 @@ def test_artifact_generation_failure_is_read_only_and_returns_an_explicit_error(
 
 
 def test_report_route_exposes_the_accepted_calibration_command_high_water(client, monkeypatch):
-    from common import datastore_accessors
+    from common.persistence import control as control_persistence
 
-    monkeypatch.setattr(datastore_accessors, "mpc_calibration_command_revision", lambda: 7)
+    monkeypatch.setattr(control_persistence, "mpc_calibration_command_revision", lambda: 7)
 
     response = client.get("/api/model-evidence/report")
 
