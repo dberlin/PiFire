@@ -25,7 +25,6 @@ from common.model_evidence import (
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
-    OwnedGreyControlPair,
     PreparedActivationRecord,
     canonical_snapshot_digest,
 )
@@ -35,6 +34,7 @@ from controller.model_learning.contracts import (
     FitRequest,
     FitWindowIdentity,
 )
+from tests.unit.mpc._solver_fixtures import owned_pair
 from common.controller_model_state import ControllerModelStore
 
 from controller.mpc import Controller
@@ -429,7 +429,7 @@ def test_manual_policy_is_rejected_from_real_backend_candidate_assessment(client
 def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
     estimator = _ApiHandle()
     solver = _ApiHandle()
-    pair = OwnedGreyControlPair(candidate, estimator, solver)
+    pair = owned_pair(candidate, estimator, solver)
     monkeypatch.setattr(
         routes,
         "_model_evidence_projection",
@@ -445,6 +445,12 @@ def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
     )
     monkeypatch.setattr(routes, "_build_manual_candidate_pair", lambda _descriptor: pair)
     monkeypatch.setattr(routes, "_manual_candidate_dry_solve", lambda value: value is pair)
+    incumbent_owner = owned_pair(incumbent, _ApiHandle(), _ApiHandle())
+    monkeypatch.setattr(
+        routes,
+        "_manual_pair_factory",
+        lambda: SimpleNamespace(restore=lambda _descriptor: incumbent_owner),
+    )
     return pair, estimator, solver
 
 
@@ -479,7 +485,7 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
         candidate_generation=1,
         role_generation=1,
     )
-    candidate_pair = OwnedGreyControlPair(candidate, _ApiHandle(), _ApiHandle())
+    candidate_pair = owned_pair(candidate, _ApiHandle(), _ApiHandle())
     candidate_digest = candidate.model_digest
     request = FitRequest(
         request_id="request-api-operator",

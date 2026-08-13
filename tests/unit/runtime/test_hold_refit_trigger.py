@@ -16,12 +16,12 @@ from common.model_evidence import CandidateAssessmentEvidence, ConfidenceDecisio
 from common.control_trace import ActuationMode
 
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.model_learning.activation import OwnedGreyControlPair
 from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
     FrameObservation,
 )
+from tests.unit.mpc._solver_fixtures import owned_pair
 from controller.runtime.model_fitting import (
     PassiveGreyHistory,
     TeardownGreyHistory,
@@ -750,7 +750,7 @@ def test_completed_frame_feedback_and_observation_reach_incumbent_before_activat
         assert runner.latest().revision == 1
 
         _state, record = _pair_phase_state()
-        candidate_pair = OwnedGreyControlPair(record.candidate, _CloseHandle(), _CloseHandle())
+        candidate_pair = owned_pair(record.candidate, _CloseHandle(), _CloseHandle())
         durable = SimpleNamespace(accepted=True, completed=True, durable=True, error=None)
         transition = PreparedPairTransition(
             record,

@@ -16,10 +16,10 @@ import hashlib
 import json
 import logging
 import math
-from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 import time
 import threading
+from typing import Literal
 
 import numpy as np
 
@@ -45,13 +45,12 @@ from controller.mpc_allocator import AllocationResult
 from controller.mpc_config import (
     DEFAULT_MPC_CONFIG,
     finite_float,
-    model_is_identified,
     normalize_config,
     optional_float,
     sanitized_copy,
     warn_about_model,
 )
-from controller.mpc_core import MpcCore
+from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
 from common.model_evidence import (
     EvidenceKind,
@@ -74,7 +73,6 @@ from controller.runtime.model_fitting import (
     GreyFitWorker,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
-    TargetTimingEvidence,
     TeardownGreyHistory,
     TeardownRefitOutcome,
     TeardownRefitResult,
@@ -95,9 +93,7 @@ from controller.model_learning.activation import (
     ActivationManager,
     ActivationPhase,
     GreyControlPairDescriptor,
-    OwnedGreyControlPair,
     PreparedActivationRecord,
-    canonical_snapshot_digest,
     recover_startup_activation,
 )
 from controller.grey_box import GreyBoxPredictionAdapter
@@ -201,7 +197,6 @@ class Controller(ControllerBase):
         self._learning_rejected_updates = 0
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
-        self._activation_output_authorized = True
         self._active_activation_record: PreparedActivationRecord | None = None
         self._trace_diagnostics = None
         self._calibration = CalibrationCoordinator(predict_max_c=self._predict_calibration_max)
@@ -219,45 +214,27 @@ class Controller(ControllerBase):
         self._trace_baseline_allocation: AllocationResult | None = None
         self._trace_allocation: AllocationResult | None = None
         self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
-        self._core = MpcCore(
+        self._pair_factory = MpcPairFactory(
             cfg,
             units,
             cycle_data,
-            output_authorized=lambda: self._activation_output_authorized,
             adjust_load=self._adjust_core_load,
             model_authority=self._core_model_authority,
             on_policy_failure=self._handle_core_policy_failure,
         )
+        self._active_control_pair = self._pair_factory.build(
+            self._pair_factory.configured(
+                cfg,
+                candidate_generation=self._model_revision,
+                role_generation=self._model_revision,
+            ),
+            authorized=True,
+        )
+        self._core = self._active_control_pair.core
         self.cfg = self._core.config
         self.u_max = self._core.u_max
         warn_about_model(self.cfg)
-        live_configuration = {
-            name: getattr(self.mpc.config, name)
-            for name in self.mpc.config.__dataclass_fields__
-        }
-        live_descriptor = GreyControlPairDescriptor(
-            model_digest=canonical_snapshot_digest(live_configuration),
-            configuration=live_configuration,
-            estimator_kind=str(cfg["estimator"]),
-            solver_kind="acados-grey",
-            candidate_generation=self._model_revision,
-            role_generation=self._model_revision,
-        )
-        try:
-            self._active_control_pair = OwnedGreyControlPair(
-                live_descriptor,
-                self.estimator,
-                self.mpc,
-            )
-        except BaseException:
-            self._core.close()
-            raise
-        self._core.bind_resources(
-            self.estimator,
-            self.mpc,
-            self._active_control_pair.close,
-        )
-        self._rollback_control_pair: OwnedGreyControlPair | None = None
+        self._rollback_control_pair: OwnedMpcPair | None = None
         self._inert_activation: PreparedActivationRecord | None = None
         self._activation_terminated_reason: str | None = None
         self._failed_role_generations: set[int] = set()
@@ -295,11 +272,6 @@ class Controller(ControllerBase):
             raise
 
 
-    @staticmethod
-    def _close_component(component):
-        close = getattr(component, "close", None)
-        if callable(close):
-            close()
 
     @property
     def estimator(self):
@@ -367,39 +339,6 @@ class Controller(ControllerBase):
             ):
                 self.terminate_mpc_activation("native-failure-compensation-failed")
 
-    def _bind_core_pair(self, pair, *, reset_estimate=False):
-        self._core.bind_resources(
-            pair.estimator,
-            pair.solver,
-            pair.close,
-            reset_estimate=reset_estimate,
-        )
-
-    def _candidate_estimator(self, native_config):
-        candidate = dict(self.cfg)
-        for name in ("C_c", "h_amb", "T_amb", "theta", "K_Q", "sigma"):
-            candidate[name] = getattr(native_config, name)
-        return MpcCore.build_estimator(candidate, 8)
-
-    def _candidate_timing(self, solver):
-        state = np.zeros(10, dtype=float)
-        state[8] = float(solver.config.T_amb)
-        durations = []
-        for _ in range(5):
-            started = time.monotonic()
-            solver.solve(
-                state,
-                setpoint_c=float(solver.config.T_amb) + 50.0,
-                q_previous=0.0,
-                equilibrium_q=0.4,
-            )
-            durations.append((time.monotonic() - started) * 1_000.0)
-        return TargetTimingEvidence(
-            target="active-runtime",
-            samples=len(durations),
-            p99_ms=max(durations),
-            limit_ms=self.get_control_period() * 200.0,
-        )
 
     def _learning_identity(self):
         document = {
@@ -427,14 +366,14 @@ class Controller(ControllerBase):
             identity=self._learning_identity(),
             config=self.mpc.config,
             incumbent_pair=CandidatePair(self.estimator, self.mpc),
-            estimator_factory=self._candidate_estimator,
-            controller_factory=MpcCore.build_solver,
-            timing_probe=self._candidate_timing,
+            estimator_factory=self._pair_factory.build_estimator,
+            controller_factory=self._pair_factory.build_solver,
+            timing_probe=self._pair_factory.probe_solver,
         )
         try:
             learning.start()
         except BaseException:
-            self._close_component(learning)
+            learning.close()
             raise
         return learning
 
@@ -459,16 +398,16 @@ class Controller(ControllerBase):
         return error
 
     @property
-    def active_control_pair(self) -> OwnedGreyControlPair:
+    def active_control_pair(self) -> OwnedMpcPair:
         return self._active_control_pair
 
     @property
-    def rollback_control_pair(self) -> OwnedGreyControlPair | None:
+    def rollback_control_pair(self) -> OwnedMpcPair | None:
         return self._rollback_control_pair
 
     @property
     def activation_output_authorized(self) -> bool:
-        return self._activation_output_authorized
+        return self._active_control_pair.authorized
 
     @property
     def failed_role_generations(self) -> frozenset[int]:
@@ -476,12 +415,12 @@ class Controller(ControllerBase):
 
     def install_candidate_pair_inert(
         self,
-        pair: OwnedGreyControlPair,
+        pair: OwnedMpcPair,
         record: PreparedActivationRecord,
     ) -> bool:
         """Install both handles while making every solve/output path illegal."""
         if (
-            not isinstance(pair, OwnedGreyControlPair)
+            not isinstance(pair, OwnedMpcPair)
             or not isinstance(record, PreparedActivationRecord)
             or record.phase is not ActivationPhase.PREPARED
             or pair.descriptor != record.candidate
@@ -490,11 +429,11 @@ class Controller(ControllerBase):
             return False
         if self._inert_activation is not None:
             return self._inert_activation.transaction_id == record.transaction_id
+        pair.revoke_output()
         self._rollback_control_pair = self._active_control_pair
         self._active_control_pair = pair
-        self._bind_core_pair(pair)
+        self._core = pair.core
         self._inert_activation = record
-        self._activation_output_authorized = False
         return True
 
     def authorize_candidate_pair(self, record: PreparedActivationRecord) -> bool:
@@ -508,8 +447,8 @@ class Controller(ControllerBase):
             or record.candidate != self._active_control_pair.descriptor
         ):
             return False
+        self._active_control_pair.authorize_output()
         self._rotate_teardown_role_generation(record.candidate.role_generation)
-        self._activation_output_authorized = True
         self._active_activation_record = record
         self._inert_activation = None
         self._model_revision = max(self._model_revision, record.candidate.role_generation)
@@ -537,7 +476,7 @@ class Controller(ControllerBase):
 
     def compensate_candidate_pair(
         self,
-        pair: OwnedGreyControlPair,
+        pair: OwnedMpcPair,
         record: PreparedActivationRecord,
         _reason: str,
     ) -> bool:
@@ -550,12 +489,12 @@ class Controller(ControllerBase):
             or rollback.descriptor != record.incumbent
         ):
             return False
+        rollback.authorize_output()
         self._active_control_pair = rollback
-        self._bind_core_pair(rollback)
+        self._core = rollback.core
         self._rollback_control_pair = None
         self._inert_activation = None
         self._active_activation_record = None
-        self._activation_output_authorized = True
         self._model_revision = max(self._model_revision, record.candidate.role_generation + 1)
         self._rotate_teardown_role_generation(self._model_revision)
         timestamp_ms = time.time_ns() // 1_000_000
@@ -587,17 +526,18 @@ class Controller(ControllerBase):
         return True
 
     def terminate_mpc_activation(self, reason: str) -> None:
-        self._activation_output_authorized = False
+        self._active_control_pair.revoke_output()
         self._activation_terminated_reason = reason
 
     def _restore_activation_rollback(self, reason: str, *, emit_fallback: bool) -> bool:
         rollback = self._rollback_control_pair
-        if rollback is None or not self._activation_output_authorized:
+        if rollback is None or not self._active_control_pair.authorized:
             return False
         failed = self._active_control_pair
         activation_record = self._active_activation_record
+        rollback.authorize_output()
         self._active_control_pair = rollback
-        self._bind_core_pair(rollback)
+        self._core = rollback.core
         self._rollback_control_pair = None
         self._failed_role_generations.add(failed.descriptor.role_generation)
         self._model_revision = max(self._model_revision, failed.descriptor.role_generation + 1)
@@ -654,7 +594,6 @@ class Controller(ControllerBase):
             )
         self._active_activation_record = None
         self._inert_activation = None
-        self._activation_output_authorized = True
         return True
 
     def _activation_persistence_channel(self):
@@ -677,46 +616,13 @@ class Controller(ControllerBase):
             raise TypeError("activation confidence must be confidence-decision evidence")
         return self._activation_persistence_channel().submit_activation_confidence(record)
 
-    def _build_pair_from_descriptor(
-        self,
-        descriptor: GreyControlPairDescriptor,
-    ) -> OwnedGreyControlPair:
-        candidate_cfg = dict(self.cfg)
-        configuration = dict(descriptor.configuration)
-        nested = configuration.get("controller_config")
-        if isinstance(nested, Mapping):
-            candidate_cfg.update(nested)
-        else:
-            field_map = {
-                "C_c": "C_c",
-                "h_amb": "h_amb",
-                "T_amb": "T_amb",
-                "theta": "theta",
-                "K_Q": "K_Q",
-                "sigma": "sigma",
-                "horizon_steps": "n_horizon",
-                "temperature_weight": "Q_w",
-                "move_weight": "R_dQ",
-            }
-            for source, target in field_map.items():
-                if source in configuration:
-                    candidate_cfg[target] = configuration[source]
-        candidate_cfg["estimator"] = descriptor.estimator_kind
-        estimator, solver = MpcCore.build_components(
-            candidate_cfg,
-            model_identified=model_is_identified(candidate_cfg, self._model_meta),
-        )
-        actual_digest = grey_config_digest(solver.config)
-        if actual_digest != descriptor.model_digest:
-            self._close_component(solver)
-            self._close_component(estimator)
-            raise ValueError("restored pair configuration digest changed")
-        return OwnedGreyControlPair(descriptor, estimator, solver)
 
     def restore_activation(self, persisted, records):
         """Converge startup before authorizing the pair selected by durable authority."""
         records = tuple(records)
         worker = self._activation_persistence_channel()
+        restored: OwnedMpcPair | None = None
+        rollback: OwnedMpcPair | None = None
         try:
             recovery = recover_startup_activation(
                 persisted,
@@ -745,27 +651,28 @@ class Controller(ControllerBase):
                 default=None,
             )
             restore_descriptor = recovery.rollback if lifecycle is not None else recovery.restore
-            restored = self._build_pair_from_descriptor(restore_descriptor)
+            restored = self._pair_factory.restore(restore_descriptor)
             rollback = (
-                self._build_pair_from_descriptor(recovery.rollback)
+                self._pair_factory.restore(recovery.rollback)
                 if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None
                 else None
             )
         except Exception:
-            candidate = locals().get("restored")
-            if isinstance(candidate, OwnedGreyControlPair):
-                candidate.close()
+            if restored is not None:
+                restored.close()
+            return False
+        if restored is None:
             return False
         retired_active = self._active_control_pair
         retired_rollback = self._rollback_control_pair
+        restored.authorize_output()
         self._active_control_pair = restored
         self._rollback_control_pair = rollback
-        self._bind_core_pair(restored)
+        self._core = restored.core
         self._inert_activation = None
         self._active_activation_record = (
             recovery.record if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None else None
         )
-        self._activation_output_authorized = True
         restored_generation = recovery.restore.role_generation
         if lifecycle is not None:
             restored_generation = lifecycle.role_generation
@@ -1341,24 +1248,34 @@ class Controller(ControllerBase):
         candidate_result = getattr(preparation, "candidate", None)
         request = getattr(candidate_result, "request", None)
         native_config = getattr(candidate_result, "config", None)
-        if candidate_pair is None or request is None or native_config is None:
+        raw_estimator_kind = self.cfg.get("estimator")
+        if raw_estimator_kind == "ekf":
+            estimator_kind: Literal["ekf", "kf"] = "ekf"
+        elif raw_estimator_kind == "kf":
+            estimator_kind = "kf"
+        else:
             raise ValueError("candidate preparation is incomplete")
-        configuration = {name: getattr(native_config, name) for name in native_config.__dataclass_fields__}
-        candidate_descriptor = GreyControlPairDescriptor(
-            model_digest=canonical_snapshot_digest(configuration),
-            configuration=configuration,
-            estimator_kind=str(self.cfg["estimator"]),
-            solver_kind="acados-grey",
-            candidate_generation=request.candidate_generation,
-            role_generation=request.window.role_generation + 1,
-        )
-        if candidate_descriptor.model_digest != preparation.candidate_digest:
-            raise ValueError("candidate-digest-changed")
-        owned_candidate = OwnedGreyControlPair(
-            candidate_descriptor,
+        if (
+            candidate_pair is None
+            or request is None
+            or not isinstance(native_config, GreyBoxMPCConfig)
+        ):
+            raise ValueError("candidate preparation is incomplete")
+        owned_candidate = self._pair_factory.adopt(
+            self._pair_factory.native(
+                native_config,
+                estimator_kind=estimator_kind,
+                candidate_generation=request.candidate_generation,
+                role_generation=request.window.role_generation + 1,
+            ),
             candidate_pair.estimator,
             candidate_pair.controller,
+            authorized=False,
         )
+        candidate_descriptor = owned_candidate.descriptor
+        if candidate_descriptor.model_digest != preparation.candidate_digest:
+            owned_candidate.close()
+            raise ValueError("candidate-digest-changed")
         worker = self._activation_persistence_channel()
         receipts = []
 
@@ -1366,15 +1283,18 @@ class Controller(ControllerBase):
             receipt = worker.submit_activation_phase(record, expected_phase=None)
             receipts.append(receipt)
             return receipt
+        def build_candidate(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
+            if descriptor != candidate_descriptor:
+                raise ValueError("candidate-digest-changed")
+            return owned_candidate
+
 
         manager = ActivationManager(
             incumbent_pair=self._active_control_pair,
-            build_candidate=lambda descriptor: (
-                owned_candidate
-                if descriptor == candidate_descriptor
-                else (_ for _ in ()).throw(ValueError("candidate-digest-changed"))
+            build_candidate=build_candidate,
+            validate_candidate=lambda pair: (
+                pair is owned_candidate and self._pair_factory.validate(pair)
             ),
-            validate_candidate=lambda pair: pair is owned_candidate,
             native_dry_solve=lambda _pair: bool(preparation.dry_solve_finite),
             persist_prepared=persist_prepared,
             receipt_timeout=2.0,
@@ -1995,25 +1915,19 @@ class Controller(ControllerBase):
         # model it already had.
         try:
             restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
-            rebuilt = MpcCore.build_components(
-                merged,
-                model_identified=owned["identification"]["status"] == "identified",
-            )
-            restored_pair = OwnedGreyControlPair(
-                restored_descriptor,
-                rebuilt[0],
-                rebuilt[1],
-            )
+            restored_pair = self._pair_factory.restore(restored_descriptor)
+            restored_pair.authorize_output()
         except Exception as exc:
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
         old_pair = self._active_control_pair
         old_learning = self._learning
-        self.cfg.update(merged)
+        self.cfg = restored_pair.core.config
         self._active_control_pair = restored_pair
-        self._bind_core_pair(restored_pair, reset_estimate=True)
+        self._core = restored_pair.core
         self._learning = None
-        self._close_component(old_learning)
+        if old_learning is not None:
+            old_learning.close()
         old_pair.close()
         # Said for the model that will actually solve. __init__'s own call saw
         # only the configured parameters, which for a grill that has been
@@ -2038,13 +1952,11 @@ class Controller(ControllerBase):
         self.get_model_snapshot()
         return True
 
-    @staticmethod
-    def _close_prepared_candidate(preparation) -> None:
+    def _close_prepared_candidate(self, preparation) -> None:
         pair = getattr(preparation, "candidate_pair", None)
         if pair is None:
             return
-        Controller._close_component(getattr(pair, "controller", None))
-        Controller._close_component(getattr(pair, "estimator", None))
+        self._pair_factory.close_components(pair.estimator, pair.controller)
 
     def _persist_operator_teardown_authority(self, window, descriptor) -> str:
         session_id = getattr(self, "_learning_session_id", None) or "mpc-learning"
@@ -2138,7 +2050,8 @@ class Controller(ControllerBase):
             self._learning = None
             self._learning_pending_origin = None
             self._learning_candidate_pair = None
-        self._close_component(learning)
+        if learning is not None:
+            learning.close()
 
         worker = GreyFitWorker()
         try:
@@ -2189,9 +2102,9 @@ class Controller(ControllerBase):
         preparation = prepare_candidate_off_path(
             success,
             incumbent_pair=CandidatePair(self.estimator, self.mpc),
-            estimator_factory=self._candidate_estimator,
-            controller_factory=MpcCore.build_solver,
-            timing_probe=self._candidate_timing,
+            estimator_factory=self._pair_factory.build_estimator,
+            controller_factory=self._pair_factory.build_solver,
+            timing_probe=self._pair_factory.probe_solver,
         )
         if not preparation.accepted:
             reason = ",".join(preparation.blockers) or "candidate-preparation-rejected"
@@ -2585,7 +2498,8 @@ class Controller(ControllerBase):
         learning = self._learning
         self._learning = None
         try:
-            self._close_component(learning)
+            if learning is not None:
+                learning.close()
         except BaseException as error:
             errors.append(error)
         with self._activation_persistence_lock:

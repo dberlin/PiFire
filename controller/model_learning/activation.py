@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar, runtime_checkable
 from common.web_contracts.learning import ModelActivationRequest
 
 from .contracts import ActivationPolicy, CandidateOrigin
 
 
-_PairT = TypeVar("_PairT", bound="OwnedGreyControlPair")
+_PairT = TypeVar("_PairT", bound="ActivationPair")
 _POLICY_BY_ORIGIN = {
     CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
     CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
@@ -135,54 +134,32 @@ class GreyControlPairDescriptor:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> GreyControlPairDescriptor:
+        configuration = value.get("configuration")
+        if not isinstance(configuration, Mapping):
+            raise ValueError("configuration must be a mapping")
+        ownership_digest = value.get("ownership_digest", "")
+        if not isinstance(ownership_digest, str):
+            raise ValueError("ownership_digest must be a string")
         return cls(
-            model_digest=value.get("model_digest"),  # type: ignore[arg-type]
-            configuration=value.get("configuration"),  # type: ignore[arg-type]
-            estimator_kind=value.get("estimator_kind"),  # type: ignore[arg-type]
-            solver_kind=value.get("solver_kind"),  # type: ignore[arg-type]
-            candidate_generation=value.get("candidate_generation"),  # type: ignore[arg-type]
-            role_generation=value.get("role_generation"),  # type: ignore[arg-type]
-            ownership_digest=value.get("ownership_digest", ""),  # type: ignore[arg-type]
+            model_digest=_digest(value.get("model_digest"), "model_digest"),
+            configuration=configuration,
+            estimator_kind=_nonblank(value.get("estimator_kind"), "estimator_kind"),
+            solver_kind=_nonblank(value.get("solver_kind"), "solver_kind"),
+            candidate_generation=_generation(
+                value.get("candidate_generation"),
+                "candidate_generation",
+            ),
+            role_generation=_generation(value.get("role_generation"), "role_generation"),
+            ownership_digest=ownership_digest,
         )
 
-
-@dataclass(frozen=True, slots=True)
-class OwnedGreyControlPair:
-    """One indivisible in-memory estimator/native solver ownership unit."""
+@runtime_checkable
+class ActivationPair(Protocol):
+    """Concrete structural contract consumed by the pure activation domain."""
 
     descriptor: GreyControlPairDescriptor
-    estimator: object
-    solver: object
-    _close_lock: threading.Lock = field(init=False, repr=False, compare=False)
-    _closed: bool = field(default=False, init=False, repr=False, compare=False)
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.descriptor, GreyControlPairDescriptor):
-            raise TypeError("descriptor must be a GreyControlPairDescriptor")
-        if self.estimator is None or self.solver is None:
-            raise ValueError("pair requires estimator and solver handles")
-        object.__setattr__(self, "_close_lock", threading.Lock())
-
-    @property
-    def closed(self) -> bool:
-        with self._close_lock:
-            return self._closed
-
-    def close(self) -> None:
-        with self._close_lock:
-            if self._closed:
-                return
-            object.__setattr__(self, "_closed", True)
-        errors: list[BaseException] = []
-        for handle in (self.solver, self.estimator):
-            close = getattr(handle, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except BaseException as error:
-                    errors.append(error)
-        if errors:
-            raise RuntimeError("could not close complete grey control pair") from errors[0]
+    def close(self) -> None: ...
 
 
 
@@ -298,12 +275,12 @@ class _DurableReceipt(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class ActivationDecision:
+class ActivationDecision(Generic[_PairT]):
     accepted: bool
     reason: str
     phase: ActivationPhase | None
-    incumbent_pair: OwnedGreyControlPair
-    candidate_pair: OwnedGreyControlPair | None = None
+    incumbent_pair: ActivationPair
+    candidate_pair: _PairT | None = None
     record: PreparedActivationRecord | None = None
 
 
@@ -313,7 +290,7 @@ class ActivationManager(Generic[_PairT]):
     def __init__(
         self,
         *,
-        incumbent_pair: OwnedGreyControlPair,
+        incumbent_pair: ActivationPair,
         build_candidate: Callable[[GreyControlPairDescriptor], _PairT],
         validate_candidate: Callable[[_PairT], bool],
         native_dry_solve: Callable[[_PairT], bool],
@@ -321,8 +298,8 @@ class ActivationManager(Generic[_PairT]):
         clock_ms: Callable[[], int] | None = None,
         receipt_timeout: float | None = None,
     ) -> None:
-        if not isinstance(incumbent_pair, OwnedGreyControlPair):
-            raise TypeError("incumbent_pair must be an OwnedGreyControlPair")
+        if not isinstance(incumbent_pair, ActivationPair):
+            raise TypeError("incumbent_pair must satisfy ActivationPair")
         self._active_pair = incumbent_pair
         self._build_candidate = build_candidate
         self._validate_candidate = validate_candidate
@@ -330,14 +307,14 @@ class ActivationManager(Generic[_PairT]):
         self._persist_prepared = persist_prepared
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         self._receipt_timeout = receipt_timeout
-        self._prepared: ActivationDecision | None = None
+        self._prepared: ActivationDecision[_PairT] | None = None
 
     @property
-    def active_pair(self) -> OwnedGreyControlPair:
+    def active_pair(self) -> ActivationPair:
         return self._active_pair
 
     @property
-    def prepared(self) -> ActivationDecision | None:
+    def prepared(self) -> ActivationDecision[_PairT] | None:
         return self._prepared
 
     def prepare(
@@ -347,7 +324,7 @@ class ActivationManager(Generic[_PairT]):
         *,
         origin: CandidateOrigin,
         policy: ActivationPolicy,
-    ) -> ActivationDecision:
+    ) -> ActivationDecision[_PairT]:
         if not isinstance(request, ModelActivationRequest):
             raise TypeError("request must be a ModelActivationRequest")
         if not isinstance(candidate, GreyControlPairDescriptor):
@@ -368,7 +345,7 @@ class ActivationManager(Generic[_PairT]):
             candidate_pair = self._build_candidate(candidate)
         except Exception:
             return self._reject("candidate-build-failed")
-        if not isinstance(candidate_pair, OwnedGreyControlPair) or candidate_pair.descriptor != candidate:
+        if not isinstance(candidate_pair, ActivationPair) or candidate_pair.descriptor != candidate:
             self._close_failed(candidate_pair)
             return self._reject("candidate-build-failed")
         try:
@@ -431,17 +408,15 @@ class ActivationManager(Generic[_PairT]):
         self._prepared = decision
         return decision
 
-    def _reject(self, reason: str) -> ActivationDecision:
+    def _reject(self, reason: str) -> ActivationDecision[_PairT]:
         return ActivationDecision(False, reason, None, self._active_pair)
 
     @staticmethod
-    def _close_failed(pair: object) -> None:
-        close = getattr(pair, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                pass
+    def _close_failed(pair: ActivationPair) -> None:
+        try:
+            pair.close()
+        except Exception:
+            pass
 
 
 @dataclass(frozen=True, slots=True)

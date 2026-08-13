@@ -7,8 +7,9 @@ import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
-from controller.model_learning.activation import ActivationPhase, OwnedGreyControlPair, PreparedActivationRecord
+from controller.model_learning.activation import ActivationPhase, PreparedActivationRecord
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from tests.unit.mpc._solver_fixtures import owned_pair
 
 
 class _Estimator:
@@ -122,11 +123,7 @@ def test_dynamic_controller_composes_config_control_status_and_trace_contract(mo
     )
     candidate_estimator = _Estimator()
     candidate_solver = _Solver(solver.config)
-    candidate = OwnedGreyControlPair(
-        candidate_descriptor,
-        candidate_estimator,
-        candidate_solver,
-    )
+    candidate = owned_pair(candidate_descriptor, candidate_estimator, candidate_solver)
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent.descriptor,

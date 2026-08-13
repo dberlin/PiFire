@@ -229,6 +229,8 @@ class MpcCore:
         ekf_factory: EkfFactory | None = None,
         kf_factory: KfFactory | None = None,
         solver_factory: SolverFactory | None = None,
+        components: tuple[MpcEstimator, MpcSolver] | None = None,
+        model_identified: bool | None = None,
     ) -> None:
         self.config = normalize_config(config)
         self.units = units
@@ -239,13 +241,21 @@ class MpcCore:
         self._on_policy_failure = on_policy_failure
 
         revision, metadata = model_authority()
-        self._estimator, self._solver = self.build_components(
-            self.config,
-            model_identified=model_is_identified(self.config, metadata),
-            ekf_factory=ekf_factory,
-            kf_factory=kf_factory,
-            solver_factory=solver_factory,
-        )
+        if components is None:
+            identified = (
+                model_is_identified(self.config, metadata)
+                if model_identified is None
+                else model_identified
+            )
+            self._estimator, self._solver = self.build_components(
+                self.config,
+                model_identified=identified,
+                ekf_factory=ekf_factory,
+                kf_factory=kf_factory,
+                solver_factory=solver_factory,
+            )
+        else:
+            self._estimator, self._solver = components
         self._close_resources: Callable[[], None] | None = lambda: _close_handles(
             self._estimator,
             self._solver,
@@ -390,6 +400,7 @@ class MpcCore:
         self._close_resources = close_resources
         if reset_estimate:
             self._x_hat = None
+
 
     def set_target(self, set_point: float) -> None:
         self._set_point_c = to_celsius(set_point, self.units)

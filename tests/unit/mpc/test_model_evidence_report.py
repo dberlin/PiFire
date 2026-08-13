@@ -34,7 +34,6 @@ from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.model_learning.activation import (
     GreyControlPairDescriptor,
-    OwnedGreyControlPair,
 )
 from controller.model_learning.report import (
     backend_learning_report,
@@ -43,6 +42,7 @@ from controller.model_learning.report import (
     current_learning_report,
 )
 from controller.runtime.model_fitting import grey_config_digest
+from tests.unit.mpc._solver_fixtures import owned_pair
 
 
 _CANDIDATE = "b" * 64
@@ -533,11 +533,7 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     preparation = SimpleNamespace(
         accepted=True,
         candidate_digest=candidate_digest,
-        candidate_pair=OwnedGreyControlPair(
-            candidate_descriptor,
-            object(),
-            object(),
-        ),
+        candidate_pair=owned_pair(candidate_descriptor, object(), object()),
         candidate=SimpleNamespace(
             request=request,
             config=native_config,

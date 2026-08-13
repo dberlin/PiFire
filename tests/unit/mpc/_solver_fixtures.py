@@ -6,7 +6,48 @@ without importing a test module directly (importing a test module runs its
 module-level code and collection side effects, and couples the two files).
 """
 
+from controller.acados import GreyBoxMPCConfig
+from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_core import MpcCore
+from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
+
+
+def owned_pair(descriptor, estimator, solver) -> OwnedMpcPair:
+    native = getattr(solver, "config", None)
+    if isinstance(native, GreyBoxMPCConfig):
+        pair_factory = MpcPairFactory(
+            DEFAULT_MPC_CONFIG,
+            "C",
+            CYCLE,
+            adjust_load=lambda load, _temperature: load,
+            model_authority=lambda: (0, None),
+            on_policy_failure=lambda _error: None,
+        )
+        pair = pair_factory.adopt(
+            pair_factory.native(
+                native,
+                estimator_kind=descriptor.estimator_kind,
+                candidate_generation=descriptor.candidate_generation,
+                role_generation=descriptor.role_generation,
+            ),
+            estimator,
+            solver,
+            authorized=False,
+        )
+        if pair.descriptor != descriptor:
+            pair.close()
+            raise ValueError("test pair descriptor does not match solver config")
+        return pair
+    core = MpcCore(
+        DEFAULT_MPC_CONFIG,
+        "C",
+        CYCLE,
+        components=(estimator, solver),
+    )
+    return OwnedMpcPair(core, descriptor)
+
 
 
 def _config(**overrides):

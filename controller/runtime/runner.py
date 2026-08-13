@@ -43,10 +43,10 @@ from common.model_evidence import (
 
 from controller.model_learning.activation import (
     ActivationPhase,
-    OwnedGreyControlPair,
     PreparedActivationRecord,
 )
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
+from controller.mpc_factory import OwnedMpcPair
 from controller.mpc_allocator import AllocationResult
 
 if TYPE_CHECKING:
@@ -801,7 +801,7 @@ class PreparedPairTransition:
     """A durable prepared receipt plus the exact inert pair to install once."""
 
     record: PreparedActivationRecord
-    candidate_pair: OwnedGreyControlPair
+    candidate_pair: OwnedMpcPair
     prepared_receipt: object
     persist_phase: Callable[[PreparedActivationRecord, ActivationPhase | None], object]
 
@@ -810,8 +810,8 @@ class PreparedPairTransition:
             raise TypeError("record must be a PreparedActivationRecord")
         if self.record.phase is not ActivationPhase.PREPARED:
             raise ValueError("runner transition requires prepared phase")
-        if not isinstance(self.candidate_pair, OwnedGreyControlPair):
-            raise TypeError("candidate_pair must be an OwnedGreyControlPair")
+        if not isinstance(self.candidate_pair, OwnedMpcPair):
+            raise TypeError("candidate_pair must be an OwnedMpcPair")
         if self.candidate_pair.descriptor != self.record.candidate:
             raise ValueError("candidate pair does not match prepared transaction")
         if not callable(self.persist_phase):

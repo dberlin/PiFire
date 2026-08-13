@@ -11,11 +11,11 @@ from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
-    OwnedGreyControlPair,
     PreparedActivationRecord,
     canonical_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FrameObservation
+from tests.unit.mpc._solver_fixtures import owned_pair
 from common.control_trace import (
     ActuationMode,
     HorizonScorePayload,
@@ -2344,7 +2344,7 @@ def _durable_receipt() -> DurableActivationReceipt:
 
 def test_durable_prepared_receipt_precedes_one_frame_boundary_swap_and_active_authority() -> None:
     _incumbent, candidate, prepared = _runner_activation_fixture()
-    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    pair = owned_pair(candidate, _PairHandle(), _PairHandle())
     active_receipt = DurableActivationReceipt(accepted=True)
     persist_calls = []
 
@@ -2385,7 +2385,7 @@ def test_active_cas_failure_restores_exact_incumbent_then_durably_aborts() -> No
     incumbent, candidate, prepared = _runner_activation_fixture()
     estimator = _PairHandle()
     solver = _PairHandle()
-    pair = OwnedGreyControlPair(candidate, estimator, solver)
+    pair = owned_pair(candidate, estimator, solver)
     active_receipt = DurableActivationReceipt(accepted=True)
     aborted_receipt = _durable_receipt()
     persist_calls = []
@@ -2423,7 +2423,7 @@ def test_active_cas_failure_restores_exact_incumbent_then_durably_aborts() -> No
 
 def test_queued_blocking_confidence_cannot_be_overtaken_by_active_cas() -> None:
     _incumbent, candidate, prepared = _runner_activation_fixture()
-    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    pair = owned_pair(candidate, _PairHandle(), _PairHandle())
     confidence_started = threading.Event()
     release_confidence = threading.Event()
     calls = []
@@ -2502,7 +2502,7 @@ def test_queued_blocking_confidence_cannot_be_overtaken_by_active_cas() -> None:
 
 def test_ambiguous_compensation_terminates_mpc_without_another_update() -> None:
     _incumbent, candidate, prepared = _runner_activation_fixture()
-    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    pair = owned_pair(candidate, _PairHandle(), _PairHandle())
     active_receipt = DurableActivationReceipt(accepted=True)
 
     core = _ActivationCore(compensation=False)
@@ -2572,7 +2572,7 @@ def test_failed_active_recovery_terminalizes_before_configured_pair_can_update()
     update_calls = []
     original_update = core.update
     core.update = lambda current: (update_calls.append(current), original_update(current))[1]
-    core._build_pair_from_descriptor = lambda _descriptor: (_ for _ in ()).throw(
+    core._pair_factory.restore = lambda _descriptor: (_ for _ in ()).throw(
         RuntimeError("candidate artifact unavailable")
     )
     runner = ThreadedControllerRunner(core)
@@ -2587,7 +2587,7 @@ def test_failed_active_recovery_terminalizes_before_configured_pair_can_update()
         runner.stop()
 def test_duplicate_transaction_is_never_installed_twice() -> None:
     _incumbent, candidate, prepared = _runner_activation_fixture()
-    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    pair = owned_pair(candidate, _PairHandle(), _PairHandle())
     active_receipt = _durable_receipt()
     transition = PreparedPairTransition(
         prepared,
@@ -2612,7 +2612,7 @@ def test_duplicate_transaction_is_never_installed_twice() -> None:
 
 def test_automatic_learning_handoff_reaches_the_same_durable_frame_boundary_path() -> None:
     _incumbent, candidate, prepared = _runner_activation_fixture()
-    pair = OwnedGreyControlPair(candidate, _PairHandle(), _PairHandle())
+    pair = owned_pair(candidate, _PairHandle(), _PairHandle())
     transition = PreparedPairTransition(
         prepared,
         pair,

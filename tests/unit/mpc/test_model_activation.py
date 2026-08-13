@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import collections
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import json
 import threading
 import time
@@ -25,7 +25,6 @@ from controller.model_learning.activation import (
     ActivationManager,
     ActivationPhase,
     GreyControlPairDescriptor,
-    OwnedGreyControlPair,
     PreparedActivationRecord,
     canonical_snapshot_digest,
     recover_startup_activation,
@@ -36,6 +35,11 @@ from controller.mpc import Controller as MpcController
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
 from tests.unit.mpc._solver_fixtures import CYCLE, _config as _mpc_config, _Estimator, _Solver
+from controller.mpc_core import MpcCore
+from controller.acados import GreyBoxMPCConfig
+from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_factory import MpcPairFactory
+from controller.mpc_factory import OwnedMpcPair
 
 
 _INCUMBENT_CONFIG = {
@@ -83,8 +87,26 @@ def _descriptor(
     )
 
 
-def _owned(descriptor: GreyControlPairDescriptor, name: str) -> OwnedGreyControlPair:
-    return OwnedGreyControlPair(descriptor, _Handle(f"{name}-estimator"), _Handle(f"{name}-solver"))
+def _owned_with_handles(
+    descriptor: GreyControlPairDescriptor,
+    estimator,
+    solver,
+) -> OwnedMpcPair:
+    numerical = MpcCore(
+        _mpc_config(),
+        "C",
+        dict(CYCLE),
+        components=(estimator, solver),
+    )
+    return OwnedMpcPair(numerical, descriptor)
+
+
+def _owned(descriptor: GreyControlPairDescriptor, name: str) -> OwnedMpcPair:
+    return _owned_with_handles(
+        descriptor,
+        _Handle(f"{name}-estimator"),
+        _Handle(f"{name}-solver"),
+    )
 
 
 def _manager(
@@ -102,19 +124,19 @@ def _manager(
     records: list[PreparedActivationRecord] = []
     durable_receipt = _Receipt() if receipt is None else receipt
 
-    def build(descriptor: GreyControlPairDescriptor) -> OwnedGreyControlPair:
+    def build(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
         calls.append("build")
         assert descriptor is candidate_descriptor
         if build_error is not None:
             raise build_error
         return candidate
 
-    def validate(pair: OwnedGreyControlPair) -> bool:
+    def validate(pair: OwnedMpcPair) -> bool:
         calls.append("validate")
         assert pair is candidate
         return validation
 
-    def solve(pair: OwnedGreyControlPair) -> bool:
+    def solve(pair: OwnedMpcPair) -> bool:
         calls.append("dry-solve")
         assert pair is candidate
         return dry_solve
@@ -449,7 +471,7 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
         return _owned(descriptor, f"restored-{len(built)}")
 
     core._activation_persistence_worker = object()
-    core._build_pair_from_descriptor = build
+    core._pair_factory = SimpleNamespace(restore=build)
 
     assert core.restore_activation(persisted, (lifecycle,))
 
@@ -474,6 +496,7 @@ def _bare_mpc_pair_owner():
         policy=ActivationPolicy.PASSIVE_AUTO,
         decision_id="decision-runtime",
     )
+    incumbent.authorize_output()
     core = MpcController.__new__(MpcController)
     numerical = SimpleNamespace(
         estimator=incumbent.estimator,
@@ -485,10 +508,8 @@ def _bare_mpc_pair_owner():
         setattr(numerical, "solver", solver),
     )
     core._core = numerical
-    core._active_control_pair = incumbent
     core._rollback_control_pair = None
     core._inert_activation = None
-    core._activation_output_authorized = True
     core._activation_terminated_reason = None
     core._activation_persistence_lock = threading.Lock()
     core._failed_role_generations = set()
@@ -496,6 +517,14 @@ def _bare_mpc_pair_owner():
     core._model_revision = 4
     core._learning_role_generation = 4
     core._teardown_history = TeardownGreyHistory(role_generation=4, max_observations=120)
+    core._pair_factory = MpcPairFactory(
+        DEFAULT_MPC_CONFIG,
+        "C",
+        dict(CYCLE),
+        adjust_load=lambda load, _temperature: load,
+        model_authority=lambda: (core._model_revision, None),
+        on_policy_failure=lambda _error: None,
+    )
     return core, incumbent, candidate, prepared
 
 
@@ -515,12 +544,11 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
             calls.append(("phase", record, expected_phase))
             return _Receipt()
 
-    native_config = SimpleNamespace(
-        __dataclass_fields__={"theta": None, "horizon_steps": None},
-        theta=39.0,
-        horizon_steps=12,
-    )
-    configuration = {"theta": 39.0, "horizon_steps": 12}
+    native_config = GreyBoxMPCConfig(theta=39.0, horizon_steps=12)
+    configuration = {
+        name: getattr(native_config, name)
+        for name in native_config.__dataclass_fields__
+    }
     evaluation = SimpleNamespace(
         decision_id="decision-confidence-fifo",
         accepted=True,
@@ -537,8 +565,8 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     )
     preparation = SimpleNamespace(
         candidate_pair=SimpleNamespace(
-            estimator=_Handle("candidate-estimator"),
-            controller=_Handle("candidate-solver"),
+            estimator=_Estimator(),
+            controller=_Solver(native_config),
         ),
         candidate=SimpleNamespace(request=request, config=native_config),
         candidate_digest=canonical_snapshot_digest(configuration),
@@ -572,7 +600,11 @@ def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
     core._activation_persistence_worker = None
     core._persisted_activation_confidence_ids = set()
     core._prepared_pair_transitions = collections.deque()
-    configuration = {"theta": 39.0, "horizon_steps": 12}
+    native_config = GreyBoxMPCConfig(theta=39.0, horizon_steps=12)
+    configuration = {
+        name: getattr(native_config, name)
+        for name in native_config.__dataclass_fields__
+    }
     evaluation = SimpleNamespace(
         decision_id="decision-raced-first-use",
         accepted=True,
@@ -585,8 +617,8 @@ def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
     core._learning = SimpleNamespace(_last_evaluation=evaluation)
     preparation = SimpleNamespace(
         candidate_pair=SimpleNamespace(
-            estimator=_Handle("raced-estimator"),
-            controller=_Handle("raced-solver"),
+            estimator=_Estimator(),
+            controller=_Solver(native_config),
         ),
         candidate=SimpleNamespace(
             request=SimpleNamespace(
@@ -594,11 +626,7 @@ def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
                 candidate_generation=4,
                 window=SimpleNamespace(role_generation=4),
             ),
-            config=SimpleNamespace(
-                __dataclass_fields__={"theta": None, "horizon_steps": None},
-                theta=39.0,
-                horizon_steps=12,
-            ),
+            config=native_config,
         ),
         candidate_digest=canonical_snapshot_digest(configuration),
         dry_solve_finite=True,
@@ -721,6 +749,9 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
     monkeypatch,
 ) -> None:
     class _FailingSolver:
+        def __init__(self, config: GreyBoxMPCConfig) -> None:
+            self.config = config
+
         def solve(self, *_args, **_kwargs):
             raise RuntimeError("native exploded")
 
@@ -732,16 +763,19 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
     monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", _Solver)
     core = MpcController(_mpc_config(), "C", dict(CYCLE))
     incumbent = core.active_control_pair
-    candidate_descriptor = _descriptor(
-        _CANDIDATE_CONFIG,
-        candidate_generation=incumbent.descriptor.candidate_generation + 1,
-        role_generation=incumbent.descriptor.role_generation + 1,
-    )
-    candidate = OwnedGreyControlPair(
-        candidate_descriptor,
+    native_config = replace(core.mpc.config, theta=core.mpc.config.theta + 1.0)
+    candidate = core._pair_factory.adopt(
+        core._pair_factory.native(
+            native_config,
+            estimator_kind="ekf",
+            candidate_generation=incumbent.descriptor.candidate_generation + 1,
+            role_generation=incumbent.descriptor.role_generation + 1,
+        ),
         _Estimator(),
-        _FailingSolver(),
+        _FailingSolver(native_config),
+        authorized=False,
     )
+    candidate_descriptor = candidate.descriptor
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent.descriptor,

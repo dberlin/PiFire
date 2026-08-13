@@ -95,12 +95,12 @@ from common.web_contracts.wizard import (
 from controller.model_learning.activation import (
     ActivationManager,
     GreyControlPairDescriptor,
-    OwnedGreyControlPair,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.model_learning.report import backend_learning_report, build_learning_artifact
 from controller.pid_sp_learning import backend_pid_sp_learning_report
 from controller.runtime.model_persistence import ModelPersistenceWorker
+from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from . import api_bp
 
 
@@ -315,50 +315,34 @@ def _model_activation_configuration(settings):
     }
 
 
-def _build_manual_candidate_pair(descriptor: GreyControlPairDescriptor) -> OwnedGreyControlPair:
-    """Build an inert pair from the exact reviewed durable configuration."""
-    from controller.mpc import Controller as MpcController
-
-    settings = read_settings()
-    activation_configuration = _model_activation_configuration(settings)
+def _manual_pair_factory() -> MpcPairFactory:
+    activation_configuration = _model_activation_configuration(read_settings())
     configured = activation_configuration["config"]
-    if not isinstance(configured, dict):
+    cycle_data = activation_configuration["cycle_data"]
+    units = activation_configuration["units"]
+    if not isinstance(configured, dict) or not isinstance(cycle_data, dict) or not isinstance(units, str):
         raise ValueError("controller configuration is incomplete")
-    candidate_config = dict(configured)
-    descriptor_config = dict(descriptor.configuration)
-    nested = descriptor_config.get("controller_config")
-    candidate_config.update(nested if isinstance(nested, dict) else descriptor_config)
-    controller = MpcController(
-        candidate_config,
-        activation_configuration["units"],
-        activation_configuration["cycle_data"],
+    return MpcPairFactory(
+        configured,
+        units,
+        cycle_data,
+        adjust_load=lambda load, _temperature_c: load,
+        model_authority=lambda: (0, None),
+        on_policy_failure=lambda _error: None,
     )
-    pair = controller.active_control_pair
-    if pair.descriptor.model_digest != descriptor.model_digest:
-        pair.close()
-        raise ValueError("candidate-digest-changed")
-    return OwnedGreyControlPair(descriptor, pair.estimator, pair.solver)
 
 
-def _manual_candidate_dry_solve(pair: OwnedGreyControlPair) -> bool:
-    config = getattr(pair.solver, "config", None)
-    state_size = getattr(config, "state_size", None)
-    horizon = getattr(config, "horizon_steps", None)
-    if not isinstance(state_size, int) or not isinstance(horizon, int):
-        return False
-    state = getattr(pair.estimator, "state", getattr(pair.estimator, "x", (0.0,) * state_size))
-    result = pair.solver.solve(
-        state,
-        setpoint_c=float(getattr(config, "T_amb", 20.0)) + 50.0,
-        q_previous=0.0,
-        equilibrium_q=0.4,
+def _build_manual_candidate_pair(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
+    """Build an inert pair from the exact reviewed durable configuration."""
+    return _manual_pair_factory().restore(descriptor)
+
+
+def _manual_candidate_dry_solve(pair: OwnedMpcPair) -> bool:
+    timing = _manual_pair_factory().dry_solve(
+        pair,
+        temperature_c=float(pair.solver.config.T_amb),
     )
-    sequence = tuple(result.sequence_q)
-    return (
-        len(sequence) == horizon
-        and math.isfinite(float(result.objective))
-        and all(math.isfinite(float(value)) for value in sequence)
-    )
+    return timing.accepted
 
 
 def _activation_checkpoint():
@@ -418,7 +402,12 @@ def api_model_evidence_activate():
         ControllerModelStore(),
         logging.getLogger("control"),
     )
-    incumbent_owner = OwnedGreyControlPair(incumbent, object(), object())
+    pair_factory = _manual_pair_factory()
+    try:
+        incumbent_owner = pair_factory.restore(incumbent)
+    except (TypeError, ValueError, RuntimeError) as error:
+        worker.flush_and_stop(timeout=2.0)
+        return _activation_rejection(str(error), 409)
     manager = ActivationManager(
         incumbent_pair=incumbent_owner,
         build_candidate=_build_manual_candidate_pair,
@@ -438,6 +427,7 @@ def api_model_evidence_activate():
             policy=ActivationPolicy.OPERATOR_REVIEWED,
         )
     finally:
+        incumbent_owner.close()
         worker.flush_and_stop(timeout=2.0)
     if not decision.accepted:
         status = 503 if decision.reason.startswith("activation-persistence") else 409

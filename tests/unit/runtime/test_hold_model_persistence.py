@@ -37,7 +37,6 @@ from controller.runtime.runner import (
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
-    OwnedGreyControlPair,
     PreparedActivationRecord,
     canonical_snapshot_digest as grey_snapshot_digest,
 )
@@ -48,6 +47,7 @@ from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
 import controller.mpc_core as _mpc_core
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_fitting import grey_config_digest
+from tests.unit.mpc._solver_fixtures import owned_pair
 
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
@@ -921,11 +921,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         candidate_generation=incumbent.candidate_generation + 1,
         role_generation=incumbent.role_generation + 1,
     )
-    candidate_pair = OwnedGreyControlPair(
-        candidate,
-        candidate_estimator,
-        candidate_solver,
-    )
+    candidate_pair = owned_pair(candidate, candidate_estimator, candidate_solver)
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent,
