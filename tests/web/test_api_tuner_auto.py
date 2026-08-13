@@ -35,7 +35,7 @@ def test_opening_a_session_flushes_the_autotune_store(ds, client):
     """A fresh session must not inherit samples from a previous one. Flask
     flushed on the first auto-status poll; the session is where "start fresh"
     lives now."""
-    from common.datastore_accessors import read_autotune, write_autotune
+    from common.persistence.history import read_autotune, write_autotune
 
     write_autotune({"ref_T": 100, "probe_Tr": 40000})
     assert len(read_autotune()) == 1
@@ -58,7 +58,7 @@ def test_opening_a_session_flushes_the_autotune_store(ds, client):
 def test_closing_a_session_does_not_touch_the_autotune_store(ds, client):
     """Close restores grill state; it must not also discard the samples a just-
     finished auto tune may still want to read back."""
-    from common.datastore_accessors import flush_autotune, read_autotune, write_autotune
+    from common.persistence.history import flush_autotune, read_autotune, write_autotune
 
     set_mode("Stop")
     client.post("/api/tuner/session", json={"open": True})
@@ -73,7 +73,7 @@ def test_closing_a_session_does_not_touch_the_autotune_store(ds, client):
 
 
 def seed_tr(values):
-    from common.datastore_accessors import write_tr
+    from common.persistence.history import write_tr
 
     write_tr(values)
 
@@ -117,7 +117,7 @@ def test_auto_status_rejects_extra_json_members(ds, client):
 
 
 def test_auto_status_records_a_sample_and_reports_it(ds, client):
-    from common.datastore_accessors import flush_autotune, read_autotune
+    from common.persistence.history import flush_autotune, read_autotune
 
     flush_autotune()
     seed_tr({"Grill": 41000})
@@ -139,7 +139,7 @@ def test_auto_status_records_a_sample_and_reports_it(ds, client):
 def test_auto_status_reports_null_for_a_probe_that_is_not_reporting(ds, client):
     """A probe absent from the tuning blob (Tr) or the current blob (temp) is
     null, not Flask's -1 sentinel, and no sample is recorded from it."""
-    from common.datastore_accessors import flush_autotune, read_autotune
+    from common.persistence.history import flush_autotune, read_autotune
 
     flush_autotune()
     seed_tr({"Grill": 41000})
@@ -152,7 +152,7 @@ def test_auto_status_reports_null_for_a_probe_that_is_not_reporting(ds, client):
 
 
 def test_auto_status_finds_the_reference_in_food_and_aux_too(ds, client):
-    from common.datastore_accessors import flush_autotune
+    from common.persistence.history import flush_autotune
 
     flush_autotune()
     seed_tr({"Grill": 41000})
@@ -164,7 +164,7 @@ def test_auto_status_finds_the_reference_in_food_and_aux_too(ds, client):
 def test_auto_status_becomes_ready_once_the_spread_is_wide_enough(ds, client):
     """More than ten samples spanning >= 50 F flips ready and fills the three
     derived points. Seeded directly rather than driven a poll at a time."""
-    from common.datastore_accessors import flush_autotune, write_autotune
+    from common.persistence.history import flush_autotune, write_autotune
 
     flush_autotune()
     seed_tr({"Grill": 41000})
@@ -183,7 +183,7 @@ def test_auto_status_becomes_ready_once_the_spread_is_wide_enough(ds, client):
 def test_auto_status_writes_no_control(ds, client):
     """Sample accumulation is tuning DATA, not grill state. The only control
     writes on this surface are the two session calls."""
-    from common.datastore_accessors import flush_autotune
+    from common.persistence.history import flush_autotune
 
     flush_autotune()
     seed_tr({"Grill": 41000})
@@ -198,7 +198,7 @@ def test_auto_status_writes_no_control(ds, client):
 def test_auto_status_skips_an_early_zero_reading(ds, client):
     """The DS18B20 slow-start guard: with few samples and a zero temp, the poll
     reports but records nothing, so a cold probe's 0 does not poison the solve."""
-    from common.datastore_accessors import flush_autotune, read_autotune
+    from common.persistence.history import flush_autotune, read_autotune
 
     flush_autotune()
     seed_tr({"Grill": 41000})

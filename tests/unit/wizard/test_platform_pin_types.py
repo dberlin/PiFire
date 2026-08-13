@@ -22,6 +22,7 @@ import pytest
 
 import wizard
 from common import datastore_accessors, defaults
+from common.persistence import install_state as install_persistence
 from common.common import read_wizard
 
 
@@ -94,7 +95,7 @@ def test_ft232h_install_writes_named_pins_and_a_string_url(ds, no_install):
     # and the field is declared str.
     assert settings["platform"]["ft232h"]["url"] == "1"
 
-    percent, _, _ = datastore_accessors.get_wizard_install_status()
+    percent, _, _ = install_persistence.get_wizard_install_status()
     assert percent == 101, "the install must run to completion, not die at 15%"
 
 
@@ -105,7 +106,7 @@ def test_a_pin_the_board_does_not_wire_is_written_as_none(ds, no_install):
     settings = run(install_info("pcb_4.x.x", {"input_selector": "None"}))
 
     assert settings["platform"]["inputs"]["selector"] is None
-    assert datastore_accessors.get_wizard_install_status()[0] == 101
+    assert install_persistence.get_wizard_install_status()[0] == 101
 
 
 def test_a_raspberry_pi_pin_is_still_written_as_an_integer(ds, no_install):
@@ -132,7 +133,7 @@ def test_a_failing_install_is_published_rather_than_dying_silently(ds, no_instal
     )
 
     assert code == 1
-    percent, status, output = datastore_accessors.get_wizard_install_status()
+    percent, status, output = install_persistence.get_wizard_install_status()
     assert percent == INSTALL_FAILED_PERCENT
     assert percent < 0, "the browser distinguishes failure from progress by sign"
     assert status == "Installation failed"
@@ -147,4 +148,4 @@ def test_a_successful_install_reports_no_failure(ds, no_install):
     )
 
     assert code == 0
-    assert datastore_accessors.get_wizard_install_status()[0] == 101
+    assert install_persistence.get_wizard_install_status()[0] == 101

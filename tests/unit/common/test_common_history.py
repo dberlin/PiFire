@@ -1,4 +1,4 @@
-from common import datastore_accessors as c
+from common.persistence import history as c
 
 SAMPLE = {
     "probe_history": {"primary": {"Grill": 225}, "food": {"P1": 145}, "aux": {}},

@@ -58,7 +58,7 @@ def seed(mode="Smoke", augerontime=100, duration_ms=60_000):
     with update_metrics, which amends the last row in place. Seeding them in
     the dict handed to append_metric looks like it works and does nothing.
     """
-    from common.datastore_accessors import append_metric, update_metrics
+    from common.persistence.history import append_metric, update_metrics
     from common.defaults import default_metrics
 
     row = default_metrics()
@@ -70,7 +70,7 @@ def seed(mode="Smoke", augerontime=100, duration_ms=60_000):
 
 
 def test_listing_is_empty_when_nothing_has_been_recorded(ds, client):
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     flush_metrics()
     body = client.get("/api/metrics").get_json()
@@ -81,7 +81,7 @@ def test_listing_is_empty_when_nothing_has_been_recorded(ds, client):
 
 
 def test_listing_returns_the_processed_record(ds, client):
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     flush_metrics()
     seed()
@@ -115,7 +115,7 @@ def test_a_running_mode_reports_endtime_c_as_zero(ds, client):
     `string | number` because of this; pinned here so the union cannot be
     "simplified" away on either side without a red test.
     """
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     flush_metrics()
     seed(duration_ms=0)
@@ -140,7 +140,7 @@ def test_listing_carries_units_and_auger_rate(ds, client):
 
 def test_estimates_use_the_configured_auger_rate(ds, client):
     from common.persistence.runtime import read_settings, write_settings
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     flush_metrics()
     settings = read_settings()
@@ -189,7 +189,7 @@ def test_the_surface_registers_no_write():
 #  All four tests below hit GET /api/metrics/export and wrap their body in
 #  _metrics_export_lock() -- see that function's docstring for why.
 def test_export_streams_a_csv_attachment(ds, client):
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     with _metrics_export_lock():
         flush_metrics()
@@ -214,7 +214,7 @@ def test_export_streams_a_csv_attachment(ds, client):
 
 
 def test_export_of_an_empty_table_says_so(ds, client):
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     with _metrics_export_lock():
         flush_metrics()
@@ -227,7 +227,7 @@ def test_export_carries_the_derived_columns(ds, client):
     """prepare_metrics_csv writes every metrics_items key, so the export
     inherits process_metrics' derived values -- which is why the route exports
     processed_metrics() and not read_all_metrics()."""
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     with _metrics_export_lock():
         flush_metrics()
@@ -245,7 +245,7 @@ def test_export_takes_no_client_supplied_name(ds, client):
     _export_temp_path basenames it, but the right answer is to never let a
     client string reach it at all. A query string must not change the name.
     """
-    from common.datastore_accessors import flush_metrics
+    from common.persistence.history import flush_metrics
 
     with _metrics_export_lock():
         flush_metrics()

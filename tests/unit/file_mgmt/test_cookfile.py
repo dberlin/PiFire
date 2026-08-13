@@ -52,7 +52,7 @@ import pytest
 
 import file_mgmt.cookfile as cookfile_mod
 from common.common import epoch_to_time, process_metrics
-from common.datastore_accessors import append_metric, read_all_metrics, read_history, update_metrics, write_history
+from common.persistence.history import append_metric, read_all_metrics, read_history, update_metrics, write_history
 from common.defaults import default_metrics
 from file_mgmt.cookfile import create_cookfile, prepare_chartdata, read_cookfile, upgrade_cookfile
 from file_mgmt.downsample import max_interpolation_error

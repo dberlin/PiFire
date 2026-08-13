@@ -22,7 +22,7 @@ from common.common import write_log
 from common.control_delta import control_delta
 from common.persistence.control import enqueue_control_delta
 from common.persistence.runtime import read_settings
-from common.datastore_accessors import load_os_info, store_os_info
+from common.persistence.install_state import load_os_info, store_os_info
 
 
 def is_real_hardware(settings=None):

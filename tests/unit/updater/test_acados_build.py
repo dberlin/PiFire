@@ -275,7 +275,7 @@ def test_real_git_flow_restores_branch_revision_runtime_and_terminal_status(
 ) -> None:
     import updater
     from common import datastore
-    from common.datastore_accessors import get_updater_install_status
+    from common.persistence.install_state import get_updater_install_status
 
     remote = tmp_path / "remote.git"
     seed = tmp_path / "seed"

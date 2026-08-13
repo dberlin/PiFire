@@ -178,9 +178,9 @@ def seed_tr(values):
     """Write the control:tuning blob read_tr() reads.
 
     write_tr is the public writer for exactly this blob
-    (common/datastore_accessors.py:654) -- do not reach for _write_json_blob.
+    (common/persistence/history.py) -- do not reach for datastore.set_blob.
     """
-    from common.datastore_accessors import write_tr
+    from common.persistence.history import write_tr
 
     write_tr(values)
 

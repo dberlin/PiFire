@@ -54,9 +54,7 @@ from common.persistence.runtime import (
     flush_connected_users,
     remove_connected_user,
 )
-from common.datastore_accessors import (
-    flush_history,
-)
+from common.persistence.history import flush_history
 from common.defaults import default_settings, default_control
 from common.system import (
     reboot_system,

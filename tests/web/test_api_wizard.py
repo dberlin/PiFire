@@ -203,7 +203,7 @@ def test_stale_draft_with_legacy_i2c_keys_is_discarded(ds, client):
     discarded on that alone -- /state must fall through to (migrated) live
     settings, not serve Basic."""
     _seed_x86_numato_live_settings()
-    from common.datastore_accessors import store_wizard_install_info
+    from common.persistence.install_state import store_wizard_install_info
 
     store_wizard_install_info(
         {
@@ -256,7 +256,7 @@ def test_unstamped_draft_is_discarded_even_when_every_key_is_valid(ds, client):
     shown to have been written against this manifest, so it goes -- however
     well its keys happen to line up."""
     _seed_x86_numato_live_settings()
-    from common.datastore_accessors import store_wizard_install_info
+    from common.persistence.install_state import store_wizard_install_info
 
     store_wizard_install_info(
         {
@@ -349,7 +349,7 @@ def test_draft_stamp_written_by_save_draft_round_trips_and_is_not_stale(ds, clie
 
 
 def test_draft_with_wrong_stamp_is_stale(ds, client):
-    from common.datastore_accessors import load_wizard_install_info, store_wizard_install_info
+    from common.persistence.install_state import load_wizard_install_info, store_wizard_install_info
 
     draft = {
         "selections": {"grillplatform": "x86_numato", "display": None, "distance": None, "probes": None},
@@ -377,7 +377,7 @@ def test_stale_draft_discard_logs_an_operator_facing_line(ds, client, monkeypatc
     monkeypatch.setattr(wr, "write_log", lambda event, *a, **k: logged.append(event))
 
     _seed_x86_numato_live_settings()
-    from common.datastore_accessors import store_wizard_install_info
+    from common.persistence.install_state import store_wizard_install_info
 
     store_wizard_install_info(
         {

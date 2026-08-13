@@ -12,6 +12,7 @@ import os
 from common import common as c
 from common.control_delta import control_delta
 from common import datastore_accessors, defaults
+from common.persistence import history as history_persistence
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -45,19 +46,19 @@ def scenario_history_cap():
         "notify_targets": {"Grill": 0},
     }
     for _ in range(5):
-        datastore_accessors.write_history(sample, maxsizelines=3)
-    return {"len": c.cmdsts.llen("control:history"), "items": datastore_accessors.read_history()}
+        history_persistence.write_history(sample, maxsizelines=3)
+    return {"len": c.cmdsts.llen("control:history"), "items": history_persistence.read_history()}
 
 
 def scenario_metrics_replace_last():
     c.cmdsts.delete("metrics:general")
     m = defaults.default_metrics()
     m["mode"] = "Startup"
-    datastore_accessors.append_metric(m)
+    history_persistence.append_metric(m)
     m2 = defaults.default_metrics()
     m2["mode"] = "Hold"
-    datastore_accessors.update_metrics(m2)
-    return {"last": datastore_accessors.read_metrics(), "all_len": len(datastore_accessors.read_all_metrics())}
+    history_persistence.update_metrics(m2)
+    return {"last": history_persistence.read_metrics(), "all_len": len(history_persistence.read_all_metrics())}
 
 
 def main():

@@ -21,7 +21,7 @@ from common.persistence.runtime import (
     read_settings,
     write_settings,
 )
-from common.datastore_accessors import (
+from common.persistence.install_state import (
     delete_wizard_install_info,
     get_wizard_install_status,
     load_wizard_install_info,

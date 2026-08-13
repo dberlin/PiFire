@@ -34,7 +34,7 @@ from common.persistence.runtime import (
     read_settings,
     read_pellet_db,
 )
-from common.datastore_accessors import (
+from common.persistence.history import (
     read_history,
 )
 

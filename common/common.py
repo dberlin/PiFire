@@ -334,7 +334,7 @@ def flush_events_records():
 
     Previously reachable only as ``read_events_records(flush=True)`` -- the same
     delete-behind-a-read_-name defect as the old ``read_history(flushhistory=True)``
-    (see common.datastore_accessors.flush_history).
+    (see common.persistence.history.flush_history).
 
     :return: An empty events list (the post-flush state).
     """

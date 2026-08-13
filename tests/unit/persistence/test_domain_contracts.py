@@ -13,7 +13,7 @@ from common.persistence.runtime import (
     read_warnings_snapshot,
     write_warning,
 )
-from common.datastore_accessors import (
+from common.persistence.install_state import (
     delete_wizard_install_info,
     get_updater_install_status,
     get_wizard_install_status,

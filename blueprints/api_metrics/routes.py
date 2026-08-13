@@ -22,7 +22,7 @@ from flask import jsonify, send_file
 from common.app import api_response, prepare_metrics_csv
 from common.common import process_metrics
 from common.persistence.runtime import read_settings
-from common.datastore_accessors import read_all_metrics
+from common.persistence.history import read_all_metrics
 from common.web_contracts.content import MetricsPayload, validated_content_json
 
 from . import api_metrics_bp

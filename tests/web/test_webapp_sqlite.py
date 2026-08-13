@@ -36,7 +36,7 @@ from common.persistence.runtime import (
     write_pellets_store,
     write_settings_store,
 )
-from common.datastore_accessors import (
+from common.persistence.history import (
     read_history,
     write_history,
 )

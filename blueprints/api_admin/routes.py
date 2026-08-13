@@ -38,9 +38,7 @@ from common.persistence.runtime import (
     write_pellet_db,
     write_settings,
 )
-from common.datastore_accessors import (
-    flush_history,
-)
+from common.persistence.history import flush_history
 from common.defaults import default_control, default_settings
 from common.modes import Mode
 from common.pellets_actions import clear_pellet_db

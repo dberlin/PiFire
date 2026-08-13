@@ -23,7 +23,7 @@ from common.persistence.control import (
 from common.persistence.runtime import (
     read_settings,
 )
-from common.datastore_accessors import (
+from common.persistence.install_state import (
     get_updater_install_status,
     set_updater_install_status,
 )

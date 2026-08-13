@@ -30,7 +30,7 @@ from common.common import (
 from common.persistence.runtime import (
     read_settings,
 )
-from common.datastore_accessors import (
+from common.persistence.history import (
     read_history,
     flush_history,
     read_all_metrics,

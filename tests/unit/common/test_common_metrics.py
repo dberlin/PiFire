@@ -1,4 +1,4 @@
-from common import datastore_accessors as c
+from common.persistence import history as c
 from common import defaults
 from common import datastore
 

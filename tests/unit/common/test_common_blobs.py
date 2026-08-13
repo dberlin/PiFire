@@ -3,6 +3,8 @@ import json
 import pytest
 
 from common import datastore_accessors as c
+from common.persistence import history as history_persistence
+from common.persistence import install_state as install_persistence
 from common import defaults
 from common.common import ErrorKind, read_events_records, flush_events_records
 from common import datastore
@@ -163,13 +165,13 @@ def test_init_drops_the_legacy_error_blobs_and_is_idempotent(ds):
 
 
 def test_autotune_uses_queue(ds):
-    c.flush_autotune()
-    c.write_autotune({"tr": 1})
-    c.write_autotune({"tr": 2})
-    assert c.read_autotune() == [{"tr": 1}, {"tr": 2}]
-    assert c.autotune_length() == 2
-    c.flush_autotune()
-    assert c.read_autotune() == []
+    history_persistence.flush_autotune()
+    history_persistence.write_autotune({"tr": 1})
+    history_persistence.write_autotune({"tr": 2})
+    assert history_persistence.read_autotune() == [{"tr": 1}, {"tr": 2}]
+    assert history_persistence.autotune_length() == 2
+    history_persistence.flush_autotune()
+    assert history_persistence.read_autotune() == []
 
 
 def test_read_warnings_snapshot_does_not_consume(ds):
@@ -213,7 +215,7 @@ def test_connected_users_add_remove(ds):
 
 def test_flush_control_clears_only_control_not_history(ds):
     # seed history + a control blob + a queued write
-    c.write_history(
+    history_persistence.write_history(
         {"probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}}, "primary_setpoint": 1, "notify_targets": {}}
     )
     c.write_control_snapshot({"mode": "Hold"}, origin="t")
@@ -223,12 +225,12 @@ def test_flush_control_clears_only_control_not_history(ds):
     from common.sqlite_queue import SqliteQueue
 
     assert SqliteQueue("queue_control_write").length() == 0  # queue cleared
-    assert len(c.read_history()) == 1  # history untouched
+    assert len(history_persistence.read_history()) == 1  # history untouched
 
 
 def test_wizard_install_status_roundtrip(ds):
-    c.set_wizard_install_status(50, "Running", "log")
-    assert c.get_wizard_install_status() == (50, "Running", "log")
+    install_persistence.set_wizard_install_status(50, "Running", "log")
+    assert install_persistence.get_wizard_install_status() == (50, "Running", "log")
 
 
 def test_read_generic_key_roundtrip(ds):

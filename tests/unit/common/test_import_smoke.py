@@ -14,6 +14,8 @@ NEW_MODULES = (
     "common.system",
     "common.persistence.control",
     "common.persistence.runtime",
+    "common.persistence.history",
+    "common.persistence.install_state",
     "common.api_commands",
     "common.settings_migration",
     "common.backups",
@@ -36,6 +38,8 @@ def test_public_names_resolve_from_new_homes():
         read_settings,
         read_probe_status,
     )
+    from common.persistence.history import read_history, read_all_metrics  # noqa: F401
+    from common.persistence.install_state import load_os_info, get_wizard_install_status  # noqa: F401
     from common.defaults import default_settings, default_control  # noqa: F401
     from common.system import is_real_hardware, get_wifi_quality  # noqa: F401
     from common.settings_migration import read_settings_file, upgrade_settings  # noqa: F401

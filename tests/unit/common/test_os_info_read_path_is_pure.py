@@ -22,7 +22,7 @@ from unittest import mock
 import pytest
 
 from common import system
-from common.datastore_accessors import load_os_info, store_os_info
+from common.persistence.install_state import load_os_info, store_os_info
 
 
 @pytest.fixture
