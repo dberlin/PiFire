@@ -3,6 +3,7 @@ from math import isfinite
 
 import time
 from dataclasses import dataclass, replace
+from enum import IntEnum
 from typing import Literal, cast
 
 from common.controller_model_state import ControllerModelStore
@@ -138,8 +139,15 @@ class _HoldFramedPulse:
 
 
 
+class _TeardownPhase(IntEnum):
+    ACTIVE = 0
+    HARDWARE_OFF = 1
+    FRAMED_FINALIZED = 2
+    FINISHED = 3
+
+
 @dataclass(slots=True)
-class _TeardownFramedDispatch:
+class _FramedDispatchState:
     result: FramedPulseResult
     record_terminal_trace: bool
     scheduler_reset: tuple[
@@ -154,6 +162,21 @@ class _TeardownFramedDispatch:
     scheduler_reset_recorded: bool = False
     completion_trace_index: int = 0
     feedback_dispatched: bool = False
+
+
+@dataclass(slots=True)
+class _HoldTeardownState:
+    phase: _TeardownPhase = _TeardownPhase.ACTIVE
+    now: float | None = None
+    ptemp: float | None = None
+    auger_on: bool = False
+    prior_output_source: OutputSource | None = None
+    advance_dispatch: _FramedDispatchState | None = None
+    feedback_prepared: bool = False
+    feedback: FramedPulseFeedback | None = None
+    feedback_dispatched: bool = False
+    reset_dispatch: _FramedDispatchState | None = None
+
 
 class HoldMode(ControlMode):
     """Hold mode: fan+power on at setup (shared branch with Startup/Reignite/
@@ -197,20 +220,11 @@ class HoldMode(ControlMode):
     _framed_pulse: FramedPulseRuntime | None = None
     _last_ptemp: float | None = None
     _hold_learning: HoldLearningRuntime | None = None
-    _teardown_phase: int = 0
+    _teardown: _HoldTeardownState
     _last_tick_s: float | None = None
-    _teardown_auger_on: bool = False
     _calibration_command_high_water: int = 0
     _last_target: float | None = None
     _safety_ceiling_fault: str | None = None
-    _teardown_now: float | None = None
-    _teardown_ptemp: float | None = None
-    _teardown_prior_output_source: OutputSource | None = None
-    _teardown_advance_dispatch: _TeardownFramedDispatch | None = None
-    _teardown_feedback_prepared: bool = False
-    _teardown_feedback: FramedPulseFeedback | None = None
-    _teardown_feedback_dispatched: bool = False
-    _teardown_reset_dispatch: _TeardownFramedDispatch | None = None
 
 
     def _observe_reachability_advisory(self, diagnostics: MpcTraceDiagnostics) -> None:
@@ -340,7 +354,7 @@ class HoldMode(ControlMode):
 
     def _resume_framed_dispatch(
         self,
-        dispatch: _TeardownFramedDispatch,
+        dispatch: _FramedDispatchState,
     ) -> None:
         result = dispatch.result
         if not dispatch.delivered_recorded:
@@ -414,7 +428,7 @@ class HoldMode(ControlMode):
         | None = None,
     ) -> None:
         self._resume_framed_dispatch(
-            _TeardownFramedDispatch(
+            _FramedDispatchState(
                 result=result,
                 record_terminal_trace=record_terminal_trace,
                 scheduler_reset=scheduler_reset,
@@ -703,17 +717,16 @@ class HoldMode(ControlMode):
     _model_store = None
 
     def setup(self):
-        import control as _control
+        self._teardown = _HoldTeardownState()
 
+        import control as _control
         self._control_trace = None
         self._hold_learning = None
         learning_evidence_available = True
         self._reachability_advisory_key = None
         self._framed_pulse = FramedPulseRuntime()
         self._last_tick_s = None
-        self._teardown_auger_on = False
         self._last_ptemp = None
-        self._teardown_phase = 0
         recorder: ControlTraceRecorder | None = None
         try:
             recorder = ControlTraceRecorder(warning=self._trace_warning)
@@ -2132,12 +2145,13 @@ class HoldMode(ControlMode):
         return status
 
     def teardown(self, ptemp):
-        if self._teardown_phase >= 3:
+        teardown = self._teardown
+        if teardown.phase >= _TeardownPhase.FINISHED:
             return
         trace = self._control_trace
-        if self._teardown_now is None:
+        if teardown.now is None:
             clock_now = self.ctx.clock.now()
-            self._teardown_now = max(
+            teardown.now = max(
                 clock_now,
                 (
                     clock_now
@@ -2145,51 +2159,51 @@ class HoldMode(ControlMode):
                     else self._last_tick_s
                 ),
             )
-            self._teardown_ptemp = ptemp
-        now = self._teardown_now
+            teardown.ptemp = ptemp
+        now = teardown.now
         runtime = self._framed_pulse
         runner = self._runner
         learning = self._hold_learning
-        if self._teardown_phase < 1:
-            self._teardown_auger_on = bool(
+        if teardown.phase < _TeardownPhase.HARDWARE_OFF:
+            teardown.auger_on = bool(
                 self.grill.get_output_status()["auger"]
             )
             self.grill.auger_off()
             self.grill.fan_off()
             self.grill.igniter_off()
             self.grill.power_off()
-            self._teardown_phase = 1
-        if self._teardown_phase < 2:
+            teardown.phase = _TeardownPhase.HARDWARE_OFF
+        if teardown.phase < _TeardownPhase.FRAMED_FINALIZED:
             if (
                 runtime is not None
                 and runtime.scheduler is not None
                 and runner is not None
             ):
-                advance_dispatch = self._teardown_advance_dispatch
+                advance_dispatch = teardown.advance_dispatch
                 if advance_dispatch is None:
-                    self._teardown_prior_output_source = (
+                    teardown.prior_output_source = (
                         None
                         if trace is None
                         else trace.applied_state.output_source
                     )
-                    advance_dispatch = _TeardownFramedDispatch(
+                    advance_dispatch = _FramedDispatchState(
                         result=runtime.advance(
                             now,
-                            self._teardown_auger_on,
+                            teardown.auger_on,
                             sample=self._framed_sample(
-                                self._teardown_ptemp
+                                teardown.ptemp
                             ),
                             prior_output_source=(
-                                self._teardown_prior_output_source
+                                teardown.prior_output_source
                             ),
                         ),
                         record_terminal_trace=False,
                     )
-                    self._teardown_advance_dispatch = advance_dispatch
+                    teardown.advance_dispatch = advance_dispatch
                 self._resume_framed_dispatch(advance_dispatch)
                 pulse_result = advance_dispatch.result
-                if not self._teardown_feedback_prepared:
-                    self._teardown_feedback = runtime.report_feedback(
+                if not teardown.feedback_prepared:
+                    teardown.feedback = runtime.report_feedback(
                         now,
                         pulse_result.decision.delivered_on_s,
                         source=classify_output_source(
@@ -2199,26 +2213,26 @@ class HoldMode(ControlMode):
                             ),
                         ),
                         prior_output_source=(
-                            self._teardown_prior_output_source
+                            teardown.prior_output_source
                         ),
                         dispatch=not bool(
                             pulse_result.decision.completed_frames
                         ),
                     )
-                    self._teardown_feedback_prepared = True
-                feedback = self._teardown_feedback
+                    teardown.feedback_prepared = True
+                feedback = teardown.feedback
                 if (
                     feedback is not None
-                    and not self._teardown_feedback_dispatched
+                    and not teardown.feedback_dispatched
                 ):
                     self._dispatch_framed_feedback(feedback)
-                    self._teardown_feedback_dispatched = True
+                    teardown.feedback_dispatched = True
             if runtime is not None and runtime.scheduler is not None:
-                reset_dispatch = self._teardown_reset_dispatch
+                reset_dispatch = teardown.reset_dispatch
                 if reset_dispatch is None:
                     prior_output_source = (
-                        self._teardown_prior_output_source
-                        if self._teardown_advance_dispatch is not None
+                        teardown.prior_output_source
+                        if teardown.advance_dispatch is not None
                         else (
                             None
                             if trace is None
@@ -2231,7 +2245,7 @@ class HoldMode(ControlMode):
                             self.state.manual_override["auger"] >= now
                         ),
                     )
-                    reset_dispatch = _TeardownFramedDispatch(
+                    reset_dispatch = _FramedDispatchState(
                         result=runtime.reset(
                             PulseResetReason.MODE_CHANGE,
                             now,
@@ -2240,7 +2254,7 @@ class HoldMode(ControlMode):
                                 "auger"
                             ],
                             sample=self._framed_sample(
-                                self._teardown_ptemp
+                                teardown.ptemp
                             ),
                             terminal_feedback=True,
                             feedback_source=source,
@@ -2255,9 +2269,9 @@ class HoldMode(ControlMode):
                             None,
                         ),
                     )
-                    self._teardown_reset_dispatch = reset_dispatch
+                    teardown.reset_dispatch = reset_dispatch
                 self._resume_framed_dispatch(reset_dispatch)
-            self._teardown_phase = 2
+            teardown.phase = _TeardownPhase.FRAMED_FINALIZED
         stop_error: Exception | None = None
         stopped: bool | None = None
         try:
@@ -2307,6 +2321,6 @@ class HoldMode(ControlMode):
                     learning.finish_teardown(
                         generation=self._runner_configuration_revision
                     )
-                self._teardown_phase = 3
+                teardown.phase = _TeardownPhase.FINISHED
         if stop_error is not None:
             raise stop_error
