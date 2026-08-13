@@ -1,3 +1,4 @@
+from dataclasses import replace
 from importlib import import_module
 from types import SimpleNamespace
 
@@ -6,6 +7,8 @@ import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
+from controller.model_learning.activation import ActivationPhase, OwnedGreyControlPair, PreparedActivationRecord
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 
 
 class _Estimator:
@@ -109,6 +112,56 @@ def test_dynamic_controller_composes_config_control_status_and_trace_contract(mo
     assert calibration.active is False
     assert calibration.probe_q == 0.0
 
+    incumbent = controller.active_control_pair
+    candidate_descriptor = replace(
+        incumbent.descriptor,
+        candidate_generation=incumbent.descriptor.candidate_generation + 1,
+        role_generation=incumbent.descriptor.role_generation + 1,
+        ownership_digest="",
+    )
+    candidate_estimator = _Estimator()
+    candidate_solver = _Solver(solver.config)
+    candidate = OwnedGreyControlPair(
+        candidate_descriptor,
+        candidate_estimator,
+        candidate_solver,
+    )
+    prepared = PreparedActivationRecord.prepared(
+        timestamp_ms=1_000,
+        incumbent=incumbent.descriptor,
+        candidate=candidate_descriptor,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        decision_id="public-close-contract",
+    )
+    controller._persist_grey_lifecycle = lambda *_args, **_kwargs: None
+    assert controller.install_candidate_pair_inert(candidate, prepared)
+    assert controller.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
+
+    close_events = []
+
+    def record_close(handle, label):
+        def close():
+            close_events.append(label)
+            handle.closed += 1
+
+        return close
+
+    controller._learning = SimpleNamespace(close=lambda: close_events.append("learning"))
+    candidate_solver.close = record_close(candidate_solver, "active-solver")
+    candidate_estimator.close = record_close(candidate_estimator, "active-estimator")
+    solver.close = record_close(solver, "rollback-solver")
+    estimator.close = record_close(estimator, "rollback-estimator")
+
     controller.close()
     controller.close()
+
+    assert close_events == [
+        "learning",
+        "active-solver",
+        "active-estimator",
+        "rollback-solver",
+        "rollback-estimator",
+    ]
+    assert candidate_estimator.closed == candidate_solver.closed == 1
     assert estimator.closed == solver.closed == 1

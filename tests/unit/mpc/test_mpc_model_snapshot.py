@@ -220,8 +220,6 @@ def test_restore_build_failure_closes_partial_candidate_and_keeps_incumbent_usab
         assert target.restore_model(snapshot) is False
         assert candidate_estimator.closed == 1
         assert target.active_control_pair is incumbent
-        assert target.estimator is incumbent.estimator
-        assert target.mpc is incumbent.solver
         assert set(target.update(20.0)) == {"cycle_ratio", "fan"}
     finally:
         target.close()

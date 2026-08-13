@@ -705,6 +705,7 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
     assert events[0].payload.failed_digest == prepared.candidate.model_digest
     assert events[0].payload.failed_generation == prepared.candidate.role_generation
     assert events[0].payload.decision_id == prepared.decision_id
+    assert core.drain_activation_events() == ()
 
 
 

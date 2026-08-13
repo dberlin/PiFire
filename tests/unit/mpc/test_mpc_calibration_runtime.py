@@ -104,12 +104,22 @@ def test_duplicate_calibration_revision_is_idempotent_and_stop_returns_baseline(
     controller = _controller(monkeypatch)
     runner = SyncControllerRunner(controller)
     runner.request_calibration(_start())
+    first = runner.latest_from(100.0).calibration
+    first_generation = first.command_generation
+    first_progress = first.progress
+    first_events = first.events
+
     runner.request_calibration(_start())
-    active = runner.latest_from(100.0)
+    duplicate = runner.latest_from(100.0).calibration
+
+    assert duplicate.command_generation == first_generation
+    assert duplicate.progress == first_progress
+    assert first_events + duplicate.events == first_events
+
     runner.request_calibration(replace(_start(2), action="stop"))
     stopped = runner.latest_from(100.0)
 
-    assert active.calibration.probe_q > 0.0
+    assert first.probe_q > 0.0
     assert stopped.calibration.probe_q == 0.0
     assert stopped.allocation == stopped.baseline_allocation
 
