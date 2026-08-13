@@ -1012,7 +1012,7 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
         def __init__(self, **_kwargs) -> None:
             self.prepared = None
             self.evaluation = None
-            self._pending_request = None
+            self.pending_request = None
             self.handoff = None
             instances.append(self)
 
@@ -1088,7 +1088,7 @@ def test_reviewed_checkpoint_failures_preserve_active_owner_and_close_candidate(
     class _Learning:
         def __init__(self, **_kwargs) -> None:
             self.prepared = None
-            self._pending_request = None
+            self.pending_request = None
             self.handoff = None
             self.evaluation = None
             instances.append(self)
@@ -1158,7 +1158,7 @@ def test_learning_status_projects_queued_running_preparing_and_handoff_states(
 
     class _Learning:
         def __init__(self, **_kwargs) -> None:
-            self._pending_request = None
+            self.pending_request = None
             self.worker = SimpleNamespace(busy=False)
             self.prepared = None
             self.handoff = None
@@ -1184,8 +1184,11 @@ def test_learning_status_projects_queued_running_preparing_and_handoff_states(
     )
     harness = _harness(learning_enabled=True)
     learning = instances[0]
-    learning._pending_request = SimpleNamespace(
+    identity = harness.runtime.learning_identity()
+    learning.pending_request = FitRequest(
+        request_id="q" * 64,
         origin=CandidateOrigin.PASSIVE_ONLINE,
+        window=identity.window(0, 0),
         candidate_generation=1,
     )
 
@@ -1193,7 +1196,7 @@ def test_learning_status_projects_queued_running_preparing_and_handoff_states(
     learning.worker.busy = True
     assert harness.runtime.learning_status()["fit_status"] == "running"
 
-    learning._pending_request = None
+    learning.pending_request = None
     polling = threading.Thread(
         target=harness.runtime.poll_learning_off_path,
         kwargs={"live_origin": CandidateOrigin.PASSIVE_ONLINE},

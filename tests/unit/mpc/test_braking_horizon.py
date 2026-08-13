@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from tools.experiments import braking_horizon
 
 
@@ -21,9 +22,9 @@ def _celsius(fahrenheit: float) -> float:
 
 def _nominal_model_bound() -> float:
     return max(
-        braking_horizon.braking_distance(dict(braking_horizon._DEFAULTS), reference)
+        braking_horizon.braking_distance(dict(DEFAULT_MPC_CONFIG), reference)
         for reference in (braking_horizon.T_FLOOR_C, braking_horizon.T_HAZARD_C)
-        if reference > float(braking_horizon._DEFAULTS["T_amb"])
+        if reference > float(DEFAULT_MPC_CONFIG["T_amb"])
     )
 
 

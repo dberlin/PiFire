@@ -315,7 +315,7 @@ def _grey_parameters_digest(parameters):
     ).hexdigest()
 
 
-def _new_grey_learning_snapshot(*, revision, parameters, metadata):
+def new_grey_learning_snapshot(*, revision, parameters, metadata):
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
         raise GreySnapshotInvalid("invalid-revision")
     owned_parameters = normalize_grey_parameters(parameters)
@@ -363,7 +363,7 @@ def migrate_grey_learning_snapshot(snapshot):
     version = snapshot.get("version")
     if version == 3:
         metadata = {name: snapshot.get(name) for name in ("rmse", "samples", "band_c", "nfev")}
-        return _new_grey_learning_snapshot(
+        return new_grey_learning_snapshot(
             revision=snapshot.get("revision"),
             parameters=snapshot.get("params"),
             metadata=metadata,

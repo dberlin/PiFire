@@ -60,11 +60,12 @@ Each arm and record carries:
     the plant's behaviour on two profiles no fit ever saw. This is the number
     that decides the question, and it is scored with the nuisance thrown away
     because that is how the model would be used: d has nowhere to live (there is
-    no such field in Controller._MODEL_PARAM_KEYS) and a truth error that keeps
+    no such field in mpc_snapshot.MODEL_PARAM_KEYS) and a truth error that keeps
     it describes a controller that will never run. Arm C additionally carries a
-    truth error with T_amb KEPT, because unlike d, T_amb IS in _MODEL_PARAM_KEYS
-    and would genuinely cross into the config -- that asymmetry is the whole of
-    the d-or-T_amb question and it is measured rather than argued.
+    truth error with T_amb KEPT, because unlike d, T_amb IS in
+    mpc_snapshot.MODEL_PARAM_KEYS and would genuinely cross into the config --
+    that asymmetry is the whole of the d-or-T_amb question and it is measured
+    rather than argued.
   * HELD-OUT RMSE, nuisance discarded. The arm's own fitter is re-run on the
     first two thirds of the record and the result scored on the last third,
     warm: run through the whole record from its true start so the transport
@@ -87,10 +88,10 @@ promotion_signal.py gives: that plant was identified FROM that cook, so the real
 cook is reported with no truth column at all and its generalisation question is
 answered by the held-out column instead.
 
-THE POPULATION IS IN-SCOPE ONLY. controller/mpc.py refuses a refit below
-mpc._REFIT_MIN_SAMPLES rows before the gate is reached, so the truncations
+THE POPULATION IS IN-SCOPE ONLY. GreyLearningRuntime refuses a refit below
+its `_REFIT_MIN_SAMPLES` rows before the gate is reached, so the truncations
 promotion_signal.py prints as out of scope are not fitted here at all. That is
-the only thing dropped, it is dropped on the live controller's own rule, and
+the only thing dropped, it is dropped on the live Grey runtime's own rule, and
 both the count and which lengths they are are printed below, derived from the
 records rather than asserted.
 
@@ -131,7 +132,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from controller.mpc import _REFIT_INIT, _REFIT_MIN_SAMPLES  # noqa: E402
+from controller.model_learning.grey_runtime import _REFIT_INIT, _REFIT_MIN_SAMPLES  # noqa: E402
 from controller.mpc_model import simulate_grey_box  # noqa: E402
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR  # noqa: E402
 from controller.update_mpc import _DIVERGED, _FREE, _LOWER_BOUND, _MAX_NFEV, _SIM_KEYS  # noqa: E402
@@ -181,7 +182,7 @@ def _rmse(params, t, Q, T0, target, sl=slice(None)):
 def discard_nuisance(params):
     """The model as the controller would actually carry it forward.
 
-    d is dropped: there is no such field in Controller._MODEL_PARAM_KEYS, so a
+    d is dropped: there is no such field in mpc_snapshot.MODEL_PARAM_KEYS, so a
     per-cook offset has nowhere to be stored and is a nuisance by construction.
     T_amb is returned to the value the shipped fitter holds it at, so arm C is
     scored on the same footing -- what its three DYNAMIC parameters learned,
@@ -331,7 +332,7 @@ def measure(rec):
         # Truth, with the nuisance discarded. The number that decides the task.
         if rec["plant"] is not None:
             row["truth"], row["dead_err"], row["coast_err"] = ps.truth_error(bare, rec["plant"])
-            # Arm C only: T_amb is in _MODEL_PARAM_KEYS, so unlike d it could
+            # Arm C only: T_amb is in mpc_snapshot.MODEL_PARAM_KEYS, so unlike d it could
             # genuinely be carried forward. Reported so the choice between the
             # two nuisances is decided by a number rather than by taste.
             row["truth_kept"] = ps.truth_error(fitted, rec["plant"])[0] if arm == "C_free_amb" else float("nan")
@@ -444,8 +445,9 @@ def main():
     kept_lengths = sorted({c["length_s"] for c in jobs})
     say(
         f"    Dropped truncation lengths, read off the records rather than assumed: {dropped_lengths} s."
-        f"\n    Kept: {kept_lengths} s. controller/mpc.py refuses a refit shorter than {_REFIT_MIN_SAMPLES}"
-        "\n    samples before the gate is reached, so the dropped ones produce no verdict to be right about."
+        f"\n    Kept: {kept_lengths} s. GreyLearningRuntime refuses a refit shorter than "
+        f"{_REFIT_MIN_SAMPLES} samples before the gate is reached, so the dropped ones produce no "
+        "verdict to be right about."
         "\n    Nothing else is dropped and no arm is measured on a smaller population than another."
     )
     say(f"--- fitting {len(jobs)} records x {len(ARMS)} arms x 2 (full + prefix) on {workers} workers ---")
@@ -576,8 +578,8 @@ def main():
         say(f"  {arm:12s} Spearman(in-sample gain, truth gain) = {fmt(rho, 7, 3)}  over n={n_rho}")
     say()
     say("Arm C only: the same truth error with T_amb KEPT rather than discarded. d has nowhere to be")
-    say("stored -- there is no such field in Controller._MODEL_PARAM_KEYS -- but T_amb is one of those")
-    say("keys, so for arm C alone 'carry it forward' is an option the code already supports.")
+    say("stored -- there is no such field in mpc_snapshot.MODEL_PARAM_KEYS -- but T_amb is one of")
+    say("those keys, so for arm C alone 'carry it forward' is an option the code already supports.")
     n, w, t_, ls, md, wr = paired(sim_rows, "C_free_amb", "A_shipped", "truth_kept", base_key="truth")
     say(
         f"  C_free_amb  truth with T_amb kept  n={n} win={w} tie={t_} loss={ls} median delta={fmt(md, 10, 4)} worst regression={fmt(wr, 10, 4)}"

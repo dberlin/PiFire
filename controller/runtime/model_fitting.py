@@ -18,7 +18,10 @@ import queue
 import threading
 import time
 from numbers import Integral, Real
-from typing import Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
+
+if TYPE_CHECKING:
+    from controller.model_learning.contracts import FitRequest
 
 
 FITTED_PARAMETERS = ("C_c", "K_Q", "theta")
@@ -1177,7 +1180,7 @@ class GreyLearningOrchestrator:
             max_observations=max_observations,
         )
         self._operator_history: deque[Any] = deque(maxlen=max_observations)
-        self._pending_request: Any | None = None
+        self._pending_request: FitRequest | None = None
         self._prepared: CandidatePreparation | None = None
         self._evaluator: Any | None = None
         self._evaluation_cursor = 0
@@ -1186,6 +1189,10 @@ class GreyLearningOrchestrator:
         self._handoff: CandidateHandoff | None = None
         self._started = False
         self._ownership_transferred = False
+
+    @property
+    def pending_request(self) -> FitRequest | None:
+        return self._pending_request
 
     @property
     def prepared(self) -> CandidatePreparation | None:

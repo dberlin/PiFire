@@ -565,7 +565,7 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     class _Learning:
         prepared = preparation
         handoff = None
-        _pending_request = None
+        pending_request = None
 
         def poll_fit_off_path(self, **_kwargs):
             return None
@@ -623,7 +623,7 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
     )
 
     class _Learning:
-        _pending_request = None
+        pending_request = None
         prepared = None
         handoff = None
         passive_history = SimpleNamespace(observations=())
@@ -762,7 +762,7 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
     class _Learning:
         prepared = preparation
         handoff = None
-        _pending_request = request
+        pending_request = request
 
         def poll_fit_off_path(self, **_kwargs):
             return delivery
@@ -857,7 +857,7 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
 
     class _Learning:
         handoff = None
-        _pending_request = None
+        pending_request = None
 
         def __init__(self):
             self.prepared = preparation

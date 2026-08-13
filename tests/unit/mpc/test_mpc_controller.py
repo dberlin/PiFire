@@ -9,7 +9,7 @@ import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
 from common.control_trace import ActuationMode, AmbientSource, ModelEvaluationPayload
 from common.model_evidence import ForecastOriginEvidence
-from controller.acados import SolverError
+from controller.acados import SolverDiagnostics, SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
 from controller.model_learning.contracts import FrameObservation
@@ -194,7 +194,7 @@ def test_every_malformed_native_result_holds_the_last_safe_load(monkeypatch, inv
 
 
 def test_structured_solver_failure_holds_and_preserves_diagnostics(monkeypatch):
-    diagnostics = mpc_module.SolverDiagnostics(
+    diagnostics = SolverDiagnostics(
         status=4,
         backend_status=7,
         iterations=10,

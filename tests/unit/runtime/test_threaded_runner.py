@@ -452,6 +452,7 @@ def test_threaded_result_recursively_freezes_nested_status_across_repolls():
     try:
         runner.submit(70.0)
         assert core.updated.wait(2.0)
+        assert _wait_for(lambda: runner.latest().revision >= 1)
         result = runner.latest()
         core.status["nested"]["samples"].append(2.0)
         core.status["nested"]["extra"] = 3.0

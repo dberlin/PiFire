@@ -3,8 +3,8 @@
 
 Each plant/seed runs three successive 325 F cooks. Cook one is deliberately
 identical: the residual penalty and analytic equilibrium are admitted only
-after a cook has identified a thermal model. The baseline arm disables both
-private production seams in an isolated worker.
+after a cook has identified a thermal model. The baseline arm disables the
+current MpcCore residual-weight and equilibrium seams in an isolated worker.
 """
 
 from __future__ import annotations
@@ -69,11 +69,11 @@ def _compact(row):
 
 def _chain(job):
     arm, plant, seed = job
-    import controller.mpc as mpc
+    import controller.mpc_core as mpc_core
 
-    production_weight = getattr(mpc, "_LEARNED_RESIDUAL_WEIGHT")
+    production_weight = mpc_core._LEARNED_RESIDUAL_WEIGHT
     if arm == "baseline":
-        setattr(mpc, "_LEARNED_RESIDUAL_WEIGHT", 0.0)
+        mpc_core._LEARNED_RESIDUAL_WEIGHT = 0.0
     elif production_weight != RESIDUAL_WEIGHT:
         raise RuntimeError(f"production residual weight is {production_weight}, expected {RESIDUAL_WEIGHT}")
 
@@ -83,7 +83,9 @@ def _chain(job):
 
         def setup(controller):
             if arm == "baseline":
-                controller._equilibrium_load = lambda target, disturbance: 0.0
+                controller.active_control_pair.core._equilibrium_load = (
+                    lambda target, disturbance, identified: 0.0
+                )
 
         raw = _run_scenario(
             "mpc",
@@ -209,8 +211,9 @@ def main(argv=None):
             "scenario": SCENARIO,
             "residual_weight": RESIDUAL_WEIGHT,
             "baseline_seams": [
-                "controller.mpc._LEARNED_RESIDUAL_WEIGHT=0",
-                "Controller._equilibrium_load=zero",
+                "controller.mpc_core._LEARNED_RESIDUAL_WEIGHT=0",
+                "controller.mpc_core.MpcCore._equilibrium_load"
+                "(target, disturbance, identified)=0 via Controller.active_control_pair.core",
             ],
             "command": ".venv/bin/python docs/superpowers/experiments/residual_mpc_compare.py",
         },

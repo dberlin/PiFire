@@ -1150,7 +1150,7 @@ class GreyLearningRuntime:
         elif inert_record is not None or self._activation_runtime.activation_pending:
             status = LearningStatus.ACTIVATING
         elif learning is not None:
-            request = getattr(learning, "_pending_request", None)
+            request = learning.pending_request
             prepared = learning.prepared
             handoff = learning.handoff
             if request is not None:
@@ -1270,7 +1270,7 @@ class GreyLearningRuntime:
             else self._model_meta
         )
         try:
-            snapshot = _snapshot._new_grey_learning_snapshot(
+            snapshot = _snapshot.new_grey_learning_snapshot(
                 revision=int(self._model_revision),
                 parameters=self._snapshot_parameters(),
                 metadata=metadata,

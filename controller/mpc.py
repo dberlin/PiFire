@@ -21,7 +21,6 @@ from common.controller_model_state import ControllerModelStore
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
 from controller import mpc_snapshot as _snapshot
-from controller.acados import SolverDiagnostics
 from controller.applied_output import AppliedOutput
 from controller.base import ControllerBase, MpcTraceDiagnostics
 from controller.model_learning.activation import PreparedActivationRecord
@@ -46,6 +45,7 @@ from controller.runtime.model_persistence import (
 )
 
 if TYPE_CHECKING:
+    from controller.acados import SolverDiagnostics
     from controller.mpc_calibration import CalibrationCommand, CompletedCalibrationResult
 
 

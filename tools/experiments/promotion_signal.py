@@ -5,7 +5,7 @@
  PiFire MPC Promotion Signal: what separates a fit worth promoting from one that is not
 *****************************************
 
- controller/mpc.py refits the grey box at the end of a cook and asks
+ GreyLearningRuntime refits the grey box at the end of a cook and asks
  controller/model_promotion.evaluate whether to put the result on a live grill.
  The only evidence evaluate weighs about fit QUALITY is an RMSE ratio, and both
  RMSEs are measured on the record the candidate was fitted to. The candidate saw
@@ -16,12 +16,12 @@
  logged at the shipped control period, over eleven excitation profiles and eight
  truncation lengths, plus the real MAK cook and the flat cook that
  tests/unit/mpc/test_mpc_refit.py pins. Every record is fitted with the SHIPPED
- fitter -- update_mpc.fit_params from mpc._REFIT_INIT at the shipped sigma and
- n_delay -- and then, against each of two incumbents (the shipped defaults, and
- a model already calibrated to that plant):
+ fitter -- update_mpc.fit_params from GreyLearningRuntime's `_REFIT_INIT` at the
+ shipped sigma and n_delay -- and then, against each of two incumbents (the
+ shipped defaults, and a model already calibrated to that plant):
 
    * IN-SAMPLE RMSE, candidate and incumbent, on the record itself. This is the
-     signal the gate uses today, computed the way mpc.py computes it.
+     signal the gate uses today, computed the way GreyLearningRuntime computes it.
    * HELD-OUT RMSE. The record is split; the fitter is re-run on the prefix
      alone and the resulting model is scored on the suffix it never saw. Two
      scorings, because they differ and the difference matters to whoever builds
@@ -77,7 +77,7 @@
  the probe alone.
 
  EVERYTHING THE RECOMMENDATION RESTS ON IS SCOPED TO WHAT THE GATE CAN SEE.
- controller/mpc.py refuses a refit below `_REFIT_MIN_SAMPLES` rows before
+ GreyLearningRuntime refuses a refit below `_REFIT_MIN_SAMPLES` rows before
  `evaluate` is ever called, so a shorter record never produces a verdict at all
  and nothing derived from one belongs in a bound. Every count, correlation,
  threshold and confusion matrix below is over records at or above that floor;
@@ -134,9 +134,9 @@ SHIPPED = {k: float(DEFAULT_MPC_CONFIG[k]) for k in MODEL_KEYS}
 SPLIT_FRAC = 2.0 / 3.0
 
 #: Truncation lengths in seconds. 600 s is where a log at the shipped cadence
-#: first reaches mpc._REFIT_MIN_SAMPLES, so the two shorter ones are below the
-#: floor the controller already enforces. They are marked rather than dropped:
-#: what they show is how much of the inversion that floor already covers.
+#: first reaches GreyLearningRuntime's `_REFIT_MIN_SAMPLES`, so the two shorter
+#: ones are below the floor the runtime already enforces. They are marked rather
+#: than dropped: what they show is how much of the inversion that floor covers.
 LENGTHS_S = (300, 450, 600, 900, 1200, 1800, 2400, 3600)
 
 RECORD_S = 3600
@@ -301,7 +301,7 @@ def _safe_rmse(params, t, Q, T0, target, sl=slice(None)):
 
 
 def shipped_fit(t, y, Q):
-    """A refit exactly as controller/mpc.py performs one."""
+    """A refit exactly as GreyLearningRuntime performs one."""
     return fit_params(t, y, Q, T_amb=T_AMB, init=dict(_REFIT_INIT), sigma=SIGMA, n_delay=N_DELAY)
 
 
@@ -564,8 +564,8 @@ def deduplicate(cuts):
 def in_scope(row):
     """Whether the live gate could ever reach a verdict about this record.
 
-    controller/mpc.py refuses the refit at `_REFIT_MIN_SAMPLES` rows, BEFORE
-    `evaluate` is called, so a shorter record produces no verdict to be right or
+    GreyLearningRuntime refuses the refit below `_REFIT_MIN_SAMPLES` rows,
+    BEFORE `evaluate` is called, so a shorter record produces no verdict to be right or
     wrong about. Bounds, correlations and confusion matrices drawn from one
     would describe a decision path that does not exist.
     """

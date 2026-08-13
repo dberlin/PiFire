@@ -495,7 +495,7 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
     class _Learning:
         prepared = preparation
         handoff = None
-        _pending_request = None
+        pending_request = None
 
         def poll_fit_off_path(self, **_kwargs):
             return None

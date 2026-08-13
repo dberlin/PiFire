@@ -27,7 +27,9 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMOTION = ROOT / "controller" / "model_promotion.py"
 UPDATE = ROOT / "controller" / "update_mpc.py"
-MPC = ROOT / "controller" / "mpc.py"
+GREY_RUNTIME = ROOT / "controller" / "model_learning" / "grey_runtime.py"
+MPC_CONFIG = ROOT / "controller" / "mpc_config.py"
+MPC_CORE = ROOT / "controller" / "mpc_core.py"
 MODEL = ROOT / "controller" / "mpc_model.py"
 
 NODES = [
@@ -208,16 +210,16 @@ MUTATIONS = [
     ),
     (
         "M34 restore_model takes a snapshot of any version",
-        MPC,
-        '        if not isinstance(snapshot, dict) or snapshot.get("version") != self._MODEL_SCHEMA:',
+        GREY_RUNTIME,
+        '        if not isinstance(snapshot, dict) or snapshot.get("version") != self.MODEL_SCHEMA:',
         "        if False:",
     ),
     (
         "M35 restore_model refuses an old snapshot without saying so",
-        MPC,
+        GREY_RUNTIME,
         "            print(\n"
         '                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "\n'
-        '                f"accepts only grey schema {self._MODEL_SCHEMA}; version 3 is migration input only."\n'
+        '                f"accepts only grey schema {self.MODEL_SCHEMA}; version 3 is migration input only."\n'
         "            )\n"
         "            return False",
         "            return False",
@@ -225,56 +227,62 @@ MUTATIONS = [
     # ---- retired settings keys --------------------------------------------
     (
         "M39 a settings record's retired keys are ignored in silence",
-        MPC,
-        "    retired = [k for k in _RETIRED_PARAMS if k in cfg]",
+        MPC_CONFIG,
+        "    retired = [key for key in RETIRED_PARAMETER_KEYS if key in config]",
         "    retired = []",
     ),
     (
         "M40 the retired-key message fires for every record",
-        MPC,
-        "    retired = [k for k in _RETIRED_PARAMS if k in cfg]",
-        "    retired = list(_RETIRED_PARAMS)",
+        MPC_CONFIG,
+        "    retired = [key for key in RETIRED_PARAMETER_KEYS if key in config]",
+        "    retired = list(RETIRED_PARAMETER_KEYS)",
     ),
     (
         "M43 the snapshot counts its own schema instead of sharing the model's",
-        MPC,
-        "    _MODEL_SCHEMA = MODEL_SCHEMA",
-        "    _MODEL_SCHEMA = 1",
+        GREY_RUNTIME,
+        "    MODEL_SCHEMA = MODEL_SCHEMA",
+        "    MODEL_SCHEMA = 1",
     ),
     # ---- the frozen output ------------------------------------------------
     (
         "M44 a failing policy freezes the output in silence again",
-        MPC,
-        "            if n == 1 or n in (10, 60) or n % 300 == 0:",
+        MPC_CORE,
+        "            if failure_count == 1 or failure_count in (10, 60) or failure_count % 300 == 0:",
         "            if False:",
     ),
     (
         "M45 the failure report fires on every step, burying the first",
-        MPC,
-        "            if n == 1 or n in (10, 60) or n % 300 == 0:",
+        MPC_CORE,
+        "            if failure_count == 1 or failure_count in (10, 60) or failure_count % 300 == 0:",
         "            if True:",
     ),
     (
         "M46 the frozen-output counter never advances",
-        MPC,
+        MPC_CORE,
         "            self._consecutive_policy_failures += 1",
         "            self._consecutive_policy_failures += 0",
     ),
     (
         "M47 the counter never clears, so a healthy policy reads as frozen",
-        MPC,
+        MPC_CORE,
         "            if self._consecutive_policy_failures:\n"
-        '                print(f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)")\n'
+        "                print(\n"
+        '                    "[mpc] native solver recovered after "\n'
+        '                    f"{self._consecutive_policy_failures} failed step(s)"\n'
+        "                )\n"
         "            self._consecutive_policy_failures = 0",
         "            if self._consecutive_policy_failures:\n"
-        '                print(f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)")',
+        "                print(\n"
+        '                    "[mpc] native solver recovered after "\n'
+        '                    f"{self._consecutive_policy_failures} failed step(s)"\n'
+        "                )",
     ),
     # ---- the deadtime chain length ----------------------------------------
     (
         "M48 the deadtime chain back to the smeared n_delay=4",
-        MPC,
-        "    n_delay=8,",
-        "    n_delay=4,",
+        MPC_CONFIG,
+        '    "n_delay": 8,',
+        '    "n_delay": 4,',
     ),
 ]
 
