@@ -217,6 +217,7 @@ def test_queue_acceptance_without_durable_receipt_never_prepares_or_transfers_ow
     assert manager.active_pair is incumbent
     assert candidate.estimator.closed == 1
     assert candidate.solver.closed == 1
+    assert incumbent.estimator.closed == incumbent.solver.closed == 0
     assert calls[-1] == "persist-prepared"
     assert receipt.waits == 1
 
@@ -245,6 +246,7 @@ def test_every_candidate_validation_failure_closes_the_complete_candidate_pair(
     assert decision.reason == reason
     assert calls == expected_calls
     assert manager.active_pair is incumbent
+    assert incumbent.estimator.closed == incumbent.solver.closed == 0
     if "build_error" not in changes:
         assert candidate.estimator.closed == 1
         assert candidate.solver.closed == 1
@@ -693,6 +695,7 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
     assert core.mpc is incumbent.solver
     assert core.active_control_pair is incumbent
     assert candidate.estimator.closed == candidate.solver.closed == 1
+    assert incumbent.estimator.closed == incumbent.solver.closed == 0
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
     assert core._teardown_history.role_generation == core._model_revision == 6
     events = core.drain_activation_events()
@@ -770,5 +773,7 @@ def test_operator_rollback_restores_only_the_recorded_in_memory_rollback_owner()
     assert core.active_control_pair is incumbent
     assert core.estimator is incumbent.estimator
     assert core.mpc is incumbent.solver
+    assert incumbent.estimator.closed == incumbent.solver.closed == 0
+    assert candidate.estimator.closed == candidate.solver.closed == 1
     assert core._teardown_history.role_generation == core._model_revision == 6
     assert unrelated.estimator.closed == unrelated.solver.closed == 0

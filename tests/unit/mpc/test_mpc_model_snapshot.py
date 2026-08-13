@@ -8,6 +8,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import controller.mpc as mpc_module
 
 from controller.mpc import _DEFAULTS, Controller
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
@@ -192,6 +193,39 @@ def test_runtime_restore_refuses_future_corrupt_or_incompatible_v4_atomically(mu
 
     assert controller.restore_model(candidate) is False
     assert controller.get_model_snapshot() == before
+
+
+def test_restore_build_failure_closes_partial_candidate_and_keeps_incumbent_usable(monkeypatch):
+    source = _identified()
+    snapshot = source.get_model_snapshot()
+    target = _controller()
+    incumbent = target.active_control_pair
+
+    class CandidateEstimator:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    candidate_estimator = CandidateEstimator()
+    monkeypatch.setattr(mpc_module, "GreyBoxEKF", lambda **_kwargs: candidate_estimator)
+    monkeypatch.setattr(
+        mpc_module,
+        "AcadosGreyBoxMPC",
+        lambda _config: (_ for _ in ()).throw(RuntimeError("restore solver unavailable")),
+    )
+
+    try:
+        assert target.restore_model(snapshot) is False
+        assert candidate_estimator.closed == 1
+        assert target.active_control_pair is incumbent
+        assert target.estimator is incumbent.estimator
+        assert target.mpc is incumbent.solver
+        assert set(target.update(20.0)) == {"cycle_ratio", "fan"}
+    finally:
+        target.close()
+        source.close()
 
 
 def test_status_exposes_live_learning_state_separately_from_durable_activation_identity():
