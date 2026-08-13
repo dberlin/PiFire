@@ -196,6 +196,25 @@ def test_alternate_database_path_must_name_an_existing_file(ds, tmp_path):
         read_control_trace_session("session-a", database_path=missing_path)
 
 
+def test_append_rejects_malformed_batches(ds):
+    with pytest.raises(TypeError, match="records must be a sequence"):
+        append_control_trace(iter(()))
+    with pytest.raises(TypeError, match="records must contain only ControlTraceRecord"):
+        append_control_trace([object()])
+
+
+def test_empty_batch_append_is_a_noop_without_a_transaction(ds, monkeypatch):
+    existing = _record(1_000, "existing")
+    append_control_trace([existing])
+
+    def transaction_must_not_open():
+        raise AssertionError("an empty append must not open a transaction")
+
+    monkeypatch.setattr(datastore, "transaction", transaction_must_not_open)
+    append_control_trace([])
+    assert read_control_trace_session("existing") == [existing]
+
+
 def test_invalid_record_is_rejected_before_transaction(ds, monkeypatch):
     valid = _record(1_000, "session-a")
     invalid = valid.model_copy(update={"schema_version": 1})

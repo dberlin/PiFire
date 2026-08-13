@@ -331,6 +331,44 @@ def test_connected_users_preserve_order_and_remove_all_matching_ids(ds):
     assert runtime.read_connected_users() == []
 
 
+def test_probe_status_routes_aux_devices_to_the_aux_bucket(ds):
+    runtime.write_generic_key(
+        "probe_device_info",
+        [
+            {
+                "device": "ambient-device",
+                "status": {"temperature": 72},
+                "config": {"units": "F"},
+            }
+        ],
+    )
+
+    result = runtime.read_probe_status(
+        [
+            {
+                "type": "Aux",
+                "label": "Ambient",
+                "device": "ambient-device",
+                "enabled": False,
+            }
+        ]
+    )
+
+    assert result["P"] == {}
+    assert result["F"] == {}
+    assert result["AUX"]["Ambient"] == {
+        "status": {"temperature": 72},
+        "config": {"units": "F"},
+        "enabled": False,
+        "profile": None,
+        "port": None,
+        "type": "Aux",
+        "device": "ambient-device",
+        "label": "Ambient",
+        "name": None,
+    }
+
+
 def test_generic_keys_round_trip_detached_json_values_and_absence_raises(ds):
     with pytest.raises(TypeError):
         runtime.read_generic_key("missing")
@@ -342,6 +380,70 @@ def test_generic_keys_round_trip_detached_json_values_and_absence_raises(ds):
     detached["nested"]["items"].append(4)
 
     assert runtime.read_generic_key("runtime:test") == {"nested": {"items": [1, 2]}}
+
+
+@pytest.mark.parametrize(
+    ("name", "snapshot"),
+    [
+        (None, {"revision": 0}),
+        ("   ", {"revision": 0}),
+        ("pid_sp", []),
+    ],
+)
+def test_controller_model_checkpoint_rejects_invalid_identity_or_shape(
+    ds, name, snapshot
+):
+    assert runtime.write_controller_model_checkpoint(name, snapshot) is False
+    assert datastore.get_blob("controller_model_state") is None
+
+
+@pytest.mark.parametrize("revision", [True, "1", -1])
+def test_controller_model_checkpoint_rejects_invalid_revisions(ds, revision):
+    assert (
+        runtime.write_controller_model_checkpoint("pid_sp", {"revision": revision}) is False
+    )
+    assert datastore.get_blob("controller_model_state") is None
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        pytest.param({"revision": 1, "model": float("nan")}, id="non-finite-number"),
+        pytest.param({"revision": 1, "model": object()}, id="non-json-value"),
+    ],
+)
+def test_controller_model_checkpoint_rejects_non_json_snapshots(ds, snapshot):
+    assert runtime.write_controller_model_checkpoint("pid_sp", snapshot) is False
+    assert datastore.get_blob("controller_model_state") is None
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param("{not json", id="malformed-json"),
+        pytest.param(json.dumps([]), id="non-object-state"),
+        pytest.param(
+            json.dumps({"version": 2, "models": {}}), id="unsupported-version"
+        ),
+        pytest.param(json.dumps({"version": 1, "models": []}), id="non-object-models"),
+        pytest.param(
+            json.dumps({"version": 1, "models": {"pid_sp": "not a snapshot"}}),
+            id="non-object-existing-snapshot",
+        ),
+    ],
+)
+def test_controller_model_checkpoint_rejects_corrupt_stored_state_without_overwriting(
+    ds, stored
+):
+    if stored == "{not json":
+        ds.connection().execute("PRAGMA ignore_check_constraints = ON")
+    datastore.set_blob("controller_model_state", stored)
+    ds.connection().execute("PRAGMA ignore_check_constraints = OFF")
+
+    assert (
+        runtime.write_controller_model_checkpoint("pid_sp", {"revision": 1}) is False
+    )
+    assert datastore.get_blob("controller_model_state") == stored
 
 
 def test_controller_model_checkpoint_is_owned_monotonic_and_atomic(ds):

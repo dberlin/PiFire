@@ -1,6 +1,7 @@
 """Behavioral contracts for the durable compact model-evidence ledger."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import sqlite3
 
@@ -9,8 +10,11 @@ from pydantic import ValidationError
 
 from common.control_trace import AllocationClampReason, AmbientSource
 from common.persistence.model_evidence import (
+    ModelActivationPair,
     append_model_evidence,
     commit_model_activation,
+    commit_model_activation_phase,
+    commit_model_rollback,
     invalidate_model_evidence_schema,
     read_model_activation,
     read_model_evidence,
@@ -23,10 +27,12 @@ from common.model_evidence import (
     CalibrationSummaryEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
+    FallbackEvidence,
+    FitLifecycleEvidence,
     ForecastOriginEvidence,
     ModelEvidenceRecord,
+    RollbackEvidence,
     TimingDistributionEvidence,
-    FitLifecycleEvidence,
 )
 from common.model_evidence import MODEL_EVIDENCE_SCHEMA_VERSION
 
@@ -99,6 +105,64 @@ def _activation(evidence_id: str = "activation-a") -> ModelEvidenceRecord:
             rollback_snapshot_json='{"revision": 2, "model": "old"}',
             controller_configuration_digest=_OTHER_DIGEST,
         ),
+    )
+
+
+def _pair(
+    model_digest: str,
+    *,
+    candidate_generation: int,
+    role_generation: int,
+    configuration_revision: int,
+) -> ModelActivationPair:
+    return ModelActivationPair(
+        model_digest=model_digest,
+        configuration_json=f'{{"revision":{configuration_revision}}}',
+        estimator_kind="grey-estimator",
+        solver_kind="native-solver",
+        candidate_generation=candidate_generation,
+        role_generation=role_generation,
+        ownership_digest=_OTHER_DIGEST,
+    )
+
+
+def _phase_record(phase: str = "prepared", *, transaction_id: str = "transaction-a"):
+    incumbent = _pair(
+        _OTHER_DIGEST,
+        candidate_generation=2,
+        role_generation=2,
+        configuration_revision=2,
+    )
+    candidate = _pair(
+        _DIGEST,
+        candidate_generation=3,
+        role_generation=3,
+        configuration_revision=3,
+    )
+    return SimpleNamespace(
+        phase=phase,
+        transaction_id=transaction_id,
+        decision_id="decision-a",
+        incumbent=incumbent,
+        candidate=candidate,
+        rollback=incumbent,
+        origin="passive-online",
+        policy="passive-auto",
+        reason=None,
+    )
+
+
+def _rollback(evidence_id: str = "rollback-a") -> ModelEvidenceRecord:
+    return ModelEvidenceRecord(
+        evidence_id=evidence_id,
+        kind=EvidenceKind.ROLLBACK,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=600,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        payload=RollbackEvidence(decision_id="decision-a", reason="runtime-failure"),
     )
 
 
@@ -414,3 +478,206 @@ def test_activation_snapshot_rejects_nonstandard_json_constants(constant):
             rollback_snapshot_json='{"revision": 1}',
             controller_configuration_digest=_OTHER_DIGEST,
         )
+
+
+@pytest.mark.parametrize(
+    ("descriptor", "message"),
+    [
+        ("[]", "descriptor must be an object"),
+        ('{"configuration":[]}', "configuration must be an object"),
+        (
+            '{"configuration":{},"candidate_generation":true,"role_generation":0}',
+            "generations must be non-negative integers",
+        ),
+        (
+            '{"configuration":{},"candidate_generation":0,"role_generation":0,'
+            '"model_digest":"","estimator_kind":"grey","solver_kind":"native",'
+            '"ownership_digest":"owner"}',
+            "identity fields must be non-blank strings",
+        ),
+    ],
+)
+def test_activation_pair_rejects_malformed_stored_descriptors(descriptor, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        ModelActivationPair.from_json(descriptor)
+
+
+def test_activation_pair_equality_compares_stored_record_values() -> None:
+    pair = _pair(
+        _DIGEST,
+        candidate_generation=3,
+        role_generation=3,
+        configuration_revision=3,
+    )
+
+    assert pair == ModelActivationPair.from_json(
+        '{"candidate_generation":3,"configuration":{"revision":3},'
+        '"estimator_kind":"grey-estimator","model_digest":"' + _DIGEST + '",'
+        '"ownership_digest":"' + _OTHER_DIGEST + '","role_generation":3,'
+        '"solver_kind":"native-solver"}'
+    )
+
+
+def test_append_rejects_invalid_containers_and_members_but_accepts_empty_batch(ds) -> None:
+    with pytest.raises(TypeError, match="sequence"):
+        append_model_evidence("not-a-record-sequence")
+    with pytest.raises(TypeError, match="only ModelEvidenceRecord"):
+        append_model_evidence([object()])
+
+    append_model_evidence(())
+    assert read_model_evidence() == []
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"session_id": " "},
+        {"cook_id": ""},
+        {"kind": "not-an-evidence-kind"},
+    ],
+)
+def test_read_filters_reject_blank_identifiers_and_unknown_record_kind(ds, filters) -> None:
+    with pytest.raises(ValueError):
+        read_model_evidence(**filters)
+
+
+def test_activation_commit_rejects_wrong_record_type_and_mixed_provenance(ds) -> None:
+    with pytest.raises(ValueError, match="requires activation evidence"):
+        commit_model_activation(_forecast("not-an-activation", 100))
+
+    poison = _confidence("older-poison", timestamp_ms=399).model_copy(
+        update={"provenance_digest": _DIGEST}
+    )
+    append_model_evidence((poison, _confidence()))
+    with pytest.raises(ValueError, match="activation-authority-changed"):
+        commit_model_activation(_activation())
+
+    assert read_model_activation() is None
+    assert read_model_evidence(kind=EvidenceKind.ACTIVATION) == []
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected_phase", "message"),
+    [
+        ("unknown", None, "unknown activation phase"),
+        ("prepared", "prepared", "cannot have an expected phase"),
+        ("active", None, "requires expected prepared phase"),
+    ],
+)
+def test_activation_phase_validates_cas_transition_shape(
+    phase, expected_phase, message, ds
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        commit_model_activation_phase(
+            SimpleNamespace(phase=phase),
+            expected_phase=expected_phase,
+        )
+
+
+def test_prepared_activation_requires_current_authority_and_consistent_provenance(ds) -> None:
+    prepared = _phase_record()
+    with pytest.raises(ValueError, match="activation-authority-changed"):
+        commit_model_activation_phase(prepared)
+
+    poison = _confidence("older-poison", timestamp_ms=399).model_copy(
+        update={"provenance_digest": _DIGEST}
+    )
+    append_model_evidence((poison, _confidence()))
+    with pytest.raises(ValueError, match="activation-authority-changed"):
+        commit_model_activation_phase(prepared)
+
+    assert read_model_activation() is None
+
+
+def test_replaying_identical_prepared_activation_is_idempotent(ds) -> None:
+    prepared = _phase_record()
+    append_model_evidence((_confidence(),))
+    commit_model_activation_phase(prepared)
+    first = read_model_activation()
+
+    commit_model_activation_phase(prepared)
+
+    assert read_model_activation() == first
+
+
+def test_rollback_commit_rejects_wrong_record_type_and_stale_cas_state(ds) -> None:
+    with pytest.raises(ValueError, match="requires rollback evidence"):
+        commit_model_rollback(_activation(), expected_activation=None)
+
+    append_model_evidence((_confidence(),))
+    commit_model_activation(_activation())
+    active = read_model_activation()
+    assert active is not None
+
+    with pytest.raises(ValueError, match="activation-state-changed"):
+        commit_model_rollback(
+            _rollback(),
+            expected_activation=replace(active, role_generation=active.role_generation + 1),
+        )
+    assert read_model_evidence(kind=EvidenceKind.ROLLBACK) == []
+
+
+def test_legacy_rollback_requires_activation_lineage(ds) -> None:
+    append_model_evidence((_confidence(),))
+    commit_model_activation(_activation())
+    active = read_model_activation()
+    assert active is not None
+    ds.connection().execute(
+        "DELETE FROM model_evidence WHERE kind=?",
+        (EvidenceKind.ACTIVATION.value,),
+    )
+
+    with pytest.raises(ValueError, match="activation-lineage-missing"):
+        commit_model_rollback(_rollback(), expected_activation=active)
+
+    assert read_model_evidence(kind=EvidenceKind.ROLLBACK) == []
+
+
+def test_legacy_rollback_insert_is_idempotent(ds) -> None:
+    append_model_evidence((_confidence(),))
+    commit_model_activation(_activation())
+    active = read_model_activation()
+    assert active is not None
+    rollback = _rollback()
+
+    inserted = commit_model_rollback(rollback, expected_activation=active)
+    replayed = commit_model_rollback(
+        rollback.model_copy(update={"evidence_id": "rollback-retry"}),
+        expected_activation=active,
+    )
+
+    assert inserted.inserted is True
+    assert inserted.record == rollback
+    assert replayed.inserted is False
+    assert replayed.record == rollback
+    assert read_model_evidence(kind=EvidenceKind.ROLLBACK) == [rollback]
+
+
+def test_prior_fallback_satisfies_rollback_lifecycle(ds) -> None:
+    append_model_evidence((_confidence(),))
+    commit_model_activation(_activation())
+    active = read_model_activation()
+    assert active is not None
+    fallback = ModelEvidenceRecord(
+        evidence_id="fallback-a",
+        kind=EvidenceKind.FALLBACK,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=550,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        payload=FallbackEvidence(
+            decision_id="decision-a",
+            reason="runtime-failure",
+            failed_digest=_DIGEST,
+            failed_generation=3,
+        ),
+    )
+    append_model_evidence((fallback,))
+
+    outcome = commit_model_rollback(_rollback(), expected_activation=active)
+
+    assert outcome.inserted is False
+    assert outcome.record == fallback
+    assert read_model_evidence(kind=EvidenceKind.ROLLBACK) == []

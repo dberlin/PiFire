@@ -143,6 +143,10 @@ def test_metric_update_changes_only_last_row_and_inserts_when_empty(monkeypatch,
     assert rows[1]["pellet_brand_type"] is None
     assert "unknown" not in rows[1]
 
+    unchanged = history.read_all_metrics()
+    assert history.update_metrics({"unknown": "ignored"}) is None
+    assert history.read_all_metrics() == unchanged
+
     history.flush_metrics()
     assert history.read_all_metrics() == []
     assert history.update_metrics({"mode": "First update"}) is None

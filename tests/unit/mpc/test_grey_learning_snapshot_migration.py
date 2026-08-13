@@ -312,3 +312,293 @@ def test_atomic_migration_rolls_back_checkpoint_and_activation_pointer_together(
 
     assert _stored_controller() == original
     assert json.loads(datastore.get_blob("mpc:model_activation_migration_input")) == activation
+
+
+def test_non_object_defaults_are_rejected_before_authority_is_rewritten(ds):
+    original = _v3()
+    _seed_controller(original)
+
+    with pytest.raises(ValueError, match="defaults must be an object"):
+        migrate_mpc_learning_authority(defaults=[PARAMS])
+
+    assert _stored_controller() == original
+
+
+def test_current_active_precedes_rollback_and_controller_authorities(ds):
+    _seed_controller(_v3(params={**PARAMS, "theta": 47.0}))
+    datastore.set_blob(
+        "mpc:model_activation_migration_input",
+        json.dumps(
+            {
+                "active": _authority(_v4(theta=31.0)),
+                "rollback": _authority(_v4(theta=36.0)),
+            }
+        ),
+    )
+
+    result = migrate_mpc_learning_authority(
+        defaults=PARAMS,
+        activation_input_key="mpc:model_activation_migration_input",
+    )
+
+    assert result.source == "active"
+    assert result.reason is None
+    assert result.snapshot["active"]["parameters"]["theta"] == 31.0
+    assert _stored_controller() == result.snapshot
+
+
+@pytest.mark.parametrize(
+    ("malformed_active", "reason"),
+    [
+        (None, None),
+        ([], "schema-invalidated"),
+        (
+            {
+                "model_kind": "grey-box",
+                "model_schema": 4,
+                "snapshot": _v3(params={**PARAMS, "theta": 31.0}),
+            },
+            "schema-invalidated",
+        ),
+        (
+            {
+                "model_kind": "grey-box",
+                "model_schema": 3,
+                "snapshot": _v4(theta=31.0),
+            },
+            "schema-invalidated",
+        ),
+        (
+            {
+                "model_kind": "grey-box",
+                "model_schema": 4,
+                "snapshot": {"version": 4},
+            },
+            "schema-invalidated",
+        ),
+    ],
+    ids=["absent", "non-object", "legacy-snapshot", "legacy-envelope", "invalid-current"],
+)
+def test_only_valid_current_active_authority_can_outrank_rollback(
+    ds, malformed_active, reason
+):
+    _seed_controller(_v3(params={**PARAMS, "theta": 47.0}))
+    datastore.set_blob(
+        "mpc:model_activation_migration_input",
+        json.dumps(
+            {
+                "active": malformed_active,
+                "rollback": _authority(_v4(theta=36.0)),
+            }
+        ),
+    )
+
+    result = migrate_mpc_learning_authority(
+        defaults=PARAMS,
+        activation_input_key="mpc:model_activation_migration_input",
+    )
+
+    assert result.source == "rollback"
+    assert result.reason == reason
+    assert result.snapshot["active"]["parameters"]["theta"] == 36.0
+    migrated = json.loads(datastore.get_blob("mpc:model_activation_migration_input"))
+    assert migrated["current"]["source"] == "rollback"
+    assert migrated["current"]["snapshot"] == result.snapshot
+
+
+def test_malformed_serialized_documents_are_replaced_by_defaults_without_partial_state(ds):
+    ds.connection().execute("PRAGMA ignore_check_constraints = ON")
+    datastore.set_blob(MODEL_STATE_KEY, "{not-json")
+    datastore.set_blob("mpc:model_activation_migration_input", "{also-not-json")
+    ds.connection().execute("PRAGMA ignore_check_constraints = OFF")
+
+    result = migrate_mpc_learning_authority(
+        defaults={**PARAMS, "theta": 52.0},
+        activation_input_key="mpc:model_activation_migration_input",
+    )
+
+    assert result.source == "defaults"
+    assert result.reason == "schema-invalidated"
+    assert result.snapshot["revision"] == 0
+    assert result.snapshot["active"]["parameters"]["theta"] == 52.0
+    assert _stored_controller() == result.snapshot
+    migrated = json.loads(datastore.get_blob("mpc:model_activation_migration_input"))
+    assert migrated == {
+        "candidate": None,
+        "current": {
+            "model_kind": "grey-box",
+            "model_schema": 4,
+            "snapshot": result.snapshot,
+            "source": "defaults",
+        },
+        "evidence_decision_id": None,
+        "migration_reason": "schema-invalidated",
+    }
+
+
+def test_legacy_singleton_snapshot_is_selected_when_no_pair_identity_exists(ds):
+    _seed_controller(_v3(params={**PARAMS, "theta": 47.0}))
+    active = _v4(revision=9, theta=33.0)
+    with datastore.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO model_activation_state(
+                singleton, active_snapshot_json, rollback_snapshot_json,
+                evidence_decision_id, controller_configuration_digest,
+                role_generation, phase
+            ) VALUES(1, ?, ?, 'legacy-decision', ?, 9, 'active')
+            """,
+            (
+                json.dumps(active, indent=2),
+                json.dumps(_v4(revision=8, theta=36.0)),
+                "d" * 64,
+            ),
+        )
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+    state = read_model_activation()
+
+    assert result.source == "active"
+    assert result.reason is None
+    assert result.snapshot == active
+    assert state is not None
+    assert state.active_pair is None
+    assert state.evidence_decision_id == "legacy-decision"
+    assert state.active_snapshot_json == json.dumps(
+        active,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    assert _stored_controller() == active
+
+
+def test_invalid_active_pair_configuration_yields_to_valid_rollback_pair(ds):
+    _seed_controller(_v3(params={**PARAMS, "theta": 47.0}))
+    invalid_config = {
+        "schema": "pifire-grey-box-model/v4",
+        **{**PARAMS, "theta": 31.0, "n_delay": 7},
+    }
+    invalid_active = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(invalid_config),
+        configuration=invalid_config,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=7,
+        role_generation=8,
+    )
+    rollback_config = {
+        "schema": "pifire-grey-box-model/v4",
+        **{**PARAMS, "theta": 36.0},
+    }
+    rollback = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(rollback_config),
+        configuration=rollback_config,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=3,
+        role_generation=4,
+    )
+    with datastore.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO model_activation_state(
+                singleton, active_snapshot_json, rollback_snapshot_json,
+                evidence_decision_id, controller_configuration_digest,
+                role_generation, phase, incumbent_pair_json, rollback_pair_json
+            ) VALUES(1, ?, ?, 'prepared-decision', ?, 8, 'prepared', ?, ?)
+            """,
+            (
+                json.dumps(_v4(theta=31.0)),
+                json.dumps(_v4(theta=36.0)),
+                "d" * 64,
+                json.dumps(invalid_active.to_dict(), sort_keys=True, separators=(",", ":")),
+                json.dumps(rollback.to_dict(), sort_keys=True, separators=(",", ":")),
+            ),
+        )
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+    state = read_model_activation()
+
+    assert result.source == "rollback"
+    assert result.reason is None
+    assert result.snapshot["active"]["parameters"]["theta"] == 36.0
+    assert state is not None
+    assert state.phase == "aborted"
+    assert state.active_pair == rollback
+    assert state.rollback_pair == rollback
+
+
+def test_scalar_singleton_authorities_fall_back_to_controller_and_are_removed(ds):
+    controller = _v3(params={**PARAMS, "theta": 47.0})
+    _seed_controller(controller)
+    with datastore.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO model_activation_state(
+                singleton, active_snapshot_json, rollback_snapshot_json,
+                evidence_decision_id, controller_configuration_digest,
+                role_generation
+            ) VALUES(1, ?, ?, 'malformed-decision', ?, 4)
+            """,
+            (json.dumps("not-an-authority"), json.dumps(17), "d" * 64),
+        )
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+
+    assert result.source == "controller"
+    assert result.reason == "schema-invalidated"
+    assert result.snapshot == migrate_grey_learning_snapshot(controller)
+    assert read_model_activation() is None
+    assert _stored_controller() == result.snapshot
+
+
+def test_rejected_rollback_pointer_update_rolls_back_controller_and_singleton(ds):
+    original = _v3(params={**PARAMS, "theta": 47.0})
+    _seed_controller(original)
+    rollback_config = {
+        "schema": "pifire-grey-box-model/v4",
+        **{**PARAMS, "theta": 36.0},
+    }
+    rollback = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(rollback_config),
+        configuration=rollback_config,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=3,
+        role_generation=4,
+    )
+    with datastore.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO model_activation_state(
+                singleton, active_snapshot_json, rollback_snapshot_json,
+                evidence_decision_id, controller_configuration_digest,
+                role_generation, phase, rollback_pair_json
+            ) VALUES(1, ?, ?, 'retired-decision', ?, 4, 'active', ?)
+            """,
+            (
+                json.dumps({"model_kind": "scheduled-arx", "version": 3}),
+                json.dumps(_v4(theta=36.0)),
+                "d" * 64,
+                json.dumps(rollback.to_dict(), sort_keys=True, separators=(",", ":")),
+            ),
+        )
+        connection.execute(
+            """
+            CREATE TRIGGER reject_rollback_pointer_migration
+            BEFORE UPDATE ON model_activation_state
+            BEGIN
+                SELECT RAISE(ABORT, 'injected rollback pointer failure');
+            END
+            """
+        )
+    original_state = read_model_activation()
+    original_evidence = read_model_evidence()
+
+    with pytest.raises(sqlite3.IntegrityError, match="injected rollback pointer"):
+        migrate_mpc_learning_authority(defaults=PARAMS)
+
+    assert _stored_controller() == original
+    assert read_model_activation() == original_state
+    assert read_model_evidence() == original_evidence

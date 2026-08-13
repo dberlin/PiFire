@@ -208,6 +208,11 @@ def test_calibration_state_uses_first_command_at_highest_valid_revision():
     }
     pending = (
         {"ops": ["legacy", {"op": "other"}]},
+        None,
+        {
+            CONTROL_DELTA_KEY: 1,
+            "ops": [{"op": "mpc_calibration.set", "command": "legacy"}],
+        },
         _calibration_delta(revision_four),
         _calibration_delta(conflicting_four),
         invalid_boolean_revision,
@@ -216,6 +221,16 @@ def test_calibration_state_uses_first_command_at_highest_valid_revision():
     assert control_store.mpc_calibration_command_state(live, pending) == revision_four
     assert control_store.mpc_calibration_command_revision(live, pending) == 4
     assert control_store.mpc_calibration_command_revision({}, ()) == 0
+
+
+def test_calibration_state_loads_each_unspecified_persistence_source(ds):
+    live = _calibration_command(2)
+    queued = _calibration_command(4, action="pause")
+    control_store.write_control_snapshot({"mpc_calibration": live}, origin="seed")
+    control_store.enqueue_control_delta(_calibration_delta(queued), origin="runtime")
+
+    assert control_store.mpc_calibration_command_state(None, ()) == live
+    assert control_store.mpc_calibration_command_state({}, None) == queued
 
 
 def test_queue_calibration_command_preserves_origin_revision_and_idempotency(ds):
