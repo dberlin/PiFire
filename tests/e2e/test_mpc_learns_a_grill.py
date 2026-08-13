@@ -5,7 +5,7 @@ drives the whole pipeline closed-loop -- cook, refit, promotion gate, adopt,
 cook again -- against `MAKGrillSim`, which carries a real MAK's identified
 parameters (C_c=3115.9, H=958.8, 100 s deadtime; fitted RMSE 2.3 C, peak 519 F
 against 520 F measured). That plant is a chamber roughly ten times slower than
-the shipped `_DEFAULTS` model, and it is the grill that started this work.
+the shipped `DEFAULT_MPC_CONFIG` model, and it is the grill that started this work.
 
 WHY 450 F. The incident was a 450 F Hold that overshot by ~70 F, and the MAK's
 parameters were identified from that very cook, so 450 F is the one setpoint at
@@ -68,7 +68,8 @@ import pytest
 
 import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
-from controller.mpc import _DEFAULTS, Controller
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from grillplat.actuator_capabilities import AUGER_TIMING
 
 MODEL_KEYS = Controller._MODEL_PARAM_KEYS
@@ -249,7 +250,7 @@ def test_identification_off_is_invisible():
     verdict = learned["refit"]
     assert verdict["accepted"], f"nothing was learned, so there is nothing to be invisible: {verdict['reason']}"
     assert {k: verdict["params"][k] for k in ("C_c", "theta", "K_Q")} != {
-        k: _DEFAULTS[k] for k in ("C_c", "theta", "K_Q")
+        k: DEFAULT_MPC_CONFIG[k] for k in ("C_c", "theta", "K_Q")
     }, "the promoted model is the shipped one; the control below would be vacuous"
 
     forgetful = _cook({}, refit=False)

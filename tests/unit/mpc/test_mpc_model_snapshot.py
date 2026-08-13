@@ -9,8 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 import controller.mpc as mpc_module
+import controller.mpc_core as mpc_core_module
 
-from controller.mpc import _DEFAULTS, Controller
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
 
@@ -31,7 +33,7 @@ PARAMS = {
 
 
 def _controller(**overrides):
-    return Controller(dict(_DEFAULTS, **overrides), "C", dict(CYCLE))
+    return Controller(dict(DEFAULT_MPC_CONFIG, **overrides), "C", dict(CYCLE))
 
 
 def _identified():
@@ -209,9 +211,9 @@ def test_restore_build_failure_closes_partial_candidate_and_keeps_incumbent_usab
             self.closed += 1
 
     candidate_estimator = CandidateEstimator()
-    monkeypatch.setattr(mpc_module, "GreyBoxEKF", lambda **_kwargs: candidate_estimator)
+    monkeypatch.setattr(mpc_core_module, "GreyBoxEKF", lambda **_kwargs: candidate_estimator)
     monkeypatch.setattr(
-        mpc_module,
+        mpc_core_module,
         "AcadosGreyBoxMPC",
         lambda _config: (_ for _ in ()).throw(RuntimeError("restore solver unavailable")),
     )

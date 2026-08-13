@@ -44,7 +44,8 @@ from controller.runtime.runner import (
     _freeze_evidence,
     build_runner,
 )
-from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
+from controller.mpc import Controller as MpcController
+from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
 from controller.model_learning.evaluation import CompletedForecastOrigin, ForecastOrigin
 
 

@@ -107,20 +107,21 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 from controller import model_promotion as promo  # noqa: E402
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
-from controller.mpc import _DEFAULTS, _REFIT_INIT, _REFIT_MIN_SAMPLES, Controller  # noqa: E402
+from controller.mpc import _REFIT_INIT, _REFIT_MIN_SAMPLES, Controller  # noqa: E402
+from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
 from controller.mpc_model import simulate_grey_box  # noqa: E402
 from controller.update_mpc import _FREE, _SIM_KEYS, fit_params, fit_quality  # noqa: E402
 
 T_AMB = 20.0
-SIGMA = float(_DEFAULTS["sigma"])
-N_DELAY = int(_DEFAULTS["n_delay"])
+SIGMA = float(DEFAULT_MPC_CONFIG["sigma"])
+N_DELAY = int(DEFAULT_MPC_CONFIG["n_delay"])
 #: The cadence a cook is actually logged at, so a synthetic record and the real
 #: one carry the same number of samples per second of grill.
-LOG_PERIOD_S = float(_DEFAULTS["control_period"])
+LOG_PERIOD_S = float(DEFAULT_MPC_CONFIG["control_period"])
 LOG_STRIDE = int(round(LOG_PERIOD_S / DT))
 
 MODEL_KEYS = Controller._MODEL_PARAM_KEYS
-SHIPPED = {k: float(_DEFAULTS[k]) for k in MODEL_KEYS}
+SHIPPED = {k: float(DEFAULT_MPC_CONFIG[k]) for k in MODEL_KEYS}
 
 #: Where a record is split for the held-out measurement. Two thirds fitted, one
 #: third scored: enough record left to fit from, and a third of a cook is long

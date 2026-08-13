@@ -17,7 +17,8 @@ import warnings, sys, json, importlib
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
-from controller.mpc import Controller as MPCController, _DEFAULTS
+from controller.mpc import Controller as MPCController
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.grill_sim import GrillSim
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
@@ -44,7 +45,7 @@ _pidsp.time = _clk
 
 class MPCAdapter:
     def __init__(self, **over):
-        cfg = dict(_DEFAULTS)
+        cfg = dict(DEFAULT_MPC_CONFIG)
         cfg.update(over)
         self.c = MPCController(cfg, "C", dict(CYCLE))
 

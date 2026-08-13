@@ -403,20 +403,20 @@ def main():
     except TraceSelectionError as exc:
         ap.error(str(exc))
 
-    from controller.mpc import _DEFAULTS, _optional_float
+    from controller.mpc_config import DEFAULT_MPC_CONFIG, optional_float
 
     T_amb = recorded_ambient_c
     if args.t_amb is not None and not math.isclose(args.t_amb, T_amb, rel_tol=0.0, abs_tol=1e-9):
         ap.error("--t-amb must match the trace's recorded ambient temperature")
-    init = {k: float(_DEFAULTS[k]) for k in ("C_c", "h_amb", "K_Q", "theta")}
+    init = {k: float(DEFAULT_MPC_CONFIG[k]) for k in ("C_c", "h_amb", "K_Q", "theta")}
     fitted = fit_params(
         t,
         temp,
         Q,
         T_amb=T_amb,
         init=init,
-        sigma=float(_DEFAULTS["sigma"]),
-        n_delay=int(_DEFAULTS["n_delay"]),
+        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
+        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
     )
     payload = {k: fitted[k] for k in CONFIG_KEYS}
 
@@ -428,7 +428,7 @@ def main():
         # the `converged` flag exists to prevent. The human-readable warning
         # goes to stderr so stdout remains parseable JSON.
         #
-        # The two errors go through `_optional_float`, so a model the grey box
+        # The two errors go through `optional_float`, so a model the grey box
         # cannot be simulated at reports `null` rather than the infinities
         # `fit_quality` returns for it -- the same encoding controller/mpc.py's
         # snapshot uses for an RMSE nobody could measure, so a consumer meets
@@ -443,8 +443,8 @@ def main():
                     "fit": {
                         "converged": fitted["converged"],
                         "nfev": fitted["nfev"],
-                        "rmse_c": _optional_float(rmse),
-                        "max_error_c": _optional_float(max_err),
+                        "rmse_c": optional_float(rmse),
+                        "max_error_c": optional_float(max_err),
                     },
                 }
             )

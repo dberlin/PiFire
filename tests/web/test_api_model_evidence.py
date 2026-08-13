@@ -37,7 +37,8 @@ from controller.model_learning.contracts import (
 )
 from common.controller_model_state import ControllerModelStore
 
-from controller.mpc import Controller, _DEFAULTS
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_fitting import grey_config_digest
 
@@ -452,16 +453,16 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
 ):
     settings = read_settings()
     settings["controller"]["selected"] = "mpc"
-    settings["controller"]["config"]["mpc"] = dict(_DEFAULTS)
+    settings["controller"]["config"]["mpc"] = dict(DEFAULT_MPC_CONFIG)
     write_settings(settings)
     controller = Controller(
-        dict(_DEFAULTS),
+        dict(DEFAULT_MPC_CONFIG),
         settings["globals"]["units"],
         settings["cycle_data"],
     )
     controller.bind_learning_identity("session-api-operator", None, 0)
     incumbent = controller.active_control_pair.descriptor
-    candidate_settings = dict(_DEFAULTS)
+    candidate_settings = dict(DEFAULT_MPC_CONFIG)
     candidate_settings["theta"] = float(candidate_settings["theta"]) + 1.0
     candidate_controller = Controller(
         candidate_settings,

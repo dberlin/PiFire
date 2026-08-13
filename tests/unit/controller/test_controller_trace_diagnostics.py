@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import collections
 
 import pytest
-from types import SimpleNamespace
 
-from common.control_trace import AllocationClampReason, ControllerBranch, MpcFailureState
-from controller import mpc, pid, pid_sp
-from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
-from controller.mpc_allocator import AllocationResult
+from common.control_trace import ControllerBranch
+from controller import pid, pid_sp
+from controller.base import PidSpTraceDiagnostics, PidTraceDiagnostics
 
 CYCLE_DATA = {"u_min": 0.1, "u_max": 0.9}
 
@@ -74,153 +71,6 @@ def test_pid_sp_trace_diagnostics_reproduce_completed_update(monkeypatch):
     assert diagnostic.previous_update_time == pytest.approx(98.0)
 
 
-class _Estimator:
-    def update(self, applied_load, measured_temperature):
-        assert applied_load == 0.7
-        assert measured_temperature == 100.0
-        return mpc.np.arange(1.0, 11.0)
-
-
-class _Solver:
-    def solve(self, x_hat, *, setpoint_c, q_previous, equilibrium_q):
-        assert tuple(x_hat) == tuple(float(value) for value in range(1, 11))
-        assert setpoint_c == 120.0
-        assert q_previous == 0.7
-        assert equilibrium_q == 0.0
-        diagnostics = SimpleNamespace(
-            status=0,
-            backend_status=0,
-            iterations=1,
-            solve_time_s=0.001,
-            objective=1.0,
-            kkt_residual=0.0,
-            constraint_residual=0.0,
-            warm_started=True,
-        )
-        return SimpleNamespace(
-            sequence_q=mpc.np.array([1.0, 1.0]),
-            sequence_residual=mpc.np.array([1.0, 1.0]),
-            objective=1.0,
-            diagnostics=diagnostics,
-        )
-
-
-def _bare_mpc_controller():
-    core = object.__new__(mpc.Controller)
-    core.units = "C"
-    core.cfg = {
-        "n_delay": mpc._DEFAULTS["n_delay"],
-        "n_horizon": 2,
-        "C_c": mpc._DEFAULTS["C_c"],
-        "h_amb": mpc._DEFAULTS["h_amb"],
-        "T_amb": mpc._DEFAULTS["T_amb"],
-        "theta": mpc._DEFAULTS["theta"],
-        "sigma": mpc._DEFAULTS["sigma"],
-        "K_Q": mpc._DEFAULTS["K_Q"],
-        "fan_min_pct": 40.0,
-        "fan_max_pct": 100.0,
-        "enable_fan_input": False,
-    }
-    core._set_point_c = 120.0
-    core._applied_combustion_load = 0.7
-    core._last_combustion_load = 0.8
-    core._last_raw_combustion_load = 0.8
-    core._consecutive_policy_failures = 0
-    core._history = collections.deque(maxlen=2)
-    core._model_revision = 3
-    core._model_meta = None
-    core._calibration_feedback = collections.deque()
-    core._calibration_operations = collections.deque()
-    core._trace_calibration = mpc.CalibrationDecision(False, 0.0, None, mpc.CalibrationProgress())
-    core.mpc = _Solver()
-    core._activation_output_authorized = True
-    core._native_failure_diagnostics = None
-    core._active_activation_record = None
-    core.estimator = _Estimator()
-    core.u_max = 0.9
-    return core
-
-
-def _allocation(_load, **_):
-    return AllocationResult(
-        normalized_combustion_load=1.0,
-        auger_duty=0.5,
-        fan_duty=None,
-        u_max=0.9,
-        fan_min_pct=40.0,
-        fan_max_pct=100.0,
-        fan_enabled=False,
-        auger_clamp_reason=AllocationClampReason.NONE,
-        fan_clamp_reason=AllocationClampReason.NONE,
-    )
-
-
-def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monkeypatch):
-    core = _bare_mpc_controller()
-    monotonic = iter((10.0, 10.25))
-    monkeypatch.setattr(mpc.time, "monotonic", lambda: next(monotonic))
-    monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(mpc, "allocate", _allocation)
-
-    assert core.update(100.0) == {"cycle_ratio": 0.5, "fan": {"duty": None}}
-
-    diagnostic = core.trace_diagnostics()
-    assert isinstance(diagnostic, MpcTraceDiagnostics)
-    assert diagnostic.state_names == ("q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "T_c", "d")
-    assert diagnostic.state_values == tuple(float(value) for value in range(1, 11))
-    assert diagnostic.disturbance_estimate == pytest.approx(10.0)
-    assert diagnostic.raw_policy_firing_load == pytest.approx(1.0)
-    assert diagnostic.bounded_firing_load == pytest.approx(1.0)
-    assert diagnostic.model_revision == 3
-    assert diagnostic.model_provenance == "configured"
-    assert diagnostic.failure_state is MpcFailureState.SUCCESS
-    assert diagnostic.solve_start_monotonic == pytest.approx(10.0)
-    assert diagnostic.solve_end_monotonic == pytest.approx(10.25)
-    assert diagnostic.solve_duration_seconds == pytest.approx(0.25)
-    assert diagnostic.applied_combustion_load == pytest.approx(0.7)
-
-
-def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch):
-    class _FailingSolver:
-        def solve(self, *_args, **_kwargs):
-            raise RuntimeError("solve failed")
-
-    core = _bare_mpc_controller()
-    core.mpc = _FailingSolver()
-    core._last_combustion_load = 0.8
-    monotonic = iter((10.0, 10.25))
-    monkeypatch.setattr(mpc.time, "monotonic", lambda: next(monotonic))
-    monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(mpc, "allocate", _allocation)
-
-    core.update(100.0)
-
-    diagnostic = core.trace_diagnostics()
-    assert diagnostic.failure_state is MpcFailureState.POLICY_EXCEPTION
-    assert diagnostic.raw_policy_firing_load is None
-    assert diagnostic.equilibrium_feed_forward is None
-    assert diagnostic.residual_move is None
-    assert diagnostic.bounded_firing_load == pytest.approx(0.8)
-
-
-def test_mpc_policy_timing_excludes_failure_logging(monkeypatch):
-    class _FailingSolver:
-        def solve(self, *_args, **_kwargs):
-            raise RuntimeError("solve failed")
-
-    core = _bare_mpc_controller()
-    core.mpc = _FailingSolver()
-    events = []
-    monotonic = iter((10.0, 10.25))
-    monkeypatch.setattr(mpc.time, "monotonic", lambda: (events.append("clock"), next(monotonic))[1])
-    monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(mpc, "allocate", _allocation)
-    monkeypatch.setattr("builtins.print", lambda *_: events.append("log"))
-
-    core.update(100.0)
-
-    assert events[:2] == ["clock", "clock"]
-    assert events[2:] == ["log"]
 
 
 @pytest.mark.parametrize(

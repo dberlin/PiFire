@@ -25,7 +25,8 @@ import warnings, sys
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
-from controller.mpc import Controller, _DEFAULTS
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.grill_sim import GrillSim
 
 from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
@@ -52,7 +53,7 @@ def make_plant(seed, *, deadtime=20, fan_lever=True, probe_tau=4.5, no_wind=Fals
 
 
 def run(plant_factory, seed=0, settle_min=60, hold_min=60):
-    cfg = dict(_DEFAULTS)
+    cfg = dict(DEFAULT_MPC_CONFIG)
     cfg["est_q_dist"] = 0.05
     c = Controller(cfg, "F", CYCLE)
     c.set_target(SP0)

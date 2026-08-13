@@ -24,7 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 
 from controller.grill_sim import GrillSim, MAKGrillSim
-from controller.mpc import _DEFAULTS
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.update_mpc import fit_params, fit_quality
 
 U_MIN = 0.10
@@ -210,22 +210,22 @@ def run_open_loop() -> list[Row]:
 
 
 def _fit(t: np.ndarray, temp: np.ndarray, input_signal: np.ndarray) -> dict[str, float | bool]:
-    init = {key: float(_DEFAULTS[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
+    init = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
     result = fit_params(
         t,
         temp,
         input_signal,
-        T_amb=float(_DEFAULTS["T_amb"]),
+        T_amb=float(DEFAULT_MPC_CONFIG["T_amb"]),
         init=init,
-        sigma=float(_DEFAULTS["sigma"]),
-        n_delay=int(_DEFAULTS["n_delay"]),
+        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
+        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
     )
     rmse, max_abs_error = fit_quality(
         t,
         temp,
         input_signal,
         result,
-        T_amb=float(_DEFAULTS["T_amb"]),
+        T_amb=float(DEFAULT_MPC_CONFIG["T_amb"]),
     )
     summary = {
         key: (bool(value) if key == "converged" else float(value))

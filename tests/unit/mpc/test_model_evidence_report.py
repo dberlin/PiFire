@@ -30,7 +30,8 @@ from common.control_trace import (
 from common.controller_model_state import ControllerModelStore
 from common.persistence.control_trace import read_control_trace_session
 from common.persistence.model_evidence import read_model_evidence
-from controller.mpc import Controller, _DEFAULTS
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.model_learning.activation import (
     GreyControlPairDescriptor,
     OwnedGreyControlPair,
@@ -450,7 +451,7 @@ def test_manual_policy_comes_from_matching_current_candidate_assessment() -> Non
 
 
 def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason() -> None:
-    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller._activation_terminated_reason = "native solver crashed"
 
     checkpoint = controller.get_model_snapshot()
@@ -502,7 +503,7 @@ def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> No
 
 
 def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_report(ds) -> None:
-    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller.bind_learning_identity("session-operator", "cook-operator", 0)
     incumbent = controller.active_control_pair.descriptor
     native_config = controller.mpc.config
@@ -601,7 +602,7 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     assert artifact["report"] == report.as_dict()
 
 def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) -> None:
-    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller.bind_learning_identity("session-submit", "cook-submit", 0)
     incumbent = controller.active_control_pair.descriptor
     request = FitRequest(
@@ -696,7 +697,7 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
     expected_fit_status,
     expected_rejection,
 ) -> None:
-    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller.bind_learning_identity(f"session-{case}", f"cook-{case}", 0)
     incumbent = controller.active_control_pair.descriptor
     native_config = controller.mpc.config
@@ -795,7 +796,7 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
 
 
 def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds) -> None:
-    controller = Controller(dict(_DEFAULTS), "C", {"u_min": 0.1, "u_max": 0.9})
+    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller.bind_learning_identity("session-evaluation-blocker", "cook-blocked", 0)
     incumbent = controller.active_control_pair.descriptor
     candidate_config = controller.mpc.config

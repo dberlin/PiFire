@@ -55,15 +55,16 @@ class _Solver:
 
 def test_dynamic_controller_composes_config_control_status_and_trace_contract(monkeypatch):
     mpc = import_module("controller.mpc")
+    mpc_core = import_module("controller.mpc_core")
     estimator = _Estimator()
     solver_box = {}
-    monkeypatch.setattr(mpc, "GreyBoxEKF", lambda **_kwargs: estimator)
+    monkeypatch.setattr(mpc_core, "GreyBoxEKF", lambda **_kwargs: estimator)
 
     def build_solver(config):
         solver_box["solver"] = _Solver(config)
         return solver_box["solver"]
 
-    monkeypatch.setattr(mpc, "AcadosGreyBoxMPC", build_solver)
+    monkeypatch.setattr(mpc_core, "AcadosGreyBoxMPC", build_solver)
     controller = mpc.Controller(
         {
             "control_period": 2.0,

@@ -17,7 +17,8 @@ import warnings, sys
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
-from controller.mpc import Controller, _DEFAULTS
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.grill_sim import GrillSim
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
@@ -31,7 +32,7 @@ def _set_ref(c, sp_f):
 
 
 def run(ramp_min=0.0, seed=0, settle_min=70, hold_min=60, cfg_over=None):
-    cfg = dict(_DEFAULTS)
+    cfg = dict(DEFAULT_MPC_CONFIG)
     if cfg_over:
         cfg.update(cfg_over)
     c = Controller(cfg, "F", CYCLE)

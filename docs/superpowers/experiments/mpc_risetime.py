@@ -18,7 +18,8 @@ import warnings, sys
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
-from controller.mpc import Controller, _DEFAULTS
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.grill_sim import GrillSim
 
 from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
@@ -31,7 +32,7 @@ F2C = lambda f: (f - 32) * 5 / 9
 
 
 def climb(over, set_c=F2C(500), seed=0, minutes=45):
-    cfg = dict(_DEFAULTS)
+    cfg = dict(DEFAULT_MPC_CONFIG)
     cfg.update(over)
     c = Controller(cfg, "C", dict(CYCLE))
     c.set_target(set_c)
@@ -52,7 +53,7 @@ def climb(over, set_c=F2C(500), seed=0, minutes=45):
 
 
 def steady(over, set_c, seed=0, minutes=70):
-    cfg = dict(_DEFAULTS)
+    cfg = dict(DEFAULT_MPC_CONFIG)
     cfg.update(over)
     c = Controller(cfg, "C", dict(CYCLE))
     c.set_target(set_c)

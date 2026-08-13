@@ -61,7 +61,7 @@
  n_delay is a structure constant and costs no parameters, so it pays for both:
  at the shipped n_delay=8 the single lump predicts 79 s and 22.5 C, ahead of
  the two-lump model's 67 s and 21.3 C rather than behind it. See
- controller/mpc.py's _DEFAULTS for why 8 and not more.
+ controller/mpc_config.py's DEFAULT_MPC_CONFIG for why 8 and not more.
 
  -----------------------------------------------------------------------------
  Physical / model parameters (shared by the builder and all three estimators)
@@ -160,7 +160,7 @@ def _thermal_parameters(params):
     return h_amb, t_amb, k_q, sigma
 
 
-def steady_combustion_load(params, setpoint, disturbance=0):
+def steady_combustion_load(params, setpoint, disturbance=0.0):
     """Return the unclipped normalized load that holds ``setpoint`` steady."""
     h_amb, t_amb, k_q, sigma = _thermal_parameters(params)
     try:

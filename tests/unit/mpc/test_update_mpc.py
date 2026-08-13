@@ -25,7 +25,7 @@ from common.control_trace import (
 )
 from common.persistence.control_trace import append_control_trace
 from controller.applied_output import OutputSource
-from controller.mpc import _DEFAULTS
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 from controller.update_mpc import TraceSelectionError, _load_trace_calibration, fit_params, load_trace_samples
 
@@ -755,12 +755,12 @@ def test_load_trace_samples_has_equivalent_fahrenheit_and_celsius_frames(ds):
 
     for left, right in zip(fahrenheit, celsius, strict=True):
         np.testing.assert_allclose(left, right)
-    init = {key: float(_DEFAULTS[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
+    init = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
     fit_kwargs = dict(
         T_amb=30.0,
         init=init,
-        sigma=float(_DEFAULTS["sigma"]),
-        n_delay=int(_DEFAULTS["n_delay"]),
+        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
+        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
     )
     fahrenheit_fit = fit_params(*fahrenheit, **fit_kwargs)
     celsius_fit = fit_params(*celsius, **fit_kwargs)

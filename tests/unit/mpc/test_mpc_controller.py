@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import controller.mpc as mpc_module
+import controller.mpc_core as mpc_core_module
 from common.control_trace import ActuationMode, AmbientSource, ModelEvaluationPayload
 from common.model_evidence import ForecastOriginEvidence
 from controller.acados import SolverError
@@ -115,14 +116,14 @@ def _solve(length, first, **overrides):
 def _make(monkeypatch, *, results=None, config=None):
     estimator = FakeEstimator()
     solver_box = {}
-    monkeypatch.setattr(mpc_module, "GreyBoxEKF", lambda **_kwargs: estimator)
+    monkeypatch.setattr(mpc_core_module, "GreyBoxEKF", lambda **_kwargs: estimator)
 
     def build_solver(native_config):
         solver = FakeSolver(native_config, results)
         solver_box["solver"] = solver
         return solver
 
-    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", build_solver, raising=False)
+    monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", build_solver)
     controller = mpc_module.Controller(dict(CONFIG if config is None else config), "C", dict(CYCLE))
     controller.set_target(110.0)
     return controller, estimator, solver_box["solver"]
@@ -215,12 +216,11 @@ def test_structured_solver_failure_holds_and_preserves_diagnostics(monkeypatch):
 
 def test_partial_native_build_closes_the_estimator(monkeypatch):
     estimator = FakeEstimator()
-    monkeypatch.setattr(mpc_module, "GreyBoxEKF", lambda **_kwargs: estimator)
+    monkeypatch.setattr(mpc_core_module, "GreyBoxEKF", lambda **_kwargs: estimator)
     monkeypatch.setattr(
-        mpc_module,
+        mpc_core_module,
         "AcadosGreyBoxMPC",
         lambda _config: (_ for _ in ()).throw(RuntimeError("native unavailable")),
-        raising=False,
     )
 
     with pytest.raises(RuntimeError, match="native unavailable"):

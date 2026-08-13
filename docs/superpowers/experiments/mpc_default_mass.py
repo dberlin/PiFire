@@ -28,8 +28,7 @@ from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
-from controller.mpc import _DEFAULTS as mpc_defaults  # noqa: E402
-from controller.mpc import _model_is_identified  # noqa: E402
+from controller.mpc_config import DEFAULT_MPC_CONFIG, model_is_identified  # noqa: E402
 import tools.experiments.controller_matrix as controller_matrix  # noqa: E402
 from tools.experiments.controller_matrix import SCENARIOS, run_scenario  # noqa: E402
 
@@ -43,7 +42,7 @@ def _assert_uncalibrated(core):
     dramatic win for the value while actually reporting the switch. Checked on
     every run rather than reasoned about once.
     """
-    if _model_is_identified(core.cfg, None):
+    if model_is_identified(core.cfg, None):
         raise AssertionError(
             "the controller reports an identified model, so this run would compare "
             "controller structures rather than values of C_c"
@@ -98,14 +97,14 @@ def _run(job):
     # inherits nothing the parent added to it at runtime.
     if fast_true_cc is not None:
         _register_fast_plant(fast_true_cc)
-    # The shipped default is moved, not overridden. `_model_is_identified`
+    # The shipped default is moved, not overridden. `model_is_identified`
     # calls a grill calibrated when any physical parameter differs from the
     # shipped default, and a calibrated grill gets an equilibrium feed-forward
     # and a learned-residual objective that an uncalibrated one does not. So
     # passing a candidate as an override alone would change the controller's
     # whole structure alongside the number, and the comparison would be
     # between two different controllers rather than two values of C_c.
-    mpc_defaults["C_c"] = c_c
+    DEFAULT_MPC_CONFIG["C_c"] = c_c
     row = run_scenario(
         controller,
         SCENARIOS[scenario_name],

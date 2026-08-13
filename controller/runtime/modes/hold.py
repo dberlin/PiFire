@@ -1931,10 +1931,10 @@ class HoldMode(ControlMode):
             self._configure_pulse_scheduler()
             if self._controller_name == "mpc":
                 try:
-                    from controller.mpc import _DEFAULTS as mpc_defaults
+                    from controller.mpc_config import DEFAULT_MPC_CONFIG
 
                     selected_config = self.settings.get("controller", {}).get("config", {}).get("mpc", {})
-                    defaults = dict(mpc_defaults)
+                    defaults = dict(DEFAULT_MPC_CONFIG)
                     if isinstance(selected_config, Mapping):
                         defaults.update(selected_config)
                     migrate_mpc_learning_authority(defaults=defaults)

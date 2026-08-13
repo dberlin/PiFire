@@ -36,13 +36,22 @@ from common.control_trace import (
     HorizonScorePayload,
     ModelEvaluationPayload,
 )
-from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
+from controller.base import ControllerBase, MpcTraceDiagnostics
 from controller.applied_output import FrameFeedbackDisposition
 from controller.model_promotion import Verdict as _Verdict
-from controller.model_promotion import feasibility_report
-from controller.mpc_model import MODEL_SCHEMA, GreyBoxEKF, GreyBoxKF, steady_combustion_load
+from controller.mpc_model import MODEL_SCHEMA
 from controller import mpc_snapshot as _snapshot
-from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
+from controller.mpc_allocator import AllocationResult
+from controller.mpc_config import (
+    DEFAULT_MPC_CONFIG,
+    finite_float,
+    model_is_identified,
+    normalize_config,
+    optional_float,
+    sanitized_copy,
+    warn_about_model,
+)
+from controller.mpc_core import MpcCore
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
 from common.model_evidence import (
     EvidenceKind,
@@ -56,12 +65,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
-from controller.acados import (
-    AcadosGreyBoxMPC,
-    GreyBoxMPCConfig,
-    SolverDiagnostics,
-    SolverError,
-)
+from controller.acados import GreyBoxMPCConfig, SolverDiagnostics
 from controller.runtime.model_fitting import (
     CandidatePair,
     FitSubmission,
@@ -105,40 +109,6 @@ from controller.model_learning.calibration import (
     CalibrationRuntimeContext,
 )
 
-_DEFAULTS = dict(
-    # R_dQ (firing-move penalty) kept low: 1.0 was over-damped -> sluggish rise AND
-    # a looser steady band. 0.1 gives ~4x faster setpoint-step rise and a tighter
-    # band, at a modest step-overshoot increase.
-    n_horizon=24,
-    # The generated prediction map is fixed at 25 seconds.
-    control_period=5.0,
-    Q_w=1.0,
-    R_dQ=0.1,
-    # Nominal grey-box thermal params -- CALIBRATE to your grill via update_mpc.py.
-    C_c=320.0,
-    h_amb=0.50,
-    T_amb=20.0,
-    theta=50.0,
-    # The generated grey model always has eight delay states.
-    n_delay=8,
-    K_Q=350.0,
-    sigma=1.4e-9,
-    # The only supported live estimators are EKF and KF.
-    estimator="ekf",
-    fan_min_pct=40.0,
-    fan_max_pct=100.0,
-    enable_fan_input=False,
-    # est_q_dist deliberately slow: a fast disturbance estimate chases unmeasured
-    # transients and worsens setpoint-step overshoot; 0.05 cut step overshoot ~30%
-    # with no change to the steady-state band.
-    est_q_temp=1e-2,
-    est_q_dist=0.05,
-    est_r_meas=0.04,
-    enable_online_adaptation=False,
-)
-
-
-_NATIVE_BOUND_TOLERANCE = 1e-6
 
 # One row per control period. At the 5 s default that is ~12 hours, which is
 # longer than any single cook; a longer one loses its beginning rather than
@@ -177,84 +147,8 @@ _REFIT_MIN_SAMPLES = 120
 # sigma and n_delay are not here: the fit passes them through unchanged, so
 # they come from the running config where an operator's own calibration of them
 # lives.
-_REFIT_INIT = {key: float(_DEFAULTS[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
+_REFIT_INIT = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
 
-
-def _to_c(value, units):
-    return (value - 32.0) * 5.0 / 9.0 if units == "F" else value
-
-
-def _finite_float(value):
-    """Cast to float, or None if the result is not finite.
-
-    A diverged solve or estimator can produce NaN/inf; json.dumps(allow_nan=False)
-    rejects NaN outright, and the MQTT handler's default allow_nan=True instead
-    emits the bare token NaN, which is not valid JSON. None survives both.
-    """
-    value = float(value)
-    return value if math.isfinite(value) else None
-
-
-def _optional_float(value):
-    """Cast to a finite float, or None when there is no number to report."""
-    try:
-        value = float(value)
-    except TypeError, ValueError:
-        return None
-    return value if math.isfinite(value) else None
-
-
-def _sanitized_copy(mapping):
-    """A copy of `mapping`, safe for a caller to own outright.
-
-    Every float value is passed through `_finite_float`; non-float values
-    (ints, strings) are kept as-is so e.g. an int setting is not silently
-    turned into a float. A copy rather than the live object, since this feeds
-    controller_state(), whose contract is that the caller owns the mapping --
-    `mapping` itself may be a live settings dict a consumer must not reach.
-    """
-    return {key: (_finite_float(value) if isinstance(value, float) else value) for key, value in mapping.items()}
-
-
-_PHYSICAL_PARAMS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
-
-_LEARNED_RESIDUAL_WEIGHT = 1_000.0
-
-
-def _model_is_identified(cfg, model_meta=None):
-    """Whether thermal parameters came from calibration rather than shipped defaults."""
-    return model_meta is not None or any(cfg.get(key) != _DEFAULTS[key] for key in _PHYSICAL_PARAMS)
-
-
-#: Parameters of the two-lump model this controller used to plan against. A
-#: settings record written before the firepot state was dropped still carries
-#: them, and an operator's own calibration may too. They are reported and
-#: ignored rather than refused: they name nothing in the model any more, so
-#: there is no value they could be given that would mean something, and a
-#: controller that will not start because an obsolete key is present is worse
-#: for the grill than one that says the key does nothing.
-_RETIRED_PARAMS = ("C_f", "h_fc")
-
-
-def _warn_about_model(cfg):
-    """Report a model that cannot govern this grill well.
-
-    Every condition is advisory: the shipped parameters are a legitimate
-    starting point for a first cook, and a controller that refuses to run is
-    worse than one that says what is wrong.
-    """
-    retired = [k for k in _RETIRED_PARAMS if k in cfg]
-    if retired:
-        print(
-            f"[mpc] ignoring {', '.join(retired)}: the model is a single chamber lump and no "
-            "longer has a firepot state for them to describe. Remove them from "
-            "Settings > Controller."
-        )
-    if all(cfg.get(k) == _DEFAULTS[k] for k in _PHYSICAL_PARAMS):
-        print(
-            "[mpc] model is uncalibrated (every thermal parameter is still the shipped default). "
-            "Expect large overshoot until you fit this grill with controller/update_mpc.py."
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,30 +193,16 @@ class Controller(ControllerBase):
             "cycle_data": copy.deepcopy(cycle_data),
             "units": units,
         }
-        cfg = dict(_DEFAULTS)
-        cfg.update(config or {})
-        cfg.pop("feed_forward", None)
+        cfg = normalize_config(config)
         self.cfg = cfg
-        _warn_about_model(cfg)
         self.u_max = float(cycle_data.get("u_max", 0.9))
-
-        self._set_point_c = 0.0
         self._learning_enabled = cfg.get("enable_online_adaptation") is True
         self._learning_eligible_updates = 0
         self._learning_rejected_updates = 0
-        self._last_combustion_load = 0.0
-        self._applied_combustion_load = 0.0
-        self._x_hat = None
-        self._last_raw_combustion_load = 0.0
-        self._last_equilibrium_load = None
-        self._last_residual_load = None
-        self._last_feasibility = None
-        # How long the output has been frozen. A single failure is a hiccup the
-        # held command covers; a run of them means nothing is steering.
-        self._consecutive_policy_failures = 0
-        self._history = collections.deque(maxlen=_HISTORY_MAX)
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
+        self._activation_output_authorized = True
+        self._active_activation_record: PreparedActivationRecord | None = None
         self._trace_diagnostics = None
         self._calibration = CalibrationCoordinator(predict_max_c=self._predict_calibration_max)
         self._calibration_operations: collections.deque[tuple[str, object]] = collections.deque()
@@ -339,8 +219,22 @@ class Controller(ControllerBase):
         self._trace_baseline_allocation: AllocationResult | None = None
         self._trace_allocation: AllocationResult | None = None
         self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
-        self.estimator, self.mpc = self._build_for(cfg)
-        live_configuration = {name: getattr(self.mpc.config, name) for name in self.mpc.config.__dataclass_fields__}
+        self._core = MpcCore(
+            cfg,
+            units,
+            cycle_data,
+            output_authorized=lambda: self._activation_output_authorized,
+            adjust_load=self._adjust_core_load,
+            model_authority=self._core_model_authority,
+            on_policy_failure=self._handle_core_policy_failure,
+        )
+        self.cfg = self._core.config
+        self.u_max = self._core.u_max
+        warn_about_model(self.cfg)
+        live_configuration = {
+            name: getattr(self.mpc.config, name)
+            for name in self.mpc.config.__dataclass_fields__
+        }
         live_descriptor = GreyControlPairDescriptor(
             model_digest=canonical_snapshot_digest(live_configuration),
             configuration=live_configuration,
@@ -349,22 +243,28 @@ class Controller(ControllerBase):
             candidate_generation=self._model_revision,
             role_generation=self._model_revision,
         )
-        self._active_control_pair = OwnedGreyControlPair(
-            live_descriptor,
+        try:
+            self._active_control_pair = OwnedGreyControlPair(
+                live_descriptor,
+                self.estimator,
+                self.mpc,
+            )
+        except BaseException:
+            self._core.close()
+            raise
+        self._core.bind_resources(
             self.estimator,
             self.mpc,
+            self._active_control_pair.close,
         )
         self._rollback_control_pair: OwnedGreyControlPair | None = None
         self._inert_activation: PreparedActivationRecord | None = None
-        self._active_activation_record: PreparedActivationRecord | None = None
-        self._activation_output_authorized = True
         self._activation_terminated_reason: str | None = None
         self._failed_role_generations: set[int] = set()
         self._activation_persistence_worker = None
         self._activation_persistence_lock = threading.Lock()
         self._persisted_activation_confidence_ids: set[str] = set()
         self._prepared_pair_transitions = collections.deque()
-        self._native_failure_diagnostics: SolverDiagnostics | None = None
         self._closed = False
         self._learning_lock = threading.RLock()
         self._learning_evaluation_lock = threading.Lock()
@@ -391,80 +291,98 @@ class Controller(ControllerBase):
         try:
             self._learning = self._build_learning() if self._learning_enabled else None
         except BaseException:
-            self._close_component(self.mpc)
-            self._close_component(self.estimator)
+            self._core.close()
             raise
 
     def _build_for(self, cfg, *, model_identified=None):
-        """Build one complete estimator/native-solver pair or leave no owner."""
+        """Build one complete estimator/native-solver pair through the numerical owner."""
         if model_identified is None:
-            model_identified = _model_is_identified(cfg, self._model_meta)
-        n_delay = int(cfg.get("n_delay", 8))
-        if n_delay != 8:
-            raise ValueError("the generated grey-box controller requires exactly eight delay states")
-        estimator = self._build_estimator(cfg, n_delay)
-        residual_weight = _LEARNED_RESIDUAL_WEIGHT if model_identified else 0.0
-        native_config = GreyBoxMPCConfig(
-            C_c=cfg["C_c"],
-            h_amb=cfg["h_amb"],
-            T_amb=cfg["T_amb"],
-            theta=cfg["theta"],
-            K_Q=cfg["K_Q"],
-            sigma=cfg["sigma"],
-            horizon_steps=cfg["n_horizon"],
-            delay_states=8,
-            state_size=10,
-            timestep_s=25.0,
-            temperature_weight=cfg["Q_w"],
-            terminal_weight=cfg["Q_w"],
-            move_weight=cfg["R_dQ"],
-            residual_weight=residual_weight,
-            max_iterations=10,
-        )
-        try:
-            solver = AcadosGreyBoxMPC(native_config)
-        except BaseException:
-            self._close_component(estimator)
-            raise
-        return estimator, solver
+            model_identified = model_is_identified(cfg, self._model_meta)
+        return MpcCore.build_components(cfg, model_identified=model_identified)
 
     def _build_estimator(self, cfg, n_delay):
-        """Build the selected estimator at the runtime control cadence."""
-        est_kind = str(cfg.get("estimator", "ekf")).lower()
-        if est_kind == "kf":
-            return GreyBoxKF(
-                C_c=cfg["C_c"],
-                h_amb=cfg["h_amb"],
-                T_amb=cfg["T_amb"],
-                t_step=float(cfg["control_period"]),
-                q_temp=cfg["est_q_temp"],
-                q_dist=cfg["est_q_dist"],
-                r_meas=cfg["est_r_meas"],
-                theta=float(cfg["theta"]),
-                n_delay=n_delay,
-                K_Q=float(cfg["K_Q"]),
-            )
-        if est_kind == "ekf":
-            return GreyBoxEKF(
-                C_c=cfg["C_c"],
-                h_amb=cfg["h_amb"],
-                T_amb=cfg["T_amb"],
-                t_step=float(cfg["control_period"]),
-                q_temp=cfg["est_q_temp"],
-                q_dist=cfg["est_q_dist"],
-                r_meas=cfg["est_r_meas"],
-                theta=float(cfg["theta"]),
-                n_delay=n_delay,
-                K_Q=float(cfg["K_Q"]),
-                sigma=float(cfg["sigma"]),
-            )
-        raise ValueError("estimator must be 'ekf' or 'kf'")
+        """Build a candidate estimator through the numerical owner."""
+        return MpcCore.build_estimator(cfg, n_delay)
 
     @staticmethod
     def _close_component(component):
         close = getattr(component, "close", None)
         if callable(close):
             close()
+
+    @property
+    def estimator(self):
+        return self._core.estimator
+
+    @property
+    def mpc(self):
+        return self._core.solver
+
+    @property
+    def _set_point_c(self):
+        return self._core.set_point_c
+
+    @property
+    def _last_combustion_load(self):
+        return self._core.last_combustion_load
+
+    @property
+    def _applied_combustion_load(self):
+        return self._core.applied_combustion_load
+
+    @property
+    def _x_hat(self):
+        return self._core.estimate
+
+    @property
+    def _last_raw_combustion_load(self):
+        return self._core.last_raw_combustion_load
+
+    @property
+    def _last_equilibrium_load(self):
+        return self._core.last_equilibrium_load
+
+    @property
+    def _last_residual_load(self):
+        return self._core.last_residual_load
+
+    @property
+    def _last_feasibility(self):
+        return self._core.last_feasibility
+
+    @property
+    def _consecutive_policy_failures(self):
+        return self._core.consecutive_policy_failures
+
+    @property
+    def _history(self):
+        return self._core.history
+
+    @property
+    def _native_failure_diagnostics(self):
+        return self._core.native_failure_diagnostics
+    def _core_model_authority(self):
+        return self._model_revision, self._model_meta
+
+    def _adjust_core_load(self, baseline_load, temperature_c):
+        calibration = self._advance_calibration(baseline_load, temperature_c)
+        return baseline_load + calibration.probe_q
+
+    def _handle_core_policy_failure(self, _error):
+        if isinstance(self._active_activation_record, PreparedActivationRecord):
+            if not self._restore_activation_rollback(
+                "native-solve-failure",
+                emit_fallback=True,
+            ):
+                self.terminate_mpc_activation("native-failure-compensation-failed")
+
+    def _bind_core_pair(self, pair, *, reset_estimate=False):
+        self._core.bind_resources(
+            pair.estimator,
+            pair.solver,
+            pair.close,
+            reset_estimate=reset_estimate,
+        )
 
     def _candidate_estimator(self, native_config):
         candidate = dict(self.cfg)
@@ -519,7 +437,7 @@ class Controller(ControllerBase):
             config=self.mpc.config,
             incumbent_pair=CandidatePair(self.estimator, self.mpc),
             estimator_factory=self._candidate_estimator,
-            controller_factory=AcadosGreyBoxMPC,
+            controller_factory=MpcCore.build_solver,
             timing_probe=self._candidate_timing,
         )
         try:
@@ -531,7 +449,7 @@ class Controller(ControllerBase):
 
     def set_target(self, set_point):
         self.set_point = set_point
-        self._set_point_c = _to_c(set_point, self.units)
+        self._core.set_target(set_point)
 
     def get_control_period(self):
         return float(self.cfg["control_period"])
@@ -583,8 +501,7 @@ class Controller(ControllerBase):
             return self._inert_activation.transaction_id == record.transaction_id
         self._rollback_control_pair = self._active_control_pair
         self._active_control_pair = pair
-        self.estimator = pair.estimator
-        self.mpc = pair.solver
+        self._bind_core_pair(pair)
         self._inert_activation = record
         self._activation_output_authorized = False
         return True
@@ -643,8 +560,7 @@ class Controller(ControllerBase):
         ):
             return False
         self._active_control_pair = rollback
-        self.estimator = rollback.estimator
-        self.mpc = rollback.solver
+        self._bind_core_pair(rollback)
         self._rollback_control_pair = None
         self._inert_activation = None
         self._active_activation_record = None
@@ -690,8 +606,7 @@ class Controller(ControllerBase):
         failed = self._active_control_pair
         activation_record = self._active_activation_record
         self._active_control_pair = rollback
-        self.estimator = rollback.estimator
-        self.mpc = rollback.solver
+        self._bind_core_pair(rollback)
         self._rollback_control_pair = None
         self._failed_role_generations.add(failed.descriptor.role_generation)
         self._model_revision = max(self._model_revision, failed.descriptor.role_generation + 1)
@@ -851,8 +766,7 @@ class Controller(ControllerBase):
         retired_rollback = self._rollback_control_pair
         self._active_control_pair = restored
         self._rollback_control_pair = rollback
-        self.estimator = restored.estimator
-        self.mpc = restored.solver
+        self._bind_core_pair(restored)
         self._inert_activation = None
         self._active_activation_record = (
             recovery.record if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None else None
@@ -1787,13 +1701,13 @@ class Controller(ControllerBase):
 
     def get_status(self):
         return {
-            "set_point": _finite_float(getattr(self, "set_point", self._set_point_c)),
-            "set_point_c": _finite_float(self._set_point_c),
-            "last_combustion_load": _finite_float(self._last_combustion_load),
-            "last_raw_combustion_load": _optional_float(self._last_raw_combustion_load),
-            "last_equilibrium_load": _optional_float(self._last_equilibrium_load),
-            "last_residual_load": _optional_float(self._last_residual_load),
-            "applied_combustion_load": _finite_float(self._applied_combustion_load),
+            "set_point": finite_float(getattr(self, "set_point", self._set_point_c)),
+            "set_point_c": finite_float(self._set_point_c),
+            "last_combustion_load": finite_float(self._last_combustion_load),
+            "last_raw_combustion_load": optional_float(self._last_raw_combustion_load),
+            "last_equilibrium_load": optional_float(self._last_equilibrium_load),
+            "last_residual_load": optional_float(self._last_residual_load),
+            "applied_combustion_load": finite_float(self._applied_combustion_load),
             "policy": "acados-grey",
             "policy_kind": "acados-grey",
             "n_horizon": int(self.cfg["n_horizon"]),
@@ -1801,17 +1715,17 @@ class Controller(ControllerBase):
             # computed one, so the number this reports is how many control
             # periods the grill has been running open-loop.
             "policy_failures": int(self._consecutive_policy_failures),
-            "u_max": _finite_float(self.u_max),
+            "u_max": finite_float(self.u_max),
             "x_hat": None
             if self._x_hat is None
-            else tuple(_finite_float(v) for v in np.asarray(self._x_hat).reshape(-1)),
+            else tuple(finite_float(v) for v in np.asarray(self._x_hat).reshape(-1)),
             # The __dict__ fallback this replaces reached the pid_cycle_data mqtt
             # topic only through notify()'s nested-dict recursion over this same
             # attribute; publish it explicitly so that topic keeps working.
             # cycle_data is core.__dict__'s live reference to settings["cycle_data"]
-            # (see _build_core) -- _sanitized_copy hands back a copy, not that
+            # (see _build_core) -- sanitized_copy hands back a copy, not that
             # live settings mapping.
-            "cycle_data": _sanitized_copy(self.cycle_data),
+            "cycle_data": sanitized_copy(self.cycle_data),
             # None until a model has been adopted this process (fresh install,
             # or before the first fit completes): a model identified at one
             # temperature does not describe another, so the band it was fit
@@ -1819,8 +1733,8 @@ class Controller(ControllerBase):
             "model": None
             if self._model_meta is None
             else {
-                "band_c": [_finite_float(v) for v in self._model_meta["band_c"]],
-                "rmse": _optional_float(self._model_meta["rmse"]),
+                "band_c": [finite_float(v) for v in self._model_meta["band_c"]],
+                "rmse": optional_float(self._model_meta["rmse"]),
             },
             "feasibility": None if self._last_feasibility is None else self._last_feasibility.as_status(),
             "learning": self._learning_live_status(),
@@ -1833,7 +1747,7 @@ class Controller(ControllerBase):
                 "role_generation": self._active_control_pair.descriptor.role_generation,
                 "failed_digest": None,
                 "failed_generation": None,
-                "last_safe_command": _finite_float(self._last_combustion_load),
+                "last_safe_command": finite_float(self._last_combustion_load),
                 "fallback_kind": (_snapshot.GREY_BOX_KIND if self._activation_terminated_reason is not None else None),
                 "fallback_reason": self._activation_terminated_reason,
             },
@@ -1894,7 +1808,7 @@ class Controller(ControllerBase):
         try:
             snapshot = _snapshot._new_grey_learning_snapshot(
                 revision=int(self._model_revision),
-                parameters={key: self.cfg[key] for key in self._MODEL_PARAM_KEYS},
+                parameters=self._core.snapshot_parameters(),
                 metadata=metadata,
             )
             live = self._learning_live_status()
@@ -2103,19 +2017,14 @@ class Controller(ControllerBase):
         old_learning = self._learning
         self.cfg.update(merged)
         self._active_control_pair = restored_pair
-        self.estimator = restored_pair.estimator
-        self.mpc = restored_pair.solver
+        self._bind_core_pair(restored_pair, reset_estimate=True)
         self._learning = None
         self._close_component(old_learning)
         old_pair.close()
-        # The state estimate belonged to the estimator just replaced. The new
-        # one starts from its own initial state, so there is nothing to report
-        # until it has seen a measurement.
-        self._x_hat = None
         # Said for the model that will actually solve. __init__'s own call saw
         # only the configured parameters, which for a grill that has been
         # learning are not the ones about to steer it.
-        _warn_about_model(self.cfg)
+        warn_about_model(self.cfg)
         # Continue the persisted counter rather than starting a new one: the
         # store rejects a revision that does not advance, permanently.
         self._model_revision = revision
@@ -2287,7 +2196,7 @@ class Controller(ControllerBase):
             success,
             incumbent_pair=CandidatePair(self.estimator, self.mpc),
             estimator_factory=self._candidate_estimator,
-            controller_factory=AcadosGreyBoxMPC,
+            controller_factory=MpcCore.build_solver,
             timing_probe=self._candidate_timing,
         )
         if not preparation.accepted:
@@ -2609,8 +2518,8 @@ class Controller(ControllerBase):
 
     def set_output(self, applied):
         """Record physical output and terminalize only explicit frame feedback."""
-        realized_q = normalized_load_from_auger_duty(applied.ratio, u_max=self.u_max)
-        self._applied_combustion_load = realized_q
+        self._core.set_output(applied)
+        realized_q = self._applied_combustion_load
         if applied.feedback_disposition is FrameFeedbackDisposition.PROGRESS:
             return
         revision = applied.producing_result_revision
@@ -2651,161 +2560,12 @@ class Controller(ControllerBase):
             )
         )
 
-    def _equilibrium_load(self, target, disturbance):
-        """Return the bounded equilibrium passed to the native residual model."""
-        if not _model_is_identified(self.cfg, self._model_meta):
-            return 0.0
-        return float(
-            np.clip(
-                steady_combustion_load(self.cfg, target, disturbance),
-                0.0,
-                1.0,
-            )
-        )
-
-    def _validated_native_command(self, solve):
-        horizon = int(self.cfg["n_horizon"])
-        sequence = np.asarray(solve.sequence_q, dtype=float)
-        residual = np.asarray(solve.sequence_residual, dtype=float)
-        objective = float(solve.objective)
-        diagnostics = solve.diagnostics
-        diagnostic_values = (
-            diagnostics.solve_time_s,
-            diagnostics.objective,
-            diagnostics.kkt_residual,
-            diagnostics.constraint_residual,
-        )
-        if (
-            sequence.shape != (horizon,)
-            or residual.shape != (horizon,)
-            or not np.isfinite(sequence).all()
-            or not np.isfinite(residual).all()
-            or not np.all((-_NATIVE_BOUND_TOLERANCE <= sequence) & (sequence <= 1.0 + _NATIVE_BOUND_TOLERANCE))
-            or not math.isfinite(objective)
-            or diagnostics.status != 0
-            or diagnostics.backend_status != 0
-            or isinstance(diagnostics.iterations, bool)
-            or not isinstance(diagnostics.iterations, int)
-            or diagnostics.iterations < 0
-            or not all(math.isfinite(float(value)) and float(value) >= 0.0 for value in diagnostic_values)
-            or not isinstance(diagnostics.warm_started, bool)
-        ):
-            raise ValueError("native grey-box result is malformed")
-        self._native_failure_diagnostics = None
-        return float(np.clip(sequence[0], 0.0, 1.0))
-
     def update(self, current):
-        if not self._activation_output_authorized:
-            raise RuntimeError("MPC activation pair is not durably authorized")
-        y = _to_c(current, self.units)
-        applied_combustion_load = self._applied_combustion_load
-        x_hat = self.estimator.update(applied_combustion_load, y)
-        self._x_hat = x_hat
-        state_values = tuple(float(value) for value in np.asarray(x_hat).reshape(-1))
-        state_names = tuple(f"q{index}" for index in range(int(self.cfg["n_delay"]))) + ("T_c", "d")
-        disturbance = state_values[-1]
-        self._history.append((time.time(), float(y), float(applied_combustion_load)))
-        model_provenance = "adopted" if self._model_meta is not None else "configured"
-        model_identified = _model_is_identified(self.cfg, self._model_meta)
-        feasibility = feasibility_report(
-            self.cfg if model_identified else None,
-            self._set_point_c,
-            disturbance=disturbance,
-            model_revision=self._model_revision if model_identified else None,
-            model_provenance=model_provenance if model_identified else None,
-        )
-        self._last_feasibility = feasibility
-        equilibrium = self._equilibrium_load(self._set_point_c, disturbance)
-
-        solve_start = time.monotonic()
-        failure_state = MpcFailureState.SUCCESS
-        failure_error = None
-        try:
-            solve = self.mpc.solve(
-                x_hat,
-                setpoint_c=self._set_point_c,
-                q_previous=applied_combustion_load,
-                equilibrium_q=equilibrium,
-            )
-            combustion_load = self._validated_native_command(solve)
-            raw_firing_load = combustion_load
-            residual_move = combustion_load - equilibrium
-        except Exception as error:
-            failure_state = MpcFailureState.POLICY_EXCEPTION
-            failure_error = error
-            if isinstance(error, SolverError):
-                self._native_failure_diagnostics = error.diagnostics
-            combustion_load = self._last_combustion_load
-            equilibrium = None
-            residual_move = None
-            raw_firing_load = None
-        finally:
-            solve_end = time.monotonic()
-
-        if failure_state is MpcFailureState.SUCCESS:
-            if self._consecutive_policy_failures:
-                print(f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)")
-            self._consecutive_policy_failures = 0
-        else:
-            self._consecutive_policy_failures += 1
-            n = self._consecutive_policy_failures
-            if n == 1 or n in (10, 60) or n % 300 == 0:
-                print(
-                    f"[mpc] native solver has failed {n} consecutive step(s) "
-                    f"({type(failure_error).__name__}: {failure_error}); holding normalized "
-                    f"combustion load {combustion_load:.3f}. The grill is not being controlled "
-                    "to setpoint -- check the published acados runtime and model configuration."
-                )
-            # The runner owns stale/deadline fallback; the controller keeps the
-            # last physically safe command until that ownership boundary acts.
-            if isinstance(self._active_activation_record, PreparedActivationRecord):
-                if not self._restore_activation_rollback(
-                    "native-solve-failure",
-                    emit_fallback=True,
-                ):
-                    self.terminate_mpc_activation("native-failure-compensation-failed")
-
-        self._last_equilibrium_load = equilibrium
-        self._last_residual_load = residual_move
-        self._last_raw_combustion_load = raw_firing_load
-        self._last_combustion_load = combustion_load
-        allocation_kwargs = {
-            "u_max": self.u_max,
-            "fan_min_pct": self.cfg["fan_min_pct"],
-            "fan_max_pct": self.cfg["fan_max_pct"],
-            "enable_fan": bool(self.cfg["enable_fan_input"]),
-        }
-        baseline_allocation = allocate(combustion_load, **allocation_kwargs)
-        calibration = self._advance_calibration(combustion_load, y)
-        requested_load = float(np.clip(combustion_load + calibration.probe_q, 0.0, 1.0))
-        allocation = allocate(requested_load, **allocation_kwargs)
-        auger = allocation.auger_duty
-        self._trace_baseline_allocation = baseline_allocation
-        self._trace_allocation = allocation
-        # The runner registers this immutable trace under its own completion
-        # revision after it atomically captures the result.
-        fan_duty = allocation.fan_duty
-        self._trace_diagnostics = MpcTraceDiagnostics(
-            state_names=state_names,
-            state_values=state_values,
-            disturbance_estimate=disturbance,
-            model_revision=self._model_revision,
-            model_provenance=model_provenance,
-            raw_policy_firing_load=raw_firing_load,
-            equilibrium_feed_forward=equilibrium,
-            residual_move=residual_move,
-            bounded_firing_load=combustion_load,
-            applied_combustion_load=applied_combustion_load,
-            policy_kind="acados-grey",
-            failure_state=failure_state,
-            consecutive_policy_failures=self._consecutive_policy_failures,
-            solve_start_monotonic=solve_start,
-            solve_end_monotonic=solve_end,
-            solve_duration_seconds=solve_end - solve_start,
-            feasibility=feasibility,
-            model_lifecycle=None,
-        )
-        return {"cycle_ratio": auger, "fan": {"duty": fan_duty}}
+        step = self._core.update(current)
+        self._trace_diagnostics = step.diagnostics
+        self._trace_baseline_allocation = step.baseline_allocation
+        self._trace_allocation = step.allocation
+        return {"cycle_ratio": step.cycle_ratio, "fan": dict(step.fan)}
 
     def trace_diagnostics(self) -> MpcTraceDiagnostics | None:
         return self._trace_diagnostics
@@ -2820,23 +2580,38 @@ class Controller(ControllerBase):
         return self._trace_calibration
 
     def native_failure_diagnostics(self) -> SolverDiagnostics | None:
-        return self._native_failure_diagnostics
+        return self._core.native_failure_diagnostics
 
     def close(self):
         """Release learning, native solver, and estimator exactly once."""
         if self._closed:
             return
         self._closed = True
+        errors: list[BaseException] = []
         learning = self._learning
         self._learning = None
-        self._close_component(learning)
+        try:
+            self._close_component(learning)
+        except BaseException as error:
+            errors.append(error)
         with self._activation_persistence_lock:
             persistence_worker = self._activation_persistence_worker
             self._activation_persistence_worker = None
         if persistence_worker is not None:
-            persistence_worker.flush_and_stop(timeout=0.1)
-        self._active_control_pair.close()
+            try:
+                persistence_worker.flush_and_stop(timeout=0.1)
+            except BaseException as error:
+                errors.append(error)
+        try:
+            self._core.close()
+        except BaseException as error:
+            errors.append(error)
         rollback = self._rollback_control_pair
         self._rollback_control_pair = None
         if rollback is not None:
-            rollback.close()
+            try:
+                rollback.close()
+            except BaseException as error:
+                errors.append(error)
+        if errors:
+            raise RuntimeError("could not close complete MPC controller ownership") from errors[0]

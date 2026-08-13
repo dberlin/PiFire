@@ -152,9 +152,9 @@ class AcadosGreyBoxMPC:
         self,
         state: npt.ArrayLike,
         *,
-        setpoint_c: Real,
-        q_previous: Real,
-        equilibrium_q: Real,
+        setpoint_c: float | int,
+        q_previous: float | int,
+        equilibrium_q: float | int,
     ) -> GreyBoxSolve:
         state_values = _state_array(state)
         setpoint = _finite_scalar(setpoint_c, "setpoint_c")

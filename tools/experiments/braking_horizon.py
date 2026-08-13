@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 from controller.grill_sim import GrillSim, MAKGrillSim
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, braking_distance
-from controller.mpc import _DEFAULTS
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_allocator import allocate
 from controller.runtime.logic.pulse import PulseScheduler
 from grillplat.actuator_capabilities import AUGER_TIMING
@@ -69,15 +69,15 @@ def _run_coast(plant_type: type[GrillSim], seed: int, target_f: float) -> dict[s
     preheat = allocate(
         1.0,
         u_max=SHIPPED_U_MAX,
-        fan_min_pct=float(_DEFAULTS["fan_min_pct"]),
-        fan_max_pct=float(_DEFAULTS["fan_max_pct"]),
+        fan_min_pct=float(DEFAULT_MPC_CONFIG["fan_min_pct"]),
+        fan_max_pct=float(DEFAULT_MPC_CONFIG["fan_max_pct"]),
         enable_fan=MPC_FAN_AUTHORITY_ENABLED,
     )
     cut = allocate(
         0.0,
         u_max=SHIPPED_U_MAX,
-        fan_min_pct=float(_DEFAULTS["fan_min_pct"]),
-        fan_max_pct=float(_DEFAULTS["fan_max_pct"]),
+        fan_min_pct=float(DEFAULT_MPC_CONFIG["fan_min_pct"]),
+        fan_max_pct=float(DEFAULT_MPC_CONFIG["fan_max_pct"]),
         enable_fan=MPC_FAN_AUTHORITY_ENABLED,
     )
     scheduler = PulseScheduler(maximum_request=preheat.u_max)
@@ -123,9 +123,9 @@ def _run_coast(plant_type: type[GrillSim], seed: int, target_f: float) -> dict[s
 def _nominal_model_bound() -> float:
     """The retained model coast product recorded for comparison only."""
     return max(
-        braking_distance(dict(_DEFAULTS), t_ref)
+        braking_distance(dict(DEFAULT_MPC_CONFIG), t_ref)
         for t_ref in (T_FLOOR_C, T_HAZARD_C)
-        if t_ref > float(_DEFAULTS["T_amb"])
+        if t_ref > float(DEFAULT_MPC_CONFIG["T_amb"])
     )
 
 

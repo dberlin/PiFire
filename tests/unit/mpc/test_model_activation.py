@@ -34,6 +34,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.runtime.model_fitting import TeardownGreyHistory
 from controller.mpc import Controller as MpcController
 import controller.mpc as mpc_module
+import controller.mpc_core as mpc_core_module
 from tests.unit.mpc._solver_fixtures import CYCLE, _config as _mpc_config, _Estimator, _Solver
 
 
@@ -474,8 +475,16 @@ def _bare_mpc_pair_owner():
         decision_id="decision-runtime",
     )
     core = MpcController.__new__(MpcController)
-    core.estimator = incumbent.estimator
-    core.mpc = incumbent.solver
+    numerical = SimpleNamespace(
+        estimator=incumbent.estimator,
+        solver=incumbent.solver,
+        last_combustion_load=0.35,
+    )
+    numerical.bind_resources = lambda estimator, solver, _close, **_kwargs: (
+        setattr(numerical, "estimator", estimator),
+        setattr(numerical, "solver", solver),
+    )
+    core._core = numerical
     core._active_control_pair = incumbent
     core._rollback_control_pair = None
     core._inert_activation = None
@@ -484,7 +493,6 @@ def _bare_mpc_pair_owner():
     core._activation_persistence_lock = threading.Lock()
     core._failed_role_generations = set()
     core._activation_events = collections.deque()
-    core._last_combustion_load = 0.35
     core._model_revision = 4
     core._learning_role_generation = 4
     core._teardown_history = TeardownGreyHistory(role_generation=4, max_observations=120)
@@ -720,8 +728,8 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
             pass
 
     _Solver.created.clear()
-    monkeypatch.setattr(mpc_module, "GreyBoxEKF", _Estimator)
-    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", _Solver)
+    monkeypatch.setattr(mpc_core_module, "GreyBoxEKF", _Estimator)
+    monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", _Solver)
     core = MpcController(_mpc_config(), "C", dict(CYCLE))
     incumbent = core.active_control_pair
     candidate_descriptor = _descriptor(

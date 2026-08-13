@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 import controller.mpc as mpc_module
+import controller.mpc_core as mpc_core_module
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.acados import GreyBoxMPCConfig
 from tests.unit.mpc._solver_fixtures import CYCLE, _config, _Estimator, _Solver
 
@@ -12,8 +14,8 @@ from tests.unit.mpc._solver_fixtures import CYCLE, _config, _Estimator, _Solver
 @pytest.mark.parametrize("horizon", [5, 12, 24])
 def test_live_build_maps_every_native_configuration_value(monkeypatch, horizon):
     _Solver.created.clear()
-    monkeypatch.setattr(mpc_module, "GreyBoxEKF", _Estimator)
-    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", _Solver, raising=False)
+    monkeypatch.setattr(mpc_core_module, "GreyBoxEKF", _Estimator)
+    monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", _Solver)
 
     controller = mpc_module.Controller(_config(n_horizon=horizon), "C", dict(CYCLE))
 
@@ -59,8 +61,8 @@ def test_kf_is_the_only_alternate_estimator_and_keeps_control_cadence(monkeypatc
         seen.append(kwargs)
         return _Estimator(**kwargs)
 
-    monkeypatch.setattr(mpc_module, "GreyBoxKF", build_kf)
-    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", _Solver, raising=False)
+    monkeypatch.setattr(mpc_core_module, "GreyBoxKF", build_kf)
+    monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", _Solver)
     controller = mpc_module.Controller(_config(estimator="kf"), "C", dict(CYCLE))
 
     assert len(seen) == 1
@@ -72,8 +74,8 @@ def test_kf_is_the_only_alternate_estimator_and_keeps_control_cadence(monkeypatc
 
 def test_fresh_default_model_has_no_residual_regularization(monkeypatch):
     _Solver.created.clear()
-    monkeypatch.setattr(mpc_module, "AcadosGreyBoxMPC", _Solver, raising=False)
-    controller = mpc_module.Controller(dict(mpc_module._DEFAULTS), "C", dict(CYCLE))
+    monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", _Solver)
+    controller = mpc_module.Controller(dict(DEFAULT_MPC_CONFIG), "C", dict(CYCLE))
     assert controller.mpc.config.residual_weight == 0.0
     controller.close()
 

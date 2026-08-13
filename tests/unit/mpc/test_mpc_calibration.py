@@ -25,7 +25,7 @@ from common.control_trace import (
 from common.persistence.control_trace import append_control_trace
 from controller.applied_output import OutputSource
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau
-from controller.mpc import _DEFAULTS
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_model import simulate_grey_box
 from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality, load_trace_samples
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
@@ -43,7 +43,7 @@ from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 #: against a mismatched grill in tests/unit/mpc/test_model_promotion.py.
 TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=3200.0, theta=110.0)
 T_AMB = 20.0
-N_DELAY = _DEFAULTS["n_delay"]
+N_DELAY = DEFAULT_MPC_CONFIG["n_delay"]
 SIGMA = 1.4e-9
 
 
@@ -514,14 +514,14 @@ def test_the_json_mode_reports_an_unscorable_fit_as_null_not_as_infinity(ds, cap
             T_amb=T_AMB,
             T0=float(temp[0]),
             C_c=1e-9,
-            h_amb=float(_DEFAULTS["h_amb"]),
-            K_Q=float(_DEFAULTS["K_Q"]),
-            theta=float(_DEFAULTS["theta"]),
-            sigma=float(_DEFAULTS["sigma"]),
+            h_amb=float(DEFAULT_MPC_CONFIG["h_amb"]),
+            K_Q=float(DEFAULT_MPC_CONFIG["K_Q"]),
+            theta=float(DEFAULT_MPC_CONFIG["theta"]),
+            sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
             n_delay=N_DELAY,
         )
-    shipped_C_c = float(_DEFAULTS["C_c"])
-    monkeypatch.setitem(_DEFAULTS, "C_c", 1e-9)
+    shipped_C_c = float(DEFAULT_MPC_CONFIG["C_c"])
+    monkeypatch.setitem(DEFAULT_MPC_CONFIG, "C_c", 1e-9)
 
     U.main()
     unscorable = capsys.readouterr().out
@@ -537,7 +537,7 @@ def test_the_json_mode_reports_an_unscorable_fit_as_null_not_as_infinity(ds, cap
 
     # And the ordinary fit still reports numbers: `null` marks the unmeasurable
     # case only, so the same record from a simulable start must not read as one.
-    monkeypatch.setitem(_DEFAULTS, "C_c", shipped_C_c)
+    monkeypatch.setitem(DEFAULT_MPC_CONFIG, "C_c", shipped_C_c)
     U.main()
     scored = json.loads(capsys.readouterr().out, parse_constant=_reject_constant)
     assert scored["fit"]["converged"] is True

@@ -43,7 +43,8 @@ from controller.model_learning.activation import (
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
-from controller.mpc import Controller as MpcController, _DEFAULTS as MPC_DEFAULTS
+from controller.mpc import Controller as MpcController
+from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
 import controller.mpc as _mpc_runtime
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_fitting import grey_config_digest

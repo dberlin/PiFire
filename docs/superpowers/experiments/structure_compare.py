@@ -344,7 +344,7 @@ def main(argv=None):
 
     import hashlib
 
-    from controller import mpc
+    from controller.mpc_config import DEFAULT_MPC_CONFIG
 
     harness = Path(controller_matrix.__file__).resolve()
     harness_sha = hashlib.sha256(harness.read_bytes()).hexdigest()
@@ -356,7 +356,7 @@ def main(argv=None):
         "commit": args.commit,
         "free": list(_free_set()),
         "states": _model_states(),
-        "n_delay": int(mpc._DEFAULTS["n_delay"]),
+        "n_delay": int(DEFAULT_MPC_CONFIG["n_delay"]),
         "harness_sha": harness_sha,
         "workers": args.workers,
         "seeds": list(args.seeds),

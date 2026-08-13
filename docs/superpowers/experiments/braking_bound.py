@@ -60,7 +60,7 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
-from controller.mpc import _DEFAULTS  # noqa: E402
+from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
 
 # The MODEL's own reading, not the public `braking_distance` -- that one already
 # carries `_COAST_BOUND`, which is the number this script exists to derive, so
@@ -145,7 +145,7 @@ def fitted_model(plant_name, n_delay):
 
 
 def main():
-    n_delay = int(_DEFAULTS["n_delay"])
+    n_delay = int(DEFAULT_MPC_CONFIG["n_delay"])
     print(f"single-lump fits at the shipped n_delay={n_delay}, fitted per plant with {list(LUMP_FREE)}")
     print()
 

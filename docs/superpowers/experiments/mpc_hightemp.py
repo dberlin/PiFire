@@ -19,7 +19,8 @@ import warnings, sys
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
-from controller.mpc import Controller, _DEFAULTS
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.grill_sim import GrillSim
 
 from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
@@ -33,7 +34,7 @@ F2C = lambda f: (f - 32) * 5 / 9
 
 
 def steady(set_c, seed=0, minutes=70, warm=True):
-    c = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
+    c = Controller(dict(DEFAULT_MPC_CONFIG), "C", dict(CYCLE))
     c.set_target(set_c)
     p = GrillSim(seed=seed)
     if warm:  # skip the long climb; start near target
@@ -57,7 +58,7 @@ def steady(set_c, seed=0, minutes=70, warm=True):
 
 
 def climb(set_c, seed=0, minutes=120):
-    c = Controller(dict(_DEFAULTS), "C", dict(CYCLE))
+    c = Controller(dict(DEFAULT_MPC_CONFIG), "C", dict(CYCLE))
     c.set_target(set_c)
     p = GrillSim(seed=seed)  # cold start (ambient)
     T = []

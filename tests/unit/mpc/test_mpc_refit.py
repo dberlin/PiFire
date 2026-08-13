@@ -11,7 +11,8 @@ import pytest
 import controller.update_mpc as update_mpc
 from common.controller_model_state import ControllerModelStore
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR, PROMOTION_BOUNDS, evaluate
-from controller.mpc import _DEFAULTS, _HISTORY_MAX, _REFIT_INIT, Controller
+from controller.mpc import _HISTORY_MAX, _REFIT_INIT, Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_model import simulate_grey_box
 from tools.experiments import promotion_signal
 
@@ -35,13 +36,13 @@ def _synthetic_cook(seed=0, noise=0.5, rows=1200):
     """
     t = np.arange(0.0, 5.0 * rows, 5.0)
     Q = np.where(t < 2.5 * rows, 1.0, 0.2)
-    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
+    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=DEFAULT_MPC_CONFIG["n_delay"], **TRUTH)
     temp = temp + np.random.default_rng(seed).normal(0.0, noise, size=temp.shape)
     return list(zip(t.tolist(), temp.tolist(), Q.tolist()))
 
 
 def _c():
-    return Controller(dict(_DEFAULTS, policy="nlp"), "C", dict(CYCLE))
+    return Controller(dict(DEFAULT_MPC_CONFIG, policy="nlp"), "C", dict(CYCLE))
 
 
 @pytest.fixture
@@ -210,7 +211,7 @@ def _heatup_only(rows, seed=0, noise=0.5):
     """
     t = np.arange(0.0, 5.0 * rows, 5.0)
     Q = np.full_like(t, 1.0)
-    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
+    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=DEFAULT_MPC_CONFIG["n_delay"], **TRUTH)
     temp = temp + np.random.default_rng(seed).normal(0.0, noise, size=temp.shape)
     return t, temp, Q
 
@@ -223,8 +224,8 @@ def _shipped_fit(t, temp, Q):
         Q,
         T_amb=20.0,
         init=dict(_REFIT_INIT),
-        sigma=float(_DEFAULTS["sigma"]),
-        n_delay=int(_DEFAULTS["n_delay"]),
+        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
+        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
     )
     s_min = update_mpc.identifiability(t, Q, fitted, T_amb=20.0, T0=float(temp[0]))
     return fitted, s_min
@@ -476,7 +477,7 @@ def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
     """
     t = np.arange(0.0, 5.0 * _HISTORY_MAX, 5.0)
     Q = np.where((t // 1800) % 2 == 0, 1.0, 0.2)
-    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
+    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=DEFAULT_MPC_CONFIG["n_delay"], **TRUTH)
     history = list(zip(t.tolist(), temp.tolist(), Q.tolist()))
     assert len(history) == _HISTORY_MAX
     c = _c()
@@ -556,13 +557,13 @@ def test_every_refit_starts_from_the_same_fixed_reference(four_cooks_in_a_row):
 
 
 def test_the_fixed_reference_is_the_shipped_model_and_is_not_written_through():
-    expected = {key: float(_DEFAULTS[key]) for key in FITTED_KEYS}
+    expected = {key: float(DEFAULT_MPC_CONFIG[key]) for key in FITTED_KEYS}
     assert _REFIT_INIT == expected
-    before = dict(_DEFAULTS)
+    before = dict(DEFAULT_MPC_CONFIG)
     c = _c()
     assert c.refit_from_cook(_synthetic_cook()).accepted is True
     assert _REFIT_INIT == expected
-    assert _DEFAULTS == before
+    assert DEFAULT_MPC_CONFIG == before
 
 
 def test_repeated_refits_leave_the_model_inside_the_promotion_bounds(four_cooks_in_a_row):
