@@ -9,43 +9,31 @@ from common.controller_model_state import ControllerModelStore
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.model_learning.migration import migrate_mpc_learning_authority
 from common.modes import Mode
-from common.model_evidence import (
-    AllocationEvidence,
-    CalibrationSummaryEvidence,
-    EvidenceKind,
-    FallbackEvidence,
-    ModelEvidenceRecord,
-    RecorderGapEvidence,
-    RollbackEvidence,
-)
+from common.model_evidence import FallbackEvidence, RollbackEvidence
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
-    AllocationPayload,
     CalibrationEventType,
     CalibrationTracePayload,
-    ControlTracePayload,
     ControllerType,
     InhibitReason,
-    ModelEventPayload,
-    ModelEvaluationPayload,
     ModelEventType,
-    ModelObservationPayload,
     RecorderGapPayload,
     ResultStaleState,
     SafetyEventType,
     TraceEventKind,
-    TraceSetting,
 )
 from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
     FrameFeedbackDisposition,
-    OutputSource,
     classify_output_source,
     seed_output,
 )
-from controller.model_learning.contracts import FrameObservation
+from controller.runtime.modes.hold_learning import (
+    HoldLearningRuntime,
+    parse_model_lifecycle_payload,
+)
 from controller.mpc_calibration import CalibrationCommand
 from controller.runtime.framed_pulse import (
     FramedPulseCompletion,
@@ -168,16 +156,12 @@ class HoldMode(ControlMode):
     _control_trace: ControlTraceSession | None = None
     _runner_configuration_revision: int = 0
     _framed_pulse: FramedPulseRuntime | None = None
-    _pending_model_observations: (
-        dict[int, tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None]] | None
-    ) = None
     _last_ptemp: float | None = None
     _persistence_worker: ModelPersistenceWorker | None = None
-    _learning_evidence_available: bool = True
+    _hold_learning: HoldLearningRuntime | None = None
     _final_refit_done: bool = False
     _activation_state_identity: tuple[object, ...] | None = None
     _activation_lifecycle_evidence_id: str | None = None
-    _PENDING_MODEL_OBSERVATION_CAPACITY = 60
     _calibration_command_high_water: int = 0
     _last_target: float | None = None
     _safety_ceiling_fault: str | None = None
@@ -293,13 +277,9 @@ class HoldMode(ControlMode):
     def _deliver_framed_completion(self, completion: FramedPulseCompletion) -> None:
         if completion.observation is not None:
             assert completion.frame_key is not None
-            if completion.applied is None:
-                self._deliver_completed_pulse_observation(
-                    completion.frame_key,
-                    completion.observation,
-                )
-            else:
-                self._deliver_completed_pulse_observation(
+            learning = self._hold_learning
+            if learning is not None:
+                learning.submit_completed_observation(
                     completion.frame_key,
                     completion.observation,
                     completion.applied,
@@ -307,7 +287,9 @@ class HoldMode(ControlMode):
         elif completion.applied is not None:
             runner = self._runner
             if runner is None:
-                raise RuntimeError("Hold framed pulse runtime requires a controller runner")
+                raise RuntimeError(
+                    "Hold framed pulse runtime requires a controller runner"
+                )
             runner.set_output(completion.applied)
 
     def _dispatch_framed_result(
@@ -422,231 +404,6 @@ class HoldMode(ControlMode):
 
 
 
-    def _record_pending_observation_gap(self, observation: FrameObservation, reason: str) -> None:
-        publication_ms = int(observation.frame_end_s * 1_000)
-        trace = self._control_trace
-        if trace is not None:
-            trace.record(
-                TraceEventKind.RECORDER_GAP,
-                RecorderGapPayload(
-                    lost_record_count=1,
-                    gap_start_ms=int(observation.frame_start_s * 1_000),
-                    gap_end_ms=publication_ms,
-                    reason=reason,
-                    frame_start_ms=int(observation.frame_start_s * 1_000),
-                    frame_end_ms=publication_ms,
-                    result_revision=observation.result_revision,
-                    observation_sequence=observation.observation_sequence,
-                ),
-                publication_ms,
-            )
-        worker = self._persistence_worker
-        identity = None if trace is None else trace.identity
-        if worker is None or identity is None:
-            return
-        session_id = identity.session_id
-        gap = ModelEvidenceRecord(
-            evidence_id=(
-                f"{session_id}:recorder-gap:{observation.role_generation}:"
-                f"{observation.observation_sequence}:{publication_ms}"
-            ),
-            kind=EvidenceKind.RECORDER_GAP,
-            session_id=session_id,
-            cook_id=identity.cook_id,
-            timestamp_ms=publication_ms,
-            role_generation=observation.role_generation,
-            model_digest=None,
-            provenance_digest=None,
-            payload=RecorderGapEvidence(lost_record_count=1, reason=reason),
-        )
-        if not worker.submit_evidence_batch((gap,)).accepted:
-            self._learning_evidence_available = False
-
-    @staticmethod
-    def _allocation_evidence(allocation):
-        if allocation is None:
-            return None
-        return AllocationEvidence(
-            normalized_combustion_load=allocation.normalized_combustion_load,
-            auger_duty=allocation.auger_duty,
-            fan_duty=allocation.fan_duty,
-            u_max=allocation.u_max,
-            fan_min_pct=allocation.fan_min_pct,
-            fan_max_pct=allocation.fan_max_pct,
-            fan_enabled=allocation.fan_enabled,
-            auger_clamp_reason=allocation.auger_clamp_reason,
-            fan_clamp_reason=allocation.fan_clamp_reason,
-            allocator_revision=allocation.allocator_revision,
-        )
-
-    @staticmethod
-    def _trace_allocation_payload(allocation, result_revision: int):
-        if allocation is None:
-            return None
-        return AllocationPayload(
-            result_revision=result_revision,
-            normalized_combustion_load=allocation.normalized_combustion_load,
-            requested_auger_duty=allocation.auger_duty,
-            requested_fan_duty=allocation.fan_duty,
-            u_max=allocation.u_max,
-            fan_min_pct=allocation.fan_min_pct,
-            fan_max_pct=allocation.fan_max_pct,
-            fan_enabled=allocation.fan_enabled,
-            mpc_has_fan_authority=allocation.fan_enabled,
-            auger_clamp_reason=allocation.auger_clamp_reason,
-            fan_clamp_reason=allocation.fan_clamp_reason,
-            allocator_revision=allocation.allocator_revision,
-        )
-
-    def _calibration_frame_evidence(
-        self, observation: FrameObservation, session_id: str | None, cook_id: str | None
-    ) -> ModelEvidenceRecord | None:
-        if (
-            session_id is None
-            or observation.calibration_command_revision == 0
-            or observation.baseline_allocation is None
-            or observation.combined_allocation is None
-            or (
-                observation.calibration_status == "active"
-                and observation.probe_q == 0.0
-                and observation.calibration_stage != "coast"
-            )
-        ):
-            return None
-        payload = CalibrationSummaryEvidence(
-            accepted=observation.calibration_status in {"accepted", "active"},
-            probe_count=1 if observation.calibration_status == "active" and observation.probe_q != 0.0 else 0,
-            reason=observation.calibration_cancellation_reason,
-            result_revision=observation.result_revision,
-            command_revision=observation.calibration_command_revision,
-            command_action=observation.calibration_command_action,
-            baseline_q=observation.baseline_q,
-            probe_q=observation.probe_q,
-            combined_q=observation.requested_q,
-            baseline_allocation=self._allocation_evidence(observation.baseline_allocation),
-            combined_allocation=self._allocation_evidence(observation.combined_allocation),
-            scheduled_on_seconds=observation.scheduled_on_s,
-            cancellation_command_revision=observation.cancellation_command_revision,
-            cancellation_command_action=observation.cancellation_command_action,
-            delivered_on_seconds=observation.delivered_on_s,
-            status=observation.calibration_status,
-            requested_fan_duty=observation.requested_fan_duty,
-            actual_fan_duty=observation.actual_fan_duty,
-            cancellation_reason=observation.calibration_cancellation_reason,
-            stage=observation.calibration_stage,
-            completed_stages=observation.completed_calibration_stages,
-            continuous=observation.continuous,
-        )
-        return ModelEvidenceRecord(
-            evidence_id=(
-                f"{session_id}:calibration-frame:{observation.result_revision}:{int(observation.frame_start_s * 1_000)}"
-            ),
-            kind=EvidenceKind.CALIBRATION_SUMMARY,
-            session_id=session_id,
-            cook_id=cook_id,
-            timestamp_ms=int(observation.frame_end_s * 1_000),
-            role_generation=observation.role_generation,
-            model_digest=None,
-            provenance_digest=None,
-            payload=payload,
-        )
-
-    def _retire_pending_model_observation(self, sequence: int, reason: str) -> None:
-        pending = self._pending_model_observations.pop(sequence, None)
-        if pending is not None and isinstance(pending[0], FrameObservation):
-            self._record_pending_observation_gap(pending[0], reason)
-
-    def _bound_pending_model_observations(self) -> None:
-        while len(self._pending_model_observations) > self._PENDING_MODEL_OBSERVATION_CAPACITY:
-            self._retire_pending_model_observation(
-                next(iter(self._pending_model_observations)),
-                "pending-observation-overflow",
-            )
-
-    def _submit_calibration_frame_evidence(self, observation: FrameObservation) -> None:
-        """Record what calibration did with this frame, whatever the learner does.
-
-        The operator's calibration run is reported from this evidence, so it
-        cannot depend on the learner accepting the observation. With online
-        adaptation off the learner returns no outcome at all and every frame is
-        retired as a gap; a run that started, probed and aborted would then
-        leave the report reading "inactive" with nothing to show the operator.
-        """
-        worker = self._persistence_worker
-        trace = self._control_trace
-        identity = None if trace is None else trace.identity
-        if worker is None or identity is None:
-            return
-        compact = self._calibration_frame_evidence(
-            observation,
-            identity.session_id,
-            identity.cook_id,
-        )
-        if compact is None:
-            return
-        if not worker.submit_evidence_batch((compact,)).accepted:
-            self._learning_evidence_available = False
-
-    def _deliver_completed_pulse_observation(
-        self,
-        frame_key: tuple[int, int],
-        observation: FrameObservation,
-        feedback: AppliedOutput | None = None,
-    ) -> None:
-        self._submit_calibration_frame_evidence(observation)
-        if not observation.probe_valid:
-            if self._pending_model_observations is None:
-                self._pending_model_observations = {}
-            sequence = -1
-            while sequence in self._pending_model_observations:
-                sequence -= 1
-            trace = self._control_trace
-            identity = None if trace is None else trace.identity
-            self._pending_model_observations[sequence] = (
-                observation,
-                None if identity is None else identity.session_id,
-                -1,
-                ((TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(observation, "invalid-probe")),),
-            )
-            self._bound_pending_model_observations()
-            return
-        worker = self._persistence_worker
-        if not self._learning_evidence_available or (worker is not None and worker.evidence_blocked):
-            self._learning_evidence_available = False
-            self._record_pending_observation_gap(observation, "model-persistence-unavailable")
-            return
-        if self._runner is None:
-            return
-        submission = (
-            self._runner.complete_frame(feedback, observation)
-            if feedback is not None
-            else self._runner.observe_frame(observation)
-        )
-        sequence = getattr(submission, "submission_sequence", None)
-        generation = getattr(submission, "configuration_generation", None)
-        if (
-            not isinstance(sequence, int)
-            or isinstance(sequence, bool)
-            or sequence < 0
-            or not isinstance(generation, int)
-            or isinstance(generation, bool)
-            or generation < 0
-        ):
-            return
-        if self._pending_model_observations is None:
-            self._pending_model_observations = {}
-        trace = self._control_trace
-        identity = None if trace is None else trace.identity
-        self._pending_model_observations[sequence] = (
-            observation,
-            None if identity is None else identity.session_id,
-            generation,
-            None,
-        )
-        evicted_sequence = getattr(submission, "evicted_sequence", None)
-        if isinstance(evicted_sequence, int) and not isinstance(evicted_sequence, bool):
-            self._retire_pending_model_observation(evicted_sequence, "runner-observation-evicted")
-        self._bound_pending_model_observations()
 
     def _trace_missing_frame_observation(self, completion: FramedPulseCompletion) -> None:
         frame = completion.frame
@@ -671,295 +428,7 @@ class HoldMode(ControlMode):
                 int(frame.ended_at_s * 1_000),
             )
 
-    @staticmethod
-    def _model_lifecycle_payload(value: object) -> ModelEventPayload | None:
-        if not isinstance(value, Mapping):
-            return None
-        try:
-            raw_parameters = value["parameters"]
-            if not isinstance(raw_parameters, tuple | list):
-                return None
-            parameters = tuple(
-                parameter
-                if isinstance(parameter, TraceSetting)
-                else TraceSetting(key=parameter["key"], value=parameter["value"])
-                for parameter in raw_parameters
-            )
-            return ModelEventPayload(
-                event=ModelEventType(value["event"]),
-                model_revision=value["model_revision"],
-                provenance=value["provenance"],
-                detail=value["detail"],
-                model_kind=value["model_kind"],
-                model_schema=value["model_schema"],
-                role_generation=value["role_generation"],
-                snapshot_digest=value["snapshot_digest"],
-                parameters=parameters,
-            )
-        except KeyError, TypeError, ValueError:
-            return None
 
-    @staticmethod
-    def _rejected_model_observation(observation: FrameObservation, reason: str) -> ModelObservationPayload:
-        output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
-        return ModelObservationPayload(
-            frame_start_ms=int(observation.frame_start_s * 1_000),
-            frame_end_ms=int(observation.frame_end_s * 1_000),
-            cancellation_command_revision=observation.cancellation_command_revision,
-            cancellation_command_action=observation.cancellation_command_action,
-            calibration_command_revision=observation.calibration_command_revision,
-            calibration_command_action=observation.calibration_command_action,
-            calibration_cancellation_reason=observation.calibration_cancellation_reason,
-            calibration_status=observation.calibration_status,
-            baseline_allocation=HoldMode._trace_allocation_payload(
-                observation.baseline_allocation, observation.result_revision
-            ),
-            combined_allocation=HoldMode._trace_allocation_payload(
-                observation.combined_allocation, observation.result_revision
-            ),
-            temp_c=observation.temp_c,
-            setpoint_c=observation.setpoint_c,
-            ambient_c=observation.ambient_c,
-            observation_sequence=observation.observation_sequence,
-            probe_valid=observation.probe_valid,
-            probe_source=observation.probe_source,
-            ambient_source=observation.ambient_source,
-            ambient_uncertainty=observation.ambient_uncertainty,
-            baseline_combustion_load=observation.baseline_q,
-            calibration_probe_load=observation.probe_q,
-            requested_combustion_load=observation.requested_q,
-            allocated_combustion_load=observation.allocated_q,
-            realized_combustion_load=observation.realized_q,
-            requested_auger_duty=observation.requested_auger_duty,
-            scheduled_on_seconds=observation.scheduled_on_s,
-            delivered_on_seconds=observation.delivered_on_s,
-            realized_auger_duty=observation.realized_auger_duty,
-            allocator_revision=observation.allocator_revision,
-            allocation_clamp_reasons=observation.allocation_clamp_reasons,
-            calibration_stage=observation.calibration_stage,
-            calibration_fit=observation.calibration_fit,
-            result_revision=observation.result_revision,
-            eligible=False,
-            rejection_reasons=(reason,),
-            input_variance=0.0,
-            input_levels=0,
-            incumbent_innovation_c=None,
-            challenger_innovation_c=None,
-            effective_updates=0,
-            role_generation=observation.role_generation,
-            model_digest=None,
-            requested_fan_duty=observation.requested_fan_duty,
-            actual_fan_duty=observation.actual_fan_duty,
-            output_source=output_source,
-            lid_open=observation.lid_open,
-            safety_inhibited=observation.safety_inhibited,
-            manual_override=observation.manual_override,
-            stale=observation.stale,
-            skipped=observation.skipped,
-            reset=observation.reset,
-            continuous=observation.continuous,
-        )
-
-    def _queue_rejected_model_observation(
-        self,
-        sequence: int,
-        reason: str,
-        evaluation_payload: ModelEvaluationPayload | None = None,
-    ) -> None:
-        pending = self._pending_model_observations.get(sequence)
-        if pending is None or not isinstance(pending[0], FrameObservation):
-            self._pending_model_observations.pop(sequence, None)
-            return
-        try:
-            rejected = self._rejected_model_observation(pending[0], reason)
-        except ValueError:
-            self._retire_pending_model_observation(sequence, reason)
-            return
-        records: tuple[tuple[TraceEventKind, object], ...] = ((TraceEventKind.MODEL_OBSERVATION, rejected),)
-        if evaluation_payload is not None:
-            records += ((TraceEventKind.MODEL_EVALUATION, evaluation_payload),)
-        self._pending_model_observations[sequence] = (*pending[:3], records)
-
-    def _flush_pending_model_trace(
-        self,
-        sequence: int,
-        pending: tuple[FrameObservation, str | None, int, tuple[tuple[TraceEventKind, object], ...] | None],
-        publication_ms: int,
-    ) -> bool:
-        remaining = pending[3]
-        if not isinstance(remaining, tuple):
-            return False
-        trace = self._control_trace
-        if trace is None:
-            return False
-        while remaining:
-            event_kind, payload = remaining[0]
-            if not trace.record(event_kind, cast(ControlTracePayload, payload), publication_ms):
-                self._pending_model_observations[sequence] = (*pending[:3], remaining)
-                return False
-            remaining = remaining[1:]
-        self._pending_model_observations.pop(sequence, None)
-        return True
-
-    def _persist_controller_evidence(self, evidence) -> None:
-        compact_batch = evidence if isinstance(evidence, tuple) else ()
-        confidence = tuple(
-            record
-            for record in compact_batch
-            if isinstance(record, ModelEvidenceRecord) and record.kind is EvidenceKind.CONFIDENCE_DECISION
-        )
-        ordinary = tuple(record for record in compact_batch if record not in confidence)
-        for record in confidence:
-            receipt = self._runner.submit_activation_confidence(record)
-            if receipt is None or not receipt.accepted:
-                self._learning_evidence_available = False
-        if (
-            ordinary
-            and self._persistence_worker is not None
-            and not self._persistence_worker.submit_evidence_batch(ordinary).accepted
-        ):
-            self._learning_evidence_available = False
-
-    def _reconcile_model_observation_outcomes(self, now: float | None = None) -> None:
-        publication_ms = int((self.ctx.clock.now() if now is None else now) * 1_000)
-        if not self._pending_model_observations or self._runner is None:
-            return
-        drain = getattr(self._runner, "drain_observation_outcomes", None)
-        if drain is None:
-            return
-        batch = drain()
-        terminal_drops = getattr(batch, "terminal_drops", ())
-        if isinstance(terminal_drops, tuple):
-            for drop in terminal_drops:
-                sequence = getattr(drop, "submission_sequence", None)
-                reason = getattr(drop, "reason", None)
-                if isinstance(sequence, int) and not isinstance(sequence, bool) and isinstance(reason, str) and reason:
-                    self._retire_pending_model_observation(sequence, reason)
-        envelopes = getattr(batch, "envelopes", batch)
-        for envelope in envelopes:
-            sequence = getattr(envelope, "submission_sequence", None)
-            generation = getattr(envelope, "configuration_generation", None)
-            delivered = getattr(envelope, "observation", None)
-            outcome = getattr(envelope, "outcome", None)
-            evidence = getattr(envelope, "evidence", ())
-            pending = self._pending_model_observations.get(sequence)
-            if pending is None:
-                continue
-            trace = self._control_trace
-            identity = None if trace is None else trace.identity
-            if generation != pending[2] or pending[1] != (
-                None if identity is None else identity.session_id
-            ):
-                self._queue_rejected_model_observation(sequence, "observation-configuration-mismatch")
-                continue
-            if not isinstance(delivered, FrameObservation) or not isinstance(outcome, Mapping):
-                self._queue_rejected_model_observation(sequence, "observation-outcome-malformed")
-                continue
-            self._persist_controller_evidence(evidence)
-            observation = delivered
-            evaluation_payload = outcome.get("evaluation_payload")
-            evaluation_payload = evaluation_payload if isinstance(evaluation_payload, ModelEvaluationPayload) else None
-            try:
-                if observation.allocation_join_reason is not None:
-                    self._queue_rejected_model_observation(
-                        sequence, observation.allocation_join_reason, evaluation_payload
-                    )
-                    continue
-                if not observation.probe_valid:
-                    self._queue_rejected_model_observation(sequence, "invalid-probe", evaluation_payload)
-                    continue
-                role_generation = outcome["role_generation"]
-                if role_generation != observation.role_generation:
-                    self._queue_rejected_model_observation(
-                        sequence, "observation-role-generation-mismatch", evaluation_payload
-                    )
-                    continue
-                if outcome.get("eligible") is True and (
-                    observation.output_source != OutputSource.CONTROLLER.value
-                    or observation.lid_open
-                    or observation.safety_inhibited
-                    or observation.manual_override
-                    or observation.stale
-                    or observation.skipped
-                    or observation.reset
-                    or not observation.continuous
-                ):
-                    self._queue_rejected_model_observation(sequence, "observation-gate-mismatch", evaluation_payload)
-                    continue
-                output_source = (
-                    OutputSource(observation.output_source) if observation.output_source != "unknown" else None
-                )
-                observation_payload = ModelObservationPayload(
-                    frame_start_ms=int(observation.frame_start_s * 1_000),
-                    frame_end_ms=int(observation.frame_end_s * 1_000),
-                    temp_c=observation.temp_c,
-                    setpoint_c=observation.setpoint_c,
-                    ambient_c=observation.ambient_c,
-                    observation_sequence=observation.observation_sequence,
-                    probe_valid=observation.probe_valid,
-                    probe_source=observation.probe_source,
-                    ambient_source=observation.ambient_source,
-                    ambient_uncertainty=observation.ambient_uncertainty,
-                    baseline_combustion_load=observation.baseline_q,
-                    calibration_probe_load=observation.probe_q,
-                    requested_combustion_load=observation.requested_q,
-                    allocated_combustion_load=observation.allocated_q,
-                    realized_combustion_load=observation.realized_q,
-                    requested_auger_duty=observation.requested_auger_duty,
-                    scheduled_on_seconds=observation.scheduled_on_s,
-                    delivered_on_seconds=observation.delivered_on_s,
-                    realized_auger_duty=observation.realized_auger_duty,
-                    allocator_revision=observation.allocator_revision,
-                    allocation_clamp_reasons=observation.allocation_clamp_reasons,
-                    calibration_stage=observation.calibration_stage,
-                    calibration_fit=observation.calibration_fit,
-                    result_revision=observation.result_revision,
-                    eligible=outcome["eligible"],
-                    rejection_reasons=tuple(outcome["rejection_reasons"]),
-                    input_variance=outcome["input_variance"],
-                    input_levels=outcome["input_levels"],
-                    incumbent_innovation_c=outcome["incumbent_innovation_c"],
-                    challenger_innovation_c=outcome["challenger_innovation_c"],
-                    cancellation_command_revision=observation.cancellation_command_revision,
-                    cancellation_command_action=observation.cancellation_command_action,
-                    calibration_command_revision=observation.calibration_command_revision,
-                    calibration_command_action=observation.calibration_command_action,
-                    calibration_cancellation_reason=observation.calibration_cancellation_reason,
-                    calibration_status=observation.calibration_status,
-                    baseline_allocation=self._trace_allocation_payload(
-                        observation.baseline_allocation, observation.result_revision
-                    ),
-                    combined_allocation=self._trace_allocation_payload(
-                        observation.combined_allocation, observation.result_revision
-                    ),
-                    effective_updates=outcome["effective_updates"],
-                    role_generation=role_generation,
-                    model_digest=outcome["model_digest"],
-                    requested_fan_duty=observation.requested_fan_duty,
-                    actual_fan_duty=observation.actual_fan_duty,
-                    output_source=output_source,
-                    lid_open=observation.lid_open,
-                    safety_inhibited=observation.safety_inhibited,
-                    manual_override=observation.manual_override,
-                    stale=observation.stale,
-                    skipped=observation.skipped,
-                    reset=observation.reset,
-                    continuous=observation.continuous,
-                )
-            except KeyError, TypeError, ValueError:
-                self._queue_rejected_model_observation(sequence, "observation-outcome-malformed", evaluation_payload)
-                continue
-            records: list[tuple[TraceEventKind, object]] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
-            if evaluation_payload is not None:
-                records.append((TraceEventKind.MODEL_EVALUATION, evaluation_payload))
-            lifecycle_payload = self._model_lifecycle_payload(outcome.get("lifecycle"))
-            if lifecycle_payload is not None:
-                records.append((TraceEventKind.MODEL_EVENT, lifecycle_payload))
-            queued = (*pending[:3], tuple(records))
-            self._pending_model_observations[sequence] = queued
-        for sequence, pending in tuple(self._pending_model_observations.items()):
-            if pending[3] is None or not self._flush_pending_model_trace(sequence, pending, publication_ms):
-                break
 
 
 
@@ -1061,43 +530,38 @@ class HoldMode(ControlMode):
 
     def _checkpoint_model(self, snapshot: dict[str, object]) -> bool:
         worker = self._persistence_worker
-        accepted = worker is not None and worker.submit_checkpoint(self._controller_name, snapshot)
-        if not accepted:
-            self._learning_evidence_available = False
+        accepted = worker is not None and worker.submit_checkpoint(
+            self._controller_name,
+            snapshot,
+        )
+        if not accepted and self._hold_learning is not None:
+            self._hold_learning.mark_evidence_unavailable()
         return bool(accepted)
 
-    def _bind_runner_evidence_context(self, generation: int) -> None:
-        bind = getattr(getattr(self, "_runner", None), "bind_evidence_context", None)
-        trace = self._control_trace
-        identity = None if trace is None else trace.identity
-        if callable(bind) and identity is not None:
-            bind(generation, identity.session_id, identity.cook_id)
 
-    def _retire_runner_evidence_context(self, generation: int) -> None:
-        retire = getattr(getattr(self, "_runner", None), "retire_evidence_context", None)
-        if callable(retire):
-            retire(generation)
-
-    def _rotate_evidence_sessions_for_reserved_runner_generations(self, now: float) -> None:
+    def _rotate_evidence_sessions_for_reserved_runner_generations(
+        self,
+        now: float,
+    ) -> None:
         """Release every reserved generation before teardown closes evidence sinks."""
-        if self._runner is None:
+        runner = self._runner
+        learning = self._hold_learning
+        if runner is None or learning is None:
             return
-        pending = self._pending_model_observations or {}
-        installed_generation = getattr(
-            self._runner, "configuration_revision", lambda: self._runner_configuration_revision
-        )()
-        generations = sorted(
-            {self._runner_configuration_revision, installed_generation, *(value[2] for value in pending.values())}
-        )
+        current_generation = self._runner_configuration_revision
+        learning.reconcile_outcomes(now)
+        remaining_generations = learning.retire_generation(current_generation)
+        installed_generation = runner.configuration_revision()
+        generations = sorted({installed_generation, *remaining_generations})
         for generation in generations:
-            if generation == self._runner_configuration_revision:
-                self._reconcile_model_observation_outcomes(now)
+            if generation == current_generation:
                 continue
-            self._retire_runner_evidence_context(self._runner_configuration_revision)
             trace = self._control_trace
             if trace is not None:
-                trace.rotate_identity(runner_snapshot_fallback_safe=not self._runner.runs_async())
-            actual_type = getattr(self._runner, "controller_type", lambda: None)()
+                trace.rotate_identity(
+                    runner_snapshot_fallback_safe=not runner.runs_async()
+                )
+            actual_type = runner.controller_type()
             if isinstance(actual_type, ControllerType):
                 self._controller_name = actual_type.value
             self._runner_configuration_revision = generation
@@ -1108,21 +572,8 @@ class HoldMode(ControlMode):
                 else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
             )
             if identity is not None:
-                self._bind_runner_evidence_context(generation)
-            self._pending_model_observations = {
-                sequence: (
-                    (observation, None if identity is None else identity.session_id, pending_generation, records)
-                    if pending_generation == generation
-                    else (observation, session_id, pending_generation, records)
-                )
-                for sequence, (
-                    observation,
-                    session_id,
-                    pending_generation,
-                    records,
-                ) in self._pending_model_observations.items()
-            }
-            self._reconcile_model_observation_outcomes(now)
+                learning.bind_generation(generation)
+            learning.reconcile_outcomes(now)
 
 
     def _set_output(
@@ -1182,9 +633,9 @@ class HoldMode(ControlMode):
         import control as _control
 
         self._control_trace = None
-        self._learning_evidence_available = True
+        self._hold_learning = None
+        learning_evidence_available = True
         self._reachability_advisory_key = None
-        self._pending_model_observations = {}
         self._framed_pulse = FramedPulseRuntime()
         self._last_ptemp = None
         self._final_refit_done = False
@@ -1198,7 +649,7 @@ class HoldMode(ControlMode):
         try:
             recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
-            self._learning_evidence_available = False
+            learning_evidence_available = False
             self._trace_warning(f"Control trace recorder unavailable: {error}")
         self._control_trace = ControlTraceSession(recorder, warning=self._trace_warning)
 
@@ -1219,7 +670,7 @@ class HoldMode(ControlMode):
         try:
             self._persistence_worker = ModelPersistenceWorker(self._model_store, _control.eventLogger)
         except Exception as error:
-            self._learning_evidence_available = False
+            learning_evidence_available = False
             self._persistence_worker = None
             self._trace_warning(f"Model persistence unavailable: {error}")
         self._controller_name = self.settings["controller"]["selected"]
@@ -1232,6 +683,14 @@ class HoldMode(ControlMode):
         if isinstance(actual_type, ControllerType):
             self._controller_name = actual_type.value
         self._runner_configuration_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
+        self._hold_learning = HoldLearningRuntime(
+            runner=self._runner,
+            persistence=self._persistence_worker,
+            trace=self._control_trace,
+            initial_generation=self._runner_configuration_revision,
+        )
+        if not learning_evidence_available:
+            self._hold_learning.mark_evidence_unavailable()
 
         if self._runner is not None:
             self._framed_pulse.configure(
@@ -1254,7 +713,7 @@ class HoldMode(ControlMode):
                         defaults.update(selected_config)
                     migrate_mpc_learning_authority(defaults=defaults)
                 except Exception as error:
-                    self._learning_evidence_available = False
+                    self._hold_learning.mark_evidence_unavailable()
                     self._trace_warning(f"Model authority migration failed: {error}")
             self._restore_model()
             self._reconcile_activation_state()
@@ -1295,6 +754,7 @@ class HoldMode(ControlMode):
     def _adopt_runner_configuration(self, now, current_output_status):
         """Adopt one actually installed runner generation exactly once."""
         import control as _control
+        runner = cast(_runner_mod.ControllerRunner, self._runner)
 
         retiring_generation = self._runner_configuration_revision
         trace = self._control_trace
@@ -1324,18 +784,15 @@ class HoldMode(ControlMode):
             terminal_feedback=False,
         )
         _control.eventLogger.info("Controller reinitialized with updated settings")
-        self._reconcile_model_observation_outcomes(now)
-        installed_generation = getattr(self._runner, "configuration_revision", lambda: retiring_generation)()
-        retained = {
-            sequence: pending
-            for sequence, pending in self._pending_model_observations.items()
-            if pending[2] == installed_generation
-        }
-        self._retire_runner_evidence_context(retiring_generation)
-        self._pending_model_observations = retained
+        learning = self._hold_learning
+        if learning is not None:
+            learning.reconcile_outcomes(now)
+        installed_generation = runner.configuration_revision()
+        if learning is not None:
+            learning.retire_generation(retiring_generation)
         if trace is not None:
-            trace.rotate(runner_snapshot_fallback_safe=not self._runner.runs_async())
-        actual_type = getattr(self._runner, "controller_type", lambda: None)()
+            trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
+        actual_type = runner.controller_type()
         self._controller_name = (
             actual_type.value if isinstance(actual_type, ControllerType) else self.settings["controller"]["selected"]
         )
@@ -1343,7 +800,7 @@ class HoldMode(ControlMode):
         if runtime is None:
             raise RuntimeError("Hold framed pulse runtime is unavailable")
         runtime.configure(
-            self._runner.actuation_mode(),
+            runner.actuation_mode(),
             controller=cast(PulseControllerState, self.state.controller),
             timing=self.grill.auger_timing(),
             now=self.ctx.clock.now(),
@@ -1363,18 +820,10 @@ class HoldMode(ControlMode):
             if trace is None or context is None
             else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
         )
-        if identity is not None:
-            self._bind_runner_evidence_context(installed_generation)
-        self._pending_model_observations = {
-            sequence: (
-                observation,
-                None if identity is None else identity.session_id,
-                generation,
-                records,
-            )
-            for sequence, (observation, _session, generation, records) in self._pending_model_observations.items()
-        }
-        self._reconcile_model_observation_outcomes(now)
+        if identity is not None and learning is not None:
+            learning.bind_generation(installed_generation)
+        if learning is not None:
+            learning.reconcile_outcomes(now)
         self._set_output(
             seed_output(
                 self.state.cycle.ratio,
@@ -1701,8 +1150,13 @@ class HoldMode(ControlMode):
             if trace is None or session_context is None
             else trace.ensure_open(session_context, timestamp_ms=int(now * 1_000))
         )
-        if previous_identity is None and identity is not None:
-            self._bind_runner_evidence_context(self._runner_configuration_revision)
+        learning = self._hold_learning
+        if (
+            previous_identity is None
+            and identity is not None
+            and learning is not None
+        ):
+            learning.bind_generation(self._runner_configuration_revision)
         self._reconcile_activation_state()
         self._drain_activation_events()
         active_calibration_reset = False
@@ -1803,7 +1257,9 @@ class HoldMode(ControlMode):
         # to solve; for the synchronous runner this just stores the latest temp,
         # so the value read at the gate below is unchanged.
         self._runner.submit(context.ptemp)
-        self._reconcile_model_observation_outcomes(context.now)
+        learning = self._hold_learning
+        if learning is not None:
+            learning.reconcile_outcomes(context.now)
         runtime = self._framed_pulse
         controller_interval = self._runner.control_period() or (
             0.0 if runtime is None else runtime.frame_seconds
@@ -1970,7 +1426,9 @@ class HoldMode(ControlMode):
             if trace is not None:
                 applied_state = trace.applied_state
                 lifecycle = (
-                    self._model_lifecycle_payload(result.diagnostics.model_lifecycle)
+                    parse_model_lifecycle_payload(
+                        result.diagnostics.model_lifecycle
+                    )
                     if isinstance(result.diagnostics, MpcTraceDiagnostics)
                     else None
                 )
@@ -2296,8 +1754,13 @@ class HoldMode(ControlMode):
                 if trace is None or context is None
                 else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
             )
-            if previous_identity is None and identity is not None:
-                self._bind_runner_evidence_context(self._runner_configuration_revision)
+            learning = self._hold_learning
+            if (
+                previous_identity is None
+                and identity is not None
+                and learning is not None
+            ):
+                learning.bind_generation(self._runner_configuration_revision)
             self._inhibit_framed_pulse(
                 PulseResetReason.SAFETY,
                 now,
@@ -2391,12 +1854,16 @@ class HoldMode(ControlMode):
             state = read_model_activation()
             records = tuple(read_model_evidence())
         except Exception as error:
-            self._learning_evidence_available = False
+            learning = self._hold_learning
+            if learning is not None:
+                learning.mark_evidence_unavailable()
             self._trace_warning(f"Model activation state unavailable: {error}")
             return
         identity = self._activation_identity(state)
         if state is not None and identity is None:
-            self._learning_evidence_available = False
+            learning = self._hold_learning
+            if learning is not None:
+                learning.mark_evidence_unavailable()
             self._trace_warning("Model activation authority uses a retired schema")
             return
         lifecycle = None if state is None else self._pair_activation_lifecycle(state, records)
@@ -2421,8 +1888,12 @@ class HoldMode(ControlMode):
             return
         worker = self._persistence_worker
         if worker is None or not worker.submit_evidence_batch(events).accepted:
-            self._learning_evidence_available = False
-            self._trace_warning("Model activation fallback evidence was not persisted")
+            learning = self._hold_learning
+            if learning is not None:
+                learning.mark_evidence_unavailable()
+            self._trace_warning(
+                "Model activation fallback evidence was not persisted"
+            )
 
     # check_safety is now a declarative pre_act guard (GUARDS["Hold"]); the base
     # ControlMode default (return False) applies here.
@@ -2512,7 +1983,9 @@ class HoldMode(ControlMode):
                 return False
         snapshot = self._runner.get_model_snapshot()
         if not isinstance(snapshot, dict):
-            self._learning_evidence_available = False
+            learning = self._hold_learning
+            if learning is not None:
+                learning.mark_evidence_unavailable()
             return False
         trace = self._control_trace
         if trace is not None:
@@ -2615,7 +2088,9 @@ class HoldMode(ControlMode):
                     if not checkpointed:
                         self._publish_final_checkpoint_once(outcome, verdict)
         finally:
-            self._retire_runner_evidence_context(self._runner_configuration_revision)
+            learning = self._hold_learning
+            if learning is not None:
+                learning.retire_generation(self._runner_configuration_revision)
             worker = getattr(self, "_persistence_worker", None)
             flushed = True
             if worker is not None:

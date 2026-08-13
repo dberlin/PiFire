@@ -204,7 +204,9 @@ def test_checkpoint_persistence_failure_disables_hold_learning(hold_cycle):
         assert worker.flush_and_stop(timeout=1.0)
         assert worker.evidence_blocked
         hold._checkpoint_model({"revision": 2})
-        assert not hold._learning_evidence_available
+        learning = hold._hold_learning
+        assert learning is not None
+        assert not learning.evidence_available
     finally:
         hold.ctx.clock.advance(400.0)
         hold.teardown(200.0)

@@ -35,7 +35,7 @@ from common.model_evidence import (
     SessionSummaryEvidence,
 )
 from controller.runtime.control_trace_session import ControlTraceSession, TraceSessionContext
-from controller.runtime.modes.hold import HoldMode
+from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.model_persistence import DurableActivationReceipt, ModelPersistenceWorker
 from controller.runtime.runner import (
     SyncControllerRunner,
@@ -1810,20 +1810,30 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         assert context is not None
         identity = trace.ensure_open(context, timestamp_ms=0)
         assert identity is not None
-        mode._bind_runner_evidence_context(mode._runner_configuration_revision)
+        learning = mode._hold_learning
+        assert learning is not None
+        learning.bind_generation(mode._runner_configuration_revision)
 
         for index in range(31):
-            mode._deliver_completed_pulse_observation((index * 20, (index + 1) * 20), frame(index, 0.3))
-
-        assert list(mode._pending_model_observations) == list(range(2, 32))
+            learning.submit_completed_observation(
+                (index * 20, (index + 1) * 20),
+                frame(index, 0.3),
+            )
         assert runner.controller_state()["dropped_observations"] == 1
 
         gate.release.set()
         assert core.wait_for_observations(30)
         assert _wait_for(
             lambda: (
-                mode._reconcile_model_observation_outcomes(now=620.0) is None
-                and mode._pending_model_observations == {}
+                learning.reconcile_outcomes(620.0) is None
+                and len(
+                    [
+                        record
+                        for record in recorder.records
+                        if isinstance(record.payload, ModelObservationPayload)
+                    ]
+                )
+                == 30
             )
         )
 
@@ -2331,30 +2341,30 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
             timestamp_ms=0,
         )
         assert identity is not None
-        runner.bind_evidence_context(0, identity.session_id, identity.cook_id)
-        submission = runner.observe_frame(observation)
-        mode = HoldMode.__new__(HoldMode)
-        mode._runner = runner
-        mode._control_trace = trace
-        mode._pending_model_observations = {
-            submission.submission_sequence: (observation, identity.session_id, 0, None)
-        }
         normal_evidence = []
-        mode._persistence_worker = SimpleNamespace(
+        persistence = SimpleNamespace(
+            evidence_blocked=False,
             submit_evidence_batch=lambda records: (
                 normal_evidence.extend(records),
                 SimpleNamespace(accepted=True),
-            )[1]
+            )[1],
         )
-        mode.ctx = SimpleNamespace(clock=SimpleNamespace(now=lambda: 100.0))
+        learning = HoldLearningRuntime(
+            runner=runner,
+            persistence=persistence,
+            trace=trace,
+            initial_generation=0,
+        )
+        learning.bind_generation(0)
+        learning.submit_completed_observation((60, 80), observation)
         def record(event_kind, payload, timestamp_ms):
             recorded.append((event_kind, payload, timestamp_ms))
             return True
 
         trace.record = record
 
-        mode._reconcile_model_observation_outcomes()
-        mode._reconcile_model_observation_outcomes()
+        learning.reconcile_outcomes(100.0)
+        learning.reconcile_outcomes(100.0)
 
         assert [item[0] for item in recorded] == [
             TraceEventKind.MODEL_OBSERVATION,
@@ -2371,7 +2381,6 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
             record.kind is not EvidenceKind.CONFIDENCE_DECISION
             for record in normal_evidence
         )
-        assert mode._pending_model_observations == {}
     finally:
         runner.stop()
 

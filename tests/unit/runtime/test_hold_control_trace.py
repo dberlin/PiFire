@@ -36,7 +36,11 @@ from controller.mpc import Controller
 from tests.characterization.fixtures import base_control, base_settings
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.framed_pulse import FramedPulseRuntime
-from controller.runtime.control_trace_session import TraceAppliedIntervalContext, TraceOutputContext, TraceUpdateContext
+from controller.runtime.control_trace_session import (
+    TraceAppliedIntervalContext,
+    TraceOutputContext,
+    TraceUpdateContext,
+)
 from controller.runtime.runner import (
     ControllerUpdateResult,
     ObservationOutcomeEnvelope,
@@ -48,6 +52,7 @@ from controller.runtime.runner import (
 from controller.model_learning.contracts import FrameObservation
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
+from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
 from tests.fakes.runner import FakeControllerRunner
 from controller.update_mpc import load_trace_samples
 def _runtime(mode) -> FramedPulseRuntime:
@@ -62,14 +67,20 @@ def _open_trace_session(mode, now):
     assert context is not None
     previous = trace.identity
     identity = trace.ensure_open(context, timestamp_ms=int(now * 1_000))
-    if previous is None and identity is not None:
-        mode._bind_runner_evidence_context(mode._runner_configuration_revision)
+    learning = mode._hold_learning
+    if previous is None and identity is not None and learning is not None:
+        learning.bind_generation(mode._runner_configuration_revision)
     return identity
 
 def _trace(mode):
     trace = mode._control_trace
     assert trace is not None
     return trace
+
+def _learning(mode):
+    learning = mode._hold_learning
+    assert learning is not None
+    return learning
 
 
 def _identity(mode):
@@ -82,7 +93,7 @@ def _record_trace_update(mode, result, *, now, controller_interval):
     trace = _trace(mode)
     applied = trace.applied_state
     lifecycle = (
-        mode._model_lifecycle_payload(result.diagnostics.model_lifecycle)
+        parse_model_lifecycle_payload(result.diagnostics.model_lifecycle)
         if isinstance(result.diagnostics, MpcTraceDiagnostics)
         else None
     )
@@ -143,7 +154,10 @@ def _observe_runtime(mode, frame, *, ptemp, inhibit, role_generation=None):
     )
     if completion.observation is not None:
         assert completion.frame_key is not None
-        mode._deliver_completed_pulse_observation(completion.frame_key, completion.observation)
+        _learning(mode).submit_completed_observation(
+            completion.frame_key,
+            completion.observation,
+        )
     elif completion.missing_observation_reason is not None:
         mode._trace_missing_frame_observation(completion)
     return completion
@@ -421,7 +435,7 @@ def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_d
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
-    mode._reconcile_model_observation_outcomes(now=22.0)
+    _learning(mode).reconcile_outcomes(22.0)
 
     replayed = next(
         record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)
@@ -1378,10 +1392,8 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
     mode.state.metrics = {"id": "ordered-learning-trace"}
     _open_trace_session(mode, 0.0)
     first, second = _learning_observation(0.0), _learning_observation(20.0)
-    mode._pending_model_observations = {
-        1: (first, _identity(mode).session_id, 0, None),
-        2: (second, _identity(mode).session_id, 0, None),
-    }
+    _learning(mode).submit_completed_observation((0, 20), first)
+    _learning(mode).submit_completed_observation((20, 40), second)
     return recorder, runner, mode, first, second
 
 
@@ -1404,9 +1416,10 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
         ),
     )
     runner.reconfigure({}, {})
-    mode._pending_model_observations = {
-        1: (_learning_observation(0.0), old_identity.session_id, 1, None),
-    }
+    _learning(mode).submit_completed_observation(
+        (0, 20),
+        _learning_observation(0.0),
+    )
 
     mode._rotate_evidence_sessions_for_reserved_runner_generations(3.0)
 
@@ -1579,7 +1592,6 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         ]
         assert gaps[0][0] == old_session_id
         assert gaps[1][0] is not None and gaps[1][0] != old_session_id
-        assert mode._pending_model_observations == {}
         assert runner.drain_observation_outcomes().terminal_drops == ()
         assert len(worker.batches) == 2
         compact_gaps = [batch[0] for batch in worker.batches]
@@ -1596,7 +1608,6 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         assert not runner._thread.is_alive()
         assert runner.drain_observation_outcomes().envelopes == ()
         assert runner.drain_observation_outcomes().terminal_drops == ()
-        assert mode._pending_model_observations == {}
         assert len(worker.batches) == 2
     finally:
         core.release_observation.set()
@@ -1645,8 +1656,8 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
-    mode._reconcile_model_observation_outcomes(now=22.0)
-    mode._reconcile_model_observation_outcomes(now=23.0)
+    _learning(mode).reconcile_outcomes(22.0)
+    _learning(mode).reconcile_outcomes(23.0)
 
     payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     assert len(payloads) == 1
@@ -1723,7 +1734,7 @@ def test_framed_learning_trace_uses_generation_latched_with_pulse_frame(hold_cyc
             1, 0, runner.observations[0], _model_observation_outcome(frame_end_ms=20_000, role_generation=7)
         )
     )
-    mode._reconcile_model_observation_outcomes(now=22.0)
+    _learning(mode).reconcile_outcomes(22.0)
 
     payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     assert [payload.role_generation for payload in payloads] == [7]
@@ -1759,10 +1770,8 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
         return original(kind, payload, timestamp)
 
     _trace(mode).record = transient
-    mode._reconcile_model_observation_outcomes(now=22.0)
-    assert len(mode._pending_model_observations[1][3]) == 2
-    mode._reconcile_model_observation_outcomes(now=23.0)
-    assert 1 not in mode._pending_model_observations
+    _learning(mode).reconcile_outcomes(22.0)
+    _learning(mode).reconcile_outcomes(23.0)
     assert [
         record.event_kind
         for record in recorder.records
@@ -1797,16 +1806,14 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
         return original(kind, payload, timestamp)
 
     _trace(mode).record = transient
-    mode._reconcile_model_observation_outcomes(now=22.0)
+    _learning(mode).reconcile_outcomes(22.0)
     assert [
         record.payload.decision_id
         for record in recorder.records
         if record.event_kind is TraceEventKind.MODEL_EVALUATION
     ] == ["generation-0-evaluation-1"]
-    assert len(mode._pending_model_observations[1][3]) == 1
-    assert len(mode._pending_model_observations[2][3]) == 3
 
-    mode._reconcile_model_observation_outcomes(now=23.0)
+    _learning(mode).reconcile_outcomes(23.0)
 
     assert [
         (record.event_kind, getattr(record.payload, "decision_id", getattr(record.payload, "detail", None)))
@@ -1829,7 +1836,7 @@ def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeyp
         ObservationOutcomeEnvelope(2, 0, second, _promotion_outcome(frame_end_ms=40_000))
     )
 
-    mode._reconcile_model_observation_outcomes(now=22.0)
+    _learning(mode).reconcile_outcomes(22.0)
 
     assert not [
         record
@@ -1840,7 +1847,7 @@ def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeyp
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, first, _promotion_outcome(frame_end_ms=20_000))
     )
-    mode._reconcile_model_observation_outcomes(now=23.0)
+    _learning(mode).reconcile_outcomes(23.0)
 
     assert [
         record.event_kind
@@ -1908,43 +1915,95 @@ def test_mpc_lifecycle_records_one_rollback_event_without_stale_duplicates(hold_
 
 
 def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_session(hold_cycle, monkeypatch):
-    _install_recorder(monkeypatch)
+    recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "runner-adoption"}
     _open_trace_session(mode, 0.0)
-    mode._pending_model_observations = {1: (None, _identity(mode).session_id, 0, object())}
+    observation = _learning_observation(0.0)
+    _learning(mode).submit_completed_observation((0, 20), observation)
     assert runner.reconfigure({}, {}) == "Active"
 
     mode._adopt_runner_configuration(1.0, mode.grill.get_output_status())
+    runner.append_observation_outcome(
+        ObservationOutcomeEnvelope(
+            1,
+            0,
+            observation,
+            _model_observation_outcome(frame_end_ms=20_000),
+        )
+    )
+    _learning(mode).reconcile_outcomes(2.0)
 
-    assert mode._pending_model_observations == {}
+    assert not [
+        record
+        for record in recorder.records
+        if isinstance(record.payload, ModelObservationPayload)
+    ]
 
 
-def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(hold_cycle):
-    mode = hold_cycle(FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE), controller="mpc")
+def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(
+    hold_cycle,
+    monkeypatch,
+):
+    recorder = _install_recorder(monkeypatch)
+    mode = hold_cycle(
+        FakeControllerRunner(
+            period=1.0,
+            actuation_mode=ActuationMode.FRAMED_PULSE,
+        ),
+        controller="mpc",
+    )
     mode.setup()
-    mode._pending_model_observations = {sequence: (None, "old-session", 0, object()) for sequence in range(60)}
-    _trace(mode).record = lambda *_: False
+    mode.state.metrics = {"id": "bounded-trace-retry"}
+    _open_trace_session(mode, 0.0)
+    learning = _learning(mode)
+    for sequence in range(60):
+        learning.submit_completed_observation(
+            (sequence * 20, (sequence + 1) * 20),
+            replace(
+                _learning_observation(sequence * 20.0),
+                observation_sequence=sequence + 1,
+                probe_valid=False,
+            ),
+        )
+    trace = _trace(mode)
+    original = trace.record
+    trace.record = lambda *_: False
 
-    mode._reconcile_model_observation_outcomes(now=1.0)
+    learning.reconcile_outcomes(1.0)
+    trace.record = original
+    learning.reconcile_outcomes(2.0)
 
-    assert len(mode._pending_model_observations) == 60
+    assert len(
+        [
+            record
+            for record in recorder.records
+            if isinstance(record.payload, ModelObservationPayload)
+        ]
+    ) == 60
 
 
-def test_hold_retires_self_evicted_submission_immediately(hold_cycle):
+def test_hold_retires_self_evicted_submission_immediately(
+    hold_cycle,
+    monkeypatch,
+):
     class SelfEvictingRunner(FakeControllerRunner):
         def observe_frame(self, observation):
             from controller.runtime.runner import ObservationSubmission
 
             return ObservationSubmission(1, 0, 1)
 
-    runner = SelfEvictingRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    recorder = _install_recorder(monkeypatch)
+    runner = SelfEvictingRunner(
+        period=1.0,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+    )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    existing = {sequence: (None, "existing-session", 0, object()) for sequence in range(2, 62)}
-    mode._pending_model_observations = dict(existing)
+    mode.state.metrics = {"id": "self-evicted-submission"}
+    _open_trace_session(mode, 0.0)
     observation = FrameObservation(
         0.0,
         20.0,
@@ -1968,9 +2027,16 @@ def test_hold_retires_self_evicted_submission_immediately(hold_cycle):
         True,
         0,
     )
-    mode._deliver_completed_pulse_observation((0, 20), observation)
+    _learning(mode).submit_completed_observation((0, 20), observation)
 
-    assert mode._pending_model_observations == existing
+    gaps = [
+        record.payload
+        for record in recorder.records
+        if isinstance(record.payload, RecorderGapPayload)
+    ]
+    assert [(gap.reason, gap.observation_sequence) for gap in gaps] == [
+        ("runner-observation-evicted", 0)
+    ]
 
 
 def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_recovery_gap(hold_cycle, monkeypatch):
@@ -2011,8 +2077,11 @@ def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_
     mode.on_tick(4.0, 213.0, output)
     runner.observation_outcome = _model_observation_outcome(frame_end_ms=20_000)
     for index in range(3):
-        mode._deliver_completed_pulse_observation((index * 20, (index + 1) * 20), _learning_observation(index * 20.0))
-    mode._reconcile_model_observation_outcomes(now=22.0)
+        _learning(mode).submit_completed_observation(
+            (index * 20, (index + 1) * 20),
+            _learning_observation(index * 20.0),
+        )
+    _learning(mode).reconcile_outcomes(22.0)
 
     assert runner.submitted_temps == [212.0, 213.0]
     assert [observation.frame_end_s for observation in runner.observations] == [20.0, 40.0, 60.0]
@@ -2053,10 +2122,8 @@ def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
     _open_trace_session(mode, 0.0)
     runner.bind_evidence_context(1, _identity(mode).session_id, _identity(mode).cook_id)
     first, second = _learning_observation(0.0), _learning_observation(20.0)
-    mode._pending_model_observations = {
-        1: (first, _identity(mode).session_id, 0, None),
-        2: (second, _identity(mode).session_id, 0, None),
-    }
+    _learning(mode).submit_completed_observation((0, 20), first)
+    _learning(mode).submit_completed_observation((20, 40), second)
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, generation, first, outcome)
     )
@@ -2069,7 +2136,7 @@ def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
         )
     )
 
-    mode._reconcile_model_observation_outcomes(now=41.0)
+    _learning(mode).reconcile_outcomes(41.0)
 
     payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     assert [(payload.frame_end_ms, payload.eligible, payload.rejection_reasons) for payload in payloads] == [
@@ -2114,12 +2181,12 @@ def test_allocation_join_failure_persists_an_ineligible_completed_observation(ho
     mode.state.metrics = {"id": "allocation-join-evidence"}
     _open_trace_session(mode, 0.0)
     observation = replace(_learning_observation(0.0), allocation_join_reason=reason)
-    mode._pending_model_observations = {1: (observation, _identity(mode).session_id, 0, None)}
+    _learning(mode).submit_completed_observation((0, 20), observation)
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, observation, _model_observation_outcome(frame_end_ms=20_000))
     )
 
-    mode._reconcile_model_observation_outcomes(now=21.0)
+    _learning(mode).reconcile_outcomes(21.0)
 
     payload = next(record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload))
     assert (payload.frame_start_ms, payload.frame_end_ms, payload.result_revision) == (0, 20_000, 1)
@@ -2136,8 +2203,8 @@ def test_invalid_probe_is_persisted_without_submitting_to_the_learner(hold_cycle
     _open_trace_session(mode, 0.0)
     observation = replace(_learning_observation(0.0), probe_valid=False, probe_source=None)
 
-    mode._deliver_completed_pulse_observation((0, 20_000), observation)
-    mode._reconcile_model_observation_outcomes(now=21.0)
+    _learning(mode).submit_completed_observation((0, 20_000), observation)
+    _learning(mode).reconcile_outcomes(21.0)
 
     assert runner.observations == []
     payload = next(record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload))
@@ -2158,15 +2225,15 @@ def test_invalid_probe_waits_for_an_earlier_learner_outcome_before_trace_publica
     first = replace(_learning_observation(0.0), observation_sequence=1)
     second = replace(_learning_observation(20.0), observation_sequence=2, probe_valid=False, probe_source=None)
 
-    mode._deliver_completed_pulse_observation((0, 20_000), first)
-    mode._deliver_completed_pulse_observation((20_000, 40_000), second)
+    _learning(mode).submit_completed_observation((0, 20_000), first)
+    _learning(mode).submit_completed_observation((20_000, 40_000), second)
 
     assert runner.observations == [first]
     assert not [record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, first, _model_observation_outcome(frame_end_ms=20_000))
     )
-    mode._reconcile_model_observation_outcomes(now=41.0)
+    _learning(mode).reconcile_outcomes(41.0)
 
     payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     assert [(payload.observation_sequence, payload.eligible, payload.rejection_reasons) for payload in payloads] == [
@@ -2184,7 +2251,7 @@ def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_re
     _open_trace_session(mode, 0.0)
     first = replace(_learning_observation(0.0), observation_sequence=1)
 
-    mode._deliver_completed_pulse_observation((0, 20_000), first)
+    _learning(mode).submit_completed_observation((0, 20_000), first)
     for sequence in range(2, 62):
         invalid = replace(
             _learning_observation((sequence - 1) * 20.0),
@@ -2192,11 +2259,13 @@ def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_re
             probe_valid=False,
             probe_source=None,
         )
-        mode._deliver_completed_pulse_observation(((sequence - 1) * 20_000, sequence * 20_000), invalid)
+        _learning(mode).submit_completed_observation(
+            ((sequence - 1) * 20_000, sequence * 20_000),
+            invalid,
+        )
 
     assert runner.observations == [first]
-    assert len(mode._pending_model_observations) == 60
-    mode._reconcile_model_observation_outcomes(now=1_221.0)
+    _learning(mode).reconcile_outcomes(1_221.0)
 
     gaps = [record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload)]
     payloads = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
@@ -2221,15 +2290,11 @@ def test_partial_terminal_frame_with_malformed_outcome_becomes_a_gap(hold_cycle,
         continuous=False,
         observation_sequence=1,
     )
-    mode._pending_model_observations = {
-        1: (observation, _identity(mode).session_id, 0, None),
-    }
+    _learning(mode).submit_completed_observation((0, 1_000), observation)
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, observation, {})
     )
 
-    mode._reconcile_model_observation_outcomes(now=1.0)
-
-    assert mode._pending_model_observations == {}
+    _learning(mode).reconcile_outcomes(1.0)
     gap = next(record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload))
     assert (gap.reason, gap.observation_sequence) == ("observation-outcome-malformed", 1)

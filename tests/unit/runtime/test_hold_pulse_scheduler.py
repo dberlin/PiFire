@@ -101,7 +101,12 @@ def _observe_runtime(mode, frame, *, ptemp, inhibit):
     )
     if completion.observation is not None:
         assert completion.frame_key is not None
-        mode._deliver_completed_pulse_observation(completion.frame_key, completion.observation)
+        learning = mode._hold_learning
+        assert learning is not None
+        learning.submit_completed_observation(
+            completion.frame_key,
+            completion.observation,
+        )
     elif completion.missing_observation_reason is not None:
         mode._trace_missing_frame_observation(completion)
     return completion
@@ -714,7 +719,9 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
     inhibit=inhibit,)
 
     assert len(runner.observations) == 1
-    mode._reconcile_model_observation_outcomes(now=20.0)
+    learning = mode._hold_learning
+    assert learning is not None
+    learning.reconcile_outcomes(20.0)
     observation = runner.observations[0]
     assert observation.output_source == expected_source
     assert observation.continuous is False

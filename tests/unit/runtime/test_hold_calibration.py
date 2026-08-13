@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,6 +8,8 @@ from common.control_trace import ResultStaleState, TraceEventKind
 from common.model_evidence import EvidenceKind
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_allocator import allocate
+from controller.runtime.model_persistence import EvidenceSubmission
+from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import ControllerUpdateResult
 from controller.runtime.framed_pulse import FramedPulseRuntime
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
@@ -177,7 +180,26 @@ def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cy
     observation = runner.observations[0]
     assert observation.calibration_status == "active"
     assert observation.probe_q == 0.0
-    assert hold._calibration_frame_evidence(observation, "session", "cook") is None
+    hold.state.metrics = {"id": "zero-probe-evidence"}
+    trace = hold._control_trace
+    context = hold._trace_session_context()
+    assert trace is not None and context is not None
+    assert trace.ensure_open(context, timestamp_ms=22_000) is not None
+    batches = []
+    runtime = HoldLearningRuntime(
+        runner=None,
+        persistence=SimpleNamespace(
+            evidence_blocked=False,
+            submit_evidence_batch=lambda records: (
+                batches.append(tuple(records)),
+                EvidenceSubmission(accepted=True),
+            )[1],
+        ),
+        trace=trace,
+        initial_generation=0,
+    )
+    runtime.submit_completed_observation((0, 20_000), observation)
+    assert batches == []
 
 
 def test_default_five_second_polls_terminalize_only_the_twenty_second_frame(hold_cycle):
@@ -539,7 +561,9 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(26.0, 200.0, hold.grill.get_output_status())
-    hold._reconcile_model_observation_outcomes(26.0)
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_outcomes(26.0)
     assert runner.observations
     assert runner.observations[-1].calibration_stage == "coast"
     assert runner.observations[-1].calibration_command_revision == 1
