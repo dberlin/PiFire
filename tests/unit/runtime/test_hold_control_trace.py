@@ -27,7 +27,7 @@ from common.control_trace import (
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
 from common.persistence.control_trace import read_control_trace_session
 from common import datastore
-from controller.applied_output import OutputSource
+from controller.applied_output import FrameFeedbackDisposition, OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.mpc_allocator import allocate
@@ -839,17 +839,18 @@ def test_mpc_manual_interval_records_measured_feedback_under_the_producing_frame
 def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     first = _mpc_result(1)
-    assert first.allocation is not None
-    first = replace(first, allocation=replace(first.allocation, normalized_combustion_load=0.2))
+    first_allocation = first.allocation
+    assert first_allocation is not None
+    first = replace(first, allocation=replace(first_allocation, normalized_combustion_load=0.2))
     second = _mpc_result(2, enable_fan=False, stale_state=ResultStaleState.STALE)
     assert second.allocation is not None
     second = replace(second, allocation=replace(second.allocation, normalized_combustion_load=0.8))
-    mode = hold_cycle(
-        FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
-            [first, second]
-        ),
-        controller="mpc",
-    )
+    runner = FakeControllerRunner(
+        period=1.0,
+        commands_fan=True,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+    ).script([first, second])
+    mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "cook-framed-latch"}
 
@@ -864,8 +865,16 @@ def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monke
     )
     assert frame.result_revision == 1
     assert frame.requested_combustion_load == 0.2
-    assert frame.requested_fan_duty == first.allocation.fan_duty
+    assert frame.requested_fan_duty == first_allocation.fan_duty
     assert frame.stale_command is False
+    terminal = [
+        applied
+        for applied in runner.applied
+        if applied.feedback_disposition is FrameFeedbackDisposition.DISCARDED
+        and applied.producing_result_revision == frame.result_revision
+    ]
+    assert len(terminal) == 1
+    assert terminal[0].producing_calibration_revision == frame.calibration_command_revision
 
 
 def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_snapshot(hold_cycle, monkeypatch):

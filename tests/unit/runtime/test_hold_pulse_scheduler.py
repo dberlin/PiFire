@@ -8,7 +8,6 @@ from common.control_trace import (
     InhibitReason,
     OutputSource,
     ResultStaleState,
-    SafetyEventType,
     TraceEventKind,
 )
 from controller.applied_output import FrameFeedbackDisposition
@@ -34,6 +33,51 @@ def _output(revision: int, duty: float, *, fan_duty: float | None = None) -> Con
 
 def _status(hold):
     return hold.grill.get_output_status()
+
+
+class _OrderedTickRunner(FakeControllerRunner):
+    def __init__(self, events, outputs):
+        super().__init__(period=1.0)
+        self.events = events
+        self.script(outputs)
+
+    def set_safety_ceiling_c(self, ceiling_c):
+        self.events.append("safety-ceiling")
+        super().set_safety_ceiling_c(ceiling_c)
+
+    def submit(self, temp):
+        self.events.append("temperature-submit")
+        super().submit(temp)
+
+    def latest(self):
+        self.events.append("result")
+        return super().latest()
+
+    def set_output(self, applied):
+        self.events.append(("feedback", applied.feedback_disposition))
+        super().set_output(applied)
+
+
+def test_normal_tick_decides_then_commands_hardware_before_feedback(hold_cycle, monkeypatch):
+    events = []
+    runner = _OrderedTickRunner(events, [_output(1, 0.9)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    events.clear()
+    auger_on = hold.grill.auger_on
+
+    def record_auger_on():
+        events.append("hardware:auger-on")
+        auger_on()
+
+    monkeypatch.setattr(hold.grill, "auger_on", record_auger_on)
+
+    hold.on_tick(2.0, 200.0, _status(hold))
+
+    first_feedback = next(index for index, event in enumerate(events) if isinstance(event, tuple))
+    assert events.index("safety-ceiling") < events.index("temperature-submit") < events.index("result")
+    assert events.index("result") < events.index("hardware:auger-on") < first_feedback
+    assert hold.grill.get_output_status()["auger"] is True
 
 
 @pytest.mark.parametrize(
@@ -505,11 +549,10 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
     mode._trace_session_id = f"session-{case}"
     runner.bind_evidence_context(0, mode._trace_session_id, None)
     mode.state.metrics = {"id": f"ineligible-{case}"}
-    _configure_frame_observation(mode, load=None if case == "unknown" else 0.3)
+    _configure_frame_observation(mode, load=None if case == "unknown" else 0.3)  # type: ignore[arg-type]
     records = []
     mode._trace_record = lambda kind, payload, timestamp: records.append((kind, payload, timestamp)) or True
-    runner.observation_outcome = {
-        "role_generation": 0,
+    runner.observation_outcome = {  # type: ignore[assignment]
         "eligible": False,
         "rejection_reasons": ("ineligible_frame",),
         "input_variance": 0.0,

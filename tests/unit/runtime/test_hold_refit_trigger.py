@@ -518,13 +518,16 @@ def test_teardown_emits_one_final_checkpoint_for_every_refit_outcome(
         online_adaptation=True,
         store=store,
     )
+    stops_before_teardown = runner.stops
+    lifecycle_before_teardown = len(runner.lifecycle)
 
     hold.teardown(225)
     hold.teardown(225)
 
     assert runner.refits == int(identification)
     assert runner.final_outcomes == [expected]
-    assert runner.lifecycle[:2] == ["join", "close"]
+    assert runner.stops - stops_before_teardown == 1
+    assert runner.lifecycle[lifecycle_before_teardown:] == ["join", "close"]
     assert len(store.saved) == 1
     assert store.saved[0][1]["cook_refit"]["latest"] == expected.value
 
@@ -651,6 +654,7 @@ def test_threaded_teardown_joins_then_refits_while_latest_remains_nonblocking_th
 
     core.release_refit.set()
     refit_thread.join(timeout=1.0)
+    runner.finish_teardown()
     runner.finish_teardown()
 
     assert core.events == ["fit", "close"]

@@ -49,6 +49,48 @@ def _result(
     )
 
 
+class _OrderedCalibrationRunner(FakeControllerRunner):
+    def __init__(self, events):
+        super().__init__(period=1.0)
+        self.events = events
+        self.script([_result()])
+
+    def set_safety_ceiling_c(self, ceiling_c):
+        self.events.append("safety-ceiling")
+        super().set_safety_ceiling_c(ceiling_c)
+
+    def request_calibration(self, command):
+        self.events.append("calibration-command")
+        super().request_calibration(command)
+
+    def submit(self, temp):
+        self.events.append("temperature-submit")
+        super().submit(temp)
+
+    def latest(self):
+        self.events.append("result")
+        return super().latest()
+
+
+def test_safety_ceiling_and_calibration_command_precede_result_consumption(hold_cycle):
+    events = []
+    runner = _OrderedCalibrationRunner(events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.control["mpc_calibration"] = {
+        "action": "start",
+        "revision": 1,
+        "ambient_c": 20.0,
+        "ambient_source": "configured",
+        "empty_grill_confirmed": True,
+        "pellets_confirmed": True,
+    }
+    hold.setup()
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+
+    assert events == ["safety-ceiling", "calibration-command", "temperature-submit", "result"]
+
+
 def test_hold_consumes_latest_calibration_revision_once_across_reconfiguration(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(), _result(2), _result(3)])
     hold = hold_cycle(runner, controller="mpc")
@@ -167,6 +209,15 @@ def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial
     assert terminal[0].source is OutputSource.CONTROLLER
     assert terminal[0].ratio == completed.realized_auger_duty
     assert terminal[1].ratio == cancelled.realized_auger_duty
+    assert (
+        terminal[0].producing_result_revision,
+        terminal[0].producing_calibration_revision,
+        terminal[0].producing_calibration_action,
+    ) == (
+        completed.result_revision,
+        completed.calibration_command_revision,
+        completed.calibration_command_action,
+    )
 
 
 def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and_partial(hold_cycle, monkeypatch):
@@ -297,6 +348,7 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
     assert cancelled.calibration_cancellation_reason == expected_reason
     assert cancelled.probe_q == pytest.approx(0.1)
     assert runner.calibration_cancellations == [expected_reason]
+    assert following.baseline_allocation is not None
     assert hold.state.controller.pulse_requested_duty == pytest.approx(following.baseline_allocation.auger_duty)
 
     if intervention == "scheduler-reset":

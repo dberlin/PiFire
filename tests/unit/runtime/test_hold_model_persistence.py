@@ -100,8 +100,7 @@ def test_setup_restores_a_stored_model_before_seeding(hold_cycle):
     assert [a.source for a in runner.applied] == [OutputSource.SEED]
     # `restored` and `applied` are separate lists and cannot express relative
     # order on their own -- `calls` is the single ordered log that can.
-    kinds = [kind for kind, _ in runner.calls]
-    assert kinds.index("restore") < kinds.index("apply")
+    assert [kind for kind, _ in runner.calls] == ["restore", "apply"]
 
 
 def test_setup_with_no_stored_model_restores_nothing(hold_cycle):
@@ -427,20 +426,40 @@ def test_setup_wires_the_default_store_through_ctx_store(hold_cycle):
     assert saved["models"]["pid_sp"] == {"revision": 1, "K": 700.0}
 
 
-def test_reconfigure_restores_the_model_and_reseeds(hold_cycle):
-    runner = FakeControllerRunner(period=0.0).script([_output(0.5)])
+def test_reconfigure_terminalizes_old_frame_before_restore_and_reseed(hold_cycle, monkeypatch):
+    runner = FakeControllerRunner(period=1.0).script([_framed_output()])
     store = _FakeModelStore({"pid_sp": {"revision": 3, "K": 700.0}})
     hold = hold_cycle(runner, model_store=store, controller="pid_sp")
     hold.setup()
+    hold.on_tick(now=2.0, ptemp=200.0, current_output_status=hold.grill.get_output_status())
     runner.restored.clear()
     runner.applied.clear()
     runner.calls.clear()
+    reconfigure = runner.reconfigure
+    observe_frame = runner.observe_frame
+
+    def record_reconfigure(settings, control, logger=None):
+        runner.calls.append(("reconfigure", None))
+        return reconfigure(settings, control, logger=logger)
+
+    def record_observation(observation):
+        if observation.reset:
+            runner.calls.append(("terminal", observation))
+        return observe_frame(observation)
+
+    monkeypatch.setattr(runner, "reconfigure", record_reconfigure)
+    monkeypatch.setattr(runner, "observe_frame", record_observation)
     hold.control["controller_update"] = True
-    hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
+
+    hold.on_tick(now=4.0, ptemp=200.0, current_output_status=hold.grill.get_output_status())
+
+    events = [
+        "seed" if kind == "apply" and payload.source is OutputSource.SEED else kind
+        for kind, payload in runner.calls
+    ]
+    assert events.index("terminal") < events.index("reconfigure") < events.index("restore") < events.index("seed")
     assert runner.restored == [{"revision": 3, "K": 700.0}]
-    assert runner.applied[0].source is OutputSource.SEED
-    kinds = [kind for kind, _ in runner.calls]
-    assert kinds.index("restore") < kinds.index("apply")
+    assert sum(applied.source is OutputSource.SEED for applied in runner.applied) == 1
 
 
 class _EventGatedCheckpointStore:
