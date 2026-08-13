@@ -14,6 +14,7 @@ from controller.applied_output import FrameFeedbackDisposition
 from controller.runtime.logic.pulse import PulseResetReason
 from controller.runtime.runner import ControllerUpdateResult
 from controller.runtime.logic.pulse import PulseFrameResult
+from controller.runtime.framed_pulse import FramedPulseRuntime
 
 from tests.fakes.runner import FakeControllerRunner
 
@@ -33,6 +34,66 @@ def _output(revision: int, duty: float, *, fan_duty: float | None = None) -> Con
 
 def _status(hold):
     return hold.grill.get_output_status()
+def _runtime(mode) -> FramedPulseRuntime:
+    runtime = mode._framed_pulse
+    assert isinstance(runtime, FramedPulseRuntime)
+    return runtime
+
+
+def _scheduler(mode):
+    scheduler = _runtime(mode).scheduler
+    assert scheduler is not None
+    return scheduler
+
+
+def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
+    result = _runtime(mode).advance(
+        now,
+        actual_auger_on,
+        sample=mode._framed_sample(ptemp),
+        prior_output_source=mode.state.controller.trace_prior_output_source,
+    )
+    transition = result.decision.transition
+    if apply_transition and transition is not None:
+        if transition.command_on:
+            mode.grill.auger_on()
+        else:
+            mode.grill.auger_off()
+    mode._dispatch_framed_result(result, record_terminal_trace=False)
+    return result.decision
+def _reset_runtime(mode, reason, now, inhibit, *, ptemp=None, terminal_feedback=False):
+    result = _runtime(mode).reset(
+        reason,
+        now,
+        inhibit,
+        actual_auger_on=mode.grill.get_output_status()["auger"],
+        sample=mode._framed_sample(ptemp),
+        terminal_feedback=terminal_feedback,
+        prior_output_source=mode.state.controller.trace_prior_output_source,
+    )
+    mode.grill.auger_off()
+    mode._dispatch_framed_result(result, record_terminal_trace=True)
+    return result
+
+
+def _observe_runtime(mode, frame, *, ptemp, inhibit):
+    runtime = _runtime(mode)
+    runtime.latch(mode._model_role_generation(mode._runner_status()))
+    completion = runtime.complete_frame(
+        frame,
+        sample=mode._framed_sample(ptemp),
+        inhibit=inhibit,
+    )
+    if completion.observation is not None:
+        assert completion.frame_key is not None
+        mode._deliver_completed_pulse_observation(completion.frame_key, completion.observation)
+    elif completion.missing_observation_reason is not None:
+        mode._trace_missing_frame_observation(completion)
+    return completion
+
+
+
+
 
 
 class _OrderedTickRunner(FakeControllerRunner):
@@ -93,7 +154,7 @@ def test_every_production_controller_builds_one_pulse_scheduler_and_starts_off(h
 
     hold.setup()
 
-    assert hold._pulse_scheduler is not None
+    assert _runtime(hold).scheduler is not None
     assert hold.grill.get_output_status()["auger"] is False
     assert hold.state.cycle.cycle_time == 0.0
 
@@ -177,13 +238,13 @@ def test_reconfiguration_replaces_scheduler_and_discards_prior_credit(hold_cycle
     hold.setup()
     hold.on_tick(2.0, 200.0, _status(hold))
     hold.on_tick(22.0, 200.0, _status(hold))
-    original_scheduler = hold._pulse_scheduler
+    original_scheduler = _runtime(hold).scheduler
     hold.control["controller_update"] = True
 
     hold.on_tick(24.0, 200.0, _status(hold))
 
-    assert hold._pulse_scheduler is not original_scheduler
-    assert hold._pulse_scheduler.advance(0.1, 42.0, False).credit_s < 2.0
+    assert _runtime(hold).scheduler is not original_scheduler
+    assert _scheduler(hold).advance(0.1, 42.0, False).credit_s < 2.0
 
 
 def test_reconfiguration_uses_post_reset_auger_state_for_the_replacement_scheduler(hold_cycle):
@@ -192,14 +253,14 @@ def test_reconfiguration_uses_post_reset_auger_state_for_the_replacement_schedul
     hold.setup()
     hold.state.metrics = {"id": "reconfigure-observed-state", "augerontime": 0.0}
     hold.on_tick(2.0, 200.0, _status(hold))
-    original_scheduler = hold._pulse_scheduler
+    original_scheduler = _runtime(hold).scheduler
     captured_before_reset = _status(hold)
     hold.control["controller_update"] = True
     runner.applied.clear()
 
     hold.on_tick(4.0, 200.0, captured_before_reset)
 
-    assert hold._pulse_scheduler is not original_scheduler
+    assert _runtime(hold).scheduler is not original_scheduler
     assert hold.grill.get_output_status()["auger"] is True
     assert hold.state.metrics["augerontime"] == 0.0
     assert runner.applied[0].ratio == 0.0
@@ -232,7 +293,7 @@ def test_guard_events_reset_without_restoring_credit(hold_cycle, event):
     hold.on_tick(22.0, 200.0, _status(hold))
 
     hold._on_safety_event(event, 23.0)
-    decision = hold._pulse_scheduler.advance(0.9, 24.0, False)
+    decision = _scheduler(hold).advance(0.9, 24.0, False)
 
     assert decision.reset_reason is not None
     assert decision.credit_s < 2.0
@@ -250,7 +311,7 @@ def test_lid_inhibit_discards_credit_and_preempts_auger(hold_cycle):
 
     assert hold.state.lid.open_detected is True
     assert hold.grill.get_output_status()["auger"] is False
-    assert hold._pulse_scheduler.advance(0.9, 3.0, False).reset_reason is not None
+    assert _scheduler(hold).advance(0.9, 3.0, False).reset_reason is not None
 
 
 def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_output(hold_cycle, monkeypatch):
@@ -272,22 +333,23 @@ def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_out
     hold.control["controller_update"] = True
     status = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     hold.on_tick(2.0, 200.0, status)
-    hold._advance_framed_pulse(2.0, True)
+    _advance_runtime(hold, 2.0, True)
 
     assert hold.grill.get_output_status()["auger"] is True
-    configure_scheduler = hold._configure_pulse_scheduler
+    runtime = _runtime(hold)
+    configure_scheduler = runtime.configure
 
-    def configure_with_live_ratio():
-        configure_scheduler()
+    def configure_with_live_ratio(*args, **kwargs):
+        configure_scheduler(*args, **kwargs)
         hold.state.cycle.ratio = 0.5
 
-    monkeypatch.setattr(hold, "_configure_pulse_scheduler", configure_with_live_ratio)
+    monkeypatch.setattr(runtime, "configure", configure_with_live_ratio)
     runner.applied.clear()
 
     runner.complete_swap()
     hold.on_tick(4.0, 200.0, _status(hold))
 
-    assert hold._pulse_scheduler is not None
+    assert _runtime(hold).scheduler is not None
     assert hold.state.cycle.cycle_time == 0.0
     assert hold._controller_name == "pid"
     assert hold.grill.get_output_status()["auger"] is True
@@ -362,14 +424,22 @@ def test_reset_keeps_cumulative_delivery_baselines_for_feedback_and_metrics(hold
     hold.state.controller.pulse_requested_duty = 0.1
     runner.applied.clear()
 
-    hold._advance_framed_pulse(20.0, False)
-    hold._advance_framed_pulse(22.0, True)
-    before_reset = hold._advance_framed_pulse(24.0, False)
+    _advance_runtime(hold, 20.0, False)
+    _advance_runtime(hold, 22.0, True)
+    before_reset = _advance_runtime(hold, 24.0, False)
     assert before_reset.delivered_on_s == 2.0
-    hold._reset_framed_pulse(PulseResetReason.SAFETY, 24.0, InhibitReason.SAFETY)
+    _reset_runtime(hold, PulseResetReason.SAFETY, 24.0, InhibitReason.SAFETY)
 
-    hold._record_pulse_delivery(12.0)
-    hold._report_framed_feedback(44.0, 12.0)
+    _advance_runtime(hold, 24.0, True)
+    _advance_runtime(hold, 34.0, False)
+    feedback = _runtime(hold).report_feedback(
+        44.0,
+        12.0,
+        source=OutputSource.CONTROLLER,
+        prior_output_source=hold.state.controller.trace_prior_output_source,
+    )
+    assert feedback is not None
+    hold._dispatch_framed_feedback(feedback)
 
     assert hold.state.metrics["augerontime"] == 12.0
     assert runner.applied[-1].ratio == 0.5
@@ -387,7 +457,7 @@ def test_stale_result_preempts_hardware_and_discards_scheduler_credit(hold_cycle
     hold.on_tick(4.0, 200.0, _status(hold))
 
     assert hold.grill.get_output_status()["auger"] is False
-    assert hold._pulse_scheduler.advance(0.9, 6.0, False).reset_reason is not None
+    assert _scheduler(hold).advance(0.9, 6.0, False).reset_reason is not None
 
 
 def test_completed_frame_feedback_uses_the_completed_frame_request_bound_and_revision(hold_cycle):
@@ -398,17 +468,17 @@ def test_completed_frame_feedback_uses_the_completed_frame_request_bound_and_rev
     controller.pulse_result_revision = 1
     controller.pulse_requested_duty = 0.1
     controller.pulse_maximum_duty = 0.5
-    hold._advance_framed_pulse(0.0, False)
-    hold._advance_framed_pulse(0.0, True)
-    hold._advance_framed_pulse(2.0, True)
-    hold._advance_framed_pulse(2.0, False)
+    _advance_runtime(hold, 0.0, False)
+    _advance_runtime(hold, 0.0, True)
+    _advance_runtime(hold, 2.0, True)
+    _advance_runtime(hold, 2.0, False)
     controller.pulse_result_revision = 2
     controller.pulse_requested_duty = 0.9
     controller.pulse_maximum_duty = 1.0
     runner.applied.clear()
 
     controller.trace_prior_output_source = OutputSource.CONTROLLER
-    hold._advance_framed_pulse(20.0, False)
+    _advance_runtime(hold, 20.0, False)
 
     assert runner.applied[-1].requested == 0.1
     assert hold.state.controller.trace_prior_combustion_load == 0.2
@@ -422,10 +492,10 @@ def test_teardown_reports_final_observed_pulse_delivery_before_reset(hold_cycle)
     controller = hold.state.controller
     controller.pulse_result_revision = 1
     controller.pulse_requested_duty = 0.1
-    hold._advance_framed_pulse(0.0, False)
+    _advance_runtime(hold, 0.0, False)
     runner.applied.clear()
     hold.ctx.clock.advance(2.0)
-    hold._advance_framed_pulse(0.0, True)
+    _advance_runtime(hold, 0.0, True)
 
     hold.teardown(200.0)
 
@@ -493,12 +563,12 @@ def test_framed_completed_observations_are_exactly_aligned_and_deduplicated(hold
     mode.state.metrics = {"id": "completed-frame-observations"}
     _configure_frame_observation(mode)
 
-    mode._advance_framed_pulse(0.0, True, ptemp=212.0)
-    mode._advance_framed_pulse(6.0, False, ptemp=212.0)
-    mode._advance_framed_pulse(20.0, False, ptemp=212.0)
-    mode._advance_framed_pulse(20.0, True, ptemp=392.0)
-    mode._advance_framed_pulse(26.0, False, ptemp=392.0)
-    mode._advance_framed_pulse(40.0, False, ptemp=392.0)
+    _advance_runtime(mode, 0.0, True, ptemp=212.0)
+    _advance_runtime(mode, 6.0, False, ptemp=212.0)
+    _advance_runtime(mode, 20.0, False, ptemp=212.0)
+    _advance_runtime(mode, 20.0, True, ptemp=392.0)
+    _advance_runtime(mode, 26.0, False, ptemp=392.0)
+    _advance_runtime(mode, 40.0, False, ptemp=392.0)
 
     assert len(runner.observations) == 2
     first, second = runner.observations
@@ -517,13 +587,13 @@ def test_framed_observation_latches_role_generation_at_frame_start(hold_cycle):
     mode.state.metrics = {"id": "latched-role-generation"}
     _configure_frame_observation(mode)
 
-    mode._advance_framed_pulse(0.0, True, ptemp=212.0)
-    mode._advance_framed_pulse(6.0, False, ptemp=212.0)
+    _advance_runtime(mode, 0.0, True, ptemp=212.0)
+    _advance_runtime(mode, 6.0, False, ptemp=212.0)
     runner.observation_status = {"adaptation": {"role_generation": 8}}
-    mode._advance_framed_pulse(20.0, False, ptemp=212.0)
-    mode._advance_framed_pulse(20.0, True, ptemp=392.0)
-    mode._advance_framed_pulse(26.0, False, ptemp=392.0)
-    mode._advance_framed_pulse(40.0, False, ptemp=392.0)
+    _advance_runtime(mode, 20.0, False, ptemp=212.0)
+    _advance_runtime(mode, 20.0, True, ptemp=392.0)
+    _advance_runtime(mode, 26.0, False, ptemp=392.0)
+    _advance_runtime(mode, 40.0, False, ptemp=392.0)
 
     assert [(item.result_revision, item.role_generation) for item in runner.observations] == [(1, 7), (1, 8)]
 
@@ -563,11 +633,9 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
         "model_digest": "a" * 64,
     }
 
-    mode._observe_completed_pulse_frame(
-        _completed_frame(skipped=skipped, reset_reason=reset_reason),
-        ptemp=212.0,
-        inhibit=inhibit,
-    )
+    _observe_runtime(mode, _completed_frame(skipped=skipped, reset_reason=reset_reason),
+    ptemp=212.0,
+    inhibit=inhibit,)
 
     assert len(runner.observations) == 1
     mode._reconcile_model_observation_outcomes(now=20.0)
@@ -591,10 +659,8 @@ def test_seed_and_zero_duration_frames_do_not_reach_the_runner(hold_cycle):
     mode.state.metrics = {"id": "seed-zero-observations"}
     _configure_frame_observation(mode, revision=0)
 
-    mode._observe_completed_pulse_frame(_completed_frame(), ptemp=212.0, inhibit=InhibitReason.NONE)
+    _observe_runtime(mode, _completed_frame(), ptemp=212.0, inhibit=InhibitReason.NONE)
     _configure_frame_observation(mode)
-    mode._observe_completed_pulse_frame(
-        _completed_frame(end=0.0, delivered=0.0), ptemp=212.0, inhibit=InhibitReason.NONE
-    )
+    _observe_runtime(mode, _completed_frame(end=0.0, delivered=0.0), ptemp=212.0, inhibit=InhibitReason.NONE)
 
     assert runner.observations == []

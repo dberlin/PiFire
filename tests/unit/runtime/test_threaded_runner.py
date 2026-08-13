@@ -837,7 +837,7 @@ def test_hold_teardown_stops_threaded_runner():
     hold.settings = {"controller": {"config": {}}}
     hold._controller_name = "mpc"
     hold.ctx = type("_Context", (), {"clock": type("_Clock", (), {"now": staticmethod(lambda: 0.0)})()})()
-    hold._pulse_scheduler = None
+    hold._framed_pulse = None
     hold._trace_closed = True
     hold.teardown(70.0)
     assert not thread.is_alive()

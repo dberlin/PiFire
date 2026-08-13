@@ -8,9 +8,33 @@ from common.model_evidence import EvidenceKind
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_allocator import allocate
 from controller.runtime.runner import ControllerUpdateResult
+from controller.runtime.framed_pulse import FramedPulseRuntime
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
 
 from tests.fakes.runner import FakeControllerRunner
+def _runtime(mode) -> FramedPulseRuntime:
+    runtime = mode._framed_pulse
+    assert isinstance(runtime, FramedPulseRuntime)
+    return runtime
+
+
+def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
+    result = _runtime(mode).advance(
+        now,
+        actual_auger_on,
+        sample=mode._framed_sample(ptemp),
+        prior_output_source=mode.state.controller.trace_prior_output_source,
+    )
+    transition = result.decision.transition
+    if apply_transition and transition is not None:
+        if transition.command_on:
+            mode.grill.auger_on()
+        else:
+            mode.grill.auger_off()
+    mode._dispatch_framed_result(result, record_terminal_trace=False)
+    return result.decision
+
+
 
 
 def _result(
@@ -228,7 +252,7 @@ def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     traces = []
     monkeypatch.setattr(hold, "_trace_record", lambda kind, payload, _at: traces.append((kind, payload)) or True)
-    hold._advance_framed_pulse(10.0, True, ptemp=200.0)
+    _advance_runtime(hold, 10.0, True, ptemp=200.0)
     hold.state.lid.open_detected = True
     hold.on_tick(63.0, 200.0, hold.grill.get_output_status())
 
@@ -258,8 +282,8 @@ def test_multiframe_catchup_pairs_each_exact_feedback_with_its_observation(hold_
     hold.setup()
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold._advance_framed_pulse(10.0, True, ptemp=200.0)
-    hold._advance_framed_pulse(63.0, True, ptemp=201.0)
+    _advance_runtime(hold, 10.0, True, ptemp=200.0)
+    _advance_runtime(hold, 63.0, True, ptemp=201.0)
 
     assert [
         (applied.timestamp, observation.frame_end_s, applied.ratio) for applied, observation in runner.frame_completions
