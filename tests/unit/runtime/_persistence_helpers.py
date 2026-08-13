@@ -13,27 +13,47 @@ from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
     PreparedActivationRecord,
-    canonical_snapshot_digest as grey_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_factory import MpcPairFactory
+
+
+_PAIR_FACTORY = MpcPairFactory(
+    DEFAULT_MPC_CONFIG,
+    "C",
+    {"u_min": 0.1, "u_max": 0.9},
+    adjust_load=lambda load, _temperature: load,
+    model_authority=lambda: (0, None),
+    on_policy_failure=lambda _error: None,
+)
+
+
+def _current_pair_descriptor(
+    theta: float,
+    *,
+    candidate_generation: int,
+    role_generation: int,
+) -> GreyControlPairDescriptor:
+    settings = dict(DEFAULT_MPC_CONFIG)
+    settings["theta"] = theta
+    return _PAIR_FACTORY.descriptor(
+        _PAIR_FACTORY.configured(
+            settings,
+            candidate_generation=candidate_generation,
+            role_generation=role_generation,
+        )
+    )
 
 
 def _pair_phase_state(phase: ActivationPhase = ActivationPhase.PREPARED):
-    incumbent_config = {"schema": "pifire-grey-box-model/v4", "theta": 50.0}
-    candidate_config = {"schema": "pifire-grey-box-model/v4", "theta": 40.0}
-    incumbent = GreyControlPairDescriptor(
-        model_digest=grey_snapshot_digest(incumbent_config),
-        configuration=incumbent_config,
-        estimator_kind="ekf",
-        solver_kind="acados-grey",
+    incumbent = _current_pair_descriptor(
+        50.0,
         candidate_generation=3,
         role_generation=4,
     )
-    candidate = GreyControlPairDescriptor(
-        model_digest=grey_snapshot_digest(candidate_config),
-        configuration=candidate_config,
-        estimator_kind="ekf",
-        solver_kind="acados-grey",
+    candidate = _current_pair_descriptor(
+        40.0,
         candidate_generation=4,
         role_generation=5,
     )

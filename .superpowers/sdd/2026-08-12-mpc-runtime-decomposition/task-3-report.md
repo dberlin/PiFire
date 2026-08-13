@@ -130,3 +130,13 @@ uv run pyright controller/mpc_factory.py controller/mpc.py controller/runtime/ru
 - Completed the `Controller.__new__` ownership fixture state with `_closed=False`, no learning owner, and no persistence worker so post-assertion `close()` exercises production ownership teardown rather than failing on missing fixture fields.
 - Expanded factory coverage for identified/unidentified nested migration, historical estimator cadence/noise defaults, exact restore, and every malformed nested schema/delay/parameter branch.
 - Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands. Parent should rerun the focused activation/snapshot/API group and factory branch gate.
+
+## Fix round 8
+
+- Parent runtime validation reported 12 failures after 112 passes: three SQLite restart boundaries, eight Hold crash boundaries, and one failed-active runner recovery.
+- Replaced the impossible `{schema, theta}` activation descriptors in the shared persistence fixtures with complete current descriptors generated through `MpcPairFactory.configured()` and `descriptor()`. Successive activation, aborted retry, and mismatch fixtures now use the same boundary.
+- Migrated the real Hold crash candidate to one factory configuration shared by descriptor creation and `adopt()`, preserving the candidate's explicit identified-model construction settings and exact estimator/solver ownership.
+- Migrated failed-active runner recovery and the shared threaded activation fixture to complete factory descriptors; the persisted pair JSON now matches the exact descriptor contract that production restore validates.
+- LSP inventory found seven `owned_pair` references. Every runtime call now consumes a complete factory descriptor; calls retaining fake estimator/solver handles still use the typed `OwnedMpcPair` fixture solely to test orchestration ownership, while the real Hold path uses `MpcPairFactory.adopt()`.
+- Production migration remains strict: no incomplete schema-only mapping was admitted, and the only historical migration is the complete nested v4 schema added in fix round 7.
+- Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands. Parent should rerun the 124-test runtime group and the focused factory branch gate.

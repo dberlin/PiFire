@@ -26,12 +26,11 @@ from common.model_evidence import (
 )
 from controller.model_learning.activation import (
     ActivationPhase,
-    GreyControlPairDescriptor,
     PreparedActivationRecord,
-    canonical_snapshot_digest,
     recover_startup_activation,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
     EvidenceSubmission,
@@ -425,27 +424,14 @@ def test_worker_commits_each_accepted_evidence_batch_once_and_never_partially() 
     assert written[0][1].payload.atomic_persistence is True
 
 
-def _pair_descriptor(
-    configuration: dict[str, object], *, candidate_generation: int, role_generation: int
-) -> GreyControlPairDescriptor:
-    return GreyControlPairDescriptor(
-        model_digest=canonical_snapshot_digest(configuration),
-        configuration=configuration,
-        estimator_kind="ekf",
-        solver_kind="acados-grey",
-        candidate_generation=candidate_generation,
-        role_generation=role_generation,
-    )
-
-
 def _prepared_activation() -> PreparedActivationRecord:
-    incumbent = _pair_descriptor(
-        {"schema": "pifire-grey-box-model/v4", "theta": 50.0},
+    incumbent = _current_pair_descriptor(
+        50.0,
         candidate_generation=3,
         role_generation=4,
     )
-    candidate = _pair_descriptor(
-        {"schema": "pifire-grey-box-model/v4", "theta": 40.0},
+    candidate = _current_pair_descriptor(
+        40.0,
         candidate_generation=4,
         role_generation=5,
     )
@@ -665,8 +651,8 @@ def test_active_pair_can_become_the_exact_incumbent_of_one_new_prepared_transact
         expected_phase=ActivationPhase.PREPARED,
         database_path=database_path,
     )
-    next_candidate = _pair_descriptor(
-        {"schema": "pifire-grey-box-model/v4", "theta": 30.0},
+    next_candidate = _current_pair_descriptor(
+        30.0,
         candidate_generation=5,
         role_generation=6,
     )
@@ -702,8 +688,8 @@ def test_aborted_authority_can_prepare_one_new_exact_incumbent_transaction(tmp_p
         expected_phase=ActivationPhase.PREPARED,
         database_path=database_path,
     )
-    next_candidate = _pair_descriptor(
-        {"schema": "pifire-grey-box-model/v4", "theta": 31.0},
+    next_candidate = _current_pair_descriptor(
+        31.0,
         candidate_generation=6,
         role_generation=7,
     )
@@ -739,8 +725,8 @@ def test_aborted_authority_rejects_new_prepared_with_different_incumbent(tmp_pat
         expected_phase=ActivationPhase.PREPARED,
         database_path=database_path,
     )
-    next_candidate = _pair_descriptor(
-        {"schema": "pifire-grey-box-model/v4", "theta": 32.0},
+    next_candidate = _current_pair_descriptor(
+        32.0,
         candidate_generation=6,
         role_generation=7,
     )

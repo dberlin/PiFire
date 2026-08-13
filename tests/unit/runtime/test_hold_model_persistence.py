@@ -26,7 +26,6 @@ from common.model_evidence import (
     RollbackEvidence,
 )
 
-from controller.model_learning.activation import canonical_snapshot_digest
 from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.runner import (
@@ -36,9 +35,7 @@ from controller.runtime.runner import (
 )
 from controller.model_learning.activation import (
     ActivationPhase,
-    GreyControlPairDescriptor,
     PreparedActivationRecord,
-    canonical_snapshot_digest as grey_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
@@ -46,8 +43,6 @@ from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
 import controller.mpc_core as _mpc_core
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
-from controller.runtime.model_fitting import grey_config_digest
-from tests.unit.mpc._solver_fixtures import owned_pair
 
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
@@ -908,20 +903,19 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         candidate_controller_config,
         model_identified=True,
     )
-    candidate_configuration = {
-        name: getattr(candidate_solver.config, name) for name in candidate_solver.config.__dataclass_fields__
-    }
-    candidate_digest = grey_config_digest(candidate_solver.config)
-    assert grey_snapshot_digest(candidate_configuration) == candidate_digest
-    candidate = GreyControlPairDescriptor(
-        model_digest=candidate_digest,
-        configuration=candidate_configuration,
-        estimator_kind=incumbent.estimator_kind,
-        solver_kind=incumbent.solver_kind,
+    candidate_configuration = first_core._pair_factory.configured(
+        candidate_controller_config,
         candidate_generation=incumbent.candidate_generation + 1,
         role_generation=incumbent.role_generation + 1,
+        model_identified=True,
     )
-    candidate_pair = owned_pair(candidate, candidate_estimator, candidate_solver)
+    candidate = first_core._pair_factory.descriptor(candidate_configuration)
+    candidate_pair = first_core._pair_factory.adopt(
+        candidate_configuration,
+        candidate_estimator,
+        candidate_solver,
+        authorized=False,
+    )
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent,

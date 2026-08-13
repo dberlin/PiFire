@@ -10,12 +10,11 @@ import pytest
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
     ActivationPhase,
-    GreyControlPairDescriptor,
     PreparedActivationRecord,
-    canonical_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FrameObservation
 from tests.unit.mpc._solver_fixtures import owned_pair
+from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 from common.control_trace import (
     ActuationMode,
     HorizonScorePayload,
@@ -2255,21 +2254,16 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
 
 
 def _runner_activation_fixture():
-    incumbent_config = {"schema": "pifire-grey-box-model/v4", "theta": 50.0}
-    candidate_config = {"schema": "pifire-grey-box-model/v4", "theta": 40.0}
-
-    def descriptor(config, candidate_generation, role_generation):
-        return GreyControlPairDescriptor(
-            model_digest=canonical_snapshot_digest(config),
-            configuration=config,
-            estimator_kind="ekf",
-            solver_kind="acados-grey",
-            candidate_generation=candidate_generation,
-            role_generation=role_generation,
-        )
-
-    incumbent = descriptor(incumbent_config, 3, 4)
-    candidate = descriptor(candidate_config, 4, 5)
+    incumbent = _current_pair_descriptor(
+        50.0,
+        candidate_generation=3,
+        role_generation=4,
+    )
+    candidate = _current_pair_descriptor(
+        40.0,
+        candidate_generation=4,
+        role_generation=5,
+    )
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent,
@@ -2540,15 +2534,14 @@ def test_failed_active_recovery_terminalizes_before_configured_pair_can_update()
         {"u_min": 0.1, "u_max": 0.9},
     )
     incumbent = core.active_control_pair.descriptor
-    candidate_configuration = dict(incumbent.to_dict()["configuration"])
-    candidate_configuration["theta"] = float(candidate_configuration["theta"]) + 1.0
-    candidate = GreyControlPairDescriptor(
-        model_digest=canonical_snapshot_digest(candidate_configuration),
-        configuration=candidate_configuration,
-        estimator_kind=incumbent.estimator_kind,
-        solver_kind=incumbent.solver_kind,
-        candidate_generation=incumbent.candidate_generation + 1,
-        role_generation=incumbent.role_generation + 1,
+    candidate_settings = dict(core.cfg)
+    candidate_settings["theta"] = float(candidate_settings["theta"]) + 1.0
+    candidate = core._pair_factory.descriptor(
+        core._pair_factory.configured(
+            candidate_settings,
+            candidate_generation=incumbent.candidate_generation + 1,
+            role_generation=incumbent.role_generation + 1,
+        )
     )
     active = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
