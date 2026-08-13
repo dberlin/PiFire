@@ -18,8 +18,14 @@ CYCLE: dict[str, JsonValue] = {"u_min": 0.1, "u_max": 0.9}
 
 
 class Estimator:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        close_failure: BaseException | None = None,
+    ) -> None:
         self.events = events
+        self.close_failure = close_failure
         self.closed = 0
         self.state = np.zeros(10, dtype=float)
 
@@ -30,6 +36,8 @@ class Estimator:
     def close(self) -> None:
         self.closed += 1
         self.events.append("estimator")
+        if self.close_failure is not None:
+            raise self.close_failure
 
 
 class EstimatorFactory:
@@ -88,6 +96,7 @@ class Solver:
         nonfinite: bool = False,
         short_sequence: bool = False,
         nonfinite_objective: bool = False,
+        close_failure: BaseException | None = None,
     ) -> None:
         self.config = config
         self.events = events
@@ -95,6 +104,7 @@ class Solver:
         self.nonfinite = nonfinite
         self.short_sequence = short_sequence
         self.nonfinite_objective = nonfinite_objective
+        self.close_failure = close_failure
         self.closed = 0
         self.calls = 0
 
@@ -121,6 +131,8 @@ class Solver:
     def close(self) -> None:
         self.closed += 1
         self.events.append("solver")
+        if self.close_failure is not None:
+            raise self.close_failure
 
 
 class SolverFactory:
@@ -470,3 +482,238 @@ def test_closed_pair_cannot_be_reauthorized() -> None:
 
     with pytest.raises(RuntimeError, match="closed MPC pair"):
         pair.authorize_output()
+
+
+def test_configuration_runtime_validation_rejects_each_invalid_identity_field() -> None:
+    settings = normalize_config(DEFAULT_MPC_CONFIG)
+    invalid_values = (
+        ("other", 0, 0, False),
+        ("ekf", True, 0, False),
+        ("ekf", 0, -1, False),
+        ("ekf", 0, 0, 1),
+    )
+
+    for estimator_kind, candidate_generation, role_generation, model_identified in invalid_values:
+        with pytest.raises(ValueError):
+            MpcPairConfiguration(
+                settings,
+                estimator_kind,
+                candidate_generation,
+                role_generation,
+                model_identified,
+            )
+
+
+def test_owned_pair_runtime_validation_rejects_wrong_core_and_descriptor_types() -> None:
+    events: list[str] = []
+    pair_factory, _ekf, _kf, _solvers = factory(events)
+    pair = pair_factory.build(configuration(), authorized=False)
+
+    with pytest.raises(TypeError, match="core"):
+        OwnedMpcPair("not-a-core", pair.descriptor)
+    with pytest.raises(TypeError, match="descriptor"):
+        OwnedMpcPair(pair.core, "not-a-descriptor")
+    pair.close()
+
+
+def test_configured_accepts_kf_and_rejects_non_string_estimator() -> None:
+    events: list[str] = []
+    pair_factory, _ekf, _kf, _solvers = factory(events)
+
+    configured = pair_factory.configured(
+        dict(DEFAULT_MPC_CONFIG, estimator="KF"),
+        candidate_generation=2,
+        role_generation=3,
+    )
+    assert configured.estimator_kind == "kf"
+    with pytest.raises(ValueError, match="estimator"):
+        pair_factory.configured(
+            dict(DEFAULT_MPC_CONFIG, estimator=7),
+            candidate_generation=0,
+            role_generation=0,
+        )
+
+
+def test_authorization_validation_precedes_build_and_adopt_ownership_transfer() -> None:
+    events: list[str] = []
+    pair_factory, ekf, _kf, solvers = factory(events)
+
+    with pytest.raises(ValueError, match="authorized"):
+        pair_factory.build(configuration(), authorized=1)
+    assert ekf.instances == [] and solvers.instances == []
+
+    estimator = Estimator(events)
+    solver = Solver(GreyBoxMPCConfig(horizon_steps=5), events)
+    with pytest.raises(ValueError, match="authorized"):
+        pair_factory.adopt(configuration(), estimator, solver, authorized=1)
+    assert estimator.closed == solver.closed == 0
+
+
+def test_adopt_can_transfer_an_already_authorized_pair() -> None:
+    events: list[str] = []
+    pair_factory, _ekf, _kf, _solvers = factory(events)
+    native = GreyBoxMPCConfig(horizon_steps=5)
+
+    pair = pair_factory.adopt(
+        pair_factory.native(
+            native,
+            estimator_kind="ekf",
+            candidate_generation=1,
+            role_generation=2,
+        ),
+        Estimator(events),
+        Solver(native, events),
+        authorized=True,
+    )
+
+    assert pair.authorized
+    pair.close()
+
+
+def test_restore_covers_kf_and_closes_case_changed_descriptor_mismatch() -> None:
+    events: list[str] = []
+    pair_factory, _ekf, kf, solvers = factory(events)
+    source = pair_factory.build(configuration(estimator="kf"), authorized=False)
+    restored = pair_factory.restore(source.descriptor)
+    assert restored.descriptor.estimator_kind == "kf"
+    assert len(kf.instances) == 2
+    source.close()
+    restored.close()
+
+    ekf_source = pair_factory.build(configuration(), authorized=False)
+    mismatched = replace(
+        ekf_source.descriptor,
+        estimator_kind="EKF",
+        ownership_digest="",
+    )
+    ekf_source.close()
+    before = len(solvers.instances)
+    with pytest.raises(ValueError, match="descriptor changed"):
+        pair_factory.restore(mismatched)
+    assert solvers.instances[before].closed == 1
+
+
+class RejectingFactory(MpcPairFactory):
+    def validate(self, pair: OwnedMpcPair) -> bool:
+        del pair
+        return False
+
+
+def test_public_adopt_closes_pair_when_postconstruction_validation_fails() -> None:
+    events: list[str] = []
+    ekf = EstimatorFactory(events)
+    kf = EstimatorFactory(events)
+    solver_factory = SolverFactory(events)
+    pair_factory = RejectingFactory(
+        normalize_config(DEFAULT_MPC_CONFIG),
+        "C",
+        CYCLE,
+        adjust_load=lambda load, _temperature: load,
+        model_authority=lambda: (0, None),
+        on_policy_failure=lambda _error: None,
+        ekf_factory=ekf,
+        kf_factory=kf,
+        solver_factory=solver_factory,
+    )
+    native = GreyBoxMPCConfig(horizon_steps=5)
+    estimator = Estimator(events)
+    solver = Solver(native, events)
+
+    with pytest.raises(ValueError, match="validation"):
+        pair_factory.adopt(
+            pair_factory.native(
+                native,
+                estimator_kind="ekf",
+                candidate_generation=0,
+                role_generation=0,
+            ),
+            estimator,
+            solver,
+            authorized=False,
+        )
+
+    assert solver.closed == estimator.closed == 1
+
+
+@pytest.mark.parametrize(
+    "ticks",
+    [
+        (1.0, 0.0),
+        (0.0, math.nan),
+    ],
+)
+def test_dry_solve_rejects_invalid_elapsed_timing_and_closes_pair(
+    ticks: tuple[float, float],
+) -> None:
+    events: list[str] = []
+    pair_factory, ekf, _kf, solvers = factory(events, clock_values=ticks)
+    pair = pair_factory.build(configuration(), authorized=False)
+
+    with pytest.raises(ValueError, match="timing"):
+        pair_factory.dry_solve(pair, temperature_c=70.0)
+
+    assert solvers.instances[0].closed == ekf.instances[0].closed == 1
+
+
+def test_adopt_surfaces_cleanup_failure_after_attempting_both_owned_closes() -> None:
+    events: list[str] = []
+    pair_factory, _ekf, _kf, _solvers = factory(
+        events,
+        authority_failure=RuntimeError("authority"),
+    )
+    estimator = Estimator(events, close_failure=RuntimeError("estimator-close"))
+    solver = Solver(
+        GreyBoxMPCConfig(horizon_steps=5),
+        events,
+        close_failure=RuntimeError("solver-close"),
+    )
+
+    with pytest.raises(RuntimeError, match="could not close failed MPC pair construction"):
+        pair_factory.adopt(configuration(), estimator, solver, authorized=False)
+
+    assert events == ["solver", "estimator"]
+    assert solver.closed == estimator.closed == 1
+
+
+def test_adopt_preserves_original_failure_for_protocol_components_without_close() -> None:
+    events: list[str] = []
+    pair_factory, _ekf, _kf, _solvers = factory(
+        events,
+        authority_failure=RuntimeError("authority"),
+    )
+
+    class NonClosableEstimator:
+        def update(
+            self,
+            normalized_combustion_load: float,
+            y_measured: float,
+        ) -> npt.NDArray[np.float64]:
+            del normalized_combustion_load, y_measured
+            return np.zeros(10, dtype=float)
+
+    class NonClosableSolver:
+        config = GreyBoxMPCConfig(horizon_steps=5)
+
+        def solve(
+            self,
+            state: npt.ArrayLike,
+            *,
+            setpoint_c: float,
+            q_previous: float,
+            equilibrium_q: float,
+        ) -> Solve:
+            del state, setpoint_c, q_previous, equilibrium_q
+            return Solve(
+                sequence_q=np.zeros(5, dtype=float),
+                sequence_residual=np.zeros(5, dtype=float),
+                objective=0.0,
+                diagnostics=Diagnostics(),
+            )
+
+    with pytest.raises(RuntimeError, match="authority"):
+        pair_factory.adopt(
+            configuration(),
+            NonClosableEstimator(),
+            NonClosableSolver(),
+            authorized=False,
+        )

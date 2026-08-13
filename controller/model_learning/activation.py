@@ -9,13 +9,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Generic, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 from common.web_contracts.learning import ModelActivationRequest
 
 from .contracts import ActivationPolicy, CandidateOrigin
+if TYPE_CHECKING:
+    from controller.mpc_factory import OwnedMpcPair
 
 
-_PairT = TypeVar("_PairT", bound="ActivationPair")
+
+_PairT = TypeVar("_PairT", bound="OwnedMpcPair")
 _POLICY_BY_ORIGIN = {
     CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
     CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
@@ -153,13 +156,6 @@ class GreyControlPairDescriptor:
             ownership_digest=ownership_digest,
         )
 
-@runtime_checkable
-class ActivationPair(Protocol):
-    """Concrete structural contract consumed by the pure activation domain."""
-
-    descriptor: GreyControlPairDescriptor
-
-    def close(self) -> None: ...
 
 
 
@@ -279,7 +275,7 @@ class ActivationDecision(Generic[_PairT]):
     accepted: bool
     reason: str
     phase: ActivationPhase | None
-    incumbent_pair: ActivationPair
+    incumbent_pair: OwnedMpcPair
     candidate_pair: _PairT | None = None
     record: PreparedActivationRecord | None = None
 
@@ -290,7 +286,7 @@ class ActivationManager(Generic[_PairT]):
     def __init__(
         self,
         *,
-        incumbent_pair: ActivationPair,
+        incumbent_pair: OwnedMpcPair,
         build_candidate: Callable[[GreyControlPairDescriptor], _PairT],
         validate_candidate: Callable[[_PairT], bool],
         native_dry_solve: Callable[[_PairT], bool],
@@ -298,8 +294,10 @@ class ActivationManager(Generic[_PairT]):
         clock_ms: Callable[[], int] | None = None,
         receipt_timeout: float | None = None,
     ) -> None:
-        if not isinstance(incumbent_pair, ActivationPair):
-            raise TypeError("incumbent_pair must satisfy ActivationPair")
+        from controller.mpc_factory import OwnedMpcPair
+
+        if not isinstance(incumbent_pair, OwnedMpcPair):
+            raise TypeError("incumbent_pair must be an OwnedMpcPair")
         self._active_pair = incumbent_pair
         self._build_candidate = build_candidate
         self._validate_candidate = validate_candidate
@@ -310,7 +308,7 @@ class ActivationManager(Generic[_PairT]):
         self._prepared: ActivationDecision[_PairT] | None = None
 
     @property
-    def active_pair(self) -> ActivationPair:
+    def active_pair(self) -> OwnedMpcPair:
         return self._active_pair
 
     @property
@@ -345,7 +343,9 @@ class ActivationManager(Generic[_PairT]):
             candidate_pair = self._build_candidate(candidate)
         except Exception:
             return self._reject("candidate-build-failed")
-        if not isinstance(candidate_pair, ActivationPair) or candidate_pair.descriptor != candidate:
+        from controller.mpc_factory import OwnedMpcPair
+
+        if not isinstance(candidate_pair, OwnedMpcPair) or candidate_pair.descriptor != candidate:
             self._close_failed(candidate_pair)
             return self._reject("candidate-build-failed")
         try:
@@ -412,7 +412,7 @@ class ActivationManager(Generic[_PairT]):
         return ActivationDecision(False, reason, None, self._active_pair)
 
     @staticmethod
-    def _close_failed(pair: ActivationPair) -> None:
+    def _close_failed(pair: OwnedMpcPair) -> None:
         try:
             pair.close()
         except Exception:

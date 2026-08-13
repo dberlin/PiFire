@@ -498,16 +498,9 @@ def _bare_mpc_pair_owner():
     )
     incumbent.authorize_output()
     core = MpcController.__new__(MpcController)
-    numerical = SimpleNamespace(
-        estimator=incumbent.estimator,
-        solver=incumbent.solver,
-        last_combustion_load=0.35,
-    )
-    numerical.bind_resources = lambda estimator, solver, _close, **_kwargs: (
-        setattr(numerical, "estimator", estimator),
-        setattr(numerical, "solver", solver),
-    )
-    core._core = numerical
+    incumbent.core._last_combustion_load = 0.35
+    core._active_control_pair = incumbent
+    core._core = incumbent.core
     core._rollback_control_pair = None
     core._inert_activation = None
     core._activation_terminated_reason = None

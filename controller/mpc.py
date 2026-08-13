@@ -1695,6 +1695,14 @@ class Controller(ControllerBase):
         `restore_model` builds against the model it restores.
         """
         self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
+        active_identity = self._active_control_pair.descriptor
+        self._next_cook_descriptor = self._pair_factory.descriptor(
+            self._pair_factory.configured(
+                self.cfg,
+                candidate_generation=active_identity.candidate_generation,
+                role_generation=active_identity.role_generation,
+            )
+        )
         self._model_meta = {
             # Provenance, not a comparison input: what this model achieved on
             # the cook it was fit from. model_promotion.evaluate() always
@@ -1915,6 +1923,13 @@ class Controller(ControllerBase):
         # model it already had.
         try:
             restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
+            restored_configuration = self._pair_factory.configured(
+                merged,
+                candidate_generation=restored_descriptor.candidate_generation,
+                role_generation=restored_descriptor.role_generation,
+            )
+            if self._pair_factory.descriptor(restored_configuration) != restored_descriptor:
+                raise ValueError("restored active pair does not match active model")
             restored_pair = self._pair_factory.restore(restored_descriptor)
             restored_pair.authorize_output()
         except Exception as exc:

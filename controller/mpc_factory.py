@@ -154,6 +154,10 @@ class MpcPairFactory:
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._base_configuration = normalize_config(base_configuration)
+        control_period = self._base_configuration.get("control_period")
+        if not isinstance(control_period, float):
+            raise RuntimeError("normalized control_period must be a float")
+        self._control_period = control_period
         self._units = units
         self._cycle_data = cycle_data
         self._adjust_load = adjust_load
@@ -210,6 +214,19 @@ class MpcPairFactory:
             role_generation=role_generation,
             model_identified=settings.residual_weight > 0.0,
         )
+    def descriptor(self, configuration: MpcPairConfiguration) -> GreyControlPairDescriptor:
+        """Describe the exact native contract without constructing live resources."""
+
+        _settings, native = self._settings(configuration)
+        return GreyControlPairDescriptor(
+            model_digest=canonical_snapshot_digest(self._native_mapping(native)),
+            configuration=self._native_mapping(native),
+            estimator_kind=configuration.estimator_kind,
+            solver_kind="acados-grey",
+            candidate_generation=configuration.candidate_generation,
+            role_generation=configuration.role_generation,
+        )
+
     def build(
         self,
         configuration: MpcPairConfiguration,
@@ -312,11 +329,10 @@ class MpcPairFactory:
         except BaseException:
             pair.close()
             raise
-
     def build_estimator(self, native: GreyBoxMPCConfig) -> MpcEstimator:
         estimator_kind = self._base_configuration.get("estimator")
         if not isinstance(estimator_kind, str):
-            raise ValueError("estimator must be 'ekf' or 'kf'")
+            raise RuntimeError("normalized estimator must be a string")
         settings = self._settings_from_native(native, estimator_kind)
         return MpcCore.build_estimator(
             settings,
@@ -340,11 +356,11 @@ class MpcPairFactory:
         core: MpcCore,
         gate: _OutputAuthorization,
         configuration: MpcPairConfiguration,
-        expected_native: GreyBoxMPCConfig | None,
+        expected_native: GreyBoxMPCConfig,
     ) -> OwnedMpcPair:
         try:
             native = self._native_mapping(core.solver.config)
-            if expected_native is not None and native != self._native_mapping(expected_native):
+            if native != self._native_mapping(expected_native):
                 raise ValueError("constructed pair configuration digest changed")
             descriptor = GreyControlPairDescriptor(
                 model_digest=canonical_snapshot_digest(native),
@@ -364,7 +380,7 @@ class MpcPairFactory:
     def _settings(
         self,
         configuration: MpcPairConfiguration,
-    ) -> tuple[MpcConfig, GreyBoxMPCConfig | None]:
+    ) -> tuple[MpcConfig, GreyBoxMPCConfig]:
         if isinstance(configuration.settings, GreyBoxMPCConfig):
             return (
                 self._settings_from_native(configuration.settings, configuration.estimator_kind),
@@ -372,7 +388,11 @@ class MpcPairFactory:
             )
         settings = normalize_config(configuration.settings)
         settings["estimator"] = configuration.estimator_kind
-        return settings, None
+        native = MpcCore.native_configuration(
+            settings,
+            model_identified=configuration.model_identified,
+        )
+        return settings, native
 
     def _settings_from_native(
         self,
@@ -421,14 +441,11 @@ class MpcPairFactory:
             if not math.isfinite(elapsed_ms) or elapsed_ms < 0.0:
                 raise ValueError("native dry-solve timing must be finite and non-negative")
             durations.append(elapsed_ms)
-        control_period = self._base_configuration.get("control_period")
-        if isinstance(control_period, bool) or not isinstance(control_period, Real):
-            raise ValueError("control_period must be numeric")
         return NativeTiming(
             target="active-runtime",
             samples=len(durations),
             p99_ms=max(durations),
-            limit_ms=float(control_period) * 200.0,
+            limit_ms=self._control_period * 200.0,
         )
 
     @staticmethod
@@ -460,8 +477,6 @@ class MpcPairFactory:
             if isinstance(value, bool) or not isinstance(value, Real):
                 raise ValueError(f"descriptor {name} must be numeric")
             normalized = float(value)
-            if not math.isfinite(normalized):
-                raise ValueError(f"descriptor {name} must be finite")
             return normalized
 
         def integer(name: str) -> int:

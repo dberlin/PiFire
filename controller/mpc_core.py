@@ -277,28 +277,19 @@ class MpcCore:
         self._model_revision = revision
 
     @classmethod
-    def build_components(
+    def native_configuration(
         cls,
         config: Mapping[str, JsonValue],
         *,
         model_identified: bool | None = None,
-        ekf_factory: EkfFactory | None = None,
-        kf_factory: KfFactory | None = None,
-        solver_factory: SolverFactory | None = None,
-    ) -> tuple[MpcEstimator, MpcSolver]:
-        """Build a complete numerical pair, closing a partial build on failure."""
+    ) -> GreyBoxMPCConfig:
+        """Map normalized runtime settings to the exact generated native contract."""
 
         n_delay = _int_setting(config, "n_delay")
         if n_delay != 8:
             raise ValueError("the generated grey-box controller requires exactly eight delay states")
-        estimator = cls.build_estimator(
-            config,
-            n_delay,
-            ekf_factory=ekf_factory,
-            kf_factory=kf_factory,
-        )
         identified = model_is_identified(config) if model_identified is None else model_identified
-        native_config = GreyBoxMPCConfig(
+        return GreyBoxMPCConfig(
             C_c=_float_setting(config, "C_c"),
             h_amb=_float_setting(config, "h_amb"),
             T_amb=_float_setting(config, "T_amb"),
@@ -314,6 +305,29 @@ class MpcCore:
             move_weight=_float_setting(config, "R_dQ"),
             residual_weight=_LEARNED_RESIDUAL_WEIGHT if identified else 0.0,
             max_iterations=10,
+        )
+
+    @classmethod
+    def build_components(
+        cls,
+        config: Mapping[str, JsonValue],
+        *,
+        model_identified: bool | None = None,
+        ekf_factory: EkfFactory | None = None,
+        kf_factory: KfFactory | None = None,
+        solver_factory: SolverFactory | None = None,
+    ) -> tuple[MpcEstimator, MpcSolver]:
+        """Build a complete numerical pair, closing a partial build on failure."""
+
+        native_config = cls.native_configuration(
+            config,
+            model_identified=model_identified,
+        )
+        estimator = cls.build_estimator(
+            config,
+            native_config.delay_states,
+            ekf_factory=ekf_factory,
+            kf_factory=kf_factory,
         )
         try:
             solver = (
