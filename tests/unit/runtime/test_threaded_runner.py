@@ -36,7 +36,11 @@ from common.model_evidence import (
 )
 from controller.runtime.control_trace_session import ControlTraceSession, TraceSessionContext
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
-from controller.runtime.model_persistence import DurableActivationReceipt, ModelPersistenceWorker
+from controller.runtime.model_persistence import (
+    DurableActivationReceipt,
+    EvidenceSubmission,
+    ModelPersistenceWorker,
+)
 from controller.runtime.runner import (
     SyncControllerRunner,
     ThreadedControllerRunner,
@@ -823,26 +827,18 @@ def test_build_runner_selects_sync_for_non_async_core(monkeypatch):
     r.stop()  # no-op
 
 
-def test_hold_teardown_stops_threaded_runner():
-    from controller.runtime.modes.hold import HoldMode
-
+def test_hold_teardown_stops_threaded_runner(hold_cycle):
     core = FakeCore()
     runner = ThreadedControllerRunner(core)
     thread = runner._thread
-    hold = HoldMode.__new__(HoldMode)
-    hold._runner = runner
-    # Scaffolding for a mode built without setup(): the shape a real HoldMode
-    # always has by teardown, with identification simply off. Without it the
-    # refit step logs a real ERROR about a mode this test never intended to
-    # build. That teardown survives a malformed settings dict at all is
-    # asserted in test_hold_refit_trigger.py, not here.
-    hold.settings = {"controller": {"config": {}}}
-    hold._controller_name = "mpc"
-    hold.ctx = type("_Context", (), {"clock": type("_Clock", (), {"now": staticmethod(lambda: 0.0)})()})()
-    hold._framed_pulse = None
-    hold._control_trace = None
-    hold.teardown(70.0)
-    assert not thread.is_alive()
+    hold = hold_cycle(runner, controller="pid_sp")
+
+    try:
+        hold.setup()
+        hold.teardown(70.0)
+        assert not thread.is_alive()
+    finally:
+        runner.stop()
 
 
 class _OrderRecordingCore(FakeCore):
@@ -2342,17 +2338,38 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         )
         assert identity is not None
         normal_evidence = []
-        persistence = SimpleNamespace(
-            evidence_blocked=False,
-            submit_evidence_batch=lambda records: (
-                normal_evidence.extend(records),
-                SimpleNamespace(accepted=True),
-            )[1],
-        )
+        class _EvidencePersistence:
+            evidence_blocked = False
+            failed = False
+
+            def submit_evidence_batch(self, records):
+                normal_evidence.extend(records)
+                return EvidenceSubmission(accepted=True)
+
+            def submit_checkpoint(self, name, snapshot):
+                return True
+
+            def flush_and_stop(self):
+                return True
+
+        class _Logger:
+            def info(self, message):
+                return None
+
+            def warning(self, message):
+                return None
+
+            def error(self, message):
+                return None
+
+        persistence = _EvidencePersistence()
         learning = HoldLearningRuntime(
             runner=runner,
+            model_store=None,
             persistence=persistence,
             trace=trace,
+            controller_name="mpc",
+            logger=_Logger(),
             initial_generation=0,
         )
         learning.bind_generation(0)

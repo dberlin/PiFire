@@ -147,13 +147,14 @@ class _OrderedTrace:
 
 def _install_boundaries(monkeypatch, events, *, failure=None):
     import controller.runtime.modes.hold as hold_module
+    import controller.runtime.modes.hold_learning as hold_learning_module
 
     persistence = _OrderedPersistence(events, failure=failure)
     trace = _OrderedTrace(events, failure=failure)
     monkeypatch.setattr(hold_module, "ModelPersistenceWorker", lambda _store, _logger: persistence)
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: trace)
-    monkeypatch.setattr(hold_module, "read_model_activation", lambda: None)
-    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: ())
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: None)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", lambda: ())
     return persistence, trace
 
 
@@ -430,6 +431,7 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(
     assert runner.finished_teardowns - finishes_before_teardown == 1
     assert len(persistence.checkpoints) <= (2 if failure == "checkpoint" else 1)
     assert hold.grill.get_output_status() == {
+        "dc_fan": False,
         "auger": False,
         "fan": False,
         "igniter": False,
@@ -471,6 +473,88 @@ def test_teardown_retry_completes_cleanup_after_pre_cleanup_failure(hold_cycle, 
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
     assert events.count("runner:stop") == 1
+
+
+def test_teardown_retry_resumes_delivery_after_scheduler_advance(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    _persistence, _trace = _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.metrics = {
+        "id": "teardown-delivery-retry",
+        "augerontime": 0.0,
+    }
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(3.0)
+    runtime = hold._framed_pulse
+    learning = hold._hold_learning
+    assert runtime is not None
+    assert learning is not None
+    calls = {"advance": 0, "feedback": 0, "reset": 0}
+    original_advance = runtime.advance
+    original_feedback = runtime.report_feedback
+    original_reset = runtime.reset
+    original_submit = learning.submit_completed_observation
+    delivery_attempts = 0
+
+    def count_advance(*args, **kwargs):
+        calls["advance"] += 1
+        return original_advance(*args, **kwargs)
+
+    def count_feedback(*args, **kwargs):
+        calls["feedback"] += 1
+        return original_feedback(*args, **kwargs)
+
+    def count_reset(*args, **kwargs):
+        calls["reset"] += 1
+        return original_reset(*args, **kwargs)
+
+    def fail_delivery_once(*args, **kwargs):
+        nonlocal delivery_attempts
+        delivery_attempts += 1
+        if delivery_attempts == 1:
+            raise RuntimeError("transient observation delivery failure")
+        return original_submit(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "advance", count_advance)
+    monkeypatch.setattr(runtime, "report_feedback", count_feedback)
+    monkeypatch.setattr(runtime, "reset", count_reset)
+    monkeypatch.setattr(
+        learning,
+        "submit_completed_observation",
+        fail_delivery_once,
+    )
+    events.clear()
+
+    with pytest.raises(
+        RuntimeError,
+        match="transient observation delivery failure",
+    ):
+        hold.teardown(200.0)
+    hold.teardown(200.0)
+    hold.teardown(200.0)
+
+    assert calls == {"advance": 1, "feedback": 1, "reset": 1}
+    assert delivery_attempts == 2
+    assert sum(
+        isinstance(event, tuple)
+        and event[0] == "runner:observation"
+        and event[3] is True
+        for event in events
+    ) == 1
+    assert sum(
+        isinstance(event, tuple)
+        and event[0] == "runner:feedback"
+        and event[2] is not FrameFeedbackDisposition.PROGRESS
+        for event in events
+    ) == 1
+    assert events.count("runner:stop") == 1
+    assert events.count("trace:close") == 1
+    assert events.count("runner:finish") == 1
 
 
 def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypatch):

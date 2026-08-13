@@ -6,10 +6,8 @@ from dataclasses import dataclass, replace
 from typing import Literal, cast
 
 from common.controller_model_state import ControllerModelStore
-from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.model_learning.migration import migrate_mpc_learning_authority
 from common.modes import Mode
-from common.model_evidence import FallbackEvidence, RollbackEvidence
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
@@ -17,7 +15,6 @@ from common.control_trace import (
     CalibrationTracePayload,
     ControllerType,
     InhibitReason,
-    ModelEventType,
     RecorderGapPayload,
     ResultStaleState,
     SafetyEventType,
@@ -27,6 +24,7 @@ from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
     FrameFeedbackDisposition,
+    OutputSource,
     classify_output_source,
     seed_output,
 )
@@ -50,7 +48,6 @@ from controller.runtime.control_trace_session import (
     TraceAppliedIntervalContext,
     TraceFrameContext,
     TraceModelAuthority,
-    TraceModelContext,
     TraceOutputContext,
     TraceSafetyContext,
     TraceSessionContext,
@@ -58,9 +55,6 @@ from controller.runtime.control_trace_session import (
 )
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.model_persistence import ModelPersistenceWorker
-from controller.runtime.model_fitting import (
-    TeardownRefitOutcome,
-)
 from controller.base import MpcTraceDiagnostics
 from controller.model_promotion import ReachabilityState
 from controller.runtime.logic.fan import controller_fan_authority, start_fan
@@ -116,6 +110,24 @@ class _HoldFramedPulse:
     report_feedback: bool
 
 
+
+@dataclass(slots=True)
+class _TeardownFramedDispatch:
+    result: FramedPulseResult
+    record_terminal_trace: bool
+    scheduler_reset: tuple[
+        PulseResetReason,
+        float,
+        InhibitReason,
+        int,
+        tuple[SafetyEventType, str, int | None] | None,
+    ] | None = None
+    delivered_recorded: bool = False
+    completion_delivery_index: int = 0
+    scheduler_reset_recorded: bool = False
+    completion_trace_index: int = 0
+    feedback_dispatched: bool = False
+
 class HoldMode(ControlMode):
     """Hold mode: fan+power on at setup (shared branch with Startup/Reignite/
     Smoke/Shutdown -- Hold always takes the plain `start_fan(grill, settings)`
@@ -157,14 +169,21 @@ class HoldMode(ControlMode):
     _runner_configuration_revision: int = 0
     _framed_pulse: FramedPulseRuntime | None = None
     _last_ptemp: float | None = None
-    _persistence_worker: ModelPersistenceWorker | None = None
     _hold_learning: HoldLearningRuntime | None = None
-    _final_refit_done: bool = False
-    _activation_state_identity: tuple[object, ...] | None = None
-    _activation_lifecycle_evidence_id: str | None = None
+    _teardown_phase: int = 0
+    _last_tick_s: float | None = None
+    _teardown_auger_on: bool = False
     _calibration_command_high_water: int = 0
     _last_target: float | None = None
     _safety_ceiling_fault: str | None = None
+    _teardown_now: float | None = None
+    _teardown_ptemp: float | None = None
+    _teardown_prior_output_source: OutputSource | None = None
+    _teardown_advance_dispatch: _TeardownFramedDispatch | None = None
+    _teardown_feedback_prepared: bool = False
+    _teardown_feedback: FramedPulseFeedback | None = None
+    _teardown_feedback_dispatched: bool = False
+    _teardown_reset_dispatch: _TeardownFramedDispatch | None = None
 
 
     def _observe_reachability_advisory(self, diagnostics: MpcTraceDiagnostics) -> None:
@@ -292,25 +311,28 @@ class HoldMode(ControlMode):
                 )
             runner.set_output(completion.applied)
 
-    def _dispatch_framed_result(
+    def _resume_framed_dispatch(
         self,
-        result: FramedPulseResult,
-        *,
-        record_terminal_trace: bool,
-        scheduler_reset: tuple[
-            PulseResetReason,
-            float,
-            InhibitReason,
-            int,
-            tuple[SafetyEventType, str, int | None] | None,
-        ]
-        | None = None,
+        dispatch: _TeardownFramedDispatch,
     ) -> None:
-        self._record_framed_delivery(result.delivered_delta_s)
-        for completion in result.completions:
+        result = dispatch.result
+        if not dispatch.delivered_recorded:
+            self._record_framed_delivery(result.delivered_delta_s)
+            dispatch.delivered_recorded = True
+        while dispatch.completion_delivery_index < len(result.completions):
+            completion = result.completions[
+                dispatch.completion_delivery_index
+            ]
             self._deliver_framed_completion(completion)
-        if scheduler_reset is not None:
-            reason, now, inhibit, result_revision, safety_trace = scheduler_reset
+            dispatch.completion_delivery_index += 1
+        scheduler_reset = dispatch.scheduler_reset
+        if (
+            scheduler_reset is not None
+            and not dispatch.scheduler_reset_recorded
+        ):
+            reason, now, inhibit, result_revision, safety_trace = (
+                scheduler_reset
+            )
             trace = self._control_trace
             if trace is not None:
                 if safety_trace is not None:
@@ -329,17 +351,48 @@ class HoldMode(ControlMode):
                         event=SafetyEventType.SCHEDULER_RESET,
                         inhibit_reason=inhibit,
                         result_revision=result_revision,
-                        detail=f"framed pulse scheduler reset: {reason.value}",
+                        detail=(
+                            "framed pulse scheduler reset: "
+                            f"{reason.value}"
+                        ),
                         timestamp_ms=int(now * 1_000),
                     )
                 )
-        for completion in result.completions:
+            dispatch.scheduler_reset_recorded = True
+        while dispatch.completion_trace_index < len(result.completions):
+            completion = result.completions[
+                dispatch.completion_trace_index
+            ]
             self._trace_framed_completion(
                 completion,
-                record_terminal_trace=record_terminal_trace,
+                record_terminal_trace=dispatch.record_terminal_trace,
             )
-        if result.feedback is not None:
+            dispatch.completion_trace_index += 1
+        if result.feedback is not None and not dispatch.feedback_dispatched:
             self._dispatch_framed_feedback(result.feedback)
+            dispatch.feedback_dispatched = True
+
+    def _dispatch_framed_result(
+        self,
+        result: FramedPulseResult,
+        *,
+        record_terminal_trace: bool,
+        scheduler_reset: tuple[
+            PulseResetReason,
+            float,
+            InhibitReason,
+            int,
+            tuple[SafetyEventType, str, int | None] | None,
+        ]
+        | None = None,
+    ) -> None:
+        self._resume_framed_dispatch(
+            _TeardownFramedDispatch(
+                result=result,
+                record_terminal_trace=record_terminal_trace,
+                scheduler_reset=scheduler_reset,
+            )
+        )
 
     def _inhibit_framed_pulse(
         self,
@@ -356,6 +409,7 @@ class HoldMode(ControlMode):
         safety_event: SafetyEventType | None = None,
         safety_detail: str = "",
         safety_result_revision: int | None = None,
+        command_auger_off: bool = True,
     ) -> None:
         runtime = self._framed_pulse
         if runtime is None or runtime.scheduler is None:
@@ -384,7 +438,8 @@ class HoldMode(ControlMode):
                 else self._control_trace.applied_state.output_source
             ),
         )
-        self.grill.auger_off()
+        if command_auger_off:
+            self.grill.auger_off()
         self._dispatch_framed_result(
             result,
             record_terminal_trace=(
@@ -528,15 +583,6 @@ class HoldMode(ControlMode):
             runner_generation=self._runner_configuration_revision,
         )
 
-    def _checkpoint_model(self, snapshot: dict[str, object]) -> bool:
-        worker = self._persistence_worker
-        accepted = worker is not None and worker.submit_checkpoint(
-            self._controller_name,
-            snapshot,
-        )
-        if not accepted and self._hold_learning is not None:
-            self._hold_learning.mark_evidence_unavailable()
-        return bool(accepted)
 
 
     def _rotate_evidence_sessions_for_reserved_runner_generations(
@@ -637,14 +683,10 @@ class HoldMode(ControlMode):
         learning_evidence_available = True
         self._reachability_advisory_key = None
         self._framed_pulse = FramedPulseRuntime()
+        self._last_tick_s = None
+        self._teardown_auger_on = False
         self._last_ptemp = None
-        self._final_refit_done = False
-        self._final_checkpoint_done = False
-        self._final_checkpoint_outcome = None
-        self._final_refit_outcome = None
-        self._teardown_done = False
-        self._activation_state_identity = None
-        self._activation_lifecycle_evidence_id = None
+        self._teardown_phase = 0
         recorder: ControlTraceRecorder | None = None
         try:
             recorder = ControlTraceRecorder(warning=self._trace_warning)
@@ -662,16 +704,20 @@ class HoldMode(ControlMode):
         self.state.lid.open_detected = False
         self.state.lid.expires = 0
         self.state.target_temp_achieved = False
-        self._model_store = self._model_store or ControllerModelStore(
+        model_store = self._model_store or ControllerModelStore(
             reader=self.ctx.store.read_generic_key,
             writer=self.ctx.store.write_generic_key,
             conditional_writer=self.ctx.store.save_model_checkpoint,
         )
+        self._model_store = None
         try:
-            self._persistence_worker = ModelPersistenceWorker(self._model_store, _control.eventLogger)
+            persistence_worker = ModelPersistenceWorker(
+                model_store,
+                _control.eventLogger,
+            )
         except Exception as error:
             learning_evidence_available = False
-            self._persistence_worker = None
+            persistence_worker = None
             self._trace_warning(f"Model persistence unavailable: {error}")
         self._controller_name = self.settings["controller"]["selected"]
 
@@ -685,8 +731,11 @@ class HoldMode(ControlMode):
         self._runner_configuration_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
         self._hold_learning = HoldLearningRuntime(
             runner=self._runner,
-            persistence=self._persistence_worker,
+            model_store=model_store,
+            persistence=persistence_worker,
             trace=self._control_trace,
+            controller_name=self._controller_name,
+            logger=_control.eventLogger,
             initial_generation=self._runner_configuration_revision,
         )
         if not learning_evidence_available:
@@ -715,8 +764,10 @@ class HoldMode(ControlMode):
                 except Exception as error:
                     self._hold_learning.mark_evidence_unavailable()
                     self._trace_warning(f"Model authority migration failed: {error}")
-            self._restore_model()
-            self._reconcile_activation_state()
+            self._hold_learning.restore_model(
+                timestamp_ms=int(self.ctx.clock.now() * 1_000)
+            )
+            self._hold_learning.reconcile_activation()
         self._configure_fan_authority()
 
         _control.eventLogger.debug(
@@ -809,9 +860,12 @@ class HoldMode(ControlMode):
         self.state.cycle.ratio = self.state.cycle.raw_ratio = 0.0
         self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
         self.grill.auger_off()
-        self._restore_model()
-        self._activation_state_identity = None
-        self._reconcile_activation_state()
+        if learning is not None:
+            learning.restore_model(
+                timestamp_ms=int(now * 1_000),
+                controller_name=self._controller_name,
+            )
+            learning.reconcile_activation()
         self._configure_fan_authority()
         self._runner_configuration_revision = installed_generation
         context = self._trace_session_context()
@@ -1108,6 +1162,7 @@ class HoldMode(ControlMode):
         ptemp: float,
         current_output_status: Mapping[str, bool | int | float],
     ) -> None:
+        self._last_tick_s = now
         context = self._adopt_tick_configuration_and_session(
             now,
             ptemp,
@@ -1157,8 +1212,9 @@ class HoldMode(ControlMode):
             and learning is not None
         ):
             learning.bind_generation(self._runner_configuration_revision)
-        self._reconcile_activation_state()
-        self._drain_activation_events()
+        if learning is not None:
+            learning.reconcile_activation()
+            learning.drain_activation_events()
         active_calibration_reset = False
 
         if control["controller_update"]:
@@ -1272,7 +1328,8 @@ class HoldMode(ControlMode):
             )
 
         result = self._runner.latest()
-        self._drain_activation_events()
+        if learning is not None:
+            learning.drain_activation_events()
         cancellation_reason = None
         if context.active_calibration_reset:
             result = self._without_calibration_probe(result)
@@ -1408,6 +1465,7 @@ class HoldMode(ControlMode):
         inhibition: _HoldInhibitionDecision,
     ) -> _HoldFramedPulse:
         result = runner_result.result
+        learning = self._hold_learning
         if result is not None:
             controller = self.state.controller
             control = self.control
@@ -1449,8 +1507,8 @@ class HoldMode(ControlMode):
                 )
             self._trace_calibration_result(result, context.now)
             snapshot = self._runner.get_model_snapshot()
-            if isinstance(snapshot, dict):
-                self._checkpoint_model(snapshot)
+            if isinstance(snapshot, dict) and learning is not None:
+                learning.submit_online_checkpoint(snapshot)
         if not inhibition.permit_framed_pulse:
             return _HoldFramedPulse(
                 result=None,
@@ -1771,130 +1829,6 @@ class HoldMode(ControlMode):
                 safety_detail=event.replace("_", " "),
             )
 
-    def _restore_model(self):
-        trace = self._control_trace
-        if trace is not None:
-            trace.clear_model_authority()
-        snapshot = self._model_store.load(self._controller_name)
-        if snapshot is None:
-            return
-        import control as _control
-
-        # True means accepted for restore, not adopted -- an asynchronous runner
-        # only queues it for its worker thread, so whether it took hold is not
-        # knowable from the Hold loop.
-        if self._runner.restore_model(snapshot):
-            provenance = "restore_submitted" if self._runner.runs_async() else "restored"
-            if trace is not None:
-                trace.set_model_authority(cast(Mapping[str, JsonValue], snapshot), provenance)
-            _control.eventLogger.info(f"Submitted the stored {self._controller_name} model for restore")
-            if trace is not None:
-                trace.record_model(
-                    TraceModelContext(
-                        event=ModelEventType.RESTORE,
-                        detail="stored model submitted for restore",
-                        snapshot=cast(Mapping[str, JsonValue], snapshot),
-                        provenance="persisted",
-                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                    )
-                )
-        else:
-            _control.eventLogger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
-            if trace is not None:
-                trace.record_model(
-                    TraceModelContext(
-                        event=ModelEventType.REJECT,
-                        detail="stored model rejected for restore",
-                        snapshot=cast(Mapping[str, JsonValue], snapshot),
-                        provenance="persisted",
-                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                    )
-                )
-
-    @staticmethod
-    def _activation_identity(state) -> tuple[object, ...] | None:
-        if state is None or state.transaction_id is None:
-            return None
-        return (
-            state.phase,
-            state.transaction_id,
-            state.role_generation,
-            state.incumbent_pair_json,
-            state.candidate_pair_json,
-            state.rollback_pair_json,
-            state.reason,
-        )
-
-    @staticmethod
-    def _pair_activation_lifecycle(state, records):
-        candidate = getattr(state, "candidate_pair", None)
-        if candidate is None:
-            return None
-        matches = [
-            record
-            for record in records
-            if (
-                isinstance(record.payload, RollbackEvidence)
-                and record.payload.decision_id == state.evidence_decision_id
-                and record.model_digest == candidate.model_digest
-            )
-            or (
-                isinstance(record.payload, FallbackEvidence)
-                and record.payload.failed_digest == candidate.model_digest
-                and record.payload.failed_generation == candidate.role_generation
-            )
-        ]
-        return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id), default=None)
-
-    def _reconcile_activation_state(self) -> None:
-        """Submit durable ownership changes without persistence work on Hold."""
-        if self._runner is None or self._controller_name != "mpc":
-            return
-        try:
-            state = read_model_activation()
-            records = tuple(read_model_evidence())
-        except Exception as error:
-            learning = self._hold_learning
-            if learning is not None:
-                learning.mark_evidence_unavailable()
-            self._trace_warning(f"Model activation state unavailable: {error}")
-            return
-        identity = self._activation_identity(state)
-        if state is not None and identity is None:
-            learning = self._hold_learning
-            if learning is not None:
-                learning.mark_evidence_unavailable()
-            self._trace_warning("Model activation authority uses a retired schema")
-            return
-        lifecycle = None if state is None else self._pair_activation_lifecycle(state, records)
-        if state is not None and identity != self._activation_state_identity:
-            self._runner.restore_activation(state, records)
-            self._activation_state_identity = identity
-            self._activation_lifecycle_evidence_id = None if lifecycle is None else lifecycle.evidence_id
-            return
-        if lifecycle is None or lifecycle.evidence_id == self._activation_lifecycle_evidence_id:
-            return
-        self._activation_lifecycle_evidence_id = lifecycle.evidence_id
-        if isinstance(lifecycle.payload, RollbackEvidence):
-            self._runner.rollback_activation(lifecycle.payload.reason)
-        elif isinstance(lifecycle.payload, FallbackEvidence):
-            self._runner.activation_runtime_failure(lifecycle.payload.reason)
-
-    def _drain_activation_events(self) -> None:
-        if self._runner is None:
-            return
-        events = tuple(self._runner.drain_activation_events())
-        if not events:
-            return
-        worker = self._persistence_worker
-        if worker is None or not worker.submit_evidence_batch(events).accepted:
-            learning = self._hold_learning
-            if learning is not None:
-                learning.mark_evidence_unavailable()
-            self._trace_warning(
-                "Model activation fallback evidence was not persisted"
-            )
-
     # check_safety is now a declarative pre_act guard (GUARDS["Hold"]); the base
     # ControlMode default (return False) applies here.
 
@@ -1904,9 +1838,9 @@ class HoldMode(ControlMode):
             "lid_open_endtime": self.state.lid.expires,
             "actuation_mode": ActuationMode.FRAMED_PULSE.value,
         }
-        learning = self._runner_status().get("learning")
-        if isinstance(learning, Mapping):
-            status["learning"] = dict(learning)
+        learning_runtime = self._hold_learning
+        if learning_runtime is not None:
+            status.update(learning_runtime.status_fragment())
         runtime = self._framed_pulse
         scheduler = None if runtime is None else runtime.scheduler
         if scheduler is not None:
@@ -1918,203 +1852,182 @@ class HoldMode(ControlMode):
             }
         return status
 
-    def _refit_model(self) -> tuple[TeardownRefitOutcome, object | None]:
-        import control as _control
-
-        try:
-            config = self.settings["controller"].get("config", {})
-            controller_config = config.get(self._controller_name, {})
-            identification_enabled = controller_config.get("enable_identification") is True
-        except Exception as error:
-            _control.eventLogger.error(f"Model refit failed at cook end: {error}")
-            return TeardownRefitOutcome.DISABLED, None
-        if not identification_enabled:
-            _control.eventLogger.info("Model refit skipped at cook end: Learn This Grill is disabled.")
-            return TeardownRefitOutcome.DISABLED, None
-
-        try:
-            verdict = self._runner.refit_from_cook()
-        except Exception as error:
-            _control.eventLogger.error(f"Model refit failed at cook end: {error}")
-            return TeardownRefitOutcome.FAILED, None
-
-        reason = getattr(verdict, "reason", None) or "no reason recorded"
-        outcome = getattr(verdict, "outcome", None)
-        if not isinstance(outcome, TeardownRefitOutcome):
-            if verdict is None:
-                outcome = TeardownRefitOutcome.INSUFFICIENT
-            elif getattr(verdict, "accepted", False):
-                origin = getattr(verdict, "origin", None)
-                outcome = (
-                    TeardownRefitOutcome.READY_FOR_REVIEW
-                    if getattr(origin, "value", origin) == "operator-calibration"
-                    else TeardownRefitOutcome.ACCEPTED_NEXT_COOK
-                )
-            else:
-                outcome = TeardownRefitOutcome.REJECTED
-        _control.eventLogger.info(f"Model refit at cook end: {outcome.value} ({reason}).")
-        return outcome, verdict
-
-    def _refit_model_once(self) -> tuple[TeardownRefitOutcome, object | None]:
-        if self._final_refit_done:
-            return self._final_refit_outcome
-        self._final_refit_done = True
-        self._final_refit_outcome = self._refit_model()
-        return self._final_refit_outcome
-
-    def _publish_final_checkpoint_once(
-        self,
-        outcome: TeardownRefitOutcome,
-        verdict: object | None,
-    ) -> bool:
-        if getattr(self, "_final_checkpoint_done", False):
-            return True
-        final_outcome = getattr(self, "_final_checkpoint_outcome", None) or outcome
-        try:
-            if self._runner.finalize_cook_refit(final_outcome) is False:
-                raise RuntimeError("refit outcome was not finalized")
-        except Exception:
-            final_outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
-            self._final_checkpoint_outcome = final_outcome
-            try:
-                if self._runner.finalize_cook_refit(final_outcome) is False:
-                    return False
-            except Exception:
-                return False
-        snapshot = self._runner.get_model_snapshot()
-        if not isinstance(snapshot, dict):
-            learning = self._hold_learning
-            if learning is not None:
-                learning.mark_evidence_unavailable()
-            return False
-        trace = self._control_trace
-        if trace is not None:
-            trace.clear_model_authority()
-            trace.record_model(
-                TraceModelContext(
-                    event=ModelEventType.REFIT,
-                    detail=f"model refit outcome: {final_outcome.value}",
-                    snapshot=cast(Mapping[str, JsonValue], snapshot),
-                    provenance="persisted",
-                    timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                )
-            )
-            if final_outcome in {
-                TeardownRefitOutcome.READY_FOR_REVIEW,
-                TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-            }:
-                trace.record_model(
-                    TraceModelContext(
-                        event=ModelEventType.ADOPT,
-                        detail=getattr(verdict, "reason", final_outcome.value),
-                        snapshot=cast(Mapping[str, JsonValue], snapshot),
-                        provenance="persisted",
-                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                    )
-                )
-            elif final_outcome is not TeardownRefitOutcome.DISABLED:
-                trace.record_model(
-                    TraceModelContext(
-                        event=ModelEventType.REJECT,
-                        detail=getattr(verdict, "reason", final_outcome.value),
-                        snapshot=cast(Mapping[str, JsonValue], snapshot),
-                        provenance="persisted",
-                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                    )
-                )
-        accepted = self._checkpoint_model(snapshot)
-        if accepted:
-            self._final_checkpoint_done = True
-            return True
-        if final_outcome is not TeardownRefitOutcome.CHECKPOINT_FAILURE:
-            try:
-                self._runner.finalize_cook_refit(
-                    TeardownRefitOutcome.CHECKPOINT_FAILURE
-                )
-                self._final_checkpoint_outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
-            except Exception:
-                pass
-        return False
-
     def teardown(self, ptemp):
-        if getattr(self, "_teardown_done", False):
+        if self._teardown_phase >= 3:
             return
-        trace = getattr(self, "_control_trace", None)
-        first_trace_teardown = trace is not None and not trace.status.closed
-        now = self.ctx.clock.now()
-        runtime = getattr(self, "_framed_pulse", None)
-        runner = getattr(self, "_runner", None)
-        if runtime is not None and runtime.scheduler is not None and runner is not None:
-            prior_output_source = None if trace is None else trace.applied_state.output_source
-            pulse_result = runtime.advance(
-                now,
-                self.grill.get_output_status()["auger"],
-                sample=self._framed_sample(ptemp),
-                prior_output_source=prior_output_source,
+        trace = self._control_trace
+        if self._teardown_now is None:
+            clock_now = self.ctx.clock.now()
+            self._teardown_now = max(
+                clock_now,
+                (
+                    clock_now
+                    if self._last_tick_s is None
+                    else self._last_tick_s
+                ),
+            )
+            self._teardown_ptemp = ptemp
+        now = self._teardown_now
+        runtime = self._framed_pulse
+        runner = self._runner
+        learning = self._hold_learning
+        if self._teardown_phase < 1:
+            self._teardown_auger_on = bool(
+                self.grill.get_output_status()["auger"]
             )
             self.grill.auger_off()
-            self._dispatch_framed_result(pulse_result, record_terminal_trace=False)
-            feedback = runtime.report_feedback(
-                now,
-                pulse_result.decision.delivered_on_s,
-                source=classify_output_source(
-                    lid_open=self.state.lid.open_detected,
-                    manual_override_active=self.state.manual_override["auger"] >= now,
-                ),
-                prior_output_source=(
-                    None if trace is None else trace.applied_state.output_source
-                ),
-                dispatch=not bool(pulse_result.decision.completed_frames),
-            )
-            if feedback is not None:
-                self._dispatch_framed_feedback(feedback)
-        self._inhibit_framed_pulse(
-            PulseResetReason.MODE_CHANGE,
-            now,
-            InhibitReason.SAFETY,
-            ptemp=ptemp,
-            terminal_feedback=False,
-        )
+            self.grill.fan_off()
+            self.grill.igniter_off()
+            self.grill.power_off()
+            self._teardown_phase = 1
+        if self._teardown_phase < 2:
+            if (
+                runtime is not None
+                and runtime.scheduler is not None
+                and runner is not None
+            ):
+                advance_dispatch = self._teardown_advance_dispatch
+                if advance_dispatch is None:
+                    self._teardown_prior_output_source = (
+                        None
+                        if trace is None
+                        else trace.applied_state.output_source
+                    )
+                    advance_dispatch = _TeardownFramedDispatch(
+                        result=runtime.advance(
+                            now,
+                            self._teardown_auger_on,
+                            sample=self._framed_sample(
+                                self._teardown_ptemp
+                            ),
+                            prior_output_source=(
+                                self._teardown_prior_output_source
+                            ),
+                        ),
+                        record_terminal_trace=False,
+                    )
+                    self._teardown_advance_dispatch = advance_dispatch
+                self._resume_framed_dispatch(advance_dispatch)
+                pulse_result = advance_dispatch.result
+                if not self._teardown_feedback_prepared:
+                    self._teardown_feedback = runtime.report_feedback(
+                        now,
+                        pulse_result.decision.delivered_on_s,
+                        source=classify_output_source(
+                            lid_open=self.state.lid.open_detected,
+                            manual_override_active=(
+                                self.state.manual_override["auger"] >= now
+                            ),
+                        ),
+                        prior_output_source=(
+                            self._teardown_prior_output_source
+                        ),
+                        dispatch=not bool(
+                            pulse_result.decision.completed_frames
+                        ),
+                    )
+                    self._teardown_feedback_prepared = True
+                feedback = self._teardown_feedback
+                if (
+                    feedback is not None
+                    and not self._teardown_feedback_dispatched
+                ):
+                    self._dispatch_framed_feedback(feedback)
+                    self._teardown_feedback_dispatched = True
+            if runtime is not None and runtime.scheduler is not None:
+                reset_dispatch = self._teardown_reset_dispatch
+                if reset_dispatch is None:
+                    prior_output_source = (
+                        self._teardown_prior_output_source
+                        if self._teardown_advance_dispatch is not None
+                        else (
+                            None
+                            if trace is None
+                            else trace.applied_state.output_source
+                        )
+                    )
+                    source = classify_output_source(
+                        lid_open=self.state.lid.open_detected,
+                        manual_override_active=(
+                            self.state.manual_override["auger"] >= now
+                        ),
+                    )
+                    reset_dispatch = _TeardownFramedDispatch(
+                        result=runtime.reset(
+                            PulseResetReason.MODE_CHANGE,
+                            now,
+                            InhibitReason.SAFETY,
+                            actual_auger_on=self.grill.get_output_status()[
+                                "auger"
+                            ],
+                            sample=self._framed_sample(
+                                self._teardown_ptemp
+                            ),
+                            terminal_feedback=True,
+                            feedback_source=source,
+                            prior_output_source=prior_output_source,
+                        ),
+                        record_terminal_trace=True,
+                        scheduler_reset=(
+                            PulseResetReason.MODE_CHANGE,
+                            now,
+                            InhibitReason.SAFETY,
+                            self.state.controller.pulse_frame_result_revision,
+                            None,
+                        ),
+                    )
+                    self._teardown_reset_dispatch = reset_dispatch
+                self._resume_framed_dispatch(reset_dispatch)
+            self._teardown_phase = 2
+        stop_error: Exception | None = None
+        stopped: bool | None = None
         try:
             if runner is not None:
-                stopped = runner.stop_for_refit()
-                if getattr(self, "ctx", None) is not None:
-                    self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
-                if stopped is False:
-                    self._trace_warning("Controller worker did not stop; final checkpoint was not queued")
-                else:
-                    outcome, verdict = self._refit_model_once()
-                    checkpointed = self._publish_final_checkpoint_once(outcome, verdict)
-                    if not checkpointed:
-                        self._publish_final_checkpoint_once(outcome, verdict)
-        finally:
-            learning = self._hold_learning
-            if learning is not None:
-                learning.retire_generation(self._runner_configuration_revision)
-            worker = getattr(self, "_persistence_worker", None)
-            flushed = True
-            if worker is not None:
-                flushed = worker.flush_and_stop() and not bool(getattr(worker, "failed", False))
-                self._persistence_worker = None
-            if not flushed and runner is not None:
                 try:
-                    runner.finalize_cook_refit(TeardownRefitOutcome.CHECKPOINT_FAILURE)
-                except Exception:
-                    pass
-            if first_trace_teardown and trace is not None:
-                trace.flush_pending()
-                trace.record_applied_interval(
-                    TraceAppliedIntervalContext(
-                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                        sample_complete=False,
-                        realized_combustion_load=None,
-                        controls_fan=self.state.controller.controls_fan,
-                    )
-                )
-                trace.close()
-            if runner is not None:
-                try:
-                    runner.finish_teardown()
+                    stopped = runner.stop_for_refit()
                 except Exception as error:
-                    self._trace_warning(f"Controller teardown close failed: {error}")
-            self._teardown_done = True
+                    stop_error = error
+                if stop_error is None:
+                    if stopped is False:
+                        self._trace_warning(
+                            "Controller worker did not stop; "
+                            "final checkpoint was not queued"
+                        )
+                    elif learning is not None:
+                        refit = learning.refit_once(
+                            cast(Mapping[str, JsonValue], self.settings)
+                        )
+                        learning.publish_final_checkpoint_once(
+                            refit,
+                            timestamp_ms=int(
+                                self.ctx.clock.now() * 1_000
+                            ),
+                        )
+                if stop_error is None:
+                    self._rotate_evidence_sessions_for_reserved_runner_generations(
+                        self.ctx.clock.now()
+                    )
+        finally:
+            try:
+                if (
+                    trace is not None
+                    and not trace.status.closed
+                ):
+                    trace.record_applied_interval(
+                        TraceAppliedIntervalContext(
+                            timestamp_ms=int(
+                                self.ctx.clock.now() * 1_000
+                            ),
+                            sample_complete=False,
+                            realized_combustion_load=None,
+                            controls_fan=self.state.controller.controls_fan,
+                        )
+                    )
+            finally:
+                if learning is not None:
+                    learning.finish_teardown(
+                        generation=self._runner_configuration_revision
+                    )
+                self._teardown_phase = 3
+        if stop_error is not None:
+            raise stop_error

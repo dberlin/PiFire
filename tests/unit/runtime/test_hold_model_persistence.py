@@ -112,6 +112,7 @@ def test_setup_with_no_stored_model_restores_nothing(hold_cycle):
 
 def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycle, monkeypatch):
     from controller.runtime.modes import hold as hold_module
+    from controller.runtime.modes import hold_learning as hold_learning_module
 
     calls = []
     v3 = {
@@ -144,8 +145,8 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
         store.models["mpc"] = migrate_grey_learning_snapshot(v3)
 
     monkeypatch.setattr(hold_module, "migrate_mpc_learning_authority", migrate_before_restore)
-    monkeypatch.setattr(hold_module, "read_model_activation", lambda: None)
-    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: ())
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: None)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", lambda: ())
     runner = FakeControllerRunner(period=0.01)
     hold = hold_cycle(runner, model_store=store, controller="mpc")
 
@@ -160,18 +161,21 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
     (ActivationPhase.PREPARED, ActivationPhase.ACTIVE, ActivationPhase.ABORTED),
 )
 def test_setup_routes_new_prepared_pair_authority_without_legacy_activation_evidence(hold_cycle, monkeypatch, phase):
-    from controller.runtime.modes import hold as hold_module
+    from controller.runtime.modes import hold_learning as hold_learning_module
 
     persisted, _record = _pair_phase_state(phase)
-    monkeypatch.setattr(hold_module, "read_model_activation", lambda: persisted)
-    monkeypatch.setattr(hold_module, "read_model_evidence", lambda: [])
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", lambda: [])
     runner = FakeControllerRunner(period=0.01)
     hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
 
     hold.setup()
 
     assert runner.activation_restores == [(persisted, ())]
-    assert hold._activation_state_identity[0:2] == (phase.value, persisted.transaction_id)
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_activation()
+    assert runner.activation_restores == [(persisted, ())]
 
 
 def test_per_tick_saves_the_controller_snapshot(hold_cycle):
@@ -197,16 +201,13 @@ def test_checkpoint_persistence_failure_disables_hold_learning(hold_cycle):
     )
     hold = hold_cycle(FakeControllerRunner(period=0.01), model_store=store, controller="pid_sp")
     hold.setup()
-    worker = hold._persistence_worker
-    assert worker is not None
+    learning = hold._hold_learning
+    assert learning is not None
     try:
-        hold._checkpoint_model({"revision": 1})
-        assert worker.flush_and_stop(timeout=1.0)
-        assert worker.evidence_blocked
-        hold._checkpoint_model({"revision": 2})
-        learning = hold._hold_learning
-        assert learning is not None
+        assert learning.submit_online_checkpoint({"revision": 1})
+        learning.finish_teardown(generation=0)
         assert not learning.evidence_available
+        assert not learning.submit_online_checkpoint({"revision": 2})
     finally:
         hold.ctx.clock.advance(400.0)
         hold.teardown(200.0)
@@ -901,7 +902,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     precrash_authorized,
     precrash_has_rollback,
 ) -> None:
-    from controller.runtime.modes import hold as hold_module
+    from controller.runtime.modes import hold_learning as hold_learning_module
 
     _CrashRecoveryEstimator.created.clear()
     _CrashRecoverySolver.created.clear()
@@ -1132,12 +1133,12 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     assert all(type(handle.closed) is int and handle.closed == 1 for handle in first_runtime_handles)
 
     monkeypatch.setattr(
-        hold_module,
+        hold_learning_module,
         "read_model_activation",
         lambda: read_model_activation(database_path=database_path),
     )
     monkeypatch.setattr(
-        hold_module,
+        hold_learning_module,
         "read_model_evidence",
         lambda: read_model_evidence(database_path=database_path),
     )

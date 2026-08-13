@@ -49,8 +49,10 @@ from controller.runtime.runner import (
     build_runner,
 )
 
+from controller.model_learning.contracts import CandidateOrigin
 from controller.model_learning.contracts import FrameObservation
 from controller.runtime.model_persistence import EvidenceSubmission
+from controller.runtime.model_fitting import TeardownRefitResult
 from controller.runtime.modes.hold import HoldMode
 from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
 from tests.fakes.runner import FakeControllerRunner
@@ -839,7 +841,17 @@ def test_refit_records_refit_then_its_verdict(hold_cycle, monkeypatch, accepted,
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
     runner.snapshot = {"revision": 7}
-    runner.refit_verdict = SimpleNamespace(accepted=accepted)
+    runner.refit_verdict = (
+        TeardownRefitResult.accepted_next_cook(
+            "accepted by trace fixture",
+            candidate_digest="a" * 64,
+        )
+        if accepted
+        else TeardownRefitResult.rejected(
+            "rejected by trace fixture",
+            origin=CandidateOrigin.COOK_REFIT,
+        )
+    )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.settings["controller"]["config"]["mpc"]["enable_identification"] = True

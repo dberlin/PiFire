@@ -1887,7 +1887,7 @@ class GreyLearningRuntime:
         Between cooks only: a refit re-simulates the whole history once per
         least-squares evaluation, so it belongs nowhere near the control path.
         It runs synchronously on its caller's thread and takes seconds, bounded
-        by `_HISTORY_MAX` -- see HoldMode._refit_model for why spending them at
+        by `_HISTORY_MAX` -- see HoldLearningRuntime.refit_once for why spending
         teardown is safe. An accepted model replaces the complete owned pair
         only after the cook has ended, so the resulting checkpoint—not a
         mid-cook numerical relabel—authorizes it for the next cook.

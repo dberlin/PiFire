@@ -1,5 +1,4 @@
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
@@ -186,16 +185,37 @@ def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cy
     assert trace is not None and context is not None
     assert trace.ensure_open(context, timestamp_ms=22_000) is not None
     batches = []
+    class _NoEvidencePersistence:
+        evidence_blocked = False
+        failed = False
+
+        def submit_evidence_batch(self, records):
+            batches.append(tuple(records))
+            return EvidenceSubmission(accepted=True)
+
+        def submit_checkpoint(self, name, snapshot):
+            return True
+
+        def flush_and_stop(self):
+            return True
+
+    class _SilentLogger:
+        def info(self, message):
+            return None
+
+        def warning(self, message):
+            return None
+
+        def error(self, message):
+            return None
+
     runtime = HoldLearningRuntime(
         runner=None,
-        persistence=SimpleNamespace(
-            evidence_blocked=False,
-            submit_evidence_batch=lambda records: (
-                batches.append(tuple(records)),
-                EvidenceSubmission(accepted=True),
-            )[1],
-        ),
+        model_store=None,
+        persistence=_NoEvidencePersistence(),
         trace=trace,
+        controller_name="mpc",
+        logger=_SilentLogger(),
         initial_generation=0,
     )
     runtime.submit_completed_observation((0, 20_000), observation)
@@ -454,11 +474,13 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
 
     recorder = Recorder(warning=lambda _message: None)
     persisted = []
+    workers = []
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
         def __init__(self, store, logger):
             super().__init__(store, logger, append_evidence=persisted.extend)
+            workers.append(self)
 
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: recorder)
     monkeypatch.setattr(hold_module, "ModelPersistenceWorker", CapturingWorker)
@@ -482,7 +504,7 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     hold.state.lid.open_detected = True
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
-    assert hold._persistence_worker.flush_and_stop(timeout=1.0)
+    assert workers[0].flush_and_stop(timeout=1.0)
 
     raw = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_OBSERVATION]
     compact = [record.payload for record in persisted if record.kind is EvidenceKind.CALIBRATION_SUMMARY]
@@ -525,11 +547,13 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
             return CheckpointSaveOutcome.SAVED
 
     persisted = []
+    workers = []
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
         def __init__(self, store, logger):
             super().__init__(store, logger, append_evidence=persisted.extend)
+            workers.append(self)
 
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: Recorder(warning=warning))
     monkeypatch.setattr(hold_module, "ModelPersistenceWorker", CapturingWorker)
@@ -567,7 +591,7 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     assert runner.observations
     assert runner.observations[-1].calibration_stage == "coast"
     assert runner.observations[-1].calibration_command_revision == 1
-    assert hold._persistence_worker.flush_and_stop(timeout=1.0)
+    assert workers[0].flush_and_stop(timeout=1.0)
 
     coast = [
         record.payload

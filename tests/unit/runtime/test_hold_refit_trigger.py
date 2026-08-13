@@ -20,7 +20,6 @@ from controller.model_learning.contracts import (
     CandidateOrigin,
     FrameObservation,
 )
-from controller.runtime.control_trace_session import ControlTraceSession
 from controller.runtime.model_fitting import (
     PassiveGreyHistory,
     TeardownGreyHistory,
@@ -81,7 +80,8 @@ def test_no_refit_when_identification_is_off(hold_cycle):
     assert runner.refits == 0
 
 
-def test_online_adaptation_without_identification_checkpoints_before_trace_close(hold_cycle):
+def test_online_adaptation_without_identification_checkpoints_before_trace_close(hold_cycle, monkeypatch):
+    import controller.runtime.modes.hold as hold_module
     events = []
 
     class _CloseRecorder:
@@ -102,9 +102,12 @@ def test_online_adaptation_without_identification_checkpoints_before_trace_close
     runner = FakeControllerRunner(period=0.01)
     runner.snapshot = {"version": 1, "revision": 7, "params": {}, "online_adaptation": {}}
     store = _OrderedStore()
+    monkeypatch.setattr(
+        hold_module,
+        "ControlTraceRecorder",
+        lambda *, warning: _CloseRecorder(),
+    )
     hold = _hold(hold_cycle, runner, identification=False, online_adaptation=True, store=store)
-    warnings: list[str] = []
-    hold._control_trace = ControlTraceSession(_CloseRecorder(), warning=warnings.append)
 
     hold.teardown(225)
 
@@ -559,27 +562,46 @@ def test_final_checkpoint_failure_is_terminal_and_is_not_retried(hold_cycle):
     ]
 
 
-def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_and_close(hold_cycle):
-    runner = _FinalLifecycleRunner(result=TeardownRefitResult.accepted_next_cook("accepted", candidate_digest="d" * 64))
+def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_and_close(
+    hold_cycle, monkeypatch
+):
+    import controller.runtime.modes.hold as hold_module
+
+    runner = _FinalLifecycleRunner(
+        result=TeardownRefitResult.accepted_next_cook(
+            "accepted",
+            candidate_digest="d" * 64,
+        )
+    )
 
     class _Queue:
         failed = False
+        evidence_blocked = False
 
         def __init__(self):
             self.attempts = []
 
         def submit_checkpoint(self, _name, snapshot):
-            runner.lifecycle.append(f"checkpoint:{snapshot['cook_refit']['latest']}")
+            runner.lifecycle.append(
+                f"checkpoint:{snapshot['cook_refit']['latest']}"
+            )
             self.attempts.append(snapshot)
             return len(self.attempts) > 1
+
+        def submit_evidence_batch(self, _records):
+            raise AssertionError("evidence submission was not expected")
 
         def flush_and_stop(self):
             runner.lifecycle.append("flush")
             return True
 
-    hold = _hold(hold_cycle, runner, identification=True)
     queue = _Queue()
-    hold._persistence_worker = queue
+    monkeypatch.setattr(
+        hold_module,
+        "ModelPersistenceWorker",
+        lambda _store, _logger: queue,
+    )
+    hold = _hold(hold_cycle, runner, identification=True)
 
     hold.teardown(225)
 
@@ -587,13 +609,20 @@ def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_
         "accepted-next-cook",
         "checkpoint-failure",
     ]
-    assert hold._final_checkpoint_done is True
-    assert hold._final_checkpoint_outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE
-    assert runner.lifecycle.index("checkpoint:checkpoint-failure") < runner.lifecycle.index("flush")
+    assert runner.final_outcomes[-1] is TeardownRefitOutcome.CHECKPOINT_FAILURE
+    assert (
+        runner.lifecycle.index("checkpoint:checkpoint-failure")
+        < runner.lifecycle.index("flush")
+    )
     assert runner.lifecycle.index("flush") < runner.lifecycle.index("close")
 
 
-def test_finalize_exception_never_queues_a_stale_snapshot(hold_cycle):
+def test_finalize_exception_never_queues_a_stale_snapshot(
+    hold_cycle,
+    monkeypatch,
+):
+    import controller.runtime.modes.hold as hold_module
+
     class _ExplodingFinalizeRunner(_FinalLifecycleRunner):
         def finalize_cook_refit(self, outcome):
             if outcome is not TeardownRefitOutcome.CHECKPOINT_FAILURE:
@@ -601,13 +630,26 @@ def test_finalize_exception_never_queues_a_stale_snapshot(hold_cycle):
             return super().finalize_cook_refit(outcome)
 
     runner = _ExplodingFinalizeRunner()
-    hold = _hold(hold_cycle, runner, identification=True)
     queued = []
-    hold._persistence_worker = SimpleNamespace(
-        submit_checkpoint=lambda _name, snapshot: (queued.append(snapshot), True)[1]
+    persistence = SimpleNamespace(
+        failed=False,
+        evidence_blocked=False,
+        submit_checkpoint=lambda _name, snapshot: (
+            queued.append(snapshot),
+            True,
+        )[1],
+        submit_evidence_batch=lambda _records: None,
+        flush_and_stop=lambda: True,
     )
+    monkeypatch.setattr(
+        hold_module,
+        "ModelPersistenceWorker",
+        lambda _store, _logger: persistence,
+    )
+    hold = _hold(hold_cycle, runner, identification=True)
 
-    assert hold._publish_final_checkpoint_once(TeardownRefitOutcome.FAILED, None)
+    hold.teardown(225)
+
     assert len(queued) == 1
     assert queued[0]["cook_refit"]["latest"] == "checkpoint-failure"
 
