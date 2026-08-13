@@ -141,7 +141,7 @@ def test_success_estimates_from_realized_load_and_uses_first_valid_native_comman
     assert setpoint == 110.0
     assert previous == 0.5
     assert equilibrium == 0.0
-    assert controller._last_combustion_load == pytest.approx(0.625)
+    assert controller.get_status()["last_combustion_load"] == pytest.approx(0.625)
     assert output["cycle_ratio"] == pytest.approx(0.625 * CYCLE["u_max"])
     assert 40.0 <= output["fan"]["duty"] <= 100.0
     trace = controller.trace_diagnostics()
@@ -161,7 +161,7 @@ def test_native_roundoff_at_command_bounds_is_clipped_not_rejected(monkeypatch):
 
     output = controller.update(72.0)
 
-    assert controller._last_combustion_load == 0.0
+    assert controller.get_status()["last_combustion_load"] == 0.0
     assert output["cycle_ratio"] == 0.0
     assert controller.trace_diagnostics().failure_state is MpcFailureState.SUCCESS
 
@@ -185,7 +185,7 @@ def test_every_malformed_native_result_holds_the_last_safe_load(monkeypatch, inv
 
     output = controller.update(73.0)
 
-    assert controller._last_combustion_load == pytest.approx(0.6)
+    assert controller.get_status()["last_combustion_load"] == pytest.approx(0.6)
     assert output["cycle_ratio"] == pytest.approx(0.54)
     trace = controller.trace_diagnostics()
     assert trace.failure_state is MpcFailureState.POLICY_EXCEPTION
@@ -209,7 +209,7 @@ def test_structured_solver_failure_holds_and_preserves_diagnostics(monkeypatch):
     controller.update(70.0)
     controller.update(71.0)
 
-    assert controller._last_combustion_load == pytest.approx(0.7)
+    assert controller.get_status()["last_combustion_load"] == pytest.approx(0.7)
     assert controller.native_failure_diagnostics() is diagnostics
     assert controller.get_status()["policy_failures"] == 1
 

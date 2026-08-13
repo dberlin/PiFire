@@ -60,16 +60,15 @@ class Controller(ControllerBase):
     ):
         super().__init__(config, units, cycle_data)
 
-        self._activation_configuration = {
-            "controller": "mpc",
-            "config": copy.deepcopy(config or {}),
-            "cycle_data": copy.deepcopy(cycle_data),
-            "units": units,
-        }
         cfg = normalize_config(config)
         self.cfg = cfg
         self.u_max = float(cycle_data.get("u_max", 0.9))
-        self._trace_diagnostics = None
+        self.set_point = 0.0
+        self._trace_diagnostics: MpcTraceDiagnostics | None = None
+        self._trace_baseline_allocation: AllocationResult | None = None
+        self._trace_allocation: AllocationResult | None = None
+        self._closed = False
+
         horizon_steps = cfg["n_horizon"]
         if isinstance(horizon_steps, bool) or not isinstance(horizon_steps, int):
             raise RuntimeError("normalized n_horizon must be an integer")
@@ -77,143 +76,153 @@ class Controller(ControllerBase):
             horizon_steps=horizon_steps,
             u_max=self.u_max,
         )
-        self._trace_baseline_allocation: AllocationResult | None = None
-        self._trace_allocation: AllocationResult | None = None
+        grey_runtime: GreyLearningRuntime | None = None
+
+        def model_authority():
+            if grey_runtime is None:
+                return 0, None
+            return grey_runtime.model_authority()
+
+        def handle_policy_failure(_error):
+            if self._activation_runtime.active_record is not None:
+                if not self.activation_runtime_failure("native-solve-failure"):
+                    self.terminate_mpc_activation(
+                        "native-failure-compensation-failed"
+                    )
+
         self._pair_factory = MpcPairFactory(
             cfg,
             units,
             cycle_data,
             advance_calibration=self._calibration.advance,
-            model_authority=self._core_model_authority,
-            on_policy_failure=self._handle_core_policy_failure,
+            model_authority=model_authority,
+            on_policy_failure=handle_policy_failure,
         )
-        initial_pair = self._pair_factory.build(
-            self._pair_factory.configured(
-                cfg,
-                candidate_generation=0,
-                role_generation=0,
-            ),
-            authorized=True,
-        )
-        persistence = (
-            activation_persistence
-            if activation_persistence is not None
-            else ModelPersistenceWorker(
-                ControllerModelStore(),
-                logging.getLogger("control"),
-            )
-        )
-        self._activation_runtime = ActivationRuntime(
-            self._pair_factory,
-            initial_pair,
-            persistence,
-        )
-        self.cfg = self._core.config
-        self.u_max = self._core.u_max
-        warn_about_model(self.cfg)
-        self._closed = False
+
+        initial_pair: OwnedMpcPair | None = None
+        persistence: ModelPersistenceWorker | None = None
+        activation_runtime: ActivationRuntime | None = None
         try:
+            initial_pair = self._pair_factory.build(
+                self._pair_factory.configured(
+                    cfg,
+                    candidate_generation=0,
+                    role_generation=0,
+                ),
+                authorized=True,
+            )
+            persistence = (
+                activation_persistence
+                if activation_persistence is not None
+                else ModelPersistenceWorker(
+                    ControllerModelStore(),
+                    logging.getLogger("control"),
+                )
+            )
+            activation_runtime = ActivationRuntime(
+                self._pair_factory,
+                initial_pair,
+                persistence,
+            )
+            self._activation_runtime = activation_runtime
+            self._sync_learning_configuration()
+            self.u_max = self.active_control_pair.core.u_max
+            warn_about_model(self.cfg)
+
             from common.persistence.control_trace import append_control_trace
 
-            self._grey_learning_runtime = GreyLearningRuntime(
+            grey_runtime = GreyLearningRuntime(
                 pair_factory=self._pair_factory,
-                activation_runtime=self._activation_runtime,
+                activation_runtime=activation_runtime,
                 learning_enabled=cfg.get("enable_online_adaptation") is True,
                 units=units,
                 cycle_data=copy.deepcopy(cycle_data),
-                active_pair=lambda: self._activation_runtime.active_pair,
+                active_pair=self._active_pair_for_learning,
                 active_components=self._active_learning_components,
                 configuration=self._learning_configuration,
-                snapshot_parameters=lambda: self._core.snapshot_parameters(),
-                cook_history=lambda: tuple(self._core.history),
+                snapshot_parameters=self._snapshot_parameters_for_learning,
+                cook_history=self._history_for_learning,
                 sync_configuration=self._sync_learning_configuration,
                 append_trace=append_control_trace,
             )
-        except BaseException:
-            self._activation_runtime.close()
+            self._grey_learning_runtime = grey_runtime
+        except BaseException as construction_error:
+            cleanup_errors: list[BaseException] = []
+            if activation_runtime is not None:
+                try:
+                    activation_runtime.close()
+                except BaseException as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+            else:
+                if persistence is not None:
+                    try:
+                        persistence.flush_and_stop(timeout=0.1)
+                    except BaseException as cleanup_error:
+                        cleanup_errors.append(cleanup_error)
+                if initial_pair is not None:
+                    try:
+                        initial_pair.close()
+                    except BaseException as cleanup_error:
+                        cleanup_errors.append(cleanup_error)
+            for cleanup_error in cleanup_errors:
+                construction_error.add_note(
+                    f"Controller construction cleanup failed: {cleanup_error!r}"
+                )
             raise
 
     @property
-    def _core(self):
-        return self._activation_runtime.active_pair.core
-
-    @property
     def estimator(self):
-        return self._core.estimator
+        return self.active_control_pair.core.estimator
 
     @property
     def mpc(self):
-        return self._core.solver
+        return self.active_control_pair.core.solver
 
-    @property
-    def _set_point_c(self):
-        return self._core.set_point_c
-
-    @property
-    def _last_combustion_load(self):
-        return self._core.last_combustion_load
-
-    @property
-    def _applied_combustion_load(self):
-        return self._core.applied_combustion_load
-
-    @property
-    def _x_hat(self):
-        return self._core.estimate
-
-    @property
-    def _last_raw_combustion_load(self):
-        return self._core.last_raw_combustion_load
-
-    @property
-    def _last_equilibrium_load(self):
-        return self._core.last_equilibrium_load
-
-    @property
-    def _last_residual_load(self):
-        return self._core.last_residual_load
-
-    @property
-    def _last_feasibility(self):
-        return self._core.last_feasibility
-
-    @property
-    def _consecutive_policy_failures(self):
-        return self._core.consecutive_policy_failures
-
-    @property
-    def _history(self):
-        return self._core.history
-
-    @property
-    def _native_failure_diagnostics(self):
-        return self._core.native_failure_diagnostics
-
-    def _core_model_authority(self):
-        if not hasattr(self, "_grey_learning_runtime"):
-            return 0, None
-        return self._grey_learning_runtime.model_authority()
-
-
-    def _handle_core_policy_failure(self, _error):
-        if self._activation_runtime.active_record is not None:
-            if not self.activation_runtime_failure("native-solve-failure"):
-                self.terminate_mpc_activation("native-failure-compensation-failed")
-
+    def _active_pair_for_learning(self) -> OwnedMpcPair:
+        return self.active_control_pair
 
     def _active_learning_components(self) -> CandidatePair:
-        return CandidatePair(self._core.estimator, self._core.solver)
+        core = self.active_control_pair.core
+        return CandidatePair(core.estimator, core.solver)
 
     def _learning_configuration(self) -> MpcConfig:
-        return copy.deepcopy(self._core.config)
+        return copy.deepcopy(self.active_control_pair.core.config)
+
+    def _snapshot_parameters_for_learning(self):
+        return copy.deepcopy(
+            self.active_control_pair.core.snapshot_parameters()
+        )
+
+    def _history_for_learning(self):
+        return tuple(self.active_control_pair.core.history)
 
     def _sync_learning_configuration(self) -> None:
-        self.cfg = self._core.config
+        self.cfg = self.active_control_pair.core.config
+
+    def _synchronize_activation_transition(self, *, exact: bool = False) -> None:
+        self._sync_learning_configuration()
+        if exact:
+            self._grey_learning_runtime.sync_activation_generation(exact=True)
+        else:
+            self._grey_learning_runtime.sync_activation_generation()
+
+    def _activation_identity_changed(
+        self,
+        previous_pair: OwnedMpcPair,
+        previous_generation: int,
+        *,
+        pair_change_is_commit: bool = True,
+    ) -> bool:
+        runtime = self._activation_runtime
+        generation_changed = runtime.role_generation != previous_generation
+        pair_changed = runtime.active_pair is not previous_pair
+        return generation_changed or (pair_change_is_commit and pair_changed)
 
     def set_target(self, set_point):
         self.set_point = set_point
-        self._core.set_target(set_point)
-        self._calibration.set_target_c(self._core.set_point_c)
+        core = self.active_control_pair.core
+        core.set_target(set_point)
+        self._calibration.set_target_c(core.set_point_c)
 
     def get_control_period(self):
         return float(self.cfg["control_period"])
@@ -223,13 +232,6 @@ class Controller(ControllerBase):
 
     def wants_async(self):
         return True
-
-    @staticmethod
-    def _normalized_forecast_failure(error):
-        """Normalize model-library finite-value errors to the lifecycle reason."""
-        if isinstance(error, (ValueError, FloatingPointError, RuntimeError)) and "finite" in str(error).lower():
-            return ValueError("non-finite-forecast")
-        return error
 
     @property
     def active_control_pair(self) -> OwnedMpcPair:
@@ -260,9 +262,15 @@ class Controller(ControllerBase):
         return self._activation_runtime.install_candidate_pair_inert(pair, record)
 
     def authorize_candidate_pair(self, record: PreparedActivationRecord) -> bool:
-        authorized = self._activation_runtime.authorize_candidate_pair(record)
-        if authorized:
-            self._grey_learning_runtime.sync_activation_generation()
+        runtime = self._activation_runtime
+        previous_pair = runtime.active_pair
+        previous_generation = runtime.role_generation
+        authorized = runtime.authorize_candidate_pair(record)
+        if authorized or self._activation_identity_changed(
+            previous_pair,
+            previous_generation,
+        ):
+            self._synchronize_activation_transition()
         return authorized
 
     def compensate_candidate_pair(
@@ -271,13 +279,19 @@ class Controller(ControllerBase):
         record: PreparedActivationRecord,
         reason: str,
     ) -> bool:
-        compensated = self._activation_runtime.compensate_candidate_pair(
+        runtime = self._activation_runtime
+        previous_pair = runtime.active_pair
+        previous_generation = runtime.role_generation
+        compensated = runtime.compensate_candidate_pair(
             pair,
             record,
             reason,
         )
-        if compensated:
-            self._grey_learning_runtime.sync_activation_generation()
+        if compensated or self._activation_identity_changed(
+            previous_pair,
+            previous_generation,
+        ):
+            self._synchronize_activation_transition()
         return compensated
 
     def queue_prepared_activation(
@@ -293,8 +307,17 @@ class Controller(ControllerBase):
         )
 
     def advance_activation(self) -> bool:
-        advanced = self._activation_runtime.advance_activation()
-        self._grey_learning_runtime.sync_activation_generation()
+        runtime = self._activation_runtime
+        previous_pair = runtime.active_pair
+        previous_generation = runtime.role_generation
+        advanced = runtime.advance_activation()
+        if self._activation_identity_changed(
+            previous_pair,
+            previous_generation,
+            # An inert first-stage install changes the pair before generation commits.
+            pair_change_is_commit=False,
+        ):
+            self._synchronize_activation_transition()
         return advanced
 
     def terminate_mpc_activation(self, reason: str) -> None:
@@ -303,29 +326,52 @@ class Controller(ControllerBase):
     def submit_activation_confidence(
         self,
         record: ModelEvidenceRecord,
+        *,
+        preceding_evidence: Sequence[ModelEvidenceRecord] = (),
     ) -> DurableActivationReceipt:
-        return self._activation_runtime.submit_activation_confidence(record)
+        return self._activation_runtime.submit_activation_confidence(
+            record,
+            preceding_evidence=preceding_evidence,
+        )
 
     def restore_activation(
         self,
         persisted: ModelActivationState,
         records: Sequence[ModelEvidenceRecord],
     ) -> bool:
-        restored = self._activation_runtime.restore_activation(persisted, records)
-        if restored:
-            self._grey_learning_runtime.sync_activation_generation(exact=True)
+        runtime = self._activation_runtime
+        previous_pair = runtime.active_pair
+        previous_generation = runtime.role_generation
+        restored = runtime.restore_activation(persisted, records)
+        if restored or self._activation_identity_changed(
+            previous_pair,
+            previous_generation,
+        ):
+            self._synchronize_activation_transition(exact=True)
         return restored
 
     def activation_runtime_failure(self, reason: str) -> bool:
-        restored = self._activation_runtime.activation_runtime_failure(reason)
-        if restored:
-            self._grey_learning_runtime.sync_activation_generation()
+        runtime = self._activation_runtime
+        previous_pair = runtime.active_pair
+        previous_generation = runtime.role_generation
+        restored = runtime.activation_runtime_failure(reason)
+        if restored or self._activation_identity_changed(
+            previous_pair,
+            previous_generation,
+        ):
+            self._synchronize_activation_transition()
         return restored
 
     def rollback_activation(self, reason: str) -> bool:
-        restored = self._activation_runtime.rollback_activation(reason)
-        if restored:
-            self._grey_learning_runtime.sync_activation_generation()
+        runtime = self._activation_runtime
+        previous_pair = runtime.active_pair
+        previous_generation = runtime.role_generation
+        restored = runtime.rollback_activation(reason)
+        if restored or self._activation_identity_changed(
+            previous_pair,
+            previous_generation,
+        ):
+            self._synchronize_activation_transition()
         return restored
 
     def drain_activation_events(self) -> tuple[ModelEvidenceRecord, ...]:
@@ -344,63 +390,75 @@ class Controller(ControllerBase):
         return self._grey_learning_runtime.poll_learning_off_path(live_origin=live_origin)
 
     def get_status(self):
+        core = self.active_control_pair.core
+        active_pair = self.active_control_pair
         model_meta = self._grey_learning_runtime.model_metadata
+        estimate = core.estimate
+        feasibility = core.last_feasibility
+        active_record = self._activation_runtime.active_record
+        terminated_reason = self._activation_runtime.terminated_reason
         return {
-            "set_point": finite_float(getattr(self, "set_point", self._set_point_c)),
-            "set_point_c": finite_float(self._set_point_c),
-            "last_combustion_load": finite_float(self._last_combustion_load),
-            "last_raw_combustion_load": optional_float(self._last_raw_combustion_load),
-            "last_equilibrium_load": optional_float(self._last_equilibrium_load),
-            "last_residual_load": optional_float(self._last_residual_load),
-            "applied_combustion_load": finite_float(self._applied_combustion_load),
+            "set_point": finite_float(self.set_point),
+            "set_point_c": finite_float(core.set_point_c),
+            "last_combustion_load": finite_float(core.last_combustion_load),
+            "last_raw_combustion_load": optional_float(
+                core.last_raw_combustion_load
+            ),
+            "last_equilibrium_load": optional_float(
+                core.last_equilibrium_load
+            ),
+            "last_residual_load": optional_float(core.last_residual_load),
+            "applied_combustion_load": finite_float(
+                core.applied_combustion_load
+            ),
             "policy": "acados-grey",
             "policy_kind": "acados-grey",
             "n_horizon": int(self.cfg["n_horizon"]),
-            # Non-zero means update() is returning a held command rather than a
-            # computed one, so the number this reports is how many control
-            # periods the grill has been running open-loop.
-            "policy_failures": int(self._consecutive_policy_failures),
+            "policy_failures": int(core.consecutive_policy_failures),
             "u_max": finite_float(self.u_max),
-            "x_hat": None
-            if self._x_hat is None
-            else tuple(finite_float(v) for v in np.asarray(self._x_hat).reshape(-1)),
-            # The __dict__ fallback this replaces reached the pid_cycle_data mqtt
-            # topic only through notify()'s nested-dict recursion over this same
-            # attribute; publish it explicitly so that topic keeps working.
-            # cycle_data is core.__dict__'s live reference to settings["cycle_data"]
-            # (see _build_core) -- sanitized_copy hands back a copy, not that
-            # live settings mapping.
+            "x_hat": (
+                None
+                if estimate is None
+                else tuple(
+                    finite_float(value)
+                    for value in np.asarray(estimate).reshape(-1)
+                )
+            ),
             "cycle_data": sanitized_copy(self.cycle_data),
-            # None until a model has been adopted this process (fresh install,
-            # or before the first fit completes): a model identified at one
-            # temperature does not describe another, so the band it was fit
-            # over travels with the fit error rather than being assumed global.
-            "model": None
-            if model_meta is None
-            else {
-                "band_c": [finite_float(v) for v in model_meta["band_c"]],
-                "rmse": optional_float(model_meta["rmse"]),
-            },
-            "feasibility": None if self._last_feasibility is None else self._last_feasibility.as_status(),
+            "model": (
+                None
+                if model_meta is None
+                else {
+                    "band_c": [
+                        finite_float(value) for value in model_meta["band_c"]
+                    ],
+                    "rmse": optional_float(model_meta["rmse"]),
+                }
+            ),
+            "feasibility": (
+                None if feasibility is None else feasibility.as_status()
+            ),
             "learning": self._grey_learning_runtime.learning_status(),
             "activation": {
                 "active_kind": _snapshot.GREY_BOX_KIND,
-                "active_digest": self.active_control_pair.descriptor.model_digest,
+                "active_digest": active_pair.descriptor.model_digest,
                 "decision_id": (
                     None
-                    if self._activation_runtime.active_record is None
-                    else self._activation_runtime.active_record.decision_id
+                    if active_record is None
+                    else active_record.decision_id
                 ),
-                "role_generation": self.active_control_pair.descriptor.role_generation,
+                "role_generation": active_pair.descriptor.role_generation,
                 "failed_digest": None,
                 "failed_generation": None,
-                "last_safe_command": finite_float(self._last_combustion_load),
+                "last_safe_command": finite_float(
+                    core.last_combustion_load
+                ),
                 "fallback_kind": (
                     _snapshot.GREY_BOX_KIND
-                    if self._activation_runtime.terminated_reason is not None
+                    if terminated_reason is not None
                     else None
                 ),
-                "fallback_reason": self._activation_runtime.terminated_reason,
+                "fallback_reason": terminated_reason,
             },
         }
 
@@ -446,11 +504,11 @@ class Controller(ControllerBase):
         self._calibration.register_result(result)
 
     def set_output(self, applied: AppliedOutput) -> None:
-        self._core.set_output(applied)
+        self.active_control_pair.core.set_output(applied)
         self._calibration.register_output(applied)
 
     def update(self, current):
-        step = self._core.update(current)
+        step = self.active_control_pair.core.update(current)
         self._trace_diagnostics = step.diagnostics
         self._trace_baseline_allocation = step.baseline_allocation
         self._trace_allocation = step.allocation
@@ -469,10 +527,10 @@ class Controller(ControllerBase):
         return self._calibration.decision
 
     def native_failure_diagnostics(self) -> SolverDiagnostics | None:
-        return self._core.native_failure_diagnostics
+        return self.active_control_pair.core.native_failure_diagnostics
 
     def close(self):
-        """Release learning, native solver, estimator, and persistence exactly once."""
+        """Stop learning, persistence, and native owners exactly once."""
         if self._closed:
             return
         self._closed = True
@@ -486,4 +544,7 @@ class Controller(ControllerBase):
         except BaseException as error:
             errors.append(error)
         if errors:
-            raise RuntimeError("could not close complete MPC controller ownership") from errors[0]
+            raise BaseExceptionGroup(
+                "could not close complete MPC controller ownership",
+                errors,
+            )

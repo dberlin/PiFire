@@ -48,6 +48,16 @@ def main() -> int:
 
     model_store = ControllerModelStore(reader=read_model, writer=write_model)
     core = Controller(mpc_config, "F", settings["cycle_data"])
+    completed_frames = 0
+    observe_frame = core.observe_frame
+
+    def observe_and_count(observation):
+        nonlocal completed_frames
+        outcome = observe_frame(observation)
+        completed_frames += 1
+        return outcome
+
+    core.observe_frame = observe_and_count
     runner = SyncControllerRunner(core)
     original_build_runner = runner_module.build_runner
     mode: HoldMode | None = None
@@ -77,13 +87,12 @@ def main() -> int:
             mode.on_tick(clock_now(), 180.0, grill.get_output_status())
             clock_advance(1.0)
 
-        teardown_history = getattr(core, "_teardown_history", None)
-        completed_frames = len(getattr(teardown_history, "observations", ()))
         if completed_frames < 1:
             raise RuntimeError("Hold did not deliver a completed framed observation")
         if not any(name in {"auger_on", "auger_off"} for name, _args in grill.calls):
             raise RuntimeError("Hold did not actuate the auger")
-        if core._history.maxlen is None or len(core._history) < 1:
+        history = core.cook_history()
+        if not history:
             raise RuntimeError("acados solve/applied-output feedback did not reach the controller")
 
         mode.teardown(180.0)
@@ -91,11 +100,11 @@ def main() -> int:
         checkpoint = model_store.load("mpc")
         if checkpoint is None or checkpoint.get("cook_refit", {}).get("latest") != "insufficient":
             raise RuntimeError(f"final teardown checkpoint did not record the bounded refit outcome: {checkpoint!r}")
-        if not core._closed:
+        if not core.active_control_pair.core.close_complete:
             raise RuntimeError("native controller resources remained open after teardown")
         print(
             "acados Hold smoke passed: "
-            f"frames={completed_frames} samples={len(core._history)} "
+            f"frames={completed_frames} samples={len(history)} "
             f"refit={checkpoint['cook_refit']['latest']} revision={checkpoint['revision']}"
         )
         return 0

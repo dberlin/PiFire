@@ -53,6 +53,7 @@ class _Persistence(ModelPersistenceWorker):
         self.confidence = []
         self.confidence_preceding = []
         self.accept_confidence = True
+        self.confidence_durable = True
         self.accept_evidence = True
         self.accept_phase = True
 
@@ -65,7 +66,7 @@ class _Persistence(ModelPersistenceWorker):
         self.confidence_preceding.append(preceding_evidence)
         receipt = DurableActivationReceipt(accepted=self.accept_confidence)
         if self.accept_confidence:
-            receipt._complete(durable=True)
+            receipt._complete(durable=self.confidence_durable)
         return receipt
 
     def submit_activation_phase(self, record, *, expected_phase):
@@ -1071,6 +1072,10 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
         ("snapshot", "reviewed-candidate-checkpoint-invalid"),
         ("checkpoint", "reviewed-candidate-checkpoint-not-durable"),
         ("confidence", "activation-confidence-not-durable"),
+        (
+            "confidence-not-durable",
+            "activation-confidence-not-durable",
+        ),
     ),
 )
 def test_reviewed_checkpoint_failures_preserve_active_owner_and_close_candidate(
@@ -1126,6 +1131,8 @@ def test_reviewed_checkpoint_failures_preserve_active_owner_and_close_candidate(
         evaluation = replace(evaluation, challenger_digest="f" * 64)
     elif failure == "confidence":
         harness.persistence.accept_confidence = False
+    elif failure == "confidence-not-durable":
+        harness.persistence.confidence_durable = False
     instances[0].prepared = preparation
     instances[0].evaluation = evaluation
     incumbent = harness.activation.active_pair
