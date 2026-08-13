@@ -21,7 +21,7 @@ import os
 import json
 import subprocess
 
-from common.datastore_accessors import read_settings
+from common.persistence.runtime import read_settings
 from common.system import probe_os_info, refresh_os_info
 
 """

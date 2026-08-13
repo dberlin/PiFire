@@ -20,13 +20,15 @@ import tempfile
 import pytest
 
 from common import datastore
-from common.datastore_accessors import (
+from common.persistence.control import (
     execute_control_writes,
     read_control,
+    write_control_snapshot,
+)
+from common.persistence.runtime import (
     read_settings,
     init_status,
     read_status,
-    write_control_snapshot,
     write_settings_store,
     write_status,
 )

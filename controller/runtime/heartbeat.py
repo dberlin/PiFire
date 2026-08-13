@@ -19,7 +19,7 @@ poll costs, though, depends entirely on its shape:
 This module is the second shape.
 """
 
-from common.datastore_accessors import CONTROL_HEARTBEAT_KEY
+from common.persistence.runtime import CONTROL_HEARTBEAT_KEY
 
 #: How often the control process refreshes the stamp. Both call sites run far
 #: hotter than this (the idle tick every 0.1s, the mode work cycle every

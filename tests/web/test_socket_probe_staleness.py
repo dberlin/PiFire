@@ -15,7 +15,7 @@ import json
 
 from common.web_contracts.core import ProbeDataPayload, ProbeStatusPayload
 from common import datastore
-from common.datastore_accessors import (
+from common.persistence.runtime import (
     flush_current,
     init_status,
     read_current,

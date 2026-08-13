@@ -5,19 +5,23 @@ import sqlite3
 import pytest
 
 from common.control_delta import control_delta
-from common.datastore_accessors import (
+from common.persistence.control import (
+    read_pending_control_writes,
+)
+from common.persistence.runtime import (
     clear_warnings_through,
+    read_warnings_snapshot,
+    write_warning,
+)
+from common.datastore_accessors import (
     delete_wizard_install_info,
     get_updater_install_status,
     get_wizard_install_status,
     load_os_info,
     load_wizard_install_info,
-    read_pending_control_writes,
-    read_warnings_snapshot,
     set_updater_install_status,
     set_wizard_install_status,
     store_wizard_install_info,
-    write_warning,
 )
 from controller.runtime.store import SqliteStore
 

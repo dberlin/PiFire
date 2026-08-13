@@ -28,7 +28,7 @@ import json
 import os
 
 from common.common import BACKUP_PATH, read_generic_json, write_generic_json, write_log
-from common.datastore_accessors import (
+from common.persistence.runtime import (
     read_pellet_db,
     read_settings,
     write_pellet_db,

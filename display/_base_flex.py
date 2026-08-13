@@ -57,9 +57,11 @@ from PIL import Image, ImageFilter
 from common.common import read_generic_json, display_sleep_timeout
 from common.modes import Mode
 from common.control_delta import control_delta
-from common.datastore_accessors import (
+from common.persistence.control import (
     read_control,
     enqueue_control_delta,
+)
+from common.persistence.runtime import (
     read_settings,
     write_settings,
     read_status,

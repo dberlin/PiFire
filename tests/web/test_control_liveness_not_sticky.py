@@ -39,13 +39,15 @@ import pytest
 
 from common.app import CONTROL_DOWN_ERROR
 from common.common import ErrorKind
-from common.datastore_accessors import (
+from common.persistence.control import (
+    default_control,
+    write_control_snapshot,
+)
+from common.persistence.runtime import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
-    default_control,
     init_status,
     read_errors,
-    write_control_snapshot,
     write_errors,
     write_generic_key,
     write_pellet_db,
@@ -87,7 +89,7 @@ def _check(consumers, alive):
 
 def _socket_tick(consumers):
     """One socket_dash_data payload, as the broadcast loop would build it."""
-    from common.datastore_accessors import read_pellets_store, read_settings_store
+    from common.persistence.runtime import read_pellets_store, read_settings_store
 
     settings = read_settings_store()
     pelletdb = read_pellets_store()

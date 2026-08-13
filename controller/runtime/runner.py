@@ -1678,7 +1678,7 @@ def _raise_banner(text, logger=None):
     """
     try:
         from common.common import ErrorKind
-        from common.datastore_accessors import read_errors, write_errors
+        from common.persistence.runtime import read_errors, write_errors
 
         errors = read_errors(ErrorKind.CONTROL)
         errors.append(text)

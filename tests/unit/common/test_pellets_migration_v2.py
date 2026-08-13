@@ -114,7 +114,7 @@ def test_running_the_migration_twice_is_identical_to_running_it_once():
 
 def test_the_store_upgrade_carries_a_v1_database_to_v2(ds):
     from common import datastore
-    from common.datastore_accessors import read_pellets_store, write_pellets_store
+    from common.persistence.runtime import read_pellets_store, write_pellets_store
 
     write_pellets_store(_v1_db())
 

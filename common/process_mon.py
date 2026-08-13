@@ -28,7 +28,7 @@ import subprocess
 import logging
 from common.common import create_logger, log_path
 from common.modes import Mode
-from common.datastore_accessors import read_control, write_control_snapshot
+from common.persistence.control import read_control, write_control_snapshot
 from common.system import is_real_hardware
 from notify.notifications import send_notifications
 

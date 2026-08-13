@@ -1,10 +1,12 @@
 import pytest
 
-from common.datastore_accessors import (
+from common.persistence.control import (
     execute_control_writes,
     read_control,
-    read_settings,
     write_control_snapshot,
+)
+from common.persistence.runtime import (
+    read_settings,
     write_settings,
 )
 from common.modes import Mode

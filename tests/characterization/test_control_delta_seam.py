@@ -8,9 +8,11 @@ import pytest
 from common import common as c
 from common import datastore_accessors as dsa
 from common.control_delta import CONTROL_DELTA_KEY, control_delta
-from common.datastore_accessors import (
+from common.persistence.control import (
     default_control,
     read_control,
+)
+from common.persistence.runtime import (
     write_settings_store,
 )
 from common.defaults import default_settings

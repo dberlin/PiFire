@@ -508,7 +508,7 @@ def default_control():
     # module -- a genuine mutual dependency in the existing code (a "defaults"
     # builder reaching into the datastore). Importing at module scope would be a
     # circular import; importing here keeps the cycle out of import time.
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     settings = read_settings()
 

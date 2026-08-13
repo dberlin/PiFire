@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from common import datastore, pellets_schema
-from common.datastore_accessors import read_pellets_store, write_pellets_store
+from common.persistence.runtime import read_pellets_store, write_pellets_store
 from common.defaults import default_pellets
 from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
 

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from blueprints.api import routes
-from common.datastore_accessors import (
+from common.persistence.runtime import (
     read_status,
     write_status,
     read_settings,

@@ -10,7 +10,7 @@ from common.controller_model_state import (
     SCHEMA_VERSION,
     ControllerModelStore,
 )
-from common.datastore_accessors import write_generic_key
+from common.persistence.runtime import write_generic_key
 from blueprints.api import routes
 from controller.fopdt_identifier import (
     MIN_ACCEPTED,

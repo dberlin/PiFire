@@ -22,20 +22,18 @@ display-command assertions here use list form. All other observable state
 (grill calls, notifications, final control mode/flags, metrics) is
 store-independent or JSON-clean and matches the golden values exactly.
 
-SETTINGS ARE NOT SQLITE-BACKED THROUGH THIS SEAM: in PiFire `read_settings()`
-reads settings from `common.common.read_settings`, which the store just
-delegates to. So the test injects the scenario's settings by monkeypatching
-`common.common.read_settings`; this does not weaken the "real store" guarantee
-for the control/status/current/metrics/queue paths, which are the only paths
-this suite exercises through the real DB.
+SETTINGS ARE SQLITE-BACKED THROUGH THIS SEAM: scenario fixtures are persisted
+directly because their fractional durations intentionally bypass the public
+write validator, while `SqliteStore.read_settings()` still exercises the same
+`common.persistence.runtime` read path as production.
 
 Each test gets its own temp-file SQLite DB (via the `store` fixture), so tests
 are fully isolated and hermetic -- no shared server, no residue to restore.
 """
 
 import pytest
+from common.persistence import runtime as runtime_persistence
 
-import common.datastore_accessors as _ccommon
 
 from tests.characterization.harness import run_mode
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
@@ -64,10 +62,7 @@ def run_sqlite_scenario(
     scenario assertions are identical to the golden tests (modulo the display
     queue's JSON tuple->list round-trip -- see module docstring)."""
 
-    # Settings are not routed through the store in PiFire (see module
-    # docstring): inject the scenario's settings so every
-    # ctx.store.read_settings() (-> common.read_settings) returns them.
-    monkeypatch.setattr(_ccommon, "read_settings", lambda *a, **k: settings)
+    runtime_persistence.write_settings_store(settings)
 
     store.system_commands().flush()
     store.system_output().flush()

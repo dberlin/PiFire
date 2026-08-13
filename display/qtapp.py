@@ -18,7 +18,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from common.common import read_generic_json
-from common.datastore_accessors import read_current, read_status
+from common.persistence.runtime import read_current, read_status
 from display.qtbackend import PiFireBackend
 from display.screen_power import ScreenPowerController
 
@@ -51,7 +51,7 @@ def build_engine(config, backend):
 def build_backend(config):
     """Construct the backend wired to the framework's data + command layer."""
     from display.qtquick_flex import Display
-    from common.datastore_accessors import read_settings_store
+    from common.persistence.runtime import read_settings_store
     from common.common import display_sleep_timeout
 
     def _accent_fn():

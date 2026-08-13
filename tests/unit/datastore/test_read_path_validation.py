@@ -10,7 +10,7 @@ to start a control loop over.
 from unittest import mock
 
 from common import datastore
-from common.datastore_accessors import read_settings, write_settings_store
+from common.persistence.runtime import read_settings, write_settings_store
 
 
 def test_a_valid_tree_reports_nothing(ds, caplog):

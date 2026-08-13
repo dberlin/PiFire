@@ -3,7 +3,7 @@ import time
 from flask import jsonify, request
 
 from common.app import prepare_annotations
-from common.datastore_accessors import read_settings
+from common.persistence.runtime import read_settings
 from file_mgmt.cookfile import prepare_chartdata
 from common.web_contracts.content import HistoryChartData, validated_content_json
 

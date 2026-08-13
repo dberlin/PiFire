@@ -14,15 +14,19 @@ from blueprints.wizard.wizard import (
 )
 from common.app import get_supported_cmds, get_system_command_output, process_command
 from common.common import read_wizard, write_log
+from common.persistence.control import (
+    read_control,
+)
+from common.persistence.runtime import (
+    read_settings,
+    write_settings,
+)
 from common.datastore_accessors import (
     delete_wizard_install_info,
     get_wizard_install_status,
     load_wizard_install_info,
-    read_control,
-    read_settings,
     set_wizard_install_status,
     store_wizard_install_info,
-    write_settings,
 )
 from common.install_log import read_install_log
 from common.i2c_bus import (

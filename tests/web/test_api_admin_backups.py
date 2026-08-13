@@ -128,7 +128,7 @@ def test_restoring_settings_applies_them_and_restarts(env):
     )
     assert resp.status_code == 200
 
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     assert read_settings()["globals"]["grill_name"] == "RestoredGrill"
     assert env["calls"] == ["restart_scripts"]
@@ -137,7 +137,7 @@ def test_restoring_settings_applies_them_and_restarts(env):
 def test_restoring_the_pellet_database_does_not_restart(env):
     """Matches Flask: settings are read once at boot by processes this request
     cannot reach; the pellet database is re-read on demand."""
-    from common.datastore_accessors import read_pellet_db
+    from common.persistence.runtime import read_pellet_db
 
     with open(os.path.join(env["dir"], "PelletDB_01-01-26_120000.json"), "w", encoding="utf-8") as h:
         json.dump(read_pellet_db(), h)
@@ -154,7 +154,7 @@ def test_a_malformed_pellet_backup_is_refused_and_the_store_is_untouched(env):
     """The settings branch of this route validates and refuses a bad backup
     with a 400. The pellet branch wrote whatever JSON the file held straight
     into the live store, and the same UI is what let the operator upload it."""
-    from common.datastore_accessors import read_pellets_store
+    from common.persistence.runtime import read_pellets_store
 
     before = read_pellets_store()
     with open(os.path.join(env["dir"], "PelletDB_01-01-26_130000.json"), "w", encoding="utf-8") as h:
@@ -172,7 +172,7 @@ def test_a_malformed_pellet_backup_is_refused_and_the_store_is_untouched(env):
 
 
 def test_a_well_formed_pellet_backup_still_restores(env):
-    from common.datastore_accessors import read_pellets_store
+    from common.persistence.runtime import read_pellets_store
     from common.defaults import default_pellets
 
     payload = default_pellets()
@@ -204,7 +204,7 @@ def test_restore_refuses_a_real_backup_outside_the_folder(env):
     assert resp.status_code == 404
     assert env["calls"] == []
 
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     assert read_settings()["globals"]["grill_name"] != "PWNED"
 

@@ -24,7 +24,7 @@ from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
 from common.control_delta import control_delta
-from common.datastore_accessors import enqueue_control_delta, read_control
+from common.persistence.control import enqueue_control_delta, read_control
 from common.file_browser import browse_files, resolve_managed_file
 from common.modes import Mode
 from common.web_contracts.content import (

@@ -126,7 +126,7 @@ def test_a_running_mode_reports_endtime_c_as_zero(ds, client):
 
 
 def test_listing_carries_units_and_auger_rate(ds, client):
-    from common.datastore_accessors import read_settings, write_settings
+    from common.persistence.runtime import read_settings, write_settings
 
     settings = read_settings()
     settings["globals"]["units"] = "C"
@@ -139,7 +139,8 @@ def test_listing_carries_units_and_auger_rate(ds, client):
 
 
 def test_estimates_use_the_configured_auger_rate(ds, client):
-    from common.datastore_accessors import flush_metrics, read_settings, write_settings
+    from common.persistence.runtime import read_settings, write_settings
+    from common.datastore_accessors import flush_metrics
 
     flush_metrics()
     settings = read_settings()

@@ -137,7 +137,7 @@ def test_the_control_process_write_path_accepts_a_stored_database(ds):
     """controller/runtime/store.py calls write_pellet_db every 60s and at each
     mode end, updating exactly these two fields. The gate raises, so a shape it
     rejected would take down the control loop rather than a request."""
-    from common.datastore_accessors import read_pellets_store, write_pellet_db
+    from common.persistence.runtime import read_pellets_store, write_pellet_db
 
     write_pellet_db(_v2_db())
 

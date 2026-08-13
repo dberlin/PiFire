@@ -26,7 +26,7 @@ from flask_qrcode import QRcode
 from werkzeug.exceptions import InternalServerError
 from common import datastore
 from common.common import ErrorKind, create_logger, log_path
-from common.datastore_accessors import flush_errors, read_settings
+from common.persistence.runtime import flush_errors, read_settings
 from common.system import is_real_hardware
 import logging
 

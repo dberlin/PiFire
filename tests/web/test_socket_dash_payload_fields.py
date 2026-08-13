@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from common.web_contracts.core import DashSocketPayload
 
 
-from common.datastore_accessors import (
+from common.persistence.runtime import (
     flush_current,
     init_status,
     read_pellet_db,
@@ -28,7 +28,7 @@ from common.datastore_accessors import (
 
 def _dash_data(**status_over):
     from blueprints.mobile import socket_io
-    from common.datastore_accessors import read_status, write_status
+    from common.persistence.runtime import read_status, write_status
 
     # Same seeding _get_dash_data needs elsewhere: status/current/device-info do
     # not self-heal the way the settings and pellet blobs do. Any status

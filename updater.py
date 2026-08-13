@@ -32,11 +32,13 @@ from common.common import (
 from common import datastore
 from common.install_log import INSTALL_FAILED_PERCENT
 from common.acados_build import run_acados_build
+from common.persistence.runtime import (
+    read_settings,
+    write_settings,
+)
 from common.datastore_accessors import (
     set_updater_install_status,
-    read_settings,
     set_wizard_install_status,
-    write_settings,
 )
 from common.web_ui_build import (
     BUILD_FAIL_MARKER,

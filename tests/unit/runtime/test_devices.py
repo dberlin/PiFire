@@ -21,7 +21,8 @@ import json
 
 from common import datastore
 from common.common import ErrorKind
-from common.datastore_accessors import read_control, read_errors, read_pellet_db, write_errors
+from common.persistence.control import read_control
+from common.persistence.runtime import read_errors, read_pellet_db, write_errors
 
 
 def _settings(**overrides):

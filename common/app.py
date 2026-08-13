@@ -13,12 +13,16 @@ from common.common import (
 )
 from common.modes import Mode
 from common.control_delta import control_delta
-from common.datastore_accessors import (
+from common.persistence.control import (
     enqueue_control_delta,
-    read_all_metrics,
-    read_history,
+)
+from common.persistence.runtime import (
     read_settings,
     write_settings,
+)
+from common.datastore_accessors import (
+    read_all_metrics,
+    read_history,
 )
 from common.defaults import metrics_items
 from common.api_commands import process_command

@@ -27,16 +27,18 @@ from common.common import (
 )
 from common.control_delta import ControlDeltaError, control_delta, validated_mpc_calibration_command
 from common.modes import Mode
-from common.datastore_accessors import (
+from common.persistence.control import (
     mpc_calibration_command_revision,
     queue_mpc_calibration_command,
     read_control,
+    enqueue_control_delta,
+)
+from common.persistence.runtime import (
     read_current,
     read_current_snapshot,
     read_pellet_db,
     read_settings,
     read_status,
-    enqueue_control_delta,
     write_settings,
 )
 from common.sqlite_queue import SqliteQueue

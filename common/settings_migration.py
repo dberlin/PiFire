@@ -38,7 +38,7 @@ from common.common import (
     write_generic_json,
     write_log,
 )
-from common.datastore_accessors import write_settings_store, write_warning
+from common.persistence.runtime import write_settings_store, write_warning
 from common.defaults import default_probe_config, default_settings
 
 

@@ -8,11 +8,13 @@ from pydantic import ValidationError
 from flask import Response, abort, jsonify, request
 from common.common import write_log, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
-from common.datastore_accessors import (
-    read_settings,
-    write_settings,
+from common.persistence.control import (
     read_control,
     enqueue_control_delta,
+)
+from common.persistence.runtime import (
+    read_settings,
+    write_settings,
     read_pellet_db,
     read_current,
     read_status,

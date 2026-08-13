@@ -20,7 +20,7 @@ import pathlib
 
 from flask import current_app
 from common.common import generate_uuid, convert_temp
-from common.datastore_accessors import read_settings
+from common.persistence.runtime import read_settings
 from common.file_browser import file_details, list_managed_files
 from file_mgmt.common import read_json_file_data
 

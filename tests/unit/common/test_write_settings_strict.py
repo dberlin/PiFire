@@ -12,7 +12,7 @@ import copy
 
 import pytest
 
-from common.datastore_accessors import read_settings, write_settings, write_settings_store
+from common.persistence.runtime import read_settings, write_settings, write_settings_store
 from common.defaults import default_settings
 from common.settings_schema import SettingsValidationError
 

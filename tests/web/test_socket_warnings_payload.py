@@ -1,4 +1,4 @@
-from common.datastore_accessors import (
+from common.persistence.runtime import (
     flush_current,
     init_status,
     read_pellet_db,

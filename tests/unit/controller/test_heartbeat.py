@@ -18,7 +18,7 @@ Two properties are load-bearing and pinned here:
 """
 
 import controller.runtime.heartbeat as heartbeat_mod
-from common.datastore_accessors import CONTROL_HEARTBEAT_KEY, CONTROL_HEARTBEAT_STALE_AFTER
+from common.persistence.runtime import CONTROL_HEARTBEAT_KEY, CONTROL_HEARTBEAT_STALE_AFTER
 from controller.runtime.clock import ManualClock
 from controller.runtime.heartbeat import HEARTBEAT_WRITE_INTERVAL, stamp_control_heartbeat
 from controller.runtime.store import InMemoryStore

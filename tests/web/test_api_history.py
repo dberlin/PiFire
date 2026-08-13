@@ -22,7 +22,7 @@ def test_chart_defaults_to_the_saved_window(ds, client):
 def test_chart_is_read_only(ds, client):
     """Unlike the legacy POST /history/refresh, asking for a window must NOT
     rewrite the user's saved history_page.minutes setting."""
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     before = read_settings()["history_page"]["minutes"]
     client.get("/api/history/chart?minutes=999")

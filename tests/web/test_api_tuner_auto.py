@@ -9,7 +9,7 @@ import pytest
 
 
 def control_now():
-    from common.datastore_accessors import execute_control_writes, read_control
+    from common.persistence.control import execute_control_writes, read_control
 
     execute_control_writes()
     return read_control()
@@ -25,7 +25,7 @@ def grill_left_stopped(ds):
 
 def set_mode(mode):
     from common.control_delta import control_delta
-    from common.datastore_accessors import enqueue_control_delta, execute_control_writes
+    from common.persistence.control import enqueue_control_delta, execute_control_writes
 
     enqueue_control_delta(control_delta(set_values={"mode": mode}), origin="test")
     execute_control_writes()
@@ -85,7 +85,7 @@ def seed_current(primary=None, food=None, aux=None):
     write_current transforms a probe_history wrapper into the {P, F, AUX} blob
     (confirmed live: P=primary, F=food, AUX=aux, keyed by label), so seeding
     means handing it that wrapper rather than the blob."""
-    from common.datastore_accessors import write_current
+    from common.persistence.runtime import write_current
 
     write_current(
         {

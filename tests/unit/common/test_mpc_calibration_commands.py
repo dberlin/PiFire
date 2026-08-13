@@ -6,7 +6,7 @@ import pytest
 
 from common import api_commands, datastore_accessors
 from common.control_delta import ControlDeltaError, control_delta
-from common.datastore_accessors import (
+from common.persistence.control import (
     execute_control_writes,
     mpc_calibration_command_state,
     queue_mpc_calibration_command,

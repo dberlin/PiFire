@@ -25,13 +25,17 @@ from common.common import (  # Common Library for writing settings
 )
 from common import datastore
 from common.control_delta import control_delta
+from common.persistence.control import (
+    read_control,
+    enqueue_control_delta,
+)
+from common.persistence.runtime import (
+    read_settings,
+    write_settings,
+)
 from common.datastore_accessors import (
     set_wizard_install_status,
     set_updater_install_status,
-    read_control,
-    read_settings,
-    enqueue_control_delta,
-    write_settings,
     load_wizard_install_info,
 )
 from common.defaults import set_probe_map

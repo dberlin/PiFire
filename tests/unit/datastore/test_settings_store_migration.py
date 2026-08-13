@@ -9,7 +9,7 @@ models -- which the write-time repair strips, silently, on the next save.
 import copy
 
 from common import datastore
-from common.datastore_accessors import read_settings_store, write_settings_store
+from common.persistence.runtime import read_settings_store, write_settings_store
 from common.defaults import default_settings
 
 
@@ -70,7 +70,7 @@ def test_the_migrated_tree_survives_a_validating_write(ds):
     and substituted the i2c_bus default -- a configured CP2112 adapter silently
     became the board's own pins.
     """
-    from common.datastore_accessors import write_settings
+    from common.persistence.runtime import write_settings
 
     _legacy_stored_settings(ds)
     datastore._upgrade_settings_in_store()
@@ -144,7 +144,7 @@ def test_reading_settings_does_not_migrate(ds):
     pins that every entry point calls it)."""
     _legacy_stored_settings(ds)
 
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     settings = read_settings()
 

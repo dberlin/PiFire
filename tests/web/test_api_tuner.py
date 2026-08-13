@@ -22,7 +22,7 @@ def control_now():
     have produced. The endpoint's own RESPONSE is computed from intent and needs
     no drain -- only reads of the persisted control:general do.
     """
-    from common.datastore_accessors import execute_control_writes, read_control
+    from common.persistence.control import execute_control_writes, read_control
 
     execute_control_writes()
     return read_control()
@@ -44,11 +44,11 @@ def grill_left_stopped(ds):
 
 def set_mode(mode):
     from common.control_delta import control_delta
-    from common.datastore_accessors import enqueue_control_delta
+    from common.persistence.control import enqueue_control_delta
 
     enqueue_control_delta(control_delta(set_values={"mode": mode}), origin="test")
     #  Drain immediately so a test's precondition is live before it POSTs.
-    from common.datastore_accessors import execute_control_writes
+    from common.persistence.control import execute_control_writes
 
     execute_control_writes()
 
@@ -294,7 +294,7 @@ PROFILE = {"name": "Test Probe", "a": 0.0007343140544, "b": 0.0002157437229, "c"
 
 
 def test_saving_a_profile_stores_it_under_a_new_id(ds, client):
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     body = client.post("/api/tuner/profile", json=PROFILE).get_json()
     assert body["result"] == "OK"
@@ -308,7 +308,7 @@ def test_saving_a_profile_stores_it_under_a_new_id(ds, client):
 
 
 def test_applying_a_profile_attaches_it_to_the_probe(ds, client):
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     label = read_settings()["probe_settings"]["probe_map"]["probe_info"][0]["label"]
     body = client.post("/api/tuner/profile", json={**PROFILE, "apply_to": label}).get_json()
@@ -323,7 +323,7 @@ def test_applying_to_an_unknown_probe_is_refused_and_saves_nothing(ds, client):
     """Flask's _settings_addprofile loops looking for the label and silently
     does nothing when it does not match -- reporting success for a profile that
     was saved but never applied."""
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     before = set(read_settings()["probe_settings"]["probe_profiles"])
     resp = client.post("/api/tuner/profile", json={**PROFILE, "apply_to": "Nonexistent"})

@@ -50,12 +50,15 @@ from app import app as flask_app
 from common import datastore
 from common.common import ErrorKind
 from common.web_contracts.core import PelletSocketPayload
-from common.datastore_accessors import (
+from common.persistence.control import (
+    execute_control_writes,
+    read_control,
+    write_control_snapshot,
+)
+from common.persistence.runtime import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
-    execute_control_writes,
     read_connected_users,
-    read_control,
     read_current,
     flush_current,
     read_errors,
@@ -64,7 +67,6 @@ from common.datastore_accessors import (
     init_status,
     read_status,
     write_connected_user,
-    write_control_snapshot,
     write_errors,
     write_generic_key,
     write_pellet_db,

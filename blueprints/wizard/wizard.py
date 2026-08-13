@@ -1,4 +1,4 @@
-from common.datastore_accessors import read_settings
+from common.persistence.runtime import read_settings
 from common.i2c_bus_config import parse_i2c_bus
 
 

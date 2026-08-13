@@ -52,7 +52,7 @@ import logging
 import threading
 
 from common import datastore
-from common.datastore_accessors import read_generic_key, write_generic_key
+from common.persistence.runtime import read_generic_key, write_generic_key
 
 MODEL_STATE_KEY = "controller_model_state"
 SCHEMA_VERSION = 1

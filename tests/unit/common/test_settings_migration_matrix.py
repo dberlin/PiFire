@@ -33,7 +33,7 @@ import pytest
 
 from common import datastore
 from common.common import read_updater_manifest
-from common.datastore_accessors import read_settings_store, write_settings, write_settings_store
+from common.persistence.runtime import read_settings_store, write_settings, write_settings_store
 from common.defaults import default_settings
 
 OLD_VERSION = {"server": "1.10.10", "cookfile": "1.5.0", "recipe": "1.0.0", "build": 70}

@@ -29,7 +29,7 @@ def read_pellets_from_server():
     """Read the pellet DB via the datastore singleton live_server shares with
     this process. Same trick as conftest's read_settings_from_server(); see
     test_page_pellets.py for the identical helper on the Flask-page side."""
-    from common.datastore_accessors import read_pellets_store
+    from common.persistence.runtime import read_pellets_store
 
     return read_pellets_store()
 

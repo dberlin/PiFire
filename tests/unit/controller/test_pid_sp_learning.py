@@ -567,7 +567,7 @@ def test_backend_report_reads_status_and_checkpoint_once(monkeypatch):
             calls.append(("checkpoint", name))
             return _FOPDT_CHECKPOINT
 
-    monkeypatch.setattr("common.datastore_accessors.read_status", read_once)
+    monkeypatch.setattr("common.persistence.runtime.read_status", read_once)
     monkeypatch.setattr("common.controller_model_state.ControllerModelStore", Store)
 
     report = learning.backend_pid_sp_learning_report()

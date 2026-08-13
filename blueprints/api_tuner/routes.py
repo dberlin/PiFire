@@ -18,17 +18,21 @@ from pydantic import ValidationError
 from common.app import api_response
 from common.common import generate_uuid
 from common.control_delta import control_delta
-from common.datastore_accessors import (
+from common.persistence.control import (
+    read_control,
+    enqueue_control_delta,
+)
+from common.persistence.runtime import (
+    read_current_snapshot,
+    read_settings,
+    write_settings,
+)
+from common.persistence.history import (
     autotune_length,
     flush_autotune,
     read_autotune,
-    read_control,
-    read_current_snapshot,
-    read_settings,
     read_tr,
     write_autotune,
-    enqueue_control_delta,
-    write_settings,
 )
 from common.modes import Mode
 

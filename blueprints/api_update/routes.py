@@ -17,10 +17,14 @@ from flask import Response, jsonify, request
 from pydantic import ValidationError
 
 from common.app import api_response
+from common.persistence.control import (
+    read_control,
+)
+from common.persistence.runtime import (
+    read_settings,
+)
 from common.datastore_accessors import (
     get_updater_install_status,
-    read_control,
-    read_settings,
     set_updater_install_status,
 )
 from common.modes import Mode

@@ -36,7 +36,7 @@ import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from common import datastore
-from common.datastore_accessors import read_settings
+from common.persistence.runtime import read_settings
 
 # 600 rows, one every 3 seconds, spans 30 minutes of history. The endpoint
 # windows by ROW COUNT (`num_items = minutes * SAMPLES_PER_MINUTE`, 20/min),

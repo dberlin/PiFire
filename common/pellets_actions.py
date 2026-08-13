@@ -27,7 +27,8 @@ from pydantic import TypeAdapter, ValidationError
 from common.app import api_response
 from common.backups import backup_pellet_db
 from common.control_delta import control_delta
-from common.datastore_accessors import enqueue_control_delta, write_pellet_db
+from common.persistence.control import enqueue_control_delta
+from common.persistence.runtime import write_pellet_db
 from common.defaults import default_pellets
 from common.web_contracts.control import PelletActionRequest, PelletActionResponse
 

@@ -548,8 +548,10 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
     """Read every backend authority once and return its one cached projection."""
 
     from common.controller_model_state import ControllerModelStore
-    from common.datastore_accessors import (
+    from common.persistence.control import (
         mpc_calibration_command_revision,
+    )
+    from common.persistence.runtime import (
         read_status,
     )
     from common.persistence.model_evidence import read_model_activation, read_model_evidence

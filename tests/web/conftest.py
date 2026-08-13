@@ -156,9 +156,11 @@ def _seed_fresh_db(db_path, grill_name):
     init_status baseline every live_server needs before app.py can even be
     imported (app.py reads settings at import time for log-level setup)."""
     from common import datastore
-    from common.datastore_accessors import (
-        init_status,
+    from common.persistence.control import (
         write_control_snapshot,
+    )
+    from common.persistence.runtime import (
+        init_status,
         write_pellets_store,
         write_settings_store,
     )
@@ -225,7 +227,7 @@ def read_settings_from_server():
     """Read current settings via the datastore singleton live_server shares
     with this process. Use after driving a UI action or posting a form to
     live_server to assert what actually got persisted."""
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     return read_settings()
 
@@ -233,7 +235,7 @@ def read_settings_from_server():
 def read_control_from_server():
     """Read current control via the datastore singleton live_server shares
     with this process. See read_settings_from_server()."""
-    from common.datastore_accessors import read_control
+    from common.persistence.control import read_control
 
     return read_control()
 
@@ -244,7 +246,7 @@ def drain_control_writes():
     In production this happens every iteration of the real control-runtime
     loop. This test harness runs only Flask, so call this after a UI action or
     POST that queues intent and before reading back the resulting live state."""
-    from common.datastore_accessors import execute_control_writes
+    from common.persistence.control import execute_control_writes
 
     execute_control_writes()
 
@@ -260,7 +262,7 @@ def apply_settings(mutate):
 
         apply_settings(lambda s: s["cycle_data"].__setitem__("PMode", 2))
     """
-    from common.datastore_accessors import read_settings, write_settings_store
+    from common.persistence.runtime import read_settings, write_settings_store
 
     settings = read_settings()
     result = mutate(settings)
@@ -272,7 +274,7 @@ def apply_control(mutate, *, origin="test-web-e2e"):
     """Read current control, apply ``mutate(control)`` in place (or use its
     replacement result), write that authoritative test snapshot immediately,
     and return it. See :func:`apply_settings` for the pattern."""
-    from common.datastore_accessors import read_control, write_control_snapshot
+    from common.persistence.control import read_control, write_control_snapshot
 
     control = read_control()
     result = mutate(control)

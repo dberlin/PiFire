@@ -122,7 +122,7 @@ def test_clear_pelletdb_log_empties_it(client):
     """pelletdb["log"] is a dict keyed by timestamp ({now: profile_id}), not a
     list -- .clear() works on both, which is why the handler reads the same
     either way, but a test must seed it correctly."""
-    from common.datastore_accessors import read_pellet_db, write_pellet_db
+    from common.persistence.runtime import read_pellet_db, write_pellet_db
 
     pelletdb = read_pellet_db()
     pelletdb["log"]["1767225600000"] = {"pelletid": "sentinel-profile-id", "deleted": False}
@@ -144,7 +144,7 @@ def test_debug_mode_toggle_persists_and_flags_the_control_process(client):
     assertion would be testing the queue, not the intent.
     """
     import blueprints.api_admin.routes as admin_routes
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     with mock.patch.object(admin_routes, "enqueue_control_delta") as m_write:
         resp = client.post("/api/admin/settings", json={"debug_mode": True})
@@ -170,7 +170,7 @@ def test_boot_to_monitor_alone_does_not_flag_the_control_process(client):
 def test_boot_to_monitor_toggle_passes_schema_validation(client):
     """The plan flagged this as unverified: write_settings validates against the
     settings schema, so a field the schema rejects would 500 here."""
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     resp = client.post("/api/admin/settings", json={"boot_to_monitor": True})
     assert resp.status_code == 200

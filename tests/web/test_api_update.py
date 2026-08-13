@@ -130,7 +130,7 @@ def test_status_preserves_idle_null_triplet(ds, client, monkeypatch):
 
 
 def _set_mode(mode):
-    from common.datastore_accessors import read_control, write_control_snapshot
+    from common.persistence.control import read_control, write_control_snapshot
 
     ctrl = read_control()
     ctrl["mode"] = mode
@@ -138,7 +138,7 @@ def _set_mode(mode):
 
 
 def _set_real_hw(value):
-    from common.datastore_accessors import read_settings, write_settings_store
+    from common.persistence.runtime import read_settings, write_settings_store
 
     s = read_settings()
     s["platform"]["real_hw"] = value

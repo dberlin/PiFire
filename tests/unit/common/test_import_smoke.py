@@ -12,7 +12,8 @@ NEW_MODULES = (
     "common.common",
     "common.defaults",
     "common.system",
-    "common.datastore_accessors",
+    "common.persistence.control",
+    "common.persistence.runtime",
     "common.api_commands",
     "common.settings_migration",
     "common.backups",
@@ -26,10 +27,12 @@ def test_new_modules_import_standalone():
 
 def test_public_names_resolve_from_new_homes():
     from common.api_commands import process_command  # noqa: F401
-    from common.datastore_accessors import (  # noqa: F401
+    from common.persistence.control import (
         read_control,
         write_control_snapshot,
         enqueue_control_delta,
+    )
+    from common.persistence.runtime import (
         read_settings,
         read_probe_status,
     )

@@ -25,7 +25,7 @@ import logging
 from PIL import Image, ImageDraw, ImageFont
 from common.modes import Mode
 from common.control_delta import control_delta
-from common.datastore_accessors import enqueue_control_delta, read_control
+from common.persistence.control import enqueue_control_delta, read_control
 
 """
 Display base class definition

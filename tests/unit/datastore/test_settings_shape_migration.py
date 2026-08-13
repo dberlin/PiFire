@@ -12,7 +12,7 @@ import copy
 import pytest
 
 from common import datastore, settings_migration
-from common.datastore_accessors import read_settings_store, write_settings_store
+from common.persistence.runtime import read_settings_store, write_settings_store
 from common.defaults import default_settings
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
@@ -127,7 +127,7 @@ def test_a_migrated_tree_survives_a_validating_write(ds):
     """The stamp is a modeled field, so write_settings must preserve it rather
     than strip it as an unmodeled key -- which is what happens to anything the
     schema does not know about."""
-    from common.datastore_accessors import write_settings
+    from common.persistence.runtime import write_settings
 
     _unstamped_legacy_tree()
     datastore._upgrade_settings_in_store()

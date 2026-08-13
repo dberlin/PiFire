@@ -614,7 +614,7 @@ def _validate_settings_in_store():
     """
     from common import settings_schema  # deferred to avoid import cycle
     from common.common import write_log
-    from common.datastore_accessors import read_settings
+    from common.persistence.runtime import read_settings
 
     try:
         settings_schema.validate_settings_tree(read_settings(), persisted=False)

@@ -2,7 +2,7 @@ import copy
 import json
 
 import pytest
-from common.datastore_accessors import read_settings, write_settings_store
+from common.persistence.runtime import read_settings, write_settings_store
 from common.web_contracts.wizard import (
     BusKindsValidationResponse,
     InstallLog,
@@ -452,7 +452,7 @@ def test_cancel_does_not_flag_a_control_update(ds, client):
     started and no module configuration was applied. Flagging a settings/probe
     update here would make the control process needlessly reload its modules on
     a mere "never mind", so the control blob must come back untouched."""
-    from common.datastore_accessors import read_control
+    from common.persistence.control import read_control
 
     before = copy.deepcopy(read_control())
 
@@ -499,7 +499,7 @@ def test_finish_blocked_when_not_stopped(ds, client, monkeypatch):
 
     fired = []
     monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))  # neutralize installer
-    from common.datastore_accessors import read_control, write_control_snapshot
+    from common.persistence.control import read_control, write_control_snapshot
 
     ctrl = read_control()
     ctrl["mode"] = "Hold"

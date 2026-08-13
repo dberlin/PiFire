@@ -31,13 +31,16 @@ from common.common import (
     epoch_to_time,
 )
 from common.control_delta import NOTIFY_POST_KEYS, ControlDeltaError, control_delta, notify_ops_from_post
-from common.datastore_accessors import (
+from common.persistence.control import (
+    read_control,
+    flush_control,
+    enqueue_control_delta,
+)
+from common.persistence.runtime import (
     read_settings_store,
     seed_settings_store,
     read_pellets_store,
     seed_pellets_store,
-    read_control,
-    flush_control,
     read_status,
     read_current,
     read_errors,
@@ -45,13 +48,14 @@ from common.datastore_accessors import (
     read_generic_key,
     read_control_heartbeat,
     CONTROL_HEARTBEAT_STALE_AFTER,
-    enqueue_control_delta,
-    flush_history,
     write_pellet_db,
     write_connected_user,
     read_connected_users,
     flush_connected_users,
     remove_connected_user,
+)
+from common.datastore_accessors import (
+    flush_history,
 )
 from common.defaults import default_settings, default_control
 from common.system import (

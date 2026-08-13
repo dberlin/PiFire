@@ -13,12 +13,12 @@ lets it detect that and refetch settings silently.
 import copy
 
 from common.app import create_ui_hash
-from common.datastore_accessors import flush_current, init_status, read_pellet_db, read_settings, write_generic_key
+from common.persistence.runtime import flush_current, init_status, read_pellet_db, read_settings, write_generic_key
 
 
 def _dash_data(settings, **status_over):
     from blueprints.mobile import socket_io
-    from common.datastore_accessors import read_status, write_status
+    from common.persistence.runtime import read_status, write_status
 
     # Same seeding _get_dash_data needs elsewhere: status/current/device-info do
     # not self-heal the way the settings and pellet blobs do. Any status

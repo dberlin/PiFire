@@ -152,7 +152,7 @@ def test_get_cannot_reach_it(hazard):
 
 
 def test_factory_reset_restores_defaults_and_restarts(hazard):
-    from common.datastore_accessors import read_settings, write_settings
+    from common.persistence.runtime import read_settings, write_settings
 
     settings = read_settings()
     settings["globals"]["grill_name"] = "Not A Default"
@@ -186,7 +186,7 @@ def test_factory_reset_clears_the_pellet_database(hazard):
     and records loading it, so a reset leaves exactly one fresh entry. What must
     be gone is the user's own history.
     """
-    from common.datastore_accessors import read_pellet_db, write_pellet_db
+    from common.persistence.runtime import read_pellet_db, write_pellet_db
 
     pelletdb = read_pellet_db()
     pelletdb["log"]["1767225600000"] = {"pelletid": "sentinel-profile-id", "deleted": False}

@@ -18,7 +18,7 @@ def test_control_write_apis_require_keyword_only_origin(api_name):
 
 
 def test_delta_api_rejects_an_unversioned_partial_before_queueing():
-    from common.datastore_accessors import enqueue_control_delta
+    from common.persistence.control import enqueue_control_delta
 
     with pytest.raises(ControlDeltaError, match=r"unknown delta member\(s\): mode"):
         enqueue_control_delta({"mode": "Stop"}, origin="test")

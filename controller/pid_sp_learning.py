@@ -494,7 +494,7 @@ def backend_pid_sp_learning_report() -> _CanonicalPidSpLearningReport:
     """Read each PID-SP report authority once and compose its projection."""
 
     from common.controller_model_state import ControllerModelStore
-    from common.datastore_accessors import read_status
+    from common.persistence.runtime import read_status
 
     status = read_status()
     checkpoint = ControllerModelStore().load_strict("pid_sp")

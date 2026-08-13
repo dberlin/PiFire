@@ -24,7 +24,7 @@ import sys
 from typing import TextIO
 
 from common import datastore
-from common.datastore_accessors import read_settings
+from common.persistence.runtime import read_settings
 
 # Absolute path to the shipped sway kiosk config. display_launch.py lives at the
 # repo root; the config sits under display/sway/. It is only referenced as a

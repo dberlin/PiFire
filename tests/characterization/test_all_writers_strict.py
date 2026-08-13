@@ -77,7 +77,7 @@ from unittest import mock
 
 import pytest
 
-from common.datastore_accessors import read_settings, write_settings_store
+from common.persistence.runtime import read_settings, write_settings_store
 from common.defaults import default_control, default_settings
 from common.settings_schema import validate_settings_tree
 
@@ -253,7 +253,8 @@ def test_admin_restoresettings_invalid_backup_rejected_no_crash(admin_client):
 @pytest.fixture
 def sio(ds):
     write_settings_store(default_settings())
-    from common.datastore_accessors import init_status, write_control_snapshot, write_pellet_db
+    from common.persistence.control import write_control_snapshot
+    from common.persistence.runtime import init_status, write_pellet_db
     from common.defaults import default_pellets
 
     write_control_snapshot(default_control(), origin="test-writer-matrix")
@@ -468,7 +469,7 @@ def test_api_post_settings_update_valid_delta_writes_strict(client_and_store):
 
 def test_save_settings_and_flag_update_writes_strict(ds):
     from common.app import save_settings_and_flag_update
-    from common.datastore_accessors import execute_control_writes, read_control
+    from common.persistence.control import execute_control_writes, read_control
 
     write_settings_store(default_settings())
     settings = read_settings()
@@ -519,7 +520,7 @@ def test_onesignal_invalid_player_id_cleanup_writes_strict(ds):
 @pytest.fixture
 def flex_display(ds, tmp_path):
     write_settings_store(default_settings())
-    from common.datastore_accessors import write_control_snapshot
+    from common.persistence.control import write_control_snapshot
     from common.defaults import default_control as _default_control
 
     write_control_snapshot(_default_control(), origin="test-writer-matrix")

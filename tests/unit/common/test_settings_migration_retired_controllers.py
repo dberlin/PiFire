@@ -4,7 +4,7 @@ import json
 import pytest
 
 from common import datastore
-from common.datastore_accessors import read_settings_store, write_settings_store
+from common.persistence.runtime import read_settings_store, write_settings_store
 from common.defaults import default_settings
 from common.settings_migration import _migrate_retired_controllers, read_settings_file
 from common.settings_schema import SETTINGS_SCHEMA_VERSION

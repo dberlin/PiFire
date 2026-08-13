@@ -1,5 +1,5 @@
 import pytest
-from common.datastore_accessors import read_warnings_snapshot, write_warning
+from common.persistence.runtime import read_warnings_snapshot, write_warning
 
 
 def test_dismiss_clears_the_warnings_through_the_given_id(client):
