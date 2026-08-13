@@ -15,15 +15,19 @@ from controller.model_learning.activation import (
     PreparedActivationRecord,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_factory import MpcPairFactory
 
+
+def _inactive_calibration(_load, _temperature, _forecast) -> CalibrationDecision:
+    return CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
 _PAIR_FACTORY = MpcPairFactory(
     DEFAULT_MPC_CONFIG,
     "C",
     {"u_min": 0.1, "u_max": 0.9},
-    adjust_load=lambda load, _temperature: load,
+    advance_calibration=_inactive_calibration,
     model_authority=lambda: (0, None),
     on_policy_failure=lambda _error: None,
 )

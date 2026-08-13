@@ -34,7 +34,13 @@ from controller.runtime.model_fitting import TeardownGreyHistory
 from controller.mpc import Controller as MpcController
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
-from tests.unit.mpc._solver_fixtures import CYCLE, _config as _mpc_config, _Estimator, _Solver
+from tests.unit.mpc._solver_fixtures import (
+    CYCLE,
+    _config as _mpc_config,
+    _Estimator,
+    _Solver,
+    inactive_calibration,
+)
 from controller.mpc_core import MpcCore
 from controller.acados import GreyBoxMPCConfig
 from controller.mpc_config import DEFAULT_MPC_CONFIG
@@ -539,7 +545,7 @@ def _bare_mpc_pair_owner():
         DEFAULT_MPC_CONFIG,
         "C",
         dict(CYCLE),
-        adjust_load=lambda load, _temperature: load,
+        advance_calibration=inactive_calibration,
         model_authority=lambda: (core._model_revision, None),
         on_policy_failure=lambda _error: None,
     )

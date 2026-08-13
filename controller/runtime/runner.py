@@ -46,13 +46,13 @@ from controller.model_learning.activation import (
     PreparedActivationRecord,
 )
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
-from controller.mpc_factory import OwnedMpcPair
 from controller.mpc_allocator import AllocationResult
 
 if TYPE_CHECKING:
     from controller.model_learning.calibration import CalibrationDecision
     from controller.model_learning.contracts import FrameObservation
-    from controller.mpc import CalibrationCommand
+    from controller.mpc_factory import OwnedMpcPair
+    from controller.mpc_calibration import CalibrationCommand
 
 
 StatusScalar: TypeAlias = None | bool | int | float | str
@@ -806,6 +806,8 @@ class PreparedPairTransition:
     persist_phase: Callable[[PreparedActivationRecord, ActivationPhase | None], object]
 
     def __post_init__(self) -> None:
+        from controller.mpc_factory import OwnedMpcPair
+
         if not isinstance(self.record, PreparedActivationRecord):
             raise TypeError("record must be a PreparedActivationRecord")
         if self.record.phase is not ActivationPhase.PREPARED:

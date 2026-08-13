@@ -22,7 +22,7 @@ from controller.mpc_core import (
     Closable,
     EkfFactory,
     KfFactory,
-    LoadAdjustment,
+    CalibrationAdvance,
     ModelAuthority,
     MpcCore,
     MpcEstimator,
@@ -189,7 +189,7 @@ class MpcPairFactory:
         units: str,
         cycle_data: Mapping[str, JsonValue],
         *,
-        adjust_load: LoadAdjustment,
+        advance_calibration: CalibrationAdvance,
         model_authority: ModelAuthority,
         on_policy_failure: PolicyFailureHandler,
         ekf_factory: EkfFactory | None = None,
@@ -204,7 +204,7 @@ class MpcPairFactory:
         self._control_period = control_period
         self._units = units
         self._cycle_data = cycle_data
-        self._adjust_load = adjust_load
+        self._advance_calibration = advance_calibration
         self._model_authority = model_authority
         self._on_policy_failure = on_policy_failure
         self._ekf_factory = ekf_factory
@@ -303,7 +303,7 @@ class MpcPairFactory:
             self._units,
             self._cycle_data,
             output_authorized=gate,
-            adjust_load=self._adjust_load,
+            advance_calibration=self._advance_calibration,
             model_authority=self._model_authority,
             on_policy_failure=self._on_policy_failure,
             ekf_factory=self._ekf_factory,
@@ -334,7 +334,7 @@ class MpcPairFactory:
                 self._units,
                 self._cycle_data,
                 output_authorized=gate,
-                adjust_load=self._adjust_load,
+                advance_calibration=self._advance_calibration,
                 model_authority=self._model_authority,
                 on_policy_failure=self._on_policy_failure,
                 components=(estimator, solver),

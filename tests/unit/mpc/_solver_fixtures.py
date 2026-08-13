@@ -7,11 +7,15 @@ module-level code and collection side effects, and couples the two files).
 """
 
 from controller.acados import GreyBoxMPCConfig
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_core import MpcCore
-from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_factory import MpcPairConfiguration, MpcPairFactory, OwnedMpcPair
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
+
+def inactive_calibration(_load, _temperature, _forecast) -> CalibrationDecision:
+    return CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
 
 def owned_pair(descriptor, estimator, solver) -> OwnedMpcPair:
@@ -21,16 +25,21 @@ def owned_pair(descriptor, estimator, solver) -> OwnedMpcPair:
             DEFAULT_MPC_CONFIG,
             "C",
             CYCLE,
-            adjust_load=lambda load, _temperature: load,
+            advance_calibration=inactive_calibration,
             model_authority=lambda: (0, None),
             on_policy_failure=lambda _error: None,
         )
         pair = pair_factory.adopt(
-            pair_factory.native(
-                native,
+            MpcPairConfiguration(
+                settings=pair_factory._settings_from_descriptor(
+                    descriptor,
+                    pair_factory._native_from_descriptor(descriptor),
+                    descriptor.estimator_kind,
+                ),
                 estimator_kind=descriptor.estimator_kind,
                 candidate_generation=descriptor.candidate_generation,
                 role_generation=descriptor.role_generation,
+                model_identified=native.residual_weight > 0.0,
             ),
             estimator,
             solver,

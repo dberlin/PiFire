@@ -16,10 +16,10 @@ import hashlib
 import json
 import logging
 import math
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict
 import time
 import threading
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -37,7 +37,7 @@ from common.control_trace import (
     ModelEvaluationPayload,
 )
 from controller.base import ControllerBase, MpcTraceDiagnostics
-from controller.applied_output import FrameFeedbackDisposition
+from controller.applied_output import AppliedOutput
 from controller.model_promotion import Verdict as _Verdict
 from controller.mpc_model import MODEL_SCHEMA
 from controller import mpc_snapshot as _snapshot
@@ -52,6 +52,7 @@ from controller.mpc_config import (
     warn_about_model,
 )
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_calibration import MpcCalibrationRuntime
 from common.controller_model_state import MAX_SNAPSHOT_BYTES
 from common.model_evidence import (
     EvidenceKind,
@@ -98,13 +99,10 @@ from controller.model_learning.activation import (
     recover_startup_activation,
 )
 from controller.grey_box import GreyBoxPredictionAdapter
-from controller.model_learning.calibration import (
-    CalibrationCommand as _CoordinatorCalibrationCommand,
-    CalibrationCoordinator,
-    CalibrationDecision,
-    CalibrationProgress,
-    CalibrationRuntimeContext,
-)
+from controller.model_learning.calibration import CalibrationDecision
+
+if TYPE_CHECKING:
+    from controller.mpc_calibration import CalibrationCommand, CompletedCalibrationResult
 
 
 # One row per control period. At the 5 s default that is ~12 hours, which is
@@ -148,36 +146,6 @@ _REFIT_INIT = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "
 
 
 
-@dataclass(frozen=True, slots=True)
-class CalibrationCommand:
-    """One revisioned operator calibration request at the runtime boundary."""
-
-    action: str
-    command_revision: int
-    ambient_c: float
-    ambient_source: str
-    empty_grill_confirmed: bool
-    pellets_confirmed: bool
-    seed: int = 0
-
-    def __post_init__(self) -> None:
-        if self.action not in {"start", "pause", "resume", "stop", "reset-progress"}:
-            raise ValueError("invalid calibration action")
-        if (
-            isinstance(self.command_revision, bool)
-            or not isinstance(self.command_revision, int)
-            or self.command_revision < 1
-        ):
-            raise ValueError("calibration command revision must be positive")
-        if not all(
-            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-            for value in (self.ambient_c,)
-        ):
-            raise ValueError("calibration temperatures must be finite")
-        if self.ambient_source not in {"measured", "manual", "weather", "configured"}:
-            raise ValueError("invalid calibration ambient source")
-        if self.empty_grill_confirmed is not True or self.pellets_confirmed is not True:
-            raise ValueError("calibration confirmations are required")
 
 
 class Controller(ControllerBase):
@@ -200,18 +168,13 @@ class Controller(ControllerBase):
         self._model_meta = None  # provenance of an adopted model, or None
         self._active_activation_record: PreparedActivationRecord | None = None
         self._trace_diagnostics = None
-        self._calibration = CalibrationCoordinator(predict_max_c=self._predict_calibration_max)
-        self._calibration_operations: collections.deque[tuple[str, object]] = collections.deque()
-        self._calibration_last_revision = 0
-        self._calibration_ambient_c = float(cfg["T_amb"])
-        self._calibration_safety_ceiling_c = 0.0
-        self._calibration_frame_results: dict[int, tuple[float, CalibrationDecision]] = {}
-        self._calibration_feedback: collections.deque[
-            tuple[float, float, bool, bool, FrameFeedbackDisposition, int, int, str, int]
-        ] = collections.deque()
-        self._calibration_generation = 0
-        self._calibration_last_feedback_timestamp: float | None = None
-        self._trace_calibration = CalibrationDecision(False, 0.0, None, CalibrationProgress())
+        horizon_steps = cfg["n_horizon"]
+        if isinstance(horizon_steps, bool) or not isinstance(horizon_steps, int):
+            raise RuntimeError("normalized n_horizon must be an integer")
+        self._calibration = MpcCalibrationRuntime(
+            horizon_steps=horizon_steps,
+            u_max=self.u_max,
+        )
         self._trace_baseline_allocation: AllocationResult | None = None
         self._trace_allocation: AllocationResult | None = None
         self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
@@ -219,7 +182,7 @@ class Controller(ControllerBase):
             cfg,
             units,
             cycle_data,
-            adjust_load=self._adjust_core_load,
+            advance_calibration=self._calibration.advance,
             model_authority=self._core_model_authority,
             on_policy_failure=self._handle_core_policy_failure,
         )
@@ -343,9 +306,6 @@ class Controller(ControllerBase):
     def _core_model_authority(self):
         return self._model_revision, self._model_meta
 
-    def _adjust_core_load(self, baseline_load, temperature_c):
-        calibration = self._advance_calibration(baseline_load, temperature_c)
-        return baseline_load + calibration.probe_q
 
     def _handle_core_policy_failure(self, _error):
         if isinstance(self._active_activation_record, PreparedActivationRecord):
@@ -396,6 +356,7 @@ class Controller(ControllerBase):
     def set_target(self, set_point):
         self.set_point = set_point
         self._core.set_target(set_point)
+        self._calibration.set_target_c(self._core.set_point_c)
 
     def get_control_period(self):
         return float(self.cfg["control_period"])
@@ -2474,217 +2435,21 @@ class Controller(ControllerBase):
                 return _Verdict(False, f"candidate construction failed: {error}")
         return verdict
 
-    def set_safety_ceiling_c(self, ceiling_c) -> None:
-        """Track the grill's configured maximum, which probing must stay under.
-
-        Read from settings on every tick rather than carried on a calibration
-        command, so lowering the grill maximum mid-cook binds the next probe
-        instead of the next operator action.
-        """
-        value = float(ceiling_c)
-        if not math.isfinite(value):
-            raise ValueError("safety ceiling must be finite Celsius")
-        self._calibration_safety_ceiling_c = value
+    def set_safety_ceiling_c(self, ceiling_c: float) -> None:
+        self._calibration.set_safety_ceiling_c(ceiling_c)
 
     def request_calibration(self, command: CalibrationCommand) -> None:
-        """Queue each strictly newer operator command for ordered consumption."""
-        if not isinstance(command, CalibrationCommand):
-            raise TypeError("command must be CalibrationCommand")
-        if command.command_revision < self._calibration_last_revision:
-            raise ValueError("calibration command revision must be monotonic")
-        if command.command_revision == self._calibration_last_revision:
-            return
-        self._calibration_operations.append(("command", command))
-        self._calibration_last_revision = command.command_revision
+        self._calibration.request(command)
 
     def cancel_calibration(self, reason: str) -> None:
-        """Queue a safety abort without consuming an operator revision."""
-        if not isinstance(reason, str) or not reason:
-            raise ValueError("calibration cancellation reason must be a non-empty string")
-        self._calibration_operations.append(("cancel", reason))
+        self._calibration.cancel(reason)
 
-    def _predict_calibration_max(self, baseline_q: float, probe_q: float, runtime: CalibrationRuntimeContext) -> float:
-        """Forecast the incumbent grey-box horizon for one requested probe."""
-        horizon = max(1, int(self.cfg["n_horizon"]))
-        requested_q = float(np.clip(baseline_q + probe_q, 0.0, 1.0))
-        adapter = GreyBoxPredictionAdapter.from_controller(self)
-        forecast = adapter.forecast(
-            np.full(horizon, requested_q, dtype=np.float64),
-            np.full(horizon, self._calibration_ambient_c, dtype=np.float64),
-        )
-        if forecast.size != horizon or not np.isfinite(forecast).all():
-            raise FloatingPointError("grey-box calibration forecast is non-finite")
-        return float(np.max(forecast))
+    def register_calibration_result(self, result: CompletedCalibrationResult) -> None:
+        self._calibration.register_result(result)
 
-    def _calibration_runtime(
-        self,
-        baseline_q: float,
-        temperature_c: float,
-        *,
-        realized_q: float | None = None,
-        continuous: bool = True,
-        actuation_known: bool = True,
-    ) -> CalibrationRuntimeContext:
-        return CalibrationRuntimeContext(
-            now_s=time.monotonic(),
-            temp_c=temperature_c,
-            target_c=self._set_point_c,
-            baseline_q=baseline_q,
-            realized_q=self._applied_combustion_load if realized_q is None else realized_q,
-            safety_ceiling_c=self._calibration_safety_ceiling_c,
-            allocator_headroom=1.0,
-            error_rate_headroom=1.0,
-            capability_headroom=1.0,
-            saturation_headroom=1.0,
-            rank_progress=1.0,
-            coverage_progress=1.0,
-            continuous=continuous,
-            actuation_known=actuation_known,
-        )
-
-    @staticmethod
-    def _command_decision(
-        decision: CalibrationDecision, command: CalibrationCommand, command_generation: int
-    ) -> CalibrationDecision:
-        return replace(
-            decision,
-            command_revision=command.command_revision,
-            command_action=command.action,
-            command_generation=command_generation,
-        )
-
-    def _advance_calibration(self, baseline_q: float, temperature_c: float) -> CalibrationDecision:
-        decision: CalibrationDecision | None = None
-        while self._calibration_feedback:
-            (
-                feedback_baseline_q,
-                realized_q,
-                continuous,
-                actuation_known,
-                disposition,
-                _revision,
-                command_revision,
-                command_action,
-                command_generation,
-            ) = self._calibration_feedback.popleft()
-            provenance = self._trace_calibration
-            if not provenance.active or (
-                provenance.command_revision,
-                provenance.command_action,
-                provenance.command_generation,
-            ) != (command_revision, command_action, command_generation):
-                continue
-            if disposition is FrameFeedbackDisposition.DISCARDED:
-                decision = self._calibration.cancel_probe("discarded_frame")
-            elif disposition is FrameFeedbackDisposition.COMPLETE:
-                decision = replace(
-                    self._calibration.advance(
-                        self._calibration_runtime(
-                            feedback_baseline_q,
-                            temperature_c,
-                            realized_q=realized_q,
-                            continuous=continuous,
-                            actuation_known=actuation_known,
-                        )
-                    ),
-                    command_revision=provenance.command_revision,
-                    command_action=provenance.command_action,
-                    command_generation=provenance.command_generation,
-                )
-            else:
-                continue
-            self._trace_calibration = decision
-        while self._calibration_operations:
-            operation, payload = self._calibration_operations.popleft()
-            if operation == "cancel":
-                decision = self._calibration.cancel_probe(payload)
-            else:
-                command = payload
-                assert isinstance(command, CalibrationCommand)
-                self._calibration_ambient_c = command.ambient_c
-                runtime = self._calibration_runtime(baseline_q, temperature_c)
-                if command.action == "start":
-                    self._calibration_generation += 1
-                    command_generation = self._calibration_generation
-                else:
-                    command_generation = self._trace_calibration.command_generation
-                if command.action == "start":
-                    decision = self._calibration.start(
-                        _CoordinatorCalibrationCommand(command.command_revision, command.seed),
-                        runtime,
-                    )
-                elif command.action == "pause":
-                    decision = self._calibration.pause()
-                elif command.action == "resume":
-                    decision = self._calibration.resume(runtime)
-                elif command.action == "stop":
-                    decision = self._calibration.stop(runtime)
-                else:
-                    decision = self._calibration.reset_progress(runtime)
-                decision = self._command_decision(decision, command, command_generation)
-            self._trace_calibration = decision
-        if decision is None:
-            decision = replace(
-                self._trace_calibration,
-                events=(),
-            )
-        self._trace_calibration = decision
-        return decision
-
-    def register_calibration_result(self, result) -> None:
-        """Associate a completed runner result with the frame that may latch it."""
-        calibration = result.calibration
-        baseline = result.baseline_allocation
-        if calibration is None or baseline is None or result.revision <= 0:
-            return
-        self._calibration_frame_results[result.revision] = (
-            baseline.normalized_combustion_load,
-            calibration,
-        )
-
-    def set_output(self, applied):
-        """Record physical output and terminalize only explicit frame feedback."""
+    def set_output(self, applied: AppliedOutput) -> None:
         self._core.set_output(applied)
-        realized_q = self._applied_combustion_load
-        if applied.feedback_disposition is FrameFeedbackDisposition.PROGRESS:
-            return
-        revision = applied.producing_result_revision
-        produced = self._calibration_frame_results.pop(revision, None) if revision > 0 else None
-        if produced is None:
-            return
-        for stale_revision in tuple(self._calibration_frame_results):
-            if stale_revision < revision:
-                del self._calibration_frame_results[stale_revision]
-        baseline_q, decision = produced
-        if not decision.active or (
-            decision.command_revision,
-            decision.command_action,
-            decision.command_generation,
-        ) != (
-            applied.producing_calibration_revision,
-            applied.producing_calibration_action,
-            applied.producing_calibration_generation,
-        ):
-            return
-        previous = self._calibration_last_feedback_timestamp
-        continuous = previous is None or applied.timestamp > previous
-        self._calibration_last_feedback_timestamp = applied.timestamp
-        disposition = applied.feedback_disposition
-        if disposition is FrameFeedbackDisposition.COMPLETE and not applied.sample_complete:
-            disposition = FrameFeedbackDisposition.DISCARDED
-        self._calibration_feedback.append(
-            (
-                baseline_q,
-                realized_q,
-                continuous,
-                applied.controller_commanded,
-                disposition,
-                revision,
-                decision.command_revision,
-                decision.command_action,
-                decision.command_generation,
-            )
-        )
+        self._calibration.register_output(applied)
 
     def update(self, current):
         step = self._core.update(current)
@@ -2703,7 +2468,7 @@ class Controller(ControllerBase):
         return self._trace_baseline_allocation
 
     def trace_calibration(self) -> CalibrationDecision:
-        return self._trace_calibration
+        return self._calibration.decision
 
     def native_failure_diagnostics(self) -> SolverDiagnostics | None:
         return self._core.native_failure_diagnostics

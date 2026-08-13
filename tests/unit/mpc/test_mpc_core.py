@@ -11,6 +11,7 @@ import controller.mpc_core as mpc_core_module
 from controller.acados import GreyBoxMPCConfig, SolverDiagnostics, SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_config import (
     DEFAULT_MPC_CONFIG,
     JsonValue,
@@ -23,6 +24,7 @@ from controller.mpc_config import (
     to_celsius,
     warn_about_model,
 )
+from controller.mpc_calibration import TemperatureForecast
 from controller.mpc_core import MpcCore, MpcSolver, MpcStep
 
 
@@ -212,8 +214,12 @@ def _authorized() -> bool:
     return True
 
 
-def _identity_adjustment(load: float, _temperature_c: float) -> float:
-    return load
+def _identity_adjustment(
+    _load: float,
+    _temperature_c: float,
+    _forecast,
+) -> CalibrationDecision:
+    return CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
 
 def _configured_authority() -> tuple[int, ModelMetadata | None]:
@@ -230,7 +236,7 @@ def make_core(
     config: dict[str, JsonValue] | None = None,
     units: str = "C",
     authorized: Callable[[], bool] = _authorized,
-    adjust_load: Callable[[float, float], float] = _identity_adjustment,
+    advance_calibration: Callable[[float, float, TemperatureForecast], CalibrationDecision] = _identity_adjustment,
     authority: Callable[[], tuple[int, ModelMetadata | None]] = _configured_authority,
     on_failure: Callable[[BaseException], None] = _ignore_failure,
 ) -> tuple[MpcCore, FakeEstimator, FakeSolver]:
@@ -241,7 +247,7 @@ def make_core(
         units,
         dict(CYCLE),
         output_authorized=authorized,
-        adjust_load=adjust_load,
+        advance_calibration=advance_calibration,
         model_authority=authority,
         on_policy_failure=on_failure,
         ekf_factory=estimator_factory,
@@ -363,15 +369,15 @@ def test_units_authority_equilibrium_adjustment_and_snapshot_are_explicit_inputs
     def authority() -> tuple[int, ModelMetadata | None]:
         return 7, {"rmse": 0.5}
 
-    def adjust(load: float, temperature_c: float) -> float:
+    def adjust(load: float, temperature_c: float, _forecast) -> CalibrationDecision:
         adjusted.append((load, temperature_c))
-        return load + 0.2
+        return CalibrationDecision(False, 0.2, None, CalibrationProgress())
 
     core, _estimator, solver = make_core(
         results=(solve_result(5, 0.4),),
         config=dict(CONFIG, C_c=321.0, enable_fan_input=False),
         units="F",
-        adjust_load=adjust,
+        advance_calibration=adjust,
         authority=authority,
     )
     core.set_target(212.0)
@@ -508,12 +514,16 @@ def test_roundoff_clips_adjustment_bounds_and_resource_close_is_idempotent():
         diagnostics=replace(FakeDiagnostics(), constraint_residual=1e-12),
     )
 
-    def excessive_adjustment(_load: float, _temperature_c: float) -> float:
-        return 2.0
+    def excessive_adjustment(
+        _load: float,
+        _temperature_c: float,
+        _forecast,
+    ) -> CalibrationDecision:
+        return CalibrationDecision(False, 2.0, None, CalibrationProgress())
 
     core, estimator, solver = make_core(
         results=(result,),
-        adjust_load=excessive_adjustment,
+        advance_calibration=excessive_adjustment,
     )
 
     step = core.update(72.0)

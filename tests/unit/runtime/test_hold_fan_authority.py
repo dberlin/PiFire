@@ -2,7 +2,7 @@
 
 import logging
 
-from controller.mpc import CalibrationCommand
+from controller.mpc_calibration import CalibrationCommand
 
 from common.control_trace import ActuationMode
 

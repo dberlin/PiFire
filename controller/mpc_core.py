@@ -18,9 +18,11 @@ from controller.acados import (
     SolverError,
 )
 from controller.applied_output import AppliedOutput
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.base import MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import FeasibilityReport, feasibility_report
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
+from controller.mpc_calibration import TemperatureForecast
 from controller.mpc_config import (
     JsonValue,
     MODEL_PARAMETER_KEYS,
@@ -144,8 +146,10 @@ class SolverFactory(Protocol):
 
 
 ModelAuthority = Callable[[], tuple[int, ModelMetadata | None]]
-LoadAdjustment = Callable[[float, float], float]
+CalibrationAdvance = Callable[[float, float, TemperatureForecast], CalibrationDecision]
 PolicyFailureHandler = Callable[[BaseException], None]
+
+_INACTIVE_CALIBRATION = CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,8 +167,12 @@ def _authorized() -> bool:
     return True
 
 
-def _identity_adjustment(load: float, _temperature_c: float) -> float:
-    return load
+def _inactive_calibration(
+    _load: float,
+    _temperature_c: float,
+    _forecast: TemperatureForecast,
+) -> CalibrationDecision:
+    return _INACTIVE_CALIBRATION
 
 
 def _default_authority() -> tuple[int, ModelMetadata | None]:
@@ -223,7 +231,7 @@ class MpcCore:
         cycle_data: Mapping[str, JsonValue],
         *,
         output_authorized: Callable[[], bool] = _authorized,
-        adjust_load: LoadAdjustment = _identity_adjustment,
+        advance_calibration: CalibrationAdvance = _inactive_calibration,
         model_authority: ModelAuthority = _default_authority,
         on_policy_failure: PolicyFailureHandler = _ignore_failure,
         ekf_factory: EkfFactory | None = None,
@@ -236,7 +244,7 @@ class MpcCore:
         self.units = units
         self.u_max = _float_setting(cycle_data, "u_max") if "u_max" in cycle_data else 0.9
         self._output_authorized = output_authorized
-        self._adjust_load = adjust_load
+        self._advance_calibration = advance_calibration
         self._model_authority = model_authority
         self._on_policy_failure = on_policy_failure
 
@@ -559,9 +567,12 @@ class MpcCore:
             fan_max_pct=fan_max,
             enable_fan=fan_enabled,
         )
-        requested_load = float(
-            np.clip(self._adjust_load(combustion_load, measured_c), 0.0, 1.0)
+        calibration = self._advance_calibration(
+            combustion_load,
+            measured_c,
+            self._forecast_calibration,
         )
+        requested_load = float(np.clip(combustion_load + calibration.probe_q, 0.0, 1.0))
         allocation = (
             baseline_allocation
             if requested_load == combustion_load
@@ -573,6 +584,7 @@ class MpcCore:
                 enable_fan=fan_enabled,
             )
         )
+
         diagnostics = MpcTraceDiagnostics(
             state_names=state_names,
             state_values=state_values,
@@ -600,6 +612,18 @@ class MpcCore:
             allocation=allocation,
             baseline_allocation=baseline_allocation,
         )
+
+    def _forecast_calibration(
+        self,
+        q_future: npt.NDArray[np.float64],
+        ambient_future: npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+        from controller.grey_box import GreyBoxPredictionAdapter
+
+        return GreyBoxPredictionAdapter.from_estimator(
+            self._estimator,
+            config=self.config,
+        ).forecast(q_future, ambient_future)
 
     def snapshot_parameters(self) -> Mapping[str, JsonValue]:
         return {key: self.config[key] for key in MODEL_PARAMETER_KEYS}

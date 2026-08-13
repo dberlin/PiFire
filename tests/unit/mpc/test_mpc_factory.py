@@ -20,11 +20,15 @@ from controller.model_learning.activation import (
     recover_startup_activation,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_config import DEFAULT_MPC_CONFIG, JsonValue, normalize_config
 from controller.mpc_factory import MpcPairConfiguration, MpcPairFactory, NativeTiming, OwnedMpcPair
 
 
 CYCLE: dict[str, JsonValue] = {"u_min": 0.1, "u_max": 0.9}
+
+def _inactive_calibration(_load, _temperature, _forecast) -> CalibrationDecision:
+    return CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
 
 class Estimator:
@@ -254,7 +258,7 @@ def factory(
         normalize_config(base_configuration),
         "C",
         CYCLE,
-        adjust_load=lambda load, _temperature: load,
+        advance_calibration=_inactive_calibration,
         model_authority=authority,
         on_policy_failure=lambda _error: None,
         ekf_factory=ekf,
@@ -940,7 +944,7 @@ def test_public_adopt_closes_pair_when_postconstruction_validation_fails() -> No
         normalize_config(DEFAULT_MPC_CONFIG),
         "C",
         CYCLE,
-        adjust_load=lambda load, _temperature: load,
+        advance_calibration=_inactive_calibration,
         model_authority=lambda: (0, None),
         on_policy_failure=lambda _error: None,
         ekf_factory=ekf,

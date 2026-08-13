@@ -6,7 +6,8 @@ import numpy as np
 
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.acados import GreyBoxMPCConfig
-from controller.mpc import CalibrationCommand, Controller
+from controller.mpc import Controller
+from controller.mpc_calibration import CalibrationCommand
 from controller.mpc_factory import MpcPairFactory
 from controller.runtime.runner import SyncControllerRunner
 
@@ -58,8 +59,8 @@ def _controller(monkeypatch, *, safe_forecast=True):
                 return np.full(len(q_future), 101.0)
 
         monkeypatch.setattr(
-            "controller.mpc.GreyBoxPredictionAdapter.from_controller",
-            lambda controller: SafeForecast(),
+            "controller.grey_box.GreyBoxPredictionAdapter.from_estimator",
+            lambda _estimator, *, config: SafeForecast(),
         )
     controller = Controller({"n_delay": 8, "enable_fan_input": False}, "C", {"u_max": 0.9})
     controller.set_target(110.0)
@@ -149,8 +150,8 @@ def test_delayed_grey_box_overshoot_fails_closed_without_querying_challenger(mon
             return np.concatenate((np.array((101.0,)), np.full(len(q_future) - 1, 131.0)))
 
     monkeypatch.setattr(
-        "controller.mpc.GreyBoxPredictionAdapter.from_controller",
-        lambda controller: DelayedOvershoot(),
+        "controller.grey_box.GreyBoxPredictionAdapter.from_estimator",
+        lambda _estimator, *, config: DelayedOvershoot(),
     )
     controller = _controller(monkeypatch, safe_forecast=False)
     runner = SyncControllerRunner(controller)
