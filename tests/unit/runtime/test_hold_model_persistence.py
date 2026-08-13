@@ -156,6 +156,70 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
     assert runner.restored[0]["version"] == 4
 
 
+
+def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malformed(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    from controller.runtime.modes import hold as hold_module
+
+    migrated_defaults = []
+    monkeypatch.setattr(
+        hold_module,
+        "migrate_mpc_learning_authority",
+        lambda *, defaults: migrated_defaults.append(defaults),
+    )
+    runner = FakeControllerRunner(period=0.01).script([_output(0.5)])
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore(),
+        controller="mpc",
+    )
+    hold.settings["controller"]["config"]["mpc"] = ["malformed"]
+
+    hold.setup()
+    hold.state.metrics = {"id": "malformed-mpc-config"}
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+
+    assert migrated_defaults == [dict(MPC_DEFAULTS)]
+    assert "malformed" not in migrated_defaults[0].values()
+    assert runner.restored == []
+    assert runner.applied[0].source is OutputSource.SEED
+    assert runner.applied[-1].source is OutputSource.CONTROLLER
+    assert runner.submitted_temps == [200.0]
+
+
+def test_mpc_setup_keeps_control_live_when_authority_migration_fails(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    from controller.runtime.modes import hold as hold_module
+
+    def migration_unavailable(*, defaults):
+        del defaults
+        raise RuntimeError("migration store unavailable")
+
+    monkeypatch.setattr(
+        hold_module,
+        "migrate_mpc_learning_authority",
+        migration_unavailable,
+    )
+    runner = FakeControllerRunner(period=0.01)
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore(),
+        controller="mpc",
+    )
+
+    hold.setup()
+
+    learning = hold._hold_learning
+    assert learning is not None
+    assert learning.evidence_available is False
+    assert [applied.source for applied in runner.applied] == [
+        OutputSource.SEED
+    ]
+
 @pytest.mark.parametrize(
     "phase",
     (ActivationPhase.PREPARED, ActivationPhase.ACTIVE, ActivationPhase.ABORTED),

@@ -778,8 +778,12 @@ class ControlTraceSession:
     def close(self) -> None:
         if self._closed:
             return
-        self.flush_pending()
-        self._closed = True
+        try:
+            self.flush_pending()
+        except Exception as error:
+            self._warn_once(f"Control trace pending flush failed: {error}")
+        finally:
+            self._closed = True
         recorder = self._recorder
         if recorder is None:
             return

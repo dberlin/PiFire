@@ -718,6 +718,43 @@ def test_close_before_or_after_open_is_idempotent_and_best_effort() -> None:
     assert unavailable.status.closed
 
 
+def test_close_marks_session_closed_and_closes_recorder_when_pending_flush_raises(
+    monkeypatch,
+) -> None:
+    recorder = _Recorder()
+    warnings: list[str] = []
+    session = _open(recorder, warnings)
+    recorder.fail_record_calls.add(recorder.record_calls + 1)
+    session.queue_model_event(
+        ModelEventPayload(
+            event=ModelEventType.REJECT,
+            model_revision=3,
+            provenance="runtime",
+            detail="pending",
+        ),
+        2_000,
+    )
+    assert session.status.pending_model_events == 1
+    assert session.flush_due(2_500)
+    warnings.clear()
+    flush_calls = 0
+
+    def fail_pending_flush() -> None:
+        nonlocal flush_calls
+        flush_calls += 1
+        raise RuntimeError("pending flush failed")
+
+    monkeypatch.setattr(session, "flush_pending", fail_pending_flush)
+
+    session.close()
+    session.close()
+
+    assert flush_calls == 1
+    assert recorder.close_calls == 1
+    assert session.status.closed
+    assert warnings == ["Control trace pending flush failed: pending flush failed"]
+
+
 def test_open_and_record_failures_leave_no_partial_identity_and_warning_callbacks_are_best_effort() -> None:
     recorder = _Recorder()
     recorder.fail_record_calls.add(1)

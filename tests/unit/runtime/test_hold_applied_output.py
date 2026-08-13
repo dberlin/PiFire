@@ -151,3 +151,118 @@ def test_manual_output_does_not_report_other_actuators(hold_cycle):
         hold._on_manual_output(name, True)
 
     assert runner.applied == []
+
+
+def test_manual_auger_off_commands_active_hardware_off(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold._last_now = 100.0
+    hold.grill.auger_on()
+    runner.applied.clear()
+
+    hold._on_manual_output("auger", False)
+
+    assert hold.grill.get_output_status()["auger"] is False
+    assert runner.applied[-1].source is OutputSource.MANUAL_OVERRIDE
+    assert runner.applied[-1].ratio == 0.0
+
+
+def test_lid_pause_expiry_restarts_fan_and_clears_status(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold.state.lid.open_detected = True
+    hold.state.lid.expires = 5.0
+    hold.grill.fan_off()
+    hold.ctx.clock.advance(6.0)
+
+    hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
+
+    assert hold.status_fragment()["lid_open_detected"] is False
+    assert hold.grill.get_output_status()["fan"] is True
+
+
+def test_operator_lid_toggle_clears_open_pause(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold.state.lid.open_detected = True
+    hold.state.lid.expires = 100.0
+    hold.control["lid_open_toggle"] = True
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+
+    assert hold.control["lid_open_toggle"] is False
+    assert hold.status_fragment()["lid_open_detected"] is False
+
+
+def test_non_auger_manual_release_leaves_controller_feedback_unchanged(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    runner.applied.clear()
+    hold.state.manual_override["fan"] = 50.0
+
+    hold._on_manual_release("fan", 10.0)
+
+    assert hold.state.manual_override["fan"] == 50.0
+    assert runner.applied == []
+
+
+def test_manual_release_without_reseed_still_turns_auger_off(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    runner.applied.clear()
+    hold.state.manual_override["auger"] = 50.0
+    hold.grill.auger_on()
+
+    hold._on_manual_release("auger", 10.0, reseed=False)
+
+    assert hold.state.manual_override["auger"] == 0
+    assert hold.grill.get_output_status()["auger"] is False
+    assert runner.applied == []
+def test_manual_release_without_reseed_preserves_already_off_auger(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    runner.applied.clear()
+    hold.state.manual_override["auger"] = 50.0
+
+    hold._on_manual_release("auger", 10.0, reseed=False)
+
+    assert hold.state.manual_override["auger"] == 0
+    assert hold.grill.get_output_status()["auger"] is False
+    assert runner.applied == []
+
+
+
+def test_operator_lid_toggle_opens_pause_and_turns_fan_off(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold.control["lid_open_toggle"] = True
+    runner.applied.clear()
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+
+    assert hold.control["lid_open_toggle"] is False
+    assert hold.status_fragment()["lid_open_detected"] is True
+    assert hold.grill.get_output_status()["fan"] is False
+    assert runner.applied[-1].source is OutputSource.LID_OPEN
+    assert runner.applied[-1].ratio == 0.0

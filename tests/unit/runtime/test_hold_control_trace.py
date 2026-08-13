@@ -329,6 +329,44 @@ def _install_recorder(monkeypatch):
     return recorder
 
 
+
+def test_inactive_reconfigure_records_controller_fallback(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    recorder = _install_recorder(monkeypatch)
+
+    runner = FakeControllerRunner(period=999)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    reconfigure = runner.reconfigure
+
+    def inactive_reconfigure(settings, control, logger=None):
+        reconfigure(
+            settings,
+            control,
+            logger=logger,
+        )
+        return "Inactive"
+
+    monkeypatch.setattr(runner, "reconfigure", inactive_reconfigure)
+    mode.state.metrics = {"id": "inactive-reconfigure"}
+    mode.control["controller_update"] = True
+
+    mode.on_tick(2.0, 200.0, mode.grill.get_output_status())
+
+    fallbacks = [
+        record.payload
+        for record in recorder.records
+        if (
+            record.event_kind is TraceEventKind.SAFETY_EVENT
+            and record.payload.event
+            is SafetyEventType.CONTROLLER_FALLBACK
+        )
+    ]
+    assert len(fallbacks) == 1
+    assert fallbacks[0].detail == "controller reconfigure fell back"
+
 def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revision(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
     result = _mpc_result()
@@ -979,6 +1017,7 @@ def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monke
         period=1.0,
         commands_fan=True,
         actuation_mode=ActuationMode.FRAMED_PULSE,
+
     ).script([first, second])
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
@@ -1005,6 +1044,33 @@ def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monke
     ]
     assert len(terminal) == 1
     assert terminal[0].producing_calibration_revision == 0
+def test_first_safety_callback_opens_and_binds_the_trace_session(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(
+        period=1.0,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "first-safety-callback"}
+    trace = _trace(mode)
+    assert trace.identity is None
+
+    mode._on_safety_event("temperature_guard", 1.0)
+
+    assert trace.identity is not None
+    safety = [
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.SAFETY_EVENT
+    ]
+    assert [payload.event for payload in safety] == [
+        SafetyEventType.TEMPERATURE_GUARD,
+        SafetyEventType.SCHEDULER_RESET,
+    ]
 
 
 def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_snapshot(hold_cycle, monkeypatch):
@@ -1416,6 +1482,7 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
     mode.setup()
     mode.state.metrics = {"id": "historical-evidence-rotation"}
     old_identity = _open_trace_session(mode, 0.0)
+    assert old_identity is not None
     trace = _trace(mode)
     trace.prepare_applied_output(
         AppliedOutput(0.4, OutputSource.CONTROLLER, 2.0, requested=0.5),
@@ -1432,10 +1499,16 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
         (0, 20),
         _learning_observation(0.0),
     )
+    monkeypatch.setattr(
+        runner,
+        "controller_type",
+        lambda: ControllerType.MPC,
+    )
 
     mode._rotate_evidence_sessions_for_reserved_runner_generations(3.0)
 
     assert _identity(mode).session_id != old_identity.session_id
+    assert _identity(mode).controller is ControllerType.MPC
     assert trace.record_applied_interval(
         TraceAppliedIntervalContext(
             timestamp_ms=4_000,
@@ -1449,9 +1522,30 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
         for record in recorder.records
         if record.event_kind is TraceEventKind.APPLIED_OUTPUT
         and isinstance(record.payload, AppliedOutputPayload)
+
     ]
     assert (intervals[-1].interval_start_ms, intervals[-1].interval_end_ms) == (2_000, 4_000)
     assert intervals[-1].result_revision == 3
+def test_unknown_selected_controller_keeps_control_live_without_trace_identity(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(
+        period=1.0,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+    ).script([_mpc_result(1), _mpc_result(2)])
+    mode = hold_cycle(runner, controller="future-controller")
+    mode.setup()
+    mode.state.metrics = {"id": "unknown-controller-trace"}
+    mode.on_tick(2.0, 200.0, mode.grill.get_output_status())
+    runner.reconfigure({}, {})
+    mode.teardown(200.0)
+
+    assert any(
+        applied.source is OutputSource.CONTROLLER
+        for applied in runner.applied
+    )
+    assert _trace(mode).identity is None
+    assert mode.grill.get_output_status()["auger"] is False
 
 
 def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_outcomes(hold_cycle, monkeypatch):

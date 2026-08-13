@@ -132,6 +132,7 @@ class _OrderedTrace:
     def __init__(self, events, *, failure=None):
         self.events = events
         self.failure = failure
+        self.close_calls = 0
 
     def record(self, record):
         self.events.append(("trace:record", record.event_kind))
@@ -140,6 +141,7 @@ class _OrderedTrace:
         return None
 
     def close(self):
+        self.close_calls += 1
         self.events.append("trace:close")
         if self.failure == "trace-close":
             raise RuntimeError("trace close failed")
@@ -321,6 +323,25 @@ def test_reconfigure_retires_old_frame_and_generation_before_replacement_is_used
     assert events.count(("runner:retire-evidence", 0)) == 1
     assert events.count(("runner:bind-evidence", 1)) == 1
 
+
+
+
+
+def test_unknown_safety_event_leaves_hardware_and_runner_unchanged(
+    hold_cycle,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    output_before = hold.grill.get_output_status()
+    applied_before = tuple(runner.applied)
+
+    hold._on_safety_event("future_guard", 2.0)
+
+    assert hold.grill.get_output_status() == output_before
+    assert tuple(runner.applied) == applied_before
+    assert runner.calibration_cancellations == []
 
 def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_closure(
     hold_cycle, monkeypatch
@@ -555,6 +576,402 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
     assert events.count("runner:stop") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
+
+
+
+def test_teardown_retry_reprepares_feedback_without_repeating_advance(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.metrics = {
+        "id": "teardown-feedback-preparation-retry",
+        "augerontime": 0.0,
+    }
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(3.0)
+    runtime = hold._framed_pulse
+    assert runtime is not None
+    calls = {"advance": 0, "feedback": 0, "reset": 0}
+    original_advance = runtime.advance
+    original_feedback = runtime.report_feedback
+    original_reset = runtime.reset
+
+    def count_advance(*args, **kwargs):
+        calls["advance"] += 1
+        return original_advance(*args, **kwargs)
+
+    def fail_feedback_once(*args, **kwargs):
+        calls["feedback"] += 1
+        if calls["feedback"] == 1:
+            raise RuntimeError("transient feedback preparation failure")
+        return original_feedback(*args, **kwargs)
+
+    def count_reset(*args, **kwargs):
+        calls["reset"] += 1
+        return original_reset(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "advance", count_advance)
+    monkeypatch.setattr(runtime, "report_feedback", fail_feedback_once)
+    monkeypatch.setattr(runtime, "reset", count_reset)
+
+    with pytest.raises(
+        RuntimeError,
+        match="transient feedback preparation failure",
+    ):
+        hold.teardown(200.0)
+    hold.teardown(200.0)
+    hold.teardown(200.0)
+
+    assert calls == {"advance": 1, "feedback": 2, "reset": 1}
+    assert events.count("runner:stop") == 1
+    assert events.count("trace:close") == 1
+    assert events.count("runner:finish") == 1
+
+
+def test_teardown_retry_reuses_prepared_feedback_after_dispatch_failure(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.metrics = {
+        "id": "teardown-feedback-dispatch-retry",
+        "augerontime": 0.0,
+    }
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(3.0)
+    runtime = hold._framed_pulse
+    assert runtime is not None
+    calls = {"advance": 0, "feedback": 0, "dispatch": 0, "reset": 0}
+    original_advance = runtime.advance
+    original_feedback = runtime.report_feedback
+    original_dispatch = hold._dispatch_framed_feedback
+    original_reset = runtime.reset
+
+    def count_advance(*args, **kwargs):
+        calls["advance"] += 1
+        return original_advance(*args, **kwargs)
+
+    def count_feedback(*args, **kwargs):
+        calls["feedback"] += 1
+        return original_feedback(*args, **kwargs)
+
+    def fail_dispatch_once(*args, **kwargs):
+        calls["dispatch"] += 1
+        if calls["dispatch"] == 1:
+            raise RuntimeError("transient feedback dispatch failure")
+        return original_dispatch(*args, **kwargs)
+
+    def count_reset(*args, **kwargs):
+        calls["reset"] += 1
+        return original_reset(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "advance", count_advance)
+    monkeypatch.setattr(runtime, "report_feedback", count_feedback)
+    monkeypatch.setattr(hold, "_dispatch_framed_feedback", fail_dispatch_once)
+    monkeypatch.setattr(runtime, "reset", count_reset)
+
+    with pytest.raises(
+        RuntimeError,
+        match="transient feedback dispatch failure",
+    ):
+        hold.teardown(200.0)
+    hold.teardown(200.0)
+    hold.teardown(200.0)
+
+    assert calls == {
+        "advance": 1,
+        "feedback": 1,
+        "dispatch": 2,
+        "reset": 1,
+    }
+    assert events.count("runner:stop") == 1
+    assert events.count("trace:close") == 1
+    assert events.count("runner:finish") == 1
+
+
+def test_teardown_retry_latches_first_timestamp_and_temperature(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.metrics = {
+        "id": "teardown-latched-inputs",
+        "augerontime": 0.0,
+    }
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(3.0)
+    runtime = hold._framed_pulse
+    assert runtime is not None
+    feedback_times = []
+    reset_inputs = []
+    original_feedback = runtime.report_feedback
+    original_reset = runtime.reset
+
+    def fail_feedback_once(now, *args, **kwargs):
+        feedback_times.append(now)
+        if len(feedback_times) == 1:
+            raise RuntimeError("transient feedback preparation failure")
+        return original_feedback(now, *args, **kwargs)
+
+    def capture_reset(reason, now, inhibit, **kwargs):
+        reset_inputs.append((reason, now, kwargs["sample"].temperature))
+        return original_reset(reason, now, inhibit, **kwargs)
+
+    monkeypatch.setattr(runtime, "report_feedback", fail_feedback_once)
+    monkeypatch.setattr(runtime, "reset", capture_reset)
+
+    with pytest.raises(
+        RuntimeError,
+        match="transient feedback preparation failure",
+    ):
+        hold.teardown(200.0)
+    hold.ctx.clock.advance(10.0)
+    hold.teardown(500.0)
+
+    assert feedback_times == [3.0, 3.0]
+    assert [(item[1], item[2]) for item in reset_inputs] == [(3.0, 200.0)]
+    assert reset_inputs[0][0].value == "mode_change"
+    assert events.count("runner:stop") == 1
+    assert events.count("trace:close") == 1
+    assert events.count("runner:finish") == 1
+
+
+def test_repeated_setup_starts_a_fresh_teardown_transaction(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+
+    hold.setup()
+    first_runtime = hold._framed_pulse
+    hold.state.metrics = {
+        "id": "first-setup",
+        "augerontime": 0.0,
+    }
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(3.0)
+    hold.teardown(200.0)
+
+    hold.setup()
+    second_runtime = hold._framed_pulse
+    hold.state.metrics = {
+        "id": "second-setup",
+        "augerontime": 0.0,
+    }
+    hold.on_tick(6.0, 300.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(4.0)
+    hold.grill.igniter_on()
+    hold.teardown(300.0)
+
+    assert second_runtime is not first_runtime
+    assert runner.stops == 2
+    assert runner.finished_teardowns == 2
+    assert events.count("trace:close") == 2
+    assert hold.grill.get_output_status()["igniter"] is False
+
+
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ("fan_on", "power_on"),
+)
+def test_early_hardware_setup_failure_closes_created_trace_and_outputs(
+    hold_cycle,
+    monkeypatch,
+    failure,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    hold = hold_cycle(runner, controller="mpc")
+
+    def unavailable_output():
+        raise RuntimeError(f"{failure} output unavailable")
+
+    monkeypatch.setattr(
+        hold.grill,
+        failure,
+        unavailable_output,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"{failure} output unavailable",
+    ):
+        hold.setup()
+    trace = hold._control_trace
+    assert trace is not None
+    assert trace.status.closed is False
+    status = hold.status_fragment()
+
+    hold.teardown(200.0)
+
+    assert trace.status.closed is True
+    assert "pulse" not in status
+    assert hold.grill.get_output_status() == {
+        "dc_fan": False,
+        "auger": False,
+        "fan": False,
+        "igniter": False,
+        "power": False,
+        "pwm": 100,
+        "frequency": 100,
+    }
+
+def test_factory_failure_after_persistence_creation_closes_all_created_owners(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    import controller.runtime.modes.hold as hold_module
+
+    events = []
+    _, trace_recorder = _install_boundaries(monkeypatch, events)
+
+    def unavailable_runner(*args, **kwargs):
+        assert len(args) == 2
+        assert "logger" in kwargs
+        raise RuntimeError("runner factory unavailable")
+
+    hold = hold_cycle(_OrderedRunner(events), controller="mpc")
+    monkeypatch.setattr(
+        hold_module._runner_mod,
+        "build_runner",
+        unavailable_runner,
+    )
+    assert events == []
+
+    with pytest.raises(RuntimeError, match="runner factory unavailable"):
+        hold.setup()
+    trace = hold._control_trace
+    assert trace is not None
+    assert "persistence:flush" not in events
+
+    hold.teardown(200.0)
+
+    assert events.count("trace:close") == 1
+    assert events.count("persistence:flush") == 1
+    assert trace_recorder is not None
+def test_runner_revision_failure_before_learning_closes_every_created_owner(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+
+    def unavailable_revision():
+        raise RuntimeError("runner revision unavailable")
+
+    monkeypatch.setattr(
+        runner,
+        "configuration_revision",
+        unavailable_revision,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="runner revision unavailable",
+    ):
+        hold.setup()
+    events.clear()
+
+    hold.teardown(200.0)
+
+    assert events.count("runner:stop") == 1
+    assert events.count("runner:finish") == 1
+    assert events.count("persistence:flush") == 1
+    assert events.count("trace:close") == 1
+    assert hold.grill.get_output_status()["auger"] is False
+
+@pytest.mark.parametrize(
+    ("failure", "expected_warning"),
+    (
+        (
+            "persistence-flush",
+            "Model persistence close failed: persistence flush failed",
+        ),
+        (
+            "trace-flush",
+            "Control trace pending flush failed: trace flush failed",
+        ),
+        (
+            "runner-finish",
+            "Controller teardown close failed: runner finish failed",
+        ),
+    ),
+)
+def test_partial_setup_cleanup_attempts_every_owner_once_after_boundary_failure(
+    hold_cycle,
+    monkeypatch,
+    failure,
+    expected_warning,
+) -> None:
+    events = []
+    runner = _OrderedRunner(events)
+    _, trace_recorder = _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+
+    def unavailable_revision():
+        raise RuntimeError("runner revision unavailable")
+
+    monkeypatch.setattr(runner, "configuration_revision", unavailable_revision)
+    with pytest.raises(RuntimeError, match="runner revision unavailable"):
+        hold.setup()
+
+    persistence = hold._persistence_worker
+    trace = hold._control_trace
+    assert persistence is not None
+    assert trace is not None
+    warnings = []
+    hold.ctx.control_log = SimpleNamespace(warning=warnings.append)
+
+    if failure == "persistence-flush":
+        def fail_persistence_flush():
+            events.append("persistence:flush")
+            raise RuntimeError("persistence flush failed")
+
+        monkeypatch.setattr(persistence, "flush_and_stop", fail_persistence_flush)
+    elif failure == "trace-flush":
+        def fail_trace_flush():
+            events.append("trace:flush-pending")
+            raise RuntimeError("trace flush failed")
+
+        monkeypatch.setattr(trace, "flush_pending", fail_trace_flush)
+    else:
+        def fail_runner_finish():
+            events.append("runner:finish")
+            raise RuntimeError("runner finish failed")
+
+        monkeypatch.setattr(runner, "finish_teardown", fail_runner_finish)
+
+    events.clear()
+    hold.teardown(200.0)
+    hold.teardown(200.0)
+
+    assert events.count("runner:stop") == 1
+    assert events.count("persistence:flush") == 1
+    assert events.count("trace:flush-pending") == (1 if failure == "trace-flush" else 0)
+    assert trace_recorder.close_calls == 1
+    assert trace.status.closed
+    assert events.count("runner:finish") == 1
+    assert warnings == [expected_warning]
 
 
 def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypatch):

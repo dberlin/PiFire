@@ -678,6 +678,108 @@ def test_framed_observation_latches_role_generation_at_frame_start(hold_cycle):
 
     assert [(item.result_revision, item.role_generation) for item in runner.observations] == [(1, 7), (1, 8)]
 
+@pytest.mark.parametrize(
+    ("runner_status", "expected_generation"),
+    [
+        (
+            {
+                "activation": {"role_generation": True},
+                "adaptation": {"role_generation": 7},
+            },
+            7,
+        ),
+        ({"activation": {"role_generation": -1}}, 0),
+        ({"adaptation": {"role_generation": False}}, 0),
+        ({"role_generation": 9}, 9),
+        (["not", "a", "mapping"], 0),
+    ],
+    ids=[
+        "invalid-activation-falls-back-to-adaptation",
+        "negative-activation-falls-back-to-zero",
+        "boolean-adaptation-falls-back-to-zero",
+        "legacy-top-level-generation",
+        "non-mapping-runner-status",
+    ],
+)
+def test_framed_observation_normalizes_runner_role_generation_status(
+    hold_cycle,
+    monkeypatch,
+    runner_status,
+    expected_generation,
+) -> None:
+    runner = _ObservationStatusRunner(
+        period=1.0,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "normalized-role-generation"}
+    _configure_frame_observation(mode)
+    monkeypatch.setattr(
+        runner,
+        "controller_state",
+        lambda: runner_status,
+    )
+
+    _advance_runtime(mode, 0.0, True, ptemp=212.0)
+    _advance_runtime(mode, 6.0, False, ptemp=212.0)
+    _advance_runtime(mode, 20.0, False, ptemp=212.0)
+
+    assert [item.role_generation for item in runner.observations] == [
+        expected_generation
+    ]
+
+
+def test_framed_observation_survives_runner_status_failure(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    runner = _ObservationStatusRunner(
+        period=1.0,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "unavailable-runner-status"}
+    _configure_frame_observation(mode)
+
+    def unavailable_status():
+        raise RuntimeError("runner status unavailable")
+
+    monkeypatch.setattr(runner, "controller_state", unavailable_status)
+
+    _advance_runtime(mode, 0.0, True, ptemp=212.0)
+    _advance_runtime(mode, 6.0, False, ptemp=212.0)
+    _advance_runtime(mode, 20.0, False, ptemp=212.0)
+
+    assert len(runner.observations) == 1
+    assert runner.observations[0].role_generation == 0
+
+def test_framed_observation_survives_non_mapping_runner_status(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    runner = _ObservationStatusRunner(
+        period=1.0,
+        actuation_mode=ActuationMode.FRAMED_PULSE,
+    )
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "malformed-runner-status"}
+    _configure_frame_observation(mode)
+    monkeypatch.setattr(runner, "controller_state", lambda: None)
+
+    _advance_runtime(mode, 0.0, True, ptemp=212.0)
+    _advance_runtime(mode, 6.0, False, ptemp=212.0)
+    _advance_runtime(mode, 20.0, False, ptemp=212.0)
+
+    assert len(runner.observations) == 1
+    assert runner.observations[0].role_generation == 0
+
+
+
+
+
 
 @pytest.mark.parametrize(
     ("case", "inhibit", "skipped", "reset_reason", "expected_source"),
@@ -747,3 +849,22 @@ def test_seed_and_zero_duration_frames_do_not_reach_the_runner(hold_cycle):
     _observe_runtime(mode, _completed_frame(end=0.0, delivered=0.0), ptemp=212.0, inhibit=InhibitReason.NONE)
 
     assert runner.observations == []
+
+
+def test_running_controller_receives_changed_setpoint_without_rebuild(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999).script(
+        [_output(1, 0.3)]
+    )
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.control["primary_setpoint"] = 250.0
+    hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+
+    assert runner.target == 250.0
+    assert runner.configuration_revision() == 0
+
+

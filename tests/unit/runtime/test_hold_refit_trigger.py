@@ -383,6 +383,23 @@ def test_a_refit_that_refuses_still_reaches_the_operator(hold_cycle):
         _control.eventLogger.error = original
     assert any("did not stop" in line for line in logged)
 
+def test_hold_warns_and_skips_refit_when_runner_reports_stop_timeout(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=0.01)
+    hold = _hold(hold_cycle, runner, identification=True)
+    refits_before = len(runner.finalized_refits)
+    warnings = []
+    hold.ctx.control_log = SimpleNamespace(warning=warnings.append)
+    runner.stop_for_refit = lambda: False
+
+    hold.teardown(225)
+
+    assert len(runner.finalized_refits) == refits_before
+    assert warnings == [
+        "Controller worker did not stop; final checkpoint was not queued"
+    ]
+
 
 def test_a_runner_that_forgets_to_refit_cannot_be_built():
     """The ABC is what makes the next runner implement this, rather than

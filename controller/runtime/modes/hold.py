@@ -68,15 +68,9 @@ class _HoldOutputStatus:
     auger: bool
     fan: bool
     pwm: int | float
-
     def __getitem__(self, name: str) -> bool | int | float:
-        if name == "auger":
-            return self.auger
-        if name == "fan":
-            return self.fan
-        if name == "pwm":
-            return self.pwm
-        raise KeyError(name)
+        return getattr(self, name)
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,11 +240,13 @@ class HoldMode(ControlMode):
         )
 
 
+
     def _runner_status(self) -> Mapping[str, object]:
-        if self._runner is None:
+        runner = self._runner
+        if runner is None:
             return {}
         try:
-            status = self._runner.controller_state()
+            status = runner.controller_state()
         except Exception:
             return {}
         return status if isinstance(status, Mapping) else {}
@@ -280,7 +276,9 @@ class HoldMode(ControlMode):
             setpoint=float(control["primary_setpoint"]),
             ambient_c=ambient_c,
             units=str(units),
-            role_generation=self._model_role_generation(self._runner_status()),
+            role_generation=self._model_role_generation(
+                self._runner_status()
+            ),
         )
 
     def _record_framed_delivery(self, delivered_delta_s: float) -> None:
@@ -337,19 +335,14 @@ class HoldMode(ControlMode):
     def _deliver_framed_completion(self, completion: FramedPulseCompletion) -> None:
         if completion.observation is not None:
             assert completion.frame_key is not None
-            learning = self._hold_learning
-            if learning is not None:
-                learning.submit_completed_observation(
-                    completion.frame_key,
-                    completion.observation,
-                    completion.applied,
-                )
+            learning = cast(HoldLearningRuntime, self._hold_learning)
+            learning.submit_completed_observation(
+                completion.frame_key,
+                completion.observation,
+                completion.applied,
+            )
         elif completion.applied is not None:
-            runner = self._runner
-            if runner is None:
-                raise RuntimeError(
-                    "Hold framed pulse runtime requires a controller runner"
-                )
+            runner = cast(_runner_mod.ControllerRunner, self._runner)
             runner.set_output(completion.applied)
 
     def _resume_framed_dispatch(
@@ -450,7 +443,6 @@ class HoldMode(ControlMode):
         safety_event: SafetyEventType | None = None,
         safety_detail: str = "",
         safety_result_revision: int | None = None,
-        command_auger_off: bool = True,
     ) -> None:
         runtime = self._framed_pulse
         if runtime is None or runtime.scheduler is None:
@@ -479,8 +471,7 @@ class HoldMode(ControlMode):
                 else self._control_trace.applied_state.output_source
             ),
         )
-        if command_auger_off:
-            self.grill.auger_off()
+        self.grill.auger_off()
         self._dispatch_framed_result(
             result,
             record_terminal_trace=(
@@ -722,6 +713,8 @@ class HoldMode(ControlMode):
         import control as _control
         self._control_trace = None
         self._hold_learning = None
+        self._runner = None
+        self._persistence_worker = None
         learning_evidence_available = True
         self._reachability_advisory_key = None
         self._framed_pulse = FramedPulseRuntime()
@@ -755,6 +748,7 @@ class HoldMode(ControlMode):
                 model_store,
                 _control.eventLogger,
             )
+            self._persistence_worker = persistence_worker
         except Exception as error:
             learning_evidence_available = False
             persistence_worker = None
@@ -848,7 +842,9 @@ class HoldMode(ControlMode):
         runner = cast(_runner_mod.ControllerRunner, self._runner)
 
         retiring_generation = self._runner_configuration_revision
-        trace = self._control_trace
+        trace = cast(ControlTraceSession, self._control_trace)
+        learning = cast(HoldLearningRuntime, self._hold_learning)
+        runtime = cast(FramedPulseRuntime, self._framed_pulse)
         if trace is not None:
             trace.record_safety(
                 TraceSafetyContext(
@@ -893,21 +889,14 @@ class HoldMode(ControlMode):
                 terminal_feedback=False,
             )
         _control.eventLogger.info("Controller reinitialized with updated settings")
-        learning = self._hold_learning
-        if learning is not None:
-            learning.reconcile_outcomes(now)
+        learning.reconcile_outcomes(now)
         installed_generation = runner.configuration_revision()
-        if learning is not None:
-            learning.retire_generation(retiring_generation)
-        if trace is not None:
-            trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
+        learning.retire_generation(retiring_generation)
+        trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
         actual_type = runner.controller_type()
         self._controller_name = (
             actual_type.value if isinstance(actual_type, ControllerType) else self.settings["controller"]["selected"]
         )
-        runtime = self._framed_pulse
-        if runtime is None:
-            raise RuntimeError("Hold framed pulse runtime is unavailable")
         runtime.configure(
             runner.actuation_mode(),
             controller=cast(PulseControllerState, self.state.controller),
@@ -918,12 +907,11 @@ class HoldMode(ControlMode):
         self.state.cycle.ratio = self.state.cycle.raw_ratio = 0.0
         self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
         self.grill.auger_off()
-        if learning is not None:
-            learning.restore_model(
-                timestamp_ms=int(now * 1_000),
-                controller_name=self._controller_name,
-            )
-            learning.reconcile_activation()
+        learning.restore_model(
+            timestamp_ms=int(now * 1_000),
+            controller_name=self._controller_name,
+        )
+        learning.reconcile_activation()
         self._configure_fan_authority()
         self._runner_configuration_revision = installed_generation
         context = self._trace_session_context()
@@ -932,10 +920,9 @@ class HoldMode(ControlMode):
             if trace is None or context is None
             else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
         )
-        if identity is not None and learning is not None:
+        if identity is not None:
             learning.bind_generation(installed_generation)
-        if learning is not None:
-            learning.reconcile_outcomes(now)
+        learning.reconcile_outcomes(now)
         self._set_output(
             seed_output(
                 self.state.cycle.ratio,
@@ -1210,6 +1197,8 @@ class HoldMode(ControlMode):
             "safety-cancel",
         ] = "safety-cancel",
     ) -> bool:
+        if self._runner is None:
+            return False
         controller = self.state.controller
         probe_load = controller.pulse_frame_calibration_probe_load
         if (
@@ -1298,14 +1287,27 @@ class HoldMode(ControlMode):
     ) -> _runner_mod.ControllerUpdateResult:
         """Return the same completed result with its exact baseline allocation."""
         baseline = result.baseline_allocation
-        if baseline is None or result.calibration is None:
+        calibration = result.calibration
+        if calibration is None:
             return result
+        if baseline is None:
+            return replace(
+                result,
+                cycle_ratio=0.0,
+                fan=None,
+                allocation=None,
+                calibration=replace(
+                    calibration,
+                    active=False,
+                    probe_q=0.0,
+                ),
+            )
         return replace(
             result,
             cycle_ratio=baseline.auger_duty,
             fan=None if baseline.fan_duty is None else {"duty": baseline.fan_duty},
             allocation=baseline,
-            calibration=replace(result.calibration, active=False, probe_q=0.0),
+            calibration=replace(calibration, active=False, probe_q=0.0),
         )
 
     def _cancel_calibration_probe(
@@ -1502,14 +1504,12 @@ class HoldMode(ControlMode):
         # Feed the runner every tick so a threaded core always has a fresh temp
         # to solve; for the synchronous runner this just stores the latest temp,
         # so the value read at the gate below is unchanged.
-        self._runner.submit(context.ptemp)
-        learning = self._hold_learning
-        if learning is not None:
-            learning.reconcile_outcomes(context.now)
-        runtime = self._framed_pulse
-        controller_interval = self._runner.control_period() or (
-            0.0 if runtime is None else runtime.frame_seconds
-        )
+        runner = cast(_runner_mod.ControllerRunner, self._runner)
+        runner.submit(context.ptemp)
+        learning = cast(HoldLearningRuntime, self._hold_learning)
+        learning.reconcile_outcomes(context.now)
+        runtime = cast(FramedPulseRuntime, self._framed_pulse)
+        controller_interval = runner.control_period() or runtime.frame_seconds
         if (context.now - self.state.controller.cycle_start) <= controller_interval:
             return _HoldRunnerResult(
                 result=None,
@@ -1519,9 +1519,8 @@ class HoldMode(ControlMode):
                 calibration=None,
                 calibration_handled=context.calibration_handled,
             )
-        result = self._runner.latest()
-        if learning is not None:
-            learning.drain_activation_events()
+        result = runner.latest()
+        learning.drain_activation_events()
         cancellation: _CalibrationCancellation | None = None
         matched_cancelled_identity = (
             self._result_matches_cancelled_frame(result)
@@ -2321,6 +2320,24 @@ class HoldMode(ControlMode):
                     learning.finish_teardown(
                         generation=self._runner_configuration_revision
                     )
+                else:
+                    persistence = self._persistence_worker
+                    if persistence is not None:
+                        try:
+                            persistence.flush_and_stop()
+                        except Exception as error:
+                            self._trace_warning(
+                                f"Model persistence close failed: {error}"
+                            )
+                    if trace is not None:
+                        trace.close()
+                    if runner is not None:
+                        try:
+                            runner.finish_teardown()
+                        except Exception as error:
+                            self._trace_warning(
+                                f"Controller teardown close failed: {error}"
+                            )
                 teardown.phase = _TeardownPhase.FINISHED
         if stop_error is not None:
             raise stop_error
