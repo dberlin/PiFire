@@ -2,7 +2,6 @@ from collections.abc import Mapping
 from math import isfinite
 
 import time
-import uuid
 from dataclasses import replace
 from typing import cast
 
@@ -25,26 +24,20 @@ from common.control_trace import (
     AllocationPayload,
     CalibrationEventType,
     CalibrationTracePayload,
-    AppliedOutputPayload,
-    ControlTraceRecord,
+    ControlTracePayload,
     ControllerType,
-    FramedPulseFramePayload,
     InhibitReason,
     ModelEventPayload,
     ModelEvaluationPayload,
     ModelEventType,
-    RecorderGapPayload,
-    MpcUpdatePayload,
     ModelObservationPayload,
+    RecorderGapPayload,
     ResultStaleState,
-    PidSpUpdatePayload,
-    PidUpdatePayload,
-    SafetyEventPayload,
     SafetyEventType,
-    SessionPayload,
     TraceEventKind,
     TraceSetting,
 )
+from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
     FrameFeedbackDisposition,
@@ -64,12 +57,23 @@ from controller.runtime.framed_pulse import (
 )
 from controller.runtime.logic.pulse import PulseResetReason
 
+from controller.runtime.control_trace_session import (
+    ControlTraceSession,
+    TraceAppliedIntervalContext,
+    TraceFrameContext,
+    TraceModelAuthority,
+    TraceModelContext,
+    TraceOutputContext,
+    TraceSafetyContext,
+    TraceSessionContext,
+    TraceUpdateContext,
+)
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.model_fitting import (
     TeardownRefitOutcome,
 )
-from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.base import MpcTraceDiagnostics
 from controller.model_promotion import ReachabilityState
 from controller.runtime.logic.fan import controller_fan_authority, start_fan
 from controller.runtime.logic.pwm import hold_duty_cycle
@@ -116,16 +120,7 @@ class HoldMode(ControlMode):
     the Shutdown/Monitor/Manual/Prime power-off teardown gate, nor the
     Startup/Reignite afterstarttemp-write teardown gate)."""
 
-    _trace_recorder: ControlTraceRecorder | None = None
-    _trace_session_id: str | None = None
-    _trace_cook_id: str | None = None
-    _trace_warning_active: bool = False
-    _trace_pending_model_events: list[tuple[ModelEventPayload, int]] | None = None
-    _trace_closed: bool = False
-    _trace_session_model_snapshot: dict | None = None
-    _trace_session_model_provenance: str | None = None
-    _trace_last_update_payload: MpcUpdatePayload | PidUpdatePayload | PidSpUpdatePayload | None = None
-    _trace_runner_snapshot_fallback_safe: bool = True
+    _control_trace: ControlTraceSession | None = None
     _runner_configuration_revision: int = 0
     _framed_pulse: FramedPulseRuntime | None = None
     _pending_model_observations: (
@@ -206,17 +201,7 @@ class HoldMode(ControlMode):
         self.ctx.store.update_metrics(self.state.metrics)
 
     def _dispatch_framed_feedback(self, feedback: FramedPulseFeedback) -> None:
-        controller = self.state.controller
         applied = feedback.applied
-        if feedback.measured_source:
-            controller.trace_interval_result_revision = applied.producing_result_revision
-            controller.trace_prior_requested_auger_duty = (
-                applied.requested if applied.requested is not None else applied.ratio
-            )
-            controller.trace_prior_realized_auger_duty = applied.ratio
-            controller.trace_prior_output_source = applied.source
-            controller.trace_prior_fan_duty = controller.fan_duty
-            controller.trace_prior_combustion_load = feedback.realized_combustion_load
         self._set_output(
             applied,
             applied.timestamp,
@@ -226,10 +211,11 @@ class HoldMode(ControlMode):
             producing_calibration_generation=applied.producing_calibration_generation,
             sample_complete=applied.sample_complete,
             feedback_disposition=applied.feedback_disposition,
+            measured_combustion_load=(
+                feedback.realized_combustion_load if feedback.measured_source else None
+            ),
             dispatch=feedback.dispatch,
         )
-        if feedback.measured_source:
-            controller.trace_prior_combustion_load = feedback.realized_combustion_load
 
     def _trace_framed_completion(
         self,
@@ -237,9 +223,22 @@ class HoldMode(ControlMode):
         *,
         record_terminal_trace: bool,
     ) -> None:
-        self._trace_pulse_frame(completion)
-        if completion.applied is not None and record_terminal_trace:
-            self._trace_terminal_framed_output(completion)
+        trace = self._control_trace
+        runtime = self._framed_pulse
+        scheduler = None if runtime is None else runtime.scheduler
+        if trace is not None and scheduler is not None:
+            trace.record_frame(
+                TraceFrameContext(
+                    completion=completion,
+                    pulse_slot_seconds=float(scheduler.timing.pulse_s),
+                    frame_seconds=float(scheduler.timing.frame_s),
+                )
+            )
+            if completion.applied is not None and record_terminal_trace:
+                trace.record_terminal_framed_output(
+                    completion,
+                    controls_fan=self.state.controller.controls_fan,
+                )
         if (
             completion.missing_observation_reason is not None
             and completion.result_revision > 0
@@ -285,22 +284,28 @@ class HoldMode(ControlMode):
             self._deliver_framed_completion(completion)
         if scheduler_reset is not None:
             reason, now, inhibit, result_revision, safety_trace = scheduler_reset
-            if safety_trace is not None:
-                event, detail, safety_revision = safety_trace
-                self._trace_safety(
-                    event,
-                    now,
-                    detail,
-                    inhibit,
-                    result_revision=safety_revision,
+            trace = self._control_trace
+            if trace is not None:
+                if safety_trace is not None:
+                    event, detail, safety_revision = safety_trace
+                    trace.record_safety(
+                        TraceSafetyContext(
+                            event=event,
+                            inhibit_reason=inhibit,
+                            result_revision=safety_revision,
+                            detail=detail,
+                            timestamp_ms=int(now * 1_000),
+                        )
+                    )
+                trace.record_safety(
+                    TraceSafetyContext(
+                        event=SafetyEventType.SCHEDULER_RESET,
+                        inhibit_reason=inhibit,
+                        result_revision=result_revision,
+                        detail=f"framed pulse scheduler reset: {reason.value}",
+                        timestamp_ms=int(now * 1_000),
+                    )
                 )
-            self._trace_safety(
-                SafetyEventType.SCHEDULER_RESET,
-                now,
-                f"framed pulse scheduler reset: {reason.value}",
-                inhibit,
-                result_revision=result_revision,
-            )
         for completion in result.completions:
             self._trace_framed_completion(
                 completion,
@@ -346,7 +351,11 @@ class HoldMode(ControlMode):
             cancellation_command_revision=cancellation_command_revision,
             cancellation_command_action=cancellation_command_action,
             feedback_source=source,
-            prior_output_source=self.state.controller.trace_prior_output_source,
+            prior_output_source=(
+                None
+                if self._control_trace is None
+                else self._control_trace.applied_state.output_source
+            ),
         )
         self.grill.auger_off()
         self._dispatch_framed_result(
@@ -370,24 +379,27 @@ class HoldMode(ControlMode):
 
     def _record_pending_observation_gap(self, observation: FrameObservation, reason: str) -> None:
         publication_ms = int(observation.frame_end_s * 1_000)
-        self._trace_record(
-            TraceEventKind.RECORDER_GAP,
-            RecorderGapPayload(
-                lost_record_count=1,
-                gap_start_ms=int(observation.frame_start_s * 1_000),
-                gap_end_ms=publication_ms,
-                reason=reason,
-                frame_start_ms=int(observation.frame_start_s * 1_000),
-                frame_end_ms=publication_ms,
-                result_revision=observation.result_revision,
-                observation_sequence=observation.observation_sequence,
-            ),
-            publication_ms,
-        )
+        trace = self._control_trace
+        if trace is not None:
+            trace.record(
+                TraceEventKind.RECORDER_GAP,
+                RecorderGapPayload(
+                    lost_record_count=1,
+                    gap_start_ms=int(observation.frame_start_s * 1_000),
+                    gap_end_ms=publication_ms,
+                    reason=reason,
+                    frame_start_ms=int(observation.frame_start_s * 1_000),
+                    frame_end_ms=publication_ms,
+                    result_revision=observation.result_revision,
+                    observation_sequence=observation.observation_sequence,
+                ),
+                publication_ms,
+            )
         worker = self._persistence_worker
-        session_id = self._trace_session_id
-        if worker is None or not isinstance(session_id, str) or not session_id:
+        identity = None if trace is None else trace.identity
+        if worker is None or identity is None:
             return
+        session_id = identity.session_id
         gap = ModelEvidenceRecord(
             evidence_id=(
                 f"{session_id}:recorder-gap:{observation.role_generation}:"
@@ -395,7 +407,7 @@ class HoldMode(ControlMode):
             ),
             kind=EvidenceKind.RECORDER_GAP,
             session_id=session_id,
-            cook_id=self._trace_cook_id,
+            cook_id=identity.cook_id,
             timestamp_ms=publication_ms,
             role_generation=observation.role_generation,
             model_digest=None,
@@ -516,9 +528,15 @@ class HoldMode(ControlMode):
         leave the report reading "inactive" with nothing to show the operator.
         """
         worker = self._persistence_worker
-        if worker is None:
+        trace = self._control_trace
+        identity = None if trace is None else trace.identity
+        if worker is None or identity is None:
             return
-        compact = self._calibration_frame_evidence(observation, self._trace_session_id, self._trace_cook_id)
+        compact = self._calibration_frame_evidence(
+            observation,
+            identity.session_id,
+            identity.cook_id,
+        )
         if compact is None:
             return
         if not worker.submit_evidence_batch((compact,)).accepted:
@@ -537,9 +555,11 @@ class HoldMode(ControlMode):
             sequence = -1
             while sequence in self._pending_model_observations:
                 sequence -= 1
+            trace = self._control_trace
+            identity = None if trace is None else trace.identity
             self._pending_model_observations[sequence] = (
                 observation,
-                self._trace_session_id,
+                None if identity is None else identity.session_id,
                 -1,
                 ((TraceEventKind.MODEL_OBSERVATION, self._rejected_model_observation(observation, "invalid-probe")),),
             )
@@ -570,7 +590,14 @@ class HoldMode(ControlMode):
             return
         if self._pending_model_observations is None:
             self._pending_model_observations = {}
-        self._pending_model_observations[sequence] = (observation, self._trace_session_id, generation, None)
+        trace = self._control_trace
+        identity = None if trace is None else trace.identity
+        self._pending_model_observations[sequence] = (
+            observation,
+            None if identity is None else identity.session_id,
+            generation,
+            None,
+        )
         evicted_sequence = getattr(submission, "evicted_sequence", None)
         if isinstance(evicted_sequence, int) and not isinstance(evicted_sequence, bool):
             self._retire_pending_model_observation(evicted_sequence, "runner-observation-evicted")
@@ -582,20 +609,22 @@ class HoldMode(ControlMode):
         sequence = completion.observation_sequence
         if reason is None or sequence is None:
             return
-        self._trace_record(
-            TraceEventKind.RECORDER_GAP,
-            RecorderGapPayload(
-                lost_record_count=1,
-                gap_start_ms=int(frame.nominal_start_s * 1_000),
-                gap_end_ms=int(frame.ended_at_s * 1_000),
-                reason=reason,
-                frame_start_ms=int(frame.nominal_start_s * 1_000),
-                frame_end_ms=int(frame.ended_at_s * 1_000),
-                result_revision=completion.result_revision if completion.result_revision > 0 else None,
-                observation_sequence=sequence,
-            ),
-            int(frame.ended_at_s * 1_000),
-        )
+        trace = self._control_trace
+        if trace is not None:
+            trace.record(
+                TraceEventKind.RECORDER_GAP,
+                RecorderGapPayload(
+                    lost_record_count=1,
+                    gap_start_ms=int(frame.nominal_start_s * 1_000),
+                    gap_end_ms=int(frame.ended_at_s * 1_000),
+                    reason=reason,
+                    frame_start_ms=int(frame.nominal_start_s * 1_000),
+                    frame_end_ms=int(frame.ended_at_s * 1_000),
+                    result_revision=completion.result_revision,
+                    observation_sequence=sequence,
+                ),
+                int(frame.ended_at_s * 1_000),
+            )
 
     @staticmethod
     def _model_lifecycle_payload(value: object) -> ModelEventPayload | None:
@@ -715,9 +744,12 @@ class HoldMode(ControlMode):
         remaining = pending[3]
         if not isinstance(remaining, tuple):
             return False
+        trace = self._control_trace
+        if trace is None:
+            return False
         while remaining:
             event_kind, payload = remaining[0]
-            if not self._trace_record(event_kind, payload, publication_ms):
+            if not trace.record(event_kind, cast(ControlTracePayload, payload), publication_ms):
                 self._pending_model_observations[sequence] = (*pending[:3], remaining)
                 return False
             remaining = remaining[1:]
@@ -768,7 +800,11 @@ class HoldMode(ControlMode):
             pending = self._pending_model_observations.get(sequence)
             if pending is None:
                 continue
-            if generation != pending[2] or pending[1] != self._trace_session_id:
+            trace = self._control_trace
+            identity = None if trace is None else trace.identity
+            if generation != pending[2] or pending[1] != (
+                None if identity is None else identity.session_id
+            ):
                 self._queue_rejected_model_observation(sequence, "observation-configuration-mismatch")
                 continue
             if not isinstance(delivered, FrameObservation) or not isinstance(outcome, Mapping):
@@ -880,42 +916,6 @@ class HoldMode(ControlMode):
             if pending[3] is None or not self._flush_pending_model_trace(sequence, pending, publication_ms):
                 break
 
-    def _trace_pulse_frame(self, completion: FramedPulseCompletion) -> None:
-        runtime = self._framed_pulse
-        scheduler = None if runtime is None else runtime.scheduler
-        frame = completion.frame
-        if (
-            scheduler is None
-            or completion.result_revision <= 0
-            or frame.ended_at_s <= frame.nominal_start_s
-        ):
-            return
-        self._trace_record(
-            TraceEventKind.ACTUATION_FRAME,
-            FramedPulseFramePayload(
-                result_revision=completion.result_revision,
-                pulse_slot_seconds=float(scheduler.timing.pulse_s),
-                frame_seconds=float(scheduler.timing.frame_s),
-                frame_start_ms=int(frame.nominal_start_s * 1_000),
-                frame_end_ms=int(frame.ended_at_s * 1_000),
-                requested_combustion_load=completion.requested_combustion_load,
-                requested_auger_duty=frame.latched_request,
-                credit_before_seconds=frame.credit_before_s,
-                credit_after_seconds=frame.credit_after_s,
-                scheduled_on_seconds=frame.scheduled_on_s,
-                delivered_on_seconds=frame.delivered_on_s,
-                transition_count=frame.observed_transition_count,
-                actual_start_active=frame.actual_start_on,
-                actual_end_active=frame.actual_end_on,
-                requested_fan_duty=completion.requested_fan_duty,
-                applied_fan_duty=completion.applied_fan_duty,
-                skipped=frame.skipped,
-                stale_command=completion.stale_command,
-                inhibit_reason=completion.inhibit,
-                reset_reason=frame.reset_reason.value if frame.reset_reason is not None else None,
-            ),
-            int(frame.ended_at_s * 1_000),
-        )
 
 
     def _trace_warning(self, message: str) -> None:
@@ -945,66 +945,74 @@ class HoldMode(ControlMode):
             )
         self.state.controller.controls_fan = wants_fan and has_authority
 
-    def _clear_trace_session_model_authority(self) -> None:
-        self._trace_session_model_snapshot = None
-        self._trace_session_model_provenance = None
-
-    def _set_trace_session_model_authority(self, snapshot: dict, provenance: str) -> None:
-        revision = snapshot.get("revision")
-        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
-            self._clear_trace_session_model_authority()
-            return
-        self._trace_session_model_snapshot = snapshot
-        self._trace_session_model_provenance = provenance
-
-    def _trace_settings(self, value, prefix: str = "") -> tuple[TraceSetting, ...]:
-        entries: list[TraceSetting] = []
-        if isinstance(value, dict):
-            for key in sorted(value):
-                name = f"{prefix}.{key}" if prefix else str(key)
-                entries.extend(self._trace_settings(value[key], name))
-        elif isinstance(value, str | int | float | bool):
-            entries.append(TraceSetting(key=prefix, value=value))
-        return tuple(entries)
-
-    def _trace_record(self, event_kind: TraceEventKind, payload, ts_ms: int) -> bool:
-        recorder = self._trace_recorder
+    def _trace_session_context(self) -> TraceSessionContext | None:
+        trace = self._control_trace
+        runner = self._runner
+        runtime = self._framed_pulse
+        scheduler = None if runtime is None else runtime.scheduler
         controller = self._trace_type()
-        if recorder is None or self._trace_session_id is None or self._trace_cook_id is None or controller is None:
-            return False
-        try:
-            recorder.record(
-                ControlTraceRecord(
-                    ts_ms=ts_ms,
-                    session_id=self._trace_session_id,
-                    cook_id=self._trace_cook_id,
-                    controller=controller,
-                    event_kind=event_kind,
-                    payload=payload,
+        cook_id = self.state.metrics.get("id")
+        if (
+            trace is None
+            or runner is None
+            or scheduler is None
+            or controller is None
+            or not isinstance(cook_id, str)
+            or not cook_id
+        ):
+            return None
+        controller_settings = self.settings.get("controller", {})
+        configs = controller_settings.get("config", {}) if isinstance(controller_settings, Mapping) else {}
+        config = configs.get(self._controller_name, {}) if isinstance(configs, Mapping) else {}
+        if not isinstance(config, Mapping):
+            config = {}
+        globals_settings = self.settings.get("globals", {})
+        temperature_unit = (
+            str(globals_settings.get("units", "F"))
+            if isinstance(globals_settings, Mapping)
+            else "F"
+        )
+        ambient_celsius = float(config.get("T_amb", 0.0))
+        ambient = ambient_celsius * 9.0 / 5.0 + 32.0 if temperature_unit == "F" else ambient_celsius
+        fallback_safe = not runner.runs_async()
+        fallback_model: TraceModelAuthority | None = None
+        if trace.model_authority is None and fallback_safe:
+            snapshot = runner.get_model_snapshot()
+            if isinstance(snapshot, Mapping):
+                fallback_model = TraceModelAuthority(
+                    cast(Mapping[str, JsonValue], snapshot),
+                    "persisted",
                 )
-            )
-        except Exception as error:
-            if not self._trace_warning_active:
-                self._trace_warning(f"Control trace record failed: {error}")
-                self._trace_warning_active = True
-            return False
-        self._trace_warning_active = False
-        return True
-
-    def _flush_pending_model_events(self) -> None:
-        if self._trace_session_id is None or self._trace_pending_model_events is None:
-            return
-        while self._trace_pending_model_events:
-            payload, timestamp_ms = self._trace_pending_model_events[0]
-            if not self._trace_record(TraceEventKind.MODEL_EVENT, payload, timestamp_ms):
-                return
-            del self._trace_pending_model_events[0]
-
-    def _queue_model_event(self, payload: ModelEventPayload, timestamp_ms: int) -> None:
-        if self._trace_pending_model_events is None:
-            return
-        self._trace_pending_model_events.append((payload, timestamp_ms))
-        self._flush_pending_model_events()
+        versions = self.settings.get("versions", {})
+        platform = self.settings.get("platform", {})
+        return TraceSessionContext(
+            controller=controller,
+            controller_config=cast(Mapping[str, JsonValue], config),
+            temperature_unit=temperature_unit,
+            control_period_seconds=float(runner.control_period() or scheduler.timing.frame_s),
+            fallback_model=fallback_model,
+            runner_snapshot_fallback_safe=fallback_safe,
+            pulse_slot_seconds=float(scheduler.timing.pulse_s),
+            pulse_frame_seconds=float(scheduler.timing.frame_s),
+            fan_authority=self.state.controller.controls_fan,
+            fan_pwm_capable=bool(platform.get("dc_fan", False)) if isinstance(platform, Mapping) else False,
+            fan_min_duty=float(config.get("fan_min_pct", 0.0)),
+            fan_max_duty=float(config.get("fan_max_pct", 100.0)),
+            setpoint=float(self.control["primary_setpoint"]),
+            ambient_temperature=ambient,
+            software_version=(
+                str(versions.get("server", "unknown"))
+                if isinstance(versions, Mapping)
+                else "unknown"
+            ),
+            build_version=(
+                str(versions.get("build", "unknown"))
+                if isinstance(versions, Mapping)
+                else "unknown"
+            ),
+            cook_id=cook_id,
+            runner_generation=self._runner_configuration_revision,
+        )
 
     def _checkpoint_model(self, snapshot: dict[str, object]) -> bool:
         worker = self._persistence_worker
@@ -1015,8 +1023,10 @@ class HoldMode(ControlMode):
 
     def _bind_runner_evidence_context(self, generation: int) -> None:
         bind = getattr(getattr(self, "_runner", None), "bind_evidence_context", None)
-        if callable(bind) and self._trace_session_id is not None:
-            bind(generation, self._trace_session_id, self._trace_cook_id)
+        trace = self._control_trace
+        identity = None if trace is None else trace.identity
+        if callable(bind) and identity is not None:
+            bind(generation, identity.session_id, identity.cook_id)
 
     def _retire_runner_evidence_context(self, generation: int) -> None:
         retire = getattr(getattr(self, "_runner", None), "retire_evidence_context", None)
@@ -1039,18 +1049,24 @@ class HoldMode(ControlMode):
                 self._reconcile_model_observation_outcomes(now)
                 continue
             self._retire_runner_evidence_context(self._runner_configuration_revision)
-            self._trace_session_id = None
-            self._trace_cook_id = None
-            self._clear_trace_session_model_authority()
+            trace = self._control_trace
+            if trace is not None:
+                trace.rotate(runner_snapshot_fallback_safe=not self._runner.runs_async())
             actual_type = getattr(self._runner, "controller_type", lambda: None)()
             if isinstance(actual_type, ControllerType):
                 self._controller_name = actual_type.value
-            self._trace_runner_snapshot_fallback_safe = not self._runner.runs_async()
             self._runner_configuration_revision = generation
-            self._ensure_trace_session(now)
+            context = self._trace_session_context()
+            identity = (
+                None
+                if trace is None or context is None
+                else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+            )
+            if identity is not None:
+                self._bind_runner_evidence_context(generation)
             self._pending_model_observations = {
                 sequence: (
-                    (observation, self._trace_session_id, pending_generation, records)
+                    (observation, None if identity is None else identity.session_id, pending_generation, records)
                     if pending_generation == generation
                     else (observation, session_id, pending_generation, records)
                 )
@@ -1063,371 +1079,6 @@ class HoldMode(ControlMode):
             }
             self._reconcile_model_observation_outcomes(now)
 
-    def _ensure_trace_session(self, now: float) -> None:
-        if self._trace_session_id is not None:
-            self._flush_pending_model_events()
-            return
-        cook_id = self.state.metrics.get("id")
-        controller = self._trace_type()
-        if not isinstance(cook_id, str) or not cook_id or controller is None:
-            return
-        config = self.settings["controller"].get("config", {}).get(self._controller_name, {})
-        temperature_unit = str(self.settings["globals"]["units"])
-        ambient_celsius = float(config.get("T_amb", 0.0))
-        session_ambient_temperature = ambient_celsius * 9.0 / 5.0 + 32.0 if temperature_unit == "F" else ambient_celsius
-        snapshot = self._trace_session_model_snapshot
-        provenance = self._trace_session_model_provenance
-        if snapshot is None and self._trace_runner_snapshot_fallback_safe:
-            snapshot = self._runner.get_model_snapshot() if self._runner is not None else None
-            provenance = "persisted"
-        model_revision = snapshot.get("revision") if isinstance(snapshot, dict) else None
-        if isinstance(model_revision, bool) or not isinstance(model_revision, int) or model_revision < 0:
-            model_revision = None
-            provenance = None
-
-        runtime = self._framed_pulse
-        scheduler = None if runtime is None else runtime.scheduler
-        if scheduler is None:
-            return
-        payload = SessionPayload(
-            controller=controller,
-            controller_config=self._trace_settings(config),
-            temperature_unit=temperature_unit,
-            control_period_seconds=float(self._runner.control_period() or scheduler.timing.frame_s),
-            model_revision=model_revision,
-            model_provenance=provenance if model_revision is not None else None,
-            pulse_slot_seconds=float(scheduler.timing.pulse_s),
-            pulse_frame_seconds=float(scheduler.timing.frame_s),
-            fan_authority=self.state.controller.controls_fan,
-            fan_pwm_capable=bool(self.settings["platform"]["dc_fan"]),
-            fan_min_duty=float(config.get("fan_min_pct", 0.0)),
-            fan_max_duty=float(config.get("fan_max_pct", 100.0)),
-            setpoint=float(self.control["primary_setpoint"]),
-            ambient_temperature=session_ambient_temperature,
-            software_version=str(self.settings.get("versions", {}).get("server", "unknown")),
-            build_version=str(self.settings.get("versions", {}).get("build", "unknown")),
-        )
-        self._trace_session_id = str(uuid.uuid4())
-        self._trace_cook_id = cook_id
-        if not self._trace_record(TraceEventKind.SESSION, payload, int(now * 1_000)):
-            self._trace_session_id = None
-            self._trace_cook_id = None
-            return
-        self._bind_runner_evidence_context(self._runner_configuration_revision)
-        self._flush_pending_model_events()
-
-    def _trace_safety(
-        self,
-        event: SafetyEventType,
-        now: float,
-        detail: str,
-        inhibit: InhibitReason,
-        *,
-        result_revision: int | None = None,
-    ) -> None:
-        revision = self.state.controller.trace_result_revision if result_revision is None else result_revision
-        self._trace_record(
-            TraceEventKind.SAFETY_EVENT,
-            SafetyEventPayload(
-                event=event,
-                inhibit_reason=inhibit,
-                result_revision=revision if revision >= 0 else None,
-                detail=detail,
-            ),
-            int(now * 1_000),
-        )
-
-    def _trace_model(self, event: ModelEventType, detail: str, snapshot=None) -> None:
-        now_ms = int(self.ctx.clock.now() * 1_000)
-        revision = snapshot.get("revision") if isinstance(snapshot, dict) else None
-        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
-            revision = None
-        payload = ModelEventPayload(
-            event=event,
-            model_revision=revision,
-            provenance="persisted" if revision is not None else None,
-            detail=detail,
-        )
-        self._queue_model_event(payload, now_ms)
-
-    def _trace_update(self, result, now: float, controller_interval: float) -> bool:
-        if result is None or result.revision == 0:
-            return False
-        diagnostics = result.diagnostics
-        stale_observation = (
-            isinstance(diagnostics, MpcTraceDiagnostics)
-            and result.revision == self.state.controller.trace_result_revision
-            and not self.state.controller.trace_mpc_stale
-            and result.stale_state is ResultStaleState.STALE
-        )
-        if result.revision < self.state.controller.trace_result_revision or (
-            result.revision == self.state.controller.trace_result_revision and not stale_observation
-        ):
-            return False
-        observed_ms = int(now * 1_000)
-        if stale_observation:
-            previous_payload = self._trace_last_update_payload
-            if not isinstance(previous_payload, MpcUpdatePayload):
-                return False
-            payload = replace(
-                previous_payload,
-                result_age_ms=max(0, int(result.result_age_seconds * 1_000)),
-                stale=True,
-                stale_state=ResultStaleState.STALE,
-                recovered=False,
-            )
-            self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, observed_ms)
-            self.state.controller.trace_mpc_stale = True
-            self._trace_last_update_payload = payload
-            return True
-        if diagnostics is None or result.completed_wall_time is None or result.solve_end_monotonic is None:
-            return False
-        wall_ms = int(result.completed_wall_time * 1_000)
-        monotonic_ms = int(result.solve_end_monotonic * 1_000)
-        common = dict(
-            monotonic_ms=monotonic_ms,
-            wall_ms=wall_ms,
-            result_revision=result.revision,
-            result_age_ms=max(0, observed_ms - wall_ms),
-            observed_dt_seconds=(
-                diagnostics.observed_dt_seconds
-                if isinstance(diagnostics, PidTraceDiagnostics)
-                else result.solve_duration_seconds or 0.0
-            ),
-            control_period_seconds=float(controller_interval),
-            setpoint=float(self.control["primary_setpoint"]),
-            measured_temperature=result.input_temperature,
-            raw_output=(
-                diagnostics.raw_output
-                if isinstance(diagnostics, PidTraceDiagnostics)
-                else (
-                    diagnostics.raw_policy_firing_load
-                    if diagnostics.raw_policy_firing_load is not None
-                    else diagnostics.bounded_firing_load
-                )
-            ),
-            requested_output=(
-                diagnostics.final_output
-                if isinstance(diagnostics, PidTraceDiagnostics)
-                else diagnostics.bounded_firing_load
-            ),
-            actuation_mode=ActuationMode.FRAMED_PULSE,
-            prior_requested_auger_duty=self.state.controller.trace_prior_requested_auger_duty,
-            prior_realized_auger_duty=self.state.controller.trace_prior_realized_auger_duty,
-            requested_fan_duty=result.fan["duty"] if result.fan is not None else None,
-            applied_fan_duty=self.state.controller.trace_prior_fan_duty,
-            output_source=classify_output_source(
-                lid_open=self.state.lid.open_detected,
-                manual_override_active=self.state.manual_override["auger"] >= now,
-            ),
-            inhibit_reason=InhibitReason.LID_OPEN if self.state.lid.open_detected else InhibitReason.NONE,
-        )
-        allocation_payload: AllocationPayload | None = None
-        realized_combustion_load: float | None = None
-        if isinstance(diagnostics, PidSpTraceDiagnostics):
-            payload = PidSpUpdatePayload(
-                **common,
-                error=diagnostics.error,
-                proportional_term=diagnostics.proportional_term,
-                integral_term=diagnostics.integral_term,
-                derivative_term=diagnostics.derivative_term,
-                integral_accumulator=diagnostics.integral_accumulator,
-                integral_clamped=diagnostics.integral_clamped,
-                derivative_input=diagnostics.derivative_input,
-                derivative_state=diagnostics.derivative_state,
-                proportional_band=diagnostics.proportional_band,
-                kp=diagnostics.kp,
-                ki=diagnostics.ki,
-                kd=diagnostics.kd,
-                center=diagnostics.center,
-                previous_temperature=diagnostics.previous_temperature,
-                previous_update_ms=max(0, int(diagnostics.previous_update_time * 1_000)),
-                measured_rate=diagnostics.measured_rate,
-                predicted_temperature=diagnostics.predicted_temperature,
-                predicted_error=diagnostics.predicted_error,
-                tau_seconds=diagnostics.tau_seconds,
-                theta_seconds=diagnostics.theta_seconds,
-                stable_window_seconds=diagnostics.stable_window_seconds,
-                center_factor=diagnostics.center_factor,
-                new_target_before=diagnostics.new_target_before,
-                new_target_after=diagnostics.new_target_after,
-                target_change_temperature=diagnostics.target_change_temperature,
-                target_change_ms=max(0, int(diagnostics.target_change_time * 1_000)),
-                branch=diagnostics.branch,
-            )
-        elif isinstance(diagnostics, PidTraceDiagnostics):
-            payload = PidUpdatePayload(
-                **common,
-                error=diagnostics.error,
-                proportional_term=diagnostics.proportional_term,
-                integral_term=diagnostics.integral_term,
-                derivative_term=diagnostics.derivative_term,
-                integral_accumulator=diagnostics.integral_accumulator,
-                integral_clamped=diagnostics.integral_clamped,
-                derivative_input=diagnostics.derivative_input,
-                derivative_state=diagnostics.derivative_state,
-                proportional_band=diagnostics.proportional_band,
-                kp=diagnostics.kp,
-                ki=diagnostics.ki,
-                kd=diagnostics.kd,
-                center=diagnostics.center,
-                previous_temperature=diagnostics.previous_temperature,
-                previous_update_ms=max(0, int(diagnostics.previous_update_time * 1_000)),
-            )
-        elif isinstance(diagnostics, MpcTraceDiagnostics):
-            mpc_common = dict(common, result_age_ms=max(0, int(result.result_age_seconds * 1_000)))
-            payload = MpcUpdatePayload(
-                **mpc_common,
-                state_names=diagnostics.state_names,
-                state_values=diagnostics.state_values,
-                disturbance_estimate=diagnostics.disturbance_estimate,
-                model_revision=diagnostics.model_revision,
-                model_provenance=diagnostics.model_provenance,
-                raw_policy_firing_load=diagnostics.raw_policy_firing_load,
-                equilibrium_feed_forward=diagnostics.equilibrium_feed_forward,
-                residual_move=diagnostics.residual_move,
-                bounded_firing_load=diagnostics.bounded_firing_load,
-                policy_kind=diagnostics.policy_kind,
-                failure_state=diagnostics.failure_state,
-                solve_start_ms=max(0, int(diagnostics.solve_start_monotonic * 1_000)),
-                solve_end_ms=max(0, int(diagnostics.solve_end_monotonic * 1_000)),
-                deadline_miss_count=result.deadline_miss_count,
-                stale=result.stale_state is ResultStaleState.STALE,
-                recovered=result.recovered,
-                predicted_feasible=(
-                    None
-                    if diagnostics.feasibility is None
-                    or diagnostics.feasibility.state is ReachabilityState.UNKNOWN_MODEL
-                    else diagnostics.feasibility.state is ReachabilityState.REACHABLE
-                ),
-                predicted_steady_load=None
-                if diagnostics.feasibility is None
-                else diagnostics.feasibility.predicted_steady_load,
-                solve_duration_ms=max(0, int(result.solve_duration_seconds * 1_000)),
-                consecutive_deadline_miss_count=result.consecutive_deadline_miss_count,
-                stale_state=result.stale_state,
-            )
-            realized_combustion_load = None
-            allocation = result.allocation
-            if allocation is not None:
-                allocation_payload = AllocationPayload(
-                    result_revision=result.revision,
-                    normalized_combustion_load=allocation.normalized_combustion_load,
-                    requested_auger_duty=allocation.auger_duty,
-                    requested_fan_duty=allocation.fan_duty,
-                    u_max=allocation.u_max,
-                    fan_min_pct=allocation.fan_min_pct,
-                    fan_max_pct=allocation.fan_max_pct,
-                    fan_enabled=allocation.fan_enabled,
-                    mpc_has_fan_authority=self.state.controller.controls_fan,
-                    auger_clamp_reason=allocation.auger_clamp_reason,
-                    fan_clamp_reason=allocation.fan_clamp_reason,
-                    allocator_revision=allocation.allocator_revision,
-                )
-        else:
-            return False
-
-        self.state.controller.trace_result_revision = result.revision
-        self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, observed_ms)
-        self._trace_last_update_payload = payload
-        if isinstance(diagnostics, MpcTraceDiagnostics):
-            lifecycle_payload = self._model_lifecycle_payload(diagnostics.model_lifecycle)
-            if lifecycle_payload is not None:
-                self._queue_model_event(lifecycle_payload, observed_ms)
-        if allocation_payload is not None and not stale_observation:
-            self._trace_record(TraceEventKind.ALLOCATION, allocation_payload, observed_ms)
-        if isinstance(diagnostics, MpcTraceDiagnostics):
-            self.state.controller.trace_mpc_stale = result.stale_state is ResultStaleState.STALE
-        return True
-
-    def _trace_complete_applied_interval(
-        self,
-        now: float,
-        *,
-        sample_complete: bool,
-        realized_combustion_load: float | None,
-    ) -> None:
-        controller = self.state.controller
-        sample_complete = sample_complete or (
-            controller.trace_interval_result_revision == 0 and controller.trace_prior_output_source is OutputSource.SEED
-        )
-        end_ms = int(now * 1_000)
-        start_ms = controller.trace_interval_start_ms
-        if (
-            start_ms is None
-            or start_ms >= end_ms
-            or controller.trace_prior_output_source is None
-            or (
-                controller.trace_interval_result_revision == 0
-                and controller.trace_interval_start_ms != 0
-            )
-        ):
-            return
-        self._trace_record(
-            TraceEventKind.APPLIED_OUTPUT,
-            AppliedOutputPayload(
-                result_revision=controller.trace_interval_result_revision,
-                interval_start_ms=start_ms,
-                interval_end_ms=end_ms,
-                realized_auger_duty=controller.trace_prior_realized_auger_duty,
-                realized_combustion_load=(
-                    None
-                    if not sample_complete
-                    else (
-                        controller.trace_prior_combustion_load
-                        if realized_combustion_load is None
-                        else realized_combustion_load
-                    )
-                ),
-                actual_fan_duty=controller.trace_prior_fan_duty if controller.controls_fan else None,
-                sample_complete=sample_complete,
-                output_source=controller.trace_prior_output_source,
-            ),
-            end_ms,
-        )
-        controller.trace_interval_start_ms = end_ms
-
-    def _trace_terminal_framed_output(self, completion: FramedPulseCompletion) -> None:
-        """Trace one already-constructed terminal frame without dispatching it."""
-        applied = completion.applied
-        realized_load = completion.realized_combustion_load
-        if applied is None or realized_load is None:
-            return
-        frame = completion.frame
-        controller = self.state.controller
-        trace_start_ms = (
-            controller.trace_interval_start_ms
-            if controller.trace_interval_start_ms is not None
-            else int(frame.nominal_start_s * 1_000)
-        )
-        trace_source = controller.trace_prior_output_source or completion.source
-        trace_sample_complete = (
-            applied.feedback_disposition is FrameFeedbackDisposition.COMPLETE
-            or completion.inhibit in (InhibitReason.SAFETY, InhibitReason.STALE_COMMAND)
-        )
-        trace_end_ms = int(frame.ended_at_s * 1_000)
-        if trace_start_ms < trace_end_ms:
-            self._trace_record(
-                TraceEventKind.APPLIED_OUTPUT,
-                AppliedOutputPayload(
-                    result_revision=controller.trace_interval_result_revision,
-                    interval_start_ms=trace_start_ms,
-                    interval_end_ms=trace_end_ms,
-                    realized_auger_duty=applied.ratio,
-                    realized_combustion_load=realized_load if trace_sample_complete else None,
-                    actual_fan_duty=completion.applied_fan_duty if controller.controls_fan else None,
-                    sample_complete=trace_sample_complete,
-                    output_source=trace_source,
-                ),
-                trace_end_ms,
-            )
-        controller.trace_interval_start_ms = int(frame.ended_at_s * 1_000)
-        controller.trace_interval_result_revision = completion.result_revision
-        controller.trace_prior_requested_auger_duty = frame.latched_request
-        controller.trace_prior_realized_auger_duty = applied.ratio
-        controller.trace_prior_output_source = completion.source
-        controller.trace_prior_fan_duty = completion.applied_fan_duty
-        controller.trace_prior_combustion_load = realized_load
 
     def _set_output(
         self,
@@ -1440,61 +1091,44 @@ class HoldMode(ControlMode):
         producing_calibration_generation: int | None = None,
         sample_complete: bool = False,
         feedback_disposition: FrameFeedbackDisposition = FrameFeedbackDisposition.PROGRESS,
+        measured_combustion_load: float | None = None,
         dispatch: bool = True,
     ) -> AppliedOutput:
         controller = self.state.controller
-        coalesce_seed = (
-            controller.pulse_frame_result_revision == 0
-            and controller.trace_prior_output_source is OutputSource.SEED
-            and applied.source is OutputSource.CONTROLLER
-        )
-        if not coalesce_seed:
-            self._trace_complete_applied_interval(
-                now,
-                sample_complete=sample_complete,
-                realized_combustion_load=None,
-            )
-        revision = (
-            max(0, producing_revision)
-            if producing_revision is not None
-            else max(0, controller.pulse_frame_result_revision)
-        )
-        applied = replace(
+        trace = self._control_trace
+        if trace is None:
+            raise RuntimeError("Hold control trace session is unavailable")
+        prepared = trace.prepare_applied_output(
             applied,
-            producing_result_revision=revision,
-            producing_calibration_revision=(
-                getattr(controller, "pulse_frame_calibration_command_revision", 0)
-                if producing_calibration_revision is None
-                else producing_calibration_revision
+            TraceOutputContext(
+                timestamp_ms=int(now * 1_000),
+                pulse_frame_result_revision=controller.pulse_frame_result_revision,
+                fan_duty=controller.fan_duty,
+                controls_fan=controller.controls_fan,
+                producing_revision=producing_revision,
+                producing_calibration_revision=(
+                    getattr(controller, "pulse_frame_calibration_command_revision", 0)
+                    if producing_calibration_revision is None
+                    else producing_calibration_revision
+                ),
+                producing_calibration_action=(
+                    getattr(controller, "pulse_frame_calibration_command_action", "none")
+                    if producing_calibration_action is None
+                    else producing_calibration_action
+                ),
+                producing_calibration_generation=(
+                    getattr(controller, "pulse_frame_calibration_command_generation", 0)
+                    if producing_calibration_generation is None
+                    else producing_calibration_generation
+                ),
+                sample_complete=sample_complete,
+                feedback_disposition=feedback_disposition,
+                measured_combustion_load=measured_combustion_load,
             ),
-            producing_calibration_action=(
-                getattr(controller, "pulse_frame_calibration_command_action", "none")
-                if producing_calibration_action is None
-                else producing_calibration_action
-            ),
-            producing_calibration_generation=(
-                getattr(controller, "pulse_frame_calibration_command_generation", 0)
-                if producing_calibration_generation is None
-                else producing_calibration_generation
-            ),
-            sample_complete=sample_complete,
-            feedback_disposition=feedback_disposition,
         )
         if dispatch:
-            self._runner.set_output(applied)
-        if coalesce_seed:
-            return applied
-        controller.trace_interval_start_ms = int(now * 1_000)
-        controller.trace_interval_result_revision = revision
-        controller.trace_prior_requested_auger_duty = (
-            applied.requested if applied.requested is not None else applied.ratio
-        )
-        controller.trace_prior_realized_auger_duty = applied.ratio
-        controller.trace_prior_output_source = applied.source
-        controller.trace_prior_fan_duty = controller.fan_duty
-        controller.trace_combustion_load = None
-        controller.trace_prior_combustion_load = None
-        return applied
+            self._runner.set_output(prepared)
+        return prepared
 
     name = Mode.HOLD
     _model_store = None
@@ -1502,16 +1136,8 @@ class HoldMode(ControlMode):
     def setup(self):
         import control as _control
 
-        self._trace_recorder = None
-        self._trace_session_id = None
-        self._trace_cook_id = None
-        self._trace_closed = False
-        self._trace_warning_active = False
+        self._control_trace = None
         self._learning_evidence_available = True
-        self._trace_pending_model_events = []
-        self._clear_trace_session_model_authority()
-        self._trace_runner_snapshot_fallback_safe = True
-        self._trace_last_update_payload = None
         self._reachability_advisory_key = None
         self._pending_model_observations = {}
         self._framed_pulse = FramedPulseRuntime()
@@ -1520,13 +1146,16 @@ class HoldMode(ControlMode):
         self._final_checkpoint_done = False
         self._final_checkpoint_outcome = None
         self._final_refit_outcome = None
+        self._teardown_done = False
         self._activation_state_identity = None
         self._activation_lifecycle_evidence_id = None
+        recorder: ControlTraceRecorder | None = None
         try:
-            self._trace_recorder = ControlTraceRecorder(warning=self._trace_warning)
+            recorder = ControlTraceRecorder(warning=self._trace_warning)
         except Exception as error:
             self._learning_evidence_available = False
             self._trace_warning(f"Control trace recorder unavailable: {error}")
+        self._control_trace = ControlTraceSession(recorder, warning=self._trace_warning)
 
         start_fan(self.grill, self.settings)
         self.grill.power_on()
@@ -1609,16 +1238,7 @@ class HoldMode(ControlMode):
                 manual_override_active=False,
                 auger_output=self.grill.get_output_status()["auger"],
             )
-            self._runner.set_output(initial_output)
-            controller = self.state.controller
-            controller.trace_interval_start_ms = int(initial_output.timestamp * 1_000)
-            controller.trace_interval_result_revision = 0
-            controller.trace_prior_requested_auger_duty = (
-                initial_output.requested if initial_output.requested is not None else initial_output.ratio
-            )
-            controller.trace_prior_realized_auger_duty = initial_output.ratio
-            controller.trace_prior_output_source = initial_output.source
-            controller.trace_prior_fan_duty = controller.fan_duty
+            self._set_output(initial_output, initial_output.timestamp)
 
     def setup_safety(self, ptemp) -> str:
         # Flameout is now a declarative pre_loop guard (GUARDS["Hold"], fired by
@@ -1632,13 +1252,25 @@ class HoldMode(ControlMode):
         import control as _control
 
         retiring_generation = self._runner_configuration_revision
-        self._trace_safety(
-            SafetyEventType.CONTROLLER_RECONFIGURE,
-            now,
-            "controller reconfigured",
-            InhibitReason.NONE,
-        )
-        self._trace_complete_applied_interval(now, sample_complete=False, realized_combustion_load=None)
+        trace = self._control_trace
+        if trace is not None:
+            trace.record_safety(
+                TraceSafetyContext(
+                    event=SafetyEventType.CONTROLLER_RECONFIGURE,
+                    inhibit_reason=InhibitReason.NONE,
+                    result_revision=trace.update_state.result_revision,
+                    detail="controller reconfigured",
+                    timestamp_ms=int(now * 1_000),
+                )
+            )
+            trace.record_applied_interval(
+                TraceAppliedIntervalContext(
+                    timestamp_ms=int(now * 1_000),
+                    sample_complete=False,
+                    realized_combustion_load=None,
+                    controls_fan=self.state.controller.controls_fan,
+                )
+            )
         self._inhibit_framed_pulse(
             PulseResetReason.MODE_CHANGE,
             now,
@@ -1655,21 +1287,9 @@ class HoldMode(ControlMode):
             if pending[2] == installed_generation
         }
         self._retire_runner_evidence_context(retiring_generation)
-        controller_state = self.state.controller
-        self._trace_session_id = None
-        self._trace_cook_id = None
         self._pending_model_observations = retained
-        self._clear_trace_session_model_authority()
-        controller_state.trace_result_revision = -1
-        controller_state.trace_combustion_load = None
-        controller_state.trace_mpc_stale = False
-        self._trace_last_update_payload = None
-        controller_state.trace_interval_start_ms = None
-        controller_state.trace_prior_requested_auger_duty = 0.0
-        controller_state.trace_prior_realized_auger_duty = 0.0
-        controller_state.trace_prior_fan_duty = None
-        controller_state.trace_prior_output_source = None
-        controller_state.trace_prior_combustion_load = None
+        if trace is not None:
+            trace.rotate(runner_snapshot_fallback_safe=not self._runner.runs_async())
         actual_type = getattr(self._runner, "controller_type", lambda: None)()
         self._controller_name = (
             actual_type.value if isinstance(actual_type, ControllerType) else self.settings["controller"]["selected"]
@@ -1687,15 +1307,26 @@ class HoldMode(ControlMode):
         self.state.cycle.ratio = self.state.cycle.raw_ratio = 0.0
         self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
         self.grill.auger_off()
-        self._trace_runner_snapshot_fallback_safe = not self._runner.runs_async()
         self._restore_model()
         self._activation_state_identity = None
         self._reconcile_activation_state()
         self._configure_fan_authority()
         self._runner_configuration_revision = installed_generation
-        self._ensure_trace_session(now)
+        context = self._trace_session_context()
+        identity = (
+            None
+            if trace is None or context is None
+            else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+        )
+        if identity is not None:
+            self._bind_runner_evidence_context(installed_generation)
         self._pending_model_observations = {
-            sequence: (observation, self._trace_session_id, generation, records)
+            sequence: (
+                observation,
+                None if identity is None else identity.session_id,
+                generation,
+                records,
+            )
             for sequence, (observation, _session, generation, records) in self._pending_model_observations.items()
         }
         self._reconcile_model_observation_outcomes(now)
@@ -1755,12 +1386,17 @@ class HoldMode(ControlMode):
         except (KeyError, NotImplementedError, TypeError, ValueError) as error:
             if self._safety_ceiling_fault != str(error):
                 self._safety_ceiling_fault = str(error)
-                self._trace_safety(
-                    SafetyEventType.SCHEDULER_RESET,
-                    now,
-                    f"cannot read the grill maximum temperature: {error}",
-                    InhibitReason.SAFETY,
-                )
+                trace = self._control_trace
+                if trace is not None:
+                    trace.record_safety(
+                        TraceSafetyContext(
+                            event=SafetyEventType.SCHEDULER_RESET,
+                            inhibit_reason=InhibitReason.SAFETY,
+                            result_revision=trace.update_state.result_revision,
+                            detail=f"cannot read the grill maximum temperature: {error}",
+                            timestamp_ms=int(now * 1_000),
+                        )
+                    )
             return
         self._safety_ceiling_fault = None
 
@@ -1796,12 +1432,17 @@ class HoldMode(ControlMode):
             # again once one that can is configured.
             self._calibration_command_high_water = revision
             _control.eventLogger.error(f"Rejected calibration command revision {revision}: {error}")
-            self._trace_safety(
-                SafetyEventType.SCHEDULER_RESET,
-                now,
-                f"invalid calibration command: {error}",
-                InhibitReason.SAFETY,
-            )
+            trace = self._control_trace
+            if trace is not None:
+                trace.record_safety(
+                    TraceSafetyContext(
+                        event=SafetyEventType.SCHEDULER_RESET,
+                        inhibit_reason=InhibitReason.SAFETY,
+                        result_revision=trace.update_state.result_revision,
+                        detail=f"invalid calibration command: {error}",
+                        timestamp_ms=int(now * 1_000),
+                    )
+                )
             return
         self._calibration_command_high_water = revision
         controller.calibration_command_revision = revision
@@ -1912,12 +1553,15 @@ class HoldMode(ControlMode):
         decision = result.calibration
         if decision is None:
             return
+        trace = self._control_trace
+        if trace is None:
+            return
         for event in decision.events:
             try:
                 event_type = CalibrationEventType(event.kind)
             except ValueError:
                 continue
-            self._trace_record(
+            trace.record(
                 TraceEventKind.CALIBRATION,
                 CalibrationTracePayload(
                     event=event_type,
@@ -1947,7 +1591,16 @@ class HoldMode(ControlMode):
         if runner_revision != self._runner_configuration_revision:
             self._adopt_runner_configuration(now, current_output_status)
             current_output_status = self.grill.get_output_status()
-        self._ensure_trace_session(now)
+        trace = self._control_trace
+        context = self._trace_session_context()
+        previous_identity = None if trace is None else trace.identity
+        identity = (
+            None
+            if trace is None or context is None
+            else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+        )
+        if previous_identity is None and identity is not None:
+            self._bind_runner_evidence_context(self._runner_configuration_revision)
         self._reconcile_activation_state()
         self._drain_activation_events()
         active_calibration_reset = False
@@ -1981,12 +1634,15 @@ class HoldMode(ControlMode):
             ):
                 self._adopt_runner_configuration(now, current_output_status)
                 current_output_status = self.grill.get_output_status()
-            elif self._controller_status != "Active":
-                self._trace_safety(
-                    SafetyEventType.CONTROLLER_FALLBACK,
-                    now,
-                    "controller reconfigure fell back",
-                    InhibitReason.SAFETY,
+            elif self._controller_status != "Active" and trace is not None:
+                trace.record_safety(
+                    TraceSafetyContext(
+                        event=SafetyEventType.CONTROLLER_FALLBACK,
+                        inhibit_reason=InhibitReason.SAFETY,
+                        result_revision=trace.update_state.result_revision,
+                        detail="controller reconfigure fell back",
+                        timestamp_ms=int(now * 1_000),
+                    )
                 )
 
         self._retarget_running_controller()
@@ -2099,7 +1755,28 @@ class HoldMode(ControlMode):
                 )
             self.state.cycle.ratio = self.state.cycle.raw_ratio = controller.pulse_requested_duty
             self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
-            self._trace_update(result, now, controller_interval)
+            if trace is not None:
+                applied_state = trace.applied_state
+                lifecycle = (
+                    self._model_lifecycle_payload(result.diagnostics.model_lifecycle)
+                    if isinstance(result.diagnostics, MpcTraceDiagnostics)
+                    else None
+                )
+                trace.record_update(
+                    TraceUpdateContext(
+                        result=result,
+                        timestamp_ms=int(now * 1_000),
+                        controller_interval_seconds=float(controller_interval),
+                        setpoint=float(self.control["primary_setpoint"]),
+                        prior_requested_auger_duty=applied_state.requested_auger_duty,
+                        prior_realized_auger_duty=applied_state.realized_auger_duty,
+                        prior_fan_duty=applied_state.fan_duty,
+                        controls_fan=controller.controls_fan,
+                        lid_open=self.state.lid.open_detected,
+                        manual_override_active=self.state.manual_override["auger"] >= now,
+                        lifecycle_event=lifecycle,
+                    )
+                )
             self._trace_calibration_result(result, now)
             framed_feedback_due = True
             snapshot = self._runner.get_model_snapshot()
@@ -2119,11 +1796,12 @@ class HoldMode(ControlMode):
             runtime = self._framed_pulse
             if runtime is None:
                 raise RuntimeError("Hold framed pulse runtime is unavailable")
+            prior_output_source = None if trace is None else trace.applied_state.output_source
             pulse_result = runtime.advance(
                 now,
                 current_output_status["auger"],
                 sample=self._framed_sample(ptemp),
-                prior_output_source=self.state.controller.trace_prior_output_source,
+                prior_output_source=prior_output_source,
             )
             if not lid_will_open and pulse_result.decision.transition is not None:
                 if pulse_result.decision.transition.command_on:
@@ -2137,15 +1815,12 @@ class HoldMode(ControlMode):
                 record_terminal_trace=False,
             )
             if (
-                self.state.controller.pulse_frame_result_revision > 0
-                and self.state.controller.trace_interval_result_revision == 0
-                and self.state.controller.trace_prior_output_source is OutputSource.SEED
+                trace is not None
+                and self.state.controller.pulse_frame_result_revision > 0
             ):
-                self.state.controller.trace_interval_result_revision = (
-                    self.state.controller.pulse_frame_result_revision
-                )
-                self.state.controller.trace_prior_output_source = (
-                    self.state.controller.pulse_frame_output_source
+                trace.promote_seed_interval(
+                    self.state.controller.pulse_frame_result_revision,
+                    self.state.controller.pulse_frame_output_source,
                 )
             if framed_feedback_due:
                 feedback = runtime.report_feedback(
@@ -2155,7 +1830,7 @@ class HoldMode(ControlMode):
                         lid_open=self.state.lid.open_detected,
                         manual_override_active=self.state.manual_override["auger"] >= now,
                     ),
-                    prior_output_source=self.state.controller.trace_prior_output_source,
+                    prior_output_source=None if trace is None else trace.applied_state.output_source,
                 )
                 if feedback is not None:
                     self._dispatch_framed_feedback(feedback)
@@ -2174,11 +1849,15 @@ class HoldMode(ControlMode):
             and ptemp < control["primary_setpoint"] * ((100 - settings["cycle_data"]["LidOpenThreshold"]) / 100)
         ):
             self.state.lid.open_detected = True
-            self._trace_complete_applied_interval(
-                now,
-                sample_complete=False,
-                realized_combustion_load=None,
-            )
+            if trace is not None:
+                trace.record_applied_interval(
+                    TraceAppliedIntervalContext(
+                        timestamp_ms=int(now * 1_000),
+                        sample_complete=False,
+                        realized_combustion_load=None,
+                        controls_fan=self.state.controller.controls_fan,
+                    )
+                )
             self._inhibit_framed_pulse(
                 PulseResetReason.LID,
                 now,
@@ -2208,21 +1887,43 @@ class HoldMode(ControlMode):
         # Clear Lid Open Detect Event, Reset
         if self.state.lid.open_detected and self.ctx.clock.now() > self.state.lid.expires:
             self.state.lid.open_detected = False
-            self._trace_safety(SafetyEventType.LID_CLEARED, now, "lid open pause elapsed", InhibitReason.NONE)
+            if trace is not None:
+                trace.record_safety(
+                    TraceSafetyContext(
+                        event=SafetyEventType.LID_CLEARED,
+                        inhibit_reason=InhibitReason.NONE,
+                        result_revision=trace.update_state.result_revision,
+                        detail="lid open pause elapsed",
+                        timestamp_ms=int(now * 1_000),
+                    )
+                )
             start_fan(grill_platform, settings, control["duty_cycle"])
         if control["lid_open_toggle"]:
             control["lid_open_toggle"] = False
             self.ctx.store.write_control_snapshot(control, origin="control")
             if self.state.lid.open_detected:
                 self.state.lid.open_detected = False
-                self._trace_safety(SafetyEventType.LID_CLEARED, now, "lid open cleared by operator", InhibitReason.NONE)
+                if trace is not None:
+                    trace.record_safety(
+                        TraceSafetyContext(
+                            event=SafetyEventType.LID_CLEARED,
+                            inhibit_reason=InhibitReason.NONE,
+                            result_revision=trace.update_state.result_revision,
+                            detail="lid open cleared by operator",
+                            timestamp_ms=int(now * 1_000),
+                        )
+                    )
             else:
                 self.state.lid.open_detected = True
-                self._trace_complete_applied_interval(
-                    now,
-                    sample_complete=False,
-                    realized_combustion_load=None,
-                )
+                if trace is not None:
+                    trace.record_applied_interval(
+                        TraceAppliedIntervalContext(
+                            timestamp_ms=int(now * 1_000),
+                            sample_complete=False,
+                            realized_combustion_load=None,
+                            controls_fan=self.state.controller.controls_fan,
+                        )
+                    )
                 self._inhibit_framed_pulse(
                     PulseResetReason.LID,
                     now,
@@ -2263,25 +1964,22 @@ class HoldMode(ControlMode):
 
         self._smoke_plus_fan_tick(now, ptemp, current_output_status)
 
-        if self._trace_recorder is not None:
-            try:
-                self._trace_recorder.flush_due(time.monotonic_ns() // 1_000_000)
-            except Exception as error:
-                if not self._trace_warning_active:
-                    self._trace_warning(f"Control trace flush failed: {error}")
-                    self._trace_warning_active = True
+        if trace is not None:
+            trace.flush_due(time.monotonic_ns() // 1_000_000)
 
     def _on_manual_output(self, name, output):
         if name != "auger" or self._runner is None:
             return
-        self._trace_complete_applied_interval(
-            self._last_now,
-            sample_complete=(
-                self.state.controller.trace_interval_result_revision == 0
-                and self.state.controller.trace_prior_output_source is OutputSource.SEED
-            ),
-            realized_combustion_load=None,
-        )
+        trace = self._control_trace
+        if trace is not None:
+            trace.record_applied_interval(
+                TraceAppliedIntervalContext(
+                    timestamp_ms=int(self._last_now * 1_000),
+                    sample_complete=False,
+                    realized_combustion_load=None,
+                    controls_fan=self.state.controller.controls_fan,
+                )
+            )
         self._inhibit_framed_pulse(
             PulseResetReason.MANUAL,
             self._last_now,
@@ -2308,12 +2006,16 @@ class HoldMode(ControlMode):
         )
 
     def _on_manual_release(self, name, now):
-        if name == "auger":
-            self._trace_safety(
-                SafetyEventType.MANUAL_RELEASE,
-                now,
-                "manual auger override expired",
-                InhibitReason.NONE,
+        trace = self._control_trace
+        if name == "auger" and trace is not None:
+            trace.record_safety(
+                TraceSafetyContext(
+                    event=SafetyEventType.MANUAL_RELEASE,
+                    inhibit_reason=InhibitReason.NONE,
+                    result_revision=trace.update_state.result_revision,
+                    detail="manual auger override expired",
+                    timestamp_ms=int(now * 1_000),
+                )
             )
 
     def _on_safety_event(self, event, now):
@@ -2324,7 +2026,16 @@ class HoldMode(ControlMode):
         }
         event_type = events.get(event)
         if event_type is not None:
-            self._ensure_trace_session(now)
+            trace = self._control_trace
+            context = self._trace_session_context()
+            previous_identity = None if trace is None else trace.identity
+            identity = (
+                None
+                if trace is None or context is None
+                else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+            )
+            if previous_identity is None and identity is not None:
+                self._bind_runner_evidence_context(self._runner_configuration_revision)
             self._inhibit_framed_pulse(
                 PulseResetReason.SAFETY,
                 now,
@@ -2336,7 +2047,9 @@ class HoldMode(ControlMode):
             )
 
     def _restore_model(self):
-        self._clear_trace_session_model_authority()
+        trace = self._control_trace
+        if trace is not None:
+            trace.clear_model_authority()
         snapshot = self._model_store.load(self._controller_name)
         if snapshot is None:
             return
@@ -2347,12 +2060,31 @@ class HoldMode(ControlMode):
         # knowable from the Hold loop.
         if self._runner.restore_model(snapshot):
             provenance = "restore_submitted" if self._runner.runs_async() else "restored"
-            self._set_trace_session_model_authority(snapshot, provenance)
+            if trace is not None:
+                trace.set_model_authority(cast(Mapping[str, JsonValue], snapshot), provenance)
             _control.eventLogger.info(f"Submitted the stored {self._controller_name} model for restore")
-            self._trace_model(ModelEventType.RESTORE, "stored model submitted for restore", snapshot)
+            if trace is not None:
+                trace.record_model(
+                    TraceModelContext(
+                        event=ModelEventType.RESTORE,
+                        detail="stored model submitted for restore",
+                        snapshot=cast(Mapping[str, JsonValue], snapshot),
+                        provenance="persisted",
+                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                    )
+                )
         else:
             _control.eventLogger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
-            self._trace_model(ModelEventType.REJECT, "stored model rejected for restore", snapshot)
+            if trace is not None:
+                trace.record_model(
+                    TraceModelContext(
+                        event=ModelEventType.REJECT,
+                        detail="stored model rejected for restore",
+                        snapshot=cast(Mapping[str, JsonValue], snapshot),
+                        provenance="persisted",
+                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                    )
+                )
 
     @staticmethod
     def _activation_identity(state) -> tuple[object, ...] | None:
@@ -2520,27 +2252,41 @@ class HoldMode(ControlMode):
         if not isinstance(snapshot, dict):
             self._learning_evidence_available = False
             return False
-        self._clear_trace_session_model_authority()
-        self._trace_model(
-            ModelEventType.REFIT,
-            f"model refit outcome: {final_outcome.value}",
-            snapshot,
-        )
-        if final_outcome in {
-            TeardownRefitOutcome.READY_FOR_REVIEW,
-            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-        }:
-            self._trace_model(
-                ModelEventType.ADOPT,
-                getattr(verdict, "reason", final_outcome.value),
-                snapshot,
+        trace = self._control_trace
+        if trace is not None:
+            trace.clear_model_authority()
+            trace.record_model(
+                TraceModelContext(
+                    event=ModelEventType.REFIT,
+                    detail=f"model refit outcome: {final_outcome.value}",
+                    snapshot=cast(Mapping[str, JsonValue], snapshot),
+                    provenance="persisted",
+                    timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                )
             )
-        elif final_outcome is not TeardownRefitOutcome.DISABLED:
-            self._trace_model(
-                ModelEventType.REJECT,
-                getattr(verdict, "reason", final_outcome.value),
-                snapshot,
-            )
+            if final_outcome in {
+                TeardownRefitOutcome.READY_FOR_REVIEW,
+                TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+            }:
+                trace.record_model(
+                    TraceModelContext(
+                        event=ModelEventType.ADOPT,
+                        detail=getattr(verdict, "reason", final_outcome.value),
+                        snapshot=cast(Mapping[str, JsonValue], snapshot),
+                        provenance="persisted",
+                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                    )
+                )
+            elif final_outcome is not TeardownRefitOutcome.DISABLED:
+                trace.record_model(
+                    TraceModelContext(
+                        event=ModelEventType.REJECT,
+                        detail=getattr(verdict, "reason", final_outcome.value),
+                        snapshot=cast(Mapping[str, JsonValue], snapshot),
+                        provenance="persisted",
+                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                    )
+                )
         accepted = self._checkpoint_model(snapshot)
         if accepted:
             self._final_checkpoint_done = True
@@ -2556,17 +2302,21 @@ class HoldMode(ControlMode):
         return False
 
     def teardown(self, ptemp):
-        first_trace_teardown = not self._trace_closed and (
-            getattr(self, "_trace_recorder", None) is not None or getattr(self, "_trace_session_id", None) is not None
-        )
+        if getattr(self, "_teardown_done", False):
+            return
+        self._teardown_done = True
+        trace = getattr(self, "_control_trace", None)
+        first_trace_teardown = trace is not None and not trace.status.closed
         now = self.ctx.clock.now()
-        runtime = self._framed_pulse
-        if runtime is not None and runtime.scheduler is not None and self._runner is not None:
+        runtime = getattr(self, "_framed_pulse", None)
+        runner = getattr(self, "_runner", None)
+        if runtime is not None and runtime.scheduler is not None and runner is not None:
+            prior_output_source = None if trace is None else trace.applied_state.output_source
             pulse_result = runtime.advance(
                 now,
                 self.grill.get_output_status()["auger"],
                 sample=self._framed_sample(ptemp),
-                prior_output_source=self.state.controller.trace_prior_output_source,
+                prior_output_source=prior_output_source,
             )
             self.grill.auger_off()
             self._dispatch_framed_result(pulse_result, record_terminal_trace=False)
@@ -2577,7 +2327,9 @@ class HoldMode(ControlMode):
                     lid_open=self.state.lid.open_detected,
                     manual_override_active=self.state.manual_override["auger"] >= now,
                 ),
-                prior_output_source=self.state.controller.trace_prior_output_source,
+                prior_output_source=(
+                    None if trace is None else trace.applied_state.output_source
+                ),
                 dispatch=not bool(pulse_result.decision.completed_frames),
             )
             if feedback is not None:
@@ -2590,8 +2342,8 @@ class HoldMode(ControlMode):
             terminal_feedback=False,
         )
         try:
-            if self._runner is not None:
-                stopped = self._runner.stop_for_refit()
+            if runner is not None:
+                stopped = runner.stop_for_refit()
                 if getattr(self, "ctx", None) is not None:
                     self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
                 if stopped is False:
@@ -2603,35 +2355,29 @@ class HoldMode(ControlMode):
                         self._publish_final_checkpoint_once(outcome, verdict)
         finally:
             self._retire_runner_evidence_context(self._runner_configuration_revision)
-            worker = self._persistence_worker
+            worker = getattr(self, "_persistence_worker", None)
             flushed = True
             if worker is not None:
                 flushed = worker.flush_and_stop() and not bool(getattr(worker, "failed", False))
                 self._persistence_worker = None
-            if not flushed and self._runner is not None:
+            if not flushed and runner is not None:
                 try:
-                    self._runner.finalize_cook_refit(
-                        TeardownRefitOutcome.CHECKPOINT_FAILURE
-                    )
+                    runner.finalize_cook_refit(TeardownRefitOutcome.CHECKPOINT_FAILURE)
                 except Exception:
                     pass
-            if self._runner is not None:
+            if first_trace_teardown and trace is not None:
+                trace.flush_pending()
+                trace.record_applied_interval(
+                    TraceAppliedIntervalContext(
+                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                        sample_complete=False,
+                        realized_combustion_load=None,
+                        controls_fan=self.state.controller.controls_fan,
+                    )
+                )
+                trace.close()
+            if runner is not None:
                 try:
-                    self._runner.finish_teardown()
+                    runner.finish_teardown()
                 except Exception as error:
                     self._trace_warning(f"Controller teardown close failed: {error}")
-            if first_trace_teardown:
-                self._flush_pending_model_events()
-                self._trace_closed = True
-                now = self.ctx.clock.now()
-                self._trace_complete_applied_interval(
-                    now,
-                    sample_complete=False,
-                    realized_combustion_load=None,
-                )
-
-                if self._trace_recorder is not None:
-                    try:
-                        self._trace_recorder.close()
-                    except Exception as error:
-                        self._trace_warning(f"Control trace close failed: {error}")

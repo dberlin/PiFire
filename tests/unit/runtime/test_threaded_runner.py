@@ -17,6 +17,7 @@ from tests.unit.mpc._solver_fixtures import owned_pair
 from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 from common.control_trace import (
     ActuationMode,
+    ControllerType,
     HorizonScorePayload,
     ModelEvaluationPayload,
     ModelObservationPayload,
@@ -33,6 +34,7 @@ from common.model_evidence import (
     RefreshDiagnosticsEvidence,
     SessionSummaryEvidence,
 )
+from controller.runtime.control_trace_session import ControlTraceSession, TraceSessionContext
 from controller.runtime.modes.hold import HoldMode
 from controller.runtime.model_persistence import DurableActivationReceipt, ModelPersistenceWorker
 from controller.runtime.runner import (
@@ -838,7 +840,7 @@ def test_hold_teardown_stops_threaded_runner():
     hold._controller_name = "mpc"
     hold.ctx = type("_Context", (), {"clock": type("_Clock", (), {"now": staticmethod(lambda: 0.0)})()})()
     hold._framed_pulse = None
-    hold._trace_closed = True
+    hold._control_trace = None
     hold.teardown(70.0)
     assert not thread.is_alive()
 
@@ -1802,7 +1804,13 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         assert gate.waiting.wait(2.0)
         mode.setup()
         mode.state.metrics = {"id": "hold-observation-overflow"}
-        mode._ensure_trace_session(0.0)
+        trace = mode._control_trace
+        assert trace is not None
+        context = mode._trace_session_context()
+        assert context is not None
+        identity = trace.ensure_open(context, timestamp_ms=0)
+        assert identity is not None
+        mode._bind_runner_evidence_context(mode._runner_configuration_revision)
 
         for index in range(31):
             mode._deliver_completed_pulse_observation((index * 20, (index + 1) * 20), frame(index, 0.3))
@@ -2282,12 +2290,54 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         assert confidence[0].payload.blocked is True
         assert confidence[0].payload.reason == "no-completed-window"
 
+        class _TraceRecorder:
+            def __init__(self):
+                self.records = []
+                self.flushes = []
+                self.closed = False
+
+            def record(self, record):
+                self.records.append(record)
+
+            def flush_due(self, now_ms):
+                self.flushes.append(now_ms)
+
+            def close(self):
+                self.closed = True
+
+        trace_warnings = []
+        trace = ControlTraceSession(_TraceRecorder(), warning=trace_warnings.append)
+        identity = trace.ensure_open(
+            TraceSessionContext(
+                controller=ControllerType.MPC,
+                controller_config={},
+                temperature_unit="C",
+                control_period_seconds=1.0,
+                fallback_model=None,
+                runner_snapshot_fallback_safe=False,
+                pulse_slot_seconds=10.0,
+                pulse_frame_seconds=20.0,
+                fan_authority=False,
+                fan_pwm_capable=False,
+                fan_min_duty=0.0,
+                fan_max_duty=100.0,
+                setpoint=120.0,
+                ambient_temperature=20.0,
+                software_version="test",
+                build_version="test",
+                cook_id="cook",
+                runner_generation=0,
+            ),
+            timestamp_ms=0,
+        )
+        assert identity is not None
+        runner.bind_evidence_context(0, identity.session_id, identity.cook_id)
         submission = runner.observe_frame(observation)
         mode = HoldMode.__new__(HoldMode)
         mode._runner = runner
-        mode._trace_session_id = "session"
+        mode._control_trace = trace
         mode._pending_model_observations = {
-            submission.submission_sequence: (observation, "session", 0, None)
+            submission.submission_sequence: (observation, identity.session_id, 0, None)
         }
         normal_evidence = []
         mode._persistence_worker = SimpleNamespace(
@@ -2297,10 +2347,11 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
             )[1]
         )
         mode.ctx = SimpleNamespace(clock=SimpleNamespace(now=lambda: 100.0))
-        mode._trace_record = lambda kind, payload, published_ms: (
-            recorded.append((kind, payload, published_ms)),
-            True,
-        )[1]
+        def record(event_kind, payload, timestamp_ms):
+            recorded.append((event_kind, payload, timestamp_ms))
+            return True
+
+        trace.record = record
 
         mode._reconcile_model_observation_outcomes()
         mode._reconcile_model_observation_outcomes()

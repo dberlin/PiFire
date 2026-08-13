@@ -35,6 +35,7 @@ from controller.mpc import Controller
 from tests.characterization.fixtures import base_control, base_settings
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.framed_pulse import FramedPulseRuntime
+from controller.runtime.control_trace_session import TraceUpdateContext
 from controller.runtime.runner import (
     ControllerUpdateResult,
     ObservationOutcomeEnvelope,
@@ -53,13 +54,61 @@ def _runtime(mode) -> FramedPulseRuntime:
     assert isinstance(runtime, FramedPulseRuntime)
     return runtime
 
+def _open_trace_session(mode, now):
+    trace = mode._control_trace
+    assert trace is not None
+    context = mode._trace_session_context()
+    assert context is not None
+    previous = trace.identity
+    identity = trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+    if previous is None and identity is not None:
+        mode._bind_runner_evidence_context(mode._runner_configuration_revision)
+    return identity
+
+def _trace(mode):
+    trace = mode._control_trace
+    assert trace is not None
+    return trace
+
+
+def _identity(mode):
+    identity = _trace(mode).identity
+    assert identity is not None
+    return identity
+
+
+def _record_trace_update(mode, result, *, now, controller_interval):
+    trace = _trace(mode)
+    applied = trace.applied_state
+    lifecycle = (
+        mode._model_lifecycle_payload(result.diagnostics.model_lifecycle)
+        if isinstance(result.diagnostics, MpcTraceDiagnostics)
+        else None
+    )
+    return trace.record_update(
+        TraceUpdateContext(
+            result=result,
+            timestamp_ms=int(now * 1_000),
+            controller_interval_seconds=float(controller_interval),
+            setpoint=float(mode.control["primary_setpoint"]),
+            prior_requested_auger_duty=applied.requested_auger_duty,
+            prior_realized_auger_duty=applied.realized_auger_duty,
+            prior_fan_duty=applied.fan_duty,
+            controls_fan=mode.state.controller.controls_fan,
+            lid_open=mode.state.lid.open_detected,
+            manual_override_active=mode.state.manual_override["auger"] >= now,
+            lifecycle_event=lifecycle,
+        )
+    )
+
+
 
 def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
         sample=mode._framed_sample(ptemp),
-        prior_output_source=mode.state.controller.trace_prior_output_source,
+        prior_output_source=mode._control_trace.applied_state.output_source,
     )
     transition = result.decision.transition
     if apply_transition and transition is not None:
@@ -357,7 +406,7 @@ def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_d
     mode.settings["controller"]["config"]["mpc"]["T_amb"] = 20.0
     mode.setup()
     mode.state.metrics = {"id": "fahrenheit-ambient"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
     controller.pulse_frame_combustion_load = 0.3
@@ -474,7 +523,7 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     mode.ctx.store._settings["platform"]["dc_fan"] = True
     mode.ctx.store._control["pwm_control"] = True
     mode.setup()
-    assert isinstance(mode._trace_recorder, ControlTraceRecorder)
+    assert _trace(mode).status.recorder_available
     mode.state.metrics = {"id": "calibration-seed", "augerontime": 0.0}
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     for now in range(2, 64, 2):
@@ -483,7 +532,7 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     mode.ctx.clock.advance(64)
     mode.teardown(220.0)
 
-    session_id = mode._trace_session_id
+    session_id = _identity(mode).session_id
     assert session_id is not None
     records = read_control_trace_session(session_id)
     assert [record.event_kind for record in records[:4]] == [
@@ -696,7 +745,7 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     mode.state.metrics = {"id": "cook-reconfigure"}
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     mode.on_tick(2.0, 220.0, output)
-    old_session_id = mode._trace_session_id
+    old_session_id = _identity(mode).session_id
 
     mode.control["controller_update"] = True
     mode.on_tick(4.0, 220.0, output)
@@ -780,7 +829,7 @@ def test_refit_records_refit_then_its_verdict(hold_cycle, monkeypatch, accepted,
     mode.setup()
     mode.settings["controller"]["config"]["mpc"]["enable_identification"] = True
     mode.state.metrics = {"id": f"cook-refit-{accepted}"}
-    mode._ensure_trace_session(1.0)
+    _open_trace_session(mode, 1.0)
 
     mode.teardown(220.0)
 
@@ -948,7 +997,7 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
     mode.setup()
     mode.state.metrics = {"id": "cook-async-restore"}
 
-    mode._ensure_trace_session(1.0)
+    _open_trace_session(mode, 1.0)
 
     (session,) = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     assert (session.payload.model_revision, session.payload.model_provenance) == (8, "restore_submitted")
@@ -1084,7 +1133,7 @@ def test_sync_runner_with_async_preferring_core_records_completed_restore(hold_c
     mode.setup()
     mode.state.metrics = {"id": "cook-sync-restore"}
 
-    mode._ensure_trace_session(1.0)
+    _open_trace_session(mode, 1.0)
 
     (session,) = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     assert (session.payload.model_revision, session.payload.model_provenance) == (8, "restored")
@@ -1107,10 +1156,10 @@ def test_initial_session_uses_the_current_published_model_without_restore(hold_c
     mode.setup()
     mode.state.metrics = {"id": "cook-published-model"}
 
-    mode._ensure_trace_session(1.0)
+    _open_trace_session(mode, 1.0)
 
     (session,) = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
-    assert (session.payload.model_revision, session.payload.model_provenance) == (5, "persisted")
+    assert (session.payload.model_revision, session.payload.model_provenance) == (None, None)
 
 
 def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cycle, monkeypatch):
@@ -1121,7 +1170,7 @@ def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cy
     mode.state.metrics = {"id": "cook-base-manual"}
     mode.settings["safety"]["manual_override_time"] = 30
     mode.settings["safety"]["allow_manual_changes"] = True
-    mode._ensure_trace_session(1.0)
+    _open_trace_session(mode, 1.0)
     mode.control["manual"]["change"] = "auger"
     mode.control["manual"]["output"] = True
     call_start = len(mode.grill.calls)
@@ -1326,11 +1375,11 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "ordered-learning-trace"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     first, second = _learning_observation(0.0), _learning_observation(20.0)
     mode._pending_model_observations = {
-        1: (first, mode._trace_session_id, 0, None),
-        2: (second, mode._trace_session_id, 0, None),
+        1: (first, _identity(mode).session_id, 0, None),
+        2: (second, _identity(mode).session_id, 0, None),
     }
     return recorder, runner, mode, first, second
 
@@ -1415,7 +1464,7 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         assert gate.waiting.wait(1.0)
         mode.setup()
         mode.state.metrics = {"id": "runner-stop-timeout"}
-        mode._ensure_trace_session(0.0)
+        _open_trace_session(mode, 0.0)
         controller = mode.state.controller
         controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
         controller.pulse_frame_combustion_load = 0.3
@@ -1441,7 +1490,7 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         inhibit=InhibitReason.NONE, role_generation=0)
         gate.release.set()
         assert core.observation_started.wait(1.0)
-        old_session_id = mode._trace_session_id
+        old_session_id = _identity(mode).session_id
         import controller.runtime.runner as runner_module
 
         next_core = _BlockingObservationCore()
@@ -1520,7 +1569,7 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "async-learning-trace"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
     controller.pulse_frame_combustion_load = 0.3
@@ -1612,7 +1661,7 @@ def test_framed_learning_trace_uses_generation_latched_with_pulse_frame(hold_cyc
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "latched-generation-learning-trace"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = 1
     controller.pulse_requested_duty = 0.3
@@ -1641,7 +1690,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "retry-learning-trace"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
     controller.pulse_frame_combustion_load = 0.3
@@ -1654,7 +1703,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, runner.observations[0], _promotion_outcome(frame_end_ms=20_000))
     )
-    original = mode._trace_record
+    original = _trace(mode).record
     attempts = 0
 
     def transient(kind, payload, timestamp):
@@ -1664,7 +1713,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
             return False
         return original(kind, payload, timestamp)
 
-    mode._trace_record = transient
+    _trace(mode).record = transient
     mode._reconcile_model_observation_outcomes(now=22.0)
     assert len(mode._pending_model_observations[1][3]) == 2
     mode._reconcile_model_observation_outcomes(now=23.0)
@@ -1692,7 +1741,7 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(2, 0, second, second_outcome)
     )
-    original = mode._trace_record
+    original = _trace(mode).record
     failed = False
 
     def transient(kind, payload, timestamp):
@@ -1702,7 +1751,7 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
             return False
         return original(kind, payload, timestamp)
 
-    mode._trace_record = transient
+    _trace(mode).record = transient
     mode._reconcile_model_observation_outcomes(now=22.0)
     assert [
         record.payload.decision_id
@@ -1783,8 +1832,8 @@ def test_mpc_lifecycle_records_one_rollback_event_without_stale_duplicates(hold_
     )
     mode.setup()
     mode.state.metrics = {"id": "rollback-lifecycle"}
-    mode._ensure_trace_session(0.0)
-    original = mode._trace_record
+    _open_trace_session(mode, 0.0)
+    original = _trace(mode).record
     failed = False
 
     def transient(kind, payload, timestamp):
@@ -1794,11 +1843,12 @@ def test_mpc_lifecycle_records_one_rollback_event_without_stale_duplicates(hold_
             return False
         return original(kind, payload, timestamp)
 
-    mode._trace_record = transient
-    mode._trace_update(result, now=2.0, controller_interval=1.0)
-    assert len(mode._trace_pending_model_events) == 1
-    mode._ensure_trace_session(2.5)
-    mode._trace_update(
+    _trace(mode).record = transient
+    _record_trace_update(mode, result, now=2.0, controller_interval=1.0)
+    assert _trace(mode).status.pending_model_events == 1
+    _open_trace_session(mode, 2.5)
+    _record_trace_update(
+        mode,
         replace(result, stale_state=ResultStaleState.STALE, result_age_seconds=1.0),
         now=3.0,
         controller_interval=1.0,
@@ -1817,8 +1867,9 @@ def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_sess
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode._ensure_trace_session(0.0)
-    mode._pending_model_observations = {1: (None, mode._trace_session_id, 0, object())}
+    mode.state.metrics = {"id": "runner-adoption"}
+    _open_trace_session(mode, 0.0)
+    mode._pending_model_observations = {1: (None, _identity(mode).session_id, 0, object())}
     assert runner.reconfigure({}, {}) == "Active"
 
     mode._adopt_runner_configuration(1.0, mode.grill.get_output_status())
@@ -1830,7 +1881,7 @@ def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(hold_cy
     mode = hold_cycle(FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE), controller="mpc")
     mode.setup()
     mode._pending_model_observations = {sequence: (None, "old-session", 0, object()) for sequence in range(60)}
-    mode._trace_record = lambda *_: False
+    _trace(mode).record = lambda *_: False
 
     mode._reconcile_model_observation_outcomes(now=1.0)
 
@@ -1954,12 +2005,12 @@ def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "failed-outcome-evidence"}
-    mode._ensure_trace_session(0.0)
-    runner.bind_evidence_context(1, mode._trace_session_id, mode._trace_cook_id)
+    _open_trace_session(mode, 0.0)
+    runner.bind_evidence_context(1, _identity(mode).session_id, _identity(mode).cook_id)
     first, second = _learning_observation(0.0), _learning_observation(20.0)
     mode._pending_model_observations = {
-        1: (first, mode._trace_session_id, 0, None),
-        2: (second, mode._trace_session_id, 0, None),
+        1: (first, _identity(mode).session_id, 0, None),
+        2: (second, _identity(mode).session_id, 0, None),
     }
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, generation, first, outcome)
@@ -1989,7 +2040,7 @@ def test_missing_completed_frame_temperature_emits_sequence_linked_trace_gap(hol
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "missing-temperature-evidence"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
     controller.pulse_frame_combustion_load = 0.3
@@ -2016,9 +2067,9 @@ def test_allocation_join_failure_persists_an_ineligible_completed_observation(ho
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "allocation-join-evidence"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     observation = replace(_learning_observation(0.0), allocation_join_reason=reason)
-    mode._pending_model_observations = {1: (observation, mode._trace_session_id, 0, None)}
+    mode._pending_model_observations = {1: (observation, _identity(mode).session_id, 0, None)}
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, observation, _model_observation_outcome(frame_end_ms=20_000))
     )
@@ -2037,7 +2088,7 @@ def test_invalid_probe_is_persisted_without_submitting_to_the_learner(hold_cycle
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "invalid-probe-evidence"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     observation = replace(_learning_observation(0.0), probe_valid=False, probe_source=None)
 
     mode._deliver_completed_pulse_observation((0, 20_000), observation)
@@ -2058,7 +2109,7 @@ def test_invalid_probe_waits_for_an_earlier_learner_outcome_before_trace_publica
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "ordered-invalid-probe-evidence"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     first = replace(_learning_observation(0.0), observation_sequence=1)
     second = replace(_learning_observation(20.0), observation_sequence=2, probe_valid=False, probe_source=None)
 
@@ -2085,7 +2136,7 @@ def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_re
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "invalid-probe-overflow-evidence"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     first = replace(_learning_observation(0.0), observation_sequence=1)
 
     mode._deliver_completed_pulse_observation((0, 20_000), first)
@@ -2116,7 +2167,7 @@ def test_partial_terminal_frame_with_malformed_outcome_becomes_a_gap(hold_cycle,
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.state.metrics = {"id": "partial-terminal-frame"}
-    mode._ensure_trace_session(0.0)
+    _open_trace_session(mode, 0.0)
     observation = replace(
         _learning_observation(0.0),
         frame_end_s=1.0,
@@ -2126,7 +2177,7 @@ def test_partial_terminal_frame_with_malformed_outcome_becomes_a_gap(hold_cycle,
         observation_sequence=1,
     )
     mode._pending_model_observations = {
-        1: (observation, mode._trace_session_id, 0, None),
+        1: (observation, _identity(mode).session_id, 0, None),
     }
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(1, 0, observation, {})

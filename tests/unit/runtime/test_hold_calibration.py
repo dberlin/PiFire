@@ -17,13 +17,19 @@ def _runtime(mode) -> FramedPulseRuntime:
     assert isinstance(runtime, FramedPulseRuntime)
     return runtime
 
+def _trace(mode):
+    trace = mode._control_trace
+    assert trace is not None
+    return trace
+
+
 
 def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
         sample=mode._framed_sample(ptemp),
-        prior_output_source=mode.state.controller.trace_prior_output_source,
+        prior_output_source=_trace(mode).applied_state.output_source,
     )
     transition = result.decision.transition
     if apply_transition and transition is not None:
@@ -244,14 +250,15 @@ def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial
     )
 
 
-def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and_partial(hold_cycle, monkeypatch):
+def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and_partial(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     traces = []
-    monkeypatch.setattr(hold, "_trace_record", lambda kind, payload, _at: traces.append((kind, payload)) or True)
+    assert hold._control_trace is not None
+    hold._control_trace.record = lambda kind, payload, _at: traces.append((kind, payload)) or True
     _advance_runtime(hold, 10.0, True, ptemp=200.0)
     hold.state.lid.open_detected = True
     hold.on_tick(63.0, 200.0, hold.grill.get_output_status())

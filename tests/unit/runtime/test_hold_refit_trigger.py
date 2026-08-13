@@ -20,6 +20,7 @@ from controller.model_learning.contracts import (
     CandidateOrigin,
     FrameObservation,
 )
+from controller.runtime.control_trace_session import ControlTraceSession
 from controller.runtime.model_fitting import (
     PassiveGreyHistory,
     TeardownGreyHistory,
@@ -80,10 +81,16 @@ def test_no_refit_when_identification_is_off(hold_cycle):
     assert runner.refits == 0
 
 
-def test_online_adaptation_without_identification_checkpoints_before_trace_close(hold_cycle, monkeypatch):
+def test_online_adaptation_without_identification_checkpoints_before_trace_close(hold_cycle):
     events = []
 
     class _CloseRecorder:
+        def record(self, record):
+            raise AssertionError(f"trace record was not expected: {record.event_kind}")
+
+        def flush_due(self, now_ms):
+            raise AssertionError(f"trace flush was not expected: {now_ms}")
+
         def close(self):
             events.append("close")
 
@@ -96,8 +103,8 @@ def test_online_adaptation_without_identification_checkpoints_before_trace_close
     runner.snapshot = {"version": 1, "revision": 7, "params": {}, "online_adaptation": {}}
     store = _OrderedStore()
     hold = _hold(hold_cycle, runner, identification=False, online_adaptation=True, store=store)
-    hold._trace_recorder = _CloseRecorder()
-    monkeypatch.setattr(hold, "_trace_record", lambda *_args: True)
+    warnings: list[str] = []
+    hold._control_trace = ControlTraceSession(_CloseRecorder(), warning=warnings.append)
 
     hold.teardown(225)
 

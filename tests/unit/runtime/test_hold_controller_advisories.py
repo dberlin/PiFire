@@ -62,7 +62,8 @@ def test_hold_warns_once_for_an_unreachable_target_while_continuing_at_maximum_s
     hold.setup()
     monkeypatch.setattr(control.eventLogger, "warning", warnings.append)
     records = []
-    monkeypatch.setattr(hold, "_trace_record", lambda kind, payload, timestamp: records.append(payload) or True)
+    assert hold._control_trace is not None
+    hold._control_trace.record = lambda kind, payload, timestamp: records.append(payload) or True
     before_settings = copy.deepcopy(hold.settings)
     hold.on_tick(2.0, 100.0, hold.grill.get_output_status())
     hold.on_tick(4.0, 100.0, hold.grill.get_output_status())

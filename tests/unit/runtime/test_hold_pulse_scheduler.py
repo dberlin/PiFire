@@ -39,6 +39,21 @@ def _runtime(mode) -> FramedPulseRuntime:
     assert isinstance(runtime, FramedPulseRuntime)
     return runtime
 
+def _trace(mode):
+    trace = mode._control_trace
+    assert trace is not None
+    return trace
+
+
+def _open_trace_session(mode, now):
+    trace = _trace(mode)
+    context = mode._trace_session_context()
+    assert context is not None
+    identity = trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+    assert identity is not None
+    return identity
+
+
 
 def _scheduler(mode):
     scheduler = _runtime(mode).scheduler
@@ -51,7 +66,7 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
         now,
         actual_auger_on,
         sample=mode._framed_sample(ptemp),
-        prior_output_source=mode.state.controller.trace_prior_output_source,
+        prior_output_source=_trace(mode).applied_state.output_source,
     )
     transition = result.decision.transition
     if apply_transition and transition is not None:
@@ -69,7 +84,7 @@ def _reset_runtime(mode, reason, now, inhibit, *, ptemp=None, terminal_feedback=
         actual_auger_on=mode.grill.get_output_status()["auger"],
         sample=mode._framed_sample(ptemp),
         terminal_feedback=terminal_feedback,
-        prior_output_source=mode.state.controller.trace_prior_output_source,
+        prior_output_source=_trace(mode).applied_state.output_source,
     )
     mode.grill.auger_off()
     mode._dispatch_framed_result(result, record_terminal_trace=True)
@@ -390,8 +405,8 @@ def test_missed_frames_are_recorded_as_skipped_without_catchup(hold_cycle, monke
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.1)])
     hold = hold_cycle(runner, controller="mpc")
     frames = []
-    monkeypatch.setattr(hold, "_trace_record", lambda kind, payload, ts: frames.append((kind, payload)) or True)
     hold.setup()
+    _trace(hold).record = lambda kind, payload, ts: frames.append((kind, payload)) or True
     hold.on_tick(2.0, 200.0, _status(hold))
     hold.on_tick(62.0, 200.0, _status(hold))
 
@@ -425,8 +440,8 @@ def test_reset_accounts_observed_output_before_safety_or_manual_preemption(hold_
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.1)])
     hold = hold_cycle(runner, controller="mpc")
     records = []
-    monkeypatch.setattr(hold, "_trace_record", lambda kind, payload, ts: records.append((kind, payload)) or True)
     hold.setup()
+    _trace(hold).record = lambda kind, payload, ts: records.append((kind, payload)) or True
     if actual_on:
         hold.grill.auger_on()
 
@@ -463,7 +478,7 @@ def test_reset_keeps_cumulative_delivery_baselines_for_feedback_and_metrics(hold
         44.0,
         12.0,
         source=OutputSource.CONTROLLER,
-        prior_output_source=hold.state.controller.trace_prior_output_source,
+        prior_output_source=_trace(hold).applied_state.output_source,
     )
     assert feedback is not None
     hold._dispatch_framed_feedback(feedback)
@@ -503,13 +518,13 @@ def test_completed_frame_feedback_uses_the_completed_frame_request_bound_and_rev
     controller.pulse_requested_duty = 0.9
     controller.pulse_maximum_duty = 1.0
     runner.applied.clear()
+    assert _trace(hold).promote_seed_interval(1, OutputSource.CONTROLLER)
 
-    controller.trace_prior_output_source = OutputSource.CONTROLLER
     _advance_runtime(hold, 20.0, False)
 
     assert runner.applied[-1].requested == 0.1
-    assert hold.state.controller.trace_prior_combustion_load == 0.2
-    assert hold.state.controller.trace_interval_result_revision == 1
+    assert _trace(hold).applied_state.combustion_load == 0.2
+    assert _trace(hold).applied_state.result_revision == 1
 
 
 def test_teardown_reports_final_observed_pulse_delivery_before_reset(hold_cycle):
@@ -677,12 +692,12 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
     runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode._trace_session_id = f"session-{case}"
-    runner.bind_evidence_context(0, mode._trace_session_id, None)
     mode.state.metrics = {"id": f"ineligible-{case}"}
+    identity = _open_trace_session(mode, 0.0)
+    runner.bind_evidence_context(0, identity.session_id, identity.cook_id)
     _configure_frame_observation(mode, load=None if case == "unknown" else 0.3)  # type: ignore[arg-type]
     records = []
-    mode._trace_record = lambda kind, payload, timestamp: records.append((kind, payload, timestamp)) or True
+    _trace(mode).record = lambda kind, payload, timestamp: records.append((kind, payload, timestamp)) or True
     runner.observation_outcome = {  # type: ignore[assignment]
         "eligible": False,
         "rejection_reasons": ("ineligible_frame",),
