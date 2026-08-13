@@ -101,11 +101,17 @@ def _validated_int(value: JsonValue, key: str) -> int:
 
 
 def _validated_bool(value: JsonValue, key: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean")
+    return value
+
+
+def _validated_fan_bool(value: JsonValue) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, int) and value in (0, 1):
         return bool(value)
-    raise ValueError(f"{key} must be a boolean or legacy 0/1")
+    raise ValueError("enable_fan_input must be a boolean or legacy 0/1")
 
 
 def _validated_estimator(value: JsonValue) -> str:
@@ -141,8 +147,11 @@ def normalize_config(config: Mapping[str, JsonValue] | None) -> MpcConfig:
         normalized[key] = _validated_float(normalized[key], key)
     for key in ("n_horizon", "n_delay"):
         normalized[key] = _validated_int(normalized[key], key)
-    for key in ("enable_fan_input", "enable_online_adaptation"):
-        normalized[key] = _validated_bool(normalized[key], key)
+    normalized["enable_fan_input"] = _validated_fan_bool(normalized["enable_fan_input"])
+    normalized["enable_online_adaptation"] = _validated_bool(
+        normalized["enable_online_adaptation"],
+        "enable_online_adaptation",
+    )
     normalized["estimator"] = _validated_estimator(normalized["estimator"])
     return normalized
 

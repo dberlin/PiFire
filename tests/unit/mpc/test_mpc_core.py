@@ -563,6 +563,10 @@ def test_close_attempts_every_owned_handle_once_when_one_close_fails():
             dict(CONFIG, enable_online_adaptation="yes"),
             "enable_online_adaptation must be a boolean",
         ),
+        (
+            dict(CONFIG, enable_online_adaptation=1),
+            "enable_online_adaptation must be a boolean",
+        ),
     ],
 )
 def test_normalization_rejects_unsound_runtime_setting_types(
@@ -573,18 +577,18 @@ def test_normalization_rejects_unsound_runtime_setting_types(
         normalize_config(config)
 
 
-def test_normalization_preserves_legacy_zero_one_booleans_as_actual_booleans():
-    enabled = normalize_config(
-        dict(CONFIG, enable_fan_input=1, enable_online_adaptation=1)
+def test_normalization_preserves_key_specific_boolean_semantics():
+    fan_enabled = normalize_config(
+        dict(CONFIG, enable_fan_input=1, enable_online_adaptation=True)
     )
-    disabled = normalize_config(
-        dict(CONFIG, enable_fan_input=0, enable_online_adaptation=0)
+    fan_disabled = normalize_config(
+        dict(CONFIG, enable_fan_input=0, enable_online_adaptation=False)
     )
 
-    assert enabled["enable_fan_input"] is True
-    assert enabled["enable_online_adaptation"] is True
-    assert disabled["enable_fan_input"] is False
-    assert disabled["enable_online_adaptation"] is False
+    assert fan_enabled["enable_fan_input"] is True
+    assert fan_enabled["enable_online_adaptation"] is True
+    assert fan_disabled["enable_fan_input"] is False
+    assert fan_disabled["enable_online_adaptation"] is False
 
     core, _estimator, _solver = make_core(
         config=dict(CONFIG, enable_fan_input=1),
