@@ -1146,7 +1146,7 @@ class Controller(ControllerBase):
         if not submission.accepted:
             raise RuntimeError("learning-lifecycle-evidence-not-accepted")
         try:
-            from common.datastore_accessors import append_control_trace
+            from common.persistence.control_trace import append_control_trace
 
             event_kind = {
                 "fit_lifecycle": TraceEventKind.FIT_LIFECYCLE,

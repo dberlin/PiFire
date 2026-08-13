@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from common.control_trace import TRACE_SCHEMA_VERSION, ControlTraceRecord, RecorderGapPayload, TraceEventKind
-from common.datastore_accessors import (
+from common.persistence.control_trace import (
     append_control_trace,
     prune_control_trace,
     prune_incompatible_control_trace,

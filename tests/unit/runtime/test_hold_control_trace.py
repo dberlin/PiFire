@@ -25,7 +25,7 @@ from common.control_trace import (
     TraceEventKind,
 )
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
-from common.datastore_accessors import read_control_trace_session
+from common.persistence.control_trace import read_control_trace_session
 from common import datastore
 from controller.applied_output import OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics

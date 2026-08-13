@@ -22,7 +22,7 @@ from common.control_trace import (
     TraceEventKind,
     TraceSetting,
 )
-from common.datastore_accessors import append_control_trace
+from common.persistence.control_trace import append_control_trace
 from controller.applied_output import OutputSource
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau
 from controller.mpc import _DEFAULTS

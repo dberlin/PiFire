@@ -201,7 +201,7 @@ def test_append_only_identity_insertion_order_and_batch_atomicity(ds):
 
 
 def test_raw_trace_pruning_cannot_delete_durable_evidence(ds):
-    from common.datastore_accessors import append_control_trace, prune_control_trace
+    from common.persistence.control_trace import append_control_trace, prune_control_trace
     from common.control_trace import ControlTraceRecord, ControllerType, SessionPayload, TraceEventKind, TraceSetting
 
     evidence = _forecast("forecast-a", 100)
