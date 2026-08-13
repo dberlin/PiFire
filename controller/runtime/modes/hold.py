@@ -1051,7 +1051,7 @@ class HoldMode(ControlMode):
             self._retire_runner_evidence_context(self._runner_configuration_revision)
             trace = self._control_trace
             if trace is not None:
-                trace.rotate(runner_snapshot_fallback_safe=not self._runner.runs_async())
+                trace.rotate_identity(runner_snapshot_fallback_safe=not self._runner.runs_async())
             actual_type = getattr(self._runner, "controller_type", lambda: None)()
             if isinstance(actual_type, ControllerType):
                 self._controller_name = actual_type.value
@@ -2304,7 +2304,6 @@ class HoldMode(ControlMode):
     def teardown(self, ptemp):
         if getattr(self, "_teardown_done", False):
             return
-        self._teardown_done = True
         trace = getattr(self, "_control_trace", None)
         first_trace_teardown = trace is not None and not trace.status.closed
         now = self.ctx.clock.now()
@@ -2381,3 +2380,4 @@ class HoldMode(ControlMode):
                     runner.finish_teardown()
                 except Exception as error:
                     self._trace_warning(f"Controller teardown close failed: {error}")
+            self._teardown_done = True

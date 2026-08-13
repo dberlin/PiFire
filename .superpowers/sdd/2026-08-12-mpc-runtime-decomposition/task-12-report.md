@@ -28,7 +28,7 @@ After implementation and coverage-driven edge-contract completion, the direct su
 ```text
 uv run coverage run --branch --source=controller.runtime.control_trace_session \
   -m pytest -q -n0 tests/unit/runtime/test_control_trace_session.py
-18 passed in 0.07s
+19 passed in 0.08s
 
 uv run coverage json -o /tmp/task12-coverage.json
 uv run python scripts/check_branch_coverage.py \
@@ -37,7 +37,27 @@ uv run python scripts/check_branch_coverage.py \
 PASS controller/runtime/control_trace_session.py: 93.58974358974359% (73/78) > 90.0%
 ```
 
-Direct contracts cover valid and invalid identity, stable UUID/cook/controller/generation binding, sorted recursive settings flattening, explicit model authority and fallback policy, invalid/bool/negative revision rejection, warning once and recovery, a warning callback that itself fails, pending FIFO failure/resume without loss or reorder, recorder record/flush/close failures, PID/PID-SP/MPC update payloads, allocation ordering, stale same-revision replay, zero/old/duplicate rejection, lifecycle FIFO, safety/model/frame/gap/calibration typed records, seed coalescing/promotion, measured and terminal applied intervals, periodic flush, rotation without pending loss, repeated open, and close before/after open.
+Direct contracts cover valid and invalid identity, stable UUID/cook/controller/generation binding, sorted recursive settings flattening, explicit model authority and fallback policy, invalid/bool/negative revision rejection, warning once and recovery, a warning callback that itself fails, pending FIFO failure/resume without loss or reorder, recorder record/flush/close failures, PID/PID-SP/MPC update payloads, allocation ordering, stale same-revision replay, zero/old/duplicate rejection, lifecycle FIFO, safety/model/frame/gap/calibration typed records, seed coalescing/promotion, measured and terminal applied intervals, periodic flush, full controller reconfiguration without pending loss, historical identity rotation without live update/applied/FIFO loss, repeated open, and close before/after open.
+
+### Review fix round 1
+
+Two reviewer findings were reproduced with wished-for tests before their fixes:
+
+```text
+uv run pytest -q -n0 --tb=short \
+  tests/unit/runtime/test_control_trace_session.py::test_identity_rotation_preserves_live_update_applied_and_pending_state \
+  tests/unit/runtime/test_hold_control_trace.py::test_historical_evidence_rotation_preserves_live_applied_interval \
+  tests/unit/runtime/test_hold_orchestration.py::test_teardown_retry_completes_cleanup_after_pre_cleanup_failure
+3 failed in 0.39s
+```
+
+The exact REDs were an absent `rotate_identity` API, a final applied interval lost after historical multi-generation evidence rotation, and a retry skipped after a pre-cleanup teardown exception. A distinct typed identity/model-authority rotation now preserves live update/applied/FIFO state, while full `rotate` remains the real controller-reconfiguration reset. Teardown marks itself complete only at the successful end of cleanup, so a pre-cleanup failure remains retryable while a completed cleanup remains idempotent.
+
+The same three cases are GREEN:
+
+```text
+3 passed in 0.34s
+```
 
 ## LSP migration inventory
 
@@ -104,8 +124,9 @@ The remaining `_trace_warning` method is the deliberately injected logging callb
 | Hardware actuation | Hold | No grill dependency in session |
 | Observation/evidence queues | Hold/runner | Session exposes identity and typed record calls only |
 | Checkpoint/model persistence | Hold/workers | No SQL/store/worker access in session |
-| Reconfigure lifecycle | Hold | Session rotates after old evidence retirement; pending trace events survive |
-| Teardown lifecycle | Hold | Applied interval and FIFO complete, session closes before runner `finish_teardown`; repeated teardown is idempotent |
+| Reconfigure lifecycle | Hold | Full session rotation resets live controller state after old evidence retirement; pending trace events survive |
+| Historical evidence rotation | Hold/session | Identity/model authority rotate for reserved generations while live update/applied state and pending FIFO survive |
+| Teardown lifecycle | Hold | Applied interval and FIFO complete, session closes before runner `finish_teardown`; completed teardown is idempotent and a pre-cleanup failure remains retryable |
 
 ## Focused verification
 
@@ -120,7 +141,7 @@ uv run pytest -q -n0 --tb=no \
   tests/unit/runtime/test_hold_applied_output.py \
   tests/unit/runtime/test_hold_orchestration.py \
   tests/unit/runtime/test_threaded_runner.py
-8 failed, 217 passed in 5.93s
+8 failed, 220 passed in 5.97s
 ```
 
 The eight failures are the exact later-task REDs listed below; the Task 12 direct/session/trace/replay/pulse/threaded cases pass.
@@ -167,7 +188,7 @@ Command:
 ```text
 uv run pytest -q -n0 --tb=no \
   tests/unit/runtime/test_hold_*.py tests/unit/runtime/test_threaded_runner.py
-8 failed, 251 passed in 6.58s
+8 failed, 253 passed in 6.56s
 ```
 
 A programmatic set difference compared the collected `FAILED ...` node IDs against Task 11's exact 15-ID baseline.

@@ -227,11 +227,15 @@ class ControlTraceSession:
     def clear_model_authority(self) -> None:
         self._model_authority = None
 
-    def rotate(self, *, runner_snapshot_fallback_safe: bool) -> None:
-        """Reset session-local identity/state without losing queued model events."""
+    def rotate_identity(self, *, runner_snapshot_fallback_safe: bool) -> None:
+        """Rotate trace identity and model authority without disturbing the live control interval."""
         self._identity = None
         self.clear_model_authority()
         self._runner_snapshot_fallback_safe = runner_snapshot_fallback_safe
+
+    def rotate(self, *, runner_snapshot_fallback_safe: bool) -> None:
+        """Reset all session-local state without losing queued model events."""
+        self.rotate_identity(runner_snapshot_fallback_safe=runner_snapshot_fallback_safe)
         self._last_update_payload = None
         self._update_state = TraceUpdateState()
         self._applied_state = TraceAppliedState()

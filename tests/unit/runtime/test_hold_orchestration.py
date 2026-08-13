@@ -439,6 +439,40 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(
     }
 
 
+def test_teardown_retry_completes_cleanup_after_pre_cleanup_failure(hold_cycle, monkeypatch):
+    events = []
+    runner = _OrderedRunner(events)
+    _persistence, _trace = _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.metrics = {"id": "teardown-retry", "augerontime": 0.0}
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(3.0)
+    runtime = hold._framed_pulse
+    assert runtime is not None
+    original_advance = runtime.advance
+    attempts = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient advance failure")
+        return original_advance(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "advance", fail_once)
+    events.clear()
+
+    with pytest.raises(RuntimeError, match="transient advance failure"):
+        hold.teardown(200.0)
+    hold.teardown(200.0)
+    hold.teardown(200.0)
+
+    assert events.count("trace:close") == 1
+    assert events.count("runner:finish") == 1
+    assert events.count("runner:stop") == 1
+
+
 def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypatch):
     import controller.runtime.modes.hold as hold_module
 

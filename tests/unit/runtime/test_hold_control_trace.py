@@ -11,6 +11,7 @@ from common.controller_model_state import CheckpointSaveOutcome
 
 from common.control_trace import (
     ActuationMode,
+    AppliedOutputPayload,
     AmbientSource,
     AmbientUncertainty,
     ControllerBranch,
@@ -27,7 +28,7 @@ from common.control_trace import (
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
 from common.persistence.control_trace import read_control_trace_session
 from common import datastore
-from controller.applied_output import FrameFeedbackDisposition, OutputSource
+from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.mpc_allocator import allocate
@@ -35,7 +36,7 @@ from controller.mpc import Controller
 from tests.characterization.fixtures import base_control, base_settings
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.framed_pulse import FramedPulseRuntime
-from controller.runtime.control_trace_session import TraceUpdateContext
+from controller.runtime.control_trace_session import TraceAppliedIntervalContext, TraceOutputContext, TraceUpdateContext
 from controller.runtime.runner import (
     ControllerUpdateResult,
     ObservationOutcomeEnvelope,
@@ -1382,6 +1383,50 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
         2: (second, _identity(mode).session_id, 0, None),
     }
     return recorder, runner, mode, first, second
+
+
+def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle, monkeypatch):
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
+    mode = hold_cycle(runner, controller="mpc")
+    mode.setup()
+    mode.state.metrics = {"id": "historical-evidence-rotation"}
+    old_identity = _open_trace_session(mode, 0.0)
+    trace = _trace(mode)
+    trace.prepare_applied_output(
+        AppliedOutput(0.4, OutputSource.CONTROLLER, 2.0, requested=0.5),
+        TraceOutputContext(
+            timestamp_ms=2_000,
+            pulse_frame_result_revision=3,
+            fan_duty=None,
+            producing_revision=3,
+            measured_combustion_load=0.3,
+        ),
+    )
+    runner.reconfigure({}, {})
+    mode._pending_model_observations = {
+        1: (_learning_observation(0.0), old_identity.session_id, 1, None),
+    }
+
+    mode._rotate_evidence_sessions_for_reserved_runner_generations(3.0)
+
+    assert _identity(mode).session_id != old_identity.session_id
+    assert trace.record_applied_interval(
+        TraceAppliedIntervalContext(
+            timestamp_ms=4_000,
+            sample_complete=True,
+            realized_combustion_load=0.3,
+            controls_fan=False,
+        )
+    )
+    intervals = [
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
+        and isinstance(record.payload, AppliedOutputPayload)
+    ]
+    assert (intervals[-1].interval_start_ms, intervals[-1].interval_end_ms) == (2_000, 4_000)
+    assert intervals[-1].result_revision == 3
 
 
 def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_outcomes(hold_cycle, monkeypatch):

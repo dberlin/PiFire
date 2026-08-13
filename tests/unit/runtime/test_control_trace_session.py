@@ -657,6 +657,41 @@ def test_reset_preserves_pending_fifo_and_clears_session_local_state() -> None:
     assert session.update_state.result_revision == -1
 
 
+def test_identity_rotation_preserves_live_update_applied_and_pending_state() -> None:
+    recorder = _Recorder()
+    session = _open(recorder)
+    session.set_model_authority({"revision": 7}, "runtime")
+    assert session.record_update(_update_context(_mpc_result(3)))
+    session.prepare_applied_output(
+        AppliedOutput(0.4, OutputSource.CONTROLLER, 2.0, requested=0.5),
+        TraceOutputContext(
+            timestamp_ms=2_000,
+            pulse_frame_result_revision=3,
+            fan_duty=50.0,
+            producing_revision=3,
+            measured_combustion_load=0.3,
+        ),
+    )
+    recorder.fail_record_calls.add(recorder.record_calls + 1)
+    pending = ModelEventPayload(
+        event=ModelEventType.REJECT,
+        model_revision=3,
+        provenance="runtime",
+        detail="pending",
+    )
+    session.queue_model_event(pending, 2_500)
+    before_update = session.update_state
+    before_applied = session.applied_state
+
+    session.rotate_identity(runner_snapshot_fallback_safe=False)
+
+    assert session.identity is None
+    assert session.model_authority is None
+    assert session.update_state == before_update
+    assert session.applied_state == before_applied
+    assert session.status.pending_model_events == 1
+
+
 def test_close_before_or_after_open_is_idempotent_and_best_effort() -> None:
     first = _Recorder()
     ignored_warnings: list[str] = []
