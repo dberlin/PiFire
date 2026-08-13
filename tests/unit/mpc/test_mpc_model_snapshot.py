@@ -36,9 +36,39 @@ def _controller(**overrides):
     return Controller(dict(DEFAULT_MPC_CONFIG, **overrides), "C", dict(CYCLE))
 
 
+def _adopt(
+    controller: Controller,
+    parameters=PARAMS,
+    *,
+    rmse=1.7,
+    samples=420,
+    band_c=(80.0, 220.0),
+    nfev=11,
+) -> None:
+    active = controller.active_control_pair.descriptor
+    settings = dict(controller.cfg)
+    settings.update(parameters)
+    pair = controller._pair_factory.build(
+        controller._pair_factory.configured(
+            settings,
+            candidate_generation=active.candidate_generation + 1,
+            role_generation=active.role_generation + 1,
+            model_identified=True,
+        ),
+        authorized=False,
+    )
+    controller._adopt_model(
+        pair,
+        rmse=rmse,
+        samples=samples,
+        band_c=band_c,
+        nfev=nfev,
+    )
+
+
 def _identified():
     controller = _controller()
-    controller._adopt_model(PARAMS, rmse=1.7, samples=420, band_c=(80.0, 220.0), nfev=11)
+    _adopt(controller)
     return controller
 
 
@@ -105,7 +135,7 @@ def test_revision_advances_on_adoption_and_restored_revision_is_carried_forward(
     restored = _controller()
 
     assert restored.restore_model(snapshot) is True
-    restored._adopt_model(PARAMS, rmse=1.2, samples=500, band_c=(90.0, 210.0))
+    _adopt(restored, rmse=1.2, samples=500, band_c=(90.0, 210.0), nfev=None)
     assert restored.finalize_cook_refit(TeardownRefitOutcome.ACCEPTED_NEXT_COOK) is True
     assert restored.get_model_snapshot()["revision"] == 43
 
@@ -133,6 +163,102 @@ def test_restore_rebinds_owned_active_pair_to_rebuilt_handles():
     assert active is not previous
     assert active.estimator is restored.estimator
     assert active.solver is restored.mpc
+
+
+def test_restore_round_trips_complete_validated_v4_checkpoint_state() -> None:
+    source = _identified()
+    restored = _controller()
+    snapshot = source.get_model_snapshot()
+    assert snapshot is not None
+    active = source.active_control_pair.descriptor
+    candidate_settings = dict(source.cfg)
+    candidate_settings["theta"] = float(candidate_settings["theta"]) + 1.0
+    candidate_descriptor = source._pair_factory.descriptor(
+        source._pair_factory.configured(
+            candidate_settings,
+            candidate_generation=active.candidate_generation + 1,
+            role_generation=active.role_generation + 1,
+            model_identified=True,
+        )
+    )
+    challenger_parameters = dict(snapshot["active"]["parameters"])
+    challenger_parameters["theta"] = candidate_settings["theta"]
+    snapshot["challenger"] = {
+        "parameters": challenger_parameters,
+        "metadata": {
+            "rmse": 1.1,
+            "samples": 500,
+            "band_c": [90.0, 230.0],
+            "nfev": 7,
+        },
+    }
+    snapshot["window"] = {
+        "session_id": "restored-session",
+        "cook_id": "restored-cook",
+        "first_observation_sequence": 10,
+        "last_observation_sequence": 510,
+        "configuration_digest": candidate_descriptor.model_digest,
+        "incumbent_digest": active.model_digest,
+        "role_generation": candidate_descriptor.role_generation,
+    }
+    snapshot["candidate_pair"] = candidate_descriptor.to_dict()
+    snapshot["evidence"]["confidence_decision_id"] = "restored-confidence"
+    snapshot["origin"] = "operator-calibration"
+    snapshot["policy"] = "operator-reviewed"
+    snapshot["cook_refit"] = {
+        "status": "succeeded",
+        "latest": TeardownRefitOutcome.READY_FOR_REVIEW.value,
+    }
+    snapshot["identities"]["candidate_digest"] = candidate_descriptor.model_digest
+    snapshot["identities"]["candidate_generation"] = candidate_descriptor.candidate_generation
+    snapshot["activation"] = {
+        "phase": "prepared",
+        "pending_persistence": True,
+        "pending_swap": True,
+    }
+    snapshot["failure"] = {
+        "code": "restored-failure",
+        "detail": "durable failure detail",
+    }
+    expected = migrate_grey_learning_snapshot(snapshot)
+
+    try:
+        assert restored.restore_model(snapshot) is True
+        assert restored.get_model_snapshot() == expected
+    finally:
+        restored.close()
+        source.close()
+
+
+def test_restore_explicitly_migrates_legacy_active_descriptor_before_factory_restore() -> None:
+    source = _identified()
+    restored = _controller()
+    snapshot = source.get_model_snapshot()
+    assert snapshot is not None
+    active = source.active_control_pair.descriptor
+    legacy_configuration = {
+        name: value
+        for name, value in active.configuration.items()
+        if name not in {"control_period", "est_q_temp", "est_q_dist", "est_r_meas"}
+    }
+    legacy = GreyControlPairDescriptor(
+        model_digest=active.model_digest,
+        configuration=legacy_configuration,
+        estimator_kind=active.estimator_kind,
+        solver_kind=active.solver_kind,
+        candidate_generation=active.candidate_generation,
+        role_generation=active.role_generation,
+    )
+    snapshot["active_pair"] = legacy.to_dict()
+    expected = migrate_grey_learning_snapshot(snapshot)
+
+    try:
+        assert restored.restore_model(snapshot) is True
+        assert restored.active_control_pair.descriptor.to_dict() == expected["active_pair"]
+        assert restored.get_model_snapshot() == expected
+    finally:
+        restored.close()
+        source.close()
 
 
 def test_restore_rotates_learning_to_the_restored_pair_generation():

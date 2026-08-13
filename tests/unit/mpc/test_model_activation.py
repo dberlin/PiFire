@@ -699,6 +699,7 @@ def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
     phase_index = next(index for index, call in enumerate(calls) if call[0] == "phase")
     assert any(call[0] == "confidence" for call in calls[:phase_index])
 
+
 def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_receipt() -> None:
     core, incumbent, candidate, prepared = _bare_mpc_pair_owner()
 
@@ -707,16 +708,72 @@ def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_rece
     assert core.mpc is candidate.solver
     assert not core.activation_output_authorized
     assert core.rollback_control_pair is incumbent
+    assert not incumbent.authorized
+    assert not candidate.authorized
     assert core.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
     assert core.activation_output_authorized
     assert core.active_control_pair is candidate
+    assert candidate.authorized
+    assert not incumbent.authorized
     assert core._teardown_history.role_generation == prepared.candidate.role_generation
+    core.close()
+
+
+def test_successive_activation_closes_displaced_rollback_before_retaining_current_owner() -> None:
+    core, original, first, first_prepared = _bare_mpc_pair_owner()
+    assert core.install_candidate_pair_inert(first, first_prepared)
+    assert core.authorize_candidate_pair(first_prepared.transition(ActivationPhase.ACTIVE))
+    second_descriptor = _descriptor(
+        {
+            **_INCUMBENT_CONFIG,
+            "parameters": {**_INCUMBENT_CONFIG["parameters"], "theta": 35.0},
+        },
+        candidate_generation=5,
+        role_generation=6,
+    )
+    second = _owned(second_descriptor, "second")
+    second_prepared = PreparedActivationRecord.prepared(
+        timestamp_ms=2_000,
+        incumbent=first.descriptor,
+        candidate=second.descriptor,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        decision_id="decision-runtime-second",
+    )
+
+    assert core.install_candidate_pair_inert(second, second_prepared)
+
+    assert original.estimator.closed == original.solver.closed == 1
+    assert core.rollback_control_pair is first
+    assert not first.authorized
+    assert not second.authorized
+    assert core.authorize_candidate_pair(second_prepared.transition(ActivationPhase.ACTIVE))
+    assert second.authorized
+    assert not first.authorized
+    assert original.estimator.closed == original.solver.closed == 1
+    core.close()
+
+
+def test_inert_compensation_reauthorizes_only_incumbent_and_closes_candidate() -> None:
+    core, incumbent, candidate, prepared = _bare_mpc_pair_owner()
+    assert core.install_candidate_pair_inert(candidate, prepared)
+
+    assert core.compensate_candidate_pair(candidate, prepared, "persistence-failed")
+
+    assert core.active_control_pair is incumbent
+    assert incumbent.authorized
+    assert not candidate.authorized
+    assert candidate.estimator.closed == candidate.solver.closed == 1
+    assert incumbent.estimator.closed == incumbent.solver.closed == 0
+    core.close()
 
 
 def test_post_activation_confidence_failure_restores_exact_pair_fences_generation_and_records_reason() -> None:
     core, incumbent, candidate, prepared = _bare_mpc_pair_owner()
     core.install_candidate_pair_inert(candidate, prepared)
     core.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
+    assert candidate.authorized
+    assert not incumbent.authorized
 
     assert core.activation_runtime_failure("confidence-window-regressed")
 
@@ -728,6 +785,8 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
     assert core._teardown_history.role_generation == core._model_revision == 6
     events = core.drain_activation_events()
+    assert incumbent.authorized
+    assert not candidate.authorized
     assert len(events) == 1
     assert isinstance(events[0].payload, FallbackEvidence)
     assert events[0].payload.reason == "confidence-window-regressed"
@@ -735,7 +794,7 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
     assert events[0].payload.failed_generation == prepared.candidate.role_generation
     assert events[0].payload.decision_id == prepared.decision_id
     assert core.drain_activation_events() == ()
-
+    core.close()
 
 
 def test_first_native_solve_failure_after_activation_restores_exact_pair_and_records_reason(

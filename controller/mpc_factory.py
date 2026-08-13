@@ -33,6 +33,39 @@ from controller.mpc_core import (
 from controller.runtime.model_fitting import TargetTimingEvidence
 
 
+_ESTIMATOR_CONFIGURATION_FIELDS = frozenset(
+    {"control_period", "est_q_temp", "est_q_dist", "est_r_meas"}
+)
+_NATIVE_CONFIGURATION_FIELDS = frozenset(
+    {
+        "C_c",
+        "h_amb",
+        "T_amb",
+        "theta",
+        "K_Q",
+        "sigma",
+        "horizon_steps",
+        "delay_states",
+        "state_size",
+        "timestep_s",
+        "temperature_weight",
+        "terminal_weight",
+        "move_weight",
+        "residual_weight",
+        "max_iterations",
+    }
+)
+_PAIR_CONFIGURATION_FIELDS = (
+    _NATIVE_CONFIGURATION_FIELDS | _ESTIMATOR_CONFIGURATION_FIELDS
+)
+_LEGACY_ESTIMATOR_CONFIGURATION: dict[str, JsonValue] = {
+    "control_period": 5.0,
+    "est_q_temp": 1e-2,
+    "est_q_dist": 0.05,
+    "est_r_meas": 0.04,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class NativeTiming(TargetTimingEvidence):
     """Deterministic timing evidence from exercising one native candidate."""
@@ -214,13 +247,15 @@ class MpcPairFactory:
             role_generation=role_generation,
             model_identified=settings.residual_weight > 0.0,
         )
+
     def descriptor(self, configuration: MpcPairConfiguration) -> GreyControlPairDescriptor:
         """Describe the exact native contract without constructing live resources."""
 
-        _settings, native = self._settings(configuration)
+        settings, native = self._settings(configuration)
+        descriptor_configuration = self._descriptor_mapping(settings, native)
         return GreyControlPairDescriptor(
             model_digest=canonical_snapshot_digest(self._native_mapping(native)),
-            configuration=self._native_mapping(native),
+            configuration=descriptor_configuration,
             estimator_kind=configuration.estimator_kind,
             solver_kind="acados-grey",
             candidate_generation=configuration.candidate_generation,
@@ -236,6 +271,21 @@ class MpcPairFactory:
         if not isinstance(authorized, bool):
             raise ValueError("authorized must be a bool")
         settings, expected_native = self._settings(configuration)
+        return self._build_owned(
+            configuration,
+            settings,
+            expected_native,
+            authorized=authorized,
+        )
+
+    def _build_owned(
+        self,
+        configuration: MpcPairConfiguration,
+        settings: MpcConfig,
+        expected_native: GreyBoxMPCConfig,
+        *,
+        authorized: bool,
+    ) -> OwnedMpcPair:
         gate = _OutputAuthorization(False)
         core = MpcCore(
             settings,
@@ -250,7 +300,7 @@ class MpcPairFactory:
             solver_factory=self._solver_factory,
             model_identified=configuration.model_identified,
         )
-        pair = self._finish(core, gate, configuration, expected_native)
+        pair = self._finish(core, gate, configuration, settings, expected_native)
         if authorized:
             pair.authorize_output()
         return pair
@@ -282,7 +332,7 @@ class MpcPairFactory:
         except BaseException:
             self.close_components(estimator, solver)
             raise
-        pair = self._finish(core, gate, configuration, expected_native)
+        pair = self._finish(core, gate, configuration, settings, expected_native)
         if authorized:
             pair.authorize_output()
         return pair
@@ -297,14 +347,19 @@ class MpcPairFactory:
             kind = "kf"
         else:
             raise ValueError("unsupported estimator kind")
+        self._require_complete_descriptor(descriptor)
         native = self._native_from_descriptor(descriptor)
-        pair = self.build(
-            self.native(
-                native,
-                estimator_kind=kind,
-                candidate_generation=descriptor.candidate_generation,
-                role_generation=descriptor.role_generation,
-            ),
+        settings = self._settings_from_descriptor(descriptor, native, kind)
+        configuration = self.native(
+            native,
+            estimator_kind=kind,
+            candidate_generation=descriptor.candidate_generation,
+            role_generation=descriptor.role_generation,
+        )
+        pair = self._build_owned(
+            configuration,
+            settings,
+            native,
             authorized=False,
         )
         if pair.descriptor != descriptor:
@@ -313,22 +368,30 @@ class MpcPairFactory:
         return pair
 
     def validate(self, pair: OwnedMpcPair) -> bool:
-        native = self._native_mapping(pair.solver.config)
+        if pair.closed:
+            return False
+        construction = self._descriptor_mapping(pair.core.config, pair.solver.config)
         estimator_kind = pair.core.config.get("estimator")
         return (
             isinstance(estimator_kind, str)
             and pair.descriptor.solver_kind == "acados-grey"
             and pair.descriptor.estimator_kind == estimator_kind.lower()
-            and pair.descriptor.model_digest == canonical_snapshot_digest(native)
-            and pair.descriptor.configuration == native
+            and pair.descriptor.model_digest
+            == canonical_snapshot_digest(self._native_mapping(pair.solver.config))
+            and pair.descriptor.configuration == construction
         )
 
     def dry_solve(self, pair: OwnedMpcPair, *, temperature_c: float) -> NativeTiming:
         try:
-            return self._probe(pair.solver, temperature_c=temperature_c)
+            return self._probe(
+                pair.solver,
+                temperature_c=temperature_c,
+                control_period=pair.core.config["control_period"],
+            )
         except BaseException:
             pair.close()
             raise
+
     def build_estimator(self, native: GreyBoxMPCConfig) -> MpcEstimator:
         estimator_kind = self._base_configuration.get("estimator")
         if not isinstance(estimator_kind, str):
@@ -349,22 +412,31 @@ class MpcPairFactory:
         )
 
     def probe_solver(self, solver: MpcSolver) -> NativeTiming:
-        return self._probe(solver, temperature_c=float(solver.config.T_amb))
+        return self._probe(
+            solver,
+            temperature_c=float(solver.config.T_amb),
+            control_period=self._control_period,
+        )
 
     def _finish(
         self,
         core: MpcCore,
         gate: _OutputAuthorization,
         configuration: MpcPairConfiguration,
+        settings: MpcConfig,
         expected_native: GreyBoxMPCConfig,
     ) -> OwnedMpcPair:
         try:
             native = self._native_mapping(core.solver.config)
             if native != self._native_mapping(expected_native):
                 raise ValueError("constructed pair configuration digest changed")
+            descriptor_configuration = self._descriptor_mapping(
+                settings,
+                core.solver.config,
+            )
             descriptor = GreyControlPairDescriptor(
                 model_digest=canonical_snapshot_digest(native),
-                configuration=native,
+                configuration=descriptor_configuration,
                 estimator_kind=configuration.estimator_kind,
                 solver_kind="acados-grey",
                 candidate_generation=configuration.candidate_generation,
@@ -377,6 +449,7 @@ class MpcPairFactory:
         except BaseException:
             core.close()
             raise
+
     def _settings(
         self,
         configuration: MpcPairConfiguration,
@@ -399,8 +472,26 @@ class MpcPairFactory:
         native: GreyBoxMPCConfig,
         estimator_kind: str,
     ) -> MpcConfig:
-        settings = normalize_config(self._base_configuration)
-        settings.update(
+        return self._settings_for_native(
+            native,
+            estimator_kind,
+            control_period=self._base_configuration["control_period"],
+            est_q_temp=self._base_configuration["est_q_temp"],
+            est_q_dist=self._base_configuration["est_q_dist"],
+            est_r_meas=self._base_configuration["est_r_meas"],
+        )
+
+    @staticmethod
+    def _settings_for_native(
+        native: GreyBoxMPCConfig,
+        estimator_kind: str,
+        *,
+        control_period: float,
+        est_q_temp: float,
+        est_q_dist: float,
+        est_r_meas: float,
+    ) -> MpcConfig:
+        return normalize_config(
             {
                 "C_c": native.C_c,
                 "h_amb": native.h_amb,
@@ -413,16 +504,23 @@ class MpcPairFactory:
                 "Q_w": native.temperature_weight,
                 "R_dQ": native.move_weight,
                 "estimator": estimator_kind,
+                "control_period": control_period,
+                "est_q_temp": est_q_temp,
+                "est_q_dist": est_q_dist,
+                "est_r_meas": est_r_meas,
             }
         )
-        return normalize_config(settings)
-
-    def _probe(self, solver: MpcSolver, *, temperature_c: float) -> NativeTiming:
+    def _probe(
+        self,
+        solver: MpcSolver,
+        *,
+        temperature_c: float,
+        control_period: float,
+    ) -> NativeTiming:
         if not math.isfinite(temperature_c):
             raise ValueError("dry-solve temperature must be finite")
         state = np.zeros(solver.config.state_size, dtype=float)
-        state[0] = temperature_c
-        state[solver.config.delay_states] = float(solver.config.T_amb)
+        state[solver.config.delay_states] = temperature_c
         durations: list[float] = []
         for _ in range(5):
             started = self._monotonic()
@@ -445,7 +543,7 @@ class MpcPairFactory:
             target="active-runtime",
             samples=len(durations),
             p99_ms=max(durations),
-            limit_ms=self._control_period * 200.0,
+            limit_ms=control_period * 200.0,
         )
 
     @staticmethod
@@ -467,6 +565,81 @@ class MpcPairFactory:
             "residual_weight": config.residual_weight,
             "max_iterations": config.max_iterations,
         }
+
+    @classmethod
+    def _descriptor_mapping(
+        cls,
+        settings: MpcConfig,
+        native: GreyBoxMPCConfig,
+    ) -> dict[str, JsonValue]:
+        construction = cls._native_mapping(native)
+        construction.update(
+            {
+                "control_period": settings["control_period"],
+                "est_q_temp": settings["est_q_temp"],
+                "est_q_dist": settings["est_q_dist"],
+                "est_r_meas": settings["est_r_meas"],
+            }
+        )
+        return construction
+
+    @staticmethod
+    def migrate_legacy_descriptor(
+        descriptor: GreyControlPairDescriptor,
+    ) -> GreyControlPairDescriptor:
+        fields = frozenset(descriptor.configuration)
+        if fields == _PAIR_CONFIGURATION_FIELDS:
+            return descriptor
+        if fields != _NATIVE_CONFIGURATION_FIELDS:
+            MpcPairFactory._require_complete_descriptor(descriptor)
+        configuration = dict(descriptor.configuration)
+        configuration.update(_LEGACY_ESTIMATOR_CONFIGURATION)
+        return GreyControlPairDescriptor(
+            model_digest=descriptor.model_digest,
+            configuration=configuration,
+            estimator_kind=descriptor.estimator_kind,
+            solver_kind=descriptor.solver_kind,
+            candidate_generation=descriptor.candidate_generation,
+            role_generation=descriptor.role_generation,
+        )
+
+    @staticmethod
+    def _require_complete_descriptor(
+        descriptor: GreyControlPairDescriptor,
+    ) -> None:
+        fields = frozenset(descriptor.configuration)
+        if fields == _PAIR_CONFIGURATION_FIELDS:
+            return
+        missing = ", ".join(sorted(_PAIR_CONFIGURATION_FIELDS - fields))
+        unexpected = ", ".join(sorted(fields - _PAIR_CONFIGURATION_FIELDS))
+        raise ValueError(
+            "descriptor configuration fields do not match"
+            f"; missing: {missing or 'none'}"
+            f"; unexpected: {unexpected or 'none'}"
+        )
+
+    @staticmethod
+    def _settings_from_descriptor(
+        descriptor: GreyControlPairDescriptor,
+        native: GreyBoxMPCConfig,
+        estimator_kind: str,
+    ) -> MpcConfig:
+        configuration = descriptor.configuration
+
+        def number(name: str) -> float:
+            value = configuration.get(name)
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise ValueError(f"descriptor {name} must be numeric")
+            return float(value)
+
+        return MpcPairFactory._settings_for_native(
+            native,
+            estimator_kind,
+            control_period=number("control_period"),
+            est_q_temp=number("est_q_temp"),
+            est_q_dist=number("est_q_dist"),
+            est_r_meas=number("est_r_meas"),
+        )
 
     @staticmethod
     def _native_from_descriptor(descriptor: GreyControlPairDescriptor) -> GreyBoxMPCConfig:

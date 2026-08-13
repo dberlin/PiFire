@@ -1,3 +1,4 @@
+from dataclasses import replace
 import json
 from types import SimpleNamespace
 
@@ -39,6 +40,7 @@ from common.controller_model_state import ControllerModelStore
 
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_core import MpcCore
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_fitting import grey_config_digest
 
@@ -274,10 +276,25 @@ class _ApiHandle:
         self.closed += 1
 
 
-def _api_descriptor(config, candidate_generation, role_generation):
+def _api_descriptor(theta, candidate_generation, role_generation, *, legacy=False):
+    settings = dict(DEFAULT_MPC_CONFIG, theta=theta)
+    native = MpcCore.native_configuration(settings)
+    native_configuration = {
+        name: getattr(native, name) for name in native.__dataclass_fields__
+    }
+    configuration = dict(native_configuration)
+    if not legacy:
+        configuration.update(
+            {
+                "control_period": DEFAULT_MPC_CONFIG["control_period"],
+                "est_q_temp": DEFAULT_MPC_CONFIG["est_q_temp"],
+                "est_q_dist": DEFAULT_MPC_CONFIG["est_q_dist"],
+                "est_r_meas": DEFAULT_MPC_CONFIG["est_r_meas"],
+            }
+        )
     return GreyControlPairDescriptor(
-        model_digest=canonical_snapshot_digest(config),
-        configuration=config,
+        model_digest=canonical_snapshot_digest(native_configuration),
+        configuration=configuration,
         estimator_kind="ekf",
         solver_kind="acados-grey",
         candidate_generation=candidate_generation,
@@ -285,17 +302,9 @@ def _api_descriptor(config, candidate_generation, role_generation):
     )
 
 
-def _api_activation():
-    incumbent = _api_descriptor(
-        {"schema": "pifire-grey-box-model/v4", "theta": 50.0},
-        3,
-        4,
-    )
-    candidate = _api_descriptor(
-        {"schema": "pifire-grey-box-model/v4", "theta": 40.0},
-        4,
-        5,
-    )
+def _api_activation(*, legacy=False):
+    incumbent = _api_descriptor(50.0, 3, 4, legacy=legacy)
+    candidate = _api_descriptor(40.0, 4, 5, legacy=legacy)
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent,
@@ -454,6 +463,54 @@ def _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared):
     return pair, estimator, solver
 
 
+def test_activate_route_does_not_start_worker_when_pair_factory_creation_fails(
+    client,
+    monkeypatch,
+):
+    incumbent, candidate, prepared, _confidence = _api_activation()
+    monkeypatch.setattr(
+        routes,
+        "_model_evidence_projection",
+        lambda: (_ReadyReport(candidate.model_digest, prepared.decision_id), ()),
+    )
+    monkeypatch.setattr(
+        routes,
+        "_activation_checkpoint",
+        lambda: {
+            "active_pair": incumbent.to_dict(),
+            "candidate_pair": candidate.to_dict(),
+        },
+    )
+    worker_events = []
+
+    class _Worker:
+        def __init__(self, *_args):
+            worker_events.append("started")
+
+        def flush_and_stop(self, *, timeout):
+            worker_events.append(("stopped", timeout))
+            return True
+
+    def fail_pair_factory():
+        raise RuntimeError("pair factory unavailable")
+
+    monkeypatch.setattr(routes, "ModelPersistenceWorker", _Worker)
+    monkeypatch.setattr(routes, "_manual_pair_factory", fail_pair_factory)
+    monkeypatch.setitem(client.application.config, "PROPAGATE_EXCEPTIONS", False)
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": candidate.model_digest,
+            "decision_id": prepared.decision_id,
+        },
+    )
+
+    assert response.status_code == 500
+    assert worker_events == []
+    assert read_model_activation() is None
+
+
 def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_activation_route(
     client,
 ):
@@ -476,14 +533,11 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
         settings["cycle_data"],
     )
     candidate_config = candidate_controller.mpc.config
-    configuration = dict(candidate_controller.active_control_pair.descriptor.configuration)
-    candidate = GreyControlPairDescriptor(
-        model_digest=canonical_snapshot_digest(configuration),
-        configuration=configuration,
-        estimator_kind="ekf",
-        solver_kind="acados-grey",
+    candidate = replace(
+        candidate_controller.active_control_pair.descriptor,
         candidate_generation=1,
         role_generation=1,
+        ownership_digest="",
     )
     candidate_pair = owned_pair(candidate, _ApiHandle(), _ApiHandle())
     candidate_digest = candidate.model_digest
@@ -613,6 +667,49 @@ def test_activate_route_persists_only_prepared_after_exact_manual_validation(cli
     assert state.active_pair == incumbent
     assert state.candidate_pair == candidate
     assert estimator.closed == solver.closed == 1
+
+
+def test_activate_route_explicitly_migrates_legacy_checkpoint_pairs_before_equality(
+    client,
+    monkeypatch,
+):
+    legacy_incumbent, legacy_candidate, legacy_prepared, confidence = _api_activation(
+        legacy=True
+    )
+    incumbent = routes.MpcPairFactory.migrate_legacy_descriptor(legacy_incumbent)
+    candidate = routes.MpcPairFactory.migrate_legacy_descriptor(legacy_candidate)
+    prepared = PreparedActivationRecord.prepared(
+        timestamp_ms=legacy_prepared.timestamp_ms,
+        incumbent=incumbent,
+        candidate=candidate,
+        origin=legacy_prepared.origin,
+        policy=legacy_prepared.policy,
+        decision_id=legacy_prepared.decision_id,
+    )
+    append_model_evidence((confidence,))
+    _patch_manual_candidate(monkeypatch, incumbent, candidate, prepared)
+    monkeypatch.setattr(
+        routes,
+        "_activation_checkpoint",
+        lambda: {
+            "active_pair": legacy_incumbent.to_dict(),
+            "candidate_pair": legacy_candidate.to_dict(),
+        },
+    )
+
+    response = client.post(
+        "/api/model-evidence/activate",
+        json={
+            "candidate_digest": legacy_candidate.model_digest,
+            "decision_id": legacy_prepared.decision_id,
+        },
+    )
+
+    assert response.status_code == 200
+    state = read_model_activation()
+    assert state is not None
+    assert state.active_pair == incumbent
+    assert state.candidate_pair == candidate
 
 
 def test_activate_route_rechecks_latest_confidence_inside_prepared_transaction(client, monkeypatch):

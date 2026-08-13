@@ -9,15 +9,16 @@ Implementation completed without running tests, builds, linters, formatters, or 
 - `controller/mpc_factory.py` (new): concrete `MpcPairConfiguration`, `NativeTiming`, `OwnedMpcPair`, and `MpcPairFactory` ownership boundary.
 - `controller/mpc.py`: factory composition, initial build, descriptor restore, automatic candidate adoption, snapshot restore, rollback authorization, and teardown candidate migration.
 - `controller/mpc_core.py`: supports governed resource and authorization ownership used by the pair boundary.
-- `controller/model_learning/activation.py`: structural activation-pair protocol consumed by activation transactions.
+- `controller/model_learning/activation.py`: concrete pair annotations, complete descriptor ownership identity, and persisted activation-record legacy migration.
+- `controller/mpc_snapshot.py`: explicit legacy pair-descriptor migration at the validated v4 decode boundary.
 - `controller/runtime/runner.py`: prepared transition now carries `OwnedMpcPair`.
-- `blueprints/api/routes.py`: operator activation uses shared factory restore/build/dry-solve behavior; no Flask imports were introduced under `controller/`.
+- `blueprints/api/routes.py`: operator activation uses shared factory restore/build/dry-solve behavior and migrates raw checkpoint descriptors; no Flask imports were introduced under `controller/`.
 - `tests/unit/mpc/test_mpc_factory.py` (new): real factory branch, ownership, digest, restore, timing, and cleanup tests.
-- `tests/unit/mpc/_solver_fixtures.py` and migrated activation/runtime/API tests: concrete owner fixture and callsite cutover.
+- `tests/unit/mpc/_solver_fixtures.py`, `tests/unit/mpc/test_model_activation.py`, `tests/unit/mpc/test_mpc_model_snapshot.py`, `tests/unit/mpc/test_mpc_refit.py`, runtime tests, and `tests/web/test_api_model_evidence.py`: concrete owner fixture, ownership lifecycle, durable roundtrip, raw legacy migration, and callsite cutover coverage.
 
 ## LSP inventory
 
-LSP references were collected before/while modifying the exported `controller.mpc.Controller` (70 references), the legacy activation owner (52 references), and `MpcCore.bind_resources`. Production, unit/runtime, web, tool, and experiment callsites were reviewed. `controller/mpc.py` no longer imports or directly instantiates `MpcCore`, `GreyBoxEKF`, `GreyBoxKF`, or `AcadosGreyBoxMPC`; descriptor restoration delegates to `MpcPairFactory.restore`.
+LSP references were collected before/while modifying the exported `controller.mpc.Controller` (69 current references), `GreyControlPairDescriptor` (119 current references), the removed legacy activation owner (52 historical references), and `MpcCore.bind_resources`. Production, unit/runtime, web, tool, and experiment callsites were reviewed. The LSP retained a stale factory snapshot after reload, so the apparent empty `MpcPairFactory` result was rejected and its import/callsite inventory was confirmed with repository search. `controller/mpc.py` no longer imports or directly instantiates `MpcCore`, `GreyBoxEKF`, `GreyBoxKF`, or `AcadosGreyBoxMPC`; descriptor restoration delegates to `MpcPairFactory.restore`.
 
 ## Ownership state transitions
 
@@ -60,6 +61,7 @@ LSP references were collected before/while modifying the exported `controller.mp
 - Existing broader suites still contain Task 2-era monkeypatches of `controller.mpc_core`; parent validation should identify any fixture that must patch the composed factory instead.
 - The live-learning orchestration contract still invokes typed factory component builders and timing probe callbacks before the resulting pair is adopted by the same factory. Construction is no longer direct in `Controller`, but a later cleanup may fold that orchestration callback surface into a single factory request.
 - Workspace LSP reports unresolved environment imports (`numpy`, `pytest`) and substantial pre-existing diagnostics; focused semantic errors in the new factory/test were cleared apart from those environment imports.
+- After concurrent worker edits, the Python LSP continued to expose a stale pre-fix `controller/mpc_factory.py` snapshot even after reload; exported factory references were therefore confirmed with the repository fallback search rather than trusted as an empty LSP result.
 
 ## Parent commands
 
@@ -107,3 +109,14 @@ uv run pyright controller/mpc_factory.py controller/mpc.py controller/runtime/ru
 - Parent validation isolated the remaining mechanical collection/runtime failure: the factory-fixture migration removed the still-used `dataclasses.replace` import.
 - Restored that import only; unchanged calibration tests at the native-configuration mutation callsites retain their original behavior.
 - Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands.
+
+## Fix round 6
+
+- Corrected factory dry-solve input state to eight zero delayed-load states, chamber temperature, and zero disturbance. Timing limits now derive from the owned pair's restored `control_period`, not factory startup settings.
+- Expanded the durable descriptor configuration to the strict native contract plus normalized `control_period`, `est_q_temp`, `est_q_dist`, and `est_r_meas`. `model_digest` remains the native-model digest; `ownership_digest` covers the full estimator/solver identity and generations. Restore uses descriptor values exclusively and rejects missing, extra, malformed, or changed fields before authorization.
+- Added explicit native-only legacy descriptor migration at all durable decode boundaries: v4 snapshots, persisted activation records, and raw operator API checkpoints. All incumbent/candidate/rollback identities are migrated before equality or restore.
+- Refit acceptance now adopts the prepared estimator/solver as one complete factory-owned pair and atomically swaps its descriptor, core, configuration, origin, policy, and rollback identity. Closed or otherwise invalid candidate owners cannot replace the incumbent.
+- Activation installation revokes the incumbent before the candidate becomes active, retains exactly one rollback owner, closes a displaced rollback on successive activation, and reauthorizes only the selected owner during compensation/rollback. Controller construction failure closes the complete pair through `OwnedMpcPair`.
+- Snapshot restore now hydrates validated challenger, candidate, window, cook-refit, activation, failure, evidence, origin/policy, and rollback state so the next snapshot round-trips the complete durable checkpoint.
+- Added focused ownership/digest/state-layout/restored-cadence/legacy migration/successive activation/refit-transfer/snapshot-roundtrip/API tests. LSP reference inventory was refreshed for `Controller` (69 references) and `GreyControlPairDescriptor` (119 references); the factory server snapshot remained stale after reload, so its production/test import inventory was confirmed with the repository fallback search and recorded as a tooling risk.
+- Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands. Parent validation commands remain those above.

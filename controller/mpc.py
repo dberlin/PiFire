@@ -44,6 +44,7 @@ from controller import mpc_snapshot as _snapshot
 from controller.mpc_allocator import AllocationResult
 from controller.mpc_config import (
     DEFAULT_MPC_CONFIG,
+    JsonValue,
     finite_float,
     normalize_config,
     optional_float,
@@ -270,10 +271,22 @@ class Controller(ControllerBase):
         try:
             self._learning = self._build_learning() if self._learning_enabled else None
         except BaseException:
-            self._core.close()
+            self._active_control_pair.close()
             raise
 
 
+        self._checkpoint_challenger: dict[str, JsonValue] | None = None
+        self._checkpoint_candidate_identity: tuple[str, int] | None = None
+        self._checkpoint_cook_refit: tuple[Literal["idle", "succeeded", "failed"], str | None] = (
+            "idle",
+            None,
+        )
+        self._checkpoint_activation: tuple[
+            Literal["prepared", "active", "aborted"],
+            bool,
+            bool,
+        ] = ("aborted", False, False)
+        self._checkpoint_failure: tuple[str, str] | None = None
 
     @property
     def estimator(self):
@@ -326,6 +339,7 @@ class Controller(ControllerBase):
     @property
     def _native_failure_diagnostics(self):
         return self._core.native_failure_diagnostics
+
     def _core_model_authority(self):
         return self._model_revision, self._model_meta
 
@@ -431,8 +445,16 @@ class Controller(ControllerBase):
             return False
         if self._inert_activation is not None:
             return self._inert_activation.transaction_id == record.transaction_id
+        displaced_rollback = self._rollback_control_pair
+        if displaced_rollback is not None:
+            try:
+                displaced_rollback.close()
+            except Exception:
+                return False
+        incumbent = self._active_control_pair
         pair.revoke_output()
-        self._rollback_control_pair = self._active_control_pair
+        incumbent.revoke_output()
+        self._rollback_control_pair = incumbent
         self._active_control_pair = pair
         self._core = pair.core
         self._inert_activation = record
@@ -491,6 +513,7 @@ class Controller(ControllerBase):
             or rollback.descriptor != record.incumbent
         ):
             return False
+        pair.revoke_output()
         rollback.authorize_output()
         self._active_control_pair = rollback
         self._core = rollback.core
@@ -537,6 +560,7 @@ class Controller(ControllerBase):
             return False
         failed = self._active_control_pair
         activation_record = self._active_activation_record
+        failed.revoke_output()
         rollback.authorize_output()
         self._active_control_pair = rollback
         self._core = rollback.core
@@ -1687,55 +1711,55 @@ class Controller(ControllerBase):
 
     def _adopt_model(
         self,
-        params,
+        pair: OwnedMpcPair,
         *,
         rmse,
         samples,
         band_c,
         nfev=None,
-        descriptor: GreyControlPairDescriptor | None = None,
         origin: CandidateOrigin = CandidateOrigin.COOK_REFIT,
         policy: ActivationPolicy = ActivationPolicy.COOK_REFIT,
     ):
-        """Adopt fitted parameters and atomically advance the active owner identity.
+        """Install a complete fitted owner without relabeling incumbent resources."""
 
-        Only `_MODEL_PARAM_KEYS` cross into the numerical configuration. The
-        pair descriptor advances in the same operation, so persistence never
-        publishes a model identity different from the one owned by the pair.
-        """
-
-        previous = self._active_control_pair.descriptor
-        self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
-        active = descriptor or self._pair_factory.descriptor(
-            self._pair_factory.configured(
-                self.cfg,
-                candidate_generation=previous.candidate_generation,
-                role_generation=previous.role_generation,
-            )
-        )
-        self._active_control_pair.descriptor = active
-        self._checkpoint_origin = origin
-        self._checkpoint_policy = policy
-        self._checkpoint_rollback_identity = (
-            previous.model_digest,
-            previous.role_generation,
-        )
-        self._model_meta = {
-            # Provenance, not a comparison input: what this model achieved on
-            # the cook it was fit from. model_promotion.evaluate() always
-            # RECOMPUTES the incumbent's error on the candidate's own data
-            # before adopting anything new, so this stored value is never fed
-            # into that comparison -- it is a record, not a gate.
+        if (
+            pair is self._active_control_pair
+            or pair is self._rollback_control_pair
+            or not self._pair_factory.validate(pair)
+        ):
+            raise ValueError("adopted model pair must be a distinct validated owner")
+        adopted_metadata = {
             "rmse": float(rmse),
             "samples": int(samples),
             "band_c": [float(band_c[0]), float(band_c[1])],
-            # How hard the solve worked for these numbers. A converged solve
-            # that took one evaluation moved nowhere, and reads identically to
-            # a hard-won one in every other field. None -- never 0 -- stands in
-            # for "not recorded", so an unknown effort cannot be misread as a
-            # measured absence of effort.
             "nfev": None if nfev is None else int(nfev),
         }
+        displaced_rollback = self._rollback_control_pair
+        if displaced_rollback is not None:
+            displaced_rollback.close()
+        previous = self._active_control_pair
+        pair.revoke_output()
+        previous.revoke_output()
+        self._rollback_control_pair = previous
+        self._active_control_pair = pair
+        self._core = pair.core
+        self.cfg = pair.core.config
+        pair.authorize_output()
+        self._checkpoint_origin = origin
+        self._checkpoint_policy = policy
+        self._checkpoint_rollback_identity = (
+            previous.descriptor.model_digest,
+            previous.descriptor.role_generation,
+        )
+        self._checkpoint_challenger = None
+        self._checkpoint_candidate_identity = None
+        self._teardown_candidate = None
+        self._teardown_candidate_descriptor = None
+        self._teardown_fit_window = None
+        self._teardown_decision_id = None
+        self._checkpoint_activation = ("aborted", False, False)
+        self._checkpoint_failure = None
+        self._model_meta = adopted_metadata
 
     def get_model_snapshot(self):
         """Return the complete grey-only v4 checkpoint; process jobs stay live-only."""
@@ -1805,8 +1829,14 @@ class Controller(ControllerBase):
                 }
                 snapshot["window"] = None if self._teardown_fit_window is None else asdict(self._teardown_fit_window)
                 candidate_descriptor = self._teardown_candidate_descriptor
+            elif candidate is None and self._checkpoint_challenger is not None:
+                snapshot["challenger"] = copy.deepcopy(self._checkpoint_challenger)
+                snapshot["window"] = (
+                    None if self._teardown_fit_window is None else asdict(self._teardown_fit_window)
+                )
+                candidate_descriptor = self._teardown_candidate_descriptor
             else:
-                candidate_descriptor = None
+                candidate_descriptor = self._teardown_candidate_descriptor
             snapshot["evidence"] = {
                 "eligible": int(self._learning_eligible_updates),
                 "rejected": int(self._learning_rejected_updates),
@@ -1838,25 +1868,22 @@ class Controller(ControllerBase):
             snapshot["identification"] = {
                 "status": "identified" if self._model_meta is not None else "unidentified",
             }
-            refit_status = (
-                "succeeded"
-                if self._cook_refit_outcome
-                in {
-                    TeardownRefitOutcome.READY_FOR_REVIEW,
-                    TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-                }
-                else "failed"
-                if self._cook_refit_outcome
-                in {
-                    TeardownRefitOutcome.REJECTED,
-                    TeardownRefitOutcome.FAILED,
-                    TeardownRefitOutcome.CHECKPOINT_FAILURE,
-                }
-                else "idle"
-            )
+            if self._cook_refit_outcome is None:
+                refit_status, refit_latest = self._checkpoint_cook_refit
+            else:
+                refit_status = (
+                    "succeeded"
+                    if self._cook_refit_outcome
+                    in {
+                        TeardownRefitOutcome.READY_FOR_REVIEW,
+                        TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
+                    }
+                    else "failed"
+                )
+                refit_latest = self._cook_refit_outcome.value
             snapshot["cook_refit"] = {
                 "status": refit_status,
-                "latest": (None if self._cook_refit_outcome is None else self._cook_refit_outcome.value),
+                "latest": refit_latest,
             }
             snapshot["identities"] = {
                 "active_digest": active.model_digest,
@@ -1866,6 +1893,8 @@ class Controller(ControllerBase):
                     if candidate is not None
                     else candidate_descriptor.model_digest
                     if isinstance(candidate_descriptor, GreyControlPairDescriptor)
+                    else self._checkpoint_candidate_identity[0]
+                    if self._checkpoint_candidate_identity is not None
                     else live["candidate_digest"]
                 ),
                 "candidate_generation": (
@@ -1873,24 +1902,40 @@ class Controller(ControllerBase):
                     if candidate is not None
                     else candidate_descriptor.candidate_generation
                     if isinstance(candidate_descriptor, GreyControlPairDescriptor)
+                    else self._checkpoint_candidate_identity[1]
+                    if self._checkpoint_candidate_identity is not None
                     else live["candidate_generation"]
                 ),
                 "rollback_digest": rollback_digest,
                 "rollback_generation": rollback_generation,
             }
+            live_activation = (
+                live["activation_phase"],
+                live["pending_persistence"],
+                live["pending_swap"],
+            )
+            activation = (
+                self._checkpoint_activation
+                if live_activation == ("aborted", False, False)
+                else live_activation
+            )
             snapshot["activation"] = {
-                "phase": live["activation_phase"],
-                "pending_persistence": live["pending_persistence"],
-                "pending_swap": live["pending_swap"],
+                "phase": activation[0],
+                "pending_persistence": activation[1],
+                "pending_swap": activation[2],
             }
-            snapshot["failure"] = (
-                None
-                if live["failure"] is None
-                else {
+            if live["failure"] is not None:
+                snapshot["failure"] = {
                     "code": live["failure"]["code"],
                     "detail": live["failure"]["detail"],
                 }
-            )
+            elif self._checkpoint_failure is not None:
+                snapshot["failure"] = {
+                    "code": self._checkpoint_failure[0],
+                    "detail": self._checkpoint_failure[1],
+                }
+            else:
+                snapshot["failure"] = None
             snapshot["active_pair"] = active.to_dict()
             snapshot["candidate_pair"] = (
                 candidate.to_dict()
@@ -1926,39 +1971,107 @@ class Controller(ControllerBase):
         if configured_n_delay != 8 or snapshot_n_delay != 8:
             print("[mpc] discarding an incompatible grey snapshot (incompatible-delay).")
             return False
-        merged = dict(self.cfg)
-        merged.update({key: params[key] for key in self._MODEL_PARAM_KEYS})
-        merged["n_delay"] = 8
-        # The restored parameters have to reach the estimator, the horizon and
-        # the policy, not just the config those three were sized from -- a
-        # config-only restore leaves the season's learning inert and, where the
-        # restored model coasts further than the shipped one, plans over a
-        # horizon that stops short of the brake. Built before anything is
-        # committed so a build that fails leaves the controller solving the
-        # model it already had.
         try:
             restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
-            restored_configuration = self._pair_factory.configured(
-                merged,
-                candidate_generation=restored_descriptor.candidate_generation,
-                role_generation=restored_descriptor.role_generation,
+            active_identity = owned["identities"]
+            if (
+                active_identity["active_digest"] != restored_descriptor.model_digest
+                or active_identity["active_generation"] != restored_descriptor.role_generation
+            ):
+                raise ValueError("restored active identity does not match its pair descriptor")
+            candidate_pair_value = owned["candidate_pair"]
+            restored_candidate_descriptor = (
+                None
+                if candidate_pair_value is None
+                else GreyControlPairDescriptor.from_dict(candidate_pair_value)
             )
-            if self._pair_factory.descriptor(restored_configuration) != restored_descriptor:
-                raise ValueError("restored active pair does not match active model")
+            candidate_digest = active_identity["candidate_digest"]
+            candidate_generation = active_identity["candidate_generation"]
+            if restored_candidate_descriptor is not None and (
+                candidate_digest != restored_candidate_descriptor.model_digest
+                or candidate_generation != restored_candidate_descriptor.candidate_generation
+            ):
+                raise ValueError("restored candidate identity does not match its pair descriptor")
+            restored_candidate_identity = (
+                None
+                if candidate_digest is None or candidate_generation is None
+                else (candidate_digest, candidate_generation)
+            )
+            challenger_value = owned["challenger"]
+            restored_challenger: dict[str, JsonValue] | None = (
+                None if challenger_value is None else copy.deepcopy(challenger_value)
+            )
+            window_value = owned["window"]
+            restored_window = (
+                None
+                if window_value is None
+                else FitWindowIdentity(
+                    session_id=window_value["session_id"],
+                    cook_id=window_value["cook_id"],
+                    first_observation_sequence=window_value["first_observation_sequence"],
+                    last_observation_sequence=window_value["last_observation_sequence"],
+                    configuration_digest=window_value["configuration_digest"],
+                    incumbent_digest=window_value["incumbent_digest"],
+                    role_generation=window_value["role_generation"],
+                )
+            )
+            cook_refit_value = owned["cook_refit"]
+            raw_refit_status = cook_refit_value["status"]
+            if raw_refit_status == "idle":
+                restored_refit_status: Literal["idle", "succeeded", "failed"] = "idle"
+            elif raw_refit_status == "succeeded":
+                restored_refit_status = "succeeded"
+            elif raw_refit_status == "failed":
+                restored_refit_status = "failed"
+            else:
+                raise ValueError("unsupported restored cook-refit status")
+            restored_cook_refit = (restored_refit_status, cook_refit_value["latest"])
+            activation_value = owned["activation"]
+            raw_activation_phase = activation_value["phase"]
+            if raw_activation_phase == "prepared":
+                restored_activation_phase: Literal["prepared", "active", "aborted"] = "prepared"
+            elif raw_activation_phase == "active":
+                restored_activation_phase = "active"
+            elif raw_activation_phase == "aborted":
+                restored_activation_phase = "aborted"
+            else:
+                raise ValueError("unsupported restored activation phase")
+            restored_activation = (
+                restored_activation_phase,
+                activation_value["pending_persistence"],
+                activation_value["pending_swap"],
+            )
+            failure_value = owned["failure"]
+            restored_failure = (
+                None
+                if failure_value is None
+                else (failure_value["code"], failure_value["detail"])
+            )
             restored_pair = self._pair_factory.restore(restored_descriptor)
-            restored_pair.authorize_output()
+            restored_parameters = restored_pair.core.snapshot_parameters()
+            if any(restored_parameters[key] != params[key] for key in self._MODEL_PARAM_KEYS):
+                restored_pair.close()
+                raise ValueError("restored active pair does not match active model")
         except Exception as exc:
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
         old_pair = self._active_control_pair
+        old_rollback = self._rollback_control_pair
         old_learning = self._learning
+        old_pair.revoke_output()
+        restored_pair.authorize_output()
         self.cfg = restored_pair.core.config
         self._active_control_pair = restored_pair
         self._core = restored_pair.core
+        self._rollback_control_pair = None
+        self._inert_activation = None
+        self._active_activation_record = None
         self._learning = None
         if old_learning is not None:
             old_learning.close()
         old_pair.close()
+        if old_rollback is not None and old_rollback is not old_pair:
+            old_rollback.close()
         # Said for the model that will actually solve. __init__'s own call saw
         # only the configured parameters, which for a grill that has been
         # learning are not the ones about to steer it.
@@ -1987,6 +2100,17 @@ class Controller(ControllerBase):
             if rollback_digest is None or rollback_generation is None
             else (rollback_digest, rollback_generation)
         )
+        self._checkpoint_challenger = restored_challenger
+        self._teardown_candidate = None
+        self._teardown_candidate_descriptor = restored_candidate_descriptor
+        self._teardown_fit_window = restored_window
+        self._checkpoint_candidate_identity = restored_candidate_identity
+        self._teardown_decision_id = owned["evidence"]["confidence_decision_id"]
+        self._checkpoint_cook_refit = restored_cook_refit
+        self._checkpoint_activation = restored_activation
+        self._checkpoint_failure = restored_failure
+        self._cook_refit_outcome = None
+        self._cook_refit_finalized = False
         if owned["identification"]["status"] != "identified":
             self._model_meta = None
         self._learning_eligible_updates = owned["evidence"]["eligible"]
@@ -2154,17 +2278,24 @@ class Controller(ControllerBase):
         if not preparation.accepted:
             reason = ",".join(preparation.blockers) or "candidate-preparation-rejected"
             return TeardownRefitResult.rejected(reason, origin=origin)
-        descriptor = GreyControlPairDescriptor(
-            model_digest=preparation.candidate_digest,
-            configuration={name: getattr(success.config, name) for name in success.config.__dataclass_fields__},
-            estimator_kind=str(self.cfg["estimator"]),
-            solver_kind="acados-grey",
+        estimator_kind = self._active_control_pair.descriptor.estimator_kind
+        if estimator_kind == "ekf":
+            candidate_estimator_kind: Literal["ekf", "kf"] = "ekf"
+        elif estimator_kind == "kf":
+            candidate_estimator_kind = "kf"
+        else:
+            self._close_prepared_candidate(preparation)
+            return TeardownRefitResult.rejected("unsupported-estimator-kind", origin=origin)
+        candidate_configuration = self._pair_factory.native(
+            success.config,
+            estimator_kind=candidate_estimator_kind,
             candidate_generation=identity.candidate_generation,
             role_generation=identity.role_generation + 1,
         )
+        descriptor = self._pair_factory.descriptor(candidate_configuration)
         self._teardown_fit_window = window
-        try:
-            if origin is CandidateOrigin.OPERATOR_CALIBRATION:
+        if origin is CandidateOrigin.OPERATOR_CALIBRATION:
+            try:
                 self._persist_operator_teardown_authority(window, descriptor)
                 self._teardown_candidate = success
                 self._teardown_candidate_descriptor = descriptor
@@ -2172,13 +2303,24 @@ class Controller(ControllerBase):
                     verdict.reason,
                     candidate_digest=descriptor.model_digest,
                 )
+            finally:
+                self._close_prepared_candidate(preparation)
+        prepared_pair = preparation.candidate_pair
+        if prepared_pair is None:
+            raise RuntimeError("accepted candidate preparation lost its owned resources")
+        owned_candidate = self._pair_factory.adopt(
+            candidate_configuration,
+            prepared_pair.estimator,
+            prepared_pair.controller,
+            authorized=False,
+        )
+        try:
             self._adopt_model(
-                candidate_parameters,
+                owned_candidate,
                 rmse=success.rmse_c,
                 samples=success.sample_count,
                 band_c=success.temperature_band_c,
                 nfev=success.nfev,
-                descriptor=descriptor,
                 origin=origin,
                 policy=(
                     ActivationPolicy.PASSIVE_AUTO
@@ -2186,12 +2328,13 @@ class Controller(ControllerBase):
                     else ActivationPolicy.COOK_REFIT
                 ),
             )
-            return TeardownRefitResult.accepted_next_cook(
-                verdict.reason,
-                candidate_digest=descriptor.model_digest,
-            )
-        finally:
-            self._close_prepared_candidate(preparation)
+        except BaseException:
+            owned_candidate.close()
+            raise
+        return TeardownRefitResult.accepted_next_cook(
+            verdict.reason,
+            candidate_digest=descriptor.model_digest,
+        )
 
     def finalize_cook_refit(self, outcome) -> bool:
         normalized = outcome if isinstance(outcome, TeardownRefitOutcome) else TeardownRefitOutcome(outcome)
@@ -2216,8 +2359,9 @@ class Controller(ControllerBase):
         least-squares evaluation, so it belongs nowhere near the control path.
         It runs synchronously on its caller's thread and takes seconds, bounded
         by `_HISTORY_MAX` -- see HoldMode._refit_model for why spending them at
-        teardown is safe. An accepted model changes `cfg` but rebuilds nothing:
-        it reaches the grill through the next cook's restore.
+        teardown is safe. An accepted model replaces the complete owned pair
+        only after the cook has ended, so the resulting checkpoint—not a
+        mid-cook numerical relabel—authorizes it for the next cook.
         """
         from controller.model_promotion import evaluate
         from controller.update_mpc import fit_params, fit_quality, identifiability
@@ -2297,13 +2441,33 @@ class Controller(ControllerBase):
             f"{len(rows)} samples in {time.perf_counter() - started:.1f} s)"
         )
         if verdict.accepted:
-            self._adopt_model(
-                fitted,
-                rmse=cand_rmse,
-                samples=len(rows),
-                band_c=(float(temp.min()), float(temp.max())),
-                nfev=fitted["nfev"],
+            active_descriptor = self._active_control_pair.descriptor
+            candidate_settings = dict(self.cfg)
+            candidate_settings.update(
+                {key: fitted[key] for key in self._MODEL_PARAM_KEYS if key in fitted}
             )
+            candidate_pair: OwnedMpcPair | None = None
+            try:
+                candidate_pair = self._pair_factory.build(
+                    self._pair_factory.configured(
+                        candidate_settings,
+                        candidate_generation=active_descriptor.candidate_generation + 1,
+                        role_generation=active_descriptor.role_generation + 1,
+                        model_identified=True,
+                    ),
+                    authorized=False,
+                )
+                self._adopt_model(
+                    candidate_pair,
+                    rmse=cand_rmse,
+                    samples=len(rows),
+                    band_c=(float(temp.min()), float(temp.max())),
+                    nfev=fitted["nfev"],
+                )
+            except Exception as error:
+                if candidate_pair is not None and candidate_pair is not self._active_control_pair:
+                    candidate_pair.close()
+                return _Verdict(False, f"candidate construction failed: {error}")
         return verdict
 
     def set_safety_ceiling_c(self, ceiling_c) -> None:

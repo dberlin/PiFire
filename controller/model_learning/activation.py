@@ -10,12 +10,13 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
+
 from common.web_contracts.learning import ModelActivationRequest
 
 from .contracts import ActivationPolicy, CandidateOrigin
+
 if TYPE_CHECKING:
     from controller.mpc_factory import OwnedMpcPair
-
 
 
 _PairT = TypeVar("_PairT", bound="OwnedMpcPair")
@@ -24,6 +25,9 @@ _POLICY_BY_ORIGIN = {
     CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
     CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
 }
+_ESTIMATOR_CONSTRUCTION_FIELDS = frozenset(
+    {"control_period", "est_q_temp", "est_q_dist", "est_r_meas"}
+)
 
 
 def _nonblank(value: object, name: str) -> str:
@@ -108,7 +112,20 @@ class GreyControlPairDescriptor:
             raise ValueError("configuration must be a mapping")
         owned = _owned_json(self.configuration)
         assert isinstance(owned, dict)
-        if canonical_snapshot_digest(owned) != self.model_digest:
+        estimator_fields = frozenset(owned) & _ESTIMATOR_CONSTRUCTION_FIELDS
+        if estimator_fields and estimator_fields != _ESTIMATOR_CONSTRUCTION_FIELDS:
+            missing = ", ".join(sorted(_ESTIMATOR_CONSTRUCTION_FIELDS - estimator_fields))
+            raise ValueError(f"estimator construction configuration is missing: {missing}")
+        model_configuration = (
+            {
+                key: value
+                for key, value in owned.items()
+                if key not in _ESTIMATOR_CONSTRUCTION_FIELDS
+            }
+            if estimator_fields
+            else owned
+        )
+        if canonical_snapshot_digest(model_configuration) != self.model_digest:
             raise ValueError("model_digest does not match configuration")
         identity = {
             "model_digest": self.model_digest,
@@ -155,8 +172,6 @@ class GreyControlPairDescriptor:
             role_generation=_generation(value.get("role_generation"), "role_generation"),
             ownership_digest=ownership_digest,
         )
-
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +445,8 @@ class StartupActivationRecovery:
 
 
 def _record_from_persisted_state(state: object) -> PreparedActivationRecord:
+    from controller.mpc_factory import MpcPairFactory
+
     def pair(name: str) -> GreyControlPairDescriptor:
         raw = getattr(state, f"{name}_pair_json", None)
         if not isinstance(raw, str):
@@ -437,7 +454,8 @@ def _record_from_persisted_state(state: object) -> PreparedActivationRecord:
         decoded = json.loads(raw)
         if not isinstance(decoded, dict):
             raise ValueError(f"persisted {name} pair must be an object")
-        return GreyControlPairDescriptor.from_dict(decoded)
+        descriptor = GreyControlPairDescriptor.from_dict(decoded)
+        return MpcPairFactory.migrate_legacy_descriptor(descriptor)
 
     return PreparedActivationRecord(
         phase=ActivationPhase(getattr(state, "phase", None)),

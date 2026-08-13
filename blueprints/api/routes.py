@@ -391,18 +391,22 @@ def api_model_evidence_activate():
         candidate_value = checkpoint.get("candidate_pair")
         if not isinstance(incumbent_value, dict) or not isinstance(candidate_value, dict):
             raise ValueError("candidate-pair-not-found")
-        incumbent = GreyControlPairDescriptor.from_dict(incumbent_value)
-        candidate = GreyControlPairDescriptor.from_dict(candidate_value)
+        incumbent = MpcPairFactory.migrate_legacy_descriptor(
+            GreyControlPairDescriptor.from_dict(incumbent_value)
+        )
+        candidate = MpcPairFactory.migrate_legacy_descriptor(
+            GreyControlPairDescriptor.from_dict(candidate_value)
+        )
         if candidate.model_digest != activation_request.candidate_digest:
             raise ValueError("candidate-digest-changed")
     except (KeyError, TypeError, ValueError) as error:
         return _activation_rejection(str(error), 422 if isinstance(error, (KeyError, TypeError)) else 409)
 
+    pair_factory = _manual_pair_factory()
     worker = ModelPersistenceWorker(
         ControllerModelStore(),
         logging.getLogger("control"),
     )
-    pair_factory = _manual_pair_factory()
     try:
         incumbent_owner = pair_factory.restore(incumbent)
     except (TypeError, ValueError, RuntimeError) as error:

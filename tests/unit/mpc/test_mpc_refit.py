@@ -90,14 +90,26 @@ def accepted_refit():
     answer its question out of another's mutation.
     """
     c = _c()
+    before_pair = c.active_control_pair
     before = c.cfg["C_c"] / c.cfg["h_amb"]
     verdict = c.refit_from_cook(_synthetic_cook())
-    return SimpleNamespace(
+    result = SimpleNamespace(
         verdict=verdict,
         tau_before=before,
         tau_after=c.cfg["C_c"] / c.cfg["h_amb"],
         snapshot=c.get_model_snapshot(),
+        owner_changed=c.active_control_pair is not before_pair,
+        owner_valid=c._pair_factory.validate(c.active_control_pair),
+        rollback_retained=c.rollback_control_pair is before_pair,
     )
+    c.close()
+    return result
+
+
+def test_an_accepted_refit_installs_the_complete_validated_candidate_owner(accepted_refit):
+    assert accepted_refit.owner_changed is True
+    assert accepted_refit.owner_valid is True
+    assert accepted_refit.rollback_retained is True
 
 
 def test_a_refit_moves_the_model_toward_the_grill_that_produced_the_cook(accepted_refit):
@@ -733,8 +745,18 @@ def test_an_infinite_error_never_reaches_the_store(model_store):
     assert c.refit_from_cook(_synthetic_cook()).accepted is True
     assert model_store.save("mpc", c.get_model_snapshot()) is True
 
+    active = c.active_control_pair.descriptor
+    pair = c._pair_factory.build(
+        c._pair_factory.configured(
+            c.cfg,
+            candidate_generation=active.candidate_generation + 1,
+            role_generation=active.role_generation + 1,
+            model_identified=True,
+        ),
+        authorized=False,
+    )
     c._adopt_model(
-        dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4),
+        pair,
         rmse=math.inf,
         samples=1200,
         band_c=(25.0, 240.0),

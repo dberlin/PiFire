@@ -147,7 +147,10 @@ def _grey_v4_pair_descriptor(value, reason):
     if not isinstance(value, Mapping):
         raise GreySnapshotInvalid(reason)
     try:
-        return GreyControlPairDescriptor.from_dict(dict(value)).to_dict()
+        descriptor = GreyControlPairDescriptor.from_dict(dict(value))
+        from controller.mpc_factory import MpcPairFactory
+
+        return MpcPairFactory.migrate_legacy_descriptor(descriptor).to_dict()
     except (KeyError, TypeError, ValueError) as error:
         raise GreySnapshotInvalid(reason) from error
 
