@@ -50,3 +50,4 @@ Task 16: complete (commit 1a909c29, review clean; HoldLearningRuntime 90.87% bra
 Task 17: complete (commit 7fbe359b, review clean; orchestration 15 passed; aggregate 386 passed)
 Task 18: fix rounds 1/5–4/5 (6 addressed, 0 open — reachable coverage contracts, partial-setup owner closure, exact denominator accounting, exception-isolated cleanup, and trace close after pending-flush failure; commit 12d237b3)
 Task 18: complete (commit 12d237b3, review clean; Hold 91.23% branches; aggregate 454 passed)
+Integration: complete (commit 44f534a8, review clean; 7,552 Python and 2,095 frontend tests passed; 13-module strict branch gate and native Hold smoke passed)
