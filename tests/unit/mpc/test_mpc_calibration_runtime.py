@@ -1,3 +1,4 @@
+from dataclasses import replace
 from functools import partial
 from types import SimpleNamespace
 

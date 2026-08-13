@@ -101,3 +101,9 @@ uv run pyright controller/mpc_factory.py controller/mpc.py controller/runtime/ru
 - Updated the fixture to request the generated controller's exact eight-delay contract. The fake estimator now emits all eight delayed-load states followed by chamber temperature and disturbance, matching the native `state_size == 10` boundary.
 - The fake policy continues to size command and residual sequences from the complete validated `GreyBoxMPCConfig.horizon_steps`; no production validation was relaxed.
 - Parent should rerun `uv run pytest -q tests/unit/mpc/test_mpc_calibration_runtime.py` and then the broader MPC suite. Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands.
+
+## Fix round 5
+
+- Parent validation isolated the remaining mechanical collection/runtime failure: the factory-fixture migration removed the still-used `dataclasses.replace` import.
+- Restored that import only; unchanged calibration tests at the native-configuration mutation callsites retain their original behavior.
+- Per instruction, this worker ran no tests, builds, linters, formatters, or coverage commands.
