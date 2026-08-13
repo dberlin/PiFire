@@ -64,7 +64,7 @@ def test_dynamic_controller_composes_config_control_status_and_trace_contract(mo
     controller = mpc.Controller(
         {
             "control_period": 2.0,
-            "n_horizon": 3,
+            "n_horizon": 5,
             "enable_fan_input": True,
             "enable_online_adaptation": False,
         },
@@ -94,7 +94,7 @@ def test_dynamic_controller_composes_config_control_status_and_trace_contract(mo
     status = controller.get_status()
     assert status["set_point"] == 212.0
     assert status["set_point_c"] == pytest.approx(100.0)
-    assert status["n_horizon"] == 3
+    assert status["n_horizon"] == 5
     assert status["applied_combustion_load"] == pytest.approx(0.5)
     assert status["policy_kind"] == "acados-grey"
 
