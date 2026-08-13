@@ -2,8 +2,8 @@ from collections.abc import Mapping
 from math import isfinite
 
 import time
-from dataclasses import replace
-from typing import cast
+from dataclasses import dataclass, replace
+from typing import Literal, cast
 
 from common.controller_model_state import ControllerModelStore
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
@@ -81,6 +81,53 @@ from controller.runtime.modes.base import ControlMode
 import controller.runtime.runner as _runner_mod
 
 
+@dataclass(frozen=True, slots=True)
+class _HoldOutputStatus:
+    auger: bool
+    fan: bool
+    pwm: int | float
+
+    def __getitem__(self, name: str) -> bool | int | float:
+        if name == "auger":
+            return self.auger
+        if name == "fan":
+            return self.fan
+        if name == "pwm":
+            return self.pwm
+        raise KeyError(name)
+
+
+@dataclass(frozen=True, slots=True)
+class _HoldTickContext:
+    now: float
+    ptemp: float
+    output_status: _HoldOutputStatus
+    trace: ControlTraceSession | None
+    active_calibration_reset: bool
+    runner_adopted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _HoldRunnerResult:
+    result: _runner_mod.ControllerUpdateResult | None
+    controller_interval: float
+    cancellation_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _HoldInhibitionDecision:
+    lid_will_open: bool
+    permit_framed_pulse: bool
+    framed_feedback_due: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _HoldFramedPulse:
+    result: FramedPulseResult | None
+    lid_will_open: bool
+    report_feedback: bool
+
+
 class HoldMode(ControlMode):
     """Hold mode: fan+power on at setup (shared branch with Startup/Reignite/
     Smoke/Shutdown -- Hold always takes the plain `start_fan(grill, settings)`
@@ -100,20 +147,18 @@ class HoldMode(ControlMode):
     pre_loop/pre_act points). setup_safety() survives only to abort to 'Inactive'
     if the runner failed to build (controller module load error); there is no
     check_safety override.
-
-    Per-tick, on_tick() first handles the `controller_update` reconfigure
-    request, then runs the Hold-specific controller sub-block (submit the
-    fresh per-tick ptemp to the runner, normalize its output into a cycle
-    ratio + optional fan command, route an MPC fan command into
-    `control['duty_cycle']` when one arrives, clamp to u_max), then the
-    shared (non-Hold) auger-cycle toggle via `_auger_cycle_tick` (Hold
-    overrides `_on_auger_on` to also recompute OnTime/OffTime/CycleTime and
-    publish MQTT PID info -- the shared helper itself is untouched). It then
-    runs the Hold-only fan work on the same fresh ptemp: the
-    target_temp_achieved latch, lid-open detect/clear, and
-    PWM-duty-from-temp-profile (gated `not self.state.controller.controls_fan`),
-    then delegates to the shared `_smoke_plus_fan_tick` helper (gated on
-    target_temp_achieved for Hold, unlike Smoke which always runs it).
+    Per tick, on_tick() visibly sequences configuration/session adoption,
+    expired manual-authority release, safety/calibration publication, runner
+    submission/result retrieval,
+    safety/manual/lid inhibition, framed-pulse scheduling, Hold-owned hardware
+    commands, and trace/feedback/reconciliation/flush. The runner result phase
+    retains controller cadence and optional fan authority; the framed runtime
+    retains frame transitions and accounting; Hold retains all grill commands,
+    control persistence, safety/lid/manual decisions, and lifecycle ordering.
+    Hold-only fan work uses the same fresh ptemp for the target-temperature
+    latch, lid-open detect/clear, PWM-duty-from-temperature-profile (gated by
+    `not self.state.controller.controls_fan`), and the shared
+    `_smoke_plus_fan_tick` behavior.
 
     status_fragment() adds the Hold-only primary_setpoint/lid_open_detected/
     lid_open_endtime status fields. No mode-specific teardown (Hold is not in
@@ -1480,7 +1525,11 @@ class HoldMode(ControlMode):
             return None
         return ", ".join(calibration.outcome_reasons)
 
-    def _calibration_cancellation_reason(self, result, now: float) -> str | None:
+    def _calibration_cancellation_reason(
+        self,
+        result: _runner_mod.ControllerUpdateResult,
+        now: float,
+    ) -> str | None:
         calibration = result.calibration
         if calibration is None or not calibration.active or calibration.probe_q == 0.0:
             return None
@@ -1507,7 +1556,9 @@ class HoldMode(ControlMode):
         return None
 
     @staticmethod
-    def _without_calibration_probe(result):
+    def _without_calibration_probe(
+        result: _runner_mod.ControllerUpdateResult,
+    ) -> _runner_mod.ControllerUpdateResult:
         """Return the same completed result with its exact baseline allocation."""
         baseline = result.baseline_allocation
         if baseline is None or result.calibration is None:
@@ -1521,8 +1572,14 @@ class HoldMode(ControlMode):
         )
 
     def _cancel_calibration_probe(
-        self, result, reason: str, now: float, ptemp: float, *, notify_runner: bool
-    ) -> object:
+        self,
+        result: _runner_mod.ControllerUpdateResult,
+        reason: str,
+        now: float,
+        ptemp: float,
+        *,
+        notify_runner: bool,
+    ) -> _runner_mod.ControllerUpdateResult:
         """Close completed frames before marking the scheduler-reset partial."""
         raw = self.control.get("mpc_calibration")
         if reason.startswith("operator_") and isinstance(raw, dict) and isinstance(raw.get("revision"), int):
@@ -1549,13 +1606,29 @@ class HoldMode(ControlMode):
             self._runner.cancel_calibration(reason)
         return self._without_calibration_probe(result)
 
-    def _trace_calibration_result(self, result, now: float) -> None:
+    def _trace_calibration_result(
+        self,
+        result: _runner_mod.ControllerUpdateResult,
+        now: float,
+    ) -> None:
         decision = result.calibration
         if decision is None:
             return
         trace = self._control_trace
         if trace is None:
             return
+        command_action = cast(
+            Literal[
+                "none",
+                "start",
+                "pause",
+                "resume",
+                "stop",
+                "reset-progress",
+                "safety-cancel",
+            ],
+            decision.command_action,
+        )
         for event in decision.events:
             try:
                 event_type = CalibrationEventType(event.kind)
@@ -1566,7 +1639,7 @@ class HoldMode(ControlMode):
                 CalibrationTracePayload(
                     event=event_type,
                     command_revision=decision.command_revision,
-                    command_action=decision.command_action,
+                    command_action=command_action,
                     result_revision=result.revision,
                     stage=event.stage,
                     intended_probe_load=event.intended_probe_q,
@@ -1580,24 +1653,53 @@ class HoldMode(ControlMode):
                 int(now * 1_000),
             )
 
-    def on_tick(self, now, ptemp, current_output_status):
-        import control as _control
+    def on_tick(
+        self,
+        now: float,
+        ptemp: float,
+        current_output_status: Mapping[str, bool | int | float],
+    ) -> None:
+        context = self._adopt_tick_configuration_and_session(
+            now,
+            ptemp,
+            current_output_status,
+        )
+        context = self._release_expired_manual_auger(context)
+        self._publish_safety_ceiling_and_consume_calibration(context)
+        runner_result = self._submit_obtain_and_handle_calibration_cancellation(context)
+        inhibition = self._decide_safety_manual_lid_inhibition(context, runner_result)
+        framed_pulse = self._advance_or_reset_framed_pulse(
+            context,
+            runner_result,
+            inhibition,
+        )
+        self._command_grill_hardware(framed_pulse)
+        self._dispatch_framed_trace_and_feedback(context, framed_pulse)
+        self._apply_hold_lid_fan_hardware_and_state(context, inhibition.lid_will_open)
+        self._flush_tick_trace(context.trace)
 
+    def _adopt_tick_configuration_and_session(
+        self,
+        now: float,
+        ptemp: float,
+        current_output_status: Mapping[str, bool | int | float],
+    ) -> _HoldTickContext:
         ctx = self.ctx
         control = self.control
-        settings = self.settings
         self._last_ptemp = float(ptemp)
+        runner_adopted = False
         runner_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
         if runner_revision != self._runner_configuration_revision:
             self._adopt_runner_configuration(now, current_output_status)
+            runner_adopted = True
             current_output_status = self.grill.get_output_status()
         trace = self._control_trace
-        context = self._trace_session_context()
+        session_context = self._trace_session_context()
         previous_identity = None if trace is None else trace.identity
         identity = (
             None
-            if trace is None or context is None
-            else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+            if trace is None or session_context is None
+            else trace.ensure_open(session_context, timestamp_ms=int(now * 1_000))
         )
         if previous_identity is None and identity is not None:
             self._bind_runner_evidence_context(self._runner_configuration_revision)
@@ -1619,7 +1721,6 @@ class HoldMode(ControlMode):
             control["controller_update"] = False
             ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
-            settings = self.settings
             self._inhibit_framed_pulse(
                 PulseResetReason.MODE_CHANGE,
                 now,
@@ -1628,11 +1729,17 @@ class HoldMode(ControlMode):
                 terminal_feedback=False,
                 report_feedback=False,
             )
-            self._controller_status = self._runner.reconfigure(settings, control, logger=ctx.control_log)
+            self._controller_status = self._runner.reconfigure(
+                self.settings,
+                control,
+                logger=ctx.control_log,
+            )
             if self._controller_status == "Active" and (
-                getattr(self._runner, "configuration_revision", lambda: 0)() != self._runner_configuration_revision
+                getattr(self._runner, "configuration_revision", lambda: 0)()
+                != self._runner_configuration_revision
             ):
                 self._adopt_runner_configuration(now, current_output_status)
+                runner_adopted = True
                 current_output_status = self.grill.get_output_status()
             elif self._controller_status != "Active" and trace is not None:
                 trace.record_safety(
@@ -1645,54 +1752,116 @@ class HoldMode(ControlMode):
                     )
                 )
 
-        self._retarget_running_controller()
-        self._publish_safety_ceiling(now)
-        self._consume_calibration_command(now)
+        return _HoldTickContext(
+            now=now,
+            ptemp=ptemp,
+            output_status=_HoldOutputStatus(
+                auger=bool(current_output_status["auger"]),
+                fan=bool(current_output_status["fan"]),
+                pwm=current_output_status["pwm"],
+            ),
+            trace=trace,
+            active_calibration_reset=active_calibration_reset,
+            runner_adopted=runner_adopted,
+        )
 
+    def _release_expired_manual_auger(
+        self,
+        context: _HoldTickContext,
+    ) -> _HoldTickContext:
+        manual_auger_until = self.state.manual_override["auger"]
+        if manual_auger_until == 0 or manual_auger_until >= context.now:
+            return context
+        self._on_manual_release(
+            "auger",
+            context.now,
+            reseed=not context.runner_adopted,
+        )
+        current_output_status = self.grill.get_output_status()
+        return replace(
+            context,
+            output_status=_HoldOutputStatus(
+                auger=bool(current_output_status["auger"]),
+                fan=bool(current_output_status["fan"]),
+                pwm=current_output_status["pwm"],
+            ),
+        )
+
+    def _publish_safety_ceiling_and_consume_calibration(
+        self,
+        context: _HoldTickContext,
+    ) -> None:
+        self._retarget_running_controller()
+        self._publish_safety_ceiling(context.now)
+        self._consume_calibration_command(context.now)
+
+    def _submit_obtain_and_handle_calibration_cancellation(
+        self,
+        context: _HoldTickContext,
+    ) -> _HoldRunnerResult:
         # Feed the runner every tick so a threaded core always has a fresh temp
         # to solve; for the synchronous runner this just stores the latest temp,
         # so the value read at the gate below is unchanged.
-        self._runner.submit(ptemp)
-        # Check to see if it's time to update pid and update if needed.
-        # A controller that names its own cadence gets it. Otherwise the cadence
-        # is the actuation's: a framed scheduler latches one request per frame,
-        # so deciding more often than that is discarded work, and a PID asked to
-        # decide every tick would integrate at the loop rate its gains were
-        # never tuned for.
-        self._reconcile_model_observation_outcomes(now)
+        self._runner.submit(context.ptemp)
+        self._reconcile_model_observation_outcomes(context.now)
         runtime = self._framed_pulse
         controller_interval = self._runner.control_period() or (
             0.0 if runtime is None else runtime.frame_seconds
         )
-        framed_feedback_due = False
-        if (now - self.state.controller.cycle_start) > controller_interval:
-            result = self._runner.latest()
-            self._drain_activation_events()
-            cancellation_reason = None
-            if active_calibration_reset:
-                result = self._without_calibration_probe(result)
-            else:
-                cancellation_reason = self._calibration_cancellation_reason(result, now)
-                if cancellation_reason is not None:
-                    result = self._cancel_calibration_probe(
-                        result,
-                        cancellation_reason,
-                        now,
-                        ptemp,
-                        notify_runner=not cancellation_reason.startswith("operator_"),
-                    )
-            if isinstance(result.diagnostics, MpcTraceDiagnostics):
-                self._observe_reachability_advisory(result.diagnostics)
+        if (context.now - self.state.controller.cycle_start) <= controller_interval:
+            return _HoldRunnerResult(
+                result=None,
+                controller_interval=controller_interval,
+                cancellation_reason=None,
+            )
+
+        result = self._runner.latest()
+        self._drain_activation_events()
+        cancellation_reason = None
+        if context.active_calibration_reset:
+            result = self._without_calibration_probe(result)
+        else:
+            cancellation_reason = self._calibration_cancellation_reason(result, context.now)
+            if cancellation_reason is not None:
+                result = self._cancel_calibration_probe(
+                    result,
+                    cancellation_reason,
+                    context.now,
+                    context.ptemp,
+                    notify_runner=not cancellation_reason.startswith("operator_"),
+                )
+        if isinstance(result.diagnostics, MpcTraceDiagnostics):
+            self._observe_reachability_advisory(result.diagnostics)
+        return _HoldRunnerResult(
+            result=result,
+            controller_interval=controller_interval,
+            cancellation_reason=cancellation_reason,
+        )
+
+    def _decide_safety_manual_lid_inhibition(
+        self,
+        context: _HoldTickContext,
+        runner_result: _HoldRunnerResult,
+    ) -> _HoldInhibitionDecision:
+        ctx = self.ctx
+        control = self.control
+        settings = self.settings
+        result = runner_result.result
+        framed_feedback_due = result is not None
+        if result is not None:
             controller = self.state.controller
-            controller.cycle_start = now
+            controller.cycle_start = context.now
             if result.revision > 0 and (
-                result.revision > controller.pulse_result_revision or cancellation_reason is not None
+                result.revision > controller.pulse_result_revision
+                or runner_result.cancellation_reason is not None
             ):
                 controller.output = result.cycle_ratio
                 controller.pulse_result_revision = result.revision
                 controller.pulse_requested_duty = max(0.0, min(1.0, result.cycle_ratio))
                 controller.pulse_combustion_load = (
-                    result.allocation.normalized_combustion_load if result.allocation is not None else None
+                    result.allocation.normalized_combustion_load
+                    if result.allocation is not None
+                    else None
                 )
                 controller.pulse_baseline_combustion_load = (
                     result.baseline_allocation.normalized_combustion_load
@@ -1703,19 +1872,28 @@ class HoldMode(ControlMode):
                     result.calibration.probe_q if result.calibration is not None else 0.0
                 )
                 controller.pulse_calibration_stage = (
-                    result.calibration.stage if result.calibration is not None and result.calibration.active else None
+                    result.calibration.stage
+                    if result.calibration is not None and result.calibration.active
+                    else None
                 )
                 controller.pulse_calibration_completed_stages = (
-                    result.calibration.completed_stages if result.calibration is not None else ()
+                    result.calibration.completed_stages
+                    if result.calibration is not None
+                    else ()
                 )
-                controller.pulse_maximum_duty = result.allocation.u_max if result.allocation is not None else 1.0
+                controller.pulse_maximum_duty = (
+                    result.allocation.u_max if result.allocation is not None else 1.0
+                )
                 controller.pulse_allocator_revision = (
                     result.allocation.allocator_revision if result.allocation is not None else 0
                 )
                 controller.pulse_allocation_clamp_reasons = (
                     tuple(
                         reason
-                        for reason in (result.allocation.auger_clamp_reason, result.allocation.fan_clamp_reason)
+                        for reason in (
+                            result.allocation.auger_clamp_reason,
+                            result.allocation.fan_clamp_reason,
+                        )
                         if reason is not AllocationClampReason.NONE
                     )
                     if result.allocation is not None
@@ -1732,29 +1910,63 @@ class HoldMode(ControlMode):
                 controller.pulse_calibration_command_generation = (
                     result.calibration.command_generation if result.calibration is not None else 0
                 )
-                controller.pulse_calibration_cancellation_reason = cancellation_reason or self._calibration_reason(
-                    result.calibration
+                controller.pulse_calibration_cancellation_reason = (
+                    runner_result.cancellation_reason or self._calibration_reason(result.calibration)
                 )
                 controller.pulse_calibration_status = self._calibration_status(result.calibration)
                 controller.pulse_allocation_evidence_checked = True
-                controller.pulse_allocation_result_revision = result.revision if result.allocation is not None else None
-                controller.pulse_requested_fan_duty = result.fan["duty"] if result.fan is not None else None
+                controller.pulse_allocation_result_revision = (
+                    result.revision if result.allocation is not None else None
+                )
+                controller.pulse_requested_fan_duty = (
+                    result.fan["duty"] if result.fan is not None else None
+                )
                 if result.fan is not None and controller_fan_authority(settings, control):
                     controller.fan_duty = result.fan["duty"]
                     control["duty_cycle"] = controller.fan_duty
                     ctx.store.write_control_snapshot(control, origin="control")
             controller.pulse_stale_command = result.stale_state is ResultStaleState.STALE
+
+        lid_will_open = (
+            self.state.target_temp_achieved
+            and settings["cycle_data"]["LidOpenDetectEnabled"]
+            and context.ptemp
+            < control["primary_setpoint"]
+            * ((100 - settings["cycle_data"]["LidOpenThreshold"]) / 100)
+        )
+        permit_framed_pulse = (
+            not self.state.controller.pulse_stale_command
+            and self.state.manual_override["auger"] < context.now
+            and not self.state.lid.open_detected
+        )
+        return _HoldInhibitionDecision(
+            lid_will_open=lid_will_open,
+            permit_framed_pulse=permit_framed_pulse,
+            framed_feedback_due=framed_feedback_due,
+        )
+
+    def _advance_or_reset_framed_pulse(
+        self,
+        context: _HoldTickContext,
+        runner_result: _HoldRunnerResult,
+        inhibition: _HoldInhibitionDecision,
+    ) -> _HoldFramedPulse:
+        result = runner_result.result
+        if result is not None:
+            controller = self.state.controller
+            control = self.control
             if controller.pulse_stale_command:
                 self._inhibit_framed_pulse(
                     PulseResetReason.SAFETY,
-                    now,
+                    context.now,
                     InhibitReason.STALE_COMMAND,
-                    ptemp=ptemp,
+                    ptemp=context.ptemp,
                     terminal_feedback=True,
                     report_feedback=True,
                 )
             self.state.cycle.ratio = self.state.cycle.raw_ratio = controller.pulse_requested_duty
             self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
+            trace = context.trace
             if trace is not None:
                 applied_state = trace.applied_state
                 lifecycle = (
@@ -1765,51 +1977,71 @@ class HoldMode(ControlMode):
                 trace.record_update(
                     TraceUpdateContext(
                         result=result,
-                        timestamp_ms=int(now * 1_000),
-                        controller_interval_seconds=float(controller_interval),
-                        setpoint=float(self.control["primary_setpoint"]),
+                        timestamp_ms=int(context.now * 1_000),
+                        controller_interval_seconds=float(runner_result.controller_interval),
+                        setpoint=float(control["primary_setpoint"]),
                         prior_requested_auger_duty=applied_state.requested_auger_duty,
                         prior_realized_auger_duty=applied_state.realized_auger_duty,
                         prior_fan_duty=applied_state.fan_duty,
                         controls_fan=controller.controls_fan,
                         lid_open=self.state.lid.open_detected,
-                        manual_override_active=self.state.manual_override["auger"] >= now,
+                        manual_override_active=self.state.manual_override["auger"] >= context.now,
                         lifecycle_event=lifecycle,
                     )
                 )
-            self._trace_calibration_result(result, now)
-            framed_feedback_due = True
+            self._trace_calibration_result(result, context.now)
             snapshot = self._runner.get_model_snapshot()
             if isinstance(snapshot, dict):
                 self._checkpoint_model(snapshot)
-
-        lid_will_open = (
-            self.state.target_temp_achieved
-            and settings["cycle_data"]["LidOpenDetectEnabled"]
-            and ptemp < control["primary_setpoint"] * ((100 - settings["cycle_data"]["LidOpenThreshold"]) / 100)
+        if not inhibition.permit_framed_pulse:
+            return _HoldFramedPulse(
+                result=None,
+                lid_will_open=inhibition.lid_will_open,
+                report_feedback=inhibition.framed_feedback_due,
+            )
+        runtime = self._framed_pulse
+        if runtime is None:
+            raise RuntimeError("Hold framed pulse runtime is unavailable")
+        prior_output_source = (
+            None if context.trace is None else context.trace.applied_state.output_source
         )
-        if (
-            not self.state.controller.pulse_stale_command
-            and self.state.manual_override["auger"] < now
-            and not self.state.lid.open_detected
-        ):
+        result = runtime.advance(
+            context.now,
+            context.output_status.auger,
+            sample=self._framed_sample(context.ptemp),
+            prior_output_source=prior_output_source,
+        )
+        return _HoldFramedPulse(
+            result=result,
+            lid_will_open=inhibition.lid_will_open,
+            report_feedback=inhibition.framed_feedback_due,
+        )
+
+    def _command_grill_hardware(self, framed_pulse: _HoldFramedPulse) -> None:
+        result = framed_pulse.result
+        if result is None:
+            return
+        transition = result.decision.transition
+        if not framed_pulse.lid_will_open and transition is not None:
+            if transition.command_on:
+                self.grill.auger_on()
+            else:
+                self.grill.auger_off()
+        if framed_pulse.lid_will_open:
+            self.grill.auger_off()
+
+    def _dispatch_framed_trace_and_feedback(
+        self,
+        context: _HoldTickContext,
+        framed_pulse: _HoldFramedPulse,
+    ) -> None:
+        now = context.now
+        trace = context.trace
+        pulse_result = framed_pulse.result
+        if pulse_result is not None:
             runtime = self._framed_pulse
             if runtime is None:
                 raise RuntimeError("Hold framed pulse runtime is unavailable")
-            prior_output_source = None if trace is None else trace.applied_state.output_source
-            pulse_result = runtime.advance(
-                now,
-                current_output_status["auger"],
-                sample=self._framed_sample(ptemp),
-                prior_output_source=prior_output_source,
-            )
-            if not lid_will_open and pulse_result.decision.transition is not None:
-                if pulse_result.decision.transition.command_on:
-                    self.grill.auger_on()
-                else:
-                    self.grill.auger_off()
-            if lid_will_open:
-                self.grill.auger_off()
             self._dispatch_framed_result(
                 pulse_result,
                 record_terminal_trace=False,
@@ -1822,7 +2054,7 @@ class HoldMode(ControlMode):
                     self.state.controller.pulse_frame_result_revision,
                     self.state.controller.pulse_frame_output_source,
                 )
-            if framed_feedback_due:
+            if framed_pulse.report_feedback:
                 feedback = runtime.report_feedback(
                     now,
                     pulse_result.decision.delivered_on_s,
@@ -1830,24 +2062,29 @@ class HoldMode(ControlMode):
                         lid_open=self.state.lid.open_detected,
                         manual_override_active=self.state.manual_override["auger"] >= now,
                     ),
-                    prior_output_source=None if trace is None else trace.applied_state.output_source,
+                    prior_output_source=(
+                        None if trace is None else trace.applied_state.output_source
+                    ),
                 )
                 if feedback is not None:
                     self._dispatch_framed_feedback(feedback)
 
-        # ---- Hold-only fan work on the fresh per-tick ptemp ----
-        grill_platform = self.grill
+    def _apply_hold_lid_fan_hardware_and_state(
+        self,
+        context: _HoldTickContext,
+        lid_will_open: bool,
+    ) -> None:
+        now = context.now
+        ptemp = context.ptemp
+        trace = context.trace
+        control = self.control
+        settings = self.settings
 
-        # Check if target temperature has been achieved before utilizing Smoke Plus Mode
+        grill_platform = self.grill
         if ptemp >= control["primary_setpoint"] and not self.state.target_temp_achieved:
             self.state.target_temp_achieved = True
 
-        # Check if a lid open event has occurred only after hold mode has been achieved
-        if (
-            self.state.target_temp_achieved
-            and settings["cycle_data"]["LidOpenDetectEnabled"]
-            and ptemp < control["primary_setpoint"] * ((100 - settings["cycle_data"]["LidOpenThreshold"]) / 100)
-        ):
+        if lid_will_open:
             self.state.lid.open_detected = True
             if trace is not None:
                 trace.record_applied_interval(
@@ -1884,7 +2121,6 @@ class HoldMode(ControlMode):
             self.state.lid.expires = now + settings["cycle_data"]["LidOpenPauseTime"]
             self.state.target_temp_achieved = False
 
-        # Clear Lid Open Detect Event, Reset
         if self.state.lid.open_detected and self.ctx.clock.now() > self.state.lid.expires:
             self.state.lid.open_detected = False
             if trace is not None:
@@ -1949,7 +2185,6 @@ class HoldMode(ControlMode):
                 self.state.timers.auger_toggle = now
                 self.state.lid.expires = now + settings["cycle_data"]["LidOpenPauseTime"]
 
-        # If PWM Fan Control enabled set duty_cycle based on temperature.
         if (
             settings["platform"]["dc_fan"]
             and control["pwm_control"]
@@ -1957,13 +2192,15 @@ class HoldMode(ControlMode):
             and (now - self.state.fan.update_time) > settings["pwm"]["update_time"]
         ):
             self.state.fan.update_time = now
-            _duty = hold_duty_cycle(control["primary_setpoint"], ptemp, settings["pwm"])
-            if _duty is not None:
-                control["duty_cycle"] = _duty
+            duty = hold_duty_cycle(control["primary_setpoint"], ptemp, settings["pwm"])
+            if duty is not None:
+                control["duty_cycle"] = duty
                 self.ctx.store.write_control_snapshot(control, origin="control")
 
-        self._smoke_plus_fan_tick(now, ptemp, current_output_status)
+        self._smoke_plus_fan_tick(now, ptemp, context.output_status)
 
+
+    def _flush_tick_trace(self, trace: ControlTraceSession | None) -> None:
         if trace is not None:
             trace.flush_due(time.monotonic_ns() // 1_000_000)
 
@@ -2005,9 +2242,20 @@ class HoldMode(ControlMode):
             self._last_now,
         )
 
-    def _on_manual_release(self, name, now):
+    def _on_manual_release(
+        self,
+        name: str,
+        now: float,
+        *,
+        reseed: bool = True,
+    ) -> None:
+        if name != "auger":
+            return
+        if self.grill.get_output_status()["auger"]:
+            self.grill.auger_off()
+        self.state.manual_override["auger"] = 0
         trace = self._control_trace
-        if name == "auger" and trace is not None:
+        if trace is not None:
             trace.record_safety(
                 TraceSafetyContext(
                     event=SafetyEventType.MANUAL_RELEASE,
@@ -2017,6 +2265,20 @@ class HoldMode(ControlMode):
                     timestamp_ms=int(now * 1_000),
                 )
             )
+        if self._runner is None or not reseed:
+            return
+        auger_on = self.grill.get_output_status()["auger"]
+        seeded = seed_output(
+            self.state.cycle.ratio,
+            now,
+            lid_open=self.state.lid.open_detected,
+            manual_override_active=False,
+            auger_output=auger_on,
+        )
+        if trace is None:
+            self._runner.set_output(seeded)
+        else:
+            self._set_output(seeded, seeded.timestamp)
 
     def _on_safety_event(self, event, now):
         events = {

@@ -103,7 +103,6 @@ def test_manual_release_reseeds_before_fresh_controller_authority(hold_cycle, mo
     monkeypatch.setattr(runner, "latest", record_latest)
     monkeypatch.setattr(hold.grill, "auger_on", record_auger_on)
 
-    hold._on_manual_release("auger", 2.0)
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     seed = ("feedback", OutputSource.SEED)
