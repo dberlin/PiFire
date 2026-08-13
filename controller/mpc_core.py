@@ -210,15 +210,30 @@ def _close_component(component: MpcEstimator | MpcSolver | None) -> None:
         component.close()
 
 
-def _close_handles(estimator: MpcEstimator, solver: MpcSolver) -> None:
-    errors: list[BaseException] = []
-    for component in (solver, estimator):
-        try:
-            _close_component(component)
-        except BaseException as error:
-            errors.append(error)
-    if errors:
-        raise RuntimeError("could not close complete grey numerical pair") from errors[0]
+
+
+class _RetryableResourceClose:
+    """Retry only resource callbacks that have not completed successfully."""
+
+    def __init__(self, callbacks: tuple[Callable[[], None], ...]) -> None:
+        self._pending = list(callbacks)
+
+    @property
+    def complete(self) -> bool:
+        return not self._pending
+
+    def close(self) -> None:
+        pending: list[Callable[[], None]] = []
+        errors: list[BaseException] = []
+        for callback in self._pending:
+            try:
+                callback()
+            except BaseException as error:
+                pending.append(callback)
+                errors.append(error)
+        self._pending = pending
+        if errors:
+            raise RuntimeError("could not close complete grey numerical pair") from errors[0]
 
 
 class MpcCore:
@@ -264,9 +279,13 @@ class MpcCore:
             )
         else:
             self._estimator, self._solver = components
-        self._close_resources: Callable[[], None] | None = lambda: _close_handles(
-            self._estimator,
-            self._solver,
+        self._close_resources: _RetryableResourceClose | None = (
+            _RetryableResourceClose(
+                (
+                    lambda: _close_component(self._solver),
+                    lambda: _close_component(self._estimator),
+                )
+            )
         )
         self._closed = False
         self._set_point_c = 0.0
@@ -419,7 +438,7 @@ class MpcCore:
             raise RuntimeError("cannot bind resources to a closed MPC core")
         self._estimator = estimator
         self._solver = solver
-        self._close_resources = close_resources
+        self._close_resources = _RetryableResourceClose((close_resources,))
         if reset_estimate:
             self._x_hat = None
 
@@ -680,14 +699,22 @@ class MpcCore:
         return self._native_failure_diagnostics
 
     @property
+    def close_complete(self) -> bool:
+        return self._closed and self._close_resources is None
+
+    @property
     def history(self) -> collections.deque[tuple[float, float, float]]:
         return self._history
 
     def close(self) -> None:
-        if self._closed:
+        if self._closed and self._close_resources is None:
             return
         self._closed = True
         close_resources = self._close_resources
-        self._close_resources = None
-        if close_resources is not None:
-            close_resources()
+        if close_resources is None:
+            return
+        try:
+            close_resources.close()
+        finally:
+            if close_resources.complete:
+                self._close_resources = None

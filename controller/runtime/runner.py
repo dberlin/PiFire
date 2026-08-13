@@ -26,10 +26,10 @@ import math
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
 from common.control_trace import ActuationMode, ControllerType, ResultStaleState
 from common.model_evidence import (
@@ -40,24 +40,54 @@ from common.model_evidence import (
     RefreshDiagnosticsEvidence,
     SessionSummaryEvidence,
 )
+from common.persistence.model_evidence import ModelActivationState
 
-from controller.model_learning.activation import (
-    ActivationPhase,
-    PreparedActivationRecord,
-)
 from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
 from controller.mpc_allocator import AllocationResult
+from controller.runtime.model_fitting import TeardownRefitOutcome
+from controller.runtime.model_lifecycle import ModelLifecycleRunner
+from controller.runtime.model_persistence import DurableActivationReceipt
 
 if TYPE_CHECKING:
     from controller.model_learning.calibration import CalibrationDecision
     from controller.model_learning.contracts import FrameObservation
-    from controller.mpc_factory import OwnedMpcPair
     from controller.mpc_calibration import CalibrationCommand
 
 
 StatusScalar: TypeAlias = None | bool | int | float | str
 StatusValue: TypeAlias = StatusScalar | Mapping[str, "StatusValue"] | tuple["StatusValue", ...]
 
+
+@runtime_checkable
+class _ActivationCore(Protocol):
+    @property
+    def activation_terminated(self) -> bool: ...
+
+    def restore_activation(
+        self,
+        persisted: ModelActivationState,
+        records: Sequence[ModelEvidenceRecord],
+    ) -> bool: ...
+
+    def activation_runtime_failure(self, reason: str) -> bool: ...
+
+    def rollback_activation(self, reason: str) -> bool: ...
+
+    def drain_activation_events(self) -> tuple[ModelEvidenceRecord, ...]: ...
+
+    def submit_activation_confidence(
+        self,
+        record: ModelEvidenceRecord,
+    ) -> DurableActivationReceipt: ...
+
+    def advance_activation(self) -> bool: ...
+
+    def terminate_mpc_activation(self, reason: str) -> None: ...
+
+
+@runtime_checkable
+class _RefitFinalizer(Protocol):
+    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool: ...
 
 @dataclass(frozen=True, slots=True)
 class ObservationOutcomeEnvelope:
@@ -467,7 +497,7 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
     return result
 
 
-class ControllerRunner(ABC):
+class ControllerRunner(ABC, ModelLifecycleRunner):
     @abstractmethod
     def set_target(self, setpoint): ...
 
@@ -519,28 +549,37 @@ class ControllerRunner(ABC):
     def refit_from_cook(self): ...
     @abstractmethod
     def controller_state(self) -> dict[str, object]: ...
-    def restore_activation(self, persisted, records):
+    def restore_activation(
+        self,
+        persisted: ModelActivationState,
+        records: Sequence[ModelEvidenceRecord],
+    ) -> bool:
         return False
 
-    def activation_runtime_failure(self, reason: str):
+    def activation_runtime_failure(self, reason: str) -> bool:
         return False
 
-    def rollback_activation(self, reason: str):
+    def rollback_activation(self, reason: str) -> bool:
         return False
 
-    def drain_activation_events(self):
+    def drain_activation_events(self) -> tuple[ModelEvidenceRecord, ...]:
         return ()
-    def submit_activation_confidence(self, record):
+
+    def submit_activation_confidence(
+        self,
+        record: ModelEvidenceRecord,
+    ) -> DurableActivationReceipt | None:
         return None
+
     def stop_for_refit(self) -> bool | None:
         """Stop control ownership while retaining the joined core for teardown fitting."""
         self.stop()
+        return None
 
-    def finalize_cook_refit(self, outcome):
-        finalize = getattr(getattr(self, "_core", None), "finalize_cook_refit", None)
-        return False if not callable(finalize) else bool(finalize(outcome))
+    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
+        return False
 
-    def finish_teardown(self):
+    def finish_teardown(self) -> None:
         """Release resources retained by stop_for_refit()."""
 
 
@@ -563,6 +602,8 @@ class SyncControllerRunner(ControllerRunner):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 
         self._core = core
+        self._activation_core = core if isinstance(core, _ActivationCore) else None
+        self._refit_finalizer = core if isinstance(core, _RefitFinalizer) else None
         self._temp = None
         self._revision = 0
         self._latest_result = None
@@ -599,24 +640,47 @@ class SyncControllerRunner(ControllerRunner):
     def retire_evidence_context(self, generation: int) -> None:
         self._observation_buffer.retire_context(generation)
 
-    def restore_activation(self, persisted, records):
-        restore = getattr(self._core, "restore_activation", None)
-        return False if restore is None else bool(restore(persisted, records))
+    def restore_activation(
+        self,
+        persisted: ModelActivationState,
+        records: Sequence[ModelEvidenceRecord],
+    ) -> bool:
+        return (
+            False
+            if self._activation_core is None
+            else self._activation_core.restore_activation(persisted, records)
+        )
 
-    def activation_runtime_failure(self, reason: str):
-        fallback = getattr(self._core, "activation_runtime_failure", None)
-        return False if fallback is None else bool(fallback(reason))
+    def activation_runtime_failure(self, reason: str) -> bool:
+        return (
+            False
+            if self._activation_core is None
+            else self._activation_core.activation_runtime_failure(reason)
+        )
 
-    def rollback_activation(self, reason: str):
-        rollback = getattr(self._core, "rollback_activation", None)
-        return False if rollback is None else bool(rollback(reason))
+    def rollback_activation(self, reason: str) -> bool:
+        return (
+            False
+            if self._activation_core is None
+            else self._activation_core.rollback_activation(reason)
+        )
 
-    def drain_activation_events(self):
-        drain = getattr(self._core, "drain_activation_events", None)
-        return () if drain is None else tuple(drain())
-    def submit_activation_confidence(self, record):
-        submit = getattr(self._core, "submit_activation_confidence", None)
-        return None if submit is None else submit(record)
+    def drain_activation_events(self) -> tuple[ModelEvidenceRecord, ...]:
+        return (
+            ()
+            if self._activation_core is None
+            else self._activation_core.drain_activation_events()
+        )
+
+    def submit_activation_confidence(
+        self,
+        record: ModelEvidenceRecord,
+    ) -> DurableActivationReceipt | None:
+        return (
+            None
+            if self._activation_core is None
+            else self._activation_core.submit_activation_confidence(record)
+        )
 
 
     def submit(self, temp):
@@ -647,6 +711,12 @@ class SyncControllerRunner(ControllerRunner):
         if status == "Active":
             retired = self._core
             self._core = core
+            self._activation_core = (
+                core if isinstance(core, _ActivationCore) else None
+            )
+            self._refit_finalizer = (
+                core if isinstance(core, _RefitFinalizer) else None
+            )
             self._controller_type = _controller_type_for(_selected_controller(settings))
             self._configuration_revision += 1
             self._quality.control_period = _control_period_seconds(core.get_control_period())
@@ -676,14 +746,14 @@ class SyncControllerRunner(ControllerRunner):
     def runs_async(self) -> bool:
         return False
 
-    def stop_for_refit(self):
+    def stop_for_refit(self) -> bool | None:
         if self._stopped:
             return self._retained_for_refit
         self._stopped = True
         self._retained_for_refit = True
         return True
 
-    def finish_teardown(self):
+    def finish_teardown(self) -> None:
         if not self._retained_for_refit:
             return
         self._retained_for_refit = False
@@ -738,9 +808,12 @@ class SyncControllerRunner(ControllerRunner):
         fn = getattr(self._core, "refit_from_cook", None)
         return fn() if fn is not None else None
 
-    def finalize_cook_refit(self, outcome):
-        finalize = getattr(self._core, "finalize_cook_refit", None)
-        return False if not callable(finalize) else bool(finalize(outcome))
+    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
+        return (
+            False
+            if self._refit_finalizer is None
+            else self._refit_finalizer.finalize_cook_refit(outcome)
+        )
 
 
 
@@ -796,35 +869,6 @@ def _close_core(core) -> None:
         close()
 
 
-@dataclass(frozen=True, slots=True)
-class PreparedPairTransition:
-    """A durable prepared receipt plus the exact inert pair to install once."""
-
-    record: PreparedActivationRecord
-    candidate_pair: OwnedMpcPair
-    prepared_receipt: object
-    persist_phase: Callable[[PreparedActivationRecord, ActivationPhase | None], object]
-
-    def __post_init__(self) -> None:
-        from controller.mpc_factory import OwnedMpcPair
-
-        if not isinstance(self.record, PreparedActivationRecord):
-            raise TypeError("record must be a PreparedActivationRecord")
-        if self.record.phase is not ActivationPhase.PREPARED:
-            raise ValueError("runner transition requires prepared phase")
-        if not isinstance(self.candidate_pair, OwnedMpcPair):
-            raise TypeError("candidate_pair must be an OwnedMpcPair")
-        if self.candidate_pair.descriptor != self.record.candidate:
-            raise ValueError("candidate pair does not match prepared transaction")
-        if not callable(self.persist_phase):
-            raise TypeError("persist_phase must be callable")
-
-
-@dataclass(slots=True)
-class _PairActivationFlight:
-    transition: PreparedPairTransition
-    phase: ActivationPhase
-    receipt: object
 
 
 class ThreadedControllerRunner(ControllerRunner):
@@ -845,6 +889,8 @@ class ThreadedControllerRunner(ControllerRunner):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 
         self._core = core
+        self._activation_core = core if isinstance(core, _ActivationCore) else None
+        self._refit_finalizer = core if isinstance(core, _RefitFinalizer) else None
         self._lock = threading.Lock()
         self._temp = None
         self._output = ControllerUpdateResult(
@@ -870,11 +916,6 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_dropped = 0
         self._pending_restore = None
         self._pending_calibrations: collections.deque[tuple[str, object]] = collections.deque()
-        self._activation_events: collections.deque[ModelEvidenceRecord] = collections.deque()
-        self._pending_pair_activation: PreparedPairTransition | None = None
-        self._pair_activation_flight: _PairActivationFlight | None = None
-        self._pair_activation_ids: set[str] = set()
-        self._mpc_activation_terminated = False
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
 
 
@@ -949,15 +990,6 @@ class ThreadedControllerRunner(ControllerRunner):
             ObservationOutcomeEnvelope(sequence, generation, observation, outcome)
         )
 
-    def _capture_activation_events(self) -> None:
-        drain = getattr(self._core, "drain_activation_events", None)
-        if not callable(drain):
-            return
-        events = tuple(drain())
-        if not all(isinstance(event, ModelEvidenceRecord) for event in events):
-            raise TypeError("controller activation events must be ModelEvidenceRecord")
-        with self._lock:
-            self._activation_events.extend(events)
 
     def _learning_loop(self):
         """Drain fitting results and prepare candidates away from control solves."""
@@ -969,10 +1001,6 @@ class ThreadedControllerRunner(ControllerRunner):
                 poll = getattr(core, "poll_learning_off_path", None)
                 if callable(poll):
                     poll()
-                drain_transitions = getattr(core, "drain_prepared_pair_transitions", None)
-                if callable(drain_transitions):
-                    for transition in tuple(drain_transitions()):
-                        self.queue_pair_activation(transition)
             except Exception:
                 # Learning is optional control evidence. A failed drain must not
                 # kill either the lifecycle dispatcher or the live controller.
@@ -989,24 +1017,12 @@ class ThreadedControllerRunner(ControllerRunner):
             while self._learning_poll_core is core:
                 self._learning_condition.wait()
 
-
-    @staticmethod
-    def _receipt_is_durable(receipt: object) -> bool:
-        return bool(
-            getattr(receipt, "accepted", False)
-            and getattr(receipt, "completed", False)
-            and getattr(receipt, "durable", False)
-        )
-
     def _terminate_pair_activation(self, reason: str) -> None:
-        terminate = getattr(self._core, "terminate_mpc_activation", None)
-        if callable(terminate):
-            try:
-                terminate(reason)
-            except Exception:
-                pass
-        with self._lock:
-            self._mpc_activation_terminated = True
+        activation_core = self._activation_core
+        if activation_core is not None:
+            activation_core.terminate_mpc_activation(reason)
+
+
 
     def _close_final_core(self) -> None:
         with self._lock:
@@ -1016,114 +1032,13 @@ class ThreadedControllerRunner(ControllerRunner):
             core = self._core
         _close_core(core)
 
-    def _compensate_pair_activation(
-        self,
-        transition: PreparedPairTransition,
-        reason: str,
-    ) -> bool:
-        compensate = getattr(self._core, "compensate_candidate_pair", None)
-        try:
-            compensated = (
-                callable(compensate)
-                and compensate(transition.candidate_pair, transition.record, reason) is True
-            )
-        except Exception:
-            compensated = False
-        if not compensated:
-            self._terminate_pair_activation("activation-compensation-failed")
-            return False
-        aborted = transition.record.transition(ActivationPhase.ABORTED, reason=reason)
-        try:
-            receipt = transition.persist_phase(aborted, ActivationPhase.PREPARED)
-        except Exception:
-            self._terminate_pair_activation("activation-abort-persistence-failed")
-            return False
-        if not getattr(receipt, "accepted", False):
-            self._terminate_pair_activation("activation-abort-persistence-failed")
-            return False
-        with self._lock:
-            self._pair_activation_flight = _PairActivationFlight(
-                transition,
-                ActivationPhase.ABORTED,
-                receipt,
-            )
-        return False
-
     def _advance_pair_activation(self) -> bool:
-        """Advance without blocking; True alone permits the next controller solve."""
-        with self._lock:
-            if self._mpc_activation_terminated:
-                return False
-            flight = self._pair_activation_flight
-            pending = self._pending_pair_activation if self._revision > 0 else None
-            if flight is None and pending is not None:
-                self._pending_pair_activation = None
-        if flight is not None:
-            receipt = flight.receipt
-            if not getattr(receipt, "completed", False):
-                return False
-            if flight.phase is ActivationPhase.ACTIVE:
-                if not self._receipt_is_durable(receipt):
-                    receipt_error = getattr(receipt, "error", None)
-                    reason = (
-                        "activation-confidence-changed"
-                        if isinstance(receipt_error, str)
-                        and "activation-authority-changed" in receipt_error
-                        else "active-persistence-failed"
-                    )
-                    return self._compensate_pair_activation(
-                        flight.transition,
-                        reason,
-                    )
-                authorize = getattr(self._core, "authorize_candidate_pair", None)
-                try:
-                    authorized = callable(authorize) and authorize(
-                        flight.transition.record.transition(ActivationPhase.ACTIVE)
-                    ) is True
-                except Exception:
-                    authorized = False
-                if not authorized:
-                    self._terminate_pair_activation("active-authorization-failed")
-                    return False
-            elif not self._receipt_is_durable(receipt):
-                self._terminate_pair_activation("activation-abort-persistence-failed")
-                return False
-            with self._lock:
-                self._pair_activation_flight = None
-            return True
-        if pending is None:
-            return True
-
-        install = getattr(self._core, "install_candidate_pair_inert", None)
-        try:
-            installed = callable(install) and install(
-                pending.candidate_pair,
-                pending.record,
-            ) is True
-        except Exception:
-            installed = False
-        if not installed:
-            return self._compensate_pair_activation(pending, "candidate-install-failed")
-        active = pending.record.transition(ActivationPhase.ACTIVE)
-        try:
-            receipt = pending.persist_phase(active, ActivationPhase.PREPARED)
-        except Exception:
-            return self._compensate_pair_activation(
-                pending,
-                "active-persistence-failed",
-            )
-        if not getattr(receipt, "accepted", False):
-            return self._compensate_pair_activation(
-                pending,
-                "active-persistence-failed",
-            )
-        with self._lock:
-            self._pair_activation_flight = _PairActivationFlight(
-                pending,
-                ActivationPhase.ACTIVE,
-                receipt,
-            )
-        return False
+        """Delegate the nonblocking boundary to the sole activation state owner."""
+        return (
+            True
+            if self._activation_core is None
+            else self._activation_core.advance_activation()
+        )
     def _loop(self):
         while True:
             stopping = self._stop_event.is_set()
@@ -1160,24 +1075,25 @@ class ThreadedControllerRunner(ControllerRunner):
                         self._latest_delivered_output = payload
                     continue
                 if operation == "activation":
+                    activation_core = self._activation_core
+                    if activation_core is None:
+                        continue
                     activation_operation, activation_payload = payload
-                    callback = getattr(
-                        self._core,
-                        {
-                            "restore": "restore_activation",
-                            "rollback": "rollback_activation",
-                            "fallback": "activation_runtime_failure",
-                        }[activation_operation],
-                        None,
-                    )
-                    if callable(callback):
-                        if activation_operation == "restore":
-                            persisted, records = activation_payload
-                            if callback(persisted, records) is not True:
-                                self._terminate_pair_activation("activation-recovery-failed")
-                        else:
-                            callback(activation_payload)
-                    self._capture_activation_events()
+                    if activation_operation == "restore":
+                        persisted, records = activation_payload
+                        if not activation_core.restore_activation(
+                            persisted,
+                            records,
+                        ):
+                            self._terminate_pair_activation(
+                                "activation-recovery-failed"
+                            )
+                    elif activation_operation == "rollback":
+                        activation_core.rollback_activation(activation_payload)
+                    else:
+                        activation_core.activation_runtime_failure(
+                            activation_payload
+                        )
                     continue
                 sequence, generation, applied, observation = payload
                 self._core.set_output(applied)
@@ -1267,6 +1183,16 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._pending_controller_type = None
                     retired_core = self._core
                     self._core = new_core
+                    self._activation_core = (
+                        new_core
+                        if isinstance(new_core, _ActivationCore)
+                        else None
+                    )
+                    self._refit_finalizer = (
+                        new_core
+                        if isinstance(new_core, _RefitFinalizer)
+                        else None
+                    )
                     self._control_period = new_core.get_control_period()
                     self._commands_fan = new_core.commands_fan()
                     self._actuation_mode = _actuation_mode_for(new_core)
@@ -1310,15 +1236,16 @@ class ThreadedControllerRunner(ControllerRunner):
                     monotonic_clock=self._monotonic_clock,
                     wall_clock=self._wall_clock,
                 )
-                self._capture_activation_events()
                 model = _owned_model_snapshot(self._core.get_model_snapshot())
                 with self._lock:
                     result, transition = self._quality.completed(result)
                     self._revision = result.revision
                     self._output = result
                     self._model_snapshot = model
-                    fallback = getattr(self._core, "activation_runtime_failure", None)
-                    if result.consecutive_deadline_miss_count >= 2 and callable(fallback):
+                    if (
+                        result.consecutive_deadline_miss_count >= 2
+                        and self._activation_core is not None
+                    ):
                         self._append_dispatch_locked(
                             "activation",
                             ("fallback", "deadline-threshold"),
@@ -1354,55 +1281,59 @@ class ThreadedControllerRunner(ControllerRunner):
 
     @property
     def mpc_activation_terminated(self) -> bool:
-        with self._lock:
-            return self._mpc_activation_terminated
+        activation_core = self._activation_core
+        return (
+            False
+            if activation_core is None
+            else activation_core.activation_terminated
+        )
 
-    def queue_pair_activation(self, transition: PreparedPairTransition) -> bool:
-        """Accept exactly one swap only after its prepared receipt is durable."""
-        if not isinstance(transition, PreparedPairTransition):
-            raise TypeError("transition must be a PreparedPairTransition")
-        if not self._receipt_is_durable(transition.prepared_receipt):
+    def restore_activation(
+        self,
+        persisted: ModelActivationState,
+        records: Sequence[ModelEvidenceRecord],
+    ) -> bool:
+        if self._activation_core is None:
             return False
-        transaction_id = transition.record.transaction_id
         with self._lock:
-            if self._mpc_activation_terminated:
-                return False
-            if transaction_id in self._pair_activation_ids:
-                return True
-            if self._pending_pair_activation is not None or self._pair_activation_flight is not None:
-                return False
-            self._pair_activation_ids.add(transaction_id)
-            self._pending_pair_activation = transition
-        return True
-    def restore_activation(self, persisted, records):
-        """Queue one durable transaction for convergence exactly once."""
-        transaction_id = getattr(persisted, "transaction_id", None)
-        with self._lock:
-            if isinstance(transaction_id, str) and transaction_id:
-                if transaction_id in self._pair_activation_ids:
-                    return True
-                self._pair_activation_ids.add(transaction_id)
-            self._append_dispatch_locked("activation", ("restore", (persisted, tuple(records))))
+            self._append_dispatch_locked(
+                "activation",
+                ("restore", (persisted, tuple(records))),
+            )
         return True
 
-    def activation_runtime_failure(self, reason: str):
+    def activation_runtime_failure(self, reason: str) -> bool:
+        if self._activation_core is None:
+            return False
         with self._lock:
             self._append_dispatch_locked("activation", ("fallback", reason))
         return True
 
-    def rollback_activation(self, reason: str):
+    def rollback_activation(self, reason: str) -> bool:
+        if self._activation_core is None:
+            return False
         with self._lock:
             self._append_dispatch_locked("activation", ("rollback", reason))
         return True
 
-    def drain_activation_events(self):
-        with self._lock:
-            events = tuple(self._activation_events)
-            self._activation_events.clear()
-        return events
-    def submit_activation_confidence(self, record):
-        submit = getattr(self._core, "submit_activation_confidence", None)
-        return None if submit is None else submit(record)
+    def drain_activation_events(self) -> tuple[ModelEvidenceRecord, ...]:
+        activation_core = self._activation_core
+        return (
+            ()
+            if activation_core is None
+            else activation_core.drain_activation_events()
+        )
+
+    def submit_activation_confidence(
+        self,
+        record: ModelEvidenceRecord,
+    ) -> DurableActivationReceipt | None:
+        activation_core = self._activation_core
+        return (
+            None
+            if activation_core is None
+            else activation_core.submit_activation_confidence(record)
+        )
 
 
     def submit(self, temp):
@@ -1413,8 +1344,14 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._output, transition = self._quality.polled(self._output, self._monotonic_clock())
             result = self._output
-            if transition is ResultStaleState.STALE:
-                self._append_dispatch_locked("activation", ("fallback", "stale-result-threshold"))
+            if (
+                transition is ResultStaleState.STALE
+                and self._activation_core is not None
+            ):
+                self._append_dispatch_locked(
+                    "activation",
+                    ("fallback", "stale-result-threshold"),
+                )
         if transition is not None and self._warning_callback is not None:
             self._warning_callback(transition)
         return result
@@ -1601,13 +1538,14 @@ class ThreadedControllerRunner(ControllerRunner):
                 if refit_error is None:
                     raise
 
-    def finalize_cook_refit(self, outcome):
+    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
         if self._thread.is_alive():
             raise RuntimeError("the controller worker did not stop; refusing to finalize behind it")
-        finalize = getattr(self._core, "finalize_cook_refit", None)
-        if not callable(finalize):
-            return False
-        finalized = bool(finalize(outcome))
+        finalized = (
+            False
+            if self._refit_finalizer is None
+            else self._refit_finalizer.finalize_cook_refit(outcome)
+        )
         model = _owned_model_snapshot(self._core.get_model_snapshot())
         with self._lock:
             self._model_snapshot = model
@@ -1633,13 +1571,13 @@ class ThreadedControllerRunner(ControllerRunner):
                 for sequence in tuple(self._accepted_observations):
                     self._terminalize_observation_locked(sequence, "runner-stop-timeout")
 
-    def stop_for_refit(self):
+    def stop_for_refit(self) -> bool | None:
         with self._lock:
             self._retain_core_for_refit = True
         self._stop_and_join()
         return not self._thread.is_alive()
 
-    def finish_teardown(self):
+    def finish_teardown(self) -> None:
         with self._lock:
             self._retain_core_for_refit = False
             worker_alive = self._thread.is_alive()

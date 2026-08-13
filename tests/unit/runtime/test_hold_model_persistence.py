@@ -30,7 +30,6 @@ from controller.applied_output import OutputSource
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.runner import (
     ControllerUpdateResult,
-    PreparedPairTransition,
     ThreadedControllerRunner,
 )
 from controller.model_learning.activation import (
@@ -890,10 +889,35 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     monkeypatch.setattr(_mpc_core, "GreyBoxEKF", _CrashRecoveryEstimator)
     monkeypatch.setattr(_mpc_core, "AcadosGreyBoxMPC", _CrashRecoverySolver)
 
+    prepared_write_started = threading.Event()
+    prepared_write_release = threading.Event()
+
+    def persist_activation_phase(record, expected):
+        if crash_boundary == "before-prepared-receipt" and record.phase is ActivationPhase.PREPARED:
+            prepared_write_started.set()
+            if not prepared_write_release.wait(timeout=5.0):
+                raise TimeoutError("prepared write was not released")
+            raise RuntimeError("simulated process death before prepared receipt")
+        return commit_model_activation_phase(
+            record,
+            expected_phase=expected,
+            database_path=database_path,
+        )
+
+    persistence_worker = ModelPersistenceWorker(
+        _FakeModelStore(),
+        SimpleNamespace(error=lambda _message: None),
+        append_evidence=lambda batch: append_model_evidence(
+            batch,
+            database_path=database_path,
+        ),
+        persist_activation_phase=persist_activation_phase,
+    )
     first_core = MpcController(
         dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
         "C",
         {"u_min": 0.1, "u_max": 0.9},
+        activation_persistence=persistence_worker,
     )
     incumbent_pair = first_core.active_control_pair
     incumbent = incumbent_pair.descriptor
@@ -924,31 +948,6 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         policy=ActivationPolicy.PASSIVE_AUTO,
         decision_id=f"crash-{crash_boundary}",
     )
-    prepared_write_started = threading.Event()
-    prepared_write_release = threading.Event()
-
-    def persist_activation_phase(record, expected):
-        if crash_boundary == "before-prepared-receipt" and record.phase is ActivationPhase.PREPARED:
-            prepared_write_started.set()
-            if not prepared_write_release.wait(timeout=5.0):
-                raise TimeoutError("prepared write was not released")
-            raise RuntimeError("simulated process death before prepared receipt")
-        return commit_model_activation_phase(
-            record,
-            expected_phase=expected,
-            database_path=database_path,
-        )
-
-    persistence_worker = ModelPersistenceWorker(
-        _FakeModelStore(),
-        SimpleNamespace(error=lambda _message: None),
-        append_evidence=lambda batch: append_model_evidence(
-            batch,
-            database_path=database_path,
-        ),
-        persist_activation_phase=persist_activation_phase,
-    )
-    first_core._activation_persistence_worker = persistence_worker
 
     first_core.set_target(225.0)
     first_result = first_core.update(225.0)
@@ -971,23 +970,11 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         assert prepared_write_started.wait(timeout=1.0)
         assert prepared_receipt.completed is False
         assert prepared_receipt.durable is False
-        first_boundary_gate = _CrashRecoveryRunnerGate()
-        first_boundary_runner = ThreadedControllerRunner(
-            first_core,
-            wait_for_period=first_boundary_gate,
-            monotonic_clock=_deterministic_monotonic(),
-        )
-        assert first_boundary_gate.wait_for_arrivals(1)
-        transition = PreparedPairTransition(
+        assert not first_core.queue_prepared_activation(
             prepared,
             candidate_pair,
             prepared_receipt,
-            lambda record, expected: persistence_worker.submit_activation_phase(
-                record,
-                expected_phase=expected,
-            ),
         )
-        assert first_boundary_runner.queue_pair_activation(transition) is False
         prepared_write_release.set()
         assert prepared_receipt.wait(timeout=1.0) is False
         assert prepared_receipt.completed is True
@@ -1133,12 +1120,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         "read_model_evidence",
         lambda: read_model_evidence(database_path=database_path),
     )
-    core = MpcController(
-        dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
-        "C",
-        {"u_min": 0.1, "u_max": 0.9},
-    )
-    core._activation_persistence_worker = ModelPersistenceWorker(
+    restart_worker = ModelPersistenceWorker(
         _FakeModelStore(),
         SimpleNamespace(error=lambda _message: None),
         append_evidence=lambda batch: append_model_evidence(
@@ -1150,6 +1132,12 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
             expected_phase=expected,
             database_path=database_path,
         ),
+    )
+    core = MpcController(
+        dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
+        "C",
+        {"u_min": 0.1, "u_max": 0.9},
+        activation_persistence=restart_worker,
     )
     restart_gate = _CrashRecoveryRunnerGate()
     runner = ThreadedControllerRunner(

@@ -54,6 +54,32 @@ class Estimator:
             raise self.close_failure
 
 
+
+def test_owned_pair_close_retries_only_unfinished_real_core_resources() -> None:
+    events: list[str] = []
+    pair_factory, ekf, _kf, solvers = factory(events)
+    configuration = pair_factory.configured(
+        dict(DEFAULT_MPC_CONFIG, estimator="ekf"),
+        candidate_generation=0,
+        role_generation=0,
+        model_identified=True,
+    )
+    pair = pair_factory.build(configuration, authorized=False)
+    estimator = ekf.instances[-1]
+    solver = solvers.instances[-1]
+    solver.close_failure = RuntimeError("solver close failed once")
+
+    with pytest.raises(RuntimeError, match="complete grey numerical pair"):
+        pair.close()
+    assert pair.closed
+    assert solver.closed == 1
+    assert estimator.closed == 1
+
+    solver.close_failure = None
+    pair.close()
+    assert solver.closed == 2
+    assert estimator.closed == 1
+
 class EstimatorFactory:
     def __init__(self, events: list[str]) -> None:
         self.events = events

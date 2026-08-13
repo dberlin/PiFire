@@ -785,10 +785,9 @@ class HoldMode(ControlMode):
             if isinstance(record, ModelEvidenceRecord) and record.kind is EvidenceKind.CONFIDENCE_DECISION
         )
         ordinary = tuple(record for record in compact_batch if record not in confidence)
-        submit_confidence = getattr(self._runner, "submit_activation_confidence", None)
         for record in confidence:
-            receipt = submit_confidence(record) if callable(submit_confidence) else None
-            if not getattr(receipt, "accepted", False):
+            receipt = self._runner.submit_activation_confidence(record)
+            if receipt is None or not receipt.accepted:
                 self._learning_evidence_available = False
         if (
             ordinary
@@ -2805,20 +2804,18 @@ class HoldMode(ControlMode):
     ) -> bool:
         if getattr(self, "_final_checkpoint_done", False):
             return True
-        finalize = getattr(self._runner, "finalize_cook_refit", None)
         final_outcome = getattr(self, "_final_checkpoint_outcome", None) or outcome
-        if callable(finalize):
+        try:
+            if self._runner.finalize_cook_refit(final_outcome) is False:
+                raise RuntimeError("refit outcome was not finalized")
+        except Exception:
+            final_outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
+            self._final_checkpoint_outcome = final_outcome
             try:
-                if finalize(final_outcome) is False:
-                    raise RuntimeError("refit outcome was not finalized")
-            except Exception:
-                final_outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
-                self._final_checkpoint_outcome = final_outcome
-                try:
-                    if finalize(final_outcome) is False:
-                        return False
-                except Exception:
+                if self._runner.finalize_cook_refit(final_outcome) is False:
                     return False
+            except Exception:
+                return False
         snapshot = self._runner.get_model_snapshot()
         if not isinstance(snapshot, dict):
             self._learning_evidence_available = False
@@ -2848,9 +2845,11 @@ class HoldMode(ControlMode):
         if accepted:
             self._final_checkpoint_done = True
             return True
-        if final_outcome is not TeardownRefitOutcome.CHECKPOINT_FAILURE and callable(finalize):
+        if final_outcome is not TeardownRefitOutcome.CHECKPOINT_FAILURE:
             try:
-                finalize(TeardownRefitOutcome.CHECKPOINT_FAILURE)
+                self._runner.finalize_cook_refit(
+                    TeardownRefitOutcome.CHECKPOINT_FAILURE
+                )
                 self._final_checkpoint_outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
             except Exception:
                 pass
@@ -2882,8 +2881,7 @@ class HoldMode(ControlMode):
         )
         try:
             if self._runner is not None:
-                stop_for_refit = getattr(self._runner, "stop_for_refit", self._runner.stop)
-                stopped = stop_for_refit()
+                stopped = self._runner.stop_for_refit()
                 if getattr(self, "ctx", None) is not None:
                     self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
                 if stopped is False:
@@ -2901,16 +2899,15 @@ class HoldMode(ControlMode):
                 flushed = worker.flush_and_stop() and not bool(getattr(worker, "failed", False))
                 self._persistence_worker = None
             if not flushed and self._runner is not None:
-                finalize = getattr(self._runner, "finalize_cook_refit", None)
-                if callable(finalize):
-                    try:
-                        finalize(TeardownRefitOutcome.CHECKPOINT_FAILURE)
-                    except Exception:
-                        pass
-            finish_teardown = getattr(self._runner, "finish_teardown", None)
-            if callable(finish_teardown):
                 try:
-                    finish_teardown()
+                    self._runner.finalize_cook_refit(
+                        TeardownRefitOutcome.CHECKPOINT_FAILURE
+                    )
+                except Exception:
+                    pass
+            if self._runner is not None:
+                try:
+                    self._runner.finish_teardown()
                 except Exception as error:
                     self._trace_warning(f"Controller teardown close failed: {error}")
             if first_trace_teardown:

@@ -555,9 +555,10 @@ def test_close_attempts_every_owned_handle_once_when_one_close_fails():
 
     with pytest.raises(RuntimeError, match="complete grey numerical pair"):
         core.close()
-    core.close()
+    with pytest.raises(RuntimeError, match="complete grey numerical pair"):
+        core.close()
 
-    assert solver_box[0].closed == 1
+    assert solver_box[0].closed == 2
     assert estimator_factory.estimator.closed == 1
 
 

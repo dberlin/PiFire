@@ -1,8 +1,6 @@
 """Atomic grey estimator/native-pair activation contracts."""
-
 from __future__ import annotations
 
-import collections
 from dataclasses import FrozenInstanceError, replace
 import json
 import threading
@@ -18,6 +16,7 @@ from common.model_evidence import (
     RollbackEvidence,
 )
 from common.web_contracts.learning import ModelActivationRequest
+from common.persistence.model_evidence import ModelActivationState
 import controller.runtime.model_persistence as model_persistence_module
 
 from controller.model_learning.activation import (
@@ -29,6 +28,7 @@ from controller.model_learning.activation import (
     canonical_snapshot_digest,
     recover_startup_activation,
 )
+from controller.model_learning.activation_runtime import ActivationRuntime
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.runtime.model_fitting import TeardownGreyHistory
 from controller.mpc import Controller as MpcController
@@ -353,12 +353,15 @@ def test_canonical_digest_is_mapping_order_independent_and_parameter_sensitive()
     assert canonical_snapshot_digest(_CANDIDATE_CONFIG) != canonical_snapshot_digest(changed)
 
 
-def _persisted_state(record: PreparedActivationRecord):
+def _persisted_state(record: PreparedActivationRecord) -> ModelActivationState:
     active = record.candidate if record.phase is ActivationPhase.ACTIVE else record.incumbent
-    return SimpleNamespace(
+    return ModelActivationState(
+        active_snapshot_json=json.dumps(active.to_dict()["configuration"]),
+        rollback_snapshot_json=json.dumps(record.rollback.to_dict()["configuration"]),
+        evidence_decision_id=record.decision_id,
+        controller_configuration_digest=record.candidate.ownership_digest,
         phase=record.phase.value,
         transaction_id=record.transaction_id,
-        evidence_decision_id=record.decision_id,
         incumbent_pair_json=json.dumps(record.incumbent.to_dict()),
         candidate_pair_json=json.dumps(record.candidate.to_dict()),
         rollback_pair_json=json.dumps(record.rollback.to_dict()),
@@ -495,7 +498,6 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
         built.append(descriptor)
         return _owned(descriptor, f"restored-{len(built)}")
 
-    core._activation_persistence_worker = object()
     monkeypatch.setattr(core._pair_factory, "restore", build)
 
     assert core.restore_activation(persisted, (lifecycle,))
@@ -507,11 +509,12 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
     assert core.activation_output_authorized
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
     assert core._teardown_history.role_generation == core._model_revision
-    core._activation_persistence_worker = None
     core.close()
 
 
-def _bare_mpc_pair_owner():
+def _bare_mpc_pair_owner(
+    persistence: model_persistence_module.ModelPersistenceWorker | None = None,
+):
     incumbent_descriptor = _descriptor(_INCUMBENT_CONFIG, candidate_generation=3, role_generation=4)
     candidate_descriptor = _descriptor(_CANDIDATE_CONFIG, candidate_generation=4, role_generation=5)
     incumbent = _owned(incumbent_descriptor, "incumbent")
@@ -527,20 +530,11 @@ def _bare_mpc_pair_owner():
     incumbent.authorize_output()
     core = MpcController.__new__(MpcController)
     incumbent.core._last_combustion_load = 0.35
-    core._active_control_pair = incumbent
-    core._core = incumbent.core
-    core._rollback_control_pair = None
-    core._inert_activation = None
-    core._activation_terminated_reason = None
-    core._activation_persistence_lock = threading.Lock()
-    core._failed_role_generations = set()
-    core._activation_events = collections.deque()
     core._model_revision = 4
     core._learning_role_generation = 4
     core._teardown_history = TeardownGreyHistory(role_generation=4, max_observations=120)
     core._closed = False
     core._learning = None
-    core._activation_persistence_worker = None
     core._pair_factory = MpcPairFactory(
         DEFAULT_MPC_CONFIG,
         "C",
@@ -549,24 +543,53 @@ def _bare_mpc_pair_owner():
         model_authority=lambda: (core._model_revision, None),
         on_policy_failure=lambda _error: None,
     )
+    if persistence is None:
+        persistence = model_persistence_module.ModelPersistenceWorker(
+            SimpleNamespace(save_outcome=lambda _name, _snapshot: None),
+            SimpleNamespace(error=lambda _message: None),
+            append_evidence=lambda _records: None,
+            persist_activation_phase=lambda _record, _expected: None,
+        )
+    core._activation_runtime = ActivationRuntime(
+        core._pair_factory,
+        incumbent,
+        persistence,
+    )
     return core, incumbent, candidate, prepared
 
 
 def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase() -> None:
-    core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner()
     calls = []
 
-    class _Worker:
+
+    class _Worker(model_persistence_module.ModelPersistenceWorker):
+        def __init__(self):
+            pass
+
         def submit_evidence(self, record):
             calls.append(("evidence", record))
             return SimpleNamespace(accepted=True)
+
         def submit_activation_confidence(self, record):
             calls.append(("confidence", record))
-            return _Receipt()
+            receipt = model_persistence_module.DurableActivationReceipt(
+                accepted=True
+            )
+            receipt._complete(durable=True)
+            return receipt
 
         def submit_activation_phase(self, record, *, expected_phase):
             calls.append(("phase", record, expected_phase))
-            return _Receipt()
+            receipt = model_persistence_module.DurableActivationReceipt(
+                accepted=True
+            )
+            receipt._complete(durable=True)
+            return receipt
+
+        def flush_and_stop(self, *, timeout=0.1):
+            return True
+
+    core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner(_Worker())
 
     native_config = GreyBoxMPCConfig(theta=39.0, horizon_steps=12)
     configuration = {
@@ -598,8 +621,6 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     )
     core.cfg = {"estimator": "ekf"}
     core._learning = SimpleNamespace(_last_evaluation=evaluation)
-    core._activation_persistence_worker = _Worker()
-    core._prepared_pair_transitions = collections.deque()
 
     core._prepare_automatic_pair_activation(preparation, ActivationPolicy.PASSIVE_AUTO)
 
@@ -612,18 +633,46 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     assert isinstance(confidence.payload, ConfidenceDecisionEvidence)
     assert confidence.payload.decision_id == evaluation.decision_id
     assert confidence.payload.blocked is False
+    core._learning = None
+    core.close()
 
 
 
-def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
-    monkeypatch,
-) -> None:
-    core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner()
+
+def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> None:
+    calls = []
+
+
+    class _Worker(model_persistence_module.ModelPersistenceWorker):
+        def __init__(self):
+            pass
+
+        def submit_evidence(self, record):
+            calls.append(("evidence", record.evidence_id))
+            return SimpleNamespace(accepted=True)
+
+        def submit_activation_confidence(self, record):
+            calls.append(("confidence", record.evidence_id))
+            receipt = model_persistence_module.DurableActivationReceipt(
+                accepted=True
+            )
+            receipt._complete(durable=True)
+            return receipt
+
+        def submit_activation_phase(self, record, *, expected_phase):
+            calls.append(("phase", record.transaction_id, expected_phase))
+            receipt = model_persistence_module.DurableActivationReceipt(
+                accepted=True
+            )
+            receipt._complete(durable=True)
+            return receipt
+
+        def flush_and_stop(self, *, timeout=0.1):
+            return True
+
+    worker = _Worker()
+    core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner(worker)
     core.cfg = {"estimator": "ekf"}
-    core._learning_lock = threading.Lock()
-    core._activation_persistence_worker = None
-    core._persisted_activation_confidence_ids = set()
-    core._prepared_pair_transitions = collections.deque()
     native_config = GreyBoxMPCConfig(theta=39.0, horizon_steps=12)
     configuration = {
         name: getattr(native_config, name)
@@ -670,65 +719,17 @@ def test_hold_and_learning_first_use_share_one_activation_persistence_fifo(
             reason=None,
         ),
     )
-    first_constructor_entered = threading.Event()
-    release_first_constructor = threading.Event()
-    constructors = []
 
-    class _Worker:
-        def __init__(self, *_args, **_kwargs):
-            self.calls = []
-            constructors.append(self)
-            if len(constructors) == 1:
-                first_constructor_entered.set()
-                release_first_constructor.wait(timeout=1.0)
-
-        def submit_evidence(self, record):
-            self.calls.append(("evidence", record.evidence_id))
-            return SimpleNamespace(accepted=True)
-        def submit_activation_confidence(self, record):
-            self.calls.append(("confidence", record.evidence_id))
-            return _Receipt()
-
-        def submit_activation_phase(self, record, *, expected_phase):
-            self.calls.append(("phase", record.transaction_id, expected_phase))
-            return _Receipt()
-
-    monkeypatch.setattr(model_persistence_module, "ModelPersistenceWorker", _Worker)
-    errors = []
-    hold_thread = threading.Thread(
-        target=lambda: (
-            core.submit_activation_confidence(hold_confidence)
-            if not errors
-            else None
-        )
+    core.submit_activation_confidence(hold_confidence)
+    core._prepare_automatic_pair_activation(
+        preparation,
+        ActivationPolicy.PASSIVE_AUTO,
     )
 
-    def prepare_from_learning():
-        try:
-            core._prepare_automatic_pair_activation(
-                preparation,
-                ActivationPolicy.PASSIVE_AUTO,
-            )
-        except Exception as error:
-            errors.append(error)
-
-    learning_thread = threading.Thread(target=prepare_from_learning)
-    hold_thread.start()
-    assert first_constructor_entered.wait(timeout=1.0)
-    learning_thread.start()
-    time.sleep(0.02)
-    release_first_constructor.set()
-    hold_thread.join(timeout=1.0)
-    learning_thread.join(timeout=1.0)
-
-    assert not hold_thread.is_alive()
-    assert not learning_thread.is_alive()
-    assert errors == []
-    assert len(constructors) == 1
-    assert core._activation_persistence_worker is constructors[0]
-    calls = constructors[0].calls
     phase_index = next(index for index, call in enumerate(calls) if call[0] == "phase")
     assert any(call[0] == "confidence" for call in calls[:phase_index])
+    core._learning = None
+    core.close()
 
 
 def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_receipt() -> None:

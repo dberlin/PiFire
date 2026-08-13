@@ -17,11 +17,9 @@ from common.control_trace import ActuationMode
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.contracts import (
-    ActivationPolicy,
     CandidateOrigin,
     FrameObservation,
 )
-from tests.unit.mpc._solver_fixtures import owned_pair
 from controller.runtime.model_fitting import (
     PassiveGreyHistory,
     TeardownGreyHistory,
@@ -31,7 +29,6 @@ from controller.runtime.model_fitting import (
 from controller.runtime.runner import (
     ControllerRunner,
     ControllerUpdateResult,
-    PreparedPairTransition,
     SyncControllerRunner,
     ThreadedControllerRunner,
 )
@@ -711,6 +708,8 @@ class _ActivationOrderingCore(_CoreWithoutRefit):
     def __init__(self):
         self.events = []
         self.installed = threading.Event()
+        self.activation_terminated = False
+        self._activation_queued = False
 
     def update(self, _temperature):
         self.events.append("solve")
@@ -723,21 +722,36 @@ class _ActivationOrderingCore(_CoreWithoutRefit):
         self.events.append(("observation", observation.role_generation))
         return {"role_generation": observation.role_generation, "eligible": True}
 
-    def install_candidate_pair_inert(self, _pair, _record):
-        self.events.append("install")
-        self.installed.set()
+    def queue_activation(self):
+        self._activation_queued = True
+
+    def advance_activation(self):
+        if self._activation_queued:
+            self._activation_queued = False
+            self.events.append("install")
+            self.installed.set()
         return True
 
-    def authorize_candidate_pair(self, _record):
-        self.events.append("authorize")
-        return True
+    def restore_activation(self, _persisted, _records):
+        return False
+
+    def activation_runtime_failure(self, _reason):
+        return False
+
+    def rollback_activation(self, _reason):
+        return False
 
     def drain_activation_events(self):
         return ()
 
+    def submit_activation_confidence(self, _record):
+        return None
+
+    def terminate_mpc_activation(self, _reason):
+        self.activation_terminated = True
+
 
 def test_completed_frame_feedback_and_observation_reach_incumbent_before_activation_install():
-    from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
     core = _ActivationOrderingCore()
     gate = _StepGate()
@@ -749,16 +763,7 @@ def test_completed_frame_feedback_and_observation_reach_incumbent_before_activat
         assert gate.wait_for_arrivals(2)
         assert runner.latest().revision == 1
 
-        _state, record = _pair_phase_state()
-        candidate_pair = owned_pair(record.candidate, _CloseHandle(), _CloseHandle())
-        durable = SimpleNamespace(accepted=True, completed=True, durable=True, error=None)
-        transition = PreparedPairTransition(
-            record,
-            candidate_pair,
-            durable,
-            lambda _record, _expected: durable,
-        )
-        assert runner.queue_pair_activation(transition)
+        core.queue_activation()
         submission = runner.complete_frame(
             AppliedOutput(
                 ratio=0.3,
@@ -810,10 +815,12 @@ def test_operator_teardown_candidate_persists_unblocked_confidence_for_manual_ac
     controller = object.__new__(Controller)
     controller._learning_session_id = "session"
     controller._learning_cook_id = "cook"
-    controller._persisted_activation_confidence_ids = set()
-    controller._persist_grey_lifecycle = lambda evidence, trace, **kwargs: persisted.append((evidence, trace, kwargs))
-    controller._activation_persistence_channel = lambda: SimpleNamespace(
-        submit_activation_confidence=lambda record: (submitted.append(record), _Receipt())[1]
+    controller._persist_grey_lifecycle = lambda evidence, trace, **kwargs: persisted.append(
+        (evidence, trace, kwargs)
+    )
+    controller._activation_runtime = SimpleNamespace(
+        submit_activation_confidence=lambda record: (submitted.append(record), _Receipt())[1],
+        mark_confidence_persisted=lambda _decision_id: None,
     )
     window = SimpleNamespace(
         first_observation_sequence=4,

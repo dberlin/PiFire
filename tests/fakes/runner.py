@@ -1,9 +1,15 @@
 from dataclasses import replace
 from typing import Any
 
+from collections.abc import Sequence
+
+from common.model_evidence import ModelEvidenceRecord
+from common.persistence.model_evidence import ModelActivationState
 from common.control_trace import ActuationMode, ControllerType
 from controller.model_learning.contracts import FrameObservation
 from controller.runtime.observation_buffer import ObservationOutcomeBuffer
+from controller.runtime.model_fitting import TeardownRefitOutcome
+from controller.runtime.model_persistence import DurableActivationReceipt
 from controller.runtime.runner import (
     ObservationOutcomeEnvelope,
     ObservationSubmission,
@@ -37,6 +43,9 @@ class FakeControllerRunner:
         self.activation_failures = []
         self.activation_rollbacks = []
         self.activation_events = []
+        self.activation_confidences = []
+        self.finalized_refits = []
+        self.finished_teardowns = 0
         self.snapshot: dict[str, Any] | None = None
         self.observations = []
         self.frame_completions = []
@@ -74,7 +83,11 @@ class FakeControllerRunner:
     def cancel_calibration(self, reason):
         self.calibration_cancellations.append(reason)
 
-    def restore_activation(self, persisted, records):
+    def restore_activation(
+        self,
+        persisted: ModelActivationState,
+        records: Sequence[ModelEvidenceRecord],
+    ) -> bool:
         self.activation_restores.append((persisted, tuple(records)))
         return True
 
@@ -90,6 +103,15 @@ class FakeControllerRunner:
         events = tuple(self.activation_events)
         self.activation_events.clear()
         return events
+    def submit_activation_confidence(
+        self,
+        record: ModelEvidenceRecord,
+    ) -> DurableActivationReceipt | None:
+        self.activation_confidences.append(record)
+        receipt = DurableActivationReceipt(accepted=True)
+        receipt._complete(durable=True)
+        return receipt
+
 
     def submit(self, temp):
         self.submitted_temps.append(temp)
@@ -127,6 +149,17 @@ class FakeControllerRunner:
 
     def stop(self):
         self.stops += 1
+    def stop_for_refit(self) -> bool | None:
+        self.stop()
+        return None
+
+    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
+        self.finalized_refits.append(outcome)
+        return True
+
+    def finish_teardown(self) -> None:
+        self.finished_teardowns += 1
+
 
     def set_output(self, applied):
         self.applied.append(applied)

@@ -173,7 +173,7 @@ class OwnedMpcPair:
 
     def close(self) -> None:
         with self._close_lock:
-            if self._closed:
+            if self._closed and self.core.close_complete:
                 return
             self._closed = True
         self._authorization.revoke()
