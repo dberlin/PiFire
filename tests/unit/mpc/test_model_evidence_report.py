@@ -378,6 +378,37 @@ def test_retired_schema_invalidation_audit_cannot_gate_current_report() -> None:
     assert payload["evidence"]["count"] == 0
 
 
+def test_completed_schema_migration_stops_gating_once_the_ledger_moves_on() -> None:
+    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
+    checkpoint = controller.get_model_snapshot()
+    active_digest = checkpoint["identities"]["active_digest"]
+    marker = ModelEvidenceRecord(
+        evidence_id="mpc:schema-migration:1:defaults",
+        kind=EvidenceKind.SCHEMA_INVALIDATION,
+        session_id="mpc-schema-migration",
+        cook_id=None,
+        timestamp_ms=0,
+        role_generation=0,
+        model_digest=active_digest,
+        provenance_digest=None,
+        payload=SchemaInvalidationEvidence(previous_schema_version=3, reason="schema-invalidated"),
+    )
+    live = _live(status=LearningStatus.ACTIVE)
+    live["checkpoint_digest"] = active_digest
+
+    payload = build_learning_report(
+        (marker, _evidence("post-migration-gap")),
+        activation_state={**_activation(phase="aborted"), "incumbent_digest": active_digest},
+        checkpoint=checkpoint,
+        live_status=live,
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    assert payload["errors"] == []
+    assert payload["status"] == "active"
+    assert payload["evidence"]["count"] == 2
+
+
 @pytest.mark.parametrize(
     ("live", "expected"),
     (

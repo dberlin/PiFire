@@ -82,9 +82,26 @@ def _canonical_bytes(value: object) -> bytes:
     ).encode("utf-8")
 
 
+def _ledger_order(record: ModelEvidenceRecord) -> tuple[int, str]:
+    return (record.timestamp_ms, record.evidence_id)
+
+
 def _latest(records: Sequence[ModelEvidenceRecord], payload_type: type):
     matches = [record for record in records if isinstance(record.payload, payload_type)]
-    return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id)) if matches else None
+    return max(matches, key=_ledger_order) if matches else None
+
+
+def _superseded_invalidation(
+    records: Sequence[ModelEvidenceRecord],
+    invalidation: ModelEvidenceRecord,
+) -> bool:
+    """Report whether the ledger recorded any later evidence of the current schema."""
+
+    return any(
+        not isinstance(record.payload, SchemaInvalidationEvidence)
+        and _ledger_order(record) > _ledger_order(invalidation)
+        for record in records
+    )
 
 
 _PayloadT = TypeVar("_PayloadT")
@@ -308,7 +325,7 @@ def build_learning_report(
     lifecycle = _latest_payload(current_records, ActivationLifecycleEvidence)
     failure = _latest_payload(current_records, LearningFailureEvidence)
     confidence = _latest_payload(current_records, ConfidenceDecisionEvidence)
-    invalidation = _latest_payload(current_records, SchemaInvalidationEvidence)
+    invalidation = _latest(current_records, SchemaInvalidationEvidence)
     if fit_payload is not None and fit_status == FitStatus.IDLE.value:
         fit_status = FitStatus(fit_payload.status).value
     if (
@@ -341,7 +358,7 @@ def build_learning_report(
             errors.append(cast(str, live_failure["code"]))
         else:
             errors.append("live-failure-invalid")
-    if invalidation is not None:
+    if invalidation is not None and not _superseded_invalidation(current_records, invalidation):
         schema_invalidated = True
     if schema_invalidated:
         status = LearningStatus.SCHEMA_INVALIDATED.value
