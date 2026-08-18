@@ -1203,8 +1203,6 @@ def test_v2_envelopes_accept_unchanged_payloads_but_reject_v3_learning_payloads(
         )
 
 
-
-
 def _canonical_observation_payload(*, calibration: bool) -> ModelObservationPayload:
     return ModelObservationPayload(
         frame_start_ms=0,
@@ -1293,6 +1291,44 @@ def test_schema_four_round_trips_distinct_canonical_observation_evidence() -> No
 def test_schema_four_rejects_incoherent_canonical_observation_evidence(replacement) -> None:
     with pytest.raises(ValidationError):
         replace(_canonical_observation_payload(calibration=True), **replacement)
+
+
+def test_schema_four_accepts_a_reset_shortened_observation_frame() -> None:
+    payload = replace(
+        _canonical_observation_payload(calibration=False),
+        frame_end_ms=7_333,
+        scheduled_on_seconds=20.0,
+        delivered_on_seconds=7.3333331,
+        realized_auger_duty=1.0,
+        realized_combustion_load=0.40,
+        reset=True,
+        continuous=False,
+        eligible=False,
+        rejection_reasons=("observation-gate-mismatch",),
+    )
+
+    assert payload.frame_end_ms - payload.frame_start_ms == 7_333
+    assert payload.reset is True
+    assert payload.calibration_status == "inactive"
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        {"frame_end_ms": 7_333},
+        {"frame_end_ms": 30_000, "reset": True, "continuous": False},
+        {
+            "frame_end_ms": 7_333,
+            "reset": True,
+            "continuous": False,
+            "delivered_on_seconds": 7.4,
+            "scheduled_on_seconds": 20.0,
+        },
+    ),
+)
+def test_schema_four_rejects_frame_durations_no_reset_explains(replacement) -> None:
+    with pytest.raises(ValidationError):
+        replace(_canonical_observation_payload(calibration=False), **replacement)
 
 
 def test_calibration_trace_payload_round_trips_and_rejects_incoherent_reasons() -> None:

@@ -157,6 +157,11 @@ class CalibrationEventType(StrEnum):
 
 _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
 
+# The learning frame the actuator schedules against, and the resolution of the
+# millisecond frame bounds every frame payload carries.
+_OBSERVATION_FRAME_SECONDS = 20.0
+_FRAME_QUANTIZATION_S = 0.001
+
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class TraceSetting:
@@ -546,12 +551,19 @@ class ModelObservationPayload:
         if self.frame_start_ms >= self.frame_end_ms:
             raise ValueError("model observation frame interval must be positive")
         duration_s = (self.frame_end_ms - self.frame_start_ms) / 1000
-        if not math.isclose(duration_s, 20.0, rel_tol=0, abs_tol=1e-9) and not (
-            self.reset and self.calibration_status == "cancelled"
-        ):
-            raise ValueError("model observation frame must be twenty seconds unless cancellation closed it early")
-        if self.delivered_on_seconds > duration_s or (
-            self.scheduled_on_seconds > duration_s and not (self.reset and self.calibration_status == "cancelled")
+        # A reset ends the frame wherever the control loop stopped it, whatever the
+        # calibration was doing, so a reset frame is short by construction and its
+        # schedule still describes the full frame the reset cut off. Every other
+        # frame runs the whole nominal frame.
+        if self.reset:
+            if duration_s > _OBSERVATION_FRAME_SECONDS + _FRAME_QUANTIZATION_S:
+                raise ValueError("reset model observation frame must not exceed the nominal frame")
+        elif not math.isclose(duration_s, _OBSERVATION_FRAME_SECONDS, rel_tol=0, abs_tol=1e-9):
+            raise ValueError("model observation frame must be twenty seconds unless a reset closed it early")
+        # Both frame bounds are truncated to whole milliseconds, so a delivery that
+        # ran to the exact instant the frame ended can read one millisecond long.
+        if self.delivered_on_seconds > duration_s + _FRAME_QUANTIZATION_S or (
+            self.scheduled_on_seconds > duration_s + _FRAME_QUANTIZATION_S and not self.reset
         ):
             raise ValueError("model observation delivery must not exceed frame duration")
         requested = min(1.0, max(0.0, self.baseline_combustion_load + self.calibration_probe_load))

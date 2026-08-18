@@ -7,10 +7,12 @@ from typing import cast
 import pytest
 
 from common.control_trace import (
+    ActuationMode,
     CalibrationEventType,
     CalibrationTracePayload,
     ControllerType,
     HorizonScorePayload,
+    InhibitReason,
     ModelEvaluationPayload,
     ModelEventPayload,
     ModelEventType,
@@ -42,6 +44,12 @@ from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceSessionContext,
 )
+from controller.runtime.framed_pulse import (
+    FramedPulseRuntime,
+    FramedPulseSample,
+    PulseControllerState,
+)
+from controller.runtime.logic.pulse import PulseResetReason
 from controller.runtime.model_fitting import (
     TeardownRefitOutcome,
     TeardownRefitResult,
@@ -51,12 +59,14 @@ from controller.runtime.modes.hold_learning import (
     HoldLearningRuntime,
     HoldRefitResult,
 )
+from controller.runtime.state import ControllerState
 from controller.runtime.runner import (
     ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
     ObservationTerminalDrop,
 )
+from grillplat.actuator_capabilities import AugerTiming
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
 
@@ -109,9 +119,7 @@ class _Persistence:
         self.flush_calls = 0
         self.events = [] if events is None else events
 
-    def submit_evidence_batch(
-        self, records: Sequence[ModelEvidenceRecord]
-    ) -> EvidenceSubmission:
+    def submit_evidence_batch(self, records: Sequence[ModelEvidenceRecord]) -> EvidenceSubmission:
         batch = tuple(records)
         self.batches.append(batch)
         self.events.append(("batch", batch))
@@ -158,9 +166,7 @@ class _Runner:
         self.next_evicted_sequence = None
         return submission
 
-    def complete_frame(
-        self, applied: AppliedOutput, observation: FrameObservation
-    ) -> ObservationSubmission | None:
+    def complete_frame(self, applied: AppliedOutput, observation: FrameObservation) -> ObservationSubmission | None:
         self.completed.append((applied, observation))
         return self.observe_frame(observation)
 
@@ -180,6 +186,7 @@ class _Runner:
         self.confidence.append(record)
         self.events.append(("confidence", record))
         return DurableActivationReceipt(accepted=self.confidence_accepted)
+
     def restore_model(self, snapshot: dict[str, object]) -> bool:
         del snapshot
         return False
@@ -547,9 +554,7 @@ def _lifecycle_runtime(
     logger: _LifecycleLogger | None = None,
     controller_name: str = "pid_sp",
 ):
-    actual_trace, actual_recorder = (
-        _trace(recorder=recorder) if trace is None else (trace, recorder)
-    )
+    actual_trace, actual_recorder = _trace(recorder=recorder) if trace is None else (trace, recorder)
     actual_trace.set_model_authority({"revision": 1}, "online")
     actual_runner = (
         _LifecycleRunner(
@@ -584,27 +589,147 @@ def _lifecycle_runtime(
 def _records(recorder: _Recorder, kind: TraceEventKind):
     return [record for record in recorder.records if record.event_kind is kind]
 
+
 def _gap_payloads(recorder: _Recorder) -> list[RecorderGapPayload]:
-    return [
-        record.payload
-        for record in recorder.records
-        if isinstance(record.payload, RecorderGapPayload)
-    ]
+    return [record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload)]
 
 
 def _observation_payloads(recorder: _Recorder) -> list[ModelObservationPayload]:
-    return [
-        record.payload
-        for record in recorder.records
-        if isinstance(record.payload, ModelObservationPayload)
-    ]
+    return [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
 
 
 def _evaluation_payloads(recorder: _Recorder) -> list[ModelEvaluationPayload]:
-    return [
-        record.payload
-        for record in recorder.records
-        if isinstance(record.payload, ModelEvaluationPayload)
+    return [record.payload for record in recorder.records if isinstance(record.payload, ModelEvaluationPayload)]
+
+
+def _reset_shortened_observation() -> FrameObservation:
+    """Take a lid-reset frame straight from the framed-pulse producer.
+
+    The reset stops the frame where the control loop stopped it, so the frame
+    is short, the auger delivery runs to that instant, and the schedule still
+    describes the full frame the reset cut off.
+    """
+    controller = cast(PulseControllerState, ControllerState())
+    runtime = FramedPulseRuntime()
+    runtime.configure(
+        ActuationMode.FRAMED_PULSE,
+        controller=controller,
+        timing=AugerTiming(pulse_s=2, frame_s=20),
+        now=0.0,
+        calibration_command_revision=0,
+    )
+    controller.pulse_result_revision = 9
+    controller.pulse_requested_duty = 1.0
+    controller.pulse_maximum_duty = 1.0
+    sample = FramedPulseSample(
+        temperature=212.0,
+        setpoint=392.0,
+        ambient_c=20.0,
+        units="F",
+        role_generation=0,
+    )
+    runtime.advance(0.0, True, sample=sample)
+    runtime.advance(3.0, True, sample=sample)
+    result = runtime.reset(
+        PulseResetReason.LID,
+        7.3333331,
+        InhibitReason.LID_OPEN,
+        actual_auger_on=True,
+        sample=sample,
+        terminal_feedback=True,
+    )
+    observation = result.completions[-1].observation
+    assert observation is not None
+    assert observation.reset is True
+    assert observation.calibration_status == "inactive"
+    return observation
+
+
+def test_reset_shortened_frame_reaches_the_trace_as_a_model_observation() -> None:
+    runtime, runner, _persistence, _trace_session, recorder = _runtime()
+    observation = _reset_shortened_observation()
+
+    runtime.submit_completed_observation((0, 7_333), observation)
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 0, observation, _outcome())))
+    runtime.reconcile_outcomes(10.0)
+
+    payloads = _observation_payloads(recorder)
+    assert [(payload.frame_start_ms, payload.frame_end_ms) for payload in payloads] == [(0, 7_333)]
+    assert payloads[0].rejection_reasons == ("insufficient-excitation",)
+    assert _gap_payloads(recorder) == []
+
+
+def test_rejected_observation_payload_failure_never_escapes_invalid_probe_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = _LifecycleLogger()
+    runtime, _runner, _persistence, _trace_session, recorder = _runtime(logger=logger)
+
+    def _explode(cls, observation, reason):
+        del cls, observation, reason
+        raise RuntimeError("validator refused the payload")
+
+    monkeypatch.setattr(
+        HoldLearningRuntime,
+        "_rejected_model_observation",
+        classmethod(_explode),
+    )
+    observation = _observation(probe_valid=False, continuous=False)
+
+    runtime.submit_completed_observation((0, 0), observation)
+
+    assert _observation_payloads(recorder) == []
+    assert [gap.reason for gap in _gap_payloads(recorder)] == ["invalid-probe"]
+    assert any("validator refused the payload" in message for message in logger.warnings)
+
+
+def test_rejected_observation_payload_failure_never_escapes_outcome_reconciliation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = _LifecycleLogger()
+    runtime, runner, _persistence, _trace_session, recorder = _runtime(logger=logger)
+    observation = _observation()
+    runtime.submit_completed_observation((0, 0), observation)
+
+    def _explode(cls, observation, reason):
+        del cls, observation, reason
+        raise RuntimeError("validator refused the payload")
+
+    monkeypatch.setattr(
+        HoldLearningRuntime,
+        "_rejected_model_observation",
+        classmethod(_explode),
+    )
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 1, observation, _outcome())))
+
+    runtime.reconcile_outcomes(22.0)
+
+    assert _observation_payloads(recorder) == []
+    assert [gap.reason for gap in _gap_payloads(recorder)] == ["observation-configuration-mismatch"]
+    assert any("validator refused the payload" in message for message in logger.warnings)
+
+
+def test_sub_millisecond_frame_leaves_the_control_loop_running() -> None:
+    logger = _LifecycleLogger()
+    runtime, _runner, persistence, _trace_session, recorder = _runtime(logger=logger)
+    # Both frame bounds truncate to the same millisecond, so neither the
+    # observation payload nor the gap that replaces it can state an interval.
+    observation = _observation(
+        frame_start_s=40.0,
+        frame_end_s=40.0004,
+        delivered_on_s=0.0002,
+        probe_valid=False,
+        continuous=False,
+    )
+
+    runtime.submit_completed_observation((40_000, 40_000), observation)
+
+    assert _observation_payloads(recorder) == []
+    assert _gap_payloads(recorder) == []
+    assert [record.kind for batch in persistence.batches for record in batch] == [EvidenceKind.RECORDER_GAP]
+    assert [message.split(":")[0] for message in logger.warnings] == [
+        "Rejected model observation failed",
+        "Recorder gap trace failed",
     ]
 
 
@@ -614,9 +739,7 @@ def test_accepted_outcome_keeps_exact_frame_feedback_identity_and_reconciles_onc
     feedback = AppliedOutput(0.25, OutputSource.CONTROLLER, 20.0, requested=0.25)
 
     runtime.submit_completed_observation((1, 2), observation, feedback)
-    runner.drains.append(
-        _drain(ObservationOutcomeEnvelope(1, 0, observation, _outcome()))
-    )
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 0, observation, _outcome())))
     runtime.reconcile_outcomes(22.0)
     runtime.reconcile_outcomes(23.0)
 
@@ -639,9 +762,7 @@ def test_submission_eviction_terminal_drop_and_dropped_sequence_are_consumed_onc
     runtime.submit_completed_observation((0, 1), second)
     runner.drains.append(
         _drain(
-            terminal_drops=(
-                ObservationTerminalDrop(2, 0, second, "runner-outcome-evicted"),
-            ),
+            terminal_drops=(ObservationTerminalDrop(2, 0, second, "runner-outcome-evicted"),),
             dropped_sequences=(2,),
         )
     )
@@ -650,8 +771,7 @@ def test_submission_eviction_terminal_drop_and_dropped_sequence_are_consumed_onc
     runtime.reconcile_outcomes(43.0)
 
     trace_reasons = [
-        cast(RecorderGapPayload, record.payload).reason
-        for record in _records(recorder, TraceEventKind.RECORDER_GAP)
+        cast(RecorderGapPayload, record.payload).reason for record in _records(recorder, TraceEventKind.RECORDER_GAP)
     ]
     compact_reasons = [
         cast(RecorderGapEvidence, batch[0].payload).reason
@@ -678,9 +798,7 @@ def test_pending_capacity_overflow_records_oldest_gap_and_retains_fifo() -> None
 
     gaps = _gap_payloads(recorder)
     observation_payloads = _observation_payloads(recorder)
-    assert [(gap.observation_sequence, gap.reason) for gap in gaps] == [
-        (1, "pending-observation-overflow")
-    ]
+    assert [(gap.observation_sequence, gap.reason) for gap in gaps] == [(1, "pending-observation-overflow")]
     assert [payload.observation_sequence for payload in observation_payloads] == [2]
 
 
@@ -702,8 +820,7 @@ def test_missing_trace_identity_and_generation_mismatch_become_visible_rejection
     runtime.reconcile_outcomes(42.0)
 
     payloads = [
-        cast(ModelObservationPayload, record.payload)
-        for record in _records(recorder, TraceEventKind.MODEL_OBSERVATION)
+        cast(ModelObservationPayload, record.payload) for record in _records(recorder, TraceEventKind.MODEL_OBSERVATION)
     ]
     assert [payload.rejection_reasons for payload in payloads] == [
         ("observation-configuration-mismatch",),
@@ -717,9 +834,7 @@ def test_retired_generation_fences_late_outcome_without_reopening_pending_state(
     runtime.submit_completed_observation((0, 0), observation)
 
     remaining_generations = runtime.retire_generation(0)
-    runner.drains.append(
-        _drain(ObservationOutcomeEnvelope(1, 0, observation, _outcome()))
-    )
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 0, observation, _outcome())))
     runtime.reconcile_outcomes(22.0)
 
     assert remaining_generations == ()
@@ -731,9 +846,7 @@ def test_evidence_preserves_split_channel_order_and_evaluation_trace() -> None:
     events = []
     runner = _Runner(events=events)
     persistence = _Persistence(events=events)
-    runtime, _runner, _persistence, _trace_session, recorder = _runtime(
-        runner=runner, persistence=persistence
-    )
+    runtime, _runner, _persistence, _trace_session, recorder = _runtime(runner=runner, persistence=persistence)
     observation = _observation()
     runtime.submit_completed_observation((0, 0), observation)
     ordinary_one = _ordinary_evidence("ordinary-1")
@@ -759,9 +872,7 @@ def test_evidence_preserves_split_channel_order_and_evaluation_trace() -> None:
         ("confidence", confidence_two),
         ("batch", (ordinary_one, ordinary_two)),
     ]
-    assert [payload.decision_id for payload in _evaluation_payloads(recorder)] == [
-        "evaluation-1"
-    ]
+    assert [payload.decision_id for payload in _evaluation_payloads(recorder)] == ["evaluation-1"]
 
 
 def test_persistence_refusals_mark_evidence_unavailable_without_skipping_a_channel() -> None:
@@ -769,9 +880,7 @@ def test_persistence_refusals_mark_evidence_unavailable_without_skipping_a_chann
     runner = _Runner(events=events)
     runner.confidence_accepted = False
     persistence = _Persistence(accepted=False, events=events)
-    runtime, _runner, _persistence, _trace_session, _recorder = _runtime(
-        runner=runner, persistence=persistence
-    )
+    runtime, _runner, _persistence, _trace_session, _recorder = _runtime(runner=runner, persistence=persistence)
     confidence = _confidence_evidence("confidence-refused")
     ordinary = _ordinary_evidence("ordinary-refused")
 
@@ -793,9 +902,7 @@ def test_blocked_worker_records_gap_without_submitting_to_learner() -> None:
 
     assert runner.submissions == []
     assert runtime.evidence_available is False
-    assert [payload.reason for payload in _gap_payloads(recorder)] == [
-        "model-persistence-unavailable"
-    ]
+    assert [payload.reason for payload in _gap_payloads(recorder)] == ["model-persistence-unavailable"]
 
 
 def test_runner_submission_exception_is_not_hidden_or_partially_accepted() -> None:
@@ -1093,35 +1200,20 @@ def test_valid_and_invalid_calibration_frames_persist_without_invalid_learner_su
     runtime.reconcile_outcomes(42.0)
 
     calibration_records = [
-        batch[0]
-        for batch in persistence.batches
-        if batch[0].kind is EvidenceKind.CALIBRATION_SUMMARY
+        batch[0] for batch in persistence.batches if batch[0].kind is EvidenceKind.CALIBRATION_SUMMARY
     ]
-    calibration_payloads = [
-        cast(CalibrationSummaryEvidence, record.payload)
-        for record in calibration_records
-    ]
+    calibration_payloads = [cast(CalibrationSummaryEvidence, record.payload) for record in calibration_records]
     assert len(calibration_payloads) == 2
     assert [payload.command_revision for payload in calibration_payloads] == [7, 7]
     assert [payload.delivered_on_seconds for payload in calibration_payloads] == [5.0, 5.0]
     assert runner.submissions == [valid]
-    invalid_payloads = [
-        payload
-        for payload in _observation_payloads(recorder)
-        if payload.observation_sequence == 2
-    ]
-    assert [payload.rejection_reasons for payload in invalid_payloads] == [
-        ("invalid-probe",)
-    ]
+    invalid_payloads = [payload for payload in _observation_payloads(recorder) if payload.observation_sequence == 2]
+    assert [payload.rejection_reasons for payload in invalid_payloads] == [("invalid-probe",)]
 
 
 def _calibration_observation() -> FrameObservation:
-    baseline = allocate(
-        0.25, u_max=0.5, fan_min_pct=10.0, fan_max_pct=100.0, enable_fan=True
-    )
-    combined = allocate(
-        0.35, u_max=0.5, fan_min_pct=10.0, fan_max_pct=100.0, enable_fan=True
-    )
+    baseline = allocate(0.25, u_max=0.5, fan_min_pct=10.0, fan_max_pct=100.0, enable_fan=True)
+    combined = allocate(0.35, u_max=0.5, fan_min_pct=10.0, fan_max_pct=100.0, enable_fan=True)
     return _observation(
         0,
         baseline_q=0.25,
@@ -1155,18 +1247,12 @@ def test_calibration_evidence_failure_never_aborts_the_completed_observation(
             result_revision=1,
         )
 
-    monkeypatch.setattr(
-        HoldLearningRuntime, "_calibration_frame_evidence", classmethod(_invalid)
-    )
+    monkeypatch.setattr(HoldLearningRuntime, "_calibration_frame_evidence", classmethod(_invalid))
 
     runtime.submit_completed_observation((0, 0), observation)
     runtime.reconcile_outcomes(22.0)
 
-    assert not [
-        batch
-        for batch in persistence.batches
-        if batch[0].kind is EvidenceKind.CALIBRATION_SUMMARY
-    ]
+    assert not [batch for batch in persistence.batches if batch[0].kind is EvidenceKind.CALIBRATION_SUMMARY]
     assert len(logger.warnings) == 1
     assert logger.warnings[0].startswith("Calibration frame evidence failed: ")
     assert runtime.evidence_available is True
@@ -1175,9 +1261,7 @@ def test_calibration_evidence_failure_never_aborts_the_completed_observation(
 
 def test_refused_calibration_evidence_batch_still_marks_evidence_unavailable() -> None:
     persistence = _Persistence(accepted=False)
-    runtime, _runner, _persistence, _trace_session, _recorder = _runtime(
-        persistence=persistence
-    )
+    runtime, _runner, _persistence, _trace_session, _recorder = _runtime(persistence=persistence)
 
     runtime.submit_completed_observation((0, 0), _calibration_observation())
 
@@ -1232,10 +1316,7 @@ def test_multiple_invalid_probes_keep_distinct_bounded_fifo_entries() -> None:
     runtime.reconcile_outcomes(42.0)
 
     assert runner.submissions == []
-    assert [
-        payload.observation_sequence
-        for payload in _observation_payloads(recorder)
-    ] == [1, 2]
+    assert [payload.observation_sequence for payload in _observation_payloads(recorder)] == [1, 2]
 
 
 def test_missing_collaborators_preserve_public_noop_boundaries() -> None:
@@ -1269,9 +1350,7 @@ def test_malformed_submission_identity_is_not_partially_retained() -> None:
             return ObservationSubmission(cast(int, True), 0)
 
     runner = MalformedSubmissionRunner()
-    runtime, _runner, _persistence, _trace_session, recorder = _runtime(
-        runner=runner
-    )
+    runtime, _runner, _persistence, _trace_session, recorder = _runtime(runner=runner)
     observation = _observation()
 
     runtime.submit_completed_observation((0, 0), observation)
@@ -1323,19 +1402,14 @@ def test_runner_outcome_rejections_and_malformed_payloads_stay_visible() -> None
 
     runtime.reconcile_outcomes(102.0)
 
-    assert [
-        payload.rejection_reasons
-        for payload in _observation_payloads(recorder)
-    ] == [
+    assert [payload.rejection_reasons for payload in _observation_payloads(recorder)] == [
         ("allocation-result-missing",),
         ("invalid-probe",),
         ("observation-role-generation-mismatch",),
         ("observation-gate-mismatch",),
         ("observation-outcome-malformed",),
     ]
-    assert [
-        payload.decision_id for payload in _evaluation_payloads(recorder)
-    ] == ["evaluation-1"]
+    assert [payload.decision_id for payload in _evaluation_payloads(recorder)] == ["evaluation-1"]
 
 
 def test_lifecycle_payload_validation_records_only_well_formed_event() -> None:
@@ -1422,10 +1496,7 @@ def test_generation_binding_updates_only_matching_pending_identity() -> None:
     runtime.reconcile_outcomes(42.0)
 
     assert runner.bindings == [(3, identity.session_id, identity.cook_id)]
-    assert [
-        payload.rejection_reasons
-        for payload in _observation_payloads(recorder)
-    ] == [
+    assert [payload.rejection_reasons for payload in _observation_payloads(recorder)] == [
         ("insufficient-excitation",),
         ("observation-configuration-mismatch",),
     ]
@@ -1453,9 +1524,7 @@ def test_public_evidence_path_handles_absent_runner_and_blocked_store() -> None:
 
 def test_calibration_persistence_refusal_blocks_learner_submission() -> None:
     persistence = _Persistence(accepted=False)
-    runtime, runner, _persistence, _trace_session, recorder = _runtime(
-        persistence=persistence
-    )
+    runtime, runner, _persistence, _trace_session, recorder = _runtime(persistence=persistence)
     allocation = allocate(
         0.25,
         u_max=0.5,
@@ -1486,18 +1555,14 @@ def test_calibration_persistence_refusal_blocks_learner_submission() -> None:
 
     assert runtime.evidence_available is False
     assert runner.submissions == []
-    assert [payload.reason for payload in _gap_payloads(recorder)] == [
-        "model-persistence-unavailable"
-    ]
+    assert [payload.reason for payload in _gap_payloads(recorder)] == ["model-persistence-unavailable"]
 
 
 def test_trace_refusal_retains_record_for_public_reconciliation_retry() -> None:
     runtime, runner, _persistence, trace, recorder = _runtime()
     observation = _observation()
     runtime.submit_completed_observation((0, 0), observation)
-    runner.drains.append(
-        _drain(ObservationOutcomeEnvelope(1, 0, observation, _outcome()))
-    )
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 0, observation, _outcome())))
     original_record = trace.record
     trace.record = lambda *_args, **_kwargs: False
 
@@ -1507,10 +1572,7 @@ def test_trace_refusal_retains_record_for_public_reconciliation_retry() -> None:
     trace.record = original_record
     runtime.reconcile_outcomes(23.0)
 
-    assert [
-        payload.observation_sequence
-        for payload in _observation_payloads(recorder)
-    ] == [1]
+    assert [payload.observation_sequence for payload in _observation_payloads(recorder)] == [1]
 
 
 def test_invalid_probe_trace_retry_is_fenced_by_generation_retirement() -> None:
@@ -1600,9 +1662,7 @@ def test_restore_model_records_runner_rejection_and_starts_fresh() -> None:
     assert record.payload.provenance == "persisted"
     assert record.payload.detail == "stored model rejected for restore"
     assert logger.infos == []
-    assert logger.warnings == [
-        "Stored pid_sp model was rejected; starting fresh"
-    ]
+    assert logger.warnings == ["Stored pid_sp model was rejected; starting fresh"]
 
 
 def test_restore_model_leaves_invalid_checkpoint_behavior_with_the_store() -> None:
@@ -1663,9 +1723,7 @@ def test_reconcile_activation_treats_absent_durable_state_as_noop(
 
     monkeypatch.setattr(learning_module, "read_model_activation", lambda: None)
     monkeypatch.setattr(learning_module, "read_model_evidence", lambda: ())
-    runtime, runner, _store, _trace_session, _recorder, logger = (
-        _lifecycle_runtime(controller_name="mpc")
-    )
+    runtime, runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(controller_name="mpc")
 
     runtime.reconcile_activation()
     runtime.reconcile_activation()
@@ -1696,9 +1754,7 @@ def test_reconcile_activation_restores_each_prepared_active_and_aborted_identity
         lambda: states[selected],
     )
     monkeypatch.setattr(learning_module, "read_model_evidence", lambda: records)
-    runtime, runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(controller_name="mpc")
-    )
+    runtime, runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(controller_name="mpc")
 
     for index in range(len(states)):
         selected = index
@@ -1717,17 +1773,13 @@ def test_reconcile_activation_rejects_retired_schema_identity(
     retired = replace(state, transaction_id=None)
     monkeypatch.setattr(learning_module, "read_model_activation", lambda: retired)
     monkeypatch.setattr(learning_module, "read_model_evidence", lambda: ())
-    runtime, runner, _store, _trace_session, _recorder, logger = (
-        _lifecycle_runtime(controller_name="mpc")
-    )
+    runtime, runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(controller_name="mpc")
 
     runtime.reconcile_activation()
 
     assert runner.activation_restores == []
     assert not runtime.evidence_available
-    assert logger.warnings == [
-        "Model activation authority uses a retired schema"
-    ]
+    assert logger.warnings == ["Model activation authority uses a retired schema"]
 
 
 @pytest.mark.parametrize("fallback", (False, True), ids=("rollback", "fallback"))
@@ -1741,9 +1793,7 @@ def test_reconcile_activation_applies_each_later_lifecycle_high_water_once(
     records: list[ModelEvidenceRecord] = []
     monkeypatch.setattr(learning_module, "read_model_activation", lambda: state)
     monkeypatch.setattr(learning_module, "read_model_evidence", lambda: records)
-    runtime, runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(controller_name="mpc")
-    )
+    runtime, runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(controller_name="mpc")
     runtime.reconcile_activation()
     first = _activation_lifecycle_record(
         state,
@@ -1787,17 +1837,13 @@ def test_reconcile_activation_read_failure_marks_evidence_unavailable(
 
     monkeypatch.setattr(learning_module, "read_model_activation", unavailable)
     monkeypatch.setattr(learning_module, "read_model_evidence", lambda: ())
-    runtime, runner, _store, _trace_session, _recorder, logger = (
-        _lifecycle_runtime(controller_name="mpc")
-    )
+    runtime, runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(controller_name="mpc")
 
     runtime.reconcile_activation()
 
     assert runner.activation_restores == []
     assert not runtime.evidence_available
-    assert logger.warnings == [
-        "Model activation state unavailable: database unavailable"
-    ]
+    assert logger.warnings == ["Model activation state unavailable: database unavailable"]
 
 
 @pytest.mark.parametrize("accepted", (True, False), ids=("accepted", "refused"))
@@ -1809,8 +1855,8 @@ def test_drain_activation_events_submits_one_ordered_atomic_batch(
     runner = _LifecycleRunner()
     runner.activation_events.extend((first, second))
     persistence = _Persistence(accepted=accepted)
-    runtime, _runner, _store, _trace_session, _recorder, logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
 
     runtime.drain_activation_events()
@@ -1818,11 +1864,7 @@ def test_drain_activation_events_submits_one_ordered_atomic_batch(
 
     assert persistence.batches == [(first, second)]
     assert runtime.evidence_available is accepted
-    assert logger.warnings == (
-        []
-        if accepted
-        else ["Model activation fallback evidence was not persisted"]
-    )
+    assert logger.warnings == ([] if accepted else ["Model activation fallback evidence was not persisted"])
 
 
 def test_status_fragment_returns_a_copy_of_live_learning_status() -> None:
@@ -1834,9 +1876,7 @@ def test_status_fragment_returns_a_copy_of_live_learning_status() -> None:
     }
     runner = _LifecycleRunner()
     runner.status = {"learning": learning}
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner)
-    )
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(runner=runner)
 
     fragment = runtime.status_fragment()
 
@@ -1857,9 +1897,7 @@ def test_submit_online_checkpoint_uses_nonblocking_worker_and_availability(
     accepted: bool,
 ) -> None:
     persistence = _Persistence(checkpoint_results=(accepted,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(persistence=persistence)
-    )
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(persistence=persistence)
     snapshot: dict[str, object] = {"revision": 9, "params": {"theta": 40.0}}
 
     result = runtime.submit_online_checkpoint(snapshot)
@@ -1930,9 +1968,7 @@ def test_refit_once_returns_immutable_typed_outcome_and_never_repeats(
 ) -> None:
     runner = _LifecycleRunner()
     runner.refit_result = verdict
-    runtime, _runner, _store, _trace_session, _recorder, logger = (
-        _lifecycle_runtime(runner=runner)
-    )
+    runtime, _runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(runner=runner)
 
     first = runtime.refit_once(_learning_settings(enabled))
     second = runtime.refit_once(_learning_settings(not enabled))
@@ -1944,13 +1980,9 @@ def test_refit_once_returns_immutable_typed_outcome_and_never_repeats(
     with pytest.raises(FrozenInstanceError):
         setattr(first, "outcome", TeardownRefitOutcome.FAILED)
     if not enabled:
-        assert logger.infos == [
-            "Model refit skipped at cook end: Learn This Grill is disabled."
-        ]
+        assert logger.infos == ["Model refit skipped at cook end: Learn This Grill is disabled."]
     else:
-        assert logger.infos == [
-            f"Model refit at cook end: {expected_outcome.value} ({reason})."
-        ]
+        assert logger.infos == [f"Model refit at cook end: {expected_outcome.value} ({reason})."]
 
 
 @pytest.mark.parametrize(
@@ -1977,9 +2009,7 @@ def test_refit_once_turns_malformed_and_exception_results_into_typed_failure(
     runner = _LifecycleRunner()
     runner.refit_result = runner_result
     runner.refit_error = runner_error
-    runtime, _runner, _store, _trace_session, _recorder, logger = (
-        _lifecycle_runtime(runner=runner)
-    )
+    runtime, _runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(runner=runner)
 
     result = runtime.refit_once(_learning_settings(True))
 
@@ -2059,8 +2089,8 @@ def test_publish_final_checkpoint_never_queues_snapshot_stale_before_finalizatio
         runner.finalize_errors = [RuntimeError("finalize exploded"), None]
         runner.finalize_results = [True]
     persistence = _Persistence()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
     refit = runtime.refit_once(_learning_settings(False))
 
@@ -2083,8 +2113,8 @@ def test_publish_final_checkpoint_makes_missing_or_malformed_snapshot_terminal(
     runner = _LifecycleRunner()
     runner.snapshot = snapshot
     persistence = _Persistence()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
     refit = runtime.refit_once(_learning_settings(False))
 
@@ -2111,8 +2141,8 @@ def test_publish_final_checkpoint_bounds_authoritative_retry_and_is_idempotent()
     runner.finalize_results = [True, True]
     runner.snapshot = {"revision": 12, "cook_refit": {"latest": "accepted-next-cook"}}
     persistence = _Persistence(checkpoint_results=(False, True))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
     refit = runtime.refit_once(_learning_settings(True))
 
@@ -2124,8 +2154,7 @@ def test_publish_final_checkpoint_bounds_authoritative_retry_and_is_idempotent()
         TeardownRefitOutcome.CHECKPOINT_FAILURE,
     ]
     assert [
-        cast(Mapping[str, object], snapshot["cook_refit"])["latest"]
-        for _name, snapshot in persistence.checkpoints
+        cast(Mapping[str, object], snapshot["cook_refit"])["latest"] for _name, snapshot in persistence.checkpoints
     ] == ["accepted-next-cook", "checkpoint-failure"]
     assert not runtime.evidence_available
 
@@ -2136,13 +2165,11 @@ def test_finish_teardown_orders_retire_flush_trace_close_and_runner_finish_once(
     persistence = _Persistence(events=events)
     recorder = _Recorder(events=events)
     trace, _recorder = _trace(recorder=recorder)
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(
-            runner=runner,
-            persistence=persistence,
-            trace=trace,
-            recorder=recorder,
-        )
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        persistence=persistence,
+        trace=trace,
+        recorder=recorder,
     )
 
     runtime.finish_teardown(generation=4)
@@ -2169,8 +2196,8 @@ def test_finish_teardown_marks_flush_failure_and_still_finishes_resources(
         flush_result=failure != "refusal",
         flush_error=TimeoutError("flush timed out") if failure == "timeout" else None,
     )
-    runtime, _runner, _store, _trace_session, recorder, _logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, recorder, _logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
 
     runtime.finish_teardown(generation=5)
@@ -2194,22 +2221,18 @@ def test_finish_teardown_trace_and_runner_finish_exceptions_are_terminal_once() 
     runner = _LifecycleRunner(events=events)
     runner.finish_error = RuntimeError("runner exploded")
     logger = _LifecycleLogger()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(
-            runner=runner,
-            trace=trace,
-            recorder=recorder,
-            logger=logger,
-        )
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        trace=trace,
+        recorder=recorder,
+        logger=logger,
     )
 
     runtime.finish_teardown(generation=6)
     runtime.finish_teardown(generation=6)
 
     assert warnings == ["Control trace close failed: trace exploded"]
-    assert logger.warnings == [
-        "Controller teardown close failed: runner exploded"
-    ]
+    assert logger.warnings == ["Controller teardown close failed: runner exploded"]
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
 
@@ -2303,9 +2326,7 @@ def test_status_fragment_rejects_invalid_public_runner_status(
     runner = _LifecycleRunner()
     runner.status = status
     runner.status_error = status_error
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner)
-    )
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(runner=runner)
 
     assert runtime.status_fragment() == {}
 
@@ -2322,9 +2343,7 @@ def test_status_fragment_rejects_invalid_public_runner_status(
 def test_refit_once_rejects_malformed_settings_as_disabled(
     settings,
 ) -> None:
-    runtime, runner, _store, _trace_session, _recorder, logger = (
-        _lifecycle_runtime()
-    )
+    runtime, runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime()
 
     result = runtime.refit_once(settings)
 
@@ -2372,8 +2391,8 @@ def test_failed_identical_checkpoint_stops_when_failure_finalization_refuses() -
     runner.snapshot = snapshot
     runner.finalize_results = [True, False]
     persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
 
     assert not runtime.submit_online_checkpoint(snapshot)
@@ -2395,8 +2414,8 @@ def test_checkpoint_failure_outcome_does_not_retry_a_refused_snapshot() -> None:
     runner = _LifecycleRunner()
     runner.snapshot = snapshot
     persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
 
     published = runtime.publish_final_checkpoint_once(
@@ -2427,8 +2446,8 @@ def test_authoritative_retry_rejects_a_malformed_refinalized_snapshot() -> None:
     runner.snapshot = snapshot
     runner.finalize_results = [True, True]
     persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(runner=runner, persistence=persistence)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner, persistence=persistence
     )
 
     published = runtime.publish_final_checkpoint_once(
@@ -2469,13 +2488,11 @@ def test_finish_teardown_contains_retirement_and_trace_flush_exceptions() -> Non
     assert identity is not None
     runner = _RetireFailureRunner()
     logger = _LifecycleLogger()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = (
-        _lifecycle_runtime(
-            runner=runner,
-            trace=trace,
-            recorder=recorder,
-            logger=logger,
-        )
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        trace=trace,
+        recorder=recorder,
+        logger=logger,
     )
 
     runtime.finish_teardown(generation=7)

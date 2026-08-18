@@ -63,19 +63,12 @@ from controller.runtime.runner import (
 type _FrameKey = tuple[int, int]
 type _OutcomeScalar = None | bool | int | float | str | ModelEvaluationPayload
 type _OutcomeValue = (
-    _OutcomeScalar
-    | Mapping[str, "_OutcomeValue"]
-    | tuple["_OutcomeValue", ...]
-    | list["_OutcomeValue"]
+    _OutcomeScalar | Mapping[str, "_OutcomeValue"] | tuple["_OutcomeValue", ...] | list["_OutcomeValue"]
 )
 type _Outcome = Mapping[str, _OutcomeValue]
 type _TraceRecord = tuple[TraceEventKind, ControlTracePayload]
 type _StatusScalar = None | bool | int | float | str
-type _StatusValue = (
-    _StatusScalar
-    | Mapping[str, "_StatusValue"]
-    | tuple["_StatusValue", ...]
-)
+type _StatusValue = _StatusScalar | Mapping[str, "_StatusValue"] | tuple["_StatusValue", ...]
 type _ActivationIdentity = tuple[
     str,
     str,
@@ -125,8 +118,6 @@ class _ParsedOutcome:
     model_digest: str | None
 
 
-
-
 def parse_model_lifecycle_payload(
     value: Mapping[str, object] | None,
 ) -> ModelEventPayload | None:
@@ -160,17 +151,14 @@ def parse_model_lifecycle_payload(
             snapshot_digest=cast(str | None, value["snapshot_digest"]),
             parameters=parameters,
         )
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return None
-
 
 
 class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
     """Typed runner surface owned by Hold's complete learning lifecycle."""
 
-    def observe_frame(
-        self, observation: FrameObservation
-    ) -> ObservationSubmission | None: ...
+    def observe_frame(self, observation: FrameObservation) -> ObservationSubmission | None: ...
 
     def complete_frame(
         self,
@@ -347,15 +335,9 @@ class HoldLearningRuntime:
                         intended_probe_load=event.intended_probe_q,
                         bounded_probe_load=event.bounded_probe_q,
                         cumulative_probe_load=event.realized_probe_sum,
-                        eligible_observations=(
-                            decision.progress.eligible_observations
-                        ),
-                        positive_observations=(
-                            decision.progress.positive_observations
-                        ),
-                        negative_observations=(
-                            decision.progress.negative_observations
-                        ),
+                        eligible_observations=(decision.progress.eligible_observations),
+                        positive_observations=(decision.progress.positive_observations),
+                        negative_observations=(decision.progress.negative_observations),
                         reasons=event.reasons,
                     ),
                     timestamp_ms,
@@ -376,23 +358,12 @@ class HoldLearningRuntime:
             if decision.active
             else self._CALIBRATION_OUTCOME_STATUS.get(
                 decision.outcome or "",
-                (
-                    "accepted"
-                    if any(
-                        event.kind == "start_accepted"
-                        for event in decision.events
-                    )
-                    else "inactive"
-                ),
+                ("accepted" if any(event.kind == "start_accepted" for event in decision.events) else "inactive"),
             )
         )
         return CalibrationHandoff(
             status=status,
-            reason=(
-                ", ".join(decision.outcome_reasons)
-                if decision.outcome_reasons
-                else None
-            ),
+            reason=(", ".join(decision.outcome_reasons) if decision.outcome_reasons else None),
             probe_load=decision.probe_q,
             stage=cast(
                 _CalibrationStage | None,
@@ -436,9 +407,7 @@ class HoldLearningRuntime:
                     cast(Mapping[str, JsonValue], snapshot),
                     provenance,
                 )
-            self._logger.info(
-                f"Submitted the stored {self._controller_name} model for restore"
-            )
+            self._logger.info(f"Submitted the stored {self._controller_name} model for restore")
             if trace is not None:
                 trace.record_model(
                     TraceModelContext(
@@ -450,9 +419,7 @@ class HoldLearningRuntime:
                     )
                 )
             return
-        self._logger.warning(
-            f"Stored {self._controller_name} model was rejected; starting fresh"
-        )
+        self._logger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
         if trace is not None:
             trace.record_model(
                 TraceModelContext(
@@ -522,27 +489,15 @@ class HoldLearningRuntime:
         identity = self._activation_identity(state)
         if state is not None and identity is None:
             self.mark_evidence_unavailable()
-            self._logger.warning(
-                "Model activation authority uses a retired schema"
-            )
+            self._logger.warning("Model activation authority uses a retired schema")
             return
-        lifecycle = (
-            None
-            if state is None
-            else self._pair_activation_lifecycle(state, records)
-        )
+        lifecycle = None if state is None else self._pair_activation_lifecycle(state, records)
         if state is not None and identity != self._activation_state_identity:
             runner.restore_activation(state, records)
             self._activation_state_identity = identity
-            self._activation_lifecycle_evidence_id = (
-                None if lifecycle is None else lifecycle.evidence_id
-            )
+            self._activation_lifecycle_evidence_id = None if lifecycle is None else lifecycle.evidence_id
             return
-        if (
-            lifecycle is None
-            or lifecycle.evidence_id
-            == self._activation_lifecycle_evidence_id
-        ):
+        if lifecycle is None or lifecycle.evidence_id == self._activation_lifecycle_evidence_id:
             return
         self._activation_lifecycle_evidence_id = lifecycle.evidence_id
         if isinstance(lifecycle.payload, RollbackEvidence):
@@ -558,14 +513,9 @@ class HoldLearningRuntime:
         if not records:
             return
         persistence = self._persistence
-        if (
-            persistence is None
-            or not persistence.submit_evidence_batch(records).accepted
-        ):
+        if persistence is None or not persistence.submit_evidence_batch(records).accepted:
             self.mark_evidence_unavailable()
-            self._logger.warning(
-                "Model activation fallback evidence was not persisted"
-            )
+            self._logger.warning("Model activation fallback evidence was not persisted")
 
     def status_fragment(self) -> dict[str, dict[str, _StatusValue]]:
         runner = self._runner
@@ -627,9 +577,7 @@ class HoldLearningRuntime:
             self._refit_result = result
             return result
         if not enabled:
-            self._logger.info(
-                "Model refit skipped at cook end: Learn This Grill is disabled."
-            )
+            self._logger.info("Model refit skipped at cook end: Learn This Grill is disabled.")
             result = HoldRefitResult(TeardownRefitOutcome.DISABLED, None)
             self._refit_result = result
             return result
@@ -652,15 +600,11 @@ class HoldLearningRuntime:
             outcome = verdict.outcome
             reason = verdict.reason
         else:
-            self._logger.error(
-                "Model refit failed at cook end: invalid refit result"
-            )
+            self._logger.error("Model refit failed at cook end: invalid refit result")
             result = HoldRefitResult(TeardownRefitOutcome.FAILED, None)
             self._refit_result = result
             return result
-        self._logger.info(
-            f"Model refit at cook end: {outcome.value} ({reason})."
-        )
+        self._logger.info(f"Model refit at cook end: {outcome.value} ({reason}).")
         result = HoldRefitResult(outcome, verdict)
         self._refit_result = result
         return result
@@ -696,11 +640,7 @@ class HoldLearningRuntime:
                 timestamp_ms=timestamp_ms,
             )
         )
-        detail = (
-            result.verdict.reason
-            if result.verdict is not None
-            else outcome.value
-        )
+        detail = result.verdict.reason if result.verdict is not None else outcome.value
         if outcome in {
             TeardownRefitOutcome.READY_FOR_REVIEW,
             TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
@@ -721,10 +661,7 @@ class HoldLearningRuntime:
         )
 
     def _finalize_checkpoint_failure(self) -> None:
-        if (
-            self._final_checkpoint_outcome
-            is TeardownRefitOutcome.CHECKPOINT_FAILURE
-        ):
+        if self._final_checkpoint_outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE:
             return
         self._finalize_outcome(TeardownRefitOutcome.CHECKPOINT_FAILURE)
 
@@ -772,9 +709,7 @@ class HoldLearningRuntime:
                 snapshot,
                 timestamp_ms,
             )
-            self._final_checkpoint_succeeded = self.submit_online_checkpoint(
-                snapshot
-            )
+            self._final_checkpoint_succeeded = self.submit_online_checkpoint(snapshot)
             return self._final_checkpoint_succeeded
         if self.submit_online_checkpoint(snapshot):
             self._final_checkpoint_succeeded = True
@@ -793,9 +728,7 @@ class HoldLearningRuntime:
             retry_snapshot,
             timestamp_ms,
         )
-        self._final_checkpoint_succeeded = self.submit_online_checkpoint(
-            retry_snapshot
-        )
+        self._final_checkpoint_succeeded = self.submit_online_checkpoint(retry_snapshot)
         return self._final_checkpoint_succeeded
 
     def finish_teardown(self, *, generation: int) -> None:
@@ -808,24 +741,17 @@ class HoldLearningRuntime:
             try:
                 self.retire_generation(generation)
             except Exception as error:
-                self._logger.warning(
-                    f"Controller evidence retirement failed: {error}"
-                )
+                self._logger.warning(f"Controller evidence retirement failed: {error}")
         persistence = self._persistence
         if not self._persistence_finished:
             self._persistence_finished = True
             flushed = persistence is None
             if persistence is not None:
                 try:
-                    flushed = (
-                        persistence.flush_and_stop()
-                        and not persistence.failed
-                    )
+                    flushed = persistence.flush_and_stop() and not persistence.failed
                 except Exception as error:
                     flushed = False
-                    self._logger.warning(
-                        f"Model persistence flush failed: {error}"
-                    )
+                    self._logger.warning(f"Model persistence flush failed: {error}")
             if not flushed:
                 self.mark_evidence_unavailable()
                 self._finalize_checkpoint_failure()
@@ -836,27 +762,21 @@ class HoldLearningRuntime:
                 try:
                     trace.flush_pending()
                 except Exception as error:
-                    self._logger.warning(
-                        f"Control trace flush failed: {error}"
-                    )
+                    self._logger.warning(f"Control trace flush failed: {error}")
         if not self._trace_finished:
             self._trace_finished = True
             if trace is not None:
                 try:
                     trace.close()
                 except Exception as error:
-                    self._logger.warning(
-                        f"Control trace close failed: {error}"
-                    )
+                    self._logger.warning(f"Control trace close failed: {error}")
         if not self._runner_finished:
             self._runner_finished = True
             if runner is not None:
                 try:
                     runner.finish_teardown()
                 except Exception as error:
-                    self._logger.warning(
-                        f"Controller teardown close failed: {error}"
-                    )
+                    self._logger.warning(f"Controller teardown close failed: {error}")
 
     def submit_completed_observation(
         self,
@@ -867,6 +787,15 @@ class HoldLearningRuntime:
         """Submit one completed frame while retaining its exact immutable identity."""
         self._submit_calibration_frame_evidence(observation)
         if not observation.probe_valid:
+            # The observation trace is telemetry about the frame, never part of
+            # actuating it, so a payload the trace model refuses costs the record
+            # and leaves a gap in its place.
+            try:
+                rejected = self._rejected_model_observation(observation, "invalid-probe")
+            except Exception as error:
+                self._logger.warning(f"Rejected model observation failed: {error}")
+                self.record_gap(observation, "invalid-probe")
+                return
             sequence = -1
             while sequence in self._pending:
                 sequence -= 1
@@ -875,36 +804,23 @@ class HoldLearningRuntime:
                 observation=observation,
                 trace_identity=self._trace_identity,
                 configuration_generation=self._generation,
-                records=(
-                    (
-                        TraceEventKind.MODEL_OBSERVATION,
-                        self._rejected_model_observation(observation, "invalid-probe"),
-                    ),
-                ),
+                records=((TraceEventKind.MODEL_OBSERVATION, rejected),),
             )
             self._bound_pending()
             return
 
         persistence = self._persistence
-        if not self._evidence_available or (
-            persistence is not None and persistence.evidence_blocked
-        ):
+        if not self._evidence_available or (persistence is not None and persistence.evidence_blocked):
             self._evidence_available = False
             self.record_gap(observation, "model-persistence-unavailable")
-            if (
-                feedback is None
-                or feedback.feedback_disposition
-                is FrameFeedbackDisposition.PROGRESS
-            ):
+            if feedback is None or feedback.feedback_disposition is FrameFeedbackDisposition.PROGRESS:
                 return
 
         runner = self._runner
         if runner is None:
             return
         submission = (
-            runner.complete_frame(feedback, observation)
-            if feedback is not None
-            else runner.observe_frame(observation)
+            runner.complete_frame(feedback, observation) if feedback is not None else runner.observe_frame(observation)
         )
         if submission is None:
             return
@@ -926,9 +842,7 @@ class HoldLearningRuntime:
             configuration_generation=generation,
         )
         evicted_sequence = submission.evicted_sequence
-        if isinstance(evicted_sequence, int) and not isinstance(
-            evicted_sequence, bool
-        ):
+        if isinstance(evicted_sequence, int) and not isinstance(evicted_sequence, bool):
             self._retire_pending(evicted_sequence, "runner-observation-evicted")
         self._bound_pending()
 
@@ -948,8 +862,7 @@ class HoldLearningRuntime:
             if pending is None:
                 continue
             if (
-                envelope.configuration_generation
-                != pending.configuration_generation
+                envelope.configuration_generation != pending.configuration_generation
                 or pending.trace_identity != self._trace_identity
             ):
                 self._queue_rejected(
@@ -959,19 +872,13 @@ class HoldLearningRuntime:
                 continue
             delivered = envelope.observation
             outcome_value = envelope.outcome
-            if not isinstance(delivered, FrameObservation) or not isinstance(
-                outcome_value, Mapping
-            ):
+            if not isinstance(delivered, FrameObservation) or not isinstance(outcome_value, Mapping):
                 self._queue_rejected(sequence, "observation-outcome-malformed")
                 continue
             self.persist_evidence(envelope.evidence)
             outcome = cast(_Outcome, outcome_value)
             evaluation_value = outcome.get("evaluation_payload")
-            evaluation = (
-                evaluation_value
-                if isinstance(evaluation_value, ModelEvaluationPayload)
-                else None
-            )
+            evaluation = evaluation_value if isinstance(evaluation_value, ModelEvaluationPayload) else None
             try:
                 parsed = self._parse_outcome(outcome)
                 rejection = self._outcome_rejection(delivered, parsed)
@@ -979,7 +886,7 @@ class HoldLearningRuntime:
                     self._queue_rejected(sequence, rejection, evaluation)
                     continue
                 observation_payload = self._observation_payload(delivered, parsed)
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 self._queue_rejected(
                     sequence,
                     "observation-outcome-malformed",
@@ -987,16 +894,12 @@ class HoldLearningRuntime:
                 )
                 continue
 
-            records: list[_TraceRecord] = [
-                (TraceEventKind.MODEL_OBSERVATION, observation_payload)
-            ]
+            records: list[_TraceRecord] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
             if evaluation is not None:
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation))
             lifecycle_value = outcome.get("lifecycle")
             lifecycle = parse_model_lifecycle_payload(
-                cast(Mapping[str, object], lifecycle_value)
-                if isinstance(lifecycle_value, Mapping)
-                else None
+                cast(Mapping[str, object], lifecycle_value) if isinstance(lifecycle_value, Mapping) else None
             )
             if lifecycle is not None:
                 records.append((TraceEventKind.MODEL_EVENT, lifecycle))
@@ -1011,12 +914,13 @@ class HoldLearningRuntime:
                 break
 
     def record_gap(self, observation: FrameObservation, reason: str) -> None:
+        # This is where every refused observation lands, so a frame the gap models
+        # cannot describe either costs the gap and nothing more.
         publication_ms = int(observation.frame_end_s * 1_000)
         trace = self._trace
         if trace is not None:
-            trace.record(
-                TraceEventKind.RECORDER_GAP,
-                RecorderGapPayload(
+            try:
+                gap_payload = RecorderGapPayload(
                     lost_record_count=1,
                     gap_start_ms=int(observation.frame_start_s * 1_000),
                     gap_end_ms=publication_ms,
@@ -1025,28 +929,35 @@ class HoldLearningRuntime:
                     frame_end_ms=publication_ms,
                     result_revision=observation.result_revision,
                     observation_sequence=observation.observation_sequence,
-                ),
-                publication_ms,
-            )
+                )
+            except Exception as error:
+                self._logger.warning(f"Recorder gap trace failed: {error}")
+            else:
+                trace.record(TraceEventKind.RECORDER_GAP, gap_payload, publication_ms)
         identity = self._trace_identity
         persistence = self._persistence
         if persistence is None or identity is None:
             return
-        gap = ModelEvidenceRecord(
-            evidence_id=(
-                f"{identity.session_id}:recorder-gap:{observation.role_generation}:"
-                f"{observation.observation_sequence}:{publication_ms}"
-            ),
-            kind=EvidenceKind.RECORDER_GAP,
-            session_id=identity.session_id,
-            cook_id=identity.cook_id,
-            timestamp_ms=publication_ms,
-            role_generation=observation.role_generation,
-            model_digest=None,
-            provenance_digest=None,
-            payload=RecorderGapEvidence(lost_record_count=1, reason=reason),
-        )
-        if not persistence.submit_evidence_batch((gap,)).accepted:
+        try:
+            gap = ModelEvidenceRecord(
+                evidence_id=(
+                    f"{identity.session_id}:recorder-gap:{observation.role_generation}:"
+                    f"{observation.observation_sequence}:{publication_ms}"
+                ),
+                kind=EvidenceKind.RECORDER_GAP,
+                session_id=identity.session_id,
+                cook_id=identity.cook_id,
+                timestamp_ms=publication_ms,
+                role_generation=observation.role_generation,
+                model_digest=None,
+                provenance_digest=None,
+                payload=RecorderGapEvidence(lost_record_count=1, reason=reason),
+            )
+            accepted = persistence.submit_evidence_batch((gap,)).accepted
+        except Exception as error:
+            self._logger.warning(f"Recorder gap evidence failed: {error}")
+            return
+        if not accepted:
             self._evidence_available = False
 
     def bind_generation(self, generation: int) -> None:
@@ -1079,30 +990,15 @@ class HoldLearningRuntime:
             for sequence, pending in self._pending.items()
             if pending.configuration_generation != generation
         }
-        return tuple(
-            sorted(
-                {
-                    pending.configuration_generation
-                    for pending in self._pending.values()
-                }
-            )
-        )
+        return tuple(sorted({pending.configuration_generation for pending in self._pending.values()}))
 
     def persist_evidence(
         self,
         evidence: tuple[ModelEvidenceRecord, ...],
     ) -> None:
         """Preserve the established confidence/ordinary split-channel order."""
-        confidence = tuple(
-            record
-            for record in evidence
-            if record.kind is EvidenceKind.CONFIDENCE_DECISION
-        )
-        ordinary = tuple(
-            record
-            for record in evidence
-            if record.kind is not EvidenceKind.CONFIDENCE_DECISION
-        )
+        confidence = tuple(record for record in evidence if record.kind is EvidenceKind.CONFIDENCE_DECISION)
+        ordinary = tuple(record for record in evidence if record.kind is not EvidenceKind.CONFIDENCE_DECISION)
         runner = self._runner
         if runner is not None:
             for record in confidence:
@@ -1110,11 +1006,7 @@ class HoldLearningRuntime:
                 if receipt is None or not receipt.accepted:
                     self._evidence_available = False
         persistence = self._persistence
-        if (
-            ordinary
-            and persistence is not None
-            and not persistence.submit_evidence_batch(ordinary).accepted
-        ):
+        if ordinary and persistence is not None and not persistence.submit_evidence_batch(ordinary).accepted:
             self._evidence_available = False
         if persistence is not None and persistence.evidence_blocked:
             self._evidence_available = False
@@ -1172,17 +1064,19 @@ class HoldLearningRuntime:
         if pending is None:
             self._pending.pop(sequence, None)
             return
+        # The observation trace is telemetry about the frame, never part of
+        # actuating it, so a payload the trace model refuses costs the record and
+        # leaves a gap in its place.
         try:
             rejected = self._rejected_model_observation(
                 pending.observation,
                 reason,
             )
-        except ValueError:
+        except Exception as error:
+            self._logger.warning(f"Rejected model observation failed: {error}")
             self._retire_pending(sequence, reason)
             return
-        records: tuple[_TraceRecord, ...] = (
-            (TraceEventKind.MODEL_OBSERVATION, rejected),
-        )
+        records: tuple[_TraceRecord, ...] = ((TraceEventKind.MODEL_OBSERVATION, rejected),)
         if evaluation is not None:
             records += ((TraceEventKind.MODEL_EVALUATION, evaluation),)
         self._pending[sequence] = replace(pending, records=records)
@@ -1270,10 +1164,7 @@ class HoldLearningRuntime:
             return None
         payload = CalibrationSummaryEvidence(
             accepted=observation.calibration_status in {"accepted", "active"},
-            probe_count=int(
-                observation.calibration_status == "active"
-                and observation.probe_q != 0.0
-            ),
+            probe_count=int(observation.calibration_status == "active" and observation.probe_q != 0.0),
             reason=observation.calibration_cancellation_reason,
             result_revision=observation.result_revision,
             command_revision=observation.calibration_command_revision,
@@ -1284,12 +1175,8 @@ class HoldLearningRuntime:
             baseline_q=observation.baseline_q,
             probe_q=observation.probe_q,
             combined_q=observation.requested_q,
-            baseline_allocation=cls._allocation_evidence(
-                observation.baseline_allocation
-            ),
-            combined_allocation=cls._allocation_evidence(
-                observation.combined_allocation
-            ),
+            baseline_allocation=cls._allocation_evidence(observation.baseline_allocation),
+            combined_allocation=cls._allocation_evidence(observation.combined_allocation),
             scheduled_on_seconds=observation.scheduled_on_s,
             cancellation_command_revision=observation.cancellation_command_revision,
             cancellation_command_action=cast(
@@ -1310,8 +1197,7 @@ class HoldLearningRuntime:
         )
         return ModelEvidenceRecord(
             evidence_id=(
-                f"{session_id}:calibration-frame:{observation.result_revision}:"
-                f"{int(observation.frame_start_s * 1_000)}"
+                f"{session_id}:calibration-frame:{observation.result_revision}:{int(observation.frame_start_s * 1_000)}"
             ),
             kind=EvidenceKind.CALIBRATION_SUMMARY,
             session_id=session_id,
@@ -1374,11 +1260,7 @@ class HoldLearningRuntime:
         observation: FrameObservation,
         outcome: _ParsedOutcome,
     ) -> ModelObservationPayload:
-        output_source = (
-            OutputSource(observation.output_source)
-            if observation.output_source != "unknown"
-            else None
-        )
+        output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
         return ModelObservationPayload(
             frame_start_ms=int(observation.frame_start_s * 1_000),
             frame_end_ms=int(observation.frame_end_s * 1_000),
@@ -1452,9 +1334,7 @@ class HoldLearningRuntime:
     def _parse_outcome(outcome: _Outcome) -> _ParsedOutcome:
         return _ParsedOutcome(
             eligible=cast(bool, outcome["eligible"]),
-            rejection_reasons=tuple(
-                cast(Sequence[str], outcome["rejection_reasons"])
-            ),
+            rejection_reasons=tuple(cast(Sequence[str], outcome["rejection_reasons"])),
             input_variance=cast(float, outcome["input_variance"]),
             input_levels=cast(int, outcome["input_levels"]),
             incumbent_innovation_c=cast(
@@ -1469,5 +1349,3 @@ class HoldLearningRuntime:
             role_generation=cast(int, outcome["role_generation"]),
             model_digest=cast(str | None, outcome["model_digest"]),
         )
-
-
