@@ -517,6 +517,7 @@ def _runtime(
     opened: bool = True,
     runner: _Runner | None = None,
     persistence: _Persistence | None = None,
+    logger: _LifecycleLogger | None = None,
 ):
     trace, recorder = _trace(opened=opened)
     actual_runner = _Runner() if runner is None else runner
@@ -527,7 +528,7 @@ def _runtime(
         persistence=actual_persistence,
         trace=trace,
         controller_name="mpc",
-        logger=_LifecycleLogger(),
+        logger=_LifecycleLogger() if logger is None else logger,
         initial_generation=actual_runner.generation,
     )
     return runtime, actual_runner, actual_persistence, trace, recorder
@@ -1112,6 +1113,76 @@ def test_valid_and_invalid_calibration_frames_persist_without_invalid_learner_su
     assert [payload.rejection_reasons for payload in invalid_payloads] == [
         ("invalid-probe",)
     ]
+
+
+def _calibration_observation() -> FrameObservation:
+    baseline = allocate(
+        0.25, u_max=0.5, fan_min_pct=10.0, fan_max_pct=100.0, enable_fan=True
+    )
+    combined = allocate(
+        0.35, u_max=0.5, fan_min_pct=10.0, fan_max_pct=100.0, enable_fan=True
+    )
+    return _observation(
+        0,
+        baseline_q=0.25,
+        probe_q=0.10,
+        requested_q=0.35,
+        calibration_command_revision=7,
+        calibration_command_action="start",
+        baseline_allocation=baseline,
+        combined_allocation=combined,
+        calibration_status="active",
+        calibration_stage="low",
+        scheduled_on_s=7.0,
+        completed_calibration_stages=("low",),
+    )
+
+
+def test_calibration_evidence_failure_never_aborts_the_completed_observation(
+    monkeypatch,
+) -> None:
+    """Evidence is telemetry: a payload the model rejects must not take the fire out."""
+    logger = _LifecycleLogger()
+    runtime, runner, persistence, _trace_session, _recorder = _runtime(logger=logger)
+    observation = _calibration_observation()
+
+    def _invalid(cls, observation, session_id, cook_id):
+        # An incomplete completed-frame payload raises the same pydantic
+        # ValidationError shape the runtime hit on the grill.
+        return CalibrationSummaryEvidence(
+            accepted=True,
+            probe_count=1,
+            result_revision=1,
+        )
+
+    monkeypatch.setattr(
+        HoldLearningRuntime, "_calibration_frame_evidence", classmethod(_invalid)
+    )
+
+    runtime.submit_completed_observation((0, 0), observation)
+    runtime.reconcile_outcomes(22.0)
+
+    assert not [
+        batch
+        for batch in persistence.batches
+        if batch[0].kind is EvidenceKind.CALIBRATION_SUMMARY
+    ]
+    assert len(logger.warnings) == 1
+    assert logger.warnings[0].startswith("Calibration frame evidence failed: ")
+    assert runtime.evidence_available is True
+    assert runner.submissions == [observation]
+
+
+def test_refused_calibration_evidence_batch_still_marks_evidence_unavailable() -> None:
+    persistence = _Persistence(accepted=False)
+    runtime, _runner, _persistence, _trace_session, _recorder = _runtime(
+        persistence=persistence
+    )
+
+    runtime.submit_completed_observation((0, 0), _calibration_observation())
+
+    assert persistence.batches[0][0].kind is EvidenceKind.CALIBRATION_SUMMARY
+    assert runtime.evidence_available is False
 
 
 def test_record_gap_publishes_matching_trace_and_compact_evidence() -> None:

@@ -146,8 +146,12 @@ class CalibrationSummaryEvidence:
                 raise ValueError("baseline allocation must match baseline load")
             if self.combined_allocation.normalized_combustion_load != self.combined_q:
                 raise ValueError("combined allocation must match combined load")
-            if self.delivered_on_seconds > self.scheduled_on_seconds:
-                raise ValueError("delivered calibration on-time must not exceed scheduled on-time")
+            # Delivered on-time routinely exceeds the schedule by up to one control
+            # period: the auger relay releases on the tick after the scheduled on-time
+            # elapses. The bound that does hold -- delivery within the frame -- needs
+            # the frame duration, which only FramedPulsePayload carries and enforces.
+            # ControlTraceReplay reports a schedule overrun as a non-fatal
+            # FRAME_DELIVERY_MISMATCH issue.
         if self.status == "active":
             if self.stage == "coast":
                 if not self.accepted or self.probe_count != 0 or self.probe_q != 0.0:

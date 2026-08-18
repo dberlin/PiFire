@@ -210,6 +210,40 @@ def test_calibration_summary_requires_matching_completed_frame_allocations() -> 
         replace(payload, result_revision=0)
 
 
+def test_calibration_summary_accepts_delivery_that_overruns_the_schedule() -> None:
+    """The auger relay releases on the control tick after the scheduled on-time elapses.
+
+    These numbers come from a real framed pulse on the live grill: an 18.0 s schedule
+    inside a 20.0 s frame delivered 18.0557 s. The physical bound is that delivery fits
+    within the frame, and only FramedPulsePayload carries the frame duration needed to
+    state it, so this payload accepts the delivered figure as measured.
+    """
+    baseline = AllocationEvidence(
+        0.3, 0.27, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2
+    )
+    combined = AllocationEvidence(
+        0.4, 0.36, None, 0.9, 0.0, 100.0, False, AllocationClampReason.NONE, AllocationClampReason.NONE, 2
+    )
+
+    payload = CalibrationSummaryEvidence(
+        accepted=True,
+        probe_count=1,
+        result_revision=3,
+        command_revision=2,
+        command_action="start",
+        baseline_q=0.3,
+        probe_q=0.1,
+        combined_q=0.4,
+        baseline_allocation=baseline,
+        combined_allocation=combined,
+        scheduled_on_seconds=18.0,
+        delivered_on_seconds=18.0557,
+    )
+
+    assert payload.scheduled_on_seconds == 18.0
+    assert payload.delivered_on_seconds == 18.0557
+
+
 @pytest.mark.parametrize(
     "replacement",
     (

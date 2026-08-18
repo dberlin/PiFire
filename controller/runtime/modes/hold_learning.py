@@ -1144,14 +1144,22 @@ class HoldLearningRuntime:
         identity = self._trace_identity
         if persistence is None or identity is None:
             return
-        compact = self._calibration_frame_evidence(
-            observation,
-            identity.session_id,
-            identity.cook_id,
-        )
-        if compact is None:
+        # Calibration evidence is telemetry about the frame, never part of actuating
+        # it, so a payload the evidence model refuses costs the record and nothing
+        # more.
+        try:
+            compact = self._calibration_frame_evidence(
+                observation,
+                identity.session_id,
+                identity.cook_id,
+            )
+            if compact is None:
+                return
+            accepted = persistence.submit_evidence_batch((compact,)).accepted
+        except Exception as error:
+            self._logger.warning(f"Calibration frame evidence failed: {error}")
             return
-        if not persistence.submit_evidence_batch((compact,)).accepted:
+        if not accepted:
             self._evidence_available = False
 
     def _queue_rejected(
