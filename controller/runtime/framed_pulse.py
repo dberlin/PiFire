@@ -251,11 +251,11 @@ class FramedPulseRuntime:
         controller.pulse_calibration_stage = None
         controller.pulse_calibration_completed_stages = ()
         self._frame = self._latch_frame(0)
+
     def latch(self, role_generation: int) -> None:
         """Latch current controller request and calibration identity for one frame."""
         self._configured()
         self._frame = self._latch_frame(role_generation)
-
 
     def advance(
         self,
@@ -593,8 +593,7 @@ class FramedPulseRuntime:
                 producing_calibration_generation=latched.calibration_command_generation,
                 feedback_disposition=disposition,
                 sample_complete=(
-                    disposition is FrameFeedbackDisposition.COMPLETE
-                    and feedback_source is OutputSource.CONTROLLER
+                    disposition is FrameFeedbackDisposition.COMPLETE and feedback_source is OutputSource.CONTROLLER
                 ),
             )
         return FramedPulseCompletion(
@@ -629,14 +628,15 @@ class FramedPulseRuntime:
         duration_s = frame.ended_at_s - frame.nominal_start_s
         source = self._observation_source(frame, inhibit, latched)
         lid_open = inhibit is InhibitReason.LID_OPEN or frame.reset_reason is PulseResetReason.LID
-        manual_override = (
-            inhibit is InhibitReason.MANUAL_OVERRIDE or frame.reset_reason is PulseResetReason.MANUAL
-        )
-        safety_inhibited = (
-            inhibit is InhibitReason.SAFETY or frame.reset_reason is PulseResetReason.SAFETY
-        )
+        manual_override = inhibit is InhibitReason.MANUAL_OVERRIDE or frame.reset_reason is PulseResetReason.MANUAL
+        safety_inhibited = inhibit is InhibitReason.SAFETY or frame.reset_reason is PulseResetReason.SAFETY
         stale = latched.stale_command or inhibit is InhibitReason.STALE_COMMAND
         reset = frame.reset_reason is not None
+        # The paired temperature is the control tick's fresh sample, which lands on
+        # the first tick at or after the frame boundary. A sample from before the
+        # boundary predates the actuation it is meant to describe, and one a whole
+        # frame late belongs to a frame the loop never closed.
+        sample_lag_s = sample_at_s - frame.ended_at_s
         continuous = not (
             lid_open
             or manual_override
@@ -645,7 +645,8 @@ class FramedPulseRuntime:
             or frame.skipped
             or reset
             or source == "unknown"
-            or frame.ended_at_s < sample_at_s
+            or sample_lag_s < 0.0
+            or sample_lag_s >= duration_s
         )
         baseline_q = max(0.0, min(1.0, latched.baseline_combustion_load))
         requested_q = max(0.0, min(1.0, baseline_q + latched.calibration_probe_load))

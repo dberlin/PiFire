@@ -7,6 +7,7 @@ from common.control_trace import ActuationMode, InhibitReason
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
 from controller.runtime.framed_pulse import FramedPulseRuntime, FramedPulseSample, PulseControllerState
 from controller.runtime.logic.pulse import PulseFrameResult, PulseReason, PulseResetReason
+from controller.runtime.model_fitting import PassiveGreyHistory
 from controller.runtime.state import ControllerState
 from grillplat.actuator_capabilities import AugerTiming
 
@@ -87,7 +88,6 @@ def test_scheduler_is_absent_until_framed_configuration() -> None:
     assert runtime.frame_seconds == 0.0
     with pytest.raises(RuntimeError, match="pulse scheduler"):
         runtime.advance(0.0, False, sample=_sample())
-
 
 
 def test_configure_initializes_scheduler_and_pulse_controller_state() -> None:
@@ -299,11 +299,7 @@ def test_completed_frame_encodes_inhibit_source_and_disposition(
         inhibit=inhibit,
         terminal_feedback=reset_reason is not None,
         feedback_source=(
-            OutputSource.LID_OPEN
-            if lid
-            else OutputSource.MANUAL_OVERRIDE
-            if manual
-            else OutputSource.CONTROLLER
+            OutputSource.LID_OPEN if lid else OutputSource.MANUAL_OVERRIDE if manual else OutputSource.CONTROLLER
         ),
     )
 
@@ -317,6 +313,92 @@ def test_completed_frame_encodes_inhibit_source_and_disposition(
     if reset_reason is not None:
         assert completion.applied is not None
         assert completion.applied.feedback_disposition is FrameFeedbackDisposition.DISCARDED
+
+
+def _live_regime_runtime() -> tuple[FramedPulseRuntime, PulseControllerState]:
+    """A framed pulse runtime carrying ordinary, uninhibited controller output."""
+    runtime, controller = _runtime()
+    controller.pulse_result_revision = 9
+    controller.pulse_requested_duty = 0.3
+    controller.pulse_combustion_load = 0.3
+    controller.pulse_baseline_combustion_load = 0.3
+    controller.pulse_maximum_duty = 1.0
+    return runtime, controller
+
+
+# Real 20-second frame boundaries with the control loop's measured ~5.01-second
+# tick, so every frame closes on the first tick past its boundary.
+_LIVE_TICKS_S = (
+    0.0,
+    5.001,
+    10.006,
+    15.014,
+    20.243,
+    25.255,
+    30.259,
+    35.268,
+    40.271,
+    45.284,
+    50.293,
+    55.307,
+    60.319,
+)
+
+
+def test_live_regime_completed_frames_are_continuous_and_accepted_by_the_fitter() -> None:
+    runtime, _controller = _live_regime_runtime()
+    history = PassiveGreyHistory(role_generation=7, max_observations=12)
+
+    observations = [
+        completion.observation
+        for tick in _LIVE_TICKS_S
+        for completion in runtime.advance(tick, False, sample=_sample()).completions
+        if completion.observation is not None
+    ]
+
+    assert len(observations) == 3
+    for observation in observations:
+        assert observation.output_source == "controller"
+        assert not observation.lid_open
+        assert not observation.manual_override
+        assert not observation.safety_inhibited
+        assert not observation.stale
+        assert not observation.skipped
+        assert not observation.reset
+        assert observation.continuous is True
+    decisions = [history.observe(observation) for observation in observations]
+    assert [(decision.accepted, decision.reasons) for decision in decisions] == [(True, ())] * 3
+    assert len(history.observations) == 3
+
+
+def test_a_sample_taken_before_the_frame_ended_is_discontinuous() -> None:
+    runtime, controller = _live_regime_runtime()
+    _latch_controller_frame(runtime, controller)
+
+    completion = runtime.complete_frame(
+        _frame(),
+        sample=_sample(),
+        inhibit=InhibitReason.NONE,
+        sample_at_s=19.5,
+    )
+
+    assert completion.observation is not None
+    assert completion.observation.continuous is False
+
+
+def test_a_sample_a_whole_frame_late_is_discontinuous() -> None:
+    runtime, controller = _live_regime_runtime()
+    _latch_controller_frame(runtime, controller)
+
+    completion = runtime.complete_frame(
+        _frame(),
+        sample=_sample(),
+        inhibit=InhibitReason.NONE,
+        sample_at_s=40.0,
+    )
+
+    assert completion.observation is not None
+    assert completion.observation.continuous is False
 
 
 def test_report_feedback_tracks_realized_duty_without_dispatching() -> None:
