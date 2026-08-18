@@ -390,7 +390,11 @@ class FramedPulseFramePayload:
             raise ValueError("framed-pulse actual duration must not exceed frame_seconds")
         if self.scheduled_on_seconds > self.frame_seconds:
             raise ValueError("scheduled_on_seconds must not exceed frame_seconds")
-        if self.delivered_on_seconds > actual_duration_seconds:
+        # The duration is recovered from int(x * 1000) bounds, so it reads up to a
+        # millisecond short of the float delivery it is compared against. A reset
+        # that stops the auger mid-frame produces exactly that pair, and this is
+        # the same quantization the observation payload allows for.
+        if self.delivered_on_seconds > actual_duration_seconds + _FRAME_QUANTIZATION_S:
             raise ValueError("delivered_on_seconds must not exceed actual frame duration")
         if self.actual_end_active is not (self.actual_start_active ^ bool(self.transition_count % 2)):
             raise ValueError("framed-pulse transition parity must match start and end state")
@@ -398,7 +402,7 @@ class FramedPulseFramePayload:
             self.delivered_on_seconds,
             actual_duration_seconds if self.actual_start_active else 0.0,
             rel_tol=0,
-            abs_tol=1e-9,
+            abs_tol=_FRAME_QUANTIZATION_S,
         ):
             raise ValueError("zero-transition framed-pulse delivery must match start state")
         return self

@@ -314,18 +314,27 @@ class HoldMode(ControlMode):
         runtime = self._framed_pulse
         scheduler = None if runtime is None else runtime.scheduler
         if trace is not None and scheduler is not None:
-            trace.record_frame(
-                TraceFrameContext(
-                    completion=completion,
-                    pulse_slot_seconds=float(scheduler.timing.pulse_s),
-                    frame_seconds=float(scheduler.timing.frame_s),
+            # The frame trace is a record of what the fire already did, never part
+            # of driving it. Its payloads are built here, outside the recorder's
+            # own guard, so a model the trace refuses would otherwise unwind
+            # through the tick and stop the controller mid-cook.
+            try:
+                trace.record_frame(
+                    TraceFrameContext(
+                        completion=completion,
+                        pulse_slot_seconds=float(scheduler.timing.pulse_s),
+                        frame_seconds=float(scheduler.timing.frame_s),
+                    )
                 )
-            )
-            if completion.applied is not None and record_terminal_trace:
-                trace.record_terminal_framed_output(
-                    completion,
-                    controls_fan=self.state.controller.controls_fan,
-                )
+                if completion.applied is not None and record_terminal_trace:
+                    trace.record_terminal_framed_output(
+                        completion,
+                        controls_fan=self.state.controller.controls_fan,
+                    )
+            except Exception as error:
+                import control as _control
+
+                _control.eventLogger.warning(f"Framed pulse trace failed: {error}")
         if (
             completion.missing_observation_reason is not None
             and completion.result_revision > 0

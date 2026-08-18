@@ -879,6 +879,63 @@ def test_framed_reset_allows_partial_zero_transition_delivery(actual_start_activ
     assert payload.delivered_on_seconds == delivered_on_seconds
 
 
+def test_framed_reset_delivery_survives_the_millisecond_bounds_it_is_compared_against():
+    # The frame's duration is recovered from int(x * 1000) bounds, so it reads up
+    # to a millisecond short of the float delivery it is compared with. A reset
+    # that stops the auger mid-frame produces exactly that pair, and refusing it
+    # costs the trace record for every lid opening and safety trip.
+    payload = FramedPulseFramePayload(
+        result_revision=1,
+        pulse_slot_seconds=2.0,
+        frame_seconds=20.0,
+        frame_start_ms=0,
+        frame_end_ms=7_333,
+        requested_combustion_load=0.4,
+        requested_auger_duty=0.4,
+        credit_before_seconds=0.0,
+        credit_after_seconds=0.0,
+        scheduled_on_seconds=2.0,
+        delivered_on_seconds=7.3333331,
+        actual_start_active=True,
+        transition_count=0,
+        actual_end_active=True,
+        requested_fan_duty=None,
+        applied_fan_duty=None,
+        skipped=False,
+        stale_command=False,
+        inhibit_reason=InhibitReason.LID_OPEN,
+        reset_reason="lid",
+    )
+
+    assert payload.delivered_on_seconds == 7.3333331
+
+
+def test_framed_delivery_beyond_the_millisecond_tolerance_is_still_refused():
+    with pytest.raises(ValidationError, match="delivered_on_seconds must not exceed"):
+        FramedPulseFramePayload(
+            result_revision=1,
+            pulse_slot_seconds=2.0,
+            frame_seconds=20.0,
+            frame_start_ms=0,
+            frame_end_ms=7_333,
+            requested_combustion_load=0.4,
+            requested_auger_duty=0.4,
+            credit_before_seconds=0.0,
+            credit_after_seconds=0.0,
+            scheduled_on_seconds=2.0,
+            delivered_on_seconds=7.4,
+            actual_start_active=True,
+            transition_count=0,
+            actual_end_active=True,
+            requested_fan_duty=None,
+            applied_fan_duty=None,
+            skipped=False,
+            stale_command=False,
+            inhibit_reason=InhibitReason.LID_OPEN,
+            reset_reason="lid",
+        )
+
+
 def test_framed_zero_transition_rejects_delivery_that_disagrees_with_actual_duration():
     with pytest.raises(ValidationError, match="zero-transition framed-pulse delivery"):
         FramedPulseFramePayload(
