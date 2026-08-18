@@ -27,6 +27,7 @@ from controller.mpc_factory import MpcPairConfiguration, MpcPairFactory, NativeT
 
 CYCLE: dict[str, JsonValue] = {"u_min": 0.1, "u_max": 0.9}
 
+
 def _inactive_calibration(_load, _temperature, _forecast) -> CalibrationDecision:
     return CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
@@ -54,7 +55,6 @@ class Estimator:
             raise self.close_failure
 
 
-
 def test_owned_pair_close_retries_only_unfinished_real_core_resources() -> None:
     events: list[str] = []
     pair_factory, ekf, _kf, solvers = factory(events)
@@ -79,6 +79,7 @@ def test_owned_pair_close_retries_only_unfinished_real_core_resources() -> None:
     pair.close()
     assert solver.closed == 2
     assert estimator.closed == 1
+
 
 class EstimatorFactory:
     def __init__(self, events: list[str]) -> None:
@@ -429,11 +430,7 @@ def test_restore_uses_descriptor_estimator_settings_instead_of_factory_base() ->
     source.close()
 
     restore_events: list[str] = []
-    restore_ticks = tuple(
-        value
-        for sample in range(5)
-        for value in (sample * 0.01, sample * 0.01 + 0.001)
-    )
+    restore_ticks = tuple(value for sample in range(5) for value in (sample * 0.01, sample * 0.01 + 0.001))
     restore_factory, restored_ekf, _restored_kf, _restored_solvers = factory(
         restore_events,
         clock_values=restore_ticks,
@@ -584,12 +581,21 @@ def test_configured_rejects_unknown_estimator_and_infers_identification() -> Non
             candidate_generation=0,
             role_generation=0,
         )
+    # A pasted `controller/update_mpc.py` fit: the whole solved set moved.
+    configured = pair_factory.configured(
+        dict(DEFAULT_MPC_CONFIG, theta=51.0, K_Q=412.7, C_c=286.4),
+        candidate_generation=0,
+        role_generation=0,
+    )
+    assert configured.model_identified
+
+    # One parameter off its default is an edit, not a fit.
     configured = pair_factory.configured(
         dict(DEFAULT_MPC_CONFIG, theta=51.0),
         candidate_generation=0,
         role_generation=0,
     )
-    assert configured.model_identified
+    assert not configured.model_identified
 
 
 def test_restore_rejects_malformed_numeric_and_integer_descriptor_fields() -> None:
@@ -655,10 +661,7 @@ def test_restore_explicitly_migrates_the_exact_legacy_native_descriptor() -> Non
         },
     )
     native = GreyBoxMPCConfig(horizon_steps=5)
-    legacy_configuration = {
-        name: getattr(native, name)
-        for name in native.__dataclass_fields__
-    }
+    legacy_configuration = {name: getattr(native, name) for name in native.__dataclass_fields__}
     legacy = descriptor(legacy_configuration)
 
     migrated = pair_factory.migrate_legacy_descriptor(legacy)
@@ -787,10 +790,7 @@ def test_startup_recovery_migrates_every_legacy_pair_before_exact_restore() -> N
     events: list[str] = []
     pair_factory, _ekf, _kf, _solvers = factory(events)
     native = GreyBoxMPCConfig(horizon_steps=5)
-    legacy_configuration = {
-        name: getattr(native, name)
-        for name in native.__dataclass_fields__
-    }
+    legacy_configuration = {name: getattr(native, name) for name in native.__dataclass_fields__}
     legacy = descriptor(legacy_configuration)
     serialized = json.dumps(legacy.to_dict())
     state = SimpleNamespace(

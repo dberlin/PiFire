@@ -82,7 +82,10 @@ DEFAULT_MPC_CONFIG = MpcConfig({
 })
 
 MODEL_PARAMETER_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
-PHYSICAL_PARAMETER_KEYS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
+#: The parameters a fit actually solves for -- update_mpc's free set. Everything
+#: else in MODEL_PARAMETER_KEYS is held at its shipped value by the solve, so a
+#: pasted fit leaves those at the default and only these three move together.
+FITTED_PARAMETER_KEYS = ("K_Q", "C_c", "theta")
 RETIRED_PARAMETER_KEYS = ("C_f", "h_fc")
 
 def _validated_float(value: JsonValue, key: str) -> float:
@@ -194,15 +197,38 @@ def model_is_identified(
     config: Mapping[str, JsonValue],
     model_metadata: ModelMetadata | None = None,
 ) -> bool:
-    """Whether thermal parameters came from configuration or calibration evidence."""
+    """Whether thermal parameters came from a fit rather than from a default.
 
-    return model_metadata is not None or any(
-        config.get(key) != DEFAULT_MPC_CONFIG[key] for key in PHYSICAL_PARAMETER_KEYS
+    Two things count as a fit. A stored model carries `model_metadata`, the
+    record of its own fit. An offline fit has no store to write to --
+    update_mpc.py prints its result for the operator to paste into
+    Settings > Controller -- so the configuration itself is the delivery path,
+    and a config that differs from the shipped defaults is real evidence.
+
+    Reading such a paste means reading FITTED_PARAMETER_KEYS, and reading them
+    together: the solve moves all three, so a genuine paste differs in all
+    three. One parameter alone is a stale or hand-edited value, not a fit, and
+    must not buy the trust a fit buys.
+    """
+
+    return model_metadata is not None or all(
+        config.get(key, DEFAULT_MPC_CONFIG[key]) != DEFAULT_MPC_CONFIG[key]
+        for key in FITTED_PARAMETER_KEYS
     )
 
 
-def warn_about_model(config: Mapping[str, JsonValue]) -> None:
-    """Report obsolete or uncalibrated model settings without refusing control."""
+def warn_about_model(
+    config: Mapping[str, JsonValue],
+    model_metadata: ModelMetadata | None = None,
+) -> None:
+    """Report obsolete or uncalibrated model settings without refusing control.
+
+    The uncalibrated warning asks `model_is_identified` rather than restating
+    its rule, so the model the controller plans against as uncalibrated is
+    exactly the model the operator is told is uncalibrated. Restating it is how
+    one stale parameter came to both buy a learned residual weight and silence
+    this warning at the same time.
+    """
 
     retired = [key for key in RETIRED_PARAMETER_KEYS if key in config]
     if retired:
@@ -211,8 +237,8 @@ def warn_about_model(config: Mapping[str, JsonValue]) -> None:
             "longer has a firepot state for them to describe. Remove them from "
             "Settings > Controller."
         )
-    if all(config.get(key) == DEFAULT_MPC_CONFIG[key] for key in PHYSICAL_PARAMETER_KEYS):
+    if not model_is_identified(config, model_metadata):
         print(
-            "[mpc] model is uncalibrated (every thermal parameter is still the shipped default). "
+            "[mpc] model is uncalibrated (the thermal parameters are not a completed fit). "
             "Expect large overshoot until you fit this grill with controller/update_mpc.py."
         )

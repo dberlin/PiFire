@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import itertools
+
 from dataclasses import dataclass, replace
 from collections.abc import Callable
 
@@ -14,7 +16,9 @@ from controller.base import MpcFailureState
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_config import (
     DEFAULT_MPC_CONFIG,
+    FITTED_PARAMETER_KEYS,
     JsonValue,
+    MODEL_PARAMETER_KEYS,
     ModelMetadata,
     finite_float,
     model_is_identified,
@@ -64,7 +68,6 @@ class NonClosableEstimator:
     ) -> npt.NDArray[np.float64]:
         del normalized_combustion_load, y_measured
         return np.zeros(10, dtype=float)
-
 
 
 class FakeEstimatorFactory:
@@ -141,11 +144,7 @@ def solve_result(
             [first] + [first / 2.0] * (length - 1),
             dtype=float,
         ),
-        sequence_residual=(
-            np.zeros(length, dtype=float)
-            if sequence_residual is None
-            else sequence_residual
-        ),
+        sequence_residual=(np.zeros(length, dtype=float) if sequence_residual is None else sequence_residual),
         objective=objective,
         diagnostics=FakeDiagnostics() if diagnostics is None else diagnostics,
     )
@@ -159,9 +158,7 @@ class FakeSolver:
     ) -> None:
         self.config = config
         self.results = list(results)
-        self.calls: list[
-            tuple[npt.NDArray[np.float64], float | int, float | int, float | int]
-        ] = []
+        self.calls: list[tuple[npt.NDArray[np.float64], float | int, float | int, float | int]] = []
         self.closed = 0
 
     def solve(
@@ -180,11 +177,7 @@ class FakeSolver:
                 equilibrium_q,
             )
         )
-        result = (
-            self.results.pop(0)
-            if self.results
-            else solve_result(self.config.horizon_steps, 0.5)
-        )
+        result = self.results.pop(0) if self.results else solve_result(self.config.horizon_steps, 0.5)
         if isinstance(result, BaseException):
             raise result
         return result
@@ -197,7 +190,6 @@ class FailingCloseSolver(FakeSolver):
     def close(self) -> None:
         self.closed += 1
         raise RuntimeError("solver close failed")
-
 
 
 class FakeSolverFactory:
@@ -282,20 +274,87 @@ def test_config_helpers_cover_absent_invalid_nonfinite_and_warning_branches(caps
     assert optional_float("2.5") == 2.5
     assert optional_float([]) is None
     assert optional_float({"not": "numeric"}) is None
-    assert sanitized_copy(
-        {"finite": 1.5, "bad": float("inf"), "integer": 2}
-    ) == {"finite": 1.5, "bad": None, "integer": 2}
+    assert sanitized_copy({"finite": 1.5, "bad": float("inf"), "integer": 2}) == {
+        "finite": 1.5,
+        "bad": None,
+        "integer": 2,
+    }
 
     assert model_is_identified(DEFAULT_MPC_CONFIG) is False
-    assert model_is_identified(dict(DEFAULT_MPC_CONFIG, C_c=321.0)) is True
+    assert model_is_identified(_FITTED_PASTE) is True
     assert model_is_identified(DEFAULT_MPC_CONFIG, {"rmse": 1.0}) is True
     warn_about_model(dict(DEFAULT_MPC_CONFIG, C_f=1.0))
     warning = capsys.readouterr().out
     assert "ignoring C_f" in warning
     assert "model is uncalibrated" in warning
 
-    warn_about_model(dict(DEFAULT_MPC_CONFIG, C_c=321.0))
+    warn_about_model(_FITTED_PASTE)
     assert capsys.readouterr().out == ""
+
+
+#: What `controller/update_mpc.py` prints for an operator to paste into
+#: Settings > Controller: every model key, with the three the solve moves off
+#: their shipped values and the held ones still at them.
+_FITTED_PASTE: dict[str, JsonValue] = dict(
+    DEFAULT_MPC_CONFIG,
+    C_c=286.4,
+    h_amb=0.5,
+    T_amb=18.0,
+    theta=63.2,
+    n_delay=8,
+    K_Q=412.7,
+    sigma=1.4e-9,
+)
+
+#: A non-default value for every model key, for enumerating partial edits.
+_MOVED: dict[str, JsonValue] = {
+    "C_c": 286.4,
+    "h_amb": 0.62,
+    "T_amb": 18.0,
+    "theta": 63.2,
+    "n_delay": 9,
+    "K_Q": 412.7,
+    "sigma": 1.1e-9,
+}
+
+
+def test_one_stale_parameter_is_not_calibration_evidence(capsys):
+    # A K_Q carried over from the two-lump model, on a grill that was never fit.
+    stale = dict(DEFAULT_MPC_CONFIG, K_Q=3.5)
+
+    assert model_is_identified(stale) is False
+    warn_about_model(stale)
+    assert "model is uncalibrated" in capsys.readouterr().out
+
+    # A config that simply omits the model keys is at the shipped model, not
+    # at seven values that differ from it.
+    sparse = {key: value for key, value in DEFAULT_MPC_CONFIG.items() if key not in MODEL_PARAMETER_KEYS}
+    assert model_is_identified(sparse) is False
+
+
+def test_a_pasted_fit_and_a_stored_model_both_identify(capsys):
+    assert model_is_identified(_FITTED_PASTE) is True
+    warn_about_model(_FITTED_PASTE)
+    assert capsys.readouterr().out == ""
+
+    assert model_is_identified(DEFAULT_MPC_CONFIG, {"rmse": 1.0}) is True
+    warn_about_model(DEFAULT_MPC_CONFIG, {"rmse": 1.0})
+    assert capsys.readouterr().out == ""
+
+
+def test_identification_and_the_uncalibrated_warning_never_disagree(capsys):
+    for size in range(len(MODEL_PARAMETER_KEYS) + 1):
+        for moved in itertools.combinations(MODEL_PARAMETER_KEYS, size):
+            config = dict(DEFAULT_MPC_CONFIG, **{key: _MOVED[key] for key in moved})
+            for metadata in (None, {"rmse": 1.0}):
+                identified = model_is_identified(config, metadata)
+                warn_about_model(config, metadata)
+                warned = "model is uncalibrated" in capsys.readouterr().out
+                assert identified is not warned, (moved, metadata)
+                assert identified is (metadata is not None or set(FITTED_PARAMETER_KEYS) <= set(moved)), (
+                    moved,
+                    metadata,
+                )
 
 
 def test_construction_selects_estimators_validates_delay_and_closes_partial_build():
@@ -393,8 +452,7 @@ def test_units_authority_equilibrium_adjustment_and_snapshot_are_explicit_inputs
     assert step.diagnostics.model_revision == 7
     assert step.diagnostics.model_provenance == "adopted"
     assert core.snapshot_parameters() == {
-        key: core.config[key]
-        for key in ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
+        key: core.config[key] for key in ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
     }
     assert core.snapshot_parameters() is not core.config
 
@@ -439,9 +497,7 @@ def test_units_authority_equilibrium_adjustment_and_snapshot_are_explicit_inputs
 def test_every_malformed_native_result_holds_the_last_safe_command(
     invalid: FakeSolve,
 ):
-    core, _estimator, _solver = make_core(
-        results=(solve_result(5, 0.6), invalid)
-    )
+    core, _estimator, _solver = make_core(results=(solve_result(5, 0.6), invalid))
     core.update(72.0)
 
     step = core.update(73.0)
@@ -508,9 +564,7 @@ def test_roundoff_clips_adjustment_bounds_and_resource_close_is_idempotent():
     result = solve_result(
         5,
         -1e-12,
-        sequence_residual=np.array(
-            [-1e-12, 0.0, 0.5, 1.0, 1.0 + 1e-12]
-        ),
+        sequence_residual=np.array([-1e-12, 0.0, 0.5, 1.0, 1.0 + 1e-12]),
         diagnostics=replace(FakeDiagnostics(), constraint_residual=1e-12),
     )
 
@@ -589,12 +643,8 @@ def test_normalization_rejects_unsound_runtime_setting_types(
 
 
 def test_normalization_preserves_key_specific_boolean_semantics():
-    fan_enabled = normalize_config(
-        dict(CONFIG, enable_fan_input=1, enable_online_adaptation=True)
-    )
-    fan_disabled = normalize_config(
-        dict(CONFIG, enable_fan_input=0, enable_online_adaptation=False)
-    )
+    fan_enabled = normalize_config(dict(CONFIG, enable_fan_input=1, enable_online_adaptation=True))
+    fan_disabled = normalize_config(dict(CONFIG, enable_fan_input=0, enable_online_adaptation=False))
 
     assert fan_enabled["enable_fan_input"] is True
     assert fan_enabled["enable_online_adaptation"] is True
@@ -606,8 +656,6 @@ def test_normalization_preserves_key_specific_boolean_semantics():
         results=(solve_result(5, 0.5),),
     )
     assert core.update(72.0).fan["duty"] is not None
-
-
 
 
 def test_public_factories_reject_unvalidated_direct_caller_settings():
@@ -670,9 +718,7 @@ def test_partial_build_accepts_nonclosable_estimator_without_masking_solver_erro
 
 def test_default_callbacks_repeat_failure_without_repeat_log_and_expose_state(capsys):
     estimator_factory = FakeEstimatorFactory()
-    solver_factory = FakeSolverFactory(
-        (RuntimeError("first"), RuntimeError("second"))
-    )
+    solver_factory = FakeSolverFactory((RuntimeError("first"), RuntimeError("second")))
     core = MpcCore(
         dict(CONFIG),
         "C",

@@ -1622,8 +1622,10 @@ class GreyLearningRuntime:
             old_learning.close()
         # Said for the model that will actually solve. __init__'s own call saw
         # only the configured parameters, which for a grill that has been
-        # learning are not the ones about to steer it.
-        warn_about_model(self._configuration())
+        # learning are not the ones about to steer it. A restored model is
+        # calibrated by its own fit record, so pass the metadata rather than
+        # letting parameter distance stand in for it.
+        warn_about_model(self._configuration(), metadata)
         self._model_meta = {
             "rmse": metadata["rmse"],
             "samples": metadata["samples"],

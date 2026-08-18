@@ -25,13 +25,30 @@ from common.control_trace import (
 )
 from common.persistence.control_trace import append_control_trace
 from controller.applied_output import OutputSource
-from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_config import DEFAULT_MPC_CONFIG, FITTED_PARAMETER_KEYS
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
-from controller.update_mpc import TraceSelectionError, _load_trace_calibration, fit_params, load_trace_samples
+from controller.update_mpc import (
+    _FREE,
+    TraceSelectionError,
+    _load_trace_calibration,
+    fit_params,
+    load_trace_samples,
+)
 
 
 SESSION_ID = "mpc-session"
 COOK_ID = "mak-cook"
+
+
+def test_the_identified_parameter_set_is_the_set_the_solve_moves():
+    """`model_is_identified` reads a pasted fit by which keys left their defaults.
+
+    It can only do that if it names exactly the parameters this solve moves: a
+    key the solve holds would never leave its default and would make every
+    pasted fit unidentifiable, and a key the solve moves but the set omits
+    would let a partial edit pass as a fit.
+    """
+    assert set(FITTED_PARAMETER_KEYS) == set(_FREE)
 
 
 def _session() -> ControlTraceRecord:
