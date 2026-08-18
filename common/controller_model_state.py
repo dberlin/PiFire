@@ -153,14 +153,20 @@ class ControllerModelStore:
             self._revisions[name] = persisted["revision"]
             return snapshot
 
+        # Storage is consulted on every load, not only on a cold cache. The
+        # in-process cache advances solely through this process's own saves and
+        # stagings, so a process that only reads -- the web worker serving the
+        # learning report -- would otherwise pin the first snapshot it ever read
+        # and never observe another process's later checkpoints. Reconciling by
+        # revision keeps the staging guarantee intact: a snapshot published here
+        # but not yet written still outranks the older stored bytes.
+        models, _safe = self._read_state()
+        persisted = models.get(name)
+        if persisted is not None:
+            self._remember_owned(name, persisted, committed=True)
         snapshot = self._latest_owned(name)
         if snapshot is None:
-            models, _safe = self._read_state()
-            persisted = models.get(name)
-            if persisted is None:
-                return None
-            self._remember_owned(name, persisted, committed=True)
-            snapshot = self._latest_owned(name)
+            return None
         committed_revision = self._committed_revision(name)
         if committed_revision is not None:
             self._revisions[name] = committed_revision

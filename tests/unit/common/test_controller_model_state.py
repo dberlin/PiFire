@@ -135,6 +135,7 @@ def test_strict_load_rejects_a_malformed_target_without_poisoning_a_good_control
 
     assert store.load("mpc") == UNRELATED
 
+
 def test_strict_load_revalidates_persistence_even_when_shared_cache_is_warm():
     store, fake = _store()
     assert store.save("pid_sp", FOPDT) is True
@@ -176,6 +177,45 @@ def test_load_primes_the_revision_cache():
     second = ControllerModelStore(reader=fake.read, writer=fake.write)
     second.load("pid_sp")
     assert second.save("pid_sp", {"revision": 5, "K": 999.0}) is False
+
+
+def test_load_sees_a_newer_revision_written_after_the_shared_cache_warmed():
+    # The in-process cache is shared by every store instance and only ever
+    # advances when THIS process remembers a snapshot. A process that only
+    # reads -- the web worker serving the learning report -- therefore has no
+    # path by which a checkpoint written by the control process can reach it,
+    # and pins whatever it first read for as long as it lives.
+    store, fake = _store()
+    assert store.save("mpc", {"revision": 1, "K": 700.0}) is True
+    assert store.load("mpc")["K"] == 700.0
+
+    fake.blobs[MODEL_STATE_KEY] = json.dumps(
+        {
+            "version": SCHEMA_VERSION,
+            "models": {"mpc": {"revision": 2, "K": 999.0}},
+        }
+    )
+
+    assert store.load("mpc") == {"revision": 2, "K": 999.0}
+
+
+def test_load_keeps_a_staged_snapshot_that_storage_has_not_caught_up_to():
+    # The other half of the same contract: staging exists so a worker can read
+    # back what it has published but not yet written, so a re-read of older
+    # stored bytes must not clobber it.
+    store, _fake = _store()
+    assert store.save("mpc", {"revision": 1, "K": 700.0}) is True
+    assert store.stage_owned("mpc", {"revision": 2, "K": 999.0}) is True
+
+    assert store.load("mpc") == {"revision": 2, "K": 999.0}
+
+
+def test_load_keeps_the_warm_cache_when_the_stored_record_cannot_be_read():
+    store, fake = _store()
+    assert store.save("mpc", {"revision": 1, "K": 700.0}) is True
+    fake.blobs[MODEL_STATE_KEY] = json.dumps({"version": SCHEMA_VERSION + 1, "models": {}})
+
+    assert store.load("mpc") == {"revision": 1, "K": 700.0}
 
 
 @pytest.mark.parametrize(
