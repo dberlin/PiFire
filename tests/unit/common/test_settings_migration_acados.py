@@ -29,6 +29,9 @@ RETIRED_MPC_KEYS = {
     "log_path",
 }
 
+#: C_c, theta and K_Q all differ from their shipped values, so this is a
+#: completed fit and the v10 reset leaves it alone -- what survives v9 here is
+#: therefore the whole of it, not the part v10 would have written back.
 RETAINED_MPC = {
     "n_horizon": 17,
     "control_period": 7.5,
@@ -97,8 +100,8 @@ def test_schema_nine_migration_is_idempotent_and_preserves_non_mpc_settings():
     migrated = _migrate(settings)
     once = deepcopy(settings)
 
-    assert SETTINGS_SCHEMA_VERSION == 9
-    assert settings["schema_version"] == 9
+    assert SETTINGS_SCHEMA_VERSION == 10
+    assert settings["schema_version"] == 10
     assert settings["controller"]["selected"] == "mpc"
     assert settings["controller"]["config"]["pid"] == expected_pid
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is False

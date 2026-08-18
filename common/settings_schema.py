@@ -641,10 +641,15 @@ class Recipe(_Section):
 #: added or deleted field -- the write-time repair handles both losslessly
 #: (added takes its default, deleted is stripped).
 #:
+#: It is also what gates a one-time repair of a stored VALUE that the running
+#: code can no longer read as its author meant it -- a retired controller id, a
+#: thermal parameter from a superseded model. The repair has to run exactly
+#: once per install, and this stamp is the only record of whether it has.
+#:
 #: It lives at the top level of the tree rather than beside versions.server /
 #: versions.build, so that nothing suggests the three move together. They do
 #: not: versions is the RELEASE, read from updater/updater_manifest.json.
-SETTINGS_SCHEMA_VERSION = 9
+SETTINGS_SCHEMA_VERSION = 10
 
 
 class SettingsSchema(_Section):

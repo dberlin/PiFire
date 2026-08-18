@@ -40,6 +40,7 @@ from common.common import (
 )
 from common.persistence.runtime import write_settings_store, write_warning
 from common.defaults import default_probe_config, default_settings
+from controller.mpc_config import DEFAULT_MPC_CONFIG, FITTED_PARAMETER_KEYS, model_is_identified
 
 
 def read_settings_file(filename="settings.json", init=False, retry_count=0):
@@ -400,6 +401,45 @@ def _migrate_acados_mpc_settings(settings):
     return changed
 
 
+def _reset_uncalibrated_mpc_parameters(settings):
+    """Return MPC thermal parameters that are not a fit to the shipped defaults.
+
+    `K_Q` shipped as 3.5 for the retired two-lump model, where it drove a
+    firepot state; the single chamber lump it became is heated by the auger
+    directly and ships 350.0. The v9 cutover dropped the keys the new model has
+    no state for but left the gain, so a saved 3.5 told the model the auger
+    could not heat the grill: it asked for a steady-state load of 48.7, clipped
+    to 1.0, and held the auger at saturation through a 76F overshoot.
+
+    Which values are a fit is `model_is_identified`'s question, asked here
+    rather than restated, so that a paste this keeps is exactly a paste the
+    controller trusts. controller/update_mpc.py solves for FITTED_PARAMETER_KEYS
+    and holds everything else, so a real fit differs in all three and survives
+    untouched; any smaller difference is a leftover from a model that no longer
+    exists, and only the keys actually stored are rewritten -- an absent key is
+    already the shipped default.
+    """
+    controller = settings.get("controller")
+    if not isinstance(controller, MutableMapping):
+        return False
+    config = controller.get("config")
+    if not isinstance(config, MutableMapping):
+        return False
+    mpc = config.get("mpc")
+    if not isinstance(mpc, MutableMapping):
+        return False
+    if model_is_identified(mpc):
+        return False
+
+    changed = False
+    for key in FITTED_PARAMETER_KEYS:
+        default = DEFAULT_MPC_CONFIG[key]
+        if key in mpc and mpc[key] != default:
+            mpc[key] = default
+            changed = True
+    return changed
+
+
 def _add_mcp2221_selector(settings):
     """Seed the USB selector introduced for the MCP2221 relay platform."""
     platform = settings.get("platform")
@@ -423,6 +463,7 @@ _SHAPE_MIGRATIONS = [
     (7, _remove_retired_fan_pid),
     (8, _add_mcp2221_selector),
     (9, _migrate_acados_mpc_settings),
+    (10, _reset_uncalibrated_mpc_parameters),
 ]
 
 

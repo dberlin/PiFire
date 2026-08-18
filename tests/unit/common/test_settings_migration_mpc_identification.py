@@ -7,13 +7,20 @@ from common.settings_migration import _apply_shape_migrations, _clear_mpc_identi
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
 
+#: A completed fit -- update_mpc's free set, all moved together. The surviving
+#: neighbour has to be one, because v10 returns anything less to the defaults,
+#: and a neighbour whose expected value IS the default could not tell a
+#: preserved setting apart from a deleted one.
+FITTED_PASTE = {"K_Q": 412.0, "C_c": 268.0, "theta": 63.5}
+
+
 def _v5_settings(stored):
     return {
         "schema_version": 5,
         "controller": {
             "selected": "mpc",
             "config": {
-                "mpc": {"enable_identification": stored, "C_c": 432.1, "policy": "nlp"},
+                "mpc": {"enable_identification": stored, **FITTED_PASTE, "policy": "nlp"},
                 "pid": {"PB": 60.0, "cycle": 17},
                 "pid_sp": {"PB": 51.0, "cycle": 23},
             },
@@ -37,13 +44,13 @@ def test_current_schema_includes_v6_identification_choice_removal():
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 9
+    assert SETTINGS_SCHEMA_VERSION == 10
     assert settings == {
-        "schema_version": 9,
+        "schema_version": 10,
         "controller": {
             "selected": "mpc",
             "config": {
-                "mpc": {"C_c": 432.1},
+                "mpc": dict(FITTED_PASTE),
                 "pid": {"PB": 60.0, "cycle": 17},
                 "pid_sp": {"PB": 51.0, "cycle": 23},
             },
