@@ -11,6 +11,7 @@ import pytest
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
 
+from common.controller_model_state import ControllerModelStore
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
@@ -302,6 +303,64 @@ def test_runtime_restore_refuses_v3_even_though_one_shot_migration_accepts_it(ca
     assert migrate_grey_learning_snapshot(v3)["version"] == 4
     assert controller.restore_model(v3) is False
     assert "migration input only" in capsys.readouterr().out
+
+
+def _restarted_store(blobs):
+    """A store over shared bytes with the empty caches a new process starts with."""
+
+    def read(key):
+        return json.loads(blobs[key]) if key in blobs else json.loads(None)
+
+    def write(key, value):
+        blobs[key] = json.dumps(value)
+
+    return ControllerModelStore(reader=read, writer=write)
+
+
+@pytest.mark.parametrize(
+    "unrestorable",
+    (
+        migrate_grey_learning_snapshot(
+            {
+                "version": 3,
+                "revision": 9,
+                "params": PARAMS,
+                "rmse": None,
+                "samples": 0,
+                "band_c": [0.0, 0.0],
+                "nfev": None,
+            }
+        ),
+        {
+            "version": 3,
+            "revision": 9,
+            "params": PARAMS,
+            "rmse": None,
+            "samples": 0,
+            "band_c": [0.0, 0.0],
+            "nfev": None,
+        },
+    ),
+    ids=("migrated-v4-carrying-no-restorable-pair", "superseded-v3-record"),
+)
+def test_a_refused_checkpoint_still_saves_the_refit_it_falls_back_to(unrestorable):
+    blobs = {}
+    assert _restarted_store(blobs).save("mpc", unrestorable) is True
+
+    restarted = _restarted_store(blobs)
+    controller = _controller()
+    try:
+        assert controller.restore_model(restarted.load("mpc")) is False
+
+        _adopt(controller)
+        assert controller.finalize_cook_refit(TeardownRefitOutcome.ACCEPTED_NEXT_COOK) is True
+        checkpoint = controller.get_model_snapshot()
+
+        assert checkpoint["revision"] == 10
+        assert restarted.save("mpc", checkpoint) is True
+        assert restarted.load("mpc")["revision"] == 10
+    finally:
+        controller.close()
 
 
 @pytest.mark.parametrize(

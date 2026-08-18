@@ -1451,7 +1451,25 @@ class GreyLearningRuntime:
             return None
         return snapshot if len(encoded) <= MAX_SNAPSHOT_BYTES else None
 
+    def _adopt_persisted_revision(self, snapshot) -> None:
+        """Continue a stored checkpoint's counter instead of starting a new one.
+
+        The store keeps one revision per controller and rejects every save that
+        does not advance past it, permanently -- so this counter has to survive
+        the restart, not merely the process. That holds for a checkpoint this
+        runtime refuses as much as for one it restores: refusing one means the
+        next cook refits from scratch, and a counter that restarted at zero
+        alongside it could never persist that refit.
+        """
+        if not isinstance(snapshot, dict):
+            return
+        revision = snapshot.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            return
+        self._model_revision = max(self._model_revision, revision)
+
     def restore_model(self, snapshot):
+        self._adopt_persisted_revision(snapshot)
         if not isinstance(snapshot, dict) or snapshot.get("version") != self.MODEL_SCHEMA:
             version = snapshot.get("version") if isinstance(snapshot, dict) else None
             print(
@@ -1467,7 +1485,6 @@ class GreyLearningRuntime:
         active = owned["active"]
         params = active["parameters"]
         metadata = active["metadata"]
-        revision = owned["revision"]
         configured_n_delay = int(self._configuration()["n_delay"])
         snapshot_n_delay = int(params["n_delay"])
         if configured_n_delay != 8 or snapshot_n_delay != 8:
@@ -1607,9 +1624,6 @@ class GreyLearningRuntime:
         # only the configured parameters, which for a grill that has been
         # learning are not the ones about to steer it.
         warn_about_model(self._configuration())
-        # Continue the persisted counter rather than starting a new one: the
-        # store rejects a revision that does not advance, permanently.
-        self._model_revision = revision
         self._model_meta = {
             "rmse": metadata["rmse"],
             "samples": metadata["samples"],
