@@ -146,25 +146,72 @@ def test_standalone_rebuild_failure_is_terminal(
     assert published[-1][1] == "Acados rebuild failed"
     assert "17" in published[-1][2]
 
-def test_public_script_resolves_python_module_outside_repository(
-    tmp_path: Path,
-) -> None:
+def _staged_script(tmp_path: Path, *, with_venv: bool) -> tuple[Path, Path]:
+    """Copy the real script into a throwaway tree whose interpreters are stubs.
+
+    The script's interpreter is now an absolute path inside the repository, so a
+    probe cannot be injected through PATH alone. Staging a copy lets the stub
+    stand in for the venv without writing into the real one.
+    """
+
     repository = Path(__file__).resolve().parents[3]
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    python = fake_bin / "python3"
-    python.write_text("#!/bin/sh\npwd\n")
-    python.chmod(0o755)
-    completed = subprocess.run(
-        ["bash", str(repository / "rebuild-acados.sh"), "--if-needed"],
-        cwd=tmp_path,
-        env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    staged = tmp_path / "repo"
+    staged.mkdir()
+    (staged / "rebuild-acados.sh").write_text((repository / "rebuild-acados.sh").read_text())
+    (staged / "rebuild-acados.sh").chmod(0o755)
+    if with_venv:
+        venv_bin = staged / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        interpreter = venv_bin / "python3"
+        interpreter.write_text("#!/bin/sh\necho venv\npwd\n")
+        interpreter.chmod(0o755)
+    decoy_bin = tmp_path / "bin"
+    decoy_bin.mkdir()
+    decoy = decoy_bin / "python3"
+    decoy.write_text("#!/bin/sh\necho path\npwd\n")
+    decoy.chmod(0o755)
+    return staged, decoy_bin
+
+
+def _run_staged(staged: Path, decoy_bin: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(staged / "rebuild-acados.sh"), "--if-needed"],
+        cwd=cwd,
+        env={"PATH": f"{decoy_bin}:/usr/bin:/bin"},
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+def test_public_script_resolves_python_module_outside_repository(
+    tmp_path: Path,
+) -> None:
+    staged, decoy_bin = _staged_script(tmp_path, with_venv=True)
+    completed = _run_staged(staged, decoy_bin, cwd=tmp_path)
     assert completed.returncode == 0
-    assert Path(completed.stdout.strip()) == repository
+    assert Path(completed.stdout.split()[-1]) == staged
+
+
+def test_public_script_prefers_the_repository_venv_over_any_path_interpreter(
+    tmp_path: Path,
+) -> None:
+    # Supervisor starts the control process with a PATH that carries no venv, so
+    # the interpreter has to be resolved by absolute path rather than by lookup.
+    staged, decoy_bin = _staged_script(tmp_path, with_venv=True)
+    completed = _run_staged(staged, decoy_bin, cwd=tmp_path)
+    assert completed.returncode == 0
+    assert completed.stdout.split()[0] == "venv"
+
+
+def test_public_script_falls_back_to_path_python_without_a_venv(
+    tmp_path: Path,
+) -> None:
+    staged, decoy_bin = _staged_script(tmp_path, with_venv=False)
+    completed = _run_staged(staged, decoy_bin, cwd=tmp_path)
+    assert completed.returncode == 0
+    assert completed.stdout.split()[0] == "path"
+    assert Path(completed.stdout.split()[-1]) == staged
 
 
 class _NativeFailure(RuntimeError):

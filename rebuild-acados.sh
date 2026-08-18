@@ -18,4 +18,14 @@ case "${1-}" in
     ;;
 esac
 
-exec python3 -m tools.rebuild_acados "$@"
+# tools/rebuild_acados is repository code and needs the interpreter the
+# repository targets, not whatever `python3` the host happens to expose. The
+# installer synchronizes the venv before it calls this script (the ordering
+# contract in auto-install/pifire-install-common.sh), so the absolute path is
+# present on the install path; the fallback keeps a bare checkout working.
+interpreter="$repository_root/.venv/bin/python3"
+if [[ ! -x "$interpreter" ]]; then
+  interpreter=python3
+fi
+
+exec "$interpreter" -m tools.rebuild_acados "$@"
