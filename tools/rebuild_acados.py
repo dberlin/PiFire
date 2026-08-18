@@ -1098,7 +1098,10 @@ class LocalOperations:
             library_digest = _sha256(library) if library.is_file() and not library.is_symlink() else None
         except FileNotFoundError:
             manifest, library_digest = None, None
-        except OSError, ValueError, json.JSONDecodeError:
+        # Parentheses stay: this module has to parse under the system `python3`
+        # that runs rebuild-acados.sh, which predates PEP 758 on most hosts.
+        # `fmt: skip` holds the line against the formatter's 3.14 canonical form.
+        except (OSError, ValueError, json.JSONDecodeError):  # fmt: skip
             manifest, library_digest = {"invalid": True}, None
         return classify_staleness(manifest, identity, actual_library_sha256=library_digest)
 
