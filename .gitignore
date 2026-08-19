@@ -167,3 +167,5 @@ htmlcov/
 .tokensave/
 
 .superpowers/
+
+/node_modules/
