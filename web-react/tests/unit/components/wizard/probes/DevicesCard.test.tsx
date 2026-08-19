@@ -2,6 +2,7 @@ import type { ProbeMap, ProbeModuleData } from "@pifire/core/contracts/wizard";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { DevicesCard } from "../../../../../src/components/wizard/probes/DevicesCard";
+import { expectConsole } from "../../../../consoleGuard";
 
 rs.mock("../../../../../src/helpers/wizard/wizardApi", () => ({
   validateBusKinds: rs.fn(async () => ({ ok: true })),
@@ -126,6 +127,8 @@ it("emits when the bus kind validates clean", async () => {
 
 it("proceeds (fail-open) when validateBusKinds rejects [inline validate]", async () => {
   (validateBusKinds as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("network"));
+  // Proceeding is right; proceeding without a trace is not.
+  expectConsole("warn", /bus-kind validation unavailable.*network/);
   const onChange = rs.fn();
   render(<DevicesCard probeMap={emptyMap} modules={modules} baseUrl="" onChange={onChange} />);
   fireEvent.change(screen.getByLabelText(/add device module/i), {

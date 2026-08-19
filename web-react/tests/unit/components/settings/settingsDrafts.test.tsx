@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { AppPrefsProvider } from "../../../../src/components/AppPrefs";
+import { HydrateFallback } from "../../../../src/components/HydrateFallback";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";
 import { PwmTab } from "../../../../src/components/settings/tabs/PwmTab";
 import { SafetyTab } from "../../../../src/components/settings/tabs/SafetyTab";
@@ -76,6 +77,7 @@ function renderSettings() {
           loaderCalls += 1;
           return { settings: structuredClone(SETTINGS), mode: "Stop", controllerMeta: null };
         },
+        HydrateFallback,
         children: [
           { path: "pwm", element: <PwmTab /> },
           { path: "safety", element: <SafetyTab /> },
@@ -102,13 +104,19 @@ const tab = (label: string) => screen.getByRole("link", { name: new RegExp(`^${l
 const inputFor = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
 
 beforeEach(() => {
-  // Only the last test saves; the rest never reach the network.
+  // Only the last test saves, but every render mounts AppPrefsProvider, which
+  // reads GET /api/settings for the accent. Answering that with the generic
+  // success envelope hands useSettings an undefined blob, so the shell renders
+  // these tests on fallback preferences rather than on SETTINGS.
   rs.stubGlobal(
     "fetch",
-    rs.fn().mockResolvedValue({
+    rs.fn().mockImplementation(async (input: RequestInfo | URL) => ({
       ok: true,
-      json: async () => ({ result: "success", message: "" }),
-    }),
+      json: async () =>
+        String(input).endsWith("/api/settings")
+          ? { settings: structuredClone(SETTINGS) }
+          : { result: "success", message: "" },
+    })),
   );
 });
 

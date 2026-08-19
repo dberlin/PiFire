@@ -1,9 +1,17 @@
-import { afterEach, expect } from "@rstest/core";
+import { afterEach, beforeEach, expect } from "@rstest/core";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { cleanup } from "@testing-library/react";
+import { assertConsoleClean, installConsoleGuard } from "./consoleGuard";
 
 expect.extend(matchers);
-afterEach(cleanup);
+
+// Unmount before the console check, in the same hook: teardown effects log too,
+// and a separate afterEach would leave the order between them to the runner.
+beforeEach(installConsoleGuard);
+afterEach(() => {
+  cleanup();
+  assertConsoleClean();
+});
 
 // jsdom implements neither `window.matchMedia` nor canvas 2D contexts. uPlot
 // (src/components/history/HistoryChart.tsx) touches both at construction

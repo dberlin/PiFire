@@ -46,7 +46,7 @@ rs.mock("../../../src/helpers/settings/settingsApi", () => ({
   getSettings: (...args: unknown[]) => getSettingsMock(...args),
 }));
 
-const { WizardShell } = await import("../../../src/components/wizard/WizardShell");
+const { WizardShell, HydrateFallback } = await import("../../../src/components/wizard/WizardShell");
 const { DashboardRoute } = await import("../../../src/components/DashboardRoute");
 const { AppPrefsProvider } = await import("../../../src/components/AppPrefs");
 
@@ -131,7 +131,7 @@ function renderApp() {
         element: <Outlet context={context} />,
         children: [{ path: "/", element: <DashboardRoute /> }],
       },
-      { path: "/wizard", element: <WizardShell />, loader: () => wizardState() },
+      { path: "/wizard", element: <WizardShell />, loader: () => wizardState(), HydrateFallback },
     ],
     { initialEntries: ["/wizard"] },
   );

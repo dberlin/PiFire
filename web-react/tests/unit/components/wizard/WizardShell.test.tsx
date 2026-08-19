@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import { expectConsole } from "../../../consoleGuard";
 import { testQueryClient } from "../../test-utils";
 
 const getWizardStateMock = rs.fn();
@@ -23,7 +24,9 @@ rs.mock("../../../../src/helpers/wizard/wizardApi", () => ({
   cancelWizard: (...args: unknown[]) => cancelWizardMock(...args),
 }));
 
-const { WizardShell } = await import("../../../../src/components/wizard/WizardShell");
+const { WizardShell, HydrateFallback } = await import(
+  "../../../../src/components/wizard/WizardShell"
+);
 
 afterEach(() => {
   cleanup();
@@ -68,6 +71,7 @@ function renderShell(state: WizardState) {
         path: "/wizard",
         element: <WizardShell />,
         loader: () => state,
+        HydrateFallback,
       },
       // Exit Setup navigates here; without a matching route react-router has
       // nothing to render and the assertions below couldn't tell a successful
@@ -198,6 +202,9 @@ describe("WizardShell", () => {
     renderShell(fixtureState());
     await screen.findByRole("heading", { name: "Welcome" });
     saveDraftMock.mockRejectedValueOnce(new Error("network error"));
+    // Swallowing the rejection silently would leave a lost draft with nothing
+    // in the log to explain it.
+    expectConsole("warn", /failed to save draft.*network error/);
 
     await clickNext("Grill Platform");
 
@@ -344,6 +351,7 @@ describe("WizardShell", () => {
 
   it("still leaves when the pre-exit draft flush rejects (the flush is best-effort)", async () => {
     saveDraftMock.mockRejectedValueOnce(new Error("network error"));
+    expectConsole("warn", /failed to save draft on exit.*network error/);
     renderShell(fixtureState());
     await screen.findByRole("heading", { name: "Welcome" });
 

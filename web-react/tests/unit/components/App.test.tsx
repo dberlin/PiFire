@@ -308,3 +308,23 @@ describe("App routing", () => {
     expect(screen.getByText("LIVE")).toBeInTheDocument();
   });
 });
+
+// React Router renders nothing at all for the pending frame of an initial load
+// unless the matched branch declares a HydrateFallback, and says so on the
+// console. A loader added to a branch that has none is therefore a blank first
+// paint on a slow grill, which is invisible in a test that only waits for the
+// resolved view.
+describe("route tree", () => {
+  it("covers every loader-bearing branch with a HydrateFallback", () => {
+    const uncovered: string[] = [];
+    const walk = (route: RouteObject, trail: string[], covered: boolean) => {
+      const here = [...trail, route.path ?? (route.index ? "(index)" : "(layout)")];
+      const coveredHere = covered || route.HydrateFallback != null;
+      if (route.loader && !coveredHere) uncovered.push(here.join(" > "));
+      for (const child of route.children ?? []) walk(child, here, coveredHere);
+    };
+    for (const route of routes) walk(route, [], false);
+
+    expect(uncovered).toEqual([]);
+  });
+});

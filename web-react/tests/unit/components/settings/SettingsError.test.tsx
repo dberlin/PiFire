@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import { HydrateFallback } from "../../../../src/components/HydrateFallback";
 import { SettingsError } from "../../../../src/components/settings/SettingsError";
 
 // SettingsError is wired as the /settings route's errorElement in App.tsx —
@@ -16,6 +17,9 @@ function renderErrorRoute() {
           throw new Error("boom");
         },
         errorElement: <SettingsError />,
+        // The real route carries one (appRoutes.tsx), and react-router renders
+        // it for the pending frame of an initial load.
+        HydrateFallback,
       },
       { path: "/", element: <div data-testid="dashboard-root">Dashboard</div> },
     ],

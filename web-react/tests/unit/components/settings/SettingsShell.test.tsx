@@ -8,6 +8,7 @@ import {
   useRouteLoaderData,
 } from "react-router";
 import { AppPrefsProvider, useAppPrefs } from "../../../../src/components/AppPrefs";
+import { HydrateFallback } from "../../../../src/components/HydrateFallback";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";
 import { flushObservers, testQueryClient } from "../../test-utils";
 
@@ -28,6 +29,7 @@ function renderShell(dcFan = true) {
           settings: { globals: { units: "F" }, platform: { dc_fan: dcFan } },
           mode: "Stop",
         }),
+        HydrateFallback,
         children: [{ index: true, element: <div /> }],
       },
       { path: "/", element: <div data-testid="dashboard-root">Dashboard</div> },
@@ -140,6 +142,7 @@ describe("SettingsShell", () => {
             mode: "Stop",
             loads: ++loads,
           }),
+          HydrateFallback,
           children: [{ index: true, element: <AccentProbe /> }],
         },
       ],

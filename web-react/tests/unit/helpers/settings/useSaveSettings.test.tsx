@@ -73,9 +73,12 @@ function Probe() {
 }
 
 function renderWithLoader(loader: () => unknown = () => ({})) {
-  const router = createMemoryRouter([{ path: "/", element: <Probe />, loader }], {
-    initialEntries: ["/"],
-  });
+  // Probe is a harness route rather than a mirror of a real one, so an empty
+  // fallback is all react-router needs for the pending frame of the initial load.
+  const router = createMemoryRouter(
+    [{ path: "/", element: <Probe />, loader, HydrateFallback: () => null }],
+    { initialEntries: ["/"] },
+  );
   // The singleton, not a throwaway test client: useSaveSettings resolves its
   // QueryClient via useQueryClient() now, but "makes settingsLoader return the
   // post-save settings" drives the REAL settingsLoader directly (outside
