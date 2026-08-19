@@ -20,6 +20,35 @@ module.exports = function (api) {
     // the bare string fails to resolve relative to this file. Resolving
     // through "expo/internal/babel-preset" -- itself a plain re-export of
     // babel-preset-expo -- works because "expo" IS a direct dependency here.
-    presets: [[require.resolve("expo/internal/babel-preset"), { enableBabelRuntime: false }]],
+    //
+    // worklets: false -- babel-preset-expo (build/configs/expo.js) auto-adds
+    // a worklet-transform plugin when `options.worklets !== false &&
+    // options.reanimated !== false`: it FIRST tries to resolve
+    // "react-native-worklets/plugin" and, only if that fails to resolve at
+    // all (options.worklets left default), falls through to
+    // "react-native-reanimated/plugin". react-native-worklets is only a
+    // *peer* dependency of react-native-reanimated here (bun's isolated
+    // linker installs it into react-native-reanimated's own node_modules,
+    // not into mobile/node_modules or the workspace root), so
+    // require.resolve("react-native-worklets/plugin", { paths: [projectRoot,
+    // babel-preset-expo's own dir] }) returns null from mobile's context --
+    // confirmed directly: `node -e "require.resolve('react-native-worklets/plugin')"`
+    // from mobile/ throws MODULE_NOT_FOUND. Because the auto-detect is an
+    // if/else (not two independent ifs), that failure does NOT fall through
+    // to the reanimated branch -- it silently adds NO plugin at all, so
+    // useAnimatedStyle/useAnimatedProps callbacks would never be
+    // workletized (a runtime failure, not a build-time one).
+    // Setting worklets:false forces the `else if (options.reanimated !==
+    // false)` branch, which resolves "react-native-reanimated/plugin"
+    // instead -- confirmed this DOES resolve and fully `require()`s from
+    // mobile's context, because react-native-reanimated/plugin/index.js is
+    // itself just `module.exports = require('react-native-worklets/plugin')`,
+    // and that inner require resolves relative to react-native-reanimated's
+    // OWN directory (where its peer dep react-native-worklets IS present),
+    // not relative to mobile/ or babel-preset-expo/. Functionally identical
+    // transform, reached through a path that actually resolves.
+    presets: [
+      [require.resolve("expo/internal/babel-preset"), { enableBabelRuntime: false, worklets: false }],
+    ],
   };
 };

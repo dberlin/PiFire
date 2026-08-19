@@ -1,5 +1,27 @@
 module.exports = {
   preset: "jest-expo",
+  // react-native-reanimated v4 delegates its native binding to
+  // react-native-worklets, whose src/WorkletsModule/NativeWorklets.native.ts
+  // calls into a real TurboModule at import time (`loadUnpackers`) -- that
+  // module does not exist under Jest's Node environment, so a bare `import
+  // "react-native-reanimated"` throws immediately (confirmed: this is what
+  // Step 4 of TDD hit here before this config existed). Mapping
+  // "react-native-reanimated" to its own "/mock" entry point is NOT enough
+  // on its own: mock.ts re-exports test helpers (setUpTests,
+  // advanceAnimationByFrame, ...) straight from the real "./index", so
+  // without also fixing resolution, that real index still pulls in the same
+  // NativeWorklets.native.ts and crashes the same way (confirmed too).
+  // react-native-worklets ships the actual fix for this as
+  // "jest/resolver.js": it strips the "native" condition when resolving
+  // anything under react-native-worklets, so `.native.ts` files
+  // (NativeWorklets.native.ts) resolve to their plain, non-native sibling
+  // (NativeWorklets.ts) instead -- a Jest-safe implementation with no
+  // TurboModule access. This is the package's own documented Jest
+  // integration point, not a project-specific workaround.
+  resolver: "react-native-worklets/jest/resolver.js",
+  moduleNameMapper: {
+    "^react-native-reanimated$": "react-native-reanimated/mock",
+  },
   // @testing-library/react-native@14 bundles its jest matchers by default
   // and no longer ships an "extend-expect" entry point (removed since v12.4),
   // so there is nothing to list here for the installed version.
