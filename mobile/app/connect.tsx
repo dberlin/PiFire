@@ -56,9 +56,9 @@ export default function Connect() {
     try {
       const updated = await rememberHost(normalized);
       setHosts(updated);
-      // The dashboard doesn't exist as a dedicated route yet (a later
-      // task's concern) — "/" is today's placeholder screen and stands in
-      // for it here.
+      // "/" resolves to app/(tabs)/index.tsx -- the real dashboard, since
+      // Task 13. Route groups like "(tabs)" don't add a URL segment, so
+      // this is unchanged from when "/" pointed at the placeholder screen.
       router.replace("/");
     } finally {
       setConnecting(false);
