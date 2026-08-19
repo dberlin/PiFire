@@ -1,41 +1,71 @@
 appId: org.dberlin.pifire.mobile
-name: Launches without crashing and asks for a grill
+name: First run, connect, and walk every tab
 ---
-# The regression this exists for: the app died on every launch with
-#   Unhandled JS Exception: Error: useLiveContext must be used within the
-#   connected app shell
-# because RootLayout mounted routes while the stored host was still being
-# read, and "/" is the dashboard, which requires a live connection context.
+# Walks the path a person actually takes on first launch. Written this way
+# because three separate crashes shipped past a suite that only ever rendered
+# components in isolation with their providers supplied by hand:
+#   - launching with no stored host mounted the dashboard before a connection
+#     existed, and the dashboard throws without one;
+#   - tapping Connect navigated into the same screen with the same result;
+#   - guarding the routes then left Connect unable to reach anything at all.
+# Each was invisible until someone opened the app and pressed the button, so
+# this flow presses the buttons.
 #
-# Nothing in the jest suite could catch that: every unit test renders one
-# component with its providers supplied by hand, which by construction cannot
-# notice a provider the app itself fails to supply. Only launching the real
-# app can, which is what this does.
+# No grill is expected to answer. "Unreachable" is a correct outcome here; a
+# crash or a dead button is not.
 
 - launchApp:
-    clearState: true          # first-run: no stored host, the crashing path
+    clearState: true
 
-# Surviving to the Connect screen proves three things at once: the bundle
-# loaded, the first render completed, and the redirect to /connect happened
-# without the dashboard mounting on the way.
-- assertVisible: "Connect"
-
-# The host field defaults to pifire.local. No port: an installed PiFire is
-# nginx-fronted on 80, and 5000 is only the manual dev invocation.
+# --- first run -------------------------------------------------------------
+- assertVisible: "Connect to your grill"
 - assertVisible:
     text: ".*pifire\\.local.*"
-
-# Still alive a few seconds in -- catches a crash that arrives just after the
-# first paint rather than during it.
 - extendedWaitUntil:
     visible: "Connect"
     timeout: 5000
 
-# Tapping Connect is a second, distinct way into the dashboard, and it has its
-# own timing: the route changes before the layout has re-read stored hosts.
-# The first fix for the launch crash did not cover this path, and it crashed
-# here instead.
+# --- connecting ------------------------------------------------------------
 - tapOn: "Connect"
+
+# Any status label proves the dashboard mounted and rendered. Which one
+# depends on whether a grill answers, and that is not this flow's business.
 - extendedWaitUntil:
     visible: "Live|Connecting|Unreachable|Stale|No data"
-    timeout: 10000
+    timeout: 15000
+
+# --- the tab bar exists and every tab opens --------------------------------
+# The tab bar mounts a beat after the first screen paints, so wait for it
+# rather than asserting the instant the status label appears. iOS exposes tab
+# labels as "Dashboard, tab, 1 of 4", and Maestro anchors its match to the
+# whole string, so these need to be patterns rather than bare words.
+- extendedWaitUntil:
+    visible: ".*Dashboard.*tab.*"
+    timeout: 8000
+- assertVisible: ".*History.*tab.*"
+- assertVisible: ".*Events.*tab.*"
+- assertVisible: ".*Preferences.*tab.*"
+
+# Each tab is opened to prove it mounts without throwing. The tab bar staying
+# visible afterwards is the evidence: a screen that crashed on mount would
+# take the app down with it.
+- tapOn: ".*History.*tab.*"
+- extendedWaitUntil:
+    visible: ".*Dashboard.*tab.*"
+    timeout: 8000
+
+- tapOn: ".*Events.*tab.*"
+- extendedWaitUntil:
+    visible: ".*Dashboard.*tab.*"
+    timeout: 8000
+
+- tapOn: ".*Preferences.*tab.*"
+- extendedWaitUntil:
+    visible: ".*Dashboard.*tab.*"
+    timeout: 8000
+
+# Back to the dashboard, which must still be showing a connection state.
+- tapOn: ".*Dashboard.*tab.*"
+- extendedWaitUntil:
+    visible: "Live|Connecting|Unreachable|Stale|No data"
+    timeout: 8000
