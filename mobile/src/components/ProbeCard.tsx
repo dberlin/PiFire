@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
-import { THEME } from "../theme";
+import { CARD_BORDER_COLOR, LABEL_COLOR, PROBE_LABEL_COLOR, TEXT_COLOR, TEXT_DIM_COLOR, THEME, WARN_COLOR } from "../theme";
 
 interface ProbeCardProps {
   /** The probe's display title (deriveView's ProbeCardView.name, i.e.
@@ -21,6 +21,17 @@ interface ProbeCardProps {
   units: "F" | "C";
   /** Set when `temp` is a carried-over reading, e.g. "last data 47s ago". */
   stale: string | null;
+  /** deriveView's ProbeCardView.tgtColor, already resolved from its
+   *  var(--ok)/var(--cooking)/var(--label) form to a hex/rgba string by the
+   *  caller (theme.ts's CSS_VAR_COLOR has no per-accent entry, so "AMBIENT"
+   *  falls back to LABEL_COLOR here when the caller omits it). */
+  tgtColor?: string;
+  /** deriveView's ProbeCardView.barPct -- 0 for a probe with no armed target,
+   *  else progress toward it, floored at 2 so a just-started probe still
+   *  shows a sliver (deriveView.ts's probeCard()). */
+  barPct?: number;
+  /** deriveView's ProbeCardView.barColor, resolved the same way as tgtColor. */
+  barColor?: string;
 }
 
 // No accent selector yet, matching GrillGauge.tsx's note: theme.ts's gauge
@@ -28,7 +39,16 @@ interface ProbeCardProps {
 // deferred to a later task. Card chrome uses the default (ember) tokens.
 const tokens = THEME.ember;
 
-export function ProbeCard({ name, temp, targetStr, units, stale }: ProbeCardProps) {
+export function ProbeCard({
+  name,
+  temp,
+  targetStr,
+  units,
+  stale,
+  tgtColor,
+  barPct = 0,
+  barColor,
+}: ProbeCardProps) {
   const hasTarget = targetStr !== "AMBIENT";
 
   return (
@@ -39,7 +59,16 @@ export function ProbeCard({ name, temp, targetStr, units, stale }: ProbeCardProp
         <Text style={styles.tempUnit}>{"°"}{units}</Text>
       </View>
       {stale !== null ? <Text style={styles.stale}>{stale}</Text> : null}
-      <Text style={hasTarget ? styles.target : styles.targetAmbient}>{targetStr}</Text>
+      <Text style={[styles.target, { color: tgtColor ?? (hasTarget ? tokens.accent : LABEL_COLOR) }]}>
+        {targetStr}
+      </Text>
+      {/* dashboard.css's .pf-dash-bar / .pf-dash-bar-fill: a thin progress
+          track under every probe card, not just ones with an armed target --
+          barPct is 0 (an empty track) for "AMBIENT" rather than the whole
+          element disappearing. */}
+      <View style={styles.bar}>
+        <View style={[styles.barFill, { width: `${barPct}%`, backgroundColor: barColor ?? tokens.accent }]} />
+      </View>
     </View>
   );
 }
@@ -47,43 +76,59 @@ export function ProbeCard({ name, temp, targetStr, units, stale }: ProbeCardProp
 const styles = StyleSheet.create({
   card: {
     backgroundColor: tokens.surface,
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
-    minWidth: 120,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: CARD_BORDER_COLOR,
+    paddingVertical: 15,
+    paddingHorizontal: 18,
+    gap: 2,
+    minWidth: 140,
   },
   name: {
-    color: tokens.text,
-    fontSize: 13,
+    color: PROBE_LABEL_COLOR,
+    fontSize: 15,
     fontWeight: "600",
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
   },
   readingRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 2,
+    alignItems: "baseline",
   },
+  // Sized to dashboard.css's phone breakpoint (max-width: 719px), the closest
+  // web ever gets to this component's actual footprint: --pf-probe-temp: 44px,
+  // --pf-probe-unit: 18px.
   tempInt: {
-    color: tokens.text,
-    fontSize: 28,
-    fontWeight: "700",
+    color: TEXT_COLOR,
+    fontSize: 44,
+    fontWeight: "800",
   },
   tempUnit: {
-    color: tokens.text,
-    fontSize: 14,
-    opacity: 0.7,
-    marginBottom: 4,
+    color: TEXT_DIM_COLOR,
+    fontSize: 18,
+    fontWeight: "600",
+    marginLeft: 2,
   },
   stale: {
-    color: tokens.danger,
-    fontSize: 11,
+    color: WARN_COLOR,
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    marginTop: 2,
   },
   target: {
-    color: tokens.accent,
-    fontSize: 13,
+    fontSize: 15,
+    fontWeight: "600",
   },
-  targetAmbient: {
-    color: tokens.text,
-    fontSize: 13,
-    opacity: 0.5,
+  bar: {
+    height: 6,
+    borderRadius: 6,
+    marginTop: 8,
+    overflow: "hidden",
+    backgroundColor: "rgba(255, 255, 255, 0.11)",
+  },
+  barFill: {
+    height: "100%",
+    borderRadius: 6,
   },
 });

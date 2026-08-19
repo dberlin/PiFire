@@ -3,7 +3,7 @@ import { deriveView } from "@pifire/core/dashboard/deriveView";
 import { ControlRow } from "../../src/components/ControlRow";
 import { GrillGauge } from "../../src/components/GrillGauge";
 import { ProbeCard } from "../../src/components/ProbeCard";
-import { CSS_VAR_COLOR, THEME } from "../../src/theme";
+import { CARD_BORDER_COLOR, CSS_VAR_COLOR, LABEL_COLOR, THEME } from "../../src/theme";
 import { useLiveContext, usePrefsContext } from "../_layout";
 
 // The dashboard screen: the one place a user watches a live cook and, from
@@ -58,29 +58,43 @@ export default function Dashboard() {
               targetStr={p.targetStr}
               units={p.unit}
               stale={p.stale}
+              tgtColor={CSS_VAR_COLOR[p.tgtColor] ?? tokens.accent}
+              barPct={p.barPct}
+              barColor={CSS_VAR_COLOR[p.barColor] ?? tokens.accent}
             />
           ))}
         </View>
       ) : null}
 
-      <View style={styles.hopper}>
-        <Text style={[styles.hopperLabel, { color: CSS_VAR_COLOR[view.hopper.labelColor] ?? tokens.text }]}>
-          {view.hopper.label}
-        </Text>
-        <View style={[styles.hopperTrack, { backgroundColor: tokens.surface }]}>
+      {/* Same two-row layout as web-react's HopperGauge.tsx: a head row
+          (caption + big percentage) over a vertical level track, then a foot
+          row for the status label. The "Manager" shortcut into /pellets
+          (dashboard.css's .pf-dash-hopper-link) is left out -- this app has
+          no pellet-manager route to link to yet. */}
+      <View style={[styles.hopper, { backgroundColor: tokens.surface, borderColor: CARD_BORDER_COLOR }]}>
+        <View style={styles.hopperHead}>
+          <Text style={styles.hopperCaption}>Hopper</Text>
+          <Text style={[styles.hopperVal, { color: CSS_VAR_COLOR[view.hopper.color] ?? tokens.accent }]}>
+            {view.hopper.pct}%
+          </Text>
+        </View>
+        <View style={styles.hopperTrack}>
           <View
             style={[
               styles.hopperFill,
               {
-                width: `${view.hopper.pct}%`,
+                height: `${view.hopper.pct}%`,
                 backgroundColor: CSS_VAR_COLOR[view.hopper.color] ?? tokens.accent,
               },
             ]}
           />
         </View>
+        <Text style={[styles.hopperLabel, { color: CSS_VAR_COLOR[view.hopper.labelColor] ?? tokens.text }]}>
+          {view.hopper.label}
+        </Text>
       </View>
 
-      <ControlRow dash={live} command={command} disabled={disabled} />
+      <ControlRow dash={live} command={command} disabled={disabled} accent={prefs.accent} />
     </ScrollView>
   );
 }
@@ -105,23 +119,56 @@ const styles = StyleSheet.create({
     gap: 10,
     width: "100%",
   },
+  // dashboard.css's .pf-dash-hopper: rounded 18, padded 16, a vertical
+  // gap-12 stack of the head row / track / foot label -- ported directly,
+  // unlike the horizontal thin bar this replaced.
   hopper: {
     width: "100%",
-    gap: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+  },
+  hopperHead: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+  },
+  hopperCaption: {
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 2.5,
+    textTransform: "uppercase",
+    color: LABEL_COLOR,
+  },
+  // dashboard.css's phone breakpoint (max-width: 719px) --pf-hopper-val: 26px
+  // -- the closest web analog to this card's actual on-device size.
+  hopperVal: {
+    fontSize: 26,
+    fontWeight: "800",
+  },
+  // .pf-dash-hopper-track: a fixed-height vertical silo, not a thin
+  // horizontal bar -- .pf-dash-hopper-fill fills it from the BOTTOM up
+  // (position: absolute; bottom: 0; height: var(--pf-hopper-pct)).
+  hopperTrack: {
+    height: 140,
+    borderRadius: 14,
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "rgba(255, 255, 255, 0.09)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  hopperFill: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   hopperLabel: {
     fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1,
+    fontWeight: "600",
+    letterSpacing: 2,
     textTransform: "uppercase",
-  },
-  hopperTrack: {
-    height: 10,
-    borderRadius: 5,
-    overflow: "hidden",
-  },
-  hopperFill: {
-    height: "100%",
-    borderRadius: 5,
   },
 });

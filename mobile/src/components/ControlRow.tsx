@@ -7,8 +7,13 @@ import {
   type MenuItem,
   buttonsForMode,
 } from "@pifire/core/dashboard/buttonsForMode";
-import { THEME } from "../theme";
+import { BODY_TEXT_COLOR, INSET_COLOR, ON_ACCENT_INK, THEME, withAlpha, type AccentName } from "../theme";
 import { SetpointModal } from "./SetpointModal";
+
+// text/surface/danger are identical across all three accents (see theme.ts's
+// own note on THEME) so the menu modal below -- which has no accent-specific
+// styling on the web either -- can read them off any one entry.
+const tokens = THEME.ember;
 
 /** The two ways out of a running cook. Ported from web-react's
  *  ControlButtons.tsx (`const SAFETY_LABELS = new Set(["Stop", "Shutdown"])`)
@@ -18,17 +23,26 @@ import { SetpointModal } from "./SetpointModal";
  *  if it were. */
 const SAFETY_LABELS = new Set(["Stop", "Shutdown"]);
 
-const tokens = THEME.ember;
-
-// Same lit-border-vs-fill idiom as web-react's VARIANT_STYLE (dashboard.css
-// tokens re-expressed as flat RN colors, same reason GrillGauge.tsx hardcodes
-// its palette: theme.ts carries no accent-aware gauge/button tokens yet).
-const VARIANT_STYLE: Record<string, { borderColor: string; backgroundColor: string; color: string }> = {
-  accent: { borderColor: tokens.accent, backgroundColor: "rgba(255,138,43,0.14)", color: tokens.accent },
-  primary: { borderColor: tokens.accent, backgroundColor: tokens.accent, color: tokens.background },
-  danger: { borderColor: tokens.danger, backgroundColor: "rgba(255,90,77,0.14)", color: tokens.danger },
-  plain: { borderColor: "rgba(255,255,255,0.14)", backgroundColor: tokens.surface, color: tokens.text },
-};
+// Ported literally from web-react's ControlButtons.tsx VARIANT_STYLE
+// (dashboard.css has no rule for this -- the colors are inline styles there
+// too): primary fills solid with the accent, accent lights a border over a
+// 16%-alpha accent tint, danger the same at 14% with var(--danger), and plain
+// sits on the inset surface. `accent` is passed in rather than fixed to ember
+// so a button matches whichever accent the user picked, same as var(--accent)
+// tracking [data-accent] on the web.
+function variantStyle(accent: AccentName) {
+  const accentColor = THEME[accent].accent;
+  return {
+    accent: { borderColor: accentColor, backgroundColor: withAlpha(accentColor, 0.16), color: BODY_TEXT_COLOR },
+    primary: { borderColor: "transparent", backgroundColor: accentColor, color: ON_ACCENT_INK },
+    danger: {
+      borderColor: THEME[accent].danger,
+      backgroundColor: withAlpha(THEME[accent].danger, 0.14),
+      color: THEME[accent].danger,
+    },
+    plain: { borderColor: "rgba(255,255,255,0.14)", backgroundColor: INSET_COLOR, color: BODY_TEXT_COLOR },
+  } as const;
+}
 
 interface ControlRowProps {
   dash: DashSocketPayload;
@@ -36,6 +50,10 @@ interface ControlRowProps {
   /** True while the live connection is not `"live"` (see useLive's `phase`).
    *  Disables every button except Stop/Shutdown -- see SAFETY_LABELS above. */
   disabled: boolean;
+  /** Which accent's colors light the primary/accent button variants. Optional
+   *  and defaulting to "ember" so callers (and existing tests) that don't
+   *  care about accent don't have to thread one through. */
+  accent?: AccentName;
 }
 
 // Mode-driven control row. Renders exactly what buttonsForMode(dash) returns
@@ -45,8 +63,9 @@ interface ControlRowProps {
 // union: "command" never confirms, "confirm"/"startup" always do). This
 // component only supplies the presentation for each action type, the same
 // split web-react's ControlButtons.tsx makes.
-export function ControlRow({ dash, command, disabled }: ControlRowProps) {
+export function ControlRow({ dash, command, disabled, accent = "ember" }: ControlRowProps) {
   const buttons = buttonsForMode(dash);
+  const VARIANT_STYLE = variantStyle(accent);
   const [setpointOpen, setSetpointOpen] = useState(false);
   const [menu, setMenu] = useState<{
     title: string;

@@ -1,11 +1,10 @@
 import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import Svg, { Defs, Line, LinearGradient, Path, Stop } from "react-native-svg";
+import Svg, { Circle, Defs, Line, LinearGradient, Path, RadialGradient, Stop } from "react-native-svg";
 import Animated, {
   Easing,
   cancelAnimation,
   useAnimatedProps,
-  useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withSequence,
@@ -21,12 +20,22 @@ import {
   TRACK_COLOR,
   WARN_COLOR,
   THEME,
+  withAlpha,
   type AccentName,
 } from "../theme";
 
-// react-native-svg's Path needs to be wrapped to accept Reanimated's
+// react-native-svg's Path/Circle need wrapping to accept Reanimated's
 // `animatedProps` (the SVG attribute equivalent of `useAnimatedStyle`).
 const AnimatedPath = Animated.createAnimatedComponent(Path);
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+// dashboard.css's .pf-dash-gauge-glow is `width/height: var(--pf-gauge-ring)`
+// against a `--pf-gauge-size` SVG -- the glow disc is smaller than the SVG
+// box, not the same size as it, so it reads as a soft ring bleeding past the
+// arc rather than a disc filling the whole card. --pf-gauge-ring / --pf-gauge-size
+// is 360/392 at desktop and 236/260 at the phone breakpoint -- both ~0.91 --
+// applied to this component's fixed 220 viewBox.
+const GLOW_RADIUS = 110 * 0.91;
 
 interface GrillGaugeProps {
   /** Selects the gradient stops, glow, and mode-badge color -- the only parts
@@ -122,7 +131,11 @@ export function GrillGauge({
   const arcAnimatedProps = useAnimatedProps(() => ({
     strokeDashoffset: dashOffset.value,
   }));
-  const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
+  // Drives the glow Circle's `opacity` prop directly (not a wrapping View's
+  // style) -- see the Circle below.
+  const glowAnimatedProps = useAnimatedProps(() => ({
+    opacity: glowOpacity.value,
+  }));
 
   const spAngle = valueAngle(setpoint, maxTemp);
   const inner = polarToCartesian(CX, CY, R - 13, spAngle);
@@ -130,10 +143,6 @@ export function GrillGauge({
 
   return (
     <View style={styles.card} testID="gauge">
-      <Animated.View
-        style={[styles.glow, glowStyle, { backgroundColor: gaugeAccent.glow }]}
-        testID="gauge-glow"
-      />
       <Svg width={220} height={220} viewBox="0 0 220 220">
         <Defs>
           <LinearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
@@ -141,7 +150,31 @@ export function GrillGauge({
             <Stop offset="0.55" stopColor={gaugeAccent.arcStop1} />
             <Stop offset="1" stopColor={gaugeAccent.arcStop2} />
           </LinearGradient>
+          {/* dashboard.css's .pf-dash-gauge-glow: radial-gradient(closest-side,
+              var(--accent), transparent 68%) -- opaque at the center, straight
+              to fully transparent by 68% of the radius, held transparent past
+              that. CSS's `filter: blur(6px)` on top of it has no RN
+              equivalent; the gradient's own linear fade from opaque to
+              transparent is the approximation for the blur, not an extra
+              effect layered on it. */}
+          <RadialGradient id="pfGaugeGlow" cx="0.5" cy="0.5" r="0.5">
+            <Stop offset="0" stopColor={gaugeAccent.glow} stopOpacity="1" />
+            <Stop offset="0.68" stopColor={gaugeAccent.glow} stopOpacity="0" />
+          </RadialGradient>
         </Defs>
+        {/* Behind the track/arc, same as .pf-dash-gauge-glow sitting behind
+            .pf-dash-gauge-svg in the DOM. A filled circle with fill="none"'s
+            opposite -- radial-gradient fill, not a flat color -- is what keeps
+            this a soft ring rather than the solid disc the earlier flat View
+            painted. */}
+        <AnimatedCircle
+          cx={CX}
+          cy={CY}
+          r={GLOW_RADIUS}
+          fill="url(#pfGaugeGlow)"
+          animatedProps={glowAnimatedProps}
+          testID="gauge-glow"
+        />
         <Path d={TRACK} fill="none" stroke={TRACK_COLOR} strokeWidth={16} strokeLinecap="round" />
         <AnimatedPath
           d={TRACK}
@@ -172,7 +205,21 @@ export function GrillGauge({
         </View>
         {stale && <Text style={styles.stale}>{stale}</Text>}
         {hasSetpoint && <Text style={styles.set}>{`SET ${Math.round(setpoint)}°`}</Text>}
-        <Text style={[styles.mode, { borderColor: accentColor, color: accentColor }]}>{modeLabel}</Text>
+        {/* dashboard.css's .pf-dash-gauge-mode: a small pill BADGE (14%-alpha
+            fill, 55%-alpha border, uppercase, letter-spaced), not a large
+            primary block -- it names the current mode, it isn't the headline. */}
+        <Text
+          style={[
+            styles.mode,
+            {
+              backgroundColor: withAlpha(accentColor, 0.14),
+              borderColor: withAlpha(accentColor, 0.55),
+              color: accentColor,
+            },
+          ]}
+        >
+          {modeLabel}
+        </Text>
       </View>
     </View>
   );
@@ -184,12 +231,6 @@ const styles = StyleSheet.create({
     height: 220,
     alignItems: "center",
     justifyContent: "center",
-  },
-  glow: {
-    position: "absolute",
-    width: 220,
-    height: 220,
-    borderRadius: 110,
   },
   overlay: {
     position: "absolute",
