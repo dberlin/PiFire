@@ -11,12 +11,14 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { arcLength, describeArc, polarToCartesian, valueAngle } from "@pifire/core/gaugeMath";
+import { SCALE, gaugeModeBadge } from "@pifire/core/dashboard/scale";
 import {
   GAUGE_ACCENT,
   SETPOINT_COLOR,
   TEXT_COLOR,
   TEXT_DIM_COLOR,
   LABEL_COLOR,
+  CAPTION,
   TRACK_COLOR,
   WARN_COLOR,
   THEME,
@@ -35,7 +37,20 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 // arc rather than a disc filling the whole card. --pf-gauge-ring / --pf-gauge-size
 // is 360/392 at desktop and 236/260 at the phone breakpoint -- both ~0.91 --
 // applied to this component's fixed 220 viewBox.
-const GLOW_RADIUS = 110 * 0.91;
+// The SVG keeps its 220-unit viewBox -- CX/CY/R below are viewBox
+// coordinates, so the drawing is unchanged -- and is *rendered* at the
+// shared gaugeSize. Rendering it at 220 was drift from the shared scale,
+// and it was load-bearing: the mode badge is 17px/3-tracking (identical to
+// web's .pf-dash-gauge-mode), which needs a ~151pt chord, and a 220 box
+// only offers ~142pt where the badge sits -- so MONITOR overhung the arc.
+const VIEWBOX = 220;
+const GAUGE_SIZE = SCALE.phone.gaugeSize;
+const GLOW_RADIUS = (VIEWBOX / 2) * (SCALE.phone.gaugeRing / SCALE.phone.gaugeSize);
+// Scaled from the desktop reference rather than copied from it: the badge
+// sits inside the arc, so it has to keep its share of the ring at this
+// gauge's size. See gaugeModeBadge's note for why this one element scales
+// uniformly where every other size is a per-element token.
+const MODE_BADGE = gaugeModeBadge(GAUGE_SIZE);
 
 interface GrillGaugeProps {
   /** Selects the gradient stops, glow, and mode-badge color -- the only parts
@@ -143,7 +158,7 @@ export function GrillGauge({
 
   return (
     <View style={styles.card} testID="gauge">
-      <Svg width={220} height={220} viewBox="0 0 220 220">
+      <Svg width={GAUGE_SIZE} height={GAUGE_SIZE} viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}>
         <Defs>
           <LinearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
             <Stop offset="0" stopColor={gaugeAccent.arcStop0} />
@@ -211,6 +226,7 @@ export function GrillGauge({
         <Text
           style={[
             styles.mode,
+            MODE_BADGE,
             {
               backgroundColor: withAlpha(accentColor, 0.14),
               borderColor: withAlpha(accentColor, 0.55),
@@ -227,8 +243,8 @@ export function GrillGauge({
 
 const styles = StyleSheet.create({
   card: {
-    width: 220,
-    height: 220,
+    width: GAUGE_SIZE,
+    height: GAUGE_SIZE,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -238,10 +254,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   caption: {
-    fontSize: 14,
-    fontWeight: "600",
-    letterSpacing: 4,
-    textTransform: "uppercase",
+    ...CAPTION,
     color: LABEL_COLOR,
   },
   num: {
@@ -249,12 +262,12 @@ const styles = StyleSheet.create({
     alignItems: "baseline",
   },
   temp: {
-    fontSize: 56,
+    fontSize: SCALE.phone.gaugeNum,
     fontWeight: "800",
     color: TEXT_COLOR,
   },
   unit: {
-    fontSize: 20,
+    fontSize: SCALE.phone.gaugeUnit,
     fontWeight: "600",
     color: TEXT_DIM_COLOR,
     marginLeft: 4,
@@ -273,15 +286,15 @@ const styles = StyleSheet.create({
     color: SETPOINT_COLOR,
     marginTop: 2,
   },
+  // dashboard.css's .pf-dash-gauge-mode literals, unscaled. The rule is
+  // declared once there with no media override, so web draws the badge at
+  // this size at every breakpoint -- matching it is what keeps the phone app
+  // and web's phone tier identical.
+  // Size, padding, tracking and the gap above all come from MODE_BADGE --
+  // they scale with the gauge. Only what does not scale lives here.
   mode: {
-    marginTop: 12,
-    paddingVertical: 6,
-    paddingHorizontal: 20,
     borderRadius: 999,
-    borderWidth: 1.5,
     textTransform: "uppercase",
-    fontSize: 17,
     fontWeight: "700",
-    letterSpacing: 3,
   },
 });

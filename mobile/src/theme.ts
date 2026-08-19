@@ -138,3 +138,23 @@ export const GAUGE_ACCENT: Record<AccentName, GaugeAccentTokens> = {
   ice: { arcStop0: "#1f9fb8", arcStop1: "#35c7d0", arcStop2: "#7ef0d2", glow: "#2ec5d3" },
   crimson: { arcStop0: "#e11d48", arcStop1: "#ff5a4d", arcStop2: "#ff9f43", glow: "#ff5a4d" },
 };
+
+// --- Native-only sizing -----------------------------------------------------
+//
+// Sizes the native app needs that web has no token for. Everything the two
+// clients share comes from @pifire/core/dashboard/scale instead -- these are
+// the deliberate additions, kept here (and named) so a future reader can tell
+// a decision from a drift. The four tokens that used to differ silently
+// (gaugeNum, gaugeUnit, btnFont, gaugeSize) are NOT in this list: those were
+// copy-paste drift and now read from the shared table.
+
+/** Every small uppercase caption on the dashboard -- "GRILL", "HOPPER",
+ *  "LEVEL OK". Web sizes these ad hoc per element; on a phone they read as
+ *  one family, so mobile gives them one size and one tracking. A probe's name
+ *  is NOT here: it scales with its column (see probeMetrics). */
+export const CAPTION = {
+  fontSize: 13,
+  fontWeight: "600",
+  letterSpacing: 2,
+  textTransform: "uppercase",
+} as const;

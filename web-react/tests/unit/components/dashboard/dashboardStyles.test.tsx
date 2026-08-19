@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { CSS_TOKEN_NAME, SCALE, type SizeTokens } from "@pifire/core/dashboard/scale";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -163,6 +164,8 @@ describe("dashboard.css carries the extracted rules", () => {
 // of each token is the literal it replaced. jsdom resolves neither var() nor
 // media queries, so this is a stylesheet-text assertion by necessity -- the
 // rendered result is the Playwright fidelity gate's job.
+const TOKEN_KEYS = Object.keys(CSS_TOKEN_NAME) as (keyof SizeTokens)[];
+
 describe("dashboard size tokens", () => {
   const css = readFileSync("src/components/dashboard/dashboard.css", "utf8");
   // The token block specifically -- located by one of its own declarations,
@@ -170,27 +173,43 @@ describe("dashboard size tokens", () => {
   const tokenStart = css.lastIndexOf("{", css.indexOf("--pf-header-h"));
   const root = css.slice(tokenStart, css.indexOf("}", tokenStart) + 1);
 
-  const TOKENS: Record<string, string> = {
-    "--pf-header-h": "58px",
-    "--pf-probecol-w": "298px",
-    "--pf-col-w": "300px",
-    "--pf-gauge-size": "392px",
-    "--pf-gauge-ring": "360px",
-    "--pf-gauge-num": "112px",
-    "--pf-gauge-unit": "40px",
-    "--pf-probe-temp": "66px",
-    "--pf-probe-unit": "26px",
-    "--pf-probe-name": "15px",
-    "--pf-btn-font": "25px",
-    "--pf-btn-h": "82px",
-    "--pf-cook-val": "26px",
-    "--pf-pill-val": "24px",
-    "--pf-hopper-val": "34px",
-  };
+  // Derived from @pifire/core's SCALE rather than restated here. These
+  // numbers are shared with the native app, which used to hand-copy them and
+  // silently drifted on four (gaugeNum, gaugeUnit, btnFont, gaugeSize). The
+  // table is now the source and this file is the check that the stylesheet
+  // still agrees with it.
+  const TOKENS: Record<string, string> = Object.fromEntries(
+    TOKEN_KEYS.map((key) => [CSS_TOKEN_NAME[key], `${SCALE.desktop[key]}px`]),
+  );
 
   it("declares every token on the dashboard root, at its original value", () => {
     for (const [name, value] of Object.entries(TOKENS)) {
       expect(root, `${name} missing from the root rule`).toContain(`${name}: ${value};`);
+    }
+  });
+
+  // The drift check. The native app renders at the phone tier and reads
+  // SCALE.phone directly, so if a breakpoint here and the table there
+  // disagree, the two clients disagree about how big the same element is.
+  // That already happened once, silently, in the other direction.
+  it.each([
+    ["max-width: 1279px", "tablet"],
+    ["max-width: 719px", "phone"],
+  ] as const)("%s overrides agree with SCALE.%s", (query, tier) => {
+    const start = css.indexOf(`@media (${query})`);
+    expect(start, `no @media (${query}) block`).toBeGreaterThan(-1);
+    // The token rule is the first `{...}` group inside the media block that
+    // declares a --pf-* custom property.
+    const block = css.slice(start, css.indexOf("\n}", start));
+    const declared = [...block.matchAll(/(--pf-[a-z-]+):\s*(\d+)px;/g)];
+    expect(declared.length, `${query} declares no size tokens`).toBeGreaterThan(0);
+
+    for (const [, name, value] of declared) {
+      const key = TOKEN_KEYS.find((k) => CSS_TOKEN_NAME[k] === name);
+      expect(key, `${name} is not a known size token`).toBeDefined();
+      expect(Number(value), `${name} at ${query} drifted from SCALE.${tier}`).toBe(
+        SCALE[tier][key as keyof SizeTokens],
+      );
     }
   });
 

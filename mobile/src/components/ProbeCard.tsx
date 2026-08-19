@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
+import { probeMetrics } from "@pifire/core/dashboard/scale";
 import { CARD_BORDER_COLOR, LABEL_COLOR, PROBE_LABEL_COLOR, TEXT_COLOR, TEXT_DIM_COLOR, THEME, WARN_COLOR } from "../theme";
 
 interface ProbeCardProps {
@@ -32,6 +33,13 @@ interface ProbeCardProps {
   barPct?: number;
   /** deriveView's ProbeCardView.barColor, resolved the same way as tgtColor. */
   barColor?: string;
+  /** The width of the column this card occupies, from @pifire/core's
+   *  probeGrid(). A card sizes itself from this, never from its own text:
+   *  before it did, every card in a row took its intrinsic content width, so
+   *  a probe named "BRISKET FLAT" rendered wider than "PROBE 2" and three
+   *  probes wrapped into a ragged 2+1. Omitted only by tests that render a
+   *  card outside a row. */
+  width?: number;
 }
 
 // No accent selector yet, matching GrillGauge.tsx's note: theme.ts's gauge
@@ -48,18 +56,39 @@ export function ProbeCard({
   tgtColor,
   barPct = 0,
   barColor,
+  width,
 }: ProbeCardProps) {
   const hasTarget = targetStr !== "AMBIENT";
+  // The reading scales with the column, so a lone full-width probe reads as a
+  // peer of the hopper while three across stay legible. probeMetrics caps it
+  // at the shared scale's probeTemp -- a probe is never a second hero
+  // competing with the gauge.
+  const m = probeMetrics(width ?? 360);
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.name}>{name}</Text>
+    <View
+      testID="probe-card"
+      style={[
+        styles.card,
+        { paddingHorizontal: m.padding, paddingVertical: m.padding - 1 },
+        width === undefined ? null : { width },
+      ]}
+    >
+      <Text style={[styles.name, { fontSize: m.name }]} numberOfLines={1}>
+        {name}
+      </Text>
       <View style={styles.readingRow}>
-        <Text style={styles.tempInt}>{temp === null ? "—" : temp}</Text>
-        <Text style={styles.tempUnit}>{"°"}{units}</Text>
+        <Text style={[styles.tempInt, { fontSize: m.temp }]}>{temp === null ? "—" : temp}</Text>
+        <Text style={[styles.tempUnit, { fontSize: m.unit }]}>{"°"}{units}</Text>
       </View>
       {stale !== null ? <Text style={styles.stale}>{stale}</Text> : null}
-      <Text style={[styles.target, { color: tgtColor ?? (hasTarget ? tokens.accent : LABEL_COLOR) }]}>
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.target,
+          { fontSize: m.name, color: tgtColor ?? (hasTarget ? tokens.accent : LABEL_COLOR) },
+        ]}
+      >
         {targetStr}
       </Text>
       {/* dashboard.css's .pf-dash-bar / .pf-dash-bar-fill: a thin progress
@@ -79,14 +108,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: CARD_BORDER_COLOR,
-    paddingVertical: 15,
-    paddingHorizontal: 18,
     gap: 2,
-    minWidth: 140,
   },
   name: {
     color: PROBE_LABEL_COLOR,
-    fontSize: 15,
     fontWeight: "600",
     letterSpacing: 1.5,
     textTransform: "uppercase",
@@ -95,17 +120,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "baseline",
   },
-  // Sized to dashboard.css's phone breakpoint (max-width: 719px), the closest
-  // web ever gets to this component's actual footprint: --pf-probe-temp: 44px,
-  // --pf-probe-unit: 18px.
+  // Type sizes come from probeMetrics() at render time, not from here: they
+  // depend on the column width, which depends on how many probes are showing.
+  // Only the properties that do NOT vary with the column stay in the sheet.
   tempInt: {
     color: TEXT_COLOR,
-    fontSize: 44,
     fontWeight: "800",
   },
   tempUnit: {
     color: TEXT_DIM_COLOR,
-    fontSize: 18,
     fontWeight: "600",
     marginLeft: 2,
   },
@@ -117,7 +140,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   target: {
-    fontSize: 15,
     fontWeight: "600",
   },
   bar: {

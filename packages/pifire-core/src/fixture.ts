@@ -176,3 +176,34 @@ export const FIXTURE_DASH = {
   },
   modelLearningRevision: null,
 } satisfies DashSocketPayload;
+
+// The same payload shape in a RUNNING state, for the cases FIXTURE_DASH
+// cannot show. FIXTURE_DASH was captured from an idle grill, so every temp is
+// 0, every output false, and the mode badge reads "Stop" -- which means it
+// exercises none of the live-cook rendering, and the widest mode label the UI
+// ever draws ("Monitor", 7 characters against "Stop"'s 4) never appears. The
+// mobile gauge's mode badge is sized to fit inside the arc, so the short label
+// is exactly the one that cannot prove the fit.
+//
+// Derived from FIXTURE_DASH rather than re-captured, so the two can never
+// disagree about the payload's shape: only the fields a running Monitor cook
+// would actually change are overridden.
+export const FIXTURE_DASH_MONITOR = {
+  ...FIXTURE_DASH,
+  status: "active",
+  currentMode: "Monitor",
+  nextMode: "Monitor",
+  displayMode: "Monitor",
+  // Monitor watches and reports; it does not drive to a setpoint, so the
+  // primary probe carries a temperature but no target.
+  outputs: { fan: true, auger: false, igniter: false, power: true },
+  primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 237 },
+  // One probe with an ARMED target (so the target line and progress bar
+  // render) and two ambient ones, which is the mix the probe row has to lay
+  // out in practice.
+  foodProbes: [
+    { ...FIXTURE_DASH.foodProbes[0], title: "Brisket", temp: 148, target: 203, targetReq: true },
+    { ...FIXTURE_DASH.foodProbes[1], title: "Pork Butt", temp: 132 },
+    { ...FIXTURE_DASH.foodProbes[2], title: "Ambient", temp: 79 },
+  ],
+} satisfies DashSocketPayload;

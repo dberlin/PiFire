@@ -7,6 +7,7 @@ import {
   type MenuItem,
   buttonsForMode,
 } from "@pifire/core/dashboard/buttonsForMode";
+import { SCALE } from "@pifire/core/dashboard/scale";
 import { BODY_TEXT_COLOR, INSET_COLOR, ON_ACCENT_INK, THEME, withAlpha, type AccentName } from "../theme";
 import { SetpointModal } from "./SetpointModal";
 
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   buttonText: {
-    fontSize: 14,
+    fontSize: SCALE.phone.btnFont,
     fontWeight: "600",
   },
   scrim: {
