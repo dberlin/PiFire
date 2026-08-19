@@ -468,7 +468,7 @@ The socket wiring is shared; the React hook around it is not. Web keeps a hook t
 - Modify: `web-react/package.json` (drops `socket.io-client`)
 
 **Interfaces:**
-- Consumes: `@pifire/core/command`, `@pifire/core/contracts/core`, `@pifire/core/contracts/control`.
+- Consumes: `@pifire/core/contracts/core`, `@pifire/core/contracts/control`. Not `command` — the command client is built by the client that owns the hook, not by the connection.
 - Produces: `@pifire/core/liveConnection` exporting:
 
 ```ts
@@ -615,10 +615,16 @@ the socket down on backgrounding."
 ## Task 6: Move the remaining pure display logic
 
 **Files:**
-- Move: `deriveView.ts`, `buttonsForMode.ts` → `packages/pifire-core/src/dashboard/`
+- Move: `deriveView.ts`, `buttonsForMode.ts`, `probeStatus.ts` → `packages/pifire-core/src/dashboard/`
 - Move: `demoData.ts`, `fixture.ts` → `packages/pifire-core/src/`
-- Move: the four corresponding test files → `packages/pifire-core/tests/`
+- Move: the five corresponding test files → `packages/pifire-core/tests/`
 - Modify: importers in `web-react/src` and `web-react/tests`
+
+**`probeStatus.ts` moves because `deriveView.ts` imports it** (`batteryBadge`,
+`connectionBadge`, `probeStatus.ts:1-7`). Nothing else in web-react imports it
+except its own test, and it imports nothing but contracts, so it moves cleanly
+and no web-react component needs repointing for it. Moving `deriveView` without
+it would leave the shared package importing back into a client.
 
 **Interfaces:**
 - Produces: `@pifire/core/dashboard/deriveView`, `@pifire/core/dashboard/buttonsForMode`, `@pifire/core/demoData`, `@pifire/core/fixture`. Exported names are unchanged by the move.
@@ -626,11 +632,14 @@ the socket down on backgrounding."
 - [ ] **Step 1: Move the four modules and their tests**
 
 ```bash
-mv web-react/src/helpers/dashboard/deriveView.ts web-react/src/helpers/dashboard/buttonsForMode.ts \
+mv web-react/src/helpers/dashboard/deriveView.ts \
+   web-react/src/helpers/dashboard/buttonsForMode.ts \
+   web-react/src/helpers/dashboard/probeStatus.ts \
    packages/pifire-core/src/dashboard/
 mv web-react/src/helpers/demoData.ts web-react/src/helpers/fixture.ts packages/pifire-core/src/
 mv web-react/tests/unit/helpers/dashboard/deriveView.test.ts \
    web-react/tests/unit/helpers/dashboard/buttonsForMode.test.ts \
+   web-react/tests/unit/helpers/dashboard/probeStatus.test.ts \
    web-react/tests/unit/helpers/demoData.test.ts packages/pifire-core/tests/
 ```
 
@@ -1114,7 +1123,7 @@ current."
 
 **Interfaces:**
 - Consumes: `@pifire/core/gaugeMath` — `describeArc`, `arcLength`, `valueAngle`, `polarToCartesian`, `clampFraction`.
-- Produces: `<GrillGauge temp setpoint maxTemp frac hasSetpoint modeLabel units cooking animate />` — the same prop set as the web component, so `deriveView`'s output feeds it unchanged.
+- Produces: `<GrillGauge temp stale setpoint maxTemp frac hasSetpoint modeLabel units cooking animate />` — the same prop set as the web component (`web-react/src/components/dashboard/GrillGauge.tsx:1-18`), so `deriveView`'s output feeds it unchanged. `stale` is the staleness marker string, or null.
 
 - [ ] **Step 1: Write the failing test**
 
