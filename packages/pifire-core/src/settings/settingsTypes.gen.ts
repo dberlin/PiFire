@@ -121,7 +121,13 @@ type Rst = number;
 type Address = string | number | null;
 type Device = string;
 type Echo = number;
-type I2CBus = _BasicBus | _KernelBusNumber | _KernelAdapterName | _KernelSerialMatch | _FT232HBus | _MCP2221Bus;
+type I2CBus =
+  | _BasicBus
+  | _KernelBusNumber
+  | _KernelAdapterName
+  | _KernelSerialMatch
+  | _FT232HBus
+  | _MCP2221Bus;
 type Kind = "basic";
 type BusNum = number;
 type Kind1 = "kernel";
@@ -139,7 +145,13 @@ type EnterSw = number;
 type UpClk = number;
 type Address1 = string;
 type Chip = string;
-type I2CBus1 = _BasicBus | _KernelBusNumber | _KernelAdapterName | _KernelSerialMatch | _FT232HBus | _MCP2221Bus;
+type I2CBus1 =
+  | _BasicBus
+  | _KernelBusNumber
+  | _KernelAdapterName
+  | _KernelSerialMatch
+  | _FT232HBus
+  | _MCP2221Bus;
 type Url2 = string;
 type Selector = number | null;
 type Shutdown1 = number | null;

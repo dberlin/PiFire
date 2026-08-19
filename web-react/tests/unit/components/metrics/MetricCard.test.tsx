@@ -1,8 +1,8 @@
+import type { MetricRecord } from "@pifire/core/contracts/content";
 import { describe, expect, it } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MetricCard } from "../../../../src/components/metrics/MetricCard";
-import type { MetricRecord } from "../../../../src/helpers/contracts/content.gen";
 
 const RECORD: MetricRecord = {
   id: "m1",

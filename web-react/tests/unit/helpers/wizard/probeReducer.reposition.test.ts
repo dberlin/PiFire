@@ -1,5 +1,5 @@
+import type { ProbeMap, ProbeProfile } from "@pifire/core/contracts/wizard";
 import { describe, expect, it } from "@rstest/core";
-import type { ProbeMap, ProbeProfile } from "../../../../src/helpers/contracts/wizard.gen";
 import { editProbe } from "../../../../src/helpers/wizard/probeReducer";
 
 const P: ProbeProfile[] = [];

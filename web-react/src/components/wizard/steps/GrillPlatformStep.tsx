@@ -1,4 +1,4 @@
-import type { ModuleValues, WizardState } from "../../../helpers/contracts/wizard.gen";
+import type { ModuleValues, WizardState } from "@pifire/core/contracts/wizard";
 import { useModuleSwitch } from "../../../helpers/wizard/useModuleSwitch";
 import {
   EMPTY_PROBE_MAP,

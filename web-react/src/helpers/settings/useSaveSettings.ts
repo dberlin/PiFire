@@ -1,8 +1,8 @@
+import type { SaveFieldError, SettingsFlag } from "@pifire/core/settings/controllerTypes";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
 import { normalizeApiBase, queryKeys } from "../query/keys";
-import type { SaveFieldError, SettingsFlag } from "./controllerTypes.gen";
 import { applySettings } from "./settingsApi";
 
 const BASE_URL = normalizeApiBase(import.meta.env.PUBLIC_PIFIRE_URL || "");

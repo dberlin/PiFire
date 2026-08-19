@@ -1,10 +1,10 @@
+import type { AdminSettings } from "@pifire/core/contracts/operations";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
-import type { AdminSettings } from "../../../../src/helpers/contracts/operations.gen";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { testQueryClient } from "../../test-utils";
 

@@ -13,7 +13,7 @@ import type {
   PidSpLearningStatus,
   PidSpPredictorModel,
   PidSpPredictorReport,
-} from "../contracts/learning.gen";
+} from "@pifire/core/contracts/learning";
 
 export interface PidSpLearningResult<T> {
   ok: boolean;

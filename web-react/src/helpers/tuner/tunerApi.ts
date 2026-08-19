@@ -4,7 +4,7 @@
 // second and is a pure GET by design -- see blueprints/api_tuner's docstring
 // for why the session and the reading are separate endpoints.
 
-import type { ApiEnvelope } from "../contracts/core.gen";
+import type { ApiEnvelope } from "@pifire/core/contracts/core";
 import type {
   AutoStatus,
   AutoStatusRequest,
@@ -16,7 +16,7 @@ import type {
   TunerPoint,
   TunerSession,
   TunerSessionRequest,
-} from "../contracts/operations.gen";
+} from "@pifire/core/contracts/operations";
 import type { TunerResult } from "./tunerTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

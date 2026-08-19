@@ -3,7 +3,7 @@ import type {
   WledDiscoverResponse,
   WledPushProfilesRequest,
   WledTestProfileRequest,
-} from "../contracts/control.gen";
+} from "@pifire/core/contracts/control";
 
 // Typed client for the /api/wled_* action surface (discover / push / test).
 //

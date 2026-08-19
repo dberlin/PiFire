@@ -1,5 +1,5 @@
+import type { ProbeMap, ProbeProfile } from "@pifire/core/contracts/wizard";
 import { useState } from "react";
-import type { ProbeMap, ProbeProfile } from "../../../helpers/contracts/wizard.gen";
 import {
   addProbe,
   deleteProbe,

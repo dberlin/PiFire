@@ -6,8 +6,8 @@
 // So there is no unpack() here -- the status line and Content-Range ARE the
 // protocol.
 
-import type { ApiEnvelope } from "../contracts/core.gen";
-import type { LogFamily, LogsMetadata } from "../contracts/operations.gen";
+import type { ApiEnvelope } from "@pifire/core/contracts/core";
+import type { LogFamily, LogsMetadata } from "@pifire/core/contracts/operations";
 import type { LogDelta } from "./logTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

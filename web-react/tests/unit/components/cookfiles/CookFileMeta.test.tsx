@@ -1,10 +1,7 @@
+import type { CookFileLabels, CookFileMetadata } from "@pifire/core/contracts/content";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {
-  CookFileLabels,
-  CookFileMetadata,
-} from "../../../../src/helpers/contracts/content.gen";
 import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 // The URL builders and CookFileRequestError stay REAL so the download hrefs and
 // the 409 branch are asserted against the shipped contract, not a stub of it.

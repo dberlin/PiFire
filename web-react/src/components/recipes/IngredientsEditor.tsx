@@ -1,5 +1,5 @@
+import type { Ingredient, Instruction } from "@pifire/core/contracts/content";
 import { useState } from "react";
-import type { Ingredient, Instruction } from "../../helpers/contracts/content.gen";
 import { addIngredient, deleteIngredient, updateIngredient } from "../../helpers/files/recipeApi";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 

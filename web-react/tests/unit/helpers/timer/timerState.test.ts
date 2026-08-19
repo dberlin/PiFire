@@ -1,5 +1,5 @@
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { describe, expect, it } from "@rstest/core";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import { deriveTimer, formatRemaining } from "../../../../src/helpers/timer/timerState";
 
 type Timer = DashSocketPayload["timer"];

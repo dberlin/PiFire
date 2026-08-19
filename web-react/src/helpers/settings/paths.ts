@@ -1,4 +1,4 @@
-import type { SettingsSchema } from "./settingsTypes.gen";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 
 /** A value that terminates a path rather than being descended into. Arrays are
  *  terminal: the tabs replace a whole list (temp_range_list, profiles) rather

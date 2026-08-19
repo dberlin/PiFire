@@ -1,9 +1,9 @@
+import type { FileListing } from "@pifire/core/contracts/content";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import type { FileListing } from "../../../../src/helpers/contracts/content.gen";
 // The two pure helpers this component also uses -- thumbnailUrl and
 // cookFileDownloadUrl -- are kept REAL, so the URL contract the server enforces
 // is asserted here rather than restated by a stub.

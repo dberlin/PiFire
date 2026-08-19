@@ -4,8 +4,8 @@ import type {
   PrimeCommandRequest,
   SystemCommand,
   TimerOptionsPayload,
-} from "./contracts/control.gen";
-import type { CommandResponse } from "./contracts/core.gen";
+} from "@pifire/core/contracts/control";
+import type { CommandResponse } from "@pifire/core/contracts/core";
 import { postControl } from "./notify/notifyApi";
 
 // REST command client using PiFire's command grammar (common/api_commands.py

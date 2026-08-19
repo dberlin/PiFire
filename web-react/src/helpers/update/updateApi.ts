@@ -6,7 +6,7 @@
 // rejected because the system is active) resolves to ok:false rather than
 // throwing, since callers render the reason instead of catching an escape.
 
-import type { ApiEnvelope } from "../contracts/core.gen";
+import type { ApiEnvelope } from "@pifire/core/contracts/core";
 import type {
   BuildLog,
   UpdateBranchRequest,
@@ -15,7 +15,7 @@ import type {
   UpdateStarted,
   UpdateState,
   UpdateStatus,
-} from "../contracts/operations.gen";
+} from "@pifire/core/contracts/operations";
 import type { UpdateResult } from "./updateTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

@@ -1,4 +1,4 @@
-import type { ProbeProfile } from "../../../helpers/contracts/wizard.gen";
+import type { ProbeProfile } from "@pifire/core/contracts/wizard";
 
 const TYPE_OPTIONS = [
   { value: "Food", label: "Food Probe" },

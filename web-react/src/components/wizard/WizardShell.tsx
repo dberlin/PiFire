@@ -1,8 +1,8 @@
+import type { WizardState } from "@pifire/core/contracts/wizard";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
 import { systemAction } from "../../helpers/admin/adminApi";
-import type { WizardState } from "../../helpers/contracts/wizard.gen";
 import { queryKeys } from "../../helpers/query/keys";
 import { cancelWizard, finishWizard, saveDraft } from "../../helpers/wizard/wizardApi";
 import { BASE_URL } from "../../helpers/wizard/wizardRoutes";

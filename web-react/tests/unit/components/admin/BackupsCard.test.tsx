@@ -1,9 +1,9 @@
+import type { BackupListing } from "@pifire/core/contracts/operations";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
-import type { BackupListing } from "../../../../src/helpers/contracts/operations.gen";
 
 const createBackupMock = rs.fn();
 const restoreBackupMock = rs.fn();

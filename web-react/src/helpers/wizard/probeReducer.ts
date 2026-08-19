@@ -7,7 +7,7 @@ import type {
   ProbeProfile,
   ProbeType,
   WireValue,
-} from "../contracts/wizard.gen";
+} from "@pifire/core/contracts/wizard";
 
 export type ReducerResult = { ok: true; probeMap: ProbeMap } | { ok: false; error: string };
 

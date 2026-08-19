@@ -1,5 +1,5 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { Link, useOutletContext } from "react-router";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { Section } from "../fields/Section";
 
 const DASH = "—";

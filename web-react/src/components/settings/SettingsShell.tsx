@@ -1,11 +1,11 @@
+import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
 import { readAccent } from "../../helpers/settings/accent";
-import type { ControllerCatalog } from "../../helpers/settings/controllerTypes.gen";
 import { hasDcFan } from "../../helpers/settings/platform";
 import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";
 import { SETTINGS_TABS } from "../../helpers/settings/settingsTabs";
-import type { SettingsSchema } from "../../helpers/settings/settingsTypes.gen";
 import { useAppPrefs } from "../AppPrefs";
 
 export function SettingsShell() {

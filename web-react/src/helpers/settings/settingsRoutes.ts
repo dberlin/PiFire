@@ -1,8 +1,8 @@
+import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { normalizeApiBase, queryKeys } from "../query/keys";
 import { queryClient } from "../query/queryClient";
-import type { ControllerCatalog } from "./controllerTypes.gen";
 import { getControllerMetadata, getMode, getSettings } from "./settingsApi";
-import type { SettingsSchema } from "./settingsTypes.gen";
 
 const BASE_URL = normalizeApiBase(import.meta.env.PUBLIC_PIFIRE_URL || "");
 

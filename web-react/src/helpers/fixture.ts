@@ -1,4 +1,4 @@
-import type { DashSocketPayload } from "./contracts/core.gen";
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 
 // Real `socket_dash_data` payload captured 2026-07-21 from the running
 // prototype backend (control.py + gunicorn on localhost:5000), via a

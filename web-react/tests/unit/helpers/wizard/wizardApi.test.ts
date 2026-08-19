@@ -1,5 +1,5 @@
+import type { WizardState } from "@pifire/core/contracts/wizard";
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
-import type { WizardState } from "../../../../src/helpers/contracts/wizard.gen";
 
 afterEach(() => {
   rs.resetAllMocks();

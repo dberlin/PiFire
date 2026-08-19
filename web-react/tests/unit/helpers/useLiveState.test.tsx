@@ -1,7 +1,7 @@
+import type { PelletDbSchema } from "@pifire/core/contracts/control";
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook } from "@testing-library/react";
-import type { PelletDbSchema } from "../../../src/helpers/contracts/control.gen";
-import type { DashSocketPayload } from "../../../src/helpers/contracts/core.gen";
 import { useLiveState } from "../../../src/helpers/useLiveState";
 
 const PELLET_DB: PelletDbSchema = {

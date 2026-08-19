@@ -1,6 +1,6 @@
+import type { LogFamily } from "@pifire/core/contracts/operations";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
-import type { LogFamily } from "../../helpers/contracts/operations.gen";
 import { fetchLogFamilies } from "../../helpers/logs/logsApi";
 import { LogFilesTab } from "./LogFilesTab";
 import { LogViewer } from "./LogViewer";

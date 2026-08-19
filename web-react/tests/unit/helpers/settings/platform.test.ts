@@ -1,6 +1,6 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { describe, expect, it } from "@rstest/core";
 import { hasDcFan } from "../../../../src/helpers/settings/platform";
-import type { SettingsSchema } from "../../../../src/helpers/settings/settingsTypes.gen";
 
 describe("hasDcFan", () => {
   it("is true when platform.dc_fan is true", () => {

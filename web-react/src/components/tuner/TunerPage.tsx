@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AutoStatus,
   Coefficients,
   Segment,
   TrReading,
   TunerPoint,
-} from "../../helpers/contracts/operations.gen";
+} from "@pifire/core/contracts/operations";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "../../helpers/settings/useSettings";
 import {
   computeCoefficients,

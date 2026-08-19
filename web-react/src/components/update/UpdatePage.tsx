@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
 import type {
   SystemAction,
   UpdateCheck,
   UpdateStarted,
   UpdateState,
   UpdateStatus,
-} from "../../helpers/contracts/operations.gen";
+} from "@pifire/core/contracts/operations";
+import { useCallback, useEffect, useState } from "react";
+import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
 import { behindText } from "../../helpers/update/behindText";
 import {
   buildLogDownloadUrl,

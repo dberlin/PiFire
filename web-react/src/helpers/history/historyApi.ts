@@ -1,4 +1,4 @@
-import type { HistoryChartData } from "../contracts/content.gen";
+import type { HistoryChartData } from "@pifire/core/contracts/content";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

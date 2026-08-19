@@ -1,4 +1,4 @@
-import type { HistoryChartData, HistoryDataset } from "../../helpers/contracts/content.gen";
+import type { HistoryChartData, HistoryDataset } from "@pifire/core/contracts/content";
 import type { ChartSeries } from "./HistoryChart";
 
 /**

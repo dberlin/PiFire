@@ -53,7 +53,11 @@ type OptionName4 = string;
 type OptionStep4 = number | null;
 type OptionType4 = "string";
 type Config = (
-  FloatControllerOption | IntControllerOption | BoolControllerOption | ListControllerOption | StringControllerOption
+  | FloatControllerOption
+  | IntControllerOption
+  | BoolControllerOption
+  | ListControllerOption
+  | StringControllerOption
 )[];
 type Contributors = string[];
 type Extra = string | null;
@@ -213,7 +217,13 @@ type Rst = number;
 type Address = string | number | null;
 type Device = string;
 type Echo = number;
-type I2CBus = _BasicBus | _KernelBusNumber | _KernelAdapterName | _KernelSerialMatch | _FT232HBus | _MCP2221Bus;
+type I2CBus =
+  | _BasicBus
+  | _KernelBusNumber
+  | _KernelAdapterName
+  | _KernelSerialMatch
+  | _FT232HBus
+  | _MCP2221Bus;
 type Kind = "basic";
 type BusNum = number;
 type Kind1 = "kernel";
@@ -231,7 +241,13 @@ type EnterSw = number;
 type UpClk = number;
 type Address1 = string;
 type Chip = string;
-type I2CBus1 = _BasicBus | _KernelBusNumber | _KernelAdapterName | _KernelSerialMatch | _FT232HBus | _MCP2221Bus;
+type I2CBus1 =
+  | _BasicBus
+  | _KernelBusNumber
+  | _KernelAdapterName
+  | _KernelSerialMatch
+  | _FT232HBus
+  | _MCP2221Bus;
 type Url2 = string;
 type Selector = number | null;
 type Shutdown1 = number | null;
@@ -281,7 +297,11 @@ type Uuid1 = string;
  * This interface was referenced by `PiFireControllerWebContracts`'s JSON-Schema
  * via the `definition` "SettingsFlag".
  */
-export type SettingsFlag = "settings_update" | "controller_update" | "distance_update" | "probe_profile_update";
+export type SettingsFlag =
+  | "settings_update"
+  | "controller_update"
+  | "distance_update"
+  | "probe_profile_update";
 type SchemaVersion = number;
 type AutoPowerOff = boolean;
 type ShutdownDuration = number;

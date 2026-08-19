@@ -1,5 +1,5 @@
+import type { ControlHealthResponse } from "@pifire/core/contracts/core";
 import { useState } from "react";
-import type { ControlHealthResponse } from "../contracts/core.gen";
 
 // The "control process did not respond" entry in dash.errors is a POLL RESULT,
 // not a durable error. blueprints/mobile/socket_io.py re-probes every 30s and

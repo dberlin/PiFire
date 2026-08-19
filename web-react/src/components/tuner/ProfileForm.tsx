@@ -1,5 +1,5 @@
+import type { ProfileInput, SavedProfile } from "@pifire/core/contracts/operations";
 import { useState } from "react";
-import type { ProfileInput, SavedProfile } from "../../helpers/contracts/operations.gen";
 import { saveProfile, tunerErrorText } from "../../helpers/tuner/tunerApi";
 import "./tuner.css";
 

@@ -17,7 +17,7 @@ import type {
   WizardFinishRequest,
   WizardSection,
   WizardState,
-} from "../contracts/wizard.gen";
+} from "@pifire/core/contracts/wizard";
 import type { WizardWorking } from "./wizardTypes";
 
 function url(baseUrl: string, path: string): string {

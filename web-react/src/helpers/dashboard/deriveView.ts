@@ -1,4 +1,4 @@
-import type { DashSocketPayload, ProbeStatusPayload } from "../contracts/core.gen";
+import type { DashSocketPayload, ProbeStatusPayload } from "@pifire/core/contracts/core";
 import {
   type BatteryBadge,
   batteryBadge,

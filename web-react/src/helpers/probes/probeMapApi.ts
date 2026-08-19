@@ -7,8 +7,8 @@ import type {
   ProbeMapResponse,
   ProbeModuleCatalog,
   ProbeProfile,
-} from "../contracts/wizard.gen";
-import type { SettingsSchema } from "../settings/settingsTypes.gen";
+} from "@pifire/core/contracts/wizard";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import type { ApplyProbeMapResult } from "./probeMapTypes";
 
 export async function getProbeModules(baseUrl: string): Promise<ProbeModuleCatalog> {

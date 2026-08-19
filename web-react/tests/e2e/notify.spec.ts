@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { NotifyEntry, NotifyListResponse } from "@pifire/core/contracts/control";
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import type { NotifyEntry, NotifyListResponse } from "../../src/helpers/contracts/control.gen";
 import { API, ensureStopped, monitorProbeReadings } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run

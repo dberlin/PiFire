@@ -1,5 +1,5 @@
+import type { PelletDbSchema, PelletProfile } from "@pifire/core/contracts/control";
 import { useState } from "react";
-import type { PelletDbSchema, PelletProfile } from "../../helpers/contracts/control.gen";
 import { formatUsage } from "../../helpers/pellets/usage";
 import { Select } from "../settings/fields/Select";
 import { Rating } from "./Rating";

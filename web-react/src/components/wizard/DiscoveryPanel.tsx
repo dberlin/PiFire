@@ -1,4 +1,4 @@
-import type { ScanResult } from "../../helpers/contracts/wizard.gen";
+import type { ScanResult } from "@pifire/core/contracts/wizard";
 
 export interface DiscoveryPanelProps {
   result: ScanResult;

@@ -1,4 +1,4 @@
-import type { DismissWarningsRequest, DismissWarningsResponse } from "../contracts/core.gen";
+import type { DismissWarningsRequest, DismissWarningsResponse } from "@pifire/core/contracts/core";
 
 // Client for the warnings dismiss endpoint.
 //

@@ -5,7 +5,7 @@
 // which rows they include, so they collapse to one row builder and a per-mode
 // row list -- and as data they are testable without rendering anything.
 
-import type { MetricRecord } from "../../helpers/contracts/content.gen";
+import type { MetricRecord } from "@pifire/core/contracts/content";
 
 /** One row of a card: the label, the raw column, and its readable form. */
 export interface MetricRow {

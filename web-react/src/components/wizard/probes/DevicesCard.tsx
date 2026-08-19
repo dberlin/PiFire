@@ -1,5 +1,5 @@
+import type { Config, ProbeMap, ProbeModuleData } from "@pifire/core/contracts/wizard";
 import { useState } from "react";
-import type { Config, ProbeMap, ProbeModuleData } from "../../../helpers/contracts/wizard.gen";
 import {
   addDevice,
   alnum,

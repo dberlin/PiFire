@@ -14,7 +14,7 @@ from .registry import ContractBundle, RootContract, WEB_CONTRACT_BUNDLES, WEB_RO
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_DIRECTORY = Path("web-react/schema/contracts")
-TYPESCRIPT_DIRECTORY = Path("web-react/src/helpers/contracts")
+TYPESCRIPT_DIRECTORY = Path("packages/pifire-core/src/contracts")
 MANIFEST_PATH = SCHEMA_DIRECTORY / "manifest.json"
 TYPESCRIPT_EXPORTS_KEY = "x-pifire-typescript-exports"
 TYPESCRIPT_DEFINITION_OWNER_OVERRIDES = {

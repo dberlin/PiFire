@@ -1,7 +1,7 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useQuery } from "@tanstack/react-query";
 import { normalizeApiBase, queryKeys } from "../query/keys";
 import { getSettings } from "./settingsApi";
-import type { SettingsSchema } from "./settingsTypes.gen";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

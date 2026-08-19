@@ -7,7 +7,11 @@ import ts from "typescript";
 import { extractFrontendWebTransports } from "../../../scripts/extractWebTransports";
 
 const WEB_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
+// The schemas stayed in web-react but the generated TypeScript did not, so
+// this test needs a repository root beside WEB_ROOT to reach it.
+const REPO_ROOT = join(WEB_ROOT, "..");
 const HELPERS_ROOT = join(WEB_ROOT, "src/helpers");
+const SCANNED_ROOTS = [HELPERS_ROOT, join(REPO_ROOT, "packages/pifire-core/src")];
 const MANIFEST_PATH = join(WEB_ROOT, "schema/contracts/manifest.json");
 const LEGACY_MIRROR_NAMES: Record<string, true> = {
   AdminEnvelope: true,
@@ -44,7 +48,7 @@ function filesBelow(root: string): string[] {
 function generatedArtifacts(): Array<{ schema: string; typescript: string }> {
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8")) as Record<string, string>;
   const schemaRoot = join(WEB_ROOT, "schema/contracts");
-  const typescriptRoot = join(WEB_ROOT, "src/helpers/contracts");
+  const typescriptRoot = join(REPO_ROOT, "packages/pifire-core/src/contracts");
   return Object.entries(manifest).map(([schema, typescript]) => ({
     schema: resolve(schemaRoot, schema),
     typescript: resolve(typescriptRoot, typescript),
@@ -96,9 +100,12 @@ function pythonOwnedNames(): Set<string> {
   return names;
 }
 
-function residualMirrors(root: string, ownedNames: ReadonlySet<string>): string[] {
+function residualMirrors(roots: readonly string[], ownedNames: ReadonlySet<string>): string[] {
   const residuals = new Set<string>();
-  for (const filename of filesBelow(root)) {
+  const filesByRoot = roots.flatMap((root) =>
+    filesBelow(root).map((filename) => ({ root, filename })),
+  );
+  for (const { root, filename } of filesByRoot) {
     const source = readFileSync(filename, "utf8");
     const kind = filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
     const sourceFile = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, kind);
@@ -156,7 +163,7 @@ describe("generated web contract ownership", () => {
         join(root, "renamed.ts"),
         "interface TransportBody { result?: string; message?: string; data?: unknown }",
       );
-      expect(residualMirrors(root, pythonOwnedNames())).toEqual(["renamed.ts:TransportBody"]);
+      expect(residualMirrors([root], pythonOwnedNames())).toEqual(["renamed.ts:TransportBody"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -169,7 +176,7 @@ describe("generated web contract ownership", () => {
         join(root, "inline.ts"),
         "async function read(response: Response) { return (await response.json()) as { result?: string; message?: string; data?: unknown }; }",
       );
-      expect(residualMirrors(root, pythonOwnedNames())).toEqual(["inline.ts:<inline-envelope>"]);
+      expect(residualMirrors([root], pythonOwnedNames())).toEqual(["inline.ts:<inline-envelope>"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -182,7 +189,7 @@ describe("generated web contract ownership", () => {
         join(root, "wire.ts"),
         "interface AdminState { selected: boolean } async function read(response: Response) { return (await response.json()) as AdminState; }",
       );
-      expect(residualMirrors(root, pythonOwnedNames())).toEqual(["wire.ts:AdminState"]);
+      expect(residualMirrors([root], pythonOwnedNames())).toEqual(["wire.ts:AdminState"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -192,7 +199,7 @@ describe("generated web contract ownership", () => {
     const root = mkdtempSync(join(tmpdir(), "pifire-contract-inventory-"));
     try {
       writeFileSync(join(root, "local.ts"), "interface AdminState { selected: boolean }");
-      expect(residualMirrors(root, pythonOwnedNames())).toEqual([]);
+      expect(residualMirrors([root], pythonOwnedNames())).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -258,7 +265,7 @@ describe("generated web contract ownership", () => {
   });
 
   it("keeps migrated helpers free of Python-owned interface and type declarations", () => {
-    const residuals = residualMirrors(HELPERS_ROOT, pythonOwnedNames());
+    const residuals = residualMirrors(SCANNED_ROOTS, pythonOwnedNames());
     expect(residuals).toEqual([]);
   });
 });

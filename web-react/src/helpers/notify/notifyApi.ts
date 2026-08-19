@@ -2,7 +2,7 @@ import type {
   ControlPatchRequest,
   ControlPatchResponse,
   NotifyUpdate,
-} from "../contracts/control.gen";
+} from "@pifire/core/contracts/control";
 
 // Per-probe notification state lives in control["notify_data"] -- runtime
 // CONTROL state, not settings. Written with a SINGLE POST /api/control

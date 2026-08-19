@@ -1,4 +1,4 @@
-import type { WizardSection } from "../../../helpers/contracts/wizard.gen";
+import type { WizardSection } from "@pifire/core/contracts/wizard";
 
 export interface PlaceholderStepProps {
   section: WizardSection;

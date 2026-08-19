@@ -1,4 +1,4 @@
-import type { Config, ProbeModuleData, WireValue } from "../../../helpers/contracts/wizard.gen";
+import type { Config, ProbeModuleData, WireValue } from "@pifire/core/contracts/wizard";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { DeviceConfigField } from "./DeviceConfigField";
 

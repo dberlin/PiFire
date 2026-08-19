@@ -1,4 +1,4 @@
-import type { AutoStatus } from "../../helpers/contracts/operations.gen";
+import type { AutoStatus } from "@pifire/core/contracts/operations";
 import "./tuner.css";
 
 /**

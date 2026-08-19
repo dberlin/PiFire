@@ -1,5 +1,5 @@
+import type { CookFileAsset, CookFileComment } from "@pifire/core/contracts/content";
 import { useState } from "react";
-import type { CookFileAsset, CookFileComment } from "../../helpers/contracts/content.gen";
 import {
   addCookFileComment,
   assetThumbUrl,

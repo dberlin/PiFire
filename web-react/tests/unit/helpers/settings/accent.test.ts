@@ -1,3 +1,4 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { queryClient } from "../../../../src/helpers/query/queryClient";
@@ -7,7 +8,6 @@ import {
   saveAccent,
   storedAccentName,
 } from "../../../../src/helpers/settings/accent";
-import type { SettingsSchema } from "../../../../src/helpers/settings/settingsTypes.gen";
 
 // The helpers take a whole Settings; these fixtures carry only the keys under
 // test, which is why each is cast rather than spread over a full default tree.

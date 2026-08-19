@@ -13,7 +13,7 @@
 // outcome (the grill is lit, so the reboot does not happen), and every caller
 // has to render the reason rather than escape past it.
 
-import type { ApiEnvelope } from "../contracts/core.gen";
+import type { ApiEnvelope } from "@pifire/core/contracts/core";
 import type {
   AdminSettingsUpdate,
   AdminState,
@@ -32,7 +32,7 @@ import type {
   SystemAction,
   SystemActionRequest,
   SystemActionResponse,
-} from "../contracts/operations.gen";
+} from "@pifire/core/contracts/operations";
 import type { AdminResult } from "./adminTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

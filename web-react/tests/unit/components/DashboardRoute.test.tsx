@@ -1,3 +1,4 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -6,7 +7,6 @@ import type { CommandClient, CommandResult } from "../../../src/helpers/command"
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 import { queryKeys } from "../../../src/helpers/query/keys";
 import { createQueryClient } from "../../../src/helpers/query/queryClient";
-import type { SettingsSchema } from "../../../src/helpers/settings/settingsTypes.gen";
 import type { ShellContext } from "../../../src/helpers/shellContext";
 import { testQueryClient } from "../test-utils";
 

@@ -1,7 +1,7 @@
+import type { SystemAction } from "@pifire/core/contracts/operations";
+import type { InstallStatus } from "@pifire/core/contracts/wizard";
 import { useEffect, useRef, useState } from "react";
 import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
-import type { SystemAction } from "../../helpers/contracts/operations.gen";
-import type { InstallStatus } from "../../helpers/contracts/wizard.gen";
 import { getInstallLog, getInstallStatus } from "../../helpers/wizard/wizardApi";
 import { StreamingLogPanel } from "../logs/StreamingLogPanel";
 

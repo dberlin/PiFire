@@ -1,6 +1,6 @@
+import type { FileListing } from "@pifire/core/contracts/content";
 import { useEffect, useId, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import type { FileListing } from "../../helpers/contracts/content.gen";
 import { fetchFileListing, thumbnailUrl } from "../../helpers/files/filesApi";
 import { PER_PAGE_CHOICES } from "../../helpers/files/fileTypes";
 import {

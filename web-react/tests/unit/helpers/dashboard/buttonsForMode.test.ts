@@ -1,6 +1,6 @@
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import { buttonsForMode } from "../../../../src/helpers/dashboard/buttonsForMode";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 

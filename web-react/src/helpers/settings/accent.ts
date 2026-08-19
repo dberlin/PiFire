@@ -1,10 +1,10 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import type { QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../query/keys";
 import type { AccentName } from "../types";
 import { setPath } from "./delta";
 import type { SettingsPath } from "./paths";
 import { applySettings, getSettings } from "./settingsApi";
-import type { SettingsSchema } from "./settingsTypes.gen";
 
 // One accent covers the whole appliance. This is the key display/qtapp.py's
 // _accent_fn reads once a second, so a change here reaches the attached screen

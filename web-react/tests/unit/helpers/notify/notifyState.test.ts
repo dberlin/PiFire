@@ -1,6 +1,6 @@
+import type { NotifyUpdate } from "@pifire/core/contracts/control";
+import type { ProbeDataPayload } from "@pifire/core/contracts/core";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
-import type { ProbeDataPayload } from "../../../../src/helpers/contracts/core.gen";
 import {
   type LimitEdit,
   limitEditFields,

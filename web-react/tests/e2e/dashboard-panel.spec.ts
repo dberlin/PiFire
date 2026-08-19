@@ -1,10 +1,10 @@
 import { mkdirSync } from "node:fs";
-import { expect, test } from "@playwright/test";
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
   PidSpLearningReport,
-} from "../../src/helpers/contracts/learning.gen";
+} from "@pifire/core/contracts/learning";
+import { expect, test } from "@playwright/test";
 import { freezeDate } from "./layoutBaseline";
 
 // 800x480 -- the grill's own screen.

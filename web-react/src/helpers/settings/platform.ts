@@ -1,4 +1,4 @@
-import type { SettingsSchema } from "./settingsTypes.gen";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 
 /**
  * Does this build drive a PWM-controlled DC fan?

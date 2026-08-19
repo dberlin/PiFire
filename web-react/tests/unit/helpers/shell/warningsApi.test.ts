@@ -1,8 +1,5 @@
+import type { DismissWarningsRequest, DismissWarningsResponse } from "@pifire/core/contracts/core";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  DismissWarningsRequest,
-  DismissWarningsResponse,
-} from "../../../../src/helpers/contracts/core.gen";
 import { dismissWarnings } from "../../../../src/helpers/shell/warningsApi";
 
 afterEach(() => {

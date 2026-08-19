@@ -1,5 +1,5 @@
-import type { ControllerCatalog } from "./controllerTypes.gen";
-import type { SettingsSchema } from "./settingsTypes.gen";
+import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 
 /** The catalog's first controller — what an install falls back to when
  *  `controller.selected` names one this build does not ship. */

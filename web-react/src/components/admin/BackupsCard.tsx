@@ -1,3 +1,4 @@
+import type { BackupKind, BackupListing } from "@pifire/core/contracts/operations";
 import { useRef, useState } from "react";
 import {
   adminErrorText,
@@ -7,7 +8,6 @@ import {
   uploadBackup,
 } from "../../helpers/admin/adminApi";
 import type { AdminResult } from "../../helpers/admin/adminTypes";
-import type { BackupKind, BackupListing } from "../../helpers/contracts/operations.gen";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 const STOPPED = "Stop";

@@ -1,5 +1,5 @@
+import type { BtScanRow } from "@pifire/core/contracts/wizard";
 import { useState } from "react";
-import type { BtScanRow } from "../../../helpers/contracts/wizard.gen";
 import { scanBluetooth } from "../../../helpers/wizard/wizardApi";
 
 export interface BluetoothPickerProps {

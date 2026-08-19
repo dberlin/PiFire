@@ -1,9 +1,9 @@
+import type { CookFileChartData } from "@pifire/core/contracts/content";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
-import type { CookFileChartData } from "../../../../src/helpers/contracts/content.gen";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };

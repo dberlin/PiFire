@@ -29,7 +29,7 @@ import type {
   RecipeStepDeleteRequest,
   RecipeStepInsertRequest,
   RecipeStepUpdateRequest,
-} from "../contracts/content.gen";
+} from "@pifire/core/contracts/content";
 import { postForm, read, write } from "./apiEnvelope";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

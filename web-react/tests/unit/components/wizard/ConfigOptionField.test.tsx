@@ -1,7 +1,7 @@
+import type { ConfigOption } from "@pifire/core/contracts/wizard";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ConfigOptionField } from "../../../../src/components/wizard/ConfigOptionField";
-import type { ConfigOption } from "../../../../src/helpers/contracts/wizard.gen";
 
 afterEach(cleanup);
 

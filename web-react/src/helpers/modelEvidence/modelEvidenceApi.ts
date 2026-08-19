@@ -6,7 +6,7 @@ import type {
   ModelRollbackRequest,
   MpcCalibrationCommand,
   MpcCalibrationCommandResponse,
-} from "../contracts/learning.gen";
+} from "@pifire/core/contracts/learning";
 
 export interface ModelEvidenceResult<T> {
   ok: boolean;

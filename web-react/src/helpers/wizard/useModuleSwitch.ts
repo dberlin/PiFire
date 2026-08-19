@@ -1,5 +1,5 @@
+import type { ModuleValues, WizardSection } from "@pifire/core/contracts/wizard";
 import { useState } from "react";
-import type { ModuleValues, WizardSection } from "../contracts/wizard.gen";
 import { fetchModuleValues } from "./wizardApi";
 
 export interface UseModuleSwitchParams {

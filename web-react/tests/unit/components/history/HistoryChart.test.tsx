@@ -1,9 +1,9 @@
+import type { HistoryAnnotation } from "@pifire/core/contracts/content";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render } from "@testing-library/react";
 import type uPlot from "uplot";
 import { formatTooltipValue } from "../../../../src/components/history/tooltipFormat";
 import { createTooltipRow } from "../../../../src/components/history/tooltipRow";
-import type { HistoryAnnotation } from "../../../../src/helpers/contracts/content.gen";
 
 // uPlot reads `plugins` only when a plot is CONSTRUCTED, so "was the annotation
 // plugin installed" is not observable from the DOM -- the factory call is the

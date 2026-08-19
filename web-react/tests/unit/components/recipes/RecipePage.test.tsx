@@ -1,10 +1,10 @@
+import type { RecipeDetail } from "@pifire/core/contracts/content";
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { RecipeDetail } from "../../../../src/helpers/contracts/content.gen";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import { testQueryClient } from "../../test-utils";

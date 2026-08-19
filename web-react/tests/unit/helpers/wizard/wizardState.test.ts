@@ -1,5 +1,5 @@
+import type { ProbeMap, WizardState } from "@pifire/core/contracts/wizard";
 import { describe, expect, it, test } from "@rstest/core";
-import type { ProbeMap, WizardState } from "../../../../src/helpers/contracts/wizard.gen";
 import {
   displayConfigFor,
   EMPTY_PROBE_MAP,

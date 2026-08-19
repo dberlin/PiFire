@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { LearningPanel } from "../../../../src/components/dashboard/LearningPanel";
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
   PidSpLearningReport,
-} from "../../../../src/helpers/contracts/learning.gen";
+} from "@pifire/core/contracts/learning";
+import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { LearningPanel } from "../../../../src/components/dashboard/LearningPanel";
 import { testQueryClient } from "../../test-utils";
 
 function mpcReport(status: ModelEvidenceStatus, revision: string): ModelEvidenceReport {

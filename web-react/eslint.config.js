@@ -19,8 +19,9 @@ export default [
       "tests/e2e",
       "*.config.js",
       "*.config.ts",
-      "src/helpers/settings/settingsTypes.gen.ts",
-      "src/helpers/settings/controllerTypes.gen.ts",
+      // settingsTypes.gen.ts and controllerTypes.gen.ts moved to @pifire/core
+      // (packages/pifire-core/src/settings) — outside web-react's tree, so
+      // they're no longer picked up by `eslint .` here at all.
       "src/helpers/settings/settingsDefaults.gen.ts",
     ],
   },

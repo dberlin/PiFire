@@ -5,8 +5,8 @@ import type {
   SettingsFlag,
   SettingsResponse,
   SettingsUpdateResponse,
-} from "./controllerTypes.gen";
-import type { SettingsSchema } from "./settingsTypes.gen";
+} from "@pifire/core/settings/controllerTypes";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 
 export function buildSettingsUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/api/${path}`;

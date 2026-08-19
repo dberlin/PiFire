@@ -1,5 +1,5 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import type { SettingsPath, ValueAt } from "./paths";
-import type { SettingsSchema } from "./settingsTypes.gen";
 
 export function setPath<P extends SettingsPath>(
   obj: object,

@@ -1,10 +1,10 @@
-import { useId, useState } from "react";
 import type {
   Ingredient,
   Instruction,
   RecipeAsset,
   RecipeIndexedAssetAssignmentRequest,
-} from "../../helpers/contracts/content.gen";
+} from "@pifire/core/contracts/content";
+import { useId, useState } from "react";
 import {
   assetUrl,
   deleteRecipeAssets,

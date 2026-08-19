@@ -1,6 +1,6 @@
+import type { PelletDbSchema } from "@pifire/core/contracts/control";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { PelletDbSchema } from "../../../../src/helpers/contracts/control.gen";
 
 const useShellStateMock = rs.fn();
 rs.mock("../../../../src/helpers/shellContext", () => ({

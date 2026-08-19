@@ -1,4 +1,4 @@
-import type { MetricsPayload } from "../contracts/content.gen";
+import type { MetricsPayload } from "@pifire/core/contracts/content";
 /**
  * How a read finished. Resolves rather than throws, matching
  * helpers/admin/adminApi.ts: the page renders the failure in place and offers a

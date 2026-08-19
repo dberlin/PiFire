@@ -1,4 +1,4 @@
-import type { I2CBusValue } from "../contracts/wizard.gen";
+import type { I2CBusValue } from "@pifire/core/contracts/wizard";
 
 /** Helpers for the generated I2C bus union. Switching kind replaces the
  * object rather than leaving a selector behind that the new kind cannot use. */

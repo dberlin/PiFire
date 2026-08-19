@@ -6,8 +6,8 @@
 // {data, result, message} with result === "OK" on success. Read responses
 // are bare payloads with an HTTP status.
 
-import type { ContentErrorEnvelope, FileErrorDetail } from "../contracts/content.gen";
-import type { ApiEnvelope } from "../contracts/core.gen";
+import type { ContentErrorEnvelope, FileErrorDetail } from "@pifire/core/contracts/content";
+import type { ApiEnvelope } from "@pifire/core/contracts/core";
 import type { FileKind } from "./fileTypes";
 
 export class FileRequestError extends Error {

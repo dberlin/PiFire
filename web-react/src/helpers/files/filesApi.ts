@@ -1,4 +1,4 @@
-import type { FileListing } from "../contracts/content.gen";
+import type { FileListing } from "@pifire/core/contracts/content";
 import { FALLBACK_THUMB, type FileKind } from "./fileTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

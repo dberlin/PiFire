@@ -1,4 +1,4 @@
-import type { WizardState } from "../../../helpers/contracts/wizard.gen";
+import type { WizardState } from "@pifire/core/contracts/wizard";
 import type { WizardWorking } from "../../../helpers/wizard/wizardTypes";
 import { DevicesCard } from "../probes/DevicesCard";
 import { PortsCard } from "../probes/PortsCard";

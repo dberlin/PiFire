@@ -1,10 +1,10 @@
+import type { ProbeModuleCatalog } from "@pifire/core/contracts/wizard";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import { ProbesTab } from "../../../../../src/components/settings/tabs/ProbesTab";
-import type { ProbeModuleCatalog } from "../../../../../src/helpers/contracts/wizard.gen";
 import { testQueryClient } from "../../../test-utils";
 
 // DevicesCard's add flow calls the wizard's bus-kind validator over HTTP

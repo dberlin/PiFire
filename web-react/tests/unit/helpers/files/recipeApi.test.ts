@@ -1,5 +1,5 @@
+import type { RecipeStep } from "@pifire/core/contracts/content";
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
-import type { RecipeStep } from "../../../../src/helpers/contracts/content.gen";
 import { FileRequestError } from "../../../../src/helpers/files/apiEnvelope";
 import {
   createRecipe,

@@ -1,5 +1,5 @@
+import type { WledDevice } from "@pifire/core/contracts/control";
 import { useState } from "react";
-import type { WledDevice } from "../../../../helpers/contracts/control.gen";
 import {
   discoverWled,
   pushWledProfiles,

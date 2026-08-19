@@ -5,7 +5,7 @@ import type {
   EditPelletWoodsRequest,
   PelletActionRequest,
   PelletActionResponse,
-} from "../contracts/control.gen";
+} from "@pifire/core/contracts/control";
 
 // Write client for the pellet inventory manager.
 //

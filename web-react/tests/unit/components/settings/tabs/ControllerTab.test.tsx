@@ -1,7 +1,7 @@
+import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { ControllerTab } from "../../../../../src/components/settings/tabs/ControllerTab";
-import type { ControllerCatalog } from "../../../../../src/helpers/settings/controllerTypes.gen";
 import { renderRoute } from "../../../test-utils";
 
 const NEURAL_WARNING_REGEX = /pre-trained neural policy|full optimisation until it is retrained/i;
@@ -427,7 +427,7 @@ describe("ControllerTab", () => {
 
 // Type-level only: retained controllers receive their generated option sets.
 // Runtime behaviour is unchanged and is covered by the cases above.
-import type { ControllerConfigs } from "../../../../../src/helpers/settings/controllerTypes.gen";
+import type { ControllerConfigs } from "@pifire/core/settings/controllerTypes";
 
 type MpcConfig = NonNullable<ControllerConfigs["mpc"]>;
 

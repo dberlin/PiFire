@@ -1,7 +1,7 @@
+import type { FileListing } from "@pifire/core/contracts/content";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
-import type { FileListing } from "../../helpers/contracts/content.gen";
 import {
   cookFileDownloadUrl,
   deleteCookFile,

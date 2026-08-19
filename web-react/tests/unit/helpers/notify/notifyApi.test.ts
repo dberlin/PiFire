@@ -1,5 +1,5 @@
+import type { NotifyUpdate } from "@pifire/core/contracts/control";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
 import { postControl, postNotifyUpdates } from "../../../../src/helpers/notify/notifyApi";
 
 const UPDATES: NotifyUpdate[] = [

@@ -1,4 +1,4 @@
-import type { ProbeMap, WizardDraftRequest } from "../contracts/wizard.gen";
+import type { ProbeMap, WizardDraftRequest } from "@pifire/core/contracts/wizard";
 
 // Mutable client working state remains local; only serialized request/response
 // contracts are generated from Pydantic.

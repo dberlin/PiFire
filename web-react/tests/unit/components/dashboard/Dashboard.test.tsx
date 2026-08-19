@@ -1,3 +1,10 @@
+import type { NotifyUpdate } from "@pifire/core/contracts/control";
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type {
+  ModelEvidenceReport,
+  ModelEvidenceStatus,
+  PidSpLearningReport,
+} from "@pifire/core/contracts/learning";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -6,13 +13,6 @@ import { type ReactElement, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
-import type { NotifyUpdate } from "../../../../src/helpers/contracts/control.gen";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
-import type {
-  ModelEvidenceReport,
-  ModelEvidenceStatus,
-  PidSpLearningReport,
-} from "../../../../src/helpers/contracts/learning.gen";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { createQueryClient } from "../../../../src/helpers/query/queryClient";

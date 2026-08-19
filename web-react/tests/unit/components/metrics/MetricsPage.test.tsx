@@ -1,6 +1,6 @@
+import type { MetricsPayload } from "@pifire/core/contracts/content";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { screen, waitFor } from "@testing-library/react";
-import type { MetricsPayload } from "../../../../src/helpers/contracts/content.gen";
 import * as actualMetricsApi from "../../../../src/helpers/metrics/metricsApi" with {
   rstest: "importActual",
 };

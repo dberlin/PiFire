@@ -1,6 +1,6 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { describe, expect, it } from "@rstest/core";
 import { mpcFanConflict, mpcFanPending } from "../../../../src/helpers/settings/mpcFan";
-import type { SettingsSchema } from "../../../../src/helpers/settings/settingsTypes.gen";
 
 const dcFan = (pwmControl: boolean, fanInput: boolean): SettingsSchema =>
   ({

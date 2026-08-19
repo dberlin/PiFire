@@ -1,7 +1,7 @@
+import type { ProbeMap, WizardState } from "@pifire/core/contracts/wizard";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { GrillPlatformStep } from "../../../../../src/components/wizard/steps/GrillPlatformStep";
-import type { ProbeMap, WizardState } from "../../../../../src/helpers/contracts/wizard.gen";
 import type { WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
 
 const fetchModuleValues = rs.fn();

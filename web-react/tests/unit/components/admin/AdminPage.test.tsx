@@ -1,3 +1,4 @@
+import type { AdminState } from "@pifire/core/contracts/operations";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -5,7 +6,6 @@ import { MemoryRouter } from "react-router";
 import * as actualAdminApi from "../../../../src/helpers/admin/adminApi" with {
   rstest: "importActual",
 };
-import type { AdminState } from "../../../../src/helpers/contracts/operations.gen";
 import { testQueryClient } from "../../test-utils";
 
 // Stubbed through a lazy wrapper so the hoisted mock factory never captures an

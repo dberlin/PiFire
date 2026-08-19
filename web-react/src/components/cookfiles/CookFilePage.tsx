@@ -1,7 +1,7 @@
+import type { FileErrorDetail } from "@pifire/core/contracts/content";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { FileErrorDetail } from "../../helpers/contracts/content.gen";
 import { FileRequestError } from "../../helpers/files/apiEnvelope";
 import { fetchCookFileDetail, recoverCookFile } from "../../helpers/files/cookfileApi";
 import { queryKeys } from "../../helpers/query/keys";

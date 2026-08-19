@@ -1,5 +1,5 @@
+import type { CookFileAsset } from "@pifire/core/contracts/content";
 import { useId, useState } from "react";
-import type { CookFileAsset } from "../../helpers/contracts/content.gen";
 import {
   assetThumbUrl,
   assetUrl,

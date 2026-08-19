@@ -5,7 +5,12 @@ import { compileFromFile } from "json-schema-to-typescript";
 import ts from "typescript";
 
 const SCHEMA_DIRECTORY = "schema/contracts";
-const TYPESCRIPT_DIRECTORY = "src/helpers/contracts";
+// The generated TypeScript is consumed by every client, so the exporter (both
+// this emitter and the Pydantic side in common/web_contracts/export.py)
+// writes it into the shared @pifire/core package, a sibling of web-react —
+// while the JSON schemas that drive it stay under web-react/schema, since no
+// client reads raw schemas.
+const TYPESCRIPT_DIRECTORY = "../packages/pifire-core/src/contracts";
 const MANIFEST_PATH = join(SCHEMA_DIRECTORY, "manifest.json");
 const WEB_REACT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BIOME_EXECUTABLE = join(WEB_REACT_ROOT, "node_modules/.bin/biome");
@@ -147,7 +152,7 @@ async function readManifest(): Promise<Record<string, string>> {
       throw new Error(`Invalid web contract manifest entry: ${schema} -> ${String(output)}`);
     }
     resolveManifestPath(SCHEMA_DIRECTORY, "schema", schema);
-    resolveManifestPath(TYPESCRIPT_DIRECTORY, "src/helpers", output);
+    resolveManifestPath(TYPESCRIPT_DIRECTORY, "../packages/pifire-core/src", output);
   }
   entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   return Object.fromEntries(entries) as Record<string, string>;
@@ -157,6 +162,14 @@ async function formatGeneratedTypeScript(generated: string, outputPath: string):
   const formatterInput = /\binterface\s+[\w$]+\s*\{\s*\}/.test(generated)
     ? `${BIOME_HEADER}\n${generated.replace(/^\/\* eslint-disable \*\/\n/, "")}`
     : generated;
+  // Biome only honors this config's `formatter.indentStyle` (space) for a
+  // --stdin-file-path it can place under the config's own root; an absolute
+  // path pointing outside web-react (as outputPath now does, since the
+  // contracts moved into the sibling @pifire/core package) falls back to
+  // Biome's built-in default (tabs). A WEB_REACT_ROOT-relative path — the
+  // same "../packages/..." shape TYPESCRIPT_DIRECTORY already uses — keeps
+  // it resolving the config correctly.
+  const formatterStdinPath = relative(WEB_REACT_ROOT, outputPath);
   const formatter = Bun.spawn(
     [
       BIOME_EXECUTABLE,
@@ -164,7 +177,7 @@ async function formatGeneratedTypeScript(generated: string, outputPath: string):
       "--config-path",
       BIOME_CONFIG,
       "--stdin-file-path",
-      outputPath,
+      formatterStdinPath,
     ],
     {
       cwd: WEB_REACT_ROOT,
@@ -218,14 +231,14 @@ export async function emitWebContracts(check: boolean): Promise<boolean> {
   const manifest = await readManifest();
   const expectedPaths = new Set(
     Object.values(manifest).map((output) =>
-      resolveManifestPath(TYPESCRIPT_DIRECTORY, "src/helpers", output),
+      resolveManifestPath(TYPESCRIPT_DIRECTORY, "../packages/pifire-core/src", output),
     ),
   );
   let stale = false;
 
   for (const [schema, output] of Object.entries(manifest)) {
     const schemaPath = resolveManifestPath(SCHEMA_DIRECTORY, "schema", schema);
-    const outputPath = resolveManifestPath(TYPESCRIPT_DIRECTORY, "src/helpers", output);
+    const outputPath = resolveManifestPath(TYPESCRIPT_DIRECTORY, "../packages/pifire-core/src", output);
     const compilerOptions = RECURSIVE_SCHEMA_NAMES[schema]
       ? { ...COMPILER_OPTIONS, strictIndexSignatures: false }
       : COMPILER_OPTIONS;

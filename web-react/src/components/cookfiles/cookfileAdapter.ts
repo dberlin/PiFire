@@ -1,4 +1,4 @@
-import type { CookFileChartData, HistoryAnnotation } from "../../helpers/contracts/content.gen";
+import type { CookFileChartData, HistoryAnnotation } from "@pifire/core/contracts/content";
 import { type ChartInput, hasPlottableHistory, toChartInput } from "../history/historyAdapter";
 
 /**

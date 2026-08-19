@@ -1,6 +1,6 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { hasDcFan } from "./platform";
 import type { SettingsDrafts } from "./settingsDrafts";
-import type { SettingsSchema } from "./settingsTypes.gen";
 
 /** The controller key whose allocator emits a fan duty. */
 const MPC = "mpc";

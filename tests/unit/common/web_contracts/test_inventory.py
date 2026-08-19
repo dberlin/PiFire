@@ -19,7 +19,7 @@ from common.web_contracts.wizard import ProbeMapResponse, WizardActionResponse
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 WEB_REACT_ROOT = REPOSITORY_ROOT / "web-react"
 SCHEMA_ROOT = WEB_REACT_ROOT / "schema" / "contracts"
-TYPESCRIPT_ROOT = WEB_REACT_ROOT / "src" / "helpers" / "contracts"
+TYPESCRIPT_ROOT = REPOSITORY_ROOT / "packages" / "pifire-core" / "src" / "contracts"
 FRONTEND_TRANSPORT_EXTRACTOR = WEB_REACT_ROOT / "scripts" / "extractWebTransports.ts"
 APPROVED_NON_JSON_CATEGORIES = {
     "browser_file_handles",

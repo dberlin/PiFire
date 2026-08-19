@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./contracts/*": "./src/contracts/*.gen.ts",
+    "./settings/*": "./src/settings/*.gen.ts",
     "./*": "./src/*.ts"
   },
   "scripts": {

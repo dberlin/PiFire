@@ -1,6 +1,6 @@
+import type { Units } from "@pifire/core/settings/settingsTypes";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import type { Units } from "../../helpers/settings/settingsTypes.gen";
 import { MpcLearningView } from "./learning/MpcLearningView";
 import { PidSpLearningView } from "./learning/PidSpLearningView";
 

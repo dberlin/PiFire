@@ -1,5 +1,5 @@
+import type { ProbeMap, ProbeModuleData } from "@pifire/core/contracts/wizard";
 import { expect, it } from "@rstest/core";
-import type { ProbeMap, ProbeModuleData } from "../../../../src/helpers/contracts/wizard.gen";
 import {
   addDevice,
   alnum,

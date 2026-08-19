@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { PidSpLearningView } from "../../../../src/components/dashboard/learning/PidSpLearningView";
 import type {
   PidSpCheckpointModel,
   PidSpLearningReport,
   PidSpLearningStatus,
   PidSpPredictorModel,
-} from "../../../../src/helpers/contracts/learning.gen";
+} from "@pifire/core/contracts/learning";
+import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { PidSpLearningView } from "../../../../src/components/dashboard/learning/PidSpLearningView";
 import { testQueryClient } from "../../test-utils";
 
 const FOPDT: PidSpCheckpointModel = {

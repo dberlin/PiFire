@@ -1,5 +1,5 @@
+import type { LogFamily } from "@pifire/core/contracts/operations";
 import { useState } from "react";
-import type { LogFamily } from "../../helpers/contracts/operations.gen";
 import { logDownloadUrl } from "../../helpers/logs/logsApi";
 import { LogViewer } from "./LogViewer";
 

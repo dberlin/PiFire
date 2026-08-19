@@ -1,10 +1,10 @@
+import type { HistoryChartData } from "@pifire/core/contracts/content";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { MemoryRouter } from "react-router";
-import type { HistoryChartData } from "../../../../src/helpers/contracts/content.gen";
 import { testQueryClient } from "../../test-utils";
 
 // Counts chart INSTANCES (mounts), not renders -- see the stub below.

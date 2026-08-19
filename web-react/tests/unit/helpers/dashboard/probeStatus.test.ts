@@ -1,5 +1,5 @@
+import type { ProbeStatusPayload } from "@pifire/core/contracts/core";
 import { describe, expect, it } from "@rstest/core";
-import type { ProbeStatusPayload } from "../../../../src/helpers/contracts/core.gen";
 import { batteryBadge, connectionBadge } from "../../../../src/helpers/dashboard/probeStatus";
 
 describe("connectionBadge", () => {

@@ -1,5 +1,5 @@
+import type { PidSpLearningReport } from "@pifire/core/contracts/learning";
 import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
-import type { PidSpLearningReport } from "../../../src/helpers/contracts/learning.gen";
 import {
   fetchPidSpLearningReport,
   parsePidSpLearningReport,

@@ -1,7 +1,7 @@
+import type { CookFileAsset, CookFileComment } from "@pifire/core/contracts/content";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { CookFileAsset, CookFileComment } from "../../../../src/helpers/contracts/content.gen";
 import * as actualCookfileApi from "../../../../src/helpers/files/cookfileApi" with {
   rstest: "importActual",
 };

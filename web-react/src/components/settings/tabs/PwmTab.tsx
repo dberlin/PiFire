@@ -1,3 +1,4 @@
+import type { PwmProfile, SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { clampToBounds } from "../../../helpers/settings/bounds";
@@ -14,7 +15,6 @@ import {
   type SettingsDraftContext,
   useSettingsDraft,
 } from "../../../helpers/settings/settingsDrafts";
-import type { PwmProfile, SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";

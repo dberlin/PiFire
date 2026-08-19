@@ -1,9 +1,9 @@
+import type { ProbeChartConfig, SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
-import type { ProbeChartConfig, SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ColorField } from "../fields/ColorField";
 import { NumberField } from "../fields/NumberField";

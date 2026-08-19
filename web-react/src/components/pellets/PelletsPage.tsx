@@ -1,5 +1,5 @@
+import type { PelletProfileFields } from "@pifire/core/contracts/control";
 import { useState } from "react";
-import type { PelletProfileFields } from "../../helpers/contracts/control.gen";
 import {
   addProfile,
   deleteLog,

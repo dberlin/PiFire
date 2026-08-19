@@ -1,10 +1,10 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   PidSpCheckpointModel,
   PidSpGateValue,
   PidSpLearningGate,
-} from "../../../helpers/contracts/learning.gen";
+} from "@pifire/core/contracts/learning";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { fetchPidSpLearningReport } from "../../../helpers/pidSpLearning/pidSpLearningApi";
 import { LearningDialog } from "./LearningDialog";
 import { LEARNING_SECTION_CLASS } from "./learningDisplay";

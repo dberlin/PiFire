@@ -1,3 +1,4 @@
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TimerModal } from "../../../../src/components/shell/TimerModal";
@@ -6,7 +7,6 @@ import {
   type CommandResult,
   createCommand,
 } from "../../../../src/helpers/command";
-import type { DashSocketPayload } from "../../../../src/helpers/contracts/core.gen";
 
 const OK: CommandResult = { ok: true, message: "" };
 

@@ -1,7 +1,7 @@
+import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { describe, expect, it } from "@rstest/core";
 import { readSelected } from "../../../../src/helpers/settings/controllerSelection";
-import type { ControllerCatalog } from "../../../../src/helpers/settings/controllerTypes.gen";
-import type { SettingsSchema } from "../../../../src/helpers/settings/settingsTypes.gen";
 
 const definitionFields = {
   attributions: [],

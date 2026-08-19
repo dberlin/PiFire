@@ -1,4 +1,4 @@
-import type { DashSocketPayload } from "../contracts/core.gen";
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 
 // The three status readouts the Flask dashboard has always carried and the
 // React port dropped: how long is left in a timed mode, how long the PID stays

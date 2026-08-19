@@ -1,4 +1,4 @@
-import type { Coefficients } from "../../helpers/contracts/operations.gen";
+import type { Coefficients } from "@pifire/core/contracts/operations";
 
 import "./tuner.css";
 

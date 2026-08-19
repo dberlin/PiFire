@@ -1,3 +1,4 @@
+import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useOutletContext } from "react-router";
 import { accentPath, readAccent, storedAccentName } from "../../../helpers/settings/accent";
 import { setPath } from "../../../helpers/settings/delta";
@@ -5,7 +6,6 @@ import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErro
 import type { SettingsPath } from "../../../helpers/settings/paths";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
-import type { SettingsSchema } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import type { AccentName } from "../../../helpers/types";
 import { useAppPrefs } from "../../AppPrefs";

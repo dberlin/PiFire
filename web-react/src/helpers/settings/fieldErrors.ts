@@ -1,4 +1,4 @@
-import type { SaveFieldError } from "./controllerTypes.gen";
+import type { SaveFieldError } from "@pifire/core/settings/controllerTypes";
 
 /** The backend's message for one settings path, or null if it did not reject it. */
 export function errorFor(errors: SaveFieldError[], path: string): string | null {

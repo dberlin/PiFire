@@ -1,8 +1,5 @@
+import type { DashSocketPayload, ProbeDataPayload } from "@pifire/core/contracts/core";
 import { describe, expect, it } from "@rstest/core";
-import type {
-  DashSocketPayload,
-  ProbeDataPayload,
-} from "../../../../src/helpers/contracts/core.gen";
 import { deriveView, staleLabel } from "../../../../src/helpers/dashboard/deriveView";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 

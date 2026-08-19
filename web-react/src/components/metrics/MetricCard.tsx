@@ -1,4 +1,4 @@
-import type { MetricRecord } from "../../helpers/contracts/content.gen";
+import type { MetricRecord } from "@pifire/core/contracts/content";
 import { metricRows, modeAccent } from "./metricFields";
 import "./metrics.css";
 
