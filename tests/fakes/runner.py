@@ -30,6 +30,7 @@ class FakeControllerRunner:
         self.target = None
         self._period = period
         self.submitted_temps = []
+        self.restore_outcome = None
         self.calibration_requests = []
         self.calibration_cancellations = []
         self._commands_fan = commands_fan
@@ -103,6 +104,7 @@ class FakeControllerRunner:
         events = tuple(self.activation_events)
         self.activation_events.clear()
         return events
+
     def submit_activation_confidence(
         self,
         record: ModelEvidenceRecord,
@@ -111,7 +113,6 @@ class FakeControllerRunner:
         receipt = DurableActivationReceipt(accepted=True)
         receipt._complete(durable=True)
         return receipt
-
 
     def submit(self, temp):
         self.submitted_temps.append(temp)
@@ -138,6 +139,11 @@ class FakeControllerRunner:
     def configuration_revision(self):
         return self._configuration_revision
 
+    def drain_restore_outcome(self):
+        outcome = self.restore_outcome
+        self.restore_outcome = None
+        return outcome
+
     def runs_async(self):
         return self._wants_async
 
@@ -149,6 +155,7 @@ class FakeControllerRunner:
 
     def stop(self):
         self.stops += 1
+
     def stop_for_refit(self) -> bool | None:
         self.stop()
         return None
@@ -159,7 +166,6 @@ class FakeControllerRunner:
 
     def finish_teardown(self) -> None:
         self.finished_teardowns += 1
-
 
     def set_output(self, applied):
         self.applied.append(applied)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 
 from dataclasses import dataclass, replace
 from collections.abc import Callable
@@ -30,6 +31,7 @@ from controller.mpc_config import (
 )
 from controller.mpc_calibration import TemperatureForecast
 from controller.mpc_core import MpcCore, MpcSolver, MpcStep
+from controller.runtime.context import EVENT_LOG_NAME
 
 
 U_MAX = 0.9
@@ -251,7 +253,7 @@ def make_core(
     return core, estimator_factory.estimator, solver_factory.solver
 
 
-def test_config_helpers_cover_absent_invalid_nonfinite_and_warning_branches(capsys):
+def test_config_helpers_cover_absent_invalid_nonfinite_and_warning_branches(caplog):
     supplied: dict[str, JsonValue] = {
         "control_period": 2.0,
         "feed_forward": 9,
@@ -283,13 +285,15 @@ def test_config_helpers_cover_absent_invalid_nonfinite_and_warning_branches(caps
     assert model_is_identified(DEFAULT_MPC_CONFIG) is False
     assert model_is_identified(_FITTED_PASTE) is True
     assert model_is_identified(DEFAULT_MPC_CONFIG, {"rmse": 1.0}) is True
-    warn_about_model(dict(DEFAULT_MPC_CONFIG, C_f=1.0))
-    warning = capsys.readouterr().out
-    assert "ignoring C_f" in warning
-    assert "model is uncalibrated" in warning
+    with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
+        warn_about_model(dict(DEFAULT_MPC_CONFIG, C_f=1.0))
+    assert "ignoring C_f" in caplog.text
+    assert "model is uncalibrated" in caplog.text
 
-    warn_about_model(_FITTED_PASTE)
-    assert capsys.readouterr().out == ""
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
+        warn_about_model(_FITTED_PASTE)
+    assert caplog.text == ""
 
 
 #: What `controller/update_mpc.py` prints for an operator to paste into
@@ -318,13 +322,14 @@ _MOVED: dict[str, JsonValue] = {
 }
 
 
-def test_one_stale_parameter_is_not_calibration_evidence(capsys):
+def test_one_stale_parameter_is_not_calibration_evidence(caplog):
     # A K_Q carried over from the two-lump model, on a grill that was never fit.
     stale = dict(DEFAULT_MPC_CONFIG, K_Q=3.5)
 
     assert model_is_identified(stale) is False
-    warn_about_model(stale)
-    assert "model is uncalibrated" in capsys.readouterr().out
+    with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
+        warn_about_model(stale)
+    assert "model is uncalibrated" in caplog.text
 
     # A config that simply omits the model keys is at the shipped model, not
     # at seven values that differ from it.
@@ -342,14 +347,16 @@ def test_a_pasted_fit_and_a_stored_model_both_identify(capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_identification_and_the_uncalibrated_warning_never_disagree(capsys):
+def test_identification_and_the_uncalibrated_warning_never_disagree(caplog):
     for size in range(len(MODEL_PARAMETER_KEYS) + 1):
         for moved in itertools.combinations(MODEL_PARAMETER_KEYS, size):
             config = dict(DEFAULT_MPC_CONFIG, **{key: _MOVED[key] for key in moved})
             for metadata in (None, {"rmse": 1.0}):
                 identified = model_is_identified(config, metadata)
-                warn_about_model(config, metadata)
-                warned = "model is uncalibrated" in capsys.readouterr().out
+                caplog.clear()
+                with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
+                    warn_about_model(config, metadata)
+                warned = "model is uncalibrated" in caplog.text
                 assert identified is not warned, (moved, metadata)
                 assert identified is (metadata is not None or set(FITTED_PARAMETER_KEYS) <= set(moved)), (
                     moved,
@@ -510,7 +517,8 @@ def test_every_malformed_native_result_holds_the_last_safe_command(
     assert step.diagnostics.consecutive_policy_failures == 1
 
 
-def test_solver_exception_holds_reports_diagnostics_counts_and_recovers(capsys):
+def test_solver_exception_holds_reports_diagnostics_counts_and_recovers(caplog):
+    caplog.set_level(logging.INFO, logger=EVENT_LOG_NAME)
     native_diagnostics = SolverDiagnostics(
         status=4,
         backend_status=7,
@@ -540,9 +548,8 @@ def test_solver_exception_holds_reports_diagnostics_counts_and_recovers(capsys):
     assert core.native_failure_diagnostics is None
     assert recovered.diagnostics.consecutive_policy_failures == 0
     assert failures and isinstance(failures[0], SolverError)
-    output = capsys.readouterr().out
-    assert "failed 1 consecutive" in output
-    assert "recovered after 1 failed" in output
+    assert "failed 1 consecutive" in caplog.text
+    assert "recovered after 1 failed" in caplog.text
 
 
 def test_authorization_denial_precedes_estimation_and_closed_core_rejects_rebind():
@@ -716,7 +723,7 @@ def test_partial_build_accepts_nonclosable_estimator_without_masking_solver_erro
         )
 
 
-def test_default_callbacks_repeat_failure_without_repeat_log_and_expose_state(capsys):
+def test_default_callbacks_repeat_failure_without_repeat_log_and_expose_state(caplog):
     estimator_factory = FakeEstimatorFactory()
     solver_factory = FakeSolverFactory((RuntimeError("first"), RuntimeError("second")))
     core = MpcCore(
@@ -733,7 +740,7 @@ def test_default_callbacks_repeat_failure_without_repeat_log_and_expose_state(ca
 
     assert first.diagnostics.consecutive_policy_failures == 1
     assert second.diagnostics.consecutive_policy_failures == 2
-    assert capsys.readouterr().out.count("native solver has failed") == 1
+    assert caplog.text.count("native solver has failed") == 1
     assert core.estimator is estimator_factory.estimator
     assert core.solver is solver_factory.solver
     assert core.set_point_c == 100.0
@@ -782,3 +789,43 @@ def test_default_numerical_factories_use_real_construction_symbols(
     kf = MpcCore.build_estimator(dict(CONFIG, estimator="kf"), 8)
     assert ekf is not None
     assert kf is not None
+
+
+def test_warn_about_model_speaks_through_an_injected_logger(caplog):
+    """The operator warnings reach events.log, not this process's stdout.
+
+    ff3f71c93 settled the controller on loggers injected from ControllerContext,
+    leaving logging.getLogger only as the default for an injectable parameter.
+    Printing instead sends the two warnings an operator most needs -- a retired
+    key still in Settings, and a model that was never fit -- to whatever
+    captured stdout, which is not a file anyone reads.
+    """
+    with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
+        warn_about_model(dict(DEFAULT_MPC_CONFIG, C_f=1.0))
+
+    assert "ignoring C_f" in caplog.text
+    assert "model is uncalibrated" in caplog.text
+
+
+def test_the_core_takes_its_event_logger_from_the_context_seam(caplog):
+    """Construction warnings go to the logger the caller injects.
+
+    `build_runner` is handed ControllerContext's loggers and is the only place
+    that knows them; a core that reached for its own would put the operator's
+    warnings wherever this process happened to send stdout.
+    """
+    from controller.mpc import Controller
+
+    injected = logging.getLogger("test.injected.events")
+    with caplog.at_level(logging.WARNING, logger="test.injected.events"):
+        controller = Controller(
+            dict(DEFAULT_MPC_CONFIG, K_Q=3.5),
+            "C",
+            {"u_min": 0.1, "u_max": 0.9},
+            logger=injected,
+        )
+    try:
+        assert "model is uncalibrated" in caplog.text
+        assert [record.name for record in caplog.records] == ["test.injected.events"]
+    finally:
+        controller.close()

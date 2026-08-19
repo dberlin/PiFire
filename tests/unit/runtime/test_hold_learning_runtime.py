@@ -154,6 +154,7 @@ class _Runner:
         self.drains: list[ObservationOutcomeDrain] = []
         self.drain_count = 0
         self.raise_on_observe: BaseException | None = None
+        self.restore_outcome: bool | None = None
         self.events = [] if events is None else events
 
     def observe_frame(self, observation: FrameObservation) -> ObservationSubmission | None:
@@ -190,6 +191,11 @@ class _Runner:
     def restore_model(self, snapshot: dict[str, object]) -> bool:
         del snapshot
         return False
+
+    def drain_restore_outcome(self) -> bool | None:
+        outcome = self.restore_outcome
+        self.restore_outcome = None
+        return outcome
 
     def runs_async(self) -> bool:
         return False
@@ -1641,6 +1647,39 @@ def test_restore_model_records_accepted_sync_and_async_provenance(
     assert record.payload.detail == "stored model submitted for restore"
     assert logger.infos == ["Submitted the stored pid_sp model for restore"]
     assert logger.warnings == []
+
+
+def test_an_async_restore_the_worker_refuses_is_reported_when_its_verdict_arrives() -> None:
+    """An async runner answers "queued", so the verdict has to correct the record.
+
+    Between submission and adoption the session has already logged a restore and
+    stamped model authority from the stored snapshot. If the worker then refuses
+    it, the controller is running the configured model while the trace still
+    claims the persisted one.
+    """
+    snapshot: dict[str, object] = {"revision": 4, "K": 710.0}
+    runtime, runner, _store, trace, recorder, logger = _lifecycle_runtime(
+        snapshot=snapshot,
+        restore_accepted=True,
+        asynchronous=True,
+    )
+
+    runtime.restore_model(timestamp_ms=2_500)
+
+    assert trace.model_authority is not None
+    assert logger.infos == ["Submitted the stored pid_sp model for restore"]
+
+    runner.restore_outcome = False
+    runtime.reconcile_outcomes(3.0)
+
+    assert trace.model_authority is None
+    assert logger.warnings == ["Stored pid_sp model was rejected; starting fresh"]
+    rejected = [
+        record.payload.detail
+        for record in _records(recorder, TraceEventKind.MODEL_EVENT)
+        if isinstance(record.payload, ModelEventPayload) and record.payload.event is ModelEventType.REJECT
+    ]
+    assert rejected == ["stored model rejected for restore"]
 
 
 def test_restore_model_records_runner_rejection_and_starts_fresh() -> None:

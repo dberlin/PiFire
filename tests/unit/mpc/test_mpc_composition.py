@@ -92,7 +92,7 @@ def _patch_construction(monkeypatch, events, pair):
             **callbacks,
         ),
     )
-    monkeypatch.setattr(mpc_module, "warn_about_model", lambda _config: None)
+    monkeypatch.setattr(mpc_module, "warn_about_model", lambda _config, *, logger=None: None)
 
 
 class _ActivationPersistence(ModelPersistenceWorker):
@@ -216,13 +216,9 @@ def _assert_activation_consistency(
 ):
     assert composition.controller.active_control_pair is expected_pair
     assert composition.runtime.active_pair is expected_pair
-    assert expected_pair.core.config["control_period"] == pytest.approx(
-        control_period
-    )
+    assert expected_pair.core.config["control_period"] == pytest.approx(control_period)
     assert composition.controller.cfg == expected_pair.core.config
-    assert composition.controller.get_control_period() == pytest.approx(
-        control_period
-    )
+    assert composition.controller.get_control_period() == pytest.approx(control_period)
     assert composition.runtime.role_generation == role_generation
     assert composition.grey.teardown_role_generation == role_generation
 
@@ -280,7 +276,7 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
     monkeypatch.setattr(mpc_module, "ModelPersistenceWorker", Persistence)
     monkeypatch.setattr(mpc_module, "ActivationRuntime", Activation)
     monkeypatch.setattr(mpc_module, "GreyLearningRuntime", Grey)
-    monkeypatch.setattr(mpc_module, "warn_about_model", lambda _config: None)
+    monkeypatch.setattr(mpc_module, "warn_about_model", lambda _config, *, logger=None: None)
 
     controller = mpc_module.Controller(dict(_CONFIG), "C", dict(_CYCLE))
     assert events == [
@@ -455,17 +451,11 @@ def test_rejected_precommit_transitions_do_not_synchronize_activation_identity()
         assert composition.controller.cfg is original_config
         assert composition.grey.teardown_role_generation == 4
 
-        assert (
-            composition.controller.activation_runtime_failure("solve failed")
-            is False
-        )
+        assert composition.controller.activation_runtime_failure("solve failed") is False
         assert composition.controller.cfg is original_config
         assert composition.grey.teardown_role_generation == 4
 
-        assert (
-            composition.controller.rollback_activation("operator rollback")
-            is False
-        )
+        assert composition.controller.rollback_activation("operator rollback") is False
         assert composition.controller.cfg is original_config
         assert composition.grey.teardown_role_generation == 4
     finally:
@@ -538,10 +528,7 @@ def test_fallback_lifecycle_rejection_synchronizes_restored_owner_identity():
         assert composition.controller.authorize_candidate_pair(active) is True
         composition.persistence.reject_evidence = True
 
-        assert (
-            composition.controller.activation_runtime_failure("solve failed")
-            is False
-        )
+        assert composition.controller.activation_runtime_failure("solve failed") is False
         _assert_activation_consistency(
             composition,
             composition.incumbent,

@@ -707,7 +707,7 @@ class HoldMode(ControlMode):
 
         # Load Controller Module (i.e. PID)
         self._runner, self._controller_status = _runner_mod.build_runner(
-            self.settings, self.control, logger=self.ctx.control_log
+            self.settings, self.control, logger=self.ctx.control_log, event_logger=self.ctx.event_log
         )
         actual_type = getattr(self._runner, "controller_type", lambda: None)() if self._runner is not None else None
         if isinstance(actual_type, ControllerType):

@@ -14,6 +14,7 @@
 """
 Imported Libraries
 """
+import logging
 import time
 from collections.abc import Mapping
 
@@ -21,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
 
 from common.control_trace import ActuationMode, ControllerBranch, MpcFailureState, ResultStaleState
+from controller.runtime.context import EVENT_LOG_NAME
 from controller.mpc_allocator import AllocationResult
 
 if TYPE_CHECKING:
@@ -100,10 +102,14 @@ Class Definition
 
 
 class ControllerBase:
-    def __init__(self, config, units, cycle_data):
+    def __init__(self, config, units, cycle_data, *, logger=None):
         self.config = config
         self.units = units
         self.cycle_data = cycle_data
+        #: build_runner injects ControllerContext's event log here. No
+        #: context reaches a controller core, so this parameter is how it
+        #: arrives; the default is the name the context itself defaults to.
+        self._logger = logging.getLogger(EVENT_LOG_NAME) if logger is None else logger
 
     def update(self, current):
         """

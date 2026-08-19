@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 from dataclasses import asdict
+import logging
 import threading
 import time
 from typing import Literal
@@ -57,6 +58,7 @@ from controller.model_learning.contracts import (
 from controller.model_learning.evaluation import EvaluationDecision
 from controller.model_promotion import Verdict as _Verdict
 from controller.mpc_config import DEFAULT_MPC_CONFIG, JsonValue, MpcConfig, warn_about_model
+from controller.runtime.context import EVENT_LOG_NAME
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.mpc_model import MODEL_SCHEMA
 from controller.runtime.model_fitting import (
@@ -107,7 +109,12 @@ class GreyLearningRuntime:
         monotonic: Callable[[], float] = time.monotonic,
         clock_ms: Callable[[], int] = lambda: time.time_ns() // 1_000_000,
         fit_worker_factory: Callable[[], GreyFitWorker] = GreyFitWorker,
+        logger: logging.Logger | None = None,
     ) -> None:
+        #: No ControllerContext reaches the core, so the context's loggers are
+        #: injected here instead. The default is the name the context itself
+        #: defaults to, which keeps an un-injected runtime out of stdout.
+        self._logger = logging.getLogger(EVENT_LOG_NAME) if logger is None else logger
         self._pair_factory = pair_factory
         self._activation_runtime = activation_runtime
         self._learning_enabled = learning_enabled
@@ -151,7 +158,9 @@ class GreyLearningRuntime:
         self._checkpoint_candidate_identity: tuple[str, int] | None = None
         self._checkpoint_cook_refit: tuple[Literal["idle", "succeeded", "failed"], str | None] = ("idle", None)
         self._checkpoint_activation: tuple[Literal["prepared", "active", "aborted"], bool, bool] = (
-            "aborted", False, False
+            "aborted",
+            False,
+            False,
         )
         self._checkpoint_failure: tuple[str, str] | None = None
         self._reviewed_checkpoint_decision_ids: set[str] = set()
@@ -164,10 +173,10 @@ class GreyLearningRuntime:
     @property
     def teardown_observations(self) -> tuple[FrameObservation, ...]:
         return self._teardown_history.observations
+
     @property
     def teardown_role_generation(self) -> int:
         return self._teardown_history.role_generation
-
 
     @property
     def model_metadata(self) -> dict[str, JsonValue] | None:
@@ -188,9 +197,7 @@ class GreyLearningRuntime:
         *,
         configuration: Mapping[str, JsonValue] | None = None,
     ) -> LiveLearningIdentity:
-        config = copy.deepcopy(
-            self._configuration() if configuration is None else configuration
-        )
+        config = copy.deepcopy(self._configuration() if configuration is None else configuration)
         config.update(asdict(components.controller.config))
         document = {
             "config": config,
@@ -243,7 +250,6 @@ class GreyLearningRuntime:
 
     def learning_status(self) -> dict[str, JsonValue]:
         return self._learning_live_status()
-
 
     @staticmethod
     def _completed_forecast_evidence(value):
@@ -351,7 +357,9 @@ class GreyLearningRuntime:
         if pair is None or self._learning is None:
             return ()
         pair.estimator.update(observation.realized_q, observation.temp_c)
-        incumbent = GreyBoxPredictionAdapter.from_estimator(self._active_components().estimator, config=self._configuration())
+        incumbent = GreyBoxPredictionAdapter.from_estimator(
+            self._active_components().estimator, config=self._configuration()
+        )
         candidate_config = dict(self._configuration())
         for name in ("C_c", "h_amb", "T_amb", "theta", "K_Q", "sigma"):
             candidate_config[name] = getattr(pair.controller.config, name)
@@ -391,12 +399,9 @@ class GreyLearningRuntime:
             confidence_accepted = self._learning_pending_confidence_accepted
             self._learning_pending_confidence_accepted = None
             evaluation_decision_id = getattr(evaluation, "decision_id", None)
-            confidence_already_persisted = (
-                isinstance(evaluation_decision_id, str)
-                and self._activation_runtime.consume_confidence_persisted(
-                    evaluation_decision_id
-                )
-            )
+            confidence_already_persisted = isinstance(
+                evaluation_decision_id, str
+            ) and self._activation_runtime.consume_confidence_persisted(evaluation_decision_id)
         forecasts = tuple(self._completed_forecast_evidence(value) for value in result.completed_forecasts)
         reasons = tuple(result.history.reasons)
         return {
@@ -459,7 +464,9 @@ class GreyLearningRuntime:
                     learning.update_identity(
                         self.learning_identity(),
                         config=self._active_components().controller.config,
-                        incumbent_pair=CandidatePair(self._active_components().estimator, self._active_components().controller),
+                        incumbent_pair=CandidatePair(
+                            self._active_components().estimator, self._active_components().controller
+                        ),
                     )
                 with self._learning_lock:
                     if learning is self._learning:
@@ -483,10 +490,7 @@ class GreyLearningRuntime:
     ):
         session_id = getattr(self, "_learning_session_id", None) or "mpc-learning"
         return ModelEvidenceRecord(
-            evidence_id=(
-                f"{session_id}:{evidence_payload.payload_type}:"
-                f"{timestamp_ms}:{role_generation}"
-            ),
+            evidence_id=(f"{session_id}:{evidence_payload.payload_type}:{timestamp_ms}:{role_generation}"),
             kind=EvidenceKind(evidence_payload.payload_type),
             session_id=session_id,
             cook_id=getattr(self, "_learning_cook_id", None),
@@ -518,9 +522,7 @@ class GreyLearningRuntime:
                 )
             )
         except Exception as error:
-            self._activation_runtime.terminate(
-                f"learning lifecycle trace failed: {error}"
-            )
+            self._activation_runtime.terminate(f"learning lifecycle trace failed: {error}")
 
     def _persist_grey_lifecycle(
         self,
@@ -620,9 +622,7 @@ class GreyLearningRuntime:
         persisted.add(evaluation.decision_id)
 
     def _persist_candidate_evaluation(self, evaluation, preparation):
-        if self._activation_runtime.confidence_persisted(
-            evaluation.decision_id
-        ):
+        if self._activation_runtime.confidence_persisted(evaluation.decision_id):
             return None
         request = getattr(getattr(preparation, "candidate", None), "request", None)
         origin = getattr(request, "origin", None)
@@ -709,9 +709,7 @@ class GreyLearningRuntime:
         self._trace_grey_lifecycle(persisted, assessment_trace)
         if receipt.wait(2.0) is not True or receipt.durable is not True:
             raise RuntimeError("activation-confidence-not-durable")
-        self._activation_runtime.mark_confidence_persisted(
-            evaluation.decision_id
-        )
+        self._activation_runtime.mark_confidence_persisted(evaluation.decision_id)
         return persisted
 
     def _persist_fit_transition(
@@ -833,11 +831,7 @@ class GreyLearningRuntime:
             estimator_kind = "kf"
         else:
             raise ValueError("candidate preparation is incomplete")
-        if (
-            candidate_pair is None
-            or request is None
-            or not isinstance(native_config, GreyBoxMPCConfig)
-        ):
+        if candidate_pair is None or request is None or not isinstance(native_config, GreyBoxMPCConfig):
             raise ValueError("candidate preparation is incomplete")
         owned_candidate = self._pair_factory.adopt(
             self._pair_factory.native(
@@ -862,18 +856,16 @@ class GreyLearningRuntime:
             receipt = self._activation_runtime.submit_prepared_phase(record)
             receipts.append(receipt)
             return receipt
+
         def build_candidate(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
             if descriptor != candidate_descriptor:
                 raise ValueError("candidate-digest-changed")
             return owned_candidate
 
-
         manager = ActivationManager(
             incumbent_pair=self._active_pair(),
             build_candidate=build_candidate,
-            validate_candidate=lambda pair: (
-                pair is owned_candidate and self._pair_factory.validate(pair)
-            ),
+            validate_candidate=lambda pair: pair is owned_candidate and self._pair_factory.validate(pair),
             native_dry_solve=lambda _pair: bool(preparation.dry_solve_finite),
             persist_prepared=persist_prepared,
             receipt_timeout=2.0,
@@ -907,15 +899,9 @@ class GreyLearningRuntime:
         # preparation tests and recovery callers still close the same durability gap.
         if not self._activation_runtime.confidence_persisted(decision_id):
             confidence = ModelEvidenceRecord(
-                evidence_id=(
-                    f"activation-confidence:{decision_id}:"
-                    f"{evaluation_role_generation}"
-                ),
+                evidence_id=(f"activation-confidence:{decision_id}:{evaluation_role_generation}"),
                 kind=EvidenceKind.CONFIDENCE_DECISION,
-                session_id=(
-                    getattr(self, "_learning_session_id", None)
-                    or "mpc-learning"
-                ),
+                session_id=(getattr(self, "_learning_session_id", None) or "mpc-learning"),
                 cook_id=getattr(self, "_learning_cook_id", None),
                 timestamp_ms=evaluated_at_ms,
                 role_generation=evaluation_role_generation,
@@ -927,9 +913,7 @@ class GreyLearningRuntime:
                     reason=None,
                 ),
             )
-            confidence_receipt = (
-                self._activation_runtime.submit_activation_confidence(confidence)
-            )
+            confidence_receipt = self._activation_runtime.submit_activation_confidence(confidence)
             if (
                 not confidence_receipt.accepted
                 or confidence_receipt.wait(2.0) is not True
@@ -947,11 +931,7 @@ class GreyLearningRuntime:
             origin=request.origin,
             policy=policy,
         )
-        if (
-            not decision.accepted
-            or decision.record is None
-            or decision.candidate_pair is None
-        ):
+        if not decision.accepted or decision.record is None or decision.candidate_pair is None:
             raise RuntimeError(decision.reason)
         if not self._activation_runtime.queue_prepared_activation(
             decision.record,
@@ -1125,9 +1105,9 @@ class GreyLearningRuntime:
         with self._learning_lock:
             if learning is self._learning and payload is not None:
                 self._learning_pending_evaluation = payload
-                self._learning_pending_confidence_accepted = bool(
-                    getattr(evaluation, "accepted", False)
-                ) and not blockers
+                self._learning_pending_confidence_accepted = (
+                    bool(getattr(evaluation, "accepted", False)) and not blockers
+                )
                 if blockers:
                     self._learning_candidate_pair = None
         return delivery, payload
@@ -1179,9 +1159,7 @@ class GreyLearningRuntime:
             if handoff is not None:
                 status = handoff.status
         active_descriptor = self._active_pair().descriptor
-        candidate_descriptor = (
-            inert_record.candidate if inert_record is not None else None
-        )
+        candidate_descriptor = inert_record.candidate if inert_record is not None else None
         return {
             "status": status.value,
             "fit_status": fit_status.value,
@@ -1279,9 +1257,7 @@ class GreyLearningRuntime:
             active = self._active_pair().descriptor
             inert_record = self._activation_runtime.inert_record
             active_record = self._activation_runtime.active_record
-            candidate = (
-                inert_record.candidate if inert_record is not None else None
-            )
+            candidate = inert_record.candidate if inert_record is not None else None
             rollback_pair = self._activation_runtime.rollback_pair
             if rollback_pair is not None:
                 rollback_digest = rollback_pair.descriptor.model_digest
@@ -1333,9 +1309,7 @@ class GreyLearningRuntime:
                 candidate_descriptor = self._teardown_candidate_descriptor
             elif candidate is None and self._checkpoint_challenger is not None:
                 snapshot["challenger"] = copy.deepcopy(self._checkpoint_challenger)
-                snapshot["window"] = (
-                    None if self._teardown_fit_window is None else asdict(self._teardown_fit_window)
-                )
+                snapshot["window"] = None if self._teardown_fit_window is None else asdict(self._teardown_fit_window)
                 candidate_descriptor = self._teardown_candidate_descriptor
             else:
                 candidate_descriptor = self._teardown_candidate_descriptor
@@ -1417,9 +1391,7 @@ class GreyLearningRuntime:
                 live["pending_swap"],
             )
             activation = (
-                self._checkpoint_activation
-                if live_activation == ("aborted", False, False)
-                else live_activation
+                self._checkpoint_activation if live_activation == ("aborted", False, False) else live_activation
             )
             snapshot["activation"] = {
                 "phase": activation[0],
@@ -1472,7 +1444,7 @@ class GreyLearningRuntime:
         self._adopt_persisted_revision(snapshot)
         if not isinstance(snapshot, dict) or snapshot.get("version") != self.MODEL_SCHEMA:
             version = snapshot.get("version") if isinstance(snapshot, dict) else None
-            print(
+            self._logger.warning(
                 f"[mpc] discarding a version {version!r} model snapshot: runtime restore "
                 f"accepts only grey schema {self.MODEL_SCHEMA}; version 3 is migration input only."
             )
@@ -1480,7 +1452,7 @@ class GreyLearningRuntime:
         try:
             owned = _snapshot.migrate_grey_learning_snapshot(snapshot)
         except _snapshot.GreySnapshotInvalid as error:
-            print(f"[mpc] discarding an incompatible grey snapshot ({error.reason}).")
+            self._logger.warning(f"[mpc] discarding an incompatible grey snapshot ({error.reason}).")
             return False
         active = owned["active"]
         params = active["parameters"]
@@ -1488,7 +1460,17 @@ class GreyLearningRuntime:
         configured_n_delay = int(self._configuration()["n_delay"])
         snapshot_n_delay = int(params["n_delay"])
         if configured_n_delay != 8 or snapshot_n_delay != 8:
-            print("[mpc] discarding an incompatible grey snapshot (incompatible-delay).")
+            self._logger.warning("[mpc] discarding an incompatible grey snapshot (incompatible-delay).")
+            return False
+        # A null active pair is well-formed v4: it is what the grey migration
+        # writes when no prior authority survived, carrying shipped defaults
+        # that no fit ever produced. There is no owner to rebuild, so say that
+        # rather than discovering it as an attribute error on the null below.
+        if owned["active_pair"] is None:
+            self._logger.warning(
+                "[mpc] discarding a grey snapshot with no active pair: the record holds "
+                "parameters but no model to restore. This cook starts from the configured model."
+            )
             return False
         try:
             restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
@@ -1500,9 +1482,7 @@ class GreyLearningRuntime:
                 raise ValueError("restored active identity does not match its pair descriptor")
             candidate_pair_value = owned["candidate_pair"]
             restored_candidate_descriptor = (
-                None
-                if candidate_pair_value is None
-                else GreyControlPairDescriptor.from_dict(candidate_pair_value)
+                None if candidate_pair_value is None else GreyControlPairDescriptor.from_dict(candidate_pair_value)
             )
             candidate_digest = active_identity["candidate_digest"]
             candidate_generation = active_identity["candidate_generation"]
@@ -1561,18 +1541,16 @@ class GreyLearningRuntime:
                 activation_value["pending_swap"],
             )
             failure_value = owned["failure"]
-            restored_failure = (
-                None
-                if failure_value is None
-                else (failure_value["code"], failure_value["detail"])
-            )
+            restored_failure = None if failure_value is None else (failure_value["code"], failure_value["detail"])
             restored_pair = self._pair_factory.restore(restored_descriptor)
             restored_parameters = restored_pair.core.snapshot_parameters()
             if any(restored_parameters[key] != params[key] for key in self.MODEL_PARAM_KEYS):
                 restored_pair.close()
                 raise ValueError("restored active pair does not match active model")
         except Exception as exc:
-            print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
+            self._logger.warning(
+                f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with."
+            )
             return False
         staged_learning = None
         if self._learning_enabled:
@@ -1592,7 +1570,7 @@ class GreyLearningRuntime:
                 )
             except BaseException as error:
                 restored_pair.close()
-                print(
+                self._logger.warning(
                     f"[mpc] restored learning could not start ({error}); "
                     "keeping the model this controller started with."
                 )
@@ -1606,12 +1584,9 @@ class GreyLearningRuntime:
         except BaseException as error:
             if staged_learning is not None:
                 staged_learning.close()
-            if (
-                self._activation_runtime.active_pair is not restored_pair
-                and not restored_pair.closed
-            ):
+            if self._activation_runtime.active_pair is not restored_pair and not restored_pair.closed:
                 restored_pair.close()
-            print(
+            self._logger.warning(
                 f"[mpc] a stored model could not replace the active owner ({error}); "
                 "keeping the model this controller started with."
             )
@@ -1625,7 +1600,7 @@ class GreyLearningRuntime:
         # learning are not the ones about to steer it. A restored model is
         # calibrated by its own fit record, so pass the metadata rather than
         # letting parameter distance stand in for it.
-        warn_about_model(self._configuration(), metadata)
+        warn_about_model(self._configuration(), metadata, logger=self._logger)
         self._model_meta = {
             "rmse": metadata["rmse"],
             "samples": metadata["samples"],
@@ -1633,19 +1608,13 @@ class GreyLearningRuntime:
             "nfev": metadata["nfev"],
         }
         restored_origin = owned["origin"]
-        self._checkpoint_origin = (
-            None if restored_origin is None else CandidateOrigin(restored_origin)
-        )
+        self._checkpoint_origin = None if restored_origin is None else CandidateOrigin(restored_origin)
         restored_policy = owned["policy"]
-        self._checkpoint_policy = (
-            None if restored_policy is None else ActivationPolicy(restored_policy)
-        )
+        self._checkpoint_policy = None if restored_policy is None else ActivationPolicy(restored_policy)
         rollback_digest = owned["identities"]["rollback_digest"]
         rollback_generation = owned["identities"]["rollback_generation"]
         self._checkpoint_rollback_identity = (
-            None
-            if rollback_digest is None or rollback_generation is None
-            else (rollback_digest, rollback_generation)
+            None if rollback_digest is None or rollback_generation is None else (rollback_digest, rollback_generation)
         )
         self._checkpoint_challenger = restored_challenger
         self._teardown_candidate = None
@@ -1770,7 +1739,10 @@ class GreyLearningRuntime:
         worker = self._fit_worker_factory()
         try:
             worker.start()
-            if worker.submit(GreyFitJob(request, frames, self._active_components().controller.config)) is not FitSubmission.ACCEPTED:
+            if (
+                worker.submit(GreyFitJob(request, frames, self._active_components().controller.config))
+                is not FitSubmission.ACCEPTED
+            ):
                 return TeardownRefitResult.failed("fitting worker was busy", origin=origin)
             message = worker.receive(timeout_s=120.0)
         except Exception as error:
@@ -1948,7 +1920,7 @@ class GreyLearningRuntime:
             # model cannot be simulated at, which a diverging solve's best
             # point can be.
             if not fitted["converged"]:
-                print(
+                self._logger.info(
                     f"[mpc] refit: abandoned after {fitted['nfev']} evaluations over "
                     f"{len(rows)} samples in {time.perf_counter() - started:.1f} s"
                 )
@@ -1980,7 +1952,7 @@ class GreyLearningRuntime:
             incumbent_rmse=inc_rmse,
             identifiability=ident,
         )
-        print(
+        self._logger.info(
             f"[mpc] refit: {verdict.reason} (candidate RMSE {cand_rmse:.2f} C, "
             f"incumbent {inc_rmse:.2f} C, {fitted['nfev']} evaluations over "
             f"{len(rows)} samples in {time.perf_counter() - started:.1f} s)"
@@ -1988,9 +1960,7 @@ class GreyLearningRuntime:
         if verdict.accepted:
             active_descriptor = self._active_pair().descriptor
             candidate_settings = dict(self._configuration())
-            candidate_settings.update(
-                {key: fitted[key] for key in self.MODEL_PARAM_KEYS if key in fitted}
-            )
+            candidate_settings.update({key: fitted[key] for key in self.MODEL_PARAM_KEYS if key in fitted})
             candidate_pair: OwnedMpcPair | None = None
             try:
                 candidate_pair = self._pair_factory.build(

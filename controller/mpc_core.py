@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections
+import logging
 import math
 import time
 from collections.abc import Callable, Mapping
@@ -18,6 +19,7 @@ from controller.acados import (
     SolverError,
 )
 from controller.applied_output import AppliedOutput
+from controller.runtime.context import EVENT_LOG_NAME
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.base import MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import FeasibilityReport, feasibility_report
@@ -37,6 +39,7 @@ from controller.mpc_model import GreyBoxEKF, GreyBoxKF, steady_combustion_load
 _NATIVE_BOUND_TOLERANCE = 1e-6
 _HISTORY_MAX = 8640
 _LEARNED_RESIDUAL_WEIGHT = 1_000.0
+
 
 class NativeDiagnostics(Protocol):
     @property
@@ -183,7 +186,6 @@ def _ignore_failure(_error: BaseException) -> None:
     return None
 
 
-
 def _float_setting(config: Mapping[str, JsonValue], key: str) -> float:
     value = config[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -208,8 +210,6 @@ def _str_setting(config: Mapping[str, JsonValue], key: str) -> str:
 def _close_component(component: MpcEstimator | MpcSolver | None) -> None:
     if isinstance(component, Closable):
         component.close()
-
-
 
 
 class _RetryableResourceClose:
@@ -254,7 +254,11 @@ class MpcCore:
         solver_factory: SolverFactory | None = None,
         components: tuple[MpcEstimator, MpcSolver] | None = None,
         model_identified: bool | None = None,
+        logger: logging.Logger | None = None,
     ) -> None:
+        #: No ControllerContext reaches the core; the context's logger is
+        #: injected instead, defaulting to the name the context defaults to.
+        self._logger = logging.getLogger(EVENT_LOG_NAME) if logger is None else logger
         self.config = normalize_config(config)
         self.units = units
         self.u_max = _float_setting(cycle_data, "u_max") if "u_max" in cycle_data else 0.9
@@ -265,11 +269,7 @@ class MpcCore:
 
         revision, metadata = model_authority()
         if components is None:
-            identified = (
-                model_is_identified(self.config, metadata)
-                if model_identified is None
-                else model_identified
-            )
+            identified = model_is_identified(self.config, metadata) if model_identified is None else model_identified
             self._estimator, self._solver = self.build_components(
                 self.config,
                 model_identified=identified,
@@ -279,12 +279,10 @@ class MpcCore:
             )
         else:
             self._estimator, self._solver = components
-        self._close_resources: _RetryableResourceClose | None = (
-            _RetryableResourceClose(
-                (
-                    lambda: _close_component(self._solver),
-                    lambda: _close_component(self._estimator),
-                )
+        self._close_resources: _RetryableResourceClose | None = _RetryableResourceClose(
+            (
+                lambda: _close_component(self._solver),
+                lambda: _close_component(self._estimator),
             )
         )
         self._closed = False
@@ -298,9 +296,7 @@ class MpcCore:
         self._x_hat: npt.NDArray[np.float64] | None = None
         self._consecutive_policy_failures = 0
         self._native_failure_diagnostics: SolverDiagnostics | None = None
-        self._history: collections.deque[tuple[float, float, float]] = collections.deque(
-            maxlen=_HISTORY_MAX
-        )
+        self._history: collections.deque[tuple[float, float, float]] = collections.deque(maxlen=_HISTORY_MAX)
         self._model_revision = revision
 
     @classmethod
@@ -357,11 +353,7 @@ class MpcCore:
             kf_factory=kf_factory,
         )
         try:
-            solver = (
-                MpcCore.build_solver(native_config)
-                if solver_factory is None
-                else solver_factory(native_config)
-            )
+            solver = MpcCore.build_solver(native_config) if solver_factory is None else solver_factory(native_config)
         except BaseException:
             _close_component(estimator)
             raise
@@ -442,7 +434,6 @@ class MpcCore:
         if reset_estimate:
             self._x_hat = None
 
-
     def set_target(self, set_point: float) -> None:
         self._set_point_c = to_celsius(set_point, self.units)
 
@@ -480,20 +471,14 @@ class MpcCore:
             or residual.shape != (horizon,)
             or not np.isfinite(sequence).all()
             or not np.isfinite(residual).all()
-            or not np.all(
-                (-_NATIVE_BOUND_TOLERANCE <= sequence)
-                & (sequence <= 1.0 + _NATIVE_BOUND_TOLERANCE)
-            )
+            or not np.all((-_NATIVE_BOUND_TOLERANCE <= sequence) & (sequence <= 1.0 + _NATIVE_BOUND_TOLERANCE))
             or not math.isfinite(objective)
             or diagnostics.status != 0
             or diagnostics.backend_status != 0
             or isinstance(diagnostics.iterations, bool)
             or not isinstance(diagnostics.iterations, int)
             or diagnostics.iterations < 0
-            or not all(
-                math.isfinite(float(value)) and float(value) >= 0.0
-                for value in diagnostic_values
-            )
+            or not all(math.isfinite(float(value)) and float(value) >= 0.0 for value in diagnostic_values)
             or not isinstance(diagnostics.warm_started, bool)
         ):
             raise ValueError("native grey-box result is malformed")
@@ -508,9 +493,7 @@ class MpcCore:
         x_hat = self._estimator.update(applied_load, measured_c)
         self._x_hat = x_hat
         state_values = tuple(float(value) for value in np.asarray(x_hat).reshape(-1))
-        state_names = tuple(
-            f"q{index}" for index in range(_int_setting(self.config, "n_delay"))
-        ) + ("T_c", "d")
+        state_names = tuple(f"q{index}" for index in range(_int_setting(self.config, "n_delay"))) + ("T_c", "d")
         disturbance = state_values[-1]
         self._history.append((time.time(), measured_c, applied_load))
         revision, metadata = self._model_authority()
@@ -553,16 +536,15 @@ class MpcCore:
 
         if failure_state is MpcFailureState.SUCCESS:
             if self._consecutive_policy_failures:
-                print(
-                    "[mpc] native solver recovered after "
-                    f"{self._consecutive_policy_failures} failed step(s)"
+                self._logger.info(
+                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"
                 )
             self._consecutive_policy_failures = 0
         else:
             self._consecutive_policy_failures += 1
             failure_count = self._consecutive_policy_failures
             if failure_count == 1 or failure_count in (10, 60) or failure_count % 300 == 0:
-                print(
+                self._logger.error(
                     f"[mpc] native solver has failed {failure_count} consecutive step(s) "
                     f"({type(failure_error).__name__}: {failure_error}); holding normalized "
                     f"combustion load {combustion_load:.3f}. The grill is not being controlled "

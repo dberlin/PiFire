@@ -139,9 +139,7 @@ def test_retired_refresh_evidence_is_frozen_only_as_schema_two_audit_history():
 
     refresh = next(record for record in records if record.kind is EvidenceKind.REFRESH_DIAGNOSTICS)
     assert refresh.schema_version == 2
-    assert refresh not in [
-        record for record in records if record.schema_version == 3
-    ]
+    assert refresh not in [record for record in records if record.schema_version == 3]
 
 
 class FakeCore:
@@ -158,7 +156,6 @@ class FakeCore:
         self.tag = "core-a"
         self.activation_calls = []
         self._activation_terminated = False
-
 
     def get_control_period(self):
         return self._period
@@ -201,6 +198,7 @@ class FakeCore:
     @property
     def activation_terminated(self):
         return self._activation_terminated
+
     def restore_activation(self, persisted, records):
         self.activation_calls.append(("restore", persisted, tuple(records)))
         return False
@@ -341,7 +339,6 @@ def test_runners_retire_generation_bound_context_until_rebound() -> None:
         def close(self):
             self.release.set()
 
-
     sync = SyncControllerRunner(NoOutcomeCore())
     sync.bind_evidence_context(0, "session-sync", "cook-sync")
     sync.retire_evidence_context(0)
@@ -351,9 +348,7 @@ def test_runners_retire_generation_bound_context_until_rebound() -> None:
 
     sync.bind_evidence_context(0, "replacement-sync", "cook-sync")
     sync_drops = sync.drain_observation_outcomes().terminal_drops
-    assert [drop.submission_sequence for drop in sync_drops] == [
-        sync_submission.submission_sequence
-    ]
+    assert [drop.submission_sequence for drop in sync_drops] == [sync_submission.submission_sequence]
 
     threaded_core = NoOutcomeCore()
     barrier = ProcessingBarrier()
@@ -375,9 +370,7 @@ def test_runners_retire_generation_bound_context_until_rebound() -> None:
 
         threaded.bind_evidence_context(0, "replacement-threaded", "cook-threaded")
         threaded_drops = threaded.drain_observation_outcomes().terminal_drops
-        assert [drop.submission_sequence for drop in threaded_drops] == [
-            threaded_submission.submission_sequence
-        ]
+        assert [drop.submission_sequence for drop in threaded_drops] == [threaded_submission.submission_sequence]
     finally:
         threaded.stop()
 
@@ -1822,13 +1815,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
         assert _wait_for(
             lambda: (
                 learning.reconcile_outcomes(620.0) is None
-                and len(
-                    [
-                        record
-                        for record in recorder.records
-                        if isinstance(record.payload, ModelObservationPayload)
-                    ]
-                )
+                and len([record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)])
                 == 30
             )
         )
@@ -2197,11 +2184,7 @@ def test_real_completed_forecast_survives_controller_to_runner_evidence_drain(mo
 
         assert _wait_for(collect)
         assert drained[0].outcome.get("forecast_origin_evidence"), drained[0].outcome
-        forecast_records = [
-            record
-            for record in drained[0].evidence
-            if record.kind is EvidenceKind.FORECAST_ORIGIN
-        ]
+        forecast_records = [record for record in drained[0].evidence if record.kind is EvidenceKind.FORECAST_ORIGIN]
         assert len(forecast_records) == 1
         assert isinstance(forecast_records[0].payload, ForecastOriginEvidence)
         assert forecast_records[0].payload.observed_temperature_c == 102.0
@@ -2287,9 +2270,7 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         first_drain = runner.drain_observation_outcomes()
         assert first_drain.envelopes[0].submission_sequence == first_submission.submission_sequence
         confidence = [
-            record
-            for record in first_drain.envelopes[0].evidence
-            if record.kind is EvidenceKind.CONFIDENCE_DECISION
+            record for record in first_drain.envelopes[0].evidence if record.kind is EvidenceKind.CONFIDENCE_DECISION
         ]
         assert len(confidence) == 1
         assert confidence[0].payload.decision_id == evaluation.decision_id
@@ -2338,6 +2319,7 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         )
         assert identity is not None
         normal_evidence = []
+
         class _EvidencePersistence:
             evidence_blocked = False
             failed = False
@@ -2374,6 +2356,7 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         )
         learning.bind_generation(0)
         learning.submit_completed_observation((60, 80), observation)
+
         def record(event_kind, payload, timestamp_ms):
             recorded.append((event_kind, payload, timestamp_ms))
             return True
@@ -2394,16 +2377,9 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         assert recorded[1][1] is not evaluation
         assert len(activation_confidence) == 1
         assert activation_confidence[0].payload.decision_id == evaluation.decision_id
-        assert all(
-            record.kind is not EvidenceKind.CONFIDENCE_DECISION
-            for record in normal_evidence
-        )
+        assert all(record.kind is not EvidenceKind.CONFIDENCE_DECISION for record in normal_evidence)
     finally:
         runner.stop()
-
-
-
-
 
 
 def test_failed_active_recovery_terminalizes_before_configured_pair_can_update() -> None:
@@ -2461,5 +2437,33 @@ def test_failed_active_recovery_terminalizes_before_configured_pair_can_update()
         time.sleep(0.02)
         assert update_calls == []
         assert runner.latest().revision == 0
+    finally:
+        runner.stop()
+
+
+class _RefusingRestoreCore(_OrderRecordingCore):
+    """A core that queues like any other and then declines the snapshot."""
+
+    def restore_model(self, snapshot):
+        super().restore_model(snapshot)
+        return False
+
+
+def test_a_restore_the_core_refuses_is_reported_back_from_the_worker():
+    """Queued is not adopted, so the worker's verdict has to travel back.
+
+    `restore_model` returns True for accepted-for-restore; the core decides on
+    the worker thread. Without a return path a refusal reaches nothing that can
+    log it or correct the session's model provenance.
+    """
+    core = _RefusingRestoreCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.drain_restore_outcome() is None
+        assert runner.restore_model({"revision": 7}) is True
+        runner.submit(212.0)
+
+        assert _wait_for(lambda: runner.drain_restore_outcome() is False)
+        assert runner.drain_restore_outcome() is None
     finally:
         runner.stop()

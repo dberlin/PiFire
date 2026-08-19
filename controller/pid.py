@@ -43,7 +43,7 @@ Class Definition
 
 
 class Controller(PIDControllerBase):
-    def __init__(self, config, units, cycle_data):
+    def __init__(self, config, units, cycle_data, *, logger=None):
         super().__init__(config, units, cycle_data)
 
         self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))

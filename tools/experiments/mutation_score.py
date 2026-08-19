@@ -217,7 +217,7 @@ MUTATIONS = [
     (
         "M35 restore_model refuses an old snapshot without saying so",
         GREY_RUNTIME,
-        "            print(\n"
+        "            self._logger.warning(\n"
         '                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "\n'
         '                f"accepts only grey schema {self.MODEL_SCHEMA}; version 3 is migration input only."\n'
         "            )\n"
@@ -266,15 +266,13 @@ MUTATIONS = [
         "M47 the counter never clears, so a healthy policy reads as frozen",
         MPC_CORE,
         "            if self._consecutive_policy_failures:\n"
-        "                print(\n"
-        '                    "[mpc] native solver recovered after "\n'
-        '                    f"{self._consecutive_policy_failures} failed step(s)"\n'
+        "                self._logger.info(\n"
+        '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
         "                )\n"
         "            self._consecutive_policy_failures = 0",
         "            if self._consecutive_policy_failures:\n"
-        "                print(\n"
-        '                    "[mpc] native solver recovered after "\n'
-        '                    f"{self._consecutive_policy_failures} failed step(s)"\n'
+        "                self._logger.info(\n"
+        '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
         "                )",
     ),
     # ---- the deadtime chain length ----------------------------------------

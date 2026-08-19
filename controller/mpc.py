@@ -57,8 +57,9 @@ class Controller(ControllerBase):
         cycle_data,
         *,
         activation_persistence: ModelPersistenceWorker | None = None,
+        logger=None,
     ):
-        super().__init__(config, units, cycle_data)
+        super().__init__(config, units, cycle_data, logger=logger)
 
         cfg = normalize_config(config)
         self.cfg = cfg
@@ -86,9 +87,7 @@ class Controller(ControllerBase):
         def handle_policy_failure(_error):
             if self._activation_runtime.active_record is not None:
                 if not self.activation_runtime_failure("native-solve-failure"):
-                    self.terminate_mpc_activation(
-                        "native-failure-compensation-failed"
-                    )
+                    self.terminate_mpc_activation("native-failure-compensation-failed")
 
         self._pair_factory = MpcPairFactory(
             cfg,
@@ -127,7 +126,7 @@ class Controller(ControllerBase):
             self._activation_runtime = activation_runtime
             self._sync_learning_configuration()
             self.u_max = self.active_control_pair.core.u_max
-            warn_about_model(self.cfg)
+            warn_about_model(self.cfg, logger=self._logger)
 
             from common.persistence.control_trace import append_control_trace
 
@@ -144,6 +143,7 @@ class Controller(ControllerBase):
                 cook_history=self._history_for_learning,
                 sync_configuration=self._sync_learning_configuration,
                 append_trace=append_control_trace,
+                logger=self._logger,
             )
             self._grey_learning_runtime = grey_runtime
         except BaseException as construction_error:
@@ -165,9 +165,7 @@ class Controller(ControllerBase):
                     except BaseException as cleanup_error:
                         cleanup_errors.append(cleanup_error)
             for cleanup_error in cleanup_errors:
-                construction_error.add_note(
-                    f"Controller construction cleanup failed: {cleanup_error!r}"
-                )
+                construction_error.add_note(f"Controller construction cleanup failed: {cleanup_error!r}")
             raise
 
     @property
@@ -189,9 +187,7 @@ class Controller(ControllerBase):
         return copy.deepcopy(self.active_control_pair.core.config)
 
     def _snapshot_parameters_for_learning(self):
-        return copy.deepcopy(
-            self.active_control_pair.core.snapshot_parameters()
-        )
+        return copy.deepcopy(self.active_control_pair.core.snapshot_parameters())
 
     def _history_for_learning(self):
         return tuple(self.active_control_pair.core.history)
@@ -252,7 +248,6 @@ class Controller(ControllerBase):
     @property
     def activation_terminated(self) -> bool:
         return self._activation_runtime.activation_terminated
-
 
     def install_candidate_pair_inert(
         self,
@@ -401,63 +396,38 @@ class Controller(ControllerBase):
             "set_point": finite_float(self.set_point),
             "set_point_c": finite_float(core.set_point_c),
             "last_combustion_load": finite_float(core.last_combustion_load),
-            "last_raw_combustion_load": optional_float(
-                core.last_raw_combustion_load
-            ),
-            "last_equilibrium_load": optional_float(
-                core.last_equilibrium_load
-            ),
+            "last_raw_combustion_load": optional_float(core.last_raw_combustion_load),
+            "last_equilibrium_load": optional_float(core.last_equilibrium_load),
             "last_residual_load": optional_float(core.last_residual_load),
-            "applied_combustion_load": finite_float(
-                core.applied_combustion_load
-            ),
+            "applied_combustion_load": finite_float(core.applied_combustion_load),
             "policy": "acados-grey",
             "policy_kind": "acados-grey",
             "n_horizon": int(self.cfg["n_horizon"]),
             "policy_failures": int(core.consecutive_policy_failures),
             "u_max": finite_float(self.u_max),
             "x_hat": (
-                None
-                if estimate is None
-                else tuple(
-                    finite_float(value)
-                    for value in np.asarray(estimate).reshape(-1)
-                )
+                None if estimate is None else tuple(finite_float(value) for value in np.asarray(estimate).reshape(-1))
             ),
             "cycle_data": sanitized_copy(self.cycle_data),
             "model": (
                 None
                 if model_meta is None
                 else {
-                    "band_c": [
-                        finite_float(value) for value in model_meta["band_c"]
-                    ],
+                    "band_c": [finite_float(value) for value in model_meta["band_c"]],
                     "rmse": optional_float(model_meta["rmse"]),
                 }
             ),
-            "feasibility": (
-                None if feasibility is None else feasibility.as_status()
-            ),
+            "feasibility": (None if feasibility is None else feasibility.as_status()),
             "learning": self._grey_learning_runtime.learning_status(),
             "activation": {
                 "active_kind": _snapshot.GREY_BOX_KIND,
                 "active_digest": active_pair.descriptor.model_digest,
-                "decision_id": (
-                    None
-                    if active_record is None
-                    else active_record.decision_id
-                ),
+                "decision_id": (None if active_record is None else active_record.decision_id),
                 "role_generation": active_pair.descriptor.role_generation,
                 "failed_digest": None,
                 "failed_generation": None,
-                "last_safe_command": finite_float(
-                    core.last_combustion_load
-                ),
-                "fallback_kind": (
-                    _snapshot.GREY_BOX_KIND
-                    if terminated_reason is not None
-                    else None
-                ),
+                "last_safe_command": finite_float(core.last_combustion_load),
+                "fallback_kind": (_snapshot.GREY_BOX_KIND if terminated_reason is not None else None),
                 "fallback_reason": terminated_reason,
             },
         }

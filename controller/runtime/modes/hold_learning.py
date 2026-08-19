@@ -179,6 +179,8 @@ class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
 
     def restore_model(self, snapshot: dict[str, object]) -> bool: ...
 
+    def drain_restore_outcome(self) -> bool | None: ...
+
     def runs_async(self) -> bool: ...
 
     def controller_state(self) -> object: ...
@@ -287,6 +289,7 @@ class HoldLearningRuntime:
         self._retired_generations: set[int] = set()
         self._activation_lifecycle_evidence_id: str | None = None
         self._refit_result: HoldRefitResult | None = None
+        self._submitted_restore: dict[str, object] | None = None
         self._final_checkpoint_attempted = False
         self._last_checkpoint_succeeded = False
         self._final_checkpoint_succeeded = False
@@ -407,6 +410,8 @@ class HoldLearningRuntime:
                     cast(Mapping[str, JsonValue], snapshot),
                     provenance,
                 )
+            if runner.runs_async():
+                self._submitted_restore = snapshot
             self._logger.info(f"Submitted the stored {self._controller_name} model for restore")
             if trace is not None:
                 trace.record_model(
@@ -846,8 +851,42 @@ class HoldLearningRuntime:
             self._retire_pending(evicted_sequence, "runner-observation-evicted")
         self._bound_pending()
 
+    def _reconcile_submitted_restore(self, timestamp_ms: int) -> None:
+        """Correct the record once the worker rules on a queued restore.
+
+        An async runner answers `restore_model` before its core has looked
+        at the snapshot, so the authority stamped at submission describes a
+        model that may never be adopted. Only the worker knows, and only
+        once, so a refusal is reported here or nowhere.
+        """
+        runner = self._runner
+        snapshot = self._submitted_restore
+        if runner is None or snapshot is None:
+            return
+        outcome = runner.drain_restore_outcome()
+        if outcome is None:
+            return
+        self._submitted_restore = None
+        if outcome:
+            return
+        trace = self._trace
+        if trace is not None:
+            trace.clear_model_authority()
+        self._logger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
+        if trace is not None:
+            trace.record_model(
+                TraceModelContext(
+                    event=ModelEventType.REJECT,
+                    detail="stored model rejected for restore",
+                    snapshot=cast(Mapping[str, JsonValue], snapshot),
+                    provenance="persisted",
+                    timestamp_ms=timestamp_ms,
+                )
+            )
+
     def reconcile_outcomes(self, publication_time_s: float) -> None:
         """Consume each public runner outcome once and flush trace effects FIFO."""
+        self._reconcile_submitted_restore(int(publication_time_s * 1_000))
         runner = self._runner
         if not self._pending or runner is None:
             return

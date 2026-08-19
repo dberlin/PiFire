@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 from dataclasses import replace
 import json
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
+from controller.runtime.context import EVENT_LOG_NAME
 
 from controller.runtime.model_fitting import TeardownRefitOutcome
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
@@ -288,7 +290,7 @@ def test_restore_rotates_learning_to_the_restored_pair_generation():
         source.close()
 
 
-def test_runtime_restore_refuses_v3_even_though_one_shot_migration_accepts_it(capsys):
+def test_runtime_restore_refuses_v3_even_though_one_shot_migration_accepts_it(caplog):
     v3 = {
         "version": 3,
         "revision": 7,
@@ -301,8 +303,9 @@ def test_runtime_restore_refuses_v3_even_though_one_shot_migration_accepts_it(ca
     controller = _controller()
 
     assert migrate_grey_learning_snapshot(v3)["version"] == 4
-    assert controller.restore_model(v3) is False
-    assert "migration input only" in capsys.readouterr().out
+    with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
+        assert controller.restore_model(v3) is False
+    assert "migration input only" in caplog.text
 
 
 def _restarted_store(blobs):
@@ -517,3 +520,35 @@ def test_real_live_status_failure_overrides_prior_active_activation():
         "detail": "native solver crashed",
         "terminal": True,
     }
+
+
+def test_restore_refuses_a_pairless_placeholder_by_naming_its_missing_pair(caplog):
+    """A record with no pair descriptor is declined for saying so, not for raising.
+
+    controller/model_learning/migration.py writes exactly this record when no
+    prior authority survives the grey-v4 cutover: shipped defaults, zero
+    samples, no fit, and deliberately no pair to own. Refusing it is correct.
+    Reaching that refusal through an AttributeError on the null field is not --
+    the reason is what an operator needs and the only thing that leaves here.
+    """
+    placeholder = migrate_grey_learning_snapshot(
+        {
+            "version": 3,
+            "revision": 1,
+            "params": PARAMS,
+            "rmse": None,
+            "samples": 0,
+            "band_c": [0.0, 0.0],
+            "nfev": None,
+        }
+    )
+    assert placeholder["active_pair"] is None
+    controller = _controller()
+    before = controller.get_model_snapshot()["active"]["parameters"]
+
+    with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
+        assert controller.restore_model(placeholder) is False
+
+    assert "active pair" in caplog.text
+    assert "NoneType" not in caplog.text
+    assert controller.get_model_snapshot()["active"]["parameters"] == before
