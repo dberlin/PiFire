@@ -2,16 +2,13 @@ import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { HistoryAnnotation } from "@pifire/core/contracts/content";
+import type { ChartSeries } from "@pifire/core/history/historyAdapter";
 import { annotationPlugin } from "./annotationPlugin";
 import "./historyChart.css";
 import { shouldResetScales } from "./scaleReset";
 import { type SeriesShape, tooltipPlugin } from "./tooltipPlugin";
 
-export interface ChartSeries {
-  label: string;
-  color: string;
-  values: (number | null)[];
-}
+export type { ChartSeries };
 
 export interface HistoryChartProps {
   /** Epoch SECONDS -- uPlot's x-axis convention. */

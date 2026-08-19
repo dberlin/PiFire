@@ -1,0 +1,117 @@
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import type { HistoryChartData } from "@pifire/core/contracts/content";
+import { hasPlottableHistory, toChartInput } from "@pifire/core/history/historyAdapter";
+import { HistoryChart, type HistorySeriesInput } from "../../src/components/HistoryChart";
+import { THEME } from "../../src/theme";
+import { useLiveContext } from "../_layout";
+
+const tokens = THEME.ember;
+
+// Same default window Flask's history page opens with (a full recent cook
+// tends to run far longer, but the last couple of hours is what a user
+// checking this screen from beside the grill usually wants).
+const DEFAULT_MINUTES = 120;
+
+// toChartInput's ChartInput is `{ times: number[], series: { values:
+// (number|null)[] }[] }` -- parallel arrays, matching how uPlot (and the
+// backend's prepare_chartdata) shape a series. HistoryChart's own contract is
+// `{ points: [time, value][] }[]` -- point tuples, easier to build an SVG
+// path from directly. This zips the two back together; it is the one piece
+// of shaping specific to the mobile chart, so it stays here rather than in
+// the shared adapter.
+function toPointSeries(data: HistoryChartData): HistorySeriesInput[] {
+  const { times, series } = toChartInput(data);
+  return series.map((s) => ({
+    label: s.label,
+    color: s.color,
+    points: times.map((t, i) => [t, s.values[i] ?? null] as [number, number | null]),
+  }));
+}
+
+export default function History() {
+  const { host } = useLiveContext();
+  const [data, setData] = useState<HistoryChartData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(
+    async (opts: { showSpinner: boolean }) => {
+      if (opts.showSpinner) setRefreshing(true);
+      try {
+        const res = await fetch(`${host}/api/history/chart?minutes=${DEFAULT_MINUTES}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as HistoryChartData;
+        setData(json);
+        setError(null);
+      } catch {
+        // A grill that answers the live socket but not this REST endpoint
+        // (e.g. mid-restart) should say so rather than show a stale chart
+        // silently -- same "explicit over blank" rule the empty state
+        // follows for a genuinely empty history.
+        setError("Could not load history from the grill.");
+      } finally {
+        if (opts.showSpinner) setRefreshing(false);
+      }
+    },
+    [host],
+  );
+
+  useEffect(() => {
+    load({ showSpinner: false });
+  }, [load]);
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => load({ showSpinner: true })}
+          tintColor={tokens.accent}
+        />
+      }
+    >
+      <Text style={styles.title}>History</Text>
+
+      {data === null && error === null ? (
+        <ActivityIndicator color={tokens.accent} style={styles.spinner} />
+      ) : null}
+
+      {error !== null ? <Text style={styles.error}>{error}</Text> : null}
+
+      {data !== null && hasPlottableHistory(data) ? (
+        <HistoryChart series={toPointSeries(data)} />
+      ) : null}
+
+      {data !== null && !hasPlottableHistory(data) ? (
+        <HistoryChart series={[]} />
+      ) : null}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: tokens.background,
+  },
+  content: {
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    gap: 16,
+  },
+  title: {
+    color: tokens.text,
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  spinner: {
+    marginTop: 32,
+  },
+  error: {
+    color: tokens.danger,
+    fontSize: 14,
+  },
+});

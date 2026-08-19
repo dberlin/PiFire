@@ -1,3 +1,4 @@
+import { hasPlottableHistory, toChartInput } from "@pifire/core/history/historyAdapter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router";
@@ -7,7 +8,6 @@ import { useSettings } from "../../helpers/settings/useSettings";
 import { CookFileList } from "../cookfiles/CookFileList";
 import { NumberField } from "../settings/fields/NumberField";
 import { HistoryChart } from "./HistoryChart";
-import { hasPlottableHistory, toChartInput } from "./historyAdapter";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 

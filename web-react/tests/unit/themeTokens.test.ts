@@ -360,9 +360,11 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 /** Literals that equal a Qt token value but must NOT become one. Each entry is
  *  a decision, not an exemption to be extended casually. */
 const LITERAL_ALLOWLIST: Record<string, string> = {
-  // uPlot strokes a <canvas>; canvas strokes cannot read custom properties, so
-  // --text-dim's value has to exist as a literal exactly once. Pinned below.
-  "src/components/history/historyAdapter.ts": "#8a7f70",
+  // historyAdapter.ts moved to packages/pifire-core/src/history/ (task 14 of
+  // the mobile app SDD plan), so it is outside this scan of web-react's own
+  // `src` tree and needs no allowlist entry here any more. Its FALLBACK_COLOR
+  // literal is still pinned to Theme.dim below via a direct file read.
+  //
   // IgniterIcon's three flame strokes are a fixed gradient (Qt's
   // IgniterIcon.qml hardcodes the same three). The highlight #ff9f43 happens to
   // equal Crimson's arcStop2; tokenising it would make the flame follow the
@@ -401,7 +403,7 @@ describe("no colour outside theme.css duplicates a Qt token", () => {
   });
 
   it("keeps the chart's canvas fallback equal to Theme.dim", () => {
-    const src = readFileSync("src/components/history/historyAdapter.ts", "utf8");
+    const src = readFileSync("../packages/pifire-core/src/history/historyAdapter.ts", "utf8");
     const m = /const FALLBACK_COLOR = "(#[0-9a-f]{6})"/i.exec(src);
     expect(m, "historyAdapter no longer declares FALLBACK_COLOR the expected way").not.toBeNull();
     const qt = QT.get("dim");

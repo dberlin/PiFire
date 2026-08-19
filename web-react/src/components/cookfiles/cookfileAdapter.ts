@@ -1,5 +1,9 @@
 import type { CookFileChartData, HistoryAnnotation } from "@pifire/core/contracts/content";
-import { type ChartInput, hasPlottableHistory, toChartInput } from "../history/historyAdapter";
+import {
+  type ChartInput,
+  hasPlottableHistory,
+  toChartInput,
+} from "@pifire/core/history/historyAdapter";
 
 /**
  * Adapt a saved cook file's chart payload to the shipped uPlot chart.

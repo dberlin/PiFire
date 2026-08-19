@@ -23,6 +23,11 @@ export interface LiveResult {
    *  arrived. This is how the UI knows a reading is stale rather than
    *  presenting an old value as current. */
   lastPayloadAt: number | null;
+  /** The connected grill's API base (same value `command` was built from).
+   *  REST reads that are not part of the socket payload -- history.tsx's
+   *  `/api/history/chart` fetch -- need this directly; `command` only
+   *  exposes control writes, not a base URL. */
+  host: string;
 }
 
 // A backgrounded iOS app suspends its socket without reliably surfacing a
@@ -102,5 +107,5 @@ export function useLive(host: string): LiveResult {
   const command = useMemo(() => createCommand(host), [host]);
   const controlAlive = deriveControlAlive(live);
 
-  return { live, phase, controlAlive, pellets, command, lastPayloadAt };
+  return { live, phase, controlAlive, pellets, command, lastPayloadAt, host };
 }
