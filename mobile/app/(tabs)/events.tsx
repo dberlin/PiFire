@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { THEME } from "../../src/theme";
-import { useLiveContext } from "../_layout";
-
-const tokens = THEME.ember;
+import { useLiveContext, usePrefsContext } from "../_layout";
 
 // Same endpoint web-react's own Events tab reads (web-react/src/components/
 // logs/EventsPage.tsx -> LogViewer stem="events" -> helpers/logs/logsApi.ts's
@@ -31,6 +29,8 @@ function parseEventLines(text: string): string[] {
 
 export default function Events() {
   const { host } = useLiveContext();
+  const { prefs } = usePrefsContext();
+  const tokens = THEME[prefs.accent];
   const [lines, setLines] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -59,7 +59,7 @@ export default function Events() {
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: tokens.background }]}
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
@@ -69,13 +69,14 @@ export default function Events() {
         />
       }
     >
-      <Text style={styles.title}>Events</Text>
+      <Text style={[styles.title, { color: tokens.text }]}>Events</Text>
 
       {/* The limitation this screen and its alerts share: they only work
           while this app is open. Placed here, not buried in a settings
           screen, because this is where someone configuring "will my phone
-          tell me" actually looks. */}
-      <Text style={styles.notice}>
+          tell me" actually looks. Also stated on the preferences screen
+          (settings.tsx), next to the alerts toggle it's really about. */}
+      <Text style={[styles.notice, { color: tokens.text }]}>
         Alerts on this screen only fire while PiFire is open on this phone. For
         notifications that reach you while it's closed, set up PiFire's
         server-side notification services (Apprise, Pushover, Pushbullet, or
@@ -86,14 +87,16 @@ export default function Events() {
         <ActivityIndicator color={tokens.accent} style={styles.spinner} />
       ) : null}
 
-      {error !== null ? <Text style={styles.error}>{error}</Text> : null}
+      {error !== null ? <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text> : null}
 
-      {lines !== null && lines.length === 0 ? <Text style={styles.empty}>No events yet.</Text> : null}
+      {lines !== null && lines.length === 0 ? (
+        <Text style={[styles.empty, { color: tokens.text }]}>No events yet.</Text>
+      ) : null}
 
       {lines !== null && lines.length > 0 ? (
         <View style={styles.list}>
           {lines.map((line, i) => (
-            <Text key={i} style={styles.line}>
+            <Text key={i} style={[styles.line, { color: tokens.text }]}>
               {line}
             </Text>
           ))}
@@ -106,7 +109,6 @@ export default function Events() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: tokens.background,
   },
   content: {
     paddingVertical: 24,
@@ -114,15 +116,14 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   title: {
-    color: tokens.text,
     fontSize: 20,
     fontWeight: "700",
   },
   notice: {
-    // THEME.ember has no separate "muted label" token (see src/theme.ts) --
+    // THEME has no separate "muted label" token for chrome text (see
+    // src/theme.ts's GAUGE_ACCENT/LABEL_COLOR, which are gauge-specific) --
     // dimming the ordinary text color is this file's own choice, not a
     // ported value.
-    color: tokens.text,
     opacity: 0.7,
     fontSize: 12,
     lineHeight: 17,
@@ -131,11 +132,9 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
   error: {
-    color: tokens.danger,
     fontSize: 14,
   },
   empty: {
-    color: tokens.text,
     opacity: 0.7,
     fontSize: 14,
   },
@@ -143,7 +142,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   line: {
-    color: tokens.text,
     fontSize: 12,
     fontFamily: "monospace",
   },

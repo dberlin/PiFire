@@ -11,15 +11,13 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { loadHosts, normalizeHost, rememberHost } from "../src/host";
 import { THEME } from "../src/theme";
-
-// No accent-preference screen exists yet (that's a later task), so the
-// Connect screen — the very first thing a user sees — uses the default
-// accent.
-const tokens = THEME.ember;
+import { usePrefsContext } from "./_layout";
 
 export default function Connect() {
   const router = useRouter();
   const { reason } = useLocalSearchParams<{ reason?: string }>();
+  const { prefs } = usePrefsContext();
+  const tokens = THEME[prefs.accent];
 
   const [host, setHost] = useState("pifire.local");
   const [hosts, setHosts] = useState<string[]>([]);
@@ -66,15 +64,18 @@ export default function Connect() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Connect to your grill</Text>
+    <View style={[styles.container, { backgroundColor: tokens.background }]}>
+      <Text style={[styles.title, { color: tokens.text }]}>Connect to your grill</Text>
 
       {typeof reason === "string" && reason.length > 0 ? (
-        <Text style={styles.reason}>{reason}</Text>
+        <Text style={[styles.reason, { color: tokens.danger }]}>{reason}</Text>
       ) : null}
 
       <TextInput
-        style={styles.input}
+        style={[
+          styles.input,
+          { borderColor: tokens.surface, backgroundColor: tokens.surface, color: tokens.text },
+        ]}
         value={host}
         onChangeText={(text) => {
           setHost(text);
@@ -89,34 +90,34 @@ export default function Connect() {
         onSubmitEditing={() => handleConnect()}
       />
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text> : null}
 
       {hosts.length > 0 ? (
         <View style={styles.hostList}>
           {hosts.map((h) => (
             <Pressable
               key={h}
-              style={styles.hostOption}
+              style={[styles.hostOption, { backgroundColor: tokens.surface }]}
               onPress={() => {
                 setHost(h);
                 handleConnect(h);
               }}
             >
-              <Text style={styles.hostOptionText}>{h}</Text>
+              <Text style={[styles.hostOptionText, { color: tokens.text }]}>{h}</Text>
             </Pressable>
           ))}
         </View>
       ) : null}
 
       <Pressable
-        style={styles.button}
+        style={[styles.button, { backgroundColor: tokens.accent }]}
         onPress={() => handleConnect()}
         disabled={connecting}
       >
         {connecting ? (
           <ActivityIndicator color={tokens.background} />
         ) : (
-          <Text style={styles.buttonText}>Connect</Text>
+          <Text style={[styles.buttonText, { color: tokens.background }]}>Connect</Text>
         )}
       </Pressable>
     </View>
@@ -129,32 +130,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
     gap: 16,
-    backgroundColor: tokens.background,
   },
   title: {
     fontSize: 22,
     fontWeight: "600",
-    color: tokens.text,
     textAlign: "center",
     marginBottom: 8,
   },
   reason: {
-    color: tokens.danger,
     textAlign: "center",
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: tokens.surface,
-    backgroundColor: tokens.surface,
-    color: tokens.text,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
   },
   error: {
-    color: tokens.danger,
     fontSize: 14,
   },
   hostList: {
@@ -164,21 +158,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: tokens.surface,
   },
   hostOptionText: {
-    color: tokens.text,
     fontSize: 14,
   },
   button: {
-    backgroundColor: tokens.accent,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
   },
   buttonText: {
-    color: tokens.background,
     fontWeight: "600",
     fontSize: 16,
   },

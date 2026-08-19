@@ -12,12 +12,27 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { arcLength, describeArc, polarToCartesian, valueAngle } from "@pifire/core/gaugeMath";
+import {
+  GAUGE_ACCENT,
+  SETPOINT_COLOR,
+  TEXT_COLOR,
+  TEXT_DIM_COLOR,
+  LABEL_COLOR,
+  TRACK_COLOR,
+  WARN_COLOR,
+  THEME,
+  type AccentName,
+} from "../theme";
 
 // react-native-svg's Path needs to be wrapped to accept Reanimated's
 // `animatedProps` (the SVG attribute equivalent of `useAnimatedStyle`).
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 interface GrillGaugeProps {
+  /** Selects the gradient stops, glow, and mode-badge color -- the only parts
+   *  of this component that vary by accent (see theme.ts's GAUGE_ACCENT and
+   *  its own doc comment for why the rest of the gauge's palette doesn't). */
+  accent: AccentName;
   /** Already rounded by deriveView, and already the last real reading when the
    *  probe has no current one. Null only when it has produced nothing at all. */
   temp: number | null;
@@ -43,24 +58,6 @@ const R = 90;
 const TRACK = describeArc(CX, CY, R, -135, 135);
 const LEN = arcLength(R);
 
-// Gauge-only color tokens, ported literally from web-react/src/theme.css's
-// base (ember) @theme block -- lines 55 (setpoint), 59 (track), 96-100
-// (accent / arc stops / glow). GrillGauge's prop set carries no accent
-// selector (see mobile/src/theme.ts's own note that the gauge gradient
-// stops and glow "this app does not need yet"), so this draws the default
-// palette directly, exactly as the web component does before any
-// [data-accent] override is applied.
-const ACCENT = "#ff8a2b"; // Theme.accentColor
-const ARC_STOP_0 = "#ff5e1a"; // Theme.arcStop0 -- gradient offset 0
-const ARC_STOP_1 = "#ff8a2b"; // Theme.arcStop1 -- gradient offset 0.55
-const ARC_STOP_2 = "#ffc24b"; // Theme.arcStop2 -- gradient offset 1
-const TRACK_COLOR = "#4a4034"; // Theme.trackColor
-const SETPOINT_COLOR = "#6cc8ff"; // Theme.setpoint
-const GLOW_COLOR = "#ff7a1a"; // Theme.glowColor
-const TEXT_COLOR = "#f4ede2";
-const TEXT_DIM_COLOR = "#b9ab98";
-const WARN_COLOR = "#ffb020";
-
 // dashboard.css's @keyframes pf-glow: opacity 0.3 <-> 0.62 over 3.2s
 // ease-in-out infinite, only while the CSS `animation` shorthand is set
 // (i.e. only when `cooking && animate`).
@@ -73,6 +70,7 @@ const GLOW_HALF_CYCLE_MS = 1600; // 3.2s full cycle, up then down
 // temperature sits on the arc), a setpoint tick, an animated glow, and the
 // big grill temperature + mode badge overlay.
 export function GrillGauge({
+  accent,
   temp,
   stale,
   setpoint,
@@ -84,6 +82,8 @@ export function GrillGauge({
   cooking,
   animate,
 }: GrillGaugeProps) {
+  const accentColor = THEME[accent].accent;
+  const gaugeAccent = GAUGE_ACCENT[accent];
   const dashOffset = useSharedValue(LEN * (1 - frac));
   const glowOpacity = useSharedValue(GLOW_MIN_OPACITY);
 
@@ -130,13 +130,16 @@ export function GrillGauge({
 
   return (
     <View style={styles.card} testID="gauge">
-      <Animated.View style={[styles.glow, glowStyle]} testID="gauge-glow" />
+      <Animated.View
+        style={[styles.glow, glowStyle, { backgroundColor: gaugeAccent.glow }]}
+        testID="gauge-glow"
+      />
       <Svg width={220} height={220} viewBox="0 0 220 220">
         <Defs>
           <LinearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
-            <Stop offset="0" stopColor={ARC_STOP_0} />
-            <Stop offset="0.55" stopColor={ARC_STOP_1} />
-            <Stop offset="1" stopColor={ARC_STOP_2} />
+            <Stop offset="0" stopColor={gaugeAccent.arcStop0} />
+            <Stop offset="0.55" stopColor={gaugeAccent.arcStop1} />
+            <Stop offset="1" stopColor={gaugeAccent.arcStop2} />
           </LinearGradient>
         </Defs>
         <Path d={TRACK} fill="none" stroke={TRACK_COLOR} strokeWidth={16} strokeLinecap="round" />
@@ -169,7 +172,7 @@ export function GrillGauge({
         </View>
         {stale && <Text style={styles.stale}>{stale}</Text>}
         {hasSetpoint && <Text style={styles.set}>{`SET ${Math.round(setpoint)}°`}</Text>}
-        <Text style={styles.mode}>{modeLabel}</Text>
+        <Text style={[styles.mode, { borderColor: accentColor, color: accentColor }]}>{modeLabel}</Text>
       </View>
     </View>
   );
@@ -187,7 +190,6 @@ const styles = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 110,
-    backgroundColor: GLOW_COLOR,
   },
   overlay: {
     position: "absolute",
@@ -199,7 +201,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     letterSpacing: 4,
     textTransform: "uppercase",
-    color: TEXT_DIM_COLOR,
+    color: LABEL_COLOR,
   },
   num: {
     flexDirection: "row",
@@ -236,8 +238,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 999,
     borderWidth: 1.5,
-    borderColor: ACCENT,
-    color: ACCENT,
     textTransform: "uppercase",
     fontSize: 17,
     fontWeight: "700",

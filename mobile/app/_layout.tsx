@@ -1,14 +1,13 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter, usePathname } from "expo-router";
 import * as Notifications from "expo-notifications";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { alertsFor } from "../src/alerts";
 import { loadHosts } from "../src/host";
+import { defaultPrefs, loadPrefs, savePrefs, type Prefs } from "../src/prefs";
 import { THEME } from "../src/theme";
 import { useLive, type LiveResult } from "../src/useLive";
-
-const tokens = THEME.ember;
 
 // Foreground behavior: expo-notifications' default handler does not present a
 // notification while the app is open, and a local alert that only shows once
@@ -43,7 +42,31 @@ export function useLiveContext(): LiveResult {
   return value;
 }
 
+interface PrefsContextValue {
+  prefs: Prefs;
+  /** Merges `partial` into the current prefs, updates every consumer
+   *  immediately (this is what makes an accent change apply live -- see the
+   *  preferences screen), and persists the result in the background. */
+  updatePrefs: (partial: Partial<Prefs>) => void;
+}
+
+const PrefsContext = createContext<PrefsContextValue | null>(null);
+
+// Every screen colors itself from this instead of hardcoding THEME.ember, so
+// a change made on the preferences screen recolors the whole running app at
+// once rather than on next launch.
+export function usePrefsContext(): PrefsContextValue {
+  const value = useContext(PrefsContext);
+  if (!value) {
+    throw new Error("usePrefsContext must be used within the connected app shell");
+  }
+  return value;
+}
+
 function StatusStrip({ live }: { live: LiveResult }) {
+  const { prefs } = usePrefsContext();
+  const tokens = THEME[prefs.accent];
+
   // Ticks once a second purely to re-render this label -- lastPayloadAt
   // itself only changes when a new dash payload arrives, but the reported
   // age needs to keep counting up between payloads.
@@ -75,7 +98,7 @@ function StatusStrip({ live }: { live: LiveResult }) {
   }
 
   return (
-    <View style={styles.strip}>
+    <View style={[styles.strip, { backgroundColor: tokens.surface }]}>
       <Text style={[styles.stripText, { color }]}>{label}</Text>
     </View>
   );
@@ -146,6 +169,7 @@ export default function RootLayout() {
   const pathname = usePathname();
   // undefined: storage not read yet. null: read, and empty.
   const [host, setHost] = useState<string | null | undefined>(undefined);
+  const [prefs, setPrefs] = useState<Prefs>(defaultPrefs);
 
   // Re-read on every navigation, not just on mount: this layout stays
   // mounted for the app's whole lifetime, and connect.tsx saves a new host
@@ -162,6 +186,21 @@ export default function RootLayout() {
     };
   }, [pathname]);
 
+  // Loaded once at launch. Unlike host, nothing outside this provider's own
+  // updatePrefs ever changes the underlying storage, so there is no
+  // navigation-triggered staleness to re-read for.
+  useEffect(() => {
+    let cancelled = false;
+    loadPrefs().then((p) => {
+      if (!cancelled) {
+        setPrefs(p);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (host === null) {
       router.replace({
@@ -171,16 +210,46 @@ export default function RootLayout() {
     }
   }, [host, router]);
 
+  // Updates the in-memory value driving every screen's colors immediately --
+  // this is what makes the preferences screen's accent picker apply live --
+  // and persists in the background; a change is never lost, but the UI never
+  // waits on the write to reflect it.
+  const updatePrefs = useCallback((partial: Partial<Prefs>) => {
+    setPrefs((current) => {
+      const next = { ...current, ...partial };
+      void savePrefs(next);
+      return next;
+    });
+  }, []);
+
+  // prefs.host mirrors the `host` state above (host.ts's remembered-hosts
+  // list) rather than whatever loadPrefs happened to read from storage, so
+  // there is exactly one source of truth for "the active grill" and it can't
+  // drift from what RootLayout itself is routing on.
+  const prefsValue = useMemo<PrefsContextValue>(
+    () => ({ prefs: { ...prefs, host: host ?? null }, updatePrefs }),
+    [prefs, host, updatePrefs],
+  );
+
   if (!host) {
     // Loading, or nothing configured yet (the effect above is sending the
     // user to /connect in the latter case) -- nothing to open a
-    // connection to, so no status strip or live context either.
-    return <Stack />;
+    // connection to, so no status strip or live context either. Prefs are
+    // still provided: the Connect screen itself reads the live accent.
+    return (
+      <PrefsContext.Provider value={prefsValue}>
+        <Stack />
+      </PrefsContext.Provider>
+    );
   }
 
   // Keyed by host so switching to a different remembered grill tears down
   // the old connection and its state rather than reusing it.
-  return <LiveShell host={host} key={host} />;
+  return (
+    <PrefsContext.Provider value={prefsValue}>
+      <LiveShell host={host} key={host} />
+    </PrefsContext.Provider>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -189,7 +258,6 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     paddingHorizontal: 16,
     alignItems: "center",
-    backgroundColor: tokens.surface,
   },
   stripText: {
     fontSize: 12,

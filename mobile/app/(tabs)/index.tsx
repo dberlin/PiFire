@@ -3,23 +3,8 @@ import { deriveView } from "@pifire/core/dashboard/deriveView";
 import { ControlRow } from "../../src/components/ControlRow";
 import { GrillGauge } from "../../src/components/GrillGauge";
 import { ProbeCard } from "../../src/components/ProbeCard";
-import { THEME } from "../../src/theme";
-import { useLiveContext } from "../_layout";
-
-const tokens = THEME.ember;
-
-// deriveView's hopper/pill colors are CSS `var(--token)` strings (dashboard.css
-// custom properties) -- meaningful on the web, meaningless as an RN style
-// value. Same limitation GrillGauge.tsx documents for its own palette: ported
-// literally from web-react/src/theme.css's base @theme block rather than
-// resolved at runtime, because RN has no var() resolver. Only the tokens
-// hopperView() actually emits are listed here.
-const CSS_VAR_COLOR: Record<string, string> = {
-  "var(--ok)": "#5ec96f", // --color-ok
-  "var(--warn)": "#ffb020", // --color-warn
-  "var(--danger)": "#ff5a4d", // --color-danger
-  "var(--label)": "#7d7264", // --color-label
-};
+import { CSS_VAR_COLOR, THEME } from "../../src/theme";
+import { useLiveContext, usePrefsContext } from "../_layout";
 
 // The dashboard screen: the one place a user watches a live cook and, from
 // the same screen, changes what the grill is doing. Every number and color
@@ -28,6 +13,8 @@ const CSS_VAR_COLOR: Record<string, string> = {
 // component's job is laying the pieces out, not deciding what they say.
 export default function Dashboard() {
   const { live, phase, command } = useLiveContext();
+  const { prefs } = usePrefsContext();
+  const tokens = THEME[prefs.accent];
   const view = deriveView(live);
   // A dead live socket does not mean the REST command endpoint is
   // unreachable (see ControlRow.tsx's SAFETY_LABELS note), but it DOES mean
@@ -36,9 +23,13 @@ export default function Dashboard() {
   const disabled = phase !== "live";
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: tokens.background }]}
+      contentContainerStyle={styles.content}
+    >
       <View style={styles.gaugeWrap}>
         <GrillGauge
+          accent={prefs.accent}
           temp={view.tempInt}
           stale={view.stale}
           setpoint={view.setpointInt}
@@ -76,7 +67,7 @@ export default function Dashboard() {
         <Text style={[styles.hopperLabel, { color: CSS_VAR_COLOR[view.hopper.labelColor] ?? tokens.text }]}>
           {view.hopper.label}
         </Text>
-        <View style={styles.hopperTrack}>
+        <View style={[styles.hopperTrack, { backgroundColor: tokens.surface }]}>
           <View
             style={[
               styles.hopperFill,
@@ -97,7 +88,6 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: tokens.background,
   },
   content: {
     alignItems: "center",
@@ -128,7 +118,6 @@ const styles = StyleSheet.create({
   hopperTrack: {
     height: 10,
     borderRadius: 5,
-    backgroundColor: tokens.surface,
     overflow: "hidden",
   },
   hopperFill: {

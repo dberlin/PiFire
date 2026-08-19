@@ -4,13 +4,14 @@ import type { HistoryChartData } from "@pifire/core/contracts/content";
 import { hasPlottableHistory, toChartInput } from "@pifire/core/history/historyAdapter";
 import { HistoryChart, type HistorySeriesInput } from "../../src/components/HistoryChart";
 import { THEME } from "../../src/theme";
-import { useLiveContext } from "../_layout";
+import { useLiveContext, usePrefsContext } from "../_layout";
 
-const tokens = THEME.ember;
-
-// Same default window Flask's history page opens with (a full recent cook
-// tends to run far longer, but the last couple of hours is what a user
-// checking this screen from beside the grill usually wants).
+// NOT Flask's default: web-react/src/helpers/settings/settingsDefaults.gen.ts
+// puts history_page.minutes at 15. This screen has no settings UI to read
+// that value from and no per-user override to persist one, so it picks its
+// own fixed window instead -- two hours, because a full recent cook tends to
+// run far longer, but the last couple of hours is what a user checking this
+// screen from beside the grill usually wants.
 const DEFAULT_MINUTES = 120;
 
 // toChartInput's ChartInput is `{ times: number[], series: { values:
@@ -31,6 +32,8 @@ function toPointSeries(data: HistoryChartData): HistorySeriesInput[] {
 
 export default function History() {
   const { host } = useLiveContext();
+  const { prefs } = usePrefsContext();
+  const tokens = THEME[prefs.accent];
   const [data, setData] = useState<HistoryChartData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -63,7 +66,7 @@ export default function History() {
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: tokens.background }]}
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
@@ -73,13 +76,13 @@ export default function History() {
         />
       }
     >
-      <Text style={styles.title}>History</Text>
+      <Text style={[styles.title, { color: tokens.text }]}>History</Text>
 
       {data === null && error === null ? (
         <ActivityIndicator color={tokens.accent} style={styles.spinner} />
       ) : null}
 
-      {error !== null ? <Text style={styles.error}>{error}</Text> : null}
+      {error !== null ? <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text> : null}
 
       {data !== null && hasPlottableHistory(data) ? (
         <HistoryChart series={toPointSeries(data)} />
@@ -95,7 +98,6 @@ export default function History() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: tokens.background,
   },
   content: {
     paddingVertical: 24,
@@ -103,7 +105,6 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   title: {
-    color: tokens.text,
     fontSize: 20,
     fontWeight: "700",
   },
@@ -111,7 +112,6 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
   error: {
-    color: tokens.danger,
     fontSize: 14,
   },
 });
