@@ -68,8 +68,9 @@ exactly what both clients must agree on:
 - **`liveState.ts`** — the `socket_dash_data` subscription with its reconnect
   and staleness semantics. `socket.io-client` is this package's one runtime
   dependency; it works under React Native.
-- **`deriveView.ts`, `gaugeMath.ts`, `buttonsForMode.ts`, unit conversion** —
-  pure payload-to-display and mode-to-controls logic.
+- **`deriveView.ts`, `gaugeMath.ts`, `buttonsForMode.ts`, `health.ts`** — pure
+  payload-to-display and mode-to-controls logic. Unit handling is not a separate
+  module; it lives inside `deriveView` and travels with it.
 - **`demoData.ts`** — the live cook simulator, which lets either client run with
   no PiFire on the network.
 
@@ -94,7 +95,7 @@ Navigation is `expo-router` with native tabs.
 
 | Screen | Reuses from `@pifire/core` | New |
 |---|---|---|
-| **Connect** | — | Host entry, mDNS discovery of `pifire.local`, remembered hosts, unreachable state |
+| **Connect** | — | Host entry defaulting to `pifire.local`, remembered hosts, unreachable state |
 | **Dashboard** | `gaugeMath`, `buttonsForMode`, `deriveView`, `command` | `GrillGauge` in `react-native-svg`; the 250 ms OutCubic value-arc ease and glow pulse in Reanimated; probe cards; control row; setpoint entry as a native modal |
 | **History** | `historyAdapter.ts` | A `react-native-svg` line chart — uPlot is DOM-only. Full pan/zoom parity is deferred |
 | **Events** | events API types | Native event list |
@@ -130,6 +131,14 @@ or FCM/APNs credentials are added.
 LAN only. The API has no authentication today and this work adds none: the trust
 model is unchanged from the web UI's. Reaching a grill from outside the LAN is
 the user's own VPN's job. No cloud relay, no shared secret, no exposed port.
+
+**There is no service discovery, because PiFire advertises no service.** The
+only zeroconf code in the repository (`notify/wled_discovery.py`) is a client
+that finds WLED devices; nothing publishes a PiFire service to browse for. The
+app therefore defaults its host field to `pifire.local` and relies on the
+operating system resolving the hostname avahi publishes on Raspberry Pi OS,
+which is what a browser already does. Adding a real advertised service would be
+a backend change and is out of scope.
 
 ## Build and distribution
 
