@@ -627,8 +627,18 @@ function ActiveMpcLearningView({
             <h3 className="font-bold">Cook refit</h3>
             <div className="mt-2 grid gap-1 text-sm">
               <p>Status: {report.cook_refit.status}</p>
-              <p>Final outcome: {report.cook_refit.final_status}</p>
-              <p>Authorization: {report.cook_refit.authorization}</p>
+              <p>
+                Final outcome:{" "}
+                {report.cook_refit.authorization === "not-run"
+                  ? "not run yet"
+                  : report.cook_refit.final_status}
+              </p>
+              <p>
+                Authorization:{" "}
+                {report.cook_refit.authorization === "not-run"
+                  ? "none yet"
+                  : report.cook_refit.authorization}
+              </p>
               <p>Next cook: {yesNo(report.cook_refit.next_cook)}</p>
             </div>
           </section>

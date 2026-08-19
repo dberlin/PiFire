@@ -124,18 +124,18 @@ def _pair_digest(activation: Mapping[str, object], name: str):
     if isinstance(json_value, str):
         try:
             decoded = json.loads(json_value)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except TypeError, ValueError, json.JSONDecodeError:
             return None
         if isinstance(decoded, Mapping):
             digest = decoded.get("model_digest")
             return digest if isinstance(digest, str) else None
     return None
+
+
 def _validated_checkpoint(checkpoint: dict[str, object]) -> dict[str, object]:
     from controller.mpc_snapshot import migrate_grey_learning_snapshot
 
     return migrate_grey_learning_snapshot(checkpoint)
-
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,16 +182,14 @@ def build_learning_report(
         calibration_command_high_water,
         "calibration_command_high_water",
     )
-    current_records = tuple(
-        record for record in records if record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
-    )
+    current_records = tuple(record for record in records if record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION)
 
     errors: list[str] = []
     schema_invalidated = False
     if checkpoint_map:
         try:
             checkpoint_map = _validated_checkpoint(checkpoint_map)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             errors.append("checkpoint-schema-invalid")
             schema_invalidated = True
     elif checkpoint_required or (not activation and not live):
@@ -219,10 +217,7 @@ def build_learning_report(
     from controller.runtime.model_fitting import TeardownRefitOutcome
 
     cook_refit_value = checkpoint_map.get("cook_refit", {"status": FitStatus.IDLE.value, "latest": None})
-    if (
-        not isinstance(cook_refit_value, Mapping)
-        or set(cook_refit_value) != {"status", "latest"}
-    ):
+    if not isinstance(cook_refit_value, Mapping) or set(cook_refit_value) != {"status", "latest"}:
         raise ValueError("invalid cook_refit")
     cook_refit_status = _enum_value(
         cook_refit_value["status"],
@@ -237,8 +232,13 @@ def build_learning_report(
             cook_refit_latest = TeardownRefitOutcome(cook_refit_latest_value).value
         except (TypeError, ValueError) as error:
             raise ValueError("invalid cook_refit latest") from error
+    #: A refit that never ran is reported apart from one that ran and
+    #: authorized nothing. Both leave the next cook on the incumbent model,
+    #: but only the second is a verdict, and only it should read as one.
     cook_refit_authorization = (
-        "next-cook"
+        "not-run"
+        if cook_refit_latest is None
+        else "next-cook"
         if cook_refit_latest == TeardownRefitOutcome.ACCEPTED_NEXT_COOK.value
         else "operator-review"
         if cook_refit_latest == TeardownRefitOutcome.READY_FOR_REVIEW.value
@@ -248,7 +248,9 @@ def build_learning_report(
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
     phase = activation.get("phase", live.get("activation_phase", "aborted"))
-    active_pair_digest = _pair_digest(activation, "candidate_pair") if phase == "active" else _pair_digest(activation, "incumbent_pair")
+    active_pair_digest = (
+        _pair_digest(activation, "candidate_pair") if phase == "active" else _pair_digest(activation, "incumbent_pair")
+    )
     incumbent_digest = activation.get("incumbent_digest")
     if not isinstance(incumbent_digest, str):
         incumbent_digest = _pair_digest(activation, "incumbent_pair")
@@ -257,8 +259,10 @@ def build_learning_report(
     candidate_digest = activation.get("candidate_digest")
     if not isinstance(candidate_digest, str):
         candidate_digest = identities.get("candidate_digest")
-    active_digest = active_pair_digest if isinstance(active_pair_digest, str) else (
-        candidate_digest if phase == "active" else incumbent_digest
+    active_digest = (
+        active_pair_digest
+        if isinstance(active_pair_digest, str)
+        else (candidate_digest if phase == "active" else incumbent_digest)
     )
     role_generation = activation.get("role_generation", identities.get("active_generation"))
     candidate_generation = activation.get(
@@ -277,11 +281,7 @@ def build_learning_report(
     ):
         errors.append("live-candidate-generation-mismatch")
     live_candidate_digest = live.get("candidate_digest")
-    if (
-        live_candidate_digest is not None
-        and candidate_digest is not None
-        and live_candidate_digest != candidate_digest
-    ):
+    if live_candidate_digest is not None and candidate_digest is not None and live_candidate_digest != candidate_digest:
         errors.append("live-candidate-digest-mismatch")
     checkpoint_digest = live.get("checkpoint_digest")
     if checkpoint_digest is not None and incumbent_digest is not None and checkpoint_digest != incumbent_digest:
@@ -290,8 +290,12 @@ def build_learning_report(
     live_origin = live.get("origin")
     durable_origin = activation.get("origin", checkpoint_map.get("origin"))
     try:
-        normalized_live_origin = None if live_origin is None else _enum_value(live_origin, CandidateOrigin, "live candidate origin")
-        normalized_durable_origin = None if durable_origin is None else _enum_value(durable_origin, CandidateOrigin, "durable candidate origin")
+        normalized_live_origin = (
+            None if live_origin is None else _enum_value(live_origin, CandidateOrigin, "live candidate origin")
+        )
+        normalized_durable_origin = (
+            None if durable_origin is None else _enum_value(durable_origin, CandidateOrigin, "durable candidate origin")
+        )
         if (
             normalized_live_origin is not None
             and normalized_durable_origin is not None
@@ -317,22 +321,14 @@ def build_learning_report(
 
     fit_payload = _latest_payload(current_records, FitLifecycleEvidence)
     assessment_record = _latest(current_records, CandidateAssessmentEvidence)
-    assessment = (
-        None
-        if assessment_record is None
-        else cast(CandidateAssessmentEvidence, assessment_record.payload)
-    )
+    assessment = None if assessment_record is None else cast(CandidateAssessmentEvidence, assessment_record.payload)
     lifecycle = _latest_payload(current_records, ActivationLifecycleEvidence)
     failure = _latest_payload(current_records, LearningFailureEvidence)
     confidence = _latest_payload(current_records, ConfidenceDecisionEvidence)
     invalidation = _latest(current_records, SchemaInvalidationEvidence)
     if fit_payload is not None and fit_status == FitStatus.IDLE.value:
         fit_status = FitStatus(fit_payload.status).value
-    if (
-        fit_payload is not None
-        and fit_payload.status == FitStatus.FAILED.value
-        and fit_payload.error is not None
-    ):
+    if fit_payload is not None and fit_payload.status == FitStatus.FAILED.value and fit_payload.error is not None:
         errors.append(fit_payload.error)
 
     pending_persistence = bool(live.get("pending_persistence", False))
@@ -388,7 +384,8 @@ def build_learning_report(
         assessment_policy == ActivationPolicy.OPERATOR_REVIEWED.value
         and assessment is not None
         and not assessment.rejection_reasons
-        and status in {
+        and status
+        in {
             LearningStatus.COLLECTING.value,
             LearningStatus.EVALUATING.value,
         }
@@ -413,9 +410,7 @@ def build_learning_report(
             "count": len(current_records),
             "audit_count": len(records),
             "high_water": (
-                list(max((record.timestamp_ms, record.evidence_id) for record in records))
-                if records
-                else None
+                list(max((record.timestamp_ms, record.evidence_id) for record in records)) if records else None
             ),
             "retired_excluded": len(records) - len(current_records),
         },
@@ -471,12 +466,14 @@ def build_learning_report(
         },
         "latest_lifecycle": None if lifecycle is None else _json_value(lifecycle),
         "failure": (
-            _json_value(live_failure)
-            if live_failure is not None
-            else None if failure is None else _json_value(failure)
+            _json_value(live_failure) if live_failure is not None else None if failure is None else _json_value(failure)
         ),
         "gates": [
-            {"name": name, "passed": value == CheckStatus.PASSED.value, "reason": None if value == CheckStatus.PASSED.value else name}
+            {
+                "name": name,
+                "passed": value == CheckStatus.PASSED.value,
+                "reason": None if value == CheckStatus.PASSED.value else name,
+            }
             for name, value in checks.items()
         ],
         "blockers": blockers,
@@ -485,9 +482,7 @@ def build_learning_report(
     revision_material = {**payload, "revision": None}
     payload["revision"] = hashlib.sha256(_canonical_bytes(revision_material)).hexdigest()
     contract = ModelEvidenceReport.model_validate_json(_canonical_bytes(payload), strict=True)
-    return LearningReport(
-        _canonical_bytes(contract.model_dump(mode="json", exclude_unset=True))
-    )
+    return LearningReport(_canonical_bytes(contract.model_dump(mode="json", exclude_unset=True)))
 
 
 def current_learning_report(
@@ -547,8 +542,7 @@ def build_learning_artifact(
     current = [
         record.model_dump(mode="json")
         for record in records
-        if isinstance(record, ModelEvidenceRecord)
-        and record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+        if isinstance(record, ModelEvidenceRecord) and record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
     ]
     return _canonical_bytes(
         {
@@ -558,7 +552,6 @@ def build_learning_artifact(
             "records": current,
         }
     )
-
 
 
 def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord, ...]]:

@@ -413,6 +413,28 @@ describe("MpcLearningView", () => {
     },
   );
 
+  it("reports a cook refit that has never run as not run rather than blocked", async () => {
+    // An idle cook_refit with no latest outcome has never had a refit reach it.
+    // Rendering that as "blocked" sends an operator hunting for a block that
+    // does not exist, which is what a stale checkpoint on a live grill did.
+    const cookRefit = {
+      status: "idle" as const,
+      latest: null,
+      final_status: "idle" as const,
+      authorization: "not-run" as const,
+      next_cook: false,
+    };
+    fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, cook_refit: cookRefit }));
+    renderPanel();
+    await openPanel();
+
+    const section = screen.getByRole("heading", { name: "Cook refit" }).closest("section");
+    expect(section).not.toBeNull();
+    expect(section!).toHaveTextContent("Final outcome: not run yet");
+    expect(section!).toHaveTextContent("Authorization: none yet");
+    expect(section!).not.toHaveTextContent("blocked");
+  });
+
   it("never exposes reviewed activation controls for passive automatic authority", async () => {
     fetchMock.mockResolvedValue(jsonResponse(passiveReport("ready-for-review")));
     renderPanel();

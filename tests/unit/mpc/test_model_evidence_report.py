@@ -144,9 +144,7 @@ def test_report_emits_only_the_locked_status_vocabulary(status: LearningStatus) 
         ("checkpoint-failure", "blocked", False),
     ),
 )
-def test_report_projects_every_final_cook_refit_outcome(
-    monkeypatch, latest, authorization, next_cook
-) -> None:
+def test_report_projects_every_final_cook_refit_outcome(monkeypatch, latest, authorization, next_cook) -> None:
     monkeypatch.setattr(report_module, "_validated_checkpoint", lambda checkpoint: checkpoint)
     payload = build_learning_report(
         (),
@@ -162,6 +160,32 @@ def test_report_projects_every_final_cook_refit_outcome(
         "final_status": latest,
         "authorization": authorization,
         "next_cook": next_cook,
+    }
+
+
+def test_report_separates_a_refit_that_never_ran_from_one_that_was_refused(monkeypatch) -> None:
+    """No recorded outcome is not a refusal, and must not be reported as one.
+
+    A cook_refit still at idle with no latest has never had a refit reach it --
+    a fresh install, or a cook whose final checkpoint never persisted. Telling
+    an operator that is "blocked" sends them looking for a block that does not
+    exist, which is exactly what a stale checkpoint on a live grill did.
+    """
+    monkeypatch.setattr(report_module, "_validated_checkpoint", lambda checkpoint: checkpoint)
+    payload = build_learning_report(
+        (),
+        activation_state=_activation(phase="aborted"),
+        live_status=_live(),
+        calibration_command_high_water=0,
+        checkpoint={"cook_refit": {"status": "idle", "latest": None}},
+    ).as_dict()
+
+    assert payload["cook_refit"] == {
+        "status": "idle",
+        "latest": None,
+        "final_status": "idle",
+        "authorization": "not-run",
+        "next_cook": False,
     }
 
 
@@ -603,9 +627,9 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
 
         def evaluate_ready_off_path(self):
             return evaluation
+
         def close(self):
             return None
-
 
     controller._grey_learning_runtime._learning = _Learning()
     controller._grey_learning_runtime._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
@@ -622,17 +646,14 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
 
-    assessments = [
-        record.payload
-        for record in records
-        if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT
-    ]
+    assessments = [record.payload for record in records if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT]
     assert len(assessments) == 1
     assert assessments[0].origin == CandidateOrigin.OPERATOR_CALIBRATION.value
     assert assessments[0].policy == "operator-reviewed"
     assert report.as_dict()["status"] == "ready-for-review", report.as_dict()
     assert report.as_dict()["candidate"]["policy"] == "operator-reviewed"
     assert artifact["report"] == report.as_dict()
+
 
 def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) -> None:
     controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
@@ -671,9 +692,9 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
 
         def evaluate_ready_off_path(self):
             return None
+
         def close(self):
             return None
-
 
     assert ControllerModelStore().save("mpc", controller.get_model_snapshot()) is True
     controller._grey_learning_runtime._learning = _Learning()
@@ -712,11 +733,7 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
 
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
-    fits = [
-        record.payload
-        for record in records
-        if record.kind is EvidenceKind.FIT_LIFECYCLE
-    ]
+    fits = [record.payload for record in records if record.kind is EvidenceKind.FIT_LIFECYCLE]
     trace = read_control_trace_session("session-submit")
 
     assert [payload.status for payload in fits] == ["queued"]
@@ -781,13 +798,7 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
         message=SimpleNamespace(request=request, outcome=outcome),
         stale_reasons=("role-generation-changed",) if case == "stale" else (),
         preparation=preparation,
-        blockers=(
-            ("fit-error",)
-            if case == "fit-error"
-            else ("identifiability",)
-            if case == "identifiability"
-            else ()
-        ),
+        blockers=(("fit-error",) if case == "fit-error" else ("identifiability",) if case == "identifiability" else ()),
     )
 
     class _Learning:
@@ -800,9 +811,9 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
 
         def evaluate_ready_off_path(self):
             return None
+
         def close(self):
             return None
-
 
     checkpoint = controller.get_model_snapshot()
     assert ControllerModelStore().save("mpc", checkpoint) is True
@@ -814,16 +825,8 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
 
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
-    fits = [
-        record.payload
-        for record in records
-        if record.kind is EvidenceKind.FIT_LIFECYCLE
-    ]
-    assessments = [
-        record.payload
-        for record in records
-        if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT
-    ]
+    fits = [record.payload for record in records if record.kind is EvidenceKind.FIT_LIFECYCLE]
+    assessments = [record.payload for record in records if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT]
     trace = read_control_trace_session(f"session-{case}")
 
     assert fits[-1].status == expected_fit_status
@@ -903,9 +906,9 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
         def retire_evaluated_candidate(self, retired):
             self.retired.append(retired)
             self.prepared = None
+
         def close(self):
             return None
-
 
     learning = _Learning()
     checkpoint = controller.get_model_snapshot()
@@ -919,16 +922,8 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
 
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
-    assessments = [
-        record
-        for record in records
-        if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT
-    ]
-    confidence = [
-        record
-        for record in records
-        if record.kind is EvidenceKind.CONFIDENCE_DECISION
-    ]
+    assessments = [record for record in records if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT]
+    confidence = [record for record in records if record.kind is EvidenceKind.CONFIDENCE_DECISION]
     trace = read_control_trace_session("session-evaluation-blocker")
 
     assert learning.retired == [evaluation]
@@ -942,12 +937,5 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
     assert confidence[0].payload.blocked is True
     assert confidence[0].payload.reason == "confidence-window"
     assert {record.event_kind.value for record in trace} >= {"candidate_assessment"}
-    assert report.as_dict()["candidate"]["assessment"]["rejection_reasons"] == [
-        "confidence-window"
-    ]
+    assert report.as_dict()["candidate"]["assessment"]["rejection_reasons"] == ["confidence-window"]
     assert artifact["report"] == report.as_dict()
-
-
-
-
-

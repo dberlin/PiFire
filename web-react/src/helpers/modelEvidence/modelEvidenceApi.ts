@@ -47,7 +47,7 @@ const COOK_REFIT_OUTCOMES = [
   "accepted-next-cook",
   "checkpoint-failure",
 ] as const;
-const COOK_REFIT_AUTHORIZATIONS = ["blocked", "operator-review", "next-cook"] as const;
+const COOK_REFIT_AUTHORIZATIONS = ["not-run", "blocked", "operator-review", "next-cook"] as const;
 
 function invalidReport(detail: string): never {
   throw new Error(`Invalid model evidence report: ${detail}`);

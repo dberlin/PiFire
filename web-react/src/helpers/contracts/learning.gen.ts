@@ -74,7 +74,7 @@ type RoleGeneration2 = number | null;
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CookRefitAuthorization".
  */
-export type CookRefitAuthorization = "blocked" | "operator-review" | "next-cook";
+export type CookRefitAuthorization = "not-run" | "blocked" | "operator-review" | "next-cook";
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CookRefitOutcome".

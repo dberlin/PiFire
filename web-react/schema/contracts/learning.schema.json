@@ -571,6 +571,7 @@
     },
     "CookRefitAuthorization": {
       "enum": [
+        "not-run",
         "blocked",
         "operator-review",
         "next-cook"

@@ -62,7 +62,10 @@ CookRefitOutcome = TypeAliasType(
 )
 CookRefitAuthorization = TypeAliasType(
     "CookRefitAuthorization",
-    Literal["blocked", "operator-review", "next-cook"],
+    #: "not-run" is the absence of a verdict, not a refusal: no refit has
+    #: reached this checkpoint yet. "blocked" means one ran and authorized
+    #: nothing.
+    Literal["not-run", "blocked", "operator-review", "next-cook"],
 )
 MpcCalibrationAction = TypeAliasType(
     "MpcCalibrationAction",
@@ -243,7 +246,6 @@ class ModelActivationAccepted(WireModel):
     role_generation: NonNegativeInt
 
 
-
 class ModelActionRejected(WireModel):
     accepted: Literal[False]
     active_kind: Literal["grey-box"]
@@ -306,9 +308,7 @@ class MpcCalibrationCommandResponseData(WireModel):
     mpc_calibration: MpcCalibrationCommand
 
 
-class MpcCalibrationCommandResponse(
-    ApiEnvelope[MpcCalibrationCommandResponseData | CommandResponseData]
-):
+class MpcCalibrationCommandResponse(ApiEnvelope[MpcCalibrationCommandResponseData | CommandResponseData]):
     pass
 
 
