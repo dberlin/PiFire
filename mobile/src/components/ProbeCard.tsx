@@ -10,12 +10,14 @@ interface ProbeCardProps {
    *  all. Not recomputed here -- the carry-over/staleness decision stays in
    *  @pifire/core/dashboard/deriveView, same as the gauge's `temp`/`stale`. */
   temp: number | null;
-  /** Raw target temperature (the wire's `foodProbes[i].target`), 0 or below
-   *  meaning "no target armed". Formatting it into "→ 203°"/"AMBIENT" is pure
-   *  presentation, the same kind of decision GrillGauge makes turning a
-   *  number into on-screen text -- not a business decision like which modes
-   *  a button offers. */
-  target: number;
+  /** Already formatted by deriveView's `probeCard()` -- "→ 203°" when the
+   *  probe has an ARMED target (`fp.target > 0 && fp.targetReq`), else
+   *  "AMBIENT". Deliberately NOT recomputed from a raw wire field here: an
+   *  earlier version of this component took a raw `target: number` and
+   *  gated display on `target > 0` alone, which rendered a target for a
+   *  probe with a STORED BUT DISARMED one (`targetReq: false`) -- exactly
+   *  the phone/web divergence the shared derivation exists to prevent. */
+  targetStr: string;
   units: "F" | "C";
   /** Set when `temp` is a carried-over reading, e.g. "last data 47s ago". */
   stale: string | null;
@@ -26,8 +28,8 @@ interface ProbeCardProps {
 // deferred to a later task. Card chrome uses the default (ember) tokens.
 const tokens = THEME.ember;
 
-export function ProbeCard({ name, temp, target, units, stale }: ProbeCardProps) {
-  const hasTarget = target > 0;
+export function ProbeCard({ name, temp, targetStr, units, stale }: ProbeCardProps) {
+  const hasTarget = targetStr !== "AMBIENT";
 
   return (
     <View style={styles.card}>
@@ -37,9 +39,7 @@ export function ProbeCard({ name, temp, target, units, stale }: ProbeCardProps) 
         <Text style={styles.tempUnit}>{"°"}{units}</Text>
       </View>
       {stale !== null ? <Text style={styles.stale}>{stale}</Text> : null}
-      <Text style={hasTarget ? styles.target : styles.targetAmbient}>
-        {hasTarget ? `→ ${target}°` : "AMBIENT"}
-      </Text>
+      <Text style={hasTarget ? styles.target : styles.targetAmbient}>{targetStr}</Text>
     </View>
   );
 }

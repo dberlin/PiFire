@@ -54,18 +54,17 @@ export default function Dashboard() {
 
       {view.hasProbes ? (
         <View style={styles.probeRow}>
-          {view.probes.map((p, i) => (
+          {view.probes.map((p) => (
             <ProbeCard
               key={p.label}
               name={p.name}
               temp={p.tempInt}
-              // Raw wire field, paired by index with deriveView's own
-              // probes array (built from the same dash.foodProbes in the
-              // same order) -- deriveView formats this into `targetStr`
-              // ("→ 203°" / "AMBIENT") for the web's CSS-driven card;
-              // ProbeCard does that same formatting itself from the number,
-              // the way GrillGauge formats its own temp/mode text.
-              target={live.foodProbes?.[i]?.target ?? 0}
+              // Straight from deriveView's ProbeCardView -- already gated on
+              // `fp.target > 0 && fp.targetReq`, not just `target > 0`. No
+              // raw `live.foodProbes` read (and no index-pairing between two
+              // separately-ordered lists) here: `p` already carries
+              // everything this card needs.
+              targetStr={p.targetStr}
               units={p.unit}
               stale={p.stale}
             />

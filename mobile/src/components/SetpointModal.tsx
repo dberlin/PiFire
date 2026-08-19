@@ -3,17 +3,17 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-nativ
 import { setpointRange } from "@pifire/core/dashboard/health";
 import { THEME } from "../theme";
 
-// The startup-hold-prompt variant of web's SetpointEntry (the one that
-// reaches BELOW the ordinary Hold floor, because it is offered before the
-// grill is even lit) passes this exact floor as its `min` override --
-// web-react/src/components/dashboard/ControlButtons.tsx:
-//   const HOLD_PROMPT_MIN: Record<"F" | "C", number> = { F: 125, C: 50 };
-// Per the task brief, mobile's single setpoint modal (there is no separate
-// startup-hold variant here -- see ControlRow.tsx) enforces this floor, not
-// the higher ordinary-Hold floor (health.ts's SETPOINT_MIN, 150/65) that
-// web's *other* SetpointEntry instance defaults to when no `min` is passed.
-const HOLD_PROMPT_MIN: Record<"F" | "C", number> = { F: 125, C: 50 };
-
+// This modal is mobile's ONE setpoint entry, opened by the plain "Hold"
+// button (buttonsForMode's {type: "setpoint"} action) -- the equivalent of
+// web's ORDINARY SetpointEntry instance, not its startup-hold-prompt
+// variant. Web's ordinary instance passes no `min` override to SetpointEntry,
+// so it falls through to setpointRange()'s own floor (health.ts's
+// SETPOINT_MIN, 150°F/65°C) -- that is the floor this modal matches, both
+// bounds from the same shared function. (An earlier version of this file
+// used web's HOLD_PROMPT_MIN, 125°F/50°C, here -- that constant is real, but
+// it belongs to web's *startup*-hold-prompt modal specifically, a variant
+// mobile does not implement yet; see ControlRow.tsx's note on the
+// single-variant startup confirm.)
 interface SetpointModalProps {
   open: boolean;
   /** Prefill, e.g. `dash.primaryProbe.setTemp || dash.primaryProbe.temp || 0`. */
@@ -37,12 +37,11 @@ export function SetpointModal({
   onCancel,
   onSubmit,
 }: SetpointModalProps) {
-  // Ceiling from setpointRange (grill's shutdown limit, with its own
-  // documented fallback); floor is HOLD_PROMPT_MIN regardless of what
-  // setpointRange would otherwise pick, mirroring the `min` override web
-  // passes into SetpointEntry for its startup-hold-prompt modal.
-  const lo = HOLD_PROMPT_MIN[units];
-  const hi = setpointRange(units, safetyMaxTemp).max;
+  // Both bounds from the same shared function: floor is SETPOINT_MIN
+  // (health.ts), ceiling is the grill's own shutdown limit when present and
+  // sensible, else health.ts's fixed fallback -- exactly what web's ordinary
+  // (no `min` override) SetpointEntry instance enforces.
+  const { min: lo, max: hi } = setpointRange(units, safetyMaxTemp);
   const clamp = (t: number) => {
     const r = Math.round(t);
     return r < lo ? lo : r > hi ? hi : r;

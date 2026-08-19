@@ -100,4 +100,38 @@ describe("ControlRow", () => {
     pressAlertButton("Confirm");
     await waitFor(() => expect(command.setMode).toHaveBeenCalledWith("shutdown"));
   });
+
+  // The single most consequential behavior on this screen: if a dispatch
+  // does NOT land, the user must be told, not left to assume it worked (the
+  // walk-away-thinking-it-shut-down hazard the task brief calls out).
+  // fire()'s `!res.ok` branch (a rejected command the grill answered but
+  // refused) and its `catch` branch (a thrown fetch, e.g. the network drops
+  // mid-request) are two different code paths -- both covered here.
+  it("surfaces a rejected command via Alert", async () => {
+    const command = {
+      setMode: jest.fn().mockResolvedValue({ ok: false, message: "grill refused the command" }),
+      hold: jest.fn(),
+    };
+    const { getByText } = await render(
+      <ControlRow dash={dashInMode("Stop")} command={command as never} disabled={false} />,
+    );
+    fireEvent.press(getByText("Manual"));
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith("Command failed", "grill refused the command"),
+    );
+  });
+
+  it("surfaces a thrown dispatch (e.g. a failed fetch) via Alert", async () => {
+    const command = {
+      setMode: jest.fn().mockRejectedValue(new Error("network request failed")),
+      hold: jest.fn(),
+    };
+    const { getByText } = await render(
+      <ControlRow dash={dashInMode("Stop")} command={command as never} disabled={false} />,
+    );
+    fireEvent.press(getByText("Manual"));
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith("Command failed", "network request failed"),
+    );
+  });
 });
