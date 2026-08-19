@@ -2,11 +2,18 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // The single place a typed host string becomes an API base URL.
 //
-// Port 5000 is not arbitrary: it is what gunicorn binds in
-// auto-install/supervisor/webapp.conf, so a bare hostname (the common case,
-// e.g. "pifire.local") gets that port by default. A trailing slash is
-// always stripped so the command client never builds a doubled path like
-// "http://pi:5000//api/...".
+// No port is added by default. A standard install's real topology is nginx
+// listening on 80/443 (auto-install/nginx/pifire.nginx, installed by
+// auto-install/install-debian.sh) reverse-proxying to gunicorn bound to
+// 127.0.0.1:8000 (auto-install/supervisor/webapp.conf) — including
+// /socket.io. A bare hostname (the common case, e.g. "pifire.local") must
+// therefore resolve to plain "http://pifire.local" (port 80), not a
+// hardcoded port that would miss the proxy entirely. Port 5000 only shows
+// up in the manual dev invocation documented in web-react/README.md, so an
+// explicitly typed port (e.g. "pifire.local:5000") is always preserved
+// exactly, letting a developer reach that dev backend directly. A trailing
+// slash is always stripped so the command client never builds a doubled
+// path like "http://pi//api/...".
 export function normalizeHost(input: string): string | null {
   const trimmed = input.trim();
   if (trimmed.length === 0) {
@@ -28,12 +35,20 @@ export function normalizeHost(input: string): string | null {
     return null;
   }
 
-  // Default port 5000 only when the input didn't specify one.
-  const port = url.port || "5000";
+  // Reject userinfo (e.g. "pi@fire.local"): the URL parser treats
+  // everything before "@" as credentials and silently connects to the host
+  // after it instead — a fat-fingered "@" must not connect somewhere the
+  // user never typed.
+  if (url.username || url.password) {
+    return null;
+  }
 
   // Strip any path/trailing slash — normalizeHost produces an API base,
-  // not a full URL.
-  return `${url.protocol}//${url.hostname}:${port}`;
+  // not a full URL. No default port: omit it entirely unless the input
+  // specified one.
+  return url.port
+    ? `${url.protocol}//${url.hostname}:${url.port}`
+    : `${url.protocol}//${url.hostname}`;
 }
 
 const HOSTS_KEY = "pifire.hosts";
