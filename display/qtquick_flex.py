@@ -16,6 +16,7 @@ PiFire Qt Quick Display Interface Library
 *****************************************
 """
 
+import logging
 import multiprocessing
 import os
 import threading
@@ -195,8 +196,43 @@ class Display(DisplayBase):
         pass
 
 
+def _configure_child_logging():
+    """Attach handlers to the two loggers inside the spawned child.
+
+    The child is started with a "spawn" context, so it is a fresh interpreter
+    that inherits nothing: every logger begins with no handlers and discards
+    what it is given. The display process configures these two names for
+    itself; the child has to do the same, to the same files, or everything the
+    Qt renderer logs is lost.
+    """
+    from common.common import create_logger
+    from common.persistence.runtime import read_settings
+
+    try:
+        debug_mode = read_settings()["globals"]["debug_mode"]
+    except Exception:
+        debug_mode = False
+    create_logger(
+        "control",
+        filename="./logs/control.log",
+        messageformat="%(asctime)s [%(levelname)s] %(message)s",
+        level=logging.DEBUG if debug_mode else logging.ERROR,
+    )
+    create_logger(
+        "events",
+        filename="./logs/events.log",
+        messageformat="%(asctime)s [%(levelname)s] %(message)s",
+        level=logging.DEBUG if debug_mode else logging.INFO,
+    )
+
+
 def _run_qt_app(config, units):
     """Entry point executed inside the spawned child process."""
+    # Before run_app, which builds the dispatcher and the backlight -- both of
+    # which log, and whose startup messages are the ones an operator wants when
+    # a display fails to come up.
+    _configure_child_logging()
+
     from display.qtapp import run_app
 
     run_app(config, units)
