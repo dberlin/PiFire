@@ -4,8 +4,8 @@
 (display_process.py, mirroring control.py for the controller process). Drivers
 receive them from `build_display()` through their constructor rather than
 calling `logging.getLogger(...)` themselves, so a test can substitute either
-without touching global state -- the same seam `ControllerContext.event_log` /
-`.control_log` provides on the controller side.
+without touching global state -- the same substitution point
+`ControllerContext.event_log` / `.control_log` provides on the controller side.
 
 An omitted argument resolves to the correctly named logger rather than None, so
 every driver holds a usable logger: no log call site needs a None guard, and an

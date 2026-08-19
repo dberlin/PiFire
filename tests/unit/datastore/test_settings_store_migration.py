@@ -66,8 +66,8 @@ def test_an_already_current_tree_is_left_alone(ds):
 def test_the_migrated_tree_survives_a_validating_write(ds):
     """The whole point: after migration, write_settings must not strip the bus.
 
-    Before this task, validate_settings_tree stripped the unmodeled legacy keys
-    and substituted the i2c_bus default -- a configured CP2112 adapter silently
+    An earlier validate_settings_tree stripped the unmodeled legacy keys and
+    substituted the i2c_bus default -- a configured CP2112 adapter silently
     became the board's own pins.
     """
     from common.persistence.runtime import write_settings

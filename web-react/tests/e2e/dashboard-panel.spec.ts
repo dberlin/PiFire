@@ -14,11 +14,11 @@ import { freezeDate } from "./layoutBaseline";
 // drives 390x844. The band in between, `@media (max-width: 1279px)`, had no
 // coverage at all -- and it is the only one an actual PiFire device renders.
 //
-// It was broken. Measured at 800x480 before this file existed: the three
-// columns never wrapped, because the centre column's desktop `flex: 1` is a
-// flex-basis of 0 and it lost every negotiation against two siblings asking
-// for 260px each. probeCol took 331px, rightCol took 331px, and the column
-// carrying the gauge, the cook row and all five control buttons was left 71px
+// It was broken. Measured at 800x480: the three columns never wrapped, because
+// the centre column's desktop `flex: 1` is a flex-basis of 0 and it lost every
+// negotiation against two siblings asking for 260px each. probeCol took 331px,
+// rightCol took 331px, and the column carrying the gauge, the cook row and all
+// five control buttons was left 71px
 // -- a 320px gauge rendered into a 69px svg, and 91px-wide buttons overhanging
 // a 71px container.
 //

@@ -705,9 +705,9 @@ def test_scan_thermoworks_auth_error(ds, client, monkeypatch):
     from thermoworks_cloud.auth import AuthenticationErrorReason
 
     def _boom(*a, **k):
-        # Real signature is (message, reason, details) -- the brief's
-        # single-arg construction doesn't match the installed
-        # thermoworks-cloud package and raises TypeError instead.
+        # Real signature is (message, reason, details). A single-arg
+        # construction does not match the installed thermoworks-cloud package
+        # and raises TypeError instead.
         raise AuthenticationError("bad creds", AuthenticationErrorReason.INVALID_PASSWORD, [])
 
     monkeypatch.setattr(wr, "_thermoworks_discover", _boom)

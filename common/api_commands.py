@@ -749,7 +749,7 @@ def _timer_start_with_options(data, control, arglist, index, now):
     won by bundling them.
 
     Two independent reasons keep the endpoint:
-      * the server clock, above -- nothing about the write seam changes it;
+      * the server clock, above -- nothing about the queued-write path changes it;
       * the input rejections below (non-numeric / zero / negative duration, and
         a paused timer), which are request-time answers a queue cannot give.
 

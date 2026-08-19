@@ -5,9 +5,9 @@ import type uPlot from "uplot";
 import { formatTooltipValue } from "../../../../src/components/history/tooltipFormat";
 import { createTooltipRow } from "../../../../src/components/history/tooltipRow";
 
-// uPlot reads `plugins` only when a plot is CONSTRUCTED, so "was the annotation
-// plugin installed" is not observable from the DOM -- the factory call is the
-// seam. Mocking it also keeps these tests off a real canvas.
+// uPlot reads `plugins` only when a plot is CONSTRUCTED, so "was the
+// annotation plugin installed" is not observable from the DOM -- only the
+// factory call shows it. Mocking it also keeps these tests off a real canvas.
 const annotationPluginMock = rs.fn(
   (_annotations: HistoryAnnotation[]) => ({ hooks: {} }) as uPlot.Plugin,
 );

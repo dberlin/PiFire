@@ -71,7 +71,7 @@ test("the app and demo servers never collide by default", () => {
 });
 
 test("a unit test run never sees the shell's PUBLIC_* backend origins", () => {
-  // The seam this pins: `ports.ts` reads process.env, but the app modules that
+  // What this pins: `ports.ts` reads process.env, but the app modules that
   // pick a backend origin read `import.meta.env.PUBLIC_PIFIRE_URL`, which
   // rsbuild INLINES from the ambient shell at build time -- and useLiveState
   // falls back through PUBLIC_PIFIRE_TARGET as well. With either exported,

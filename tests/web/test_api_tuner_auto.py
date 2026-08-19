@@ -45,11 +45,10 @@ def test_opening_a_session_flushes_the_autotune_store(ds, client):
     try:
         assert read_autotune() == []
     finally:
-        #  Drain the open write before closing, so close sees Monitor and
-        #  restores Stop -- otherwise it reads the not-yet-drained Stop, declines
-        #  to restore, and the grill is left in Monitor. (Same ordering the
-        #  slice-1 session tests handle; the control loop ticks between actions
-        #  in production.)
+        # Drain the open write before closing, so close sees Monitor and restores
+        # Stop -- otherwise it reads the not-yet-drained Stop, declines to
+        # restore, and the grill is left in Monitor. (In production the control
+        # loop ticks between actions.)
         control_now()
         client.post("/api/tuner/session", json={"open": False})
         control_now()

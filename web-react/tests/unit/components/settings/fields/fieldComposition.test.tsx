@@ -46,7 +46,7 @@ describe("every settings field carries a description and an error", () => {
 // proven the aria-describedby/aria-invalid wiring without ever proving the
 // <label> actually names the control. Field now associates label to control
 // via htmlFor/id (a genuine sibling relationship, not a wrapper -- see
-// Field.tsx and the round-1 fix note below), so a field with no aria-label
+// Field.tsx and the note below), so a field with no aria-label
 // of its own resolving by its visible label text IS that proof.
 describe("Field's <label> names its control by htmlFor/id association, not aria-label", () => {
   it("resolves a field by its visible label text alone", () => {
@@ -57,18 +57,18 @@ describe("Field's <label> names its control by htmlFor/id association, not aria-
   });
 });
 
-// Round-1 fix: Field originally wrapped its render-prop output in the
-// <label> itself. For SecretField and StringListField that render more than
-// one element (an input plus a reveal button; N row inputs plus remove/add
-// buttons), a wrapping <label> computes the FIRST control's accessible name
-// from every descendant's text -- "MQTT Password" became
-// "MQTT Password Show", and StringListField's rows 2+ had no name at all.
-// getByLabelText could not see this: it strips nested form-control text
-// before matching, so it kept resolving "MQTT Password" to the input even
-// while a screen reader would announce "MQTT Password Show". These tests use
-// getByRole(name:) and dom-accessibility-api's computeAccessibleName
-// directly -- the same AccName computation testing-library uses for
-// getByRole -- because that is what actually exposes the pollution.
+// Field must not wrap its render-prop output in the <label> itself. For
+// SecretField and StringListField, which render more than one element (an
+// input plus a reveal button; N row inputs plus remove/add buttons), a
+// wrapping <label> computes the FIRST control's accessible name from every
+// descendant's text -- "MQTT Password" becomes "MQTT Password Show", and
+// StringListField's rows 2+ get no name at all. getByLabelText could not see
+// this: it strips nested form-control text before matching, so it kept
+// resolving "MQTT Password" to the input even while a screen reader would
+// announce "MQTT Password Show". These tests use getByRole(name:) and
+// dom-accessibility-api's computeAccessibleName directly -- the same AccName
+// computation testing-library uses for getByRole -- because that is what
+// actually exposes the pollution.
 describe("reveal buttons and repeated rows do not pollute a control's accessible name", () => {
   it("SecretField: the masked input's name is the field label alone", () => {
     render(<SecretField label="MQTT Password" value="s3cret" onChange={() => {}} />);

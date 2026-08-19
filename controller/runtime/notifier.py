@@ -1,4 +1,4 @@
-"""Notification seam so the control loop can be tested without a real backend."""
+"""Notification interface so the control loop can run without a real backend."""
 
 from abc import ABC, abstractmethod
 

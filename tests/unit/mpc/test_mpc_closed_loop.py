@@ -52,9 +52,9 @@ def steady_run():
 
 
 def test_realistic_steady_band(steady_run):
-    # The shipped model is deliberately uncalibrated and warns that tight
-    # tracking requires a grill-specific fit. This contract guards bounded
-    # convergence through the production applied-output feedback seam.
+    # The shipped model is deliberately uncalibrated and warns that tight tracking
+    # requires a grill-specific fit. This contract guards bounded convergence
+    # through the production applied-output feedback path.
     ts, temps = steady_run
     sm = ts >= 1800  # after 30 min warmup
     err = temps[sm] - SETPOINT

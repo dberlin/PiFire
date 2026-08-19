@@ -158,8 +158,8 @@ test("a probe target set in the UI reaches the backend and comes back over the s
   // that would have caught the clobbering landmine.
   expect(entryFor(await getNotify(request), "Timer", "timer")).toEqual(timerBefore);
 
-  // And the real cross-process seam: the card re-renders the new target from the
-  // socket echo, not from anything the modal kept locally.
+  // And the real cross-process behaviour: the card re-renders the new target
+  // from the socket echo, not from anything the modal kept locally.
   await expect(page.getByText("→ 203°")).toBeVisible({ timeout: 20_000 });
 
   // Re-sending "eta": null must not trip the null-strip diagnostic.

@@ -486,8 +486,7 @@ def test_the_control_loop_never_waits_on_a_hopper_reading(monkeypatch):
     elapsed = time.monotonic() - started
 
     # Both halves matter. Without the first, a loop that simply never refreshes
-    # (which is what the code did before this change) would pass the timing
-    # assertion trivially.
+    # would pass the timing assertion trivially.
     assert dist.get_level_calls == 6, "the loop did not publish the hopper level"
     assert elapsed < 1.0, f"the control loop waited {elapsed:.1f}s on a hopper reading"
 

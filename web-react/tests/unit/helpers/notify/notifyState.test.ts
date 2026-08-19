@@ -70,11 +70,11 @@ describe("targetEditFields", () => {
     });
   });
 
-  // THE test that makes Slice 2 (high/low limit alerts) purely additive, and
-  // that keeps a concurrent writer's work alive: every field this object does
-  // NOT name keeps whatever value the entry holds when the control loop drains
-  // the queue. Naming a fifth field here would start writing state this modal
-  // does not own.
+  // THE test that keeps high/low limit alerts purely additive, and that keeps a
+  // concurrent writer's work alive: every field this object does NOT name keeps
+  // whatever value the entry holds when the control loop drains the queue.
+  // Naming a fifth field here would start writing state this modal does not
+  // own.
   it("names ONLY the four fields the target modal owns", () => {
     expect(Object.keys(targetEditFields(ON)).sort()).toEqual([
       "keep_warm",
@@ -151,8 +151,8 @@ describe("readTargetEdit", () => {
 describe("limitEditFields", () => {
   const ARMED: LimitEdit = { enabled: true, target: 300, action: "none" };
 
-  // THE reason slice 2 cannot use the /api/set/limit_high|limit_low REST
-  // grammar: that grammar takes req/shutdown/keep_warm/reignite/target
+  // THE reason the limit editor cannot use the /api/set/limit_high|limit_low
+  // REST grammar: that grammar takes req/shutdown/keep_warm/reignite/target
   // (common/api_commands.py:544-551) and cannot set `triggered` at all. An
   // entry saved with triggered:false while the temperature is ALREADY past the
   // limit fires on the very next control pass (notify/notifications.py:112) --

@@ -146,7 +146,7 @@ def _set_real_hw(value):
 
 
 def _neutralize(monkeypatch, exit_code=0):
-    """Replace the one seam that shells out. The stub returns an exit status
+    """Replace the one call that shells out. The stub returns an exit status
     because the routes now read it: os.system answers 0 when the shell accepted
     the line, and the routes report a launch that never happened otherwise."""
     import blueprints.api_update.routes as ur

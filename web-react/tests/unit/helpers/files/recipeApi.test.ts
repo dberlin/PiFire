@@ -135,7 +135,7 @@ describe("recipeApi urls", () => {
 
 // The step and asset writers all funnel through one endpoint each and are
 // distinguished only by the payload they send, so the payload IS the contract
-// with recipes_api.py. These pin that shape at this end of the seam.
+// with recipes_api.py. These pin that shape at the client end.
 const okEnvelope = (data: unknown = null) => ({
   ok: true,
   status: 200,

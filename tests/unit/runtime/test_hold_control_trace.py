@@ -1,4 +1,4 @@
-"""End-to-end Hold control-trace contracts using the normal fake runtime seam."""
+"""End-to-end Hold control-trace contracts driven through the normal fake runtime."""
 
 import queue
 import threading

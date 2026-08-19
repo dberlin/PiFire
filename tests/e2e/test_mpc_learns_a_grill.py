@@ -51,8 +51,8 @@ below can be silently the same arm. What runs a refit is calling
 harness calls it once per cook, after the run has already been scored, so a
 refit never touches the run it is measured on -- exactly as production does it,
 where an adopted model reaches the grill through the NEXT cook's build.
-`tests/unit/runtime/test_hold_refit_trigger.py` pins the flag end of that seam;
-these tests pin the closed-loop end.
+`tests/unit/runtime/test_hold_refit_trigger.py` pins the flag end of that
+handoff; these tests pin the closed-loop end.
 
 A REFUSAL IS AN OUTCOME, NOT A HANG. A12's identifiability floor refuses a cook
 that does not determine the model however well it fits, and the gate refuses a
@@ -118,7 +118,7 @@ def _cook(config, *, refit):
     then hands the snapshot to `Controller.restore_model`, which rebuilds the
     estimator, the horizon and the policy against it. Both routes end with the
     learned model built into the objects that solve, which is what this test
-    measures; the seam between them is pinned by
+    measures; the agreement between the two routes is pinned by
     tests/unit/mpc/test_mpc_model_snapshot.py's
     test_a_restored_model_reaches_the_estimator_the_horizon_and_the_solve, and
     a cook here would not notice if the restore stopped carrying it.

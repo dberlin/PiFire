@@ -219,8 +219,7 @@ static/
 !mobile/README.md
 
 # The web client's sources. Its package.json MUST remain: it is a declared bun
-# workspace member, and bun hard-errors on a workspace path that does not exist
-# (we hit exactly that in Task 1 with mobile/).
+# workspace member, and bun hard-errors on a workspace path that does not exist.
 web-react/*
 !web-react/package.json
 

@@ -141,8 +141,8 @@ def write_manifest(manifest: Path, version: str, build: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# VCS seam. Everything below talks to these, never to jj/git directly, except
-# where the comment says the operation is git-only by nature.
+# VCS backends. Everything below talks to these, never to jj/git directly,
+# except where the comment says the operation is git-only by nature.
 # ---------------------------------------------------------------------------
 
 

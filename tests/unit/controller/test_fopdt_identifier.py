@@ -634,8 +634,8 @@ def test_every_promotable_form_can_be_restored():
     ids=[FORM_FOPDT, FORM_IPDT],
 )
 def test_a_persisted_model_round_trips_through_restore(model):
-    """Both ends of the store's seam, for every form: what a cook hands out is
-    what the next cook gets back."""
+    """Both ends of the store, for every form: what a cook hands out is what
+    the next cook gets back."""
     identifier = FOPDTIdentifier()
     assert identifier.restore(dict(model)) is True
     assert identifier.trusted_model() == model

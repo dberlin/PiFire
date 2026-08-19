@@ -5,7 +5,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 
 // ---------------------------------------------------------------------------
-// A model of the control-write seam, so the bar's BUTTON SEQUENCES can be
+// A model of how control writes land, so the bar's BUTTON SEQUENCES can be
 // judged by what the control process ends up holding rather than by which
 // fetches were issued.
 //
@@ -29,7 +29,7 @@ import { TimerBar } from "../../../../src/components/shell/TimerBar";
 // (3) is the whole point, and it is what retired this bar's
 // one-write-per-gesture guard: a stop followed by a pause pauses a timer that
 // the stop already cleared, which is the backend's own start == 0 branch, i.e.
-// nothing. See "the control-write seam" at the bottom of this file.
+// nothing. See "the control-write model" at the bottom of this file.
 // ---------------------------------------------------------------------------
 
 const NOW = 1_700_000_000;
@@ -367,13 +367,13 @@ describe("TimerBar across one control cycle", () => {
   });
 });
 
-// The seam itself, driven directly with no UI. These used to be the guard's
-// justification -- they showed what the bar would do if the guard were removed.
-// They now show why it COULD be removed. Both are pinned against the real
-// backend in tests/characterization/test_process_command_golden.py
+// The model itself, driven directly with no UI. These used to be the guard's
+// justification -- they showed what the bar would do if the guard were
+// removed. They now show why it COULD be removed. Both are pinned against the
+// real backend in tests/characterization/test_process_command_golden.py
 // (test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped and
 // test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer).
-describe("the control-write seam", () => {
+describe("the control-write model", () => {
   it("keeps a stopped countdown stopped when a pause lands in the same cycle", () => {
     const cp = new ControlProcess(
       seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true, shutdown: true }),

@@ -1,7 +1,7 @@
 """FakeControllerRunner's public surface must not silently drift from the real
-runners it stands in for -- Task 11's fix round found reconfigure() missing the
-logger kwarg every real runner accepts, which made a test drive HoldMode through
-a TypeError unrelated to the behaviour under test.
+runners it stands in for. A drift like reconfigure() missing the logger kwarg
+every real runner accepts drives HoldMode through a TypeError unrelated to the
+behaviour under test.
 """
 
 import inspect

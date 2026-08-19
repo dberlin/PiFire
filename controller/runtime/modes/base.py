@@ -68,9 +68,9 @@ class ControlMode:
     name: Mode | str = ""
     # Loop-consistent `now`, refreshed at the top of `_apply_manual_overrides`
     # (the same value `run()` will go on to pass to `on_tick` this iteration).
-    # `_on_manual_output` has no `now` of its own; it reads this instead of
-    # taking a fresh clock reading, so a manual report never sorts after the
-    # tick reports it actually preceded (Task 6's runner replays by timestamp).
+    # `_on_manual_output` has no `now` of its own; it reads this instead of taking
+    # a fresh clock reading, so a manual report never sorts after the tick reports
+    # it actually preceded (the runner replays by timestamp).
     _last_now: float = 0.0
 
     def __init__(self, ctx, state):
@@ -423,8 +423,9 @@ class ControlMode:
             last = grill_platform.get_input_status()
             if not last:
                 self.ctx.event_log.info("Switch set to off, going to monitor mode.")
-                # The seam sets mode="Stop"/updated + writes; status is not part
-                # of the transition, so set it on control first (single OVERWRITE).
+                # request_transition sets mode="Stop"/updated + writes; status is
+                # not part of the transition, so set it on control first (single
+                # OVERWRITE).
                 control["status"] = StatusState.ACTIVE
                 request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
                 return (last, pelletdb, True)

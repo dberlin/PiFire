@@ -748,12 +748,12 @@ def _api_post_probe_map(settings, request_json):
 
     settings = set_probe_map(settings, probe_map, control)
     # settings_update makes the loop re-read settings; probe_map_update is what
-    # makes it REBUILD its probe devices (controller.py, Task 3).
-    # probe_profile_update is NOT enough on its own -- it only refills
-    # per-port profiles on already-constructed devices (probes/base.py:393).
-    # notify_data travels as a notify.replace op because set_probe_map() may
-    # have dropped entries, and "an entry the incoming array omits is a
-    # deletion" is exactly what replace says out loud.
+    # makes it REBUILD its probe devices (controller.py). probe_profile_update is
+    # NOT enough on its own -- it only refills per-port profiles on
+    # already-constructed devices (probes/base.py:393). notify_data travels as a
+    # notify.replace op because set_probe_map() may have dropped entries, and "an
+    # entry the incoming array omits is a deletion" is exactly what replace says
+    # out loud.
     save_settings_and_flag_update(
         settings,
         control,

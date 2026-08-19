@@ -6,8 +6,8 @@ from INSIDE a work cycle.
 These fill coverage gaps for transition edges that today have NO transition-level
 test: Hold setup_safety->Error/Reignite, Hold check_safety->Error/Reignite,
 Smoke in-loop check_safety->Error/Reignite, and base inner-loop switch-off->Stop.
-They are the safety net for repointing those inline writes onto the
-request_transition() seam -- if a refactor changes any captured value, that is a
+They are the safety net for routing those inline writes through
+request_transition() -- if a refactor changes any captured value, that is a
 regression to investigate.
 
 METHOD: run-then-freeze, reusing the modes-golden harness (`run_mode`) exactly
@@ -129,9 +129,9 @@ def test_hold_check_safety_inloop_flameout_reignite():
 
 
 # --------------------------------------------------------------------------
-# Smoke check_safety (in-loop flameout) -> Error / Reignite  (gap #5)
-# The golden Smoke tests trip in setup_safety (pre-loop); this pins the
-# distinct in-loop check_safety path (smoke.py:133-148).
+# Smoke check_safety (in-loop flameout) -> Error / Reignite The golden Smoke
+# tests trip in setup_safety (pre-loop); this pins the distinct in-loop
+# check_safety path (smoke.py:133-148).
 # --------------------------------------------------------------------------
 
 
@@ -169,7 +169,7 @@ def test_smoke_check_safety_inloop_flameout_reignite():
 
 
 # --------------------------------------------------------------------------
-# base inner-loop switch-off -> Stop  (gap #6)  base.py:401-409
+# base inner-loop switch-off -> Stop (base.py:401-409)
 # --------------------------------------------------------------------------
 
 

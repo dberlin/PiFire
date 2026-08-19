@@ -30,8 +30,8 @@ def test_sqlite_display_queue_roundtrip(store):
 
 def test_generic_key_roundtrip_parity(store):
     """ControllerModelStore is constructed with a Store's read/write_generic_key
-    as reader/writer (Task 11's fix round) instead of the module-level SQLite
-    functions, so the two paths must round-trip identically.
+    as reader/writer, not the module-level SQLite functions, so the two paths
+    must round-trip identically.
     """
     from controller.runtime.store import InMemoryStore
 
@@ -157,7 +157,7 @@ def test_update_metrics_partial_dict_parity(store):
     # it was handed. InMemoryStore used to REPLACE the last record wholesale, so
     # a partial dict left the fake holding a one-key row while SqliteStore kept
     # every unmentioned column's prior value; a test could pass against the fake
-    # and still be wrong about production. Pins the seam in both directions:
+    # and still be wrong about production. Pins the rule in both directions:
     # unmentioned columns survive, an explicit None still nulls.
     from controller.runtime.store import InMemoryStore
 

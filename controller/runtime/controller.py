@@ -199,9 +199,9 @@ class Controller:
         # If recipe is exiting normally (i.e. no other mode requested, then initiate stop mode)
         if not control["updated"] or (step_num == num_steps):
             self.eventLogger.info("Recipe mode ended.")
-            # Genuine terminal transition -> route through the seam (mode=Stop,
-            # updated, write). The recipe-field cleanup above is carried on the
-            # same control dict, so the seam's single OVERWRITE persists it too.
+            # Genuine terminal transition -> route through request_transition
+            # (mode=Stop, updated, write). The recipe-field cleanup above is carried
+            # on the same control dict, so that single OVERWRITE persists it too.
             request_transition(self.ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
         else:
             # Cancel/break case: no mode transition here (the requested mode is

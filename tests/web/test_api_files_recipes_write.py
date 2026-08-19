@@ -142,13 +142,13 @@ def test_upload_with_no_file_part_is_400(client, folders):
     assert resp.status_code == 400
 
 
-# Byte-identical to test_api_files_cookfile_write.py's test of the same name
-# (Task 15 audit). NOT redundant: both files' `client` fixture resolves to the
-# same api_files_client, but each module's own `_upload()` posts to a
-# different URL with a different form field (recipes/upload+"recipe" here vs.
+# Byte-identical to test_api_files_cookfile_write.py's test of the same
+# name. NOT redundant: both files' `client` fixture resolves to the same
+# api_files_client, but each module's own `_upload()` posts to a different
+# URL with a different form field (recipes/upload+"recipe" here vs.
 # cookfiles/upload+"file" there) -- so this exercises the recipes upload
 # route's 400-on-empty-filename behavior specifically. Intentionally kept
-# duplicated; allowlist both in Task 16's duplicate-test guard.
+# duplicated; both are allowlisted in the duplicate-test guard.
 def test_upload_with_an_empty_filename_is_400(client, folders):
     resp = _upload(client, "")
     assert resp.status_code == 400
@@ -844,8 +844,8 @@ def test_update_step_rejects_a_non_bool(client, folders, field):
 
 
 def test_update_step_rejects_a_food_list_that_does_not_match_food_probes(client, folders):
-    """A mismatch here is exactly the corruption Task 9's food_probes reshape
-    exists to prevent."""
+    """A step's food list must match the recipe's food_probes count; a mismatch
+    is exactly the corruption that check exists to prevent."""
     name = write_recipe(folders[1], "Brisket", food_probes=2, steps=[_step(food_probes=2)])
     resp = client.post(
         "/api/files/recipes/steps",

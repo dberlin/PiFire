@@ -101,9 +101,9 @@ def test_celsius_resistance_decodes_known_pt1000_temperature(monkeypatch):
 
 def test_celsius_resistance_negative_branch_uses_polynomial(monkeypatch):
     # R_back=849.948 ohms decodes (via the T>=0 quadratic) to a negative temp,
-    # so the code switches to the documented rational-polynomial approximation.
-    # Independently computed (see task-4-report.md derivation): celsius ~=
-    # -38.170586991488044, normalized raw_reading ~= 84.99481201171875.
+    # so the code switches to the documented rational-polynomial
+    # approximation. Independently computed: celsius ~= -38.170586991488044,
+    # normalized raw_reading ~= 84.99481201171875.
     probe = _load_probe(monkeypatch, msb=0x32, lsb=0x9A)
     device = probe.RTDDevice(cs=1)
 

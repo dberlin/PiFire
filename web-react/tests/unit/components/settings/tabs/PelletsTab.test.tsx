@@ -221,8 +221,8 @@ describe("PelletsTab", () => {
       expect(inputFor("Warning Time")).toHaveValue(240);
     });
 
-    // I16 — safety copy on a control that lights a fire, dropped in the port
-    // (index.html:1403-1412). The triage assigned it to no slice.
+    // Safety copy on a control that lights a fire, dropped in the port
+    // (index.html:1403-1412).
     it("renders the DANGER copy under the Prime Ignition toggle", () => {
       renderRoute(<PelletsTab />, fixture);
       const danger = screen.getByText(/DANGER/);

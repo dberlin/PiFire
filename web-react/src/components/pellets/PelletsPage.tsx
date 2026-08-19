@@ -21,8 +21,7 @@ import { VocabTable } from "./VocabTable";
 // Same-origin, matching every other module. Deliberately NOT `targetUrl` from
 // the shell context: that value is absolute so ConnectionStatus has something
 // readable to show, and fetching with it sends every request cross-origin,
-// which Flask answers without CORS headers. The notify slice already shipped
-// that bug once.
+// which Flask answers without CORS headers. That bug has shipped once already.
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 /**

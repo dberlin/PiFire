@@ -16,9 +16,8 @@ test process:
   replaced with a synchronous fake Thread so the IP-sweep logic runs
   deterministically and fast, without real OS threads or real network I/O.
 
-Also documents four latent bugs found while writing these tests
-(coverage-round2), all since FIXED here -- the pinning tests were flipped to
-assert the fixed behavior:
+Also documents four latent bugs, all since FIXED -- the tests below assert
+the fixed behavior:
 
 1. notify/wled_discovery.py:74 -- ``socket.inet_ntoa(info.addresses[0])``
    used to assume an IPv4 4-byte address and ignore every address past

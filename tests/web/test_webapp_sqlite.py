@@ -2,7 +2,7 @@
 
 The blueprints (blueprints/api, blueprints/dash, common/app.py, etc.) call
 `common.common` free functions directly -- they never go through the
-`Store` seam exercised by test_datastore*.py / test_common_*.py. This file
+`Store` interface exercised by test_datastore*.py / test_common_*.py. This file
 proves that path is genuinely backed by SQLite, with valkey-server stopped.
 
 A fresh SQLite DB is seeded BEFORE `app` (the module-level Flask app in the

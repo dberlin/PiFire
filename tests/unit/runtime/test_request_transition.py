@@ -1,4 +1,4 @@
-"""Unit tests for the request_transition() seam (controller/runtime/transitions.py).
+"""Unit tests for request_transition() (controller/runtime/transitions.py).
 
 Uses a fake ctx (fake store + notifications) that records writes / notifies /
 display pushes. Asserts the resulting persisted control VALUES + side effects
@@ -113,7 +113,7 @@ def test_natural_yields_to_a_same_mode_request_from_a_listed_source():
     #
     # Smoke is a LISTED source whose exits exclude itself, so this is the case
     # the yield above cannot cover: mode="Error" dodges the legality check
-    # entirely because terminal modes are unlisted. A transition the seam is
+    # entirely because terminal modes are unlisted. A transition the caller is
     # about to abandon must not be rejected on its way to being abandoned.
     control = _base_control(mode="Smoke", updated=True)
     ctx, store, notifier = _ctx(control)

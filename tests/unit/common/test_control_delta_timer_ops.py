@@ -157,8 +157,9 @@ def test_clear_then_start_or_resume_arms_a_fresh_timer_rather_than_the_old_one()
 
 
 def test_start_or_resume_then_clear_leaves_the_timer_stopped():
-    """Residual 2: a `stop` against an already-zero ancestor carried no evidence
-    of intent, so start + stop in one cycle left the timer RUNNING."""
+    """A `stop` against an already-zero ancestor carries no evidence of intent
+    under a whole-dict write, so start + stop in one cycle left the timer
+    RUNNING. The op form disarms it."""
     control = _stopped()
     apply_control_delta(
         control,

@@ -49,8 +49,7 @@ export function useSaveSettings() {
         // screen (staleTime is 30s, easily long enough to still be "fresh").
         //
         // settingsRoot is the prefix of all three loader keys (settings, mode,
-        // controller metadata), which preserves exactly what revalidate() did
-        // before this cache existed: refetch all three.
+        // controller metadata), so all three are refetched.
         await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(BASE_URL) });
         revalidator.revalidate(); // re-run the loader → fresh settings
       }

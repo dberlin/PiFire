@@ -439,7 +439,7 @@ def test_identity_digest_changes_require_atomic_config_and_incumbent_replacement
     replacement_identity = LiveLearningIdentity(
         session_id=identity.session_id,
         cook_id=identity.cook_id,
-        # This is the complete-controller digest supplied by Task 8, not the
+        # This is the complete-controller digest the scheduler supplies, not the
         # digest of GreyBoxMPCConfig alone.
         configuration_digest="5" * 64,
         incumbent_digest="4" * 64,
@@ -728,7 +728,7 @@ def test_handoff_rechecks_exact_evaluation_model_digests(digest_field, wrong_dig
         confidence_accepted=True,
         online_enabled=True,
         prepare=lambda *_args: handed.append(True),
-        install=lambda _pair: pytest.fail("Task 7 must never install a candidate"),
+        install=lambda _pair: pytest.fail("the fit pipeline must never install a candidate"),
     )
     assert handed == []
     assert outcome.blockers == (blocker,)
@@ -747,7 +747,7 @@ def test_operator_calibration_always_stops_ready_for_review_even_when_passive_au
         confidence_accepted=True,
         online_enabled=True,
         prepare=lambda exact, policy: handed.append((exact, policy)),
-        install=lambda _pair: pytest.fail("Task 7 must never install a candidate"),
+        install=lambda _pair: pytest.fail("the fit pipeline must never install a candidate"),
     )
     assert handed == [(prepared, ActivationPolicy.OPERATOR_REVIEWED)]
     assert outcome.status is LearningStatus.READY_FOR_REVIEW

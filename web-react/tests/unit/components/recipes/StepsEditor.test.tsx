@@ -52,9 +52,9 @@ describe("StepsEditor", () => {
 
   afterEach(cleanup);
 
-  // THE RULE THIS SLICE EXISTS TO ENFORCE: 0 is the disabled sentinel for
-  // every trigger_temps member (and the timer), not a real temperature/count.
-  // An enable switch OFF must write 0, and a field already at 0 must render
+  // THE RULE THIS ENFORCES: 0 is the disabled sentinel for every
+  // trigger_temps member (and the timer), not a real temperature/count. An
+  // enable switch OFF must write 0, and a field already at 0 must render
   // disabled rather than as an editable "0". Because `enabled` is derived
   // straight from `value > 0` (not a separate boolean), the switch and the
   // field can never disagree about which state they are in.

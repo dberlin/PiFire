@@ -109,10 +109,10 @@
 }
 
 /* The bridge. Seven stylesheets reference the ORIGINAL names in hundreds of
- * places and are not rewritten by this change; the accent switcher still works
- * by attribute. Both keep working because these rules are UNLAYERED, and an
- * unlayered declaration beats anything in @layer theme whatever its
- * specificity -- so [data-accent="ice"] below wins over @theme's
+ * places, and the accent switcher works by attribute. Both keep working because
+ * these rules are UNLAYERED, and an unlayered declaration beats anything in
+ * @layer theme whatever its specificity -- so [data-accent="ice"] below wins
+ * over @theme's
  * --color-accent, and every var(--accent) resolves through this alias to it.
  *
  * The direction is deliberate: theme -> legacy, never legacy -> theme. Putting

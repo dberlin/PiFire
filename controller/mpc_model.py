@@ -125,7 +125,7 @@ _KELVIN = 273.15
 #: 3  migration input only: variable-delay grey snapshot with retired nested learners
 #: 4  fixed eight-delay grey-only adaptation record
 #:
-#: Version 3 is interpreted only by the one-shot Task 11 migration.  Runtime
+#: Version 3 is interpreted only by the one-shot startup migration.  Runtime
 #: restore and every current writer accept/emit version 4 exclusively.
 MODEL_SCHEMA = 4
 

@@ -6,8 +6,7 @@ import type { DashSocketPayload } from "./contracts/core.gen";
 // the first `socket_dash_data` event. The prototype grill platform was idle
 // (currentMode/displayMode "Stop", status "inactive") at capture time, so
 // temps/outputs read as zero/false — this is a genuine backend snapshot, not
-// a hand-authored "nice" cook state. See `.superpowers/sdd/task-dash1-report.md`
-// for the capture procedure.
+// a hand-authored "nice" cook state.
 export const FIXTURE_DASH = {
   uuid: "91a66346-7e6a-11f1-b29c-84470959a251",
   errors: [],

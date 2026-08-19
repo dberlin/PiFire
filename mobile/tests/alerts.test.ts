@@ -67,8 +67,7 @@ it("alerts on a grill error", () => {
   expect(alerts.map((a) => a.id)).toContain("GRILL_ERROR_01");
 });
 
-// The scenarios point 2 of the task brief calls out by name, beyond the three
-// required above.
+// Further scenarios, beyond the three required above.
 
 it("raises nothing on the very first payload after launch, even if it already carries an error, a timer that just cleared, and a probe already at target", () => {
   const busy = withError(withProbeTemp(FIXTURE_DASH, "Brisket", PROBE_TARGET), "GRILL_ERROR_01");

@@ -16,10 +16,10 @@ rs.mock("../../../../src/helpers/files/cookfileApi", () => ({
   fetchCookFileChart: (...args: unknown[]) => fetchCookFileChartMock(...args),
 }));
 
-// jsdom has no canvas, so the real uPlot chart is stubbed. The stub records the
-// props it was handed -- so the ms -> s conversion and the annotation toggle
-// are observable at the seam -- plus a per-INSTANCE id, so a test can tell a
-// remount (which is how Reset zoom works) from a re-render.
+// jsdom has no canvas, so the real uPlot chart is stubbed. The stub records the props
+// it was handed -- so the ms -> s conversion and the annotation toggle are observable
+// in the recorded props -- plus a per-INSTANCE id, so a test can tell a remount (which
+// is how Reset zoom works) from a re-render.
 let chartInstances = 0;
 rs.mock("../../../../src/components/history/HistoryChart", () => ({
   HistoryChart: ({ times, annotations }: { times: number[]; annotations?: { xMin: number }[] }) => {

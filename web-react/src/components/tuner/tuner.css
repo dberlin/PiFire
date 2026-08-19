@@ -5,9 +5,9 @@
    .pf-section-body and would not apply here.
 
    The page-level rules (.pf-tuner, its header and the segment grid) live in
-   this file too, added in Task 10 alongside the markup that uses them --
-   styleCoverage fails on a rule with no consumer, so nothing here can be
-   written ahead of the component that wears it. */
+   this file too, alongside the markup that uses them -- styleCoverage fails on
+   a rule with no consumer, so nothing here can be written ahead of the
+   component that wears it. */
 
 /* The page shell. .pf-shell-main is flex:1/min-height:0/overflow:auto
    (shell.css), so this scrolls inside that pane. Target viewport 1280x720. */

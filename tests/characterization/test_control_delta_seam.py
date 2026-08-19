@@ -96,7 +96,7 @@ def test_an_unversioned_legacy_row_is_rejected_dequeued_and_logged(seeded, caplo
 
 
 def test_two_deltas_restoring_the_opening_value_are_not_confused_with_silence(seeded):
-    """Residual 2 at the seam."""
+    """A write restoring the value the cycle began with is not read as silence."""
     opening = read_control()["primary_setpoint"]
     control_persistence.enqueue_control_delta(control_delta(set_values={"primary_setpoint": 225}), origin="a")
     control_persistence.enqueue_control_delta(control_delta(set_values={"primary_setpoint": opening}), origin="b")
@@ -167,7 +167,7 @@ def test_stop_then_resume_in_one_cycle_does_not_bring_back_the_old_end_time(seed
 
 
 def test_start_then_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
-    """Residual 2, through the real commands.
+    """A restore-to-opening through the real timer commands.
 
     Note the fourth member: default_control()'s timer is
     {start, paused, end, shutdown} (common/defaults.py). `shutdown` has one
@@ -356,7 +356,7 @@ def _notify_entry(label, type_):
 
 
 def test_a_notify_target_set_back_to_the_cycles_opening_value_still_lands(seeded):
-    """Residual 2 for notify_data -- and the plan's own example of it was wrong.
+    """A restore-to-opening for notify_data.
 
     A restore is only invisible when it restores the value THIS CYCLE began
     with. Setting a target to 203, draining, then setting it to 0 alongside a
@@ -382,8 +382,8 @@ def test_a_notify_write_is_not_reverted_by_a_concurrent_whole_dict_writer(seeded
 
 
 def test_a_setpoint_set_back_to_its_opening_value_survives_a_concurrent_writer(seeded):
-    """Residual 2 for a scalar: both writes inside ONE cycle, the second
-    restoring the value the cycle began with."""
+    """A restore-to-opening for a scalar: both writes inside ONE cycle, the
+    second restoring the value the cycle began with."""
     opening = read_control()["primary_setpoint"]
     assert _cmd("psp", "225")["result"] == "OK"
     assert _cmd("psp", str(opening))["result"] == "OK"
@@ -414,8 +414,8 @@ def test_a_background_system_write_does_not_hide_a_restore_to_the_opening_value(
 
     The sibling in tests/characterization/test_control_writes_cross_writer.py
     (test_background_full_control_write_does_not_eat_a_notify_write) passes
-    under BOTH seams, because a plain change differs from the ancestor. Only a
-    restore-to-opening tells the two apart.
+    under BOTH write models, because a plain change differs from the ancestor.
+    Only a restore-to-opening tells the two apart.
     """
     opening = _notify_entry("Grill", "probe")["target"]
     assert _cmd("notify", "Grill", "target", "203")["result"] == "OK"
@@ -452,14 +452,12 @@ _PAIRS = [
 
 @pytest.mark.parametrize("first,second", _PAIRS, ids=lambda p: "_".join(str(x) for x in p))
 def test_two_commands_in_one_cycle_match_the_same_two_one_cycle_apart(seeded, first, second):
-    """THE invariant. Both residuals named in the task-ctl report were
-    violations of it; every op and every `set` in this plan exists to restore
-    it.
+    """THE invariant: two commands in one cycle land exactly what the same two
+    land a cycle apart. Every op and every `set` exists to hold it.
 
     Scoped to ACCEPTED commands: request-time validation (e.g. the 4-argument
     timer form's paused-timer rejection) reads a stale blob, and no queue
-    representation can fix a synchronous HTTP answer. See "Where the invariant
-    does not hold" in the plan.
+    representation can fix a synchronous HTTP answer.
     """
 
     def _run(drain_between):

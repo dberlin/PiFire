@@ -133,7 +133,7 @@ characterization captures warts):
   1. get/status `ui_hash` is `hash(json.dumps(probe_info))`. Python salts str
      hashing per-process, so this value changes on every restart even when the
      probe map is identical. Pinned only as "an int is present".
-  2. (FIXED in the latent-bug pass -- was `arglist=[]`, a mutable default
+  2. (FIXED -- was `arglist=[]`, a mutable default
      argument; the pad-to-4 loop appended None INTO it, so
      `process_command.__defaults__[1]` became permanently
      `[None, None, None, None]` after the first no-arglist call.) The default
@@ -144,10 +144,10 @@ characterization captures warts):
      additionally rewrites `arglist[2]` to 'true'/'false'. Callers see this.
   4. action=='sys' pushes the PADDED arglist, so the trailing Nones leak into
      the queue payload: `['restart'] -> ['restart', None, None, None]`.
-  5. (FIXED in the latent-bug pass -- was a no-op if/else) set/lid_open
+  5. (FIXED -- was a no-op if/else) set/lid_open
      unconditionally sets `lid_open_toggle = True` regardless of arglist[1];
      no argument can clear the flag.
-  6. (FIXED in the latent-bug pass) set/notify/<label>/target with units == 'C'
+  6. (FIXED) set/notify/<label>/target with units == 'C'
      used to write `control['primary_setpoint']` instead of the notify object's
      target (an apparent copy/paste bug). It now writes `notify_data[i]['target']`
      on both paths -- as a float under 'C' (fractional targets), an int under 'F'.
@@ -1155,11 +1155,10 @@ def test_timer_start_hardcodes_origin_app(seeded):
 # `start` form accepts: a non-numeric, zero or negative duration, and a paused
 # timer.
 #
-# It was ALSO built to force a single control write, because a split write used
-# to lose the earlier half. That reason is gone -- the drain three-way merges
-# each queued patch against the blob as it stood when it began
-# (common/common.py::reduce_control_patch, ::merge_notify_data) -- and the form
-# is kept on the reasons above, which are independent of the write seam.
+# It was ALSO built to force a single control write, because a split write used to lose the
+# earlier half. That reason is gone -- the drain three-way merges each queued patch against the
+# blob as it stood when it began (common/common.py::reduce_control_patch, ::merge_notify_data) --
+# and the form is kept on the reasons above, which are independent of how the write lands.
 # ---------------------------------------------------------------------------
 
 
@@ -1368,21 +1367,19 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
 
 
 # ---------------------------------------------------------------------------
-# The seam these tests pin: TWO control writes inside ONE cycle, and what the
-# second does to the first.
+# What these tests pin: TWO control writes inside ONE cycle, and what the second does to the
+# first.
 #
 # Under the retired whole-snapshot model, read_control() served the persisted
 # blob and never the queue, so every writer in a cycle sent a full stale copy.
 #
-# For the timer commands this is now CLOSED at the source rather than patched
-# at the seam. They no longer queue a computed timer state at all: each queues
-# a named OP (common/control_delta.py) which the drain evaluates, in order,
-# against LIVE state. `timer.pause` chooses the running-vs-cleared branch in the
-# drain; `timer.start_or_resume` chooses start-vs-unpause there. So the two
-# reachable pairs below -- stop-then-pause and stop-then-resume, both buttons on
-# screen together while a timer runs -- compose instead of racing, and the
-# undrained result equals the drained one:
-# test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped and
+# For the timer commands this is CLOSED at the source rather than patched at the drain. They
+# queue no computed timer state at all: each queues a named OP (common/control_delta.py) which
+# the drain evaluates, in order, against LIVE state. `timer.pause` chooses the running-vs-cleared
+# branch in the drain; `timer.start_or_resume` chooses start-vs-unpause there. So the two
+# reachable pairs below -- stop-then-pause and stop-then-resume, both buttons on screen together
+# while a timer runs -- compose instead of racing, and the undrained result equals the drained
+# one: test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped and
 # test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer.
 #
 # That is what retired the client-side one-write-per-gesture guard in
@@ -1405,7 +1402,7 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
 def test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer(seeded):
     """start + shutdown, undrained: BOTH halves now survive. FIXED.
 
-    This used to be the sharpest instance of the seam. The shutdown command
+    This used to be the sharpest instance of the collision. The shutdown command
     reads the pre-start blob, so its partial carried timer.start/paused/end as
     ZEROS and was queued second; control['timer'] is a JSON object whose three
     keys the partial all supplied, so json_patch overwrote every one of them.
@@ -1552,8 +1549,7 @@ def test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer(seeded):
 def test_notify_target_in_celsius_writes_the_notify_target(seeded):
     """The 'C' path writes the notify object's target (kept a float, since
     Celsius targets can be fractional), leaving control['primary_setpoint']
-    untouched. Formerly wart #6 (an apparent copy/paste bug); FIXED in the
-    latent-bug pass."""
+    untouched. Formerly item #6 above (an apparent copy/paste bug); FIXED."""
     settings = runtime_persistence.read_settings()
     settings["globals"]["units"] = "C"
     runtime_persistence.write_settings(settings)

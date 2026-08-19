@@ -30,7 +30,7 @@ _SOLVER_NAMES = ("grey_box",)
 _DIRECT_WRITE_ERROR = (
     "direct --write is unsupported because generated-source publication requires "
     "the complete equation, parity, compile, ABI, and smoke gate; use --check "
-    "until Task 6 provides the sole public rebuild entry point, ./rebuild-acados.sh"
+    "instead, and rebuild through the sole public entry point, ./rebuild-acados.sh"
 )
 Generator = Callable[[Path], Path]
 Gate = Callable[[Path, Path, Path], None]
@@ -468,7 +468,7 @@ def _parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--write",
         action="store_true",
-        help="unsupported directly; use ./rebuild-acados.sh once Task 6 lands",
+        help="unsupported directly; use ./rebuild-acados.sh",
     )
     mode.add_argument("--check", action="store_true", help="compare without modifying files")
     mode.add_argument(

@@ -825,12 +825,12 @@ describe("Dashboard target notifications", () => {
     });
   });
 
-  // The cross-process seam this slice adds: the probe's LIVE reading decides the
-  // `triggered` latch the backend then reads. Saved without pre-arming, a limit
-  // the temperature has already passed sounds its alarm on the very next control
+  // The cross-process rule: the probe's LIVE reading decides the `triggered`
+  // latch the backend then reads. Saved without pre-arming, a limit the
+  // temperature has already passed sounds its alarm on the very next control
   // pass (notify/notifications.py:112) -- and the REST grammar cannot set
-  // `triggered` at all (common/api_commands.py:544-551), which is why this write
-  // is a POST /api/control.
+  // `triggered` at all (common/api_commands.py:544-551), which is why this
+  // write is a POST /api/control.
   it("pre-arms a limit against the probe's live temperature", async () => {
     const user = userEvent.setup();
     const fetchMock = stubNotifyFetch();

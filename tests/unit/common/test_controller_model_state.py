@@ -360,13 +360,13 @@ def test_concurrent_store_instances_recheck_persisted_revision_after_waiting():
 
 
 def test_a_reset_revision_is_logged_at_error_under_the_shipped_default_log_level(caplog):
-    # C1 (fix round 2): control.py sets the "control" logger to ERROR whenever
-    # debug_mode is off -- the shipped default -- so a bare .warning() never
-    # reaches a log file in production. This test does NOT loosen that
-    # threshold with caplog.at_level(); it reproduces the exact production
-    # configuration and proves the message survives anyway, because a
-    # revision going backwards is the one outcome that must be logged at
-    # ERROR, not merely observable when a test raises the level for it.
+    # control.py sets the "control" logger to ERROR whenever debug_mode is off
+    # -- the shipped default -- so a bare .warning() never reaches a log file
+    # in production. This test does NOT loosen that threshold with
+    # caplog.at_level(); it reproduces the exact production configuration and
+    # proves the message survives anyway, because a revision going backwards is
+    # the one outcome that must be logged at ERROR, not merely observable when
+    # a test raises the level for it.
     control_logger = logging.getLogger("control")
     previous_level = control_logger.level
     control_logger.setLevel(logging.ERROR)  # matches control.py's debug_mode=False branch
@@ -471,7 +471,7 @@ def test_load_priming_avoids_a_read_on_a_subsequent_cache_hit_save():
 
 
 def test_a_full_identifier_bank_round_trips():
-    """Slice B persists 25 RLS candidates: coefficients (25x3), covariances
+    """A full identifier bank is 25 RLS candidates: coefficients (25x3), covariances
     (25x3x3) and residuals (25). That is ~7 KB of JSON -- under the old cap,
     but with too little headroom to build on."""
     import numpy as np
@@ -511,7 +511,7 @@ def test_a_bank_larger_than_the_identifier_will_ever_build_still_fits():
 
 def test_round_trips_through_the_real_datastore_seam(ds):
     # The fake in every other test matches read_generic_key's documented
-    # behavior on purpose, but only this test exercises the actual seam:
+    # behavior on purpose, but only this test exercises the real path:
     # ControllerModelStore() with no injected reader/writer, backed by a real
     # (temp-file) SQLite datastore via common.persistence.runtime.
     store = ControllerModelStore()

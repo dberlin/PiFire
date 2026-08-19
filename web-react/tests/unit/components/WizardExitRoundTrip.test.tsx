@@ -15,8 +15,8 @@ import { queryClient } from "../../../src/helpers/query/queryClient";
 import type { ShellContext } from "../../../src/helpers/shellContext";
 
 // One fake PiFire settings store, shared by BOTH mocked API clients, because
-// the defect this file pins lives in the seam BETWEEN them: WizardShell's exit
-// calls /api/wizard/cancel, and DashboardRoute reads globals.first_time_setup
+// the defect this file pins lives BETWEEN them: WizardShell's exit calls
+// /api/wizard/cancel, and DashboardRoute reads globals.first_time_setup
 // off the shared settings cache (useSettings.ts) and navigates back to
 // /wizard while it is still true. Leaving the wizard therefore only works if
 // the cancel both clears the flag on the server AND invalidates that cache

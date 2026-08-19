@@ -6,9 +6,8 @@ const setUnitsMock = rs.fn();
 
 // createCommand is a *direct* dependency of UnitsTab.tsx (not transitive
 // through another mocked module), so a static `import { UnitsTab } from
-// "./UnitsTab"` above this mock hits the rstest hoisting TDZ (documented in
-// task-2b22-report.md) — import the module under test dynamically after the
-// mock is registered instead.
+// "./UnitsTab"` above this mock hits the rstest hoisting TDZ — import the
+// module under test dynamically after the mock is registered instead.
 rs.mock("@pifire/core/command", () => ({
   createCommand: () => ({
     setMode: rs.fn(),

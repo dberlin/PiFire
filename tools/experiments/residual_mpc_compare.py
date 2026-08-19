@@ -4,7 +4,7 @@
 Each plant/seed runs three successive 325 F cooks. Cook one is deliberately
 identical: the residual penalty and analytic equilibrium are admitted only
 after a cook has identified a thermal model. The baseline arm disables the
-current MpcCore residual-weight and equilibrium seams in an isolated worker.
+current MpcCore residual weighting and analytic equilibrium in an isolated worker.
 """
 
 from __future__ import annotations

@@ -65,8 +65,9 @@ def migrate_mpc_learning_authority(
 ) -> GreyLearningMigrationResult:
     """Atomically converge the checkpoint and activation pointer on grey v4.
 
-    ``activation_input_key`` is an injected migration seam for legacy blob
-    installations. Normal startup omits it and migrates the Task 10 singleton.
+    ``activation_input_key`` names the legacy blob key to migrate from, for
+    installations still on that layout. Normal startup omits it and migrates
+    the singleton.
     Historical evidence rows are deliberately untouched.
     """
 

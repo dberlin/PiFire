@@ -146,13 +146,13 @@ describe("RecipePage", () => {
     await waitFor(() => expect(screen.getByText(/on step 1/)).toBeInTheDocument());
   });
 
-  // THE RULE TASK 14+15 EXISTS TO ENFORCE: recipes_api.py's update_ingredient
-  // rewrites the OLD ingredient name to the new one inside every instruction
-  // that referenced it. IngredientsEditor and InstructionsEditor are siblings
-  // that each only see their own slice of `detail.recipe` -- the ONLY way the
-  // instruction list can show the renamed name is for the save to trigger a
-  // refetch of the WHOLE detail (onChanged -> RecipePage's reload), not a
-  // local patch of either editor's own state.
+  // THE RULE THIS ENFORCES: recipes_api.py's update_ingredient rewrites the
+  // OLD ingredient name to the new one inside every instruction that
+  // referenced it. IngredientsEditor and InstructionsEditor are siblings
+  // that each only see their own slice of `detail.recipe` -- the ONLY way
+  // the instruction list can show the renamed name is for the save to
+  // trigger a refetch of the WHOLE detail (onChanged -> RecipePage's
+  // reload), not a local patch of either editor's own state.
   it("renaming an ingredient refetches the whole detail and updates the instruction that referenced it", async () => {
     const user = userEvent.setup();
     const before: RecipeDetail = {
@@ -193,8 +193,8 @@ describe("RecipePage", () => {
     expect(screen.getAllByText("Sea Salt").length).toBeGreaterThan(0);
   });
 
-  // Task 11 (brief step 2): the requestId counter is gone -- an editor save
-  // must now invalidate the recipe's query key rather than bump a counter.
+  // There is no requestId counter -- an editor save invalidates the recipe's
+  // query key instead.
   it("re-reads the recipe after an editor saves", async () => {
     const withIngredient: RecipeDetail = {
       ...DETAIL,

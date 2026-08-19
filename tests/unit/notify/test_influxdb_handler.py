@@ -21,9 +21,8 @@ queue drain), the empty-queue no-op write, and notify()'s point construction
 grill_platform output fields, the GRILL_STATE Event-field suppression) and
 its 1-second debounce.
 
-Three latent bugs were found here (coverage-round2) and have since been
-FIXED; the pinning tests were flipped to assert the fixed behavior, and a
-new test covers the previously-undemonstrated bug #3:
+Three latent bugs, all since FIXED. The tests below assert the fixed
+behavior:
 
   1. **First point after startup is always dropped** (influxdb_handler.py:9,
      60-61): ``__init__`` used to set ``self.last_updated = time.time()``

@@ -69,9 +69,9 @@ describe("useTunerSession", () => {
   });
 
   it("CLOSES THE SESSION ON UNMOUNT", async () => {
-    //  The single most important assertion in this slice. A page that unmounts
-    //  without closing leaves the operator's grill in Monitor with tuning_mode
-    //  set, and nothing on screen to say so.
+    // The single most important assertion here. A page that unmounts without
+    // closing leaves the operator's grill in Monitor with tuning_mode set, and
+    // nothing on screen to say so.
     openMock.mockResolvedValue(OK({ open: true, mode: "Monitor", restored: true }));
     const view = render(<Host />);
     act(() => screen.getByText("start").click());

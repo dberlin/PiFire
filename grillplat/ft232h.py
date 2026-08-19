@@ -62,7 +62,7 @@ def reset_state():
 
 
 def _new_controller(url, frequency):
-    """Open and configure a pyftdi I2cController. Isolated as a test seam."""
+    """Open and configure a pyftdi I2cController. Isolated so tests can substitute it."""
     from pyftdi.i2c import I2cController
 
     controller = I2cController()

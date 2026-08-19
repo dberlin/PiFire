@@ -62,7 +62,7 @@ def _effective_configuration(controller, config, cycle_config):
     ``controller/controllers.json`` each call. Importing its module rather than
     its function lets a test (or a newly installed manifest) change that source
     after this experiment module was imported. `config` and `cycle_config` are
-    the only explicit override seams; each wins over the fresh shipped value.
+    the only explicit overrides; each wins over the fresh shipped value.
     """
     settings = importlib.import_module("common.defaults").default_settings()
     controller_config = dict(settings["controller"]["config"].get(controller, {}))
@@ -308,7 +308,7 @@ def run_scenario(
 ):
     """Drive one controller/plant scenario with the configuration shipping now.
 
-    The only override seams are ``config`` (controller options) and
+    The only overrides are ``config`` (controller options) and
     ``cycle_config`` (Hold cycle settings); both override fresh
     ``default_settings()`` values for this call only. Rows retain independent
     JSON-safe snapshots so subsequent settings/manifest changes cannot alter

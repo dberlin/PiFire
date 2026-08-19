@@ -220,7 +220,7 @@ export function WorkModeTab() {
           label="Lid Open Pause Time"
           value={v.cycle_data.LidOpenPauseTime}
           onChange={(n) => setCycleData("LidOpenPauseTime", n)}
-          // index.html:511 — the audit missed this one
+          // Bounds from index.html:511
           min={10}
           max={1000}
           step={1}

@@ -82,9 +82,8 @@ except Exception as exc:  # pragma: no cover - only exercised if playwright itse
 #   from tests.web.conftest import requires_chromium
 #   pytestmark = requires_chromium
 #
-# at module scope, mirroring the guard originally inlined in
-# test_wizard_nested_modal_scroll.py, so the module skips cleanly (not an
-# error) when chromium isn't installed.
+# at module scope, so the module skips cleanly (not an error) when chromium
+# isn't installed.
 requires_chromium = pytest.mark.skipif(
     _PLAYWRIGHT_UNAVAILABLE_REASON is not None, reason=_PLAYWRIGHT_UNAVAILABLE_REASON or ""
 )

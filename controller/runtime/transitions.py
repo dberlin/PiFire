@@ -1,7 +1,6 @@
-"""Single seam for every controller mode transition. All mode changes route
-through request_transition; transition *kind* sets priority. Designed for
-clarity -- correctness is defined by the transition characterization suite +
-the mode/loop goldens, not by mirroring the old next_mode/inline-write split.
+"""Single entry point for every controller mode transition. All mode changes
+route through request_transition; transition *kind* sets priority. Correctness
+is defined by the transition characterization suite and the mode/loop goldens.
 
 kind semantics:
   - "natural": the post-cycle progression. Flushes deferred writes, re-reads the
@@ -73,17 +72,19 @@ STATUS_TRANSITIONS = (
 )
 
 
-# The explicit mode-transition graph: every legal `from -> {to, ...}` edge the
-# seam may perform, cross-checked against the characterization suite (see the
-# committed-snapshot tests in tests/unit/runtime/test_request_transition.py).
-# `to` targets for the cycling modes are data-driven (control['next_mode']),
-# so a mode's set is the UNION of its universal safety/switch-off targets
-# (Error/Reignite/Stop) and every mode it can legally advance into.
+# The explicit mode-transition graph: every legal `from -> {to, ...}` edge
+# request_transition may perform, cross-checked against the characterization
+# suite (see the committed-snapshot tests in
+# tests/unit/runtime/test_request_transition.py). `to` targets for the cycling
+# modes are data-driven (control['next_mode']), so a mode's set is the UNION of
+# its universal safety/switch-off targets (Error/Reignite/Stop) and every mode
+# it can legally advance into.
 #
 # Terminal pseudo-states Stop and Error are intentionally OMITTED (not listed):
-# they never initiate a seam transition, and a post-trip `natural` next_mode call
-# momentarily reads mode=="Error"/"Stop" before yielding -- leaving them unlisted
-# makes _check_legal a no-op for that spurious source so the yield is unaffected.
+# they never initiate a transition, and a post-trip `natural` next_mode call
+# momentarily reads mode=="Error"/"Stop" before yielding -- leaving them
+# unlisted makes _check_legal a no-op for that spurious source so the yield is
+# unaffected.
 ALLOWED_EXITS: dict[Mode, set[Mode]] = {
     Mode.PRIME: {Mode.STARTUP, Mode.STOP, Mode.ERROR},
     Mode.STARTUP: {Mode.PRIME, Mode.SMOKE, Mode.HOLD, Mode.MONITOR, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
@@ -258,13 +259,13 @@ def _flameout_edges(*, setup):
 # priority over the mode-specific flameout -- matching the live pre_act order
 # (base.py max-temp before check_safety).
 #
-# NOTE: the inner-loop switch-off -> Stop edge is deliberately NOT migrated here.
-# It lives EARLIER in base.run (before the manual-override actuation block, not
-# at the pre_act safety point) and is stateful (edge-detection on the previous
-# switch reading), so a pure pre_act guard would both move it relative to
-# actuation and drop the edge-detection. It stays as the inline seam call in
-# base.run, like the bespoke recipe/startup writes, which also call the seam
-# directly rather than going through GUARDS.
+# NOTE: the inner-loop switch-off -> Stop edge is deliberately NOT migrated
+# here. It lives EARLIER in base.run (before the manual-override actuation
+# block, not at the pre_act safety point) and is stateful (edge-detection on
+# the previous switch reading), so a pure pre_act guard would both move it
+# relative to actuation and drop the edge-detection. It stays as an inline
+# request_transition call in base.run, like the bespoke recipe/startup writes,
+# which also call request_transition directly rather than going through GUARDS.
 GUARDS: dict[Mode | str, dict[str, list]] = {
     "*": {  # "*" is a wildcard applying to every mode, NOT a Mode value.
         "pre_act": [

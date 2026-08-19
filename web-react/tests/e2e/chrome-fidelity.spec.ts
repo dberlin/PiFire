@@ -22,7 +22,7 @@ import { CHROME_PROBES, DESKTOP, PHONE } from "./pageSpecs";
 // style, and removes it. tests/e2e/wizard-layout.spec.ts already does exactly
 // this for the modal and the install stripe; this generalises it and gives it a
 // committed baseline. It proves the rules resolve and to WHAT. It proves
-// nothing about how they look in situ -- that is Task 15's human checkpoint.
+// nothing about how they look in situ -- that needs a human looking at them.
 
 for (const viewport of [DESKTOP, PHONE]) {
   test.describe(`${viewport.width}x${viewport.height}`, () => {

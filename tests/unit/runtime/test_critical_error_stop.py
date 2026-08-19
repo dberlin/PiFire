@@ -23,7 +23,7 @@ So the operator's requested mode is readable at the gate as `control["mode"]`;
 `next_mode` is NOT part of this path (it is the controller's own "where this
 cycling mode goes next" field, seeded to Stop by default_control()). These tests
 push the same DELTA envelope `_cmd_set_mode` builds and let tick()'s own drain
-apply it, so both ends of that seam are exercised rather than assumed.
+apply it, so both ends of that path are exercised rather than assumed.
 """
 
 import pytest

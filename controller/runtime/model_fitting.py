@@ -175,7 +175,7 @@ class GreyFitMessage:
 
 
 def _fit_grey_job(job: GreyFitJob) -> GreyFitSuccess:
-    """Run the canonical grey simulator fitter with Task 7's strict bounds."""
+    """Run the canonical grey simulator fitter with the pipeline's strict bounds."""
     from controller.acados.contracts import GreyBoxMPCConfig
     from controller.update_mpc import fit_params, fit_quality, identifiability
 
@@ -1007,7 +1007,7 @@ def handoff_candidate(
     prepare: Callable[[CandidatePreparation, Any], Any],
     install: Callable[[Any], Any],
 ) -> CandidateHandoff:
-    """Prepare persistence handoff only; Task 7 never installs or swaps a pair."""
+    """Prepare persistence handoff only; this pipeline never installs or swaps a pair."""
     from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, LearningStatus
 
     if not isinstance(prepared, CandidatePreparation):
@@ -1016,7 +1016,7 @@ def handoff_candidate(
         raise ValueError("confidence_accepted and online_enabled must be bools")
     if not callable(prepare) or not callable(install):
         raise ValueError("prepare and install must be callable")
-    del install  # Ownership transfer is intentionally outside Task 7.
+    del install  # Ownership transfer is intentionally outside this pipeline.
     blockers: list[str] = []
     if not prepared.accepted:
         blockers.extend(prepared.blockers or ("candidate-rejected",))
@@ -1038,7 +1038,7 @@ def handoff_candidate(
         blockers.append("confidence")
     origin = request.origin
     if origin is CandidateOrigin.COOK_REFIT:
-        raise ValueError("cook-refit handoff belongs to Task 12")
+        raise ValueError("cook-refit handoff is not owned by this pipeline")
     policy = (
         ActivationPolicy.OPERATOR_REVIEWED
         if origin is CandidateOrigin.OPERATOR_CALIBRATION
@@ -1070,7 +1070,7 @@ def handoff_candidate(
 
 @dataclass(frozen=True, slots=True)
 class LiveLearningIdentity:
-    """Task 8's live identity input to the otherwise off-path Task 7 pipeline."""
+    """The scheduler's live identity input to the otherwise off-path fit pipeline."""
 
     session_id: str
     cook_id: str | None
@@ -1134,11 +1134,11 @@ class GreyLearningDelivery:
 
 
 class GreyLearningOrchestrator:
-    """Cohesive Task 7 pipeline for Task 8 to schedule off the control worker.
+    """Cohesive grey-learning fit pipeline, scheduled off the control worker.
 
     This owner deliberately has no Controller/Hold references and never installs
-    a pair.  Task 8 supplies live identities and calls ``poll_fit_off_path`` on
-    its lifecycle worker; Task 10 supplies the preparation callback.
+    a pair.  The scheduler supplies live identities, calls ``poll_fit_off_path``
+    on its lifecycle worker, and supplies the preparation callback.
     """
 
     def __init__(
@@ -1380,7 +1380,7 @@ class GreyLearningOrchestrator:
         live_identity: LiveLearningIdentity,
         live_origin: Any,
     ) -> GreyLearningDelivery | None:
-        """Drain, stale-check, and build a candidate; Task 8 calls this off-worker."""
+        """Drain, stale-check, and build a candidate; called off the control worker."""
         from controller.model_learning.contracts import FitResult, FitStatus
 
         if self._pending_request is None:
@@ -1503,7 +1503,7 @@ class GreyLearningOrchestrator:
                 online_enabled=online_enabled,
                 prepare=prepare,
                 install=lambda _pair: (_ for _ in ()).throw(
-                    AssertionError("Task 7 cannot install a runtime pair")
+                    AssertionError("this pipeline cannot install a runtime pair")
                 ),
             )
         except CandidateOwnershipTransferredError:

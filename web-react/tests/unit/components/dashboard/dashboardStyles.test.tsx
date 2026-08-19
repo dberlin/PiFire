@@ -159,11 +159,11 @@ describe("dashboard.css carries the extracted rules", () => {
   });
 });
 
-// Task 12's contract, and the thing Task 13 depends on: every size a
-// breakpoint will want to change is behind a named token, and the desktop value
-// of each token is the literal it replaced. jsdom resolves neither var() nor
-// media queries, so this is a stylesheet-text assertion by necessity -- the
-// rendered result is the Playwright fidelity gate's job.
+// The contract the breakpoints rest on: every size a breakpoint will want to
+// change is behind a named token, and the desktop value of each token is the
+// literal it replaced. jsdom resolves neither var() nor media queries, so this
+// is a stylesheet-text assertion by necessity -- the rendered result is the
+// Playwright fidelity gate's job.
 const TOKEN_KEYS = Object.keys(CSS_TOKEN_NAME) as (keyof SizeTokens)[];
 
 describe("dashboard size tokens", () => {

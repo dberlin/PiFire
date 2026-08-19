@@ -109,8 +109,8 @@ function StepCard({
 }
 
 // The read-only recipe detail surface (blueprints/recipes/templates/recipes/
-// _recipe_view.html): splash, about card, description, ingredients,
-// instructions and the program-step list. Every editor is Slice B.
+// _recipe_view.html): splash, about card, description, ingredients, instructions
+// and the program-step list. Read-only: the editors live in their own components.
 export function RecipeView({ detail, activeStep }: Props) {
   const { metadata, recipe } = detail;
   const units = metadata.units;

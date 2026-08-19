@@ -8,8 +8,8 @@ export interface FieldProps {
   /** The backend's reason for refusing this field on the last save. */
   error?: string | null;
   /** Dotted settings path, e.g. "startup.duration". Present on settings
-   *  fields, absent on wizard fields that write no settings path. Task 2
-   *  gives this meaning; here it is accepted and ignored. */
+   *  fields, absent on wizard fields that write no settings path. Field itself
+   *  only accepts and forwards it. */
   path?: string;
   /** Extra class(es) appended to the field's wrapping container, e.g. the
    *  column layout a multi-row field like StringListField needs. Every

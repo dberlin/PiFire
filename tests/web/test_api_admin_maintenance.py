@@ -168,8 +168,8 @@ def test_boot_to_monitor_alone_does_not_flag_the_control_process(client):
 
 
 def test_boot_to_monitor_toggle_passes_schema_validation(client):
-    """The plan flagged this as unverified: write_settings validates against the
-    settings schema, so a field the schema rejects would 500 here."""
+    """write_settings validates against the settings schema, so a field the
+    schema rejects would 500 here."""
     from common.persistence.runtime import read_settings
 
     resp = client.post("/api/admin/settings", json={"boot_to_monitor": True})

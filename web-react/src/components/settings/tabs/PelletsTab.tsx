@@ -102,7 +102,7 @@ export function PelletsTab() {
           label="Empty"
           value={v.empty}
           onChange={(n) => set("empty", n)}
-          // index.html:1362 — the audit missed this one
+          // Bounds from index.html:1362
           min={1}
           max={100}
           suffix="cm"
@@ -113,7 +113,7 @@ export function PelletsTab() {
           label="Full"
           value={v.full}
           onChange={(n) => set("full", n)}
-          // index.html:1354 — the audit missed this one
+          // Bounds from index.html:1354
           min={0}
           max={100}
           suffix="cm"

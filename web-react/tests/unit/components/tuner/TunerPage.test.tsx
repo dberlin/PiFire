@@ -53,8 +53,8 @@ const autoStatus = (over = {}) =>
     ...over,
   });
 
-// Fake timers must be installed BEFORE render, or the poll interval runs on the
-// real clock -- the mistake that cost the events slice four failing tests.
+// Fake timers must be installed BEFORE render, or the poll interval runs on
+// the real clock, and the poll assertions below never fire.
 const installFakeClock = rs.useFakeTimers.bind(rs);
 
 beforeEach(() => {

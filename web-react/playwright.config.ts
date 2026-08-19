@@ -101,7 +101,7 @@ export default defineConfig({
     },
     // /pellets is socket-fed, so it cannot run on the demo server (no socket =
     // no pellet database = the "Loading..." branch) and it cannot be stubbed
-    // over REST. App server, live backend, fingerprint guard. See Task 5.
+    // over REST. App server, live backend, fingerprint guard.
     {
       name: "fidelity-pellets",
       testMatch: /pellets-fidelity\.spec\.ts/,

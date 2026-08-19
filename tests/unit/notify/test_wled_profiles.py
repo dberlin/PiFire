@@ -10,8 +10,7 @@ mocked at ``notify.wled_profiles.requests`` -- no real device or network is
 touched, and ``time.sleep`` is patched so tests don't pay the real 0.1s/preset
 delay.
 
-Two latent bugs were found here (coverage-round2) and have since been FIXED;
-the pinning tests below were flipped to assert the fixed behavior:
+Two latent bugs, both since FIXED. The tests below assert the fixed behavior:
 
 1. ``push_all_profiles`` used to silently drop the error preset because
    ``DEFAULT_PROFILE_NUMBERS`` keyed it "error" (notify/wled_profiles.py:79)

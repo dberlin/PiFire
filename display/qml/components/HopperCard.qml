@@ -1,11 +1,11 @@
 import QtQuick
 import ".."
 
-// Hopper level card: header (HOPPER label + n% in threshold color), a
-// vertical fill bar anchored to the bottom of a track, and a threshold
-// status label. Sized by the caller's Layout (DashScreen, Task 15) — this
-// component does not bind its own width/height. Adapted from the
-// preview-verified hopperCard in tools/qt_dashboard_preview.qml.
+// Hopper level card: header (HOPPER label + n% in threshold color), a vertical
+// fill bar anchored to the bottom of a track, and a threshold status label.
+// Sized by the caller's Layout (DashScreen) — this component does not bind its
+// own width/height. Adapted from the preview-verified hopperCard in
+// tools/qt_dashboard_preview.qml.
 Rectangle {
 	id: card
 	property bool compact: false

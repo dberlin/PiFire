@@ -351,7 +351,7 @@ describe("WorkModeTab", () => {
       expect(el).toHaveAttribute("max", "100");
     });
 
-    // Task 1's enforcement, reaching a real call site.
+    // NumberField's blur clamp, through a real call site.
     it("clamps PMode on blur", () => {
       renderRoute(<WorkModeTab />, boundsFixture);
       const pmode = inputFor("PMode");

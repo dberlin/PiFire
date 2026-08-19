@@ -146,8 +146,8 @@ def test_set_target_preserves_the_learned_model(clock):
 
 def test_no_tau_or_theta_config_is_read(clock):
     """A user-supplied tau=115 is outside the design's own trusted band.
-    controller/controllers.json still advertises the options until Task 10
-    removes them; what this pins is that pid_sp no longer reads them."""
+    controller/controllers.json still advertises the options; what this pins is
+    that pid_sp does not read them."""
     import controller.pid_sp as mod
 
     source = open(mod.__file__).read()
@@ -366,11 +366,11 @@ def test_set_output_feeds_the_identifier_as_well_as_the_predictor(clock):
 
 
 def test_a_celsius_install_scales_error_and_corrections_from_fahrenheit(clock):
-    """_to_f / _from_f are new code this task introduced, and every other
-    test constructs with units='F', so either could be replaced by the
-    identity and nothing would fail. Runs the identical schedule in C and in
-    F and checks the C instance's deltas are the F instance's deltas scaled
-    by 5/9 -- the round trip a Celsius install's correctness rests on."""
+    """Every other test constructs with units='F', so _to_f / _from_f could
+    each be replaced by the identity and nothing would fail. Runs the identical
+    schedule in C and in F and checks the C instance's deltas are the F
+    instance's deltas scaled by 5/9 -- the round trip a Celsius install's
+    correctness rests on."""
     sp_c = _controller("pid_sp", clock, units="C")
     sp_f = _controller("pid_sp", clock, units="F")
     sp_c.set_target(107.0)

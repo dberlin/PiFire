@@ -1,6 +1,6 @@
-"""Pins common/server_revision.py, the seam a stale gunicorn worker is caught by.
+"""Pins common/server_revision.py, which is how a stale gunicorn worker is caught.
 
-Both ends of that seam matter: this module publishes the fields, and
+Both ends matter: this module publishes the fields, and
 web-react/tests/e2e/globalSetup.ts refuses to run the suite when `stale` is
 true. A rename here silently disarms the guard there, so the field NAMES are
 asserted, not just the behaviour.

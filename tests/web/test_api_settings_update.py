@@ -226,15 +226,15 @@ def test_settings_update_layer2_still_rejects_delta_invalid_against_merged_tree(
 
 # ---------------------------------------------------------------------------
 # The React General tab's screen-sleep control (ruling 4, 2026-07-26,
-# docs/superpowers/backlogs/react-migration-backlog.md): it must actually drive the
-# DPMS behaviour, so this pins the seam between the two processes. The web
-# process writes settings["display"]["sleep_timeout"]; the display process
+# docs/superpowers/backlogs/react-migration-backlog.md): it must actually drive
+# the DPMS behaviour, so this pins the contract between the two processes. The
+# web process writes settings["display"]["sleep_timeout"]; the display process
 # re-reads it through common.common.display_sleep_timeout() once a second
-# (display/qtapp.py's _timeout_fn -> PiFireBackend.TIMEOUT ->
-# _update_idle -> asleep -> ScreenPowerController's `swaymsg output * dpms`).
-# Every other hop of that path already has a test; this is the one that
-# crosses the process boundary, and a control the display cannot see would be
-# worse than no control.
+# (display/qtapp.py's _timeout_fn -> PiFireBackend.TIMEOUT -> _update_idle ->
+# asleep -> ScreenPowerController's `swaymsg output * dpms`). Every other hop
+# of that path already has a test; this is the one that crosses the process
+# boundary, and a control the display cannot see would be worse than no
+# control.
 # ---------------------------------------------------------------------------
 
 
@@ -273,11 +273,11 @@ def test_settings_update_rejects_a_negative_sleep_timeout(client):
 # The React SmartStart/PWM range-table saves ride the tab's single delta with
 # the ["settings_update"] flag, where Flask's separate table forms send a BARE
 # write. Judged a harmless superset -- the flag only makes the control loop
-# re-read settings -- but the settings-state half of that claim was never
-# pinned across the process boundary (deferred-inventory-plans finding #9). The
-# seam pinned here: an array-subtree ("table") save WITH the flag stores the
-# SAME settings tree as the identical delta WITHOUT it. The flag's only effect
-# is the queued control re-read; it never changes what is written.
+# re-read settings -- but the settings-state half of that claim needs pinning
+# across the process boundary. The rule pinned here: an array-subtree ("table")
+# save WITH the flag stores the SAME settings tree as the identical delta
+# WITHOUT it. The flag's only effect is the queued control re-read; it never
+# changes what is written.
 # ---------------------------------------------------------------------------
 
 

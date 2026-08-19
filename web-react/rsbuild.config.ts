@@ -19,10 +19,10 @@ const target = ports.pifireUrl;
 //     dependency updates. tests/e2e/baselines/ would report that as a visual
 //     regression with no cause anywhere in the diff.
 //
-// This raises nothing in practice: the stylesheets already use
-// color-mix(in srgb, var(--accent) ...), which Lightning CSS cannot precompute
-// through a var() and passes through verbatim, so the shipped CSS already
-// required Chrome 111 / Safari 16.2 before this key existed.
+// This raises nothing in practice: the stylesheets already use color-mix(in
+// srgb, var(--accent) ...), which Lightning CSS cannot precompute through a
+// var() and passes through verbatim, so the shipped CSS already requires Chrome
+// 111 / Safari 16.2 regardless of this key.
 export default defineConfig({
   // @rsbuild/plugin-tailwindcss wraps @tailwindcss/webpack. Deliberately NOT
   // @tailwindcss/postcss: Rsbuild transforms CSS with Lightning CSS through

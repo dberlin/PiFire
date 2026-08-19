@@ -30,8 +30,8 @@ describe("probeModulesLoader", () => {
 
   it("uses a same-origin base so Flask never has to send CORS headers", () => {
     // PUBLIC_PIFIRE_URL is unset in tests and in the shipped bundle; the shell
-    // context's absolute targetUrl must NOT be used as a fetch base -- the
-    // notify slice already shipped that bug once.
+    // context's absolute targetUrl must NOT be used as a fetch base -- that bug
+    // has shipped once already.
     expect(BASE_URL).toBe("");
   });
 });

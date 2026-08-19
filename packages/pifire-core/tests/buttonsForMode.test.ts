@@ -248,7 +248,7 @@ describe("buttonsForMode", () => {
 
   // The controller's graph has no Smoke -> Smoke edge (ALLOWED_EXITS in
   // controller/runtime/transitions.py), so commanding the mode you are already
-  // in is a request the seam can only reject.
+  // in is a request the controller can only reject.
   it("does not command Smoke while already smoking", () => {
     const smoke = buttonsForMode(at("Smoke")).find((b) => b.label === "Smoke");
     expect(smoke?.disabled).toBe(true);

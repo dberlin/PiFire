@@ -1,4 +1,4 @@
-"""Contracts for Task 7 pulse evidence and delayed-solver safety evidence."""
+"""Contracts for pulse evidence and delayed-solver safety evidence."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ FEED_FORWARD_EVIDENCE = ROOT / "docs/superpowers/experiments/_mpc_feed_forward.j
 
 def _load_module(path: Path, name: str):
     """Resolve experiment modules only while a test is executing."""
-    assert path.is_file(), f"Task 7 experiment is missing: {path}"
+    assert path.is_file(), f"experiment module is missing: {path}"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -46,8 +46,8 @@ def _plant_calibration(plant):
 
 def test_pulse_evidence_pins_the_approved_quantum_frame_and_plant_calibration():
     """The 2 s/20 s point is a fixed measured condition, not a selectable sweep default."""
-    experiment = _load_module(PULSE_EXPERIMENT, "task7_mpc_pulse_allocator")
-    assert PULSE_EVIDENCE.is_file(), f"Task 7 pulse evidence is missing: {PULSE_EVIDENCE}"
+    experiment = _load_module(PULSE_EXPERIMENT, "mpc_pulse_allocator_experiment")
+    assert PULSE_EVIDENCE.is_file(), f"pulse evidence is missing: {PULSE_EVIDENCE}"
     payload = json.loads(PULSE_EVIDENCE.read_text())
 
     assert experiment.PULSE_QUANTUM_S == 2.0
@@ -73,7 +73,7 @@ def test_pulse_evidence_pins_the_approved_quantum_frame_and_plant_calibration():
 
 def test_delayed_solver_evidence_preserves_scheduler_safety_and_single_revision_authority():
     """Slow solves must leave last accepted framed actuation safe and observable."""
-    assert FEED_FORWARD_EVIDENCE.is_file(), f"Task 7 evidence is missing: {FEED_FORWARD_EVIDENCE}"
+    assert FEED_FORWARD_EVIDENCE.is_file(), f"feed-forward evidence is missing: {FEED_FORWARD_EVIDENCE}"
     payload = json.loads(FEED_FORWARD_EVIDENCE.read_text())
     cases = payload["delayed_solver_cases"]
 

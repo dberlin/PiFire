@@ -25,7 +25,7 @@ const PELLET_DB: PelletDbSchema = {
 // listen_app_data, the connect_error guard, the pellet envelope -- covered by
 // packages/pifire-core/tests/liveConnection.test.ts. What is left for the hook
 // is the adapter: subscribe once, map each callback onto its own piece of
-// state, and close the connection on unmount. So the seam mocked here is
+// state, and close the connection on unmount. So what is mocked here is
 // createLiveConnection, not socket.io-client: core imports socket.io-client
 // through its OWN node_modules, a different resolved path than web-react's, so
 // a socket.io-client mock registered from this file never intercepts it.
@@ -62,8 +62,8 @@ afterEach(() => {
 
 // PUBLIC_DEMO is an import.meta.env value baked in at build time, unset in
 // this test build, so FORCE_DEMO is always false here -- only the live-socket
-// branch is reachable. See task-2b22 brief: demo branch left uncovered
-// rather than contorting the module to reach it.
+// branch is reachable. The demo branch is deliberately left uncovered rather
+// than contorting the module to reach it.
 describe("useLiveState (live mode)", () => {
   it("opens one connection to the configured target and hands it all three callbacks", () => {
     const { rerender } = renderHook(() => useLiveState());

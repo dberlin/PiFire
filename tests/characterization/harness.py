@@ -18,12 +18,12 @@ enqueues a validated delta setting `updated=True`. The loop reads that at the
 so post-loop cleanup (auger/igniter off, metrics, monitor.stop_monitor())
 still runs, exactly as it would for any other mode-change request.
 
-Other pitfalls handled here (see task brief):
+Other pitfalls handled here:
   1. Controller logging goes to the operator's `events` / `control` loggers,
      which `create_logger` points at real files at process startup. `make_ctx`
      injects the `characterization` logger into `ControllerContext` instead, so
      a captured run logs where the test can see it and nowhere else. Injection
-     IS the redirection seam -- there is no module global to rebind.
+     is the only redirection point -- there is no module global to rebind.
   2. `Process_Monitor` spawns a NON-DAEMON heartbeat thread and, 30s after a
      missed heartbeat, writes a critical_error and shells out to
      `supervisorctl restart control` -- for real, since `is_real_hw` reads
@@ -46,13 +46,13 @@ import controller.runtime.runner
 import controller.runtime.controller as controller_mod
 
 
-#: --- Pitfall 1 --- The logger every captured run is redirected to. Handed to
+#: Pitfall 1. The logger every captured run is redirected to. Handed to
 #: `ControllerContext` by `make_ctx` below; add a handler to it to read back
 #: what a work cycle logged.
 CAPTURE_LOGGER_NAME = "characterization"
 
 
-# --- Pitfall 2: Process_Monitor. There USED to be an autouse
+# Pitfall 2: Process_Monitor. There USED to be an autouse
 # `_neutralize_process_monitor` fixture in tests/conftest.py that no-oped
 # _heartbeat_check. It was deliberately deleted once stop_monitor() was fixed to
 # actually terminate the thread (`fix(process-mon): stop_monitor terminates the

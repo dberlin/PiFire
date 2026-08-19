@@ -8,11 +8,11 @@ consume. These are read-only and share one handler -- the single piece the
 cookfile and recipe surfaces genuinely have in common.
 
 Harness: flask test_client + the `ds` fixture, the model
-tests/web/test_api_history.py set for JSON endpoints. The plan's own draft
-reached for the playwright `live_server`; that would make every test here --
-including the containment tests in the sibling modules -- SKIP on a machine
-without chromium, which is exactly where a security test must not be silent.
-There is no DOM involved, so there is nothing playwright buys.
+tests/web/test_api_history.py set for JSON endpoints. Deliberately NOT the
+playwright `live_server`: that would make every test here -- including the
+containment tests in the sibling modules -- SKIP on a machine without chromium,
+which is exactly where a security test must not be silent. There is no DOM
+involved, so playwright buys nothing.
 """
 
 import json

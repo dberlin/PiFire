@@ -91,8 +91,8 @@ def test_virtual_median_distinct_value_from_three_inputs():
 
 @pytest.mark.parametrize("module,module_name,values,expected", AGGREGATORS)
 def test_aggregator_sources_probe_from_food_group(module, module_name, values, expected):
-    # Brief's "mixed food/aux probe-location case": the *source* probes being
-    # aggregated live in output_data["food"], not output_data["primary"].
+    # The mixed food/aux probe-location case: the *source* probes being aggregated live in
+    # output_data["food"], not output_data["primary"].
     device_info = _device(module_name, ["Food1", "Food2"])
     probe_info = [_probe("VIRT0", "AggLabel", "Primary")]
     obj = module.ReadProbes(probe_info, device_info, units="F")

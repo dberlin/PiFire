@@ -147,7 +147,7 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
 // ends: every timer write now queues a named delta operation that the server
 // evaluates at drain time against live state (common/control_delta.py), so two
 // timer writes in one cycle compose instead of racing. The form is kept for the
-// two reasons above, which have nothing to do with the write seam.
+// two reasons above, which have nothing to do with how the write is delivered.
 // --------------------------------------------------------------------------
 
 /** Name the ticked flags for the option segment of the start command; 'none'

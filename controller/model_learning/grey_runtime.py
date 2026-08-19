@@ -452,7 +452,7 @@ class GreyLearningRuntime:
         )
 
     def bind_learning_identity(self, session_id, cook_id, role_generation):
-        """Fence Task 7 work to the runner's current cook/configuration identity."""
+        """Fence learning work to the runner's current cook/configuration identity."""
         with self._learning_lifecycle_lock:
             self._learning_session_id = session_id
             self._learning_cook_id = cook_id

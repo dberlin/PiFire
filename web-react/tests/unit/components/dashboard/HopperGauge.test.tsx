@@ -71,12 +71,12 @@ describe("HopperGauge has no controls", () => {
   });
 
   // These two assertions used to be their exact inverse ("offers no link out to
-  // the Flask pellet manager"), from the dashboard slice's decision that
-  // linking out would drop the live socket. That reasoning expired: /pellets is
-  // a React route as of 2026-07-25, reached through the router rather than a
-  // page load, and the human ruled on 2026-07-26 that the link exists because
-  // it exists in Bootstrap (_macro_dash_default.html:360). It is also the only
-  // entry point to the pellet manager -- there is no navbar item for it.
+  // the Flask pellet manager"), because linking out would drop the live socket.
+  // That reasoning expired: /pellets is a React route as of 2026-07-25, reached
+  // through the router rather than a page load, and the human ruled on
+  // 2026-07-26 that the link exists because it exists in Bootstrap
+  // (_macro_dash_default.html:360). It is also the only entry point to the
+  // pellet manager -- there is no navbar item for it.
   it("links to the pellet manager", () => {
     renderHopper(view);
     const link = screen.getByRole("link", { name: "Manager" });

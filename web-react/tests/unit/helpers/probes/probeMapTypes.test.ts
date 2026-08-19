@@ -20,7 +20,7 @@ const WIRE = {
   message: null,
 };
 
-describe("probe module catalog seam", () => {
+describe("probe module catalog wire shape", () => {
   it("carries the two maps the tab needs, keyed alike", () => {
     const catalog: ProbeModuleCatalog = WIRE.data as ProbeModuleCatalog;
     expect(Object.keys(catalog.modules)).toEqual(Object.keys(catalog.requires_install));

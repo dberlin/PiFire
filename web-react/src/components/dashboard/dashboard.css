@@ -488,7 +488,7 @@
    Size tokens.
 
    Every value here is exactly the literal it replaces, so the desktop
-   rendering is unchanged by construction. Task 13's media queries override
+   rendering is unchanged by construction. The media queries below override
    ONLY these names -- which is what makes "1280x720 is untouched" a structural
    property of this stylesheet rather than something to be careful about.
 

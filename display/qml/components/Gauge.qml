@@ -42,8 +42,8 @@ Item {
 
 	// Glow: pulsing translucent disc behind the arc/track. Sized relative to
 	// the gauge radius so it scales with the component instead of the design's
-	// fixed 340px. MultiEffect blur was intentionally not pursued per the task
-	// brief (default to this fallback; do not block implementation on it).
+	// fixed 340px. MultiEffect blur is deliberately not used; this disc is the
+	// accepted fallback.
 	Rectangle {
 		anchors.centerIn: parent
 		width: (g._radius + 30) * 2
@@ -92,9 +92,8 @@ Item {
 	Shape {
 		anchors.fill: parent
 		ShapePath {
-			// QML shape strokes can't take a gradient cleanly; a solid accent
-			// stroke + the glow disc above is the accepted fidelity tradeoff
-			// (see task brief / preview note).
+			// QML shape strokes can't take a gradient cleanly; a solid accent stroke
+			// + the glow disc above is the accepted fidelity tradeoff.
 			strokeColor: g.arcColor
 			strokeWidth: 22
 			fillColor: "transparent"

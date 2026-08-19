@@ -159,7 +159,7 @@ def test_next_build_increments_the_committed_value(manifest):
 
 
 # --------------------------------------------------------------------------
-# Bookmark resolution -- the jj seam
+# Bookmark resolution -- the jj backend
 # --------------------------------------------------------------------------
 
 BOOKMARK_CMD = ("jj", "--no-pager", "log")

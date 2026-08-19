@@ -15,9 +15,8 @@ is always `[]` in these fixtures so `read_json_file_data`'s default
 `unpackassets=True` path (used internally by `read_cookfile`) never touches
 `./static/img/tmp/`.
 
-Three latent bugs were found and are now FIXED here (each test below
-originally pinned the crash/loss via `pytest.raises`/an under-populated
-assertion; each has been flipped to assert the corrected behavior):
+Three latent bugs, all now FIXED. Each test below asserts the corrected
+behavior:
 
 1. HIGH -- `upgrade_cookfile`'s pre-v1.5.0 `graph_data` conversion branch
    (file_mgmt/cookfile.py:266-286) crashed with `KeyError: 'history_page'`
@@ -359,8 +358,7 @@ def test_prepare_chartdata_custom_chart_info_skips_default_template():
 
 
 def test_prepare_chartdata_multiple_primary_probes_all_get_setpoint_data():
-    """FIXED (was LATENT BUG #3, LOW/MEDIUM severity) --
-    file_mgmt/cookfile.py:423-427.
+    """FIXED (was latent bug #3) -- file_mgmt/cookfile.py:423-427.
 
     `for key in probe_mapper["primarysp"]: chart_data[...].append(...)`
     (the trailing `break` was removed) now appends the shared
@@ -787,7 +785,7 @@ def test_read_cookfile_still_rejects_versions_below_the_minimum(ds, tmp_path, ve
 
 
 def test_read_cookfile_corrupt_zip_returns_error_status_instead_of_crashing(ds, tmp_path):
-    """FIXED (was LATENT BUG #2, HIGH severity) -- file_mgmt/cookfile.py:183.
+    """FIXED (was latent bug #2) -- file_mgmt/cookfile.py:183.
 
     `read_json_file_data()` (file_mgmt/common.py) already handles a corrupt
     (non-zip) file gracefully, returning `({}, "Error: ...")`. Previously,
@@ -970,7 +968,7 @@ def _stub_probe_config(_settings_dict):
 
 
 def test_upgrade_cookfile_pre_1_5_0_graph_data_conversion_succeeds_with_real_probe_config(ds, tmp_path):
-    """FIXED (was LATENT BUG #1, HIGH severity) -- file_mgmt/cookfile.py:278.
+    """FIXED (was latent bug #1) -- file_mgmt/cookfile.py:278.
 
     `upgrade_cookfile`'s pre-v1.5.0 `graph_data` conversion branch builds an
     ad-hoc `probe_info` dict and calls `default_probe_config(probe_info)`.

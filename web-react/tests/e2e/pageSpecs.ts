@@ -11,7 +11,7 @@ import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
 // The two viewports the fidelity gate is defined at. 1280x720 is the desktop
 // regression target the dashboard was authored for; 390x844 is the phone the
-// reflow slice introduced. (800x480 -- the grill's own screen -- keeps its own
+// reflow targets. (800x480 -- the grill's own screen -- keeps its own
 // dedicated `panel` project; this gate does not duplicate it.)
 export const DESKTOP = { width: 1280, height: 720 };
 export const PHONE = { width: 390, height: 844 };
@@ -33,8 +33,8 @@ const SHELL = [
 ];
 
 // Every structural rule settings.css owns. /history reuses .pf-settings,
-// .pf-section and .pf-settings-actions, which is why Task 11 has to re-run the
-// history baselines too.
+// .pf-section and .pf-settings-actions, so a change to any of them means
+// re-running the history baselines too.
 const SETTINGS = [
   ".pf-settings",
   ".pf-settings-nav",
@@ -108,15 +108,14 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-dash-probecard",
       ".pf-dash-system",
       ".pf-dash-hopper",
-      // The card is a landmark; the FILL inside it is a separate one because it
-      // is the only element carrying the hopper gradient, and the card cannot
-      // see it. The gradient is new as of the 2026-07-26 colour ruling --
-      // HopperView.color2 was deleted and dashboard.css:997 now derives the
+      // The card is a landmark; the FILL inside it is a separate one because
+      // it is the only element carrying the hopper gradient, and the card
+      // cannot see it. The gradient is new as of the 2026-07-26 colour ruling
+      // -- HopperView.color2 was deleted and dashboard.css:997 now derives the
       // light stop in place with color-mix -- so nothing has ever pinned it.
-      // Task 14 converts dashboard.css, the largest file in the migration;
-      // without this entry a wrong @apply on that rule would reach Task 15's
-      // eyeball as the only cover. `background-image` is in STYLE_PROPS, so the
-      // whole linear-gradient() is compared exactly.
+      // Without this entry a wrong @apply on that rule would have nothing but
+      // a human eyeball covering it. `background-image` is in STYLE_PROPS, so
+      // the whole linear-gradient() is compared exactly.
       ".pf-dash-hopper-fill",
       ".pf-dash-cookrow",
       ".pf-dash-pills",
@@ -515,7 +514,7 @@ PAGE_SPECS.push(
  *  server opens no socket at all -- PelletsPage then renders nothing but its
  *  "Loading pellet database..." branch. So it runs against the APP server and
  *  the live backend, and pellets-fidelity.spec.ts fingerprints the store
- *  before trusting the numbers. See Task 5. */
+ *  before trusting the numbers. */
 export const PELLETS_SPEC: PageSpec = {
   name: "pellets",
   path: "/pellets",

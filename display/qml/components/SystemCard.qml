@@ -6,8 +6,8 @@ import ".."
 // matching backend output. Adapted from the working preview layout in
 // tools/qt_dashboard_preview.qml, with the design's full-fidelity SVG icons
 // (FanIcon / AugerIcon / IgniterIcon) in place of the preview's simplified
-// placeholders. Sized by the caller (DashScreen, Task 15) — only height is
-// implicit (content-driven); width is not bound.
+// placeholders. Sized by the caller (DashScreen) — only height is implicit
+// (content-driven); width is not bound.
 Rectangle {
 	id: card
 	property bool compact: false

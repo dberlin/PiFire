@@ -479,13 +479,12 @@ def test_build_display_configure_failure_falls_back_to_none_in_debug_mode(ds, mo
 
 
 # ---------------------------------------------------------------------------
-# build_display(): import-failure fallback -- LATENT BUGS
+# build_display(): import-failure fallback
 # ---------------------------------------------------------------------------
 
 
 def test_build_display_import_failure_falls_back_to_none_module(ds):
-    """FIXED (was LATENT BUG, controller/runtime/devices.py:54, MEDIUM
-    severity).
+    """FIXED (was a latent bug at controller/runtime/devices.py:54).
 
     When the *configured* display module fails to import, the except
     handler's own fallback used to be:
@@ -614,12 +613,12 @@ def test_build_display_failures_do_not_set_critical_error(ds, monkeypatch):
 
 
 def test_build_display_import_failure_uses_default_display_config_and_rotation(ds, monkeypatch):
-    """FIXED (was LATENT BUG #2, controller/runtime/devices.py:71 and :85,
-    MEDIUM severity, compounded the bug above).
+    """FIXED (was a latent bug at controller/runtime/devices.py:71 and :85,
+    compounding the one above).
 
-    Isolates the failure that used to surface once bug #1 (the
-    "display_none" name) was fixed, by monkeypatching that import to
-    resolve (now via the real "display.none" name). Previously: the except
+    Isolates the failure that only surfaces once the bogus "display_none"
+    import name above is fixed, by monkeypatching that import to resolve (now
+    via the real "display.none" name). Previously: the except
     block never assigned `display_config` / `disp_rotation` as fallback
     values before falling through to the code below it that reads them, so
     execution crashed with UnboundLocalError on `disp_rotation` while

@@ -41,8 +41,8 @@ export function storedAccentName(a: AccentName): string {
  *
  * `queryClient` is passed in rather than imported as the module singleton:
  * this is a plain function, not a hook, but its one caller (Dashboard.tsx) is
- * a component sitting inside the app's QueryClientProvider, and the plan's
- * invariant is that only App.tsx reaches for the singleton directly.
+ * a component sitting inside the app's QueryClientProvider, and only App.tsx
+ * reaches for the singleton directly.
  */
 export async function saveAccent(
   baseUrl: string,

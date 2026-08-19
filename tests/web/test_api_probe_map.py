@@ -113,10 +113,10 @@ def test_apply_writes_live_settings_and_flags_the_controller(ds, client):
     stored = read_settings()["probe_settings"]["probe_map"]
     assert [d["device"] for d in stored["probe_devices"]] == ["VirtDev"]
     assert [p["label"] for p in stored["probe_info"]] == ["Grill"]
-    # The flag the controller acts on (Task 3). save_settings_and_flag_update
-    # QUEUES a named-flag delta (common/app.py:419) rather than overwriting
-    # control:general, so the queue has to be drained before it is visible --
-    # in production that drain is the control loop's own execute_control_writes.
+    # The flag the controller acts on. save_settings_and_flag_update QUEUES a
+    # named-flag delta (common/app.py:419) rather than overwriting
+    # control:general, so the queue has to be drained before it is visible -- in
+    # production that drain is the control loop's own execute_control_writes.
     execute_control_writes()
     assert read_control()["probe_map_update"] is True
 

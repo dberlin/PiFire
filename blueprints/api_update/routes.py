@@ -78,7 +78,7 @@ def _python_exec(settings):
 def _fire(settings, command):
     """Fire a detached updater.py process, ONLY on real hardware.
 
-    Returns (started, error). `os.system` is the single seam tests neutralize;
+    Returns (started, error). `os.system` is the single call tests neutralize;
     nothing else in this module shells out.
 
     Its exit status is CHECKED. The command ends in `&`, so the shell backgrounds

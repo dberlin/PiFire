@@ -360,10 +360,10 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 /** Literals that equal a Qt token value but must NOT become one. Each entry is
  *  a decision, not an exemption to be extended casually. */
 const LITERAL_ALLOWLIST: Record<string, string> = {
-  // historyAdapter.ts moved to packages/pifire-core/src/history/ (task 14 of
-  // the mobile app SDD plan), so it is outside this scan of web-react's own
-  // `src` tree and needs no allowlist entry here any more. Its FALLBACK_COLOR
-  // literal is still pinned to Theme.dim below via a direct file read.
+  // historyAdapter.ts lives in packages/pifire-core/src/history/, outside this
+  // scan of web-react's own `src` tree, so it needs no allowlist entry here.
+  // Its FALLBACK_COLOR literal is still pinned to Theme.dim below via a direct
+  // file read.
   //
   // IgniterIcon's three flame strokes are a fixed gradient (Qt's
   // IgniterIcon.qml hardcodes the same three). The highlight #ff9f43 happens to

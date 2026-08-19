@@ -42,7 +42,7 @@ if BUN is None:
 # currently do -- not a guess. Where they match, the case proves the rules
 # agree. Where they don't, `divergence` records why that is accepted rather
 # than a bug: parse_i2c_bus also has to accept an already-normalized object
-# (Task 1), so it is intentionally more permissive than the wizard's
+# already, so it is intentionally more permissive than the wizard's
 # keystroke-time UX hints.
 CASES = [
     ("basic", {"kind": "basic"}, True, True, None),

@@ -249,7 +249,7 @@ describe("ProbeNotifyModal", () => {
     });
   });
 
-  // Landmine 7: Flask's "Cancel" in this modal is not a close -- it POSTs a wipe
+  // Flask's "Cancel" in this modal is not a close -- it POSTs a wipe
   // of the target AND both limit alerts (dash_default.js:803-831). React's
   // cancel closes and writes nothing; the master switches are how you disable.
   it("cancels on the button and on the scrim, and never submits", async () => {

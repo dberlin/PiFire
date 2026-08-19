@@ -161,13 +161,14 @@ describe("GeneralTab", () => {
     );
   });
 
-  // Ruling 4, 2026-07-26 (docs/superpowers/backlogs/react-migration-backlog.md).
-  // Flask put this field on its Display pane (settings/index.html:1080); the
-  // React app has no Display tab, and General is where it belongs. It is not
-  // decoration: the display process re-reads display.sleep_timeout once a
-  // second (display/qtapp.py's _timeout_fn -> PiFireBackend.TIMEOUT ->
-  // asleep -> ScreenPowerController's `swaymsg output * dpms off`), and the
-  // web-to-display seam is pinned in tests/web/test_api_settings_update.py.
+  // Ruling 4, 2026-07-26
+  // (docs/superpowers/backlogs/react-migration-backlog.md). Flask put this
+  // field on its Display pane (settings/index.html:1080); the React app has no
+  // Display tab, and General is where it belongs. It is not decoration: the
+  // display process re-reads display.sleep_timeout once a second
+  // (display/qtapp.py's _timeout_fn -> PiFireBackend.TIMEOUT -> asleep ->
+  // ScreenPowerController's `swaymsg output * dpms off`), and the
+  // web-to-display contract is pinned in tests/web/test_api_settings_update.py.
   it("renders the screen sleep timeout with the loaded value", () => {
     const context = {
       settings: {

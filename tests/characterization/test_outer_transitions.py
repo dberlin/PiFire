@@ -42,7 +42,7 @@ def build_controller(monkeypatch, *, mode="Stop", settings=None, control_over=No
 
 
 # --------------------------------------------------------------------------
-# Step 1: next_mode() field semantics (gap #9) -- the REAL method, not spied
+# next_mode() field semantics -- the REAL method, not spied
 # --------------------------------------------------------------------------
 
 
@@ -99,7 +99,7 @@ def test_hold_dispatch_self_restart_preserves_the_active_setpoint(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# Step 2: recipe_mode() internal edges (gap #11)
+# recipe_mode() internal edges
 # --------------------------------------------------------------------------
 
 
@@ -219,9 +219,9 @@ def test_recipe_cancel_on_mode_change_leaves_requested_mode(monkeypatch):
 
 
 def test_recipe_missing_file_transitions_to_stop(monkeypatch):
-    # Missing recipe file -> recipe_mode routes to Stop before returning (bug fix,
-    # gotcha #9). Previously it returned () with no mode write, leaving the
-    # controller stuck idling in Recipe forever.
+    # Missing recipe file -> recipe_mode routes to Stop before returning. Without
+    # that write it returns () with no mode change, leaving the controller stuck
+    # idling in Recipe forever.
     c, store = build_controller(monkeypatch, mode="Recipe")
     _install_recipe(monkeypatch, c, store, [_step()], exists=False)
 
@@ -237,8 +237,7 @@ def test_recipe_missing_file_transitions_to_stop(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# Step 3: units_change->Stop (#7), prime-on-startup handshake (#8),
-#         reignite dispatch (#10)
+# units_change->Stop, prime-on-startup handshake, reignite dispatch
 # --------------------------------------------------------------------------
 
 

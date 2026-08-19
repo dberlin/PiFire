@@ -18,7 +18,7 @@ export interface LiveConnectionHandlers {
   onDash(payload: DashSocketPayload): void;
   onPellets(pellets: PelletSocketPayload["pellets"]): void;
   onPhase(phase: ConnectionPhase): void;
-  /** Injection seam for tests. Production passes nothing and gets socket.io. */
+  /** Socket factory override for tests. Production passes nothing and gets socket.io. */
   createSocket?: (url: string) => SocketLike;
 }
 

@@ -1,4 +1,4 @@
-"""Task 11 grey-only checkpoint and durable-authority migration contracts."""
+"""Grey-only checkpoint and durable-authority migration contracts."""
 
 from __future__ import annotations
 

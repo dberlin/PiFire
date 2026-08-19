@@ -4,14 +4,13 @@ import ".."
 import "../components"
 
 // Ember dashboard: header bar + 3-column body (food probes / primary gauge +
-// cook-time + controls / system + duty pills + hopper). Assembles the
-// components built in Tasks 8-14 against the real `backend`. See
-// .superpowers/sdd/task-15-brief.md and tools/qt_dashboard_preview.qml for
-// the verified layout-sizing rules this structure follows: nested Layouts
-// compute their own implicit size from children, which overrides advisory
-// Layout.preferredWidth/Height, so every fixed-size region below is pinned
-// with matching minimum/maximum constraints, and only the gauge card and the
-// hopper card absorb vertical slack via Layout.fillHeight.
+// cook-time + controls / system + duty pills + hopper). Assembles the card
+// components against the real `backend`. See tools/qt_dashboard_preview.qml
+// for the verified layout-sizing rules this structure follows: nested
+// Layouts compute their own implicit size from children, which overrides
+// advisory Layout.preferredWidth/Height, so every fixed-size region below is
+// pinned with matching minimum/maximum constraints, and only the gauge card
+// and the hopper card absorb vertical slack via Layout.fillHeight.
 Item {
 	id: dash
 	// name "" opens the mode-appropriate main menu; a specific name opens that menu.

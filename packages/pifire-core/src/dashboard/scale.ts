@@ -169,12 +169,11 @@ export function probeGrid(count: number, available: number): { columns: number; 
 /**
  * A probe card's type sizes for the column width it was given.
  *
- * A card sizes from its column, never from its own text. Before this existed
- * each card took its intrinsic content width, so a probe named "BRISKET FLAT"
- * rendered wider than one named "PROBE 2" and three probes wrapped into a
- * ragged 2+1. The reading scales down as the row fills, and `probeTemp` is
- * the ceiling: a lone full-width probe is a peer of the hopper, never a
- * second hero competing with the gauge.
+ * A card sizes from its column, never from its own text. Sizing from content
+ * instead makes a probe named "BRISKET FLAT" render wider than one named
+ * "PROBE 2", wrapping three probes into a ragged 2+1. The reading scales down
+ * as the row fills, and `probeTemp` is the ceiling: a lone full-width probe is
+ * a peer of the hopper, never a second hero competing with the gauge.
  */
 export function probeMetrics(
   width: number,

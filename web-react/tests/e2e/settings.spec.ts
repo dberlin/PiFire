@@ -159,15 +159,16 @@ test("invalid settings_update delta is rejected atomically with a dotted-path er
   expect(afterBody.settings?.safety?.maxtemp).toBe(originalMaxtemp);
 });
 
-// NOTE (guards sweep, Task 3): this spec's original vector -- raising
-// min_duty_cycle above the lowest profile duty cycle so PwmSettings._check_profiles
-// rejects the merged tree -- is NO LONGER REACHABLE through the PWM tab. PwmTab.onSave
-// now re-clamps every profile duty_cycle AND startup.pwm_duty_cycle into the new range
-// (ported from blueprints/settings/routes.py:485-495), so that save now succeeds by
-// design. The spec is kept, not deleted, and re-pointed at what the guard actually does;
-// the server-rejection channel itself is still covered by the API-level spec above
-// ("invalid settings_update delta is rejected atomically...") and, at the UI level, by
-// the PwmTab unit test "surfaces a rejected save inline and withholds the success marker".
+// NOTE: this spec's original vector -- raising min_duty_cycle above the lowest
+// profile duty cycle so PwmSettings._check_profiles rejects the merged tree -- is
+// NO LONGER REACHABLE through the PWM tab. PwmTab.onSave now re-clamps every
+// profile duty_cycle AND startup.pwm_duty_cycle into the new range (ported from
+// blueprints/settings/routes.py:485-495), so that save now succeeds by design. The
+// spec is kept, not deleted, and re-pointed at what the guard actually does; the
+// server-rejection channel itself is still covered by the API-level spec above
+// ("invalid settings_update delta is rejected atomically...") and, at the UI level,
+// by the PwmTab unit test "surfaces a rejected save inline and withholds the
+// success marker".
 test("narrowing the duty-cycle range clamps the dependent profiles instead of being rejected", async ({
   page,
 }) => {
@@ -228,7 +229,7 @@ test("narrowing the duty-cycle range clamps the dependent profiles instead of be
   }
 });
 
-// Guards sweep, Task 2 (I5). Flask gates the PWM nav pill on
+// Flask gates the PWM nav pill on
 // settings['platform']['dc_fan'] (settings/index.html:63-65); React showed it
 // unconditionally. The /settings/pwm ROUTE stays registered either way so a
 // bookmarked URL still resolves.
@@ -258,7 +259,7 @@ test("the PWM Fan nav item tracks platform.dc_fan and the route still resolves",
   }
 });
 
-// Guards sweep, Task 3 (I6). This is the CLIENT-side half; it deliberately does
+// The CLIENT-side half of the duty-cycle guard; it deliberately does
 // not collide with the server-rejection spec above, which now proves the clamp.
 test("a min >= max duty cycle is refused client-side without issuing any request", async ({
   page,

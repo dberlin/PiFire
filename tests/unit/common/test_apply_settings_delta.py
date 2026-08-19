@@ -80,9 +80,9 @@ def test_deleting_a_path_that_is_not_there_is_already_satisfied():
 
 
 def test_settings_delta_deletes_a_onesignal_device_end_to_end():
-    """Pins both ends of the seam NotificationsTab's delete-device save
-    crosses: web-react's settingsDelta() builds exactly this envelope shape
-    (M15), and a unit test on the payload alone proves the *shape* is right,
+    """Pins both ends of NotificationsTab's delete-device save: web-react's
+    settingsDelta() builds exactly this envelope shape, and a unit test on the
+    payload alone proves the *shape* is right,
     not that the device is actually gone. This runs the real envelope through
     apply_settings_delta AND a validate_settings_tree round-trip, and checks
     the device is absent while its sibling device and the service's own

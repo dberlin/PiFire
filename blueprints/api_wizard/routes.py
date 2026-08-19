@@ -101,7 +101,7 @@ def _request_contract(model, *, allow_absent=False):
 
 
 def _thermoworks_discover(email, password):
-    """Sync seam over the async ThermoWorks discovery, matching legacy
+    """Synchronous wrapper over the async ThermoWorks discovery, matching legacy
     _wizard_thermoworks_discover (blueprints/wizard/routes.py:162)."""
     return asyncio.run(_thermoworks_discover_impl(email, password))
 

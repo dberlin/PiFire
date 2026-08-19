@@ -42,9 +42,9 @@ interface ProbeCardProps {
   width?: number;
 }
 
-// No accent selector yet, matching GrillGauge.tsx's note: theme.ts's gauge
-// gradient/glow tokens (and, by the same limitation, any per-card accent) are
-// deferred to a later task. Card chrome uses the default (ember) tokens.
+// No accent selector, matching GrillGauge.tsx: theme.ts's gauge gradient/glow
+// tokens are ember-only, so a per-card accent has nothing to resolve against.
+// Card chrome uses the default (ember) tokens.
 const tokens = THEME.ember;
 
 export function ProbeCard({

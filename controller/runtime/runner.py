@@ -1,4 +1,4 @@
-"""Temperature-controller execution seam (PID/MPC/etc).
+"""Temperature-controller execution interface (PID/MPC/etc).
 
 `ControllerRunner` is the abstract interface `HoldMode.on_tick` drives:
 set_target/submit/latest to run the control math, reconfigure() to rebuild the

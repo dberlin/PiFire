@@ -566,7 +566,7 @@ describe("StartupTab", () => {
       expect(setpoint).toHaveAttribute("min", "100");
       expect(setpoint).toHaveAttribute("max", "550");
 
-      // Task 1's blur clamp, seen through a real call site: typing is not
+      // NumberField's blur clamp, through a real call site: typing is not
       // clamped, finishing the edit is.
       fireEvent.change(setpoint, { target: { value: "700" } });
       expect(inputFor("Primary Setpoint")).toHaveValue(700);
@@ -665,11 +665,11 @@ describe("StartupTab", () => {
 
     // Regression: StartupTab hands SettingsFieldErrorsProvider the raw
     // `errors` array, and no field on this tab claims its path through that
-    // context yet (Task 3 wires that up). Without filtering by
-    // CLAIMED_PATHS first, SaveBar's unmatched fallback would repeat every
-    // error a NumberField already renders inline via `error={errorFor(...)}`
-    // below -- distinct wording from "Save failed." so a duplicate is
-    // unambiguous rather than coincidentally matching the summary line.
+    // context. Without filtering by CLAIMED_PATHS first, SaveBar's unmatched
+    // fallback would repeat every error a NumberField already renders inline
+    // via `error={errorFor(...)}` below -- distinct wording from "Save
+    // failed." so a duplicate is unambiguous rather than coincidentally
+    // matching the summary line.
     it("does not repeat a claimed field's error in the save bar", () => {
       useSaveSettingsMock.mockReturnValue({
         save: saveMock,

@@ -21,9 +21,9 @@ const API = ports.pifireUrl.replace("localhost", "127.0.0.1");
 //   - the destructive admin routes are aborted and RECORDED (a stray click
 //     could reach them), asserted empty after each test;
 //   - afterEach force-closes any session and then polls the live control state,
-//     failing the test if the grill is not back in Stop. This is the slice's
-//     own hazard and no other spec covers it: a test that opens a session and
-//     dies mid-way would otherwise leave the operator's grill in Monitor.
+// failing the test if the grill is not back in Stop. This hazard is unique to
+// the tuner and no other spec covers it: a test that opens a session and dies
+// mid-way would otherwise leave the operator's grill in Monitor.
 
 const WRITE_ROUTES = [
   "**/api/admin/system",
@@ -56,10 +56,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.afterEach(async ({ request }) => {
-  //  Force-close whatever this test may have opened, then confirm the grill
-  //  settled back into Stop. This is the slice's own hazard and no other spec
-  //  covers it: a test that opened a session and died mid-way would otherwise
-  //  leave the operator's live grill in Monitor with tuning_mode set.
+  // Force-close whatever this test may have opened, then confirm the grill
+  // settled back into Stop. This hazard is unique to the tuner and no other
+  // spec covers it: a test that opened a session and died mid-way would
+  // otherwise leave the operator's live grill in Monitor with tuning_mode set.
   await request.post(`${API}/api/tuner/session`, { data: { open: false } });
   await expect.poll(async () => (await controlMode(request)).mode, { timeout: 5000 }).toBe("Stop");
   const state = await controlMode(request);

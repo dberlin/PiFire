@@ -98,8 +98,8 @@ test("nothing overflows the page horizontally", async ({ page }) => {
 });
 
 test("the probe temperature stays readable", async ({ page }) => {
-  // Under the old uniform scale this rendered at roughly 20px -- the audit's
-  // headline number. 36px is the floor for the number you read across a garden.
+  // Under the old uniform scale this rendered at roughly 20px. 36px is the
+  // floor for the number you read across a garden.
   //
   // It has to be the EFFECTIVE size. `getComputedStyle().fontSize` reports the
   // authored value and is completely blind to an ancestor's scale(): on the

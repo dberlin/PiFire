@@ -37,7 +37,7 @@ class AdafruitADSDevice:
 
 
 def initialize_ads_probe(owner, device_class, chip_name: str) -> None:
-    """Initialize a probe owner while preserving each public module's device seam."""
+    """Initialize a probe owner while preserving each public module's own device attribute."""
     owner.time_delay = 0.008
     owner.device_info["ports"] = ["ADC0", "ADC1", "ADC2", "ADC3"]
     i2c_bus_addr = int(owner.device_info["config"].get("i2c_bus_addr", "0x48"), 16)

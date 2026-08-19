@@ -274,8 +274,8 @@ describe("AdminPage", () => {
     //  effect inside render()'s own act()), so no wait is needed at all.
     expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
 
-    //  advanceTimersByTimeAsync, not the sync advanceTimersByTime the brief's
-    //  snippet showed: react-query reschedules refetchInterval's next timer
+    // advanceTimersByTimeAsync, not the sync advanceTimersByTime: react-query
+    // reschedules refetchInterval's next timer
     //  only after the in-flight fetch's promise settles, and a synchronous
     //  advance never yields for that microtask, so it fires at most the
     //  first tick and this assertion would pass even with polling turned ON.

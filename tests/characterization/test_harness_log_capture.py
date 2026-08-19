@@ -57,7 +57,7 @@ def test_harness_captures_the_work_cycles_own_logging():
 
 
 def test_the_harness_context_carries_the_capture_logger():
-    """The injected context IS the redirection seam the globals used to be."""
+    """The injected context carries the capture logger the globals once held."""
     ctx, _grill, _notifier = make_ctx(
         base_settings(),
         base_control(mode="Monitor"),

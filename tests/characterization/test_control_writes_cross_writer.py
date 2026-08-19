@@ -1,7 +1,7 @@
 """Two control writers in one control cycle must both survive the drain.
 
-The seam
---------
+How a write lands
+-----------------
 A control delta does not land when it is enqueued. It is applied by the control
 loop in ``execute_control_writes``. ``read_control()`` serves the persisted
 ``control:general`` blob and never the pending queue, so two writers inside one
@@ -502,8 +502,8 @@ def test_a_reset_to_the_ancestor_value_is_now_distinguishable_because_the_writer
 
     This closes the residual for writers that have been CONVERTED. A legacy
     whole-dict writer still cannot express a restore-to-ancestor, which is why
-    the conversion is a call-site change across every writer rather than a seam
-    change.
+    the conversion is a call-site change across every writer rather than a
+    single change in one place.
     """
     assert _command("timer", "start", "600")["result"] == "OK"
     assert _command("timer", "stop")["result"] == "OK"
@@ -514,9 +514,9 @@ def test_a_reset_to_the_ancestor_value_is_now_distinguishable_because_the_writer
     assert control["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
     assert _entry(control, "Timer", "timer")["req"] is False
 
-    # Given a cycle of its own -- the normal case, since the control loop drains
-    # every iteration -- the same pair lands identically. That equality IS the
-    # invariant the delta seam exists to restore.
+    # Given a cycle of its own -- the normal case, since the control loop
+    # drains every iteration -- the same pair lands identically. That equality
+    # IS the invariant queued deltas exist to restore.
     assert _command("timer", "start", "600")["result"] == "OK"
     control_persistence.execute_control_writes()
     assert read_control()["timer"]["end"] == FIXED_NOW + 600

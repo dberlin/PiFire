@@ -1,4 +1,4 @@
-"""REST coverage for /api/pellets -- the pellet inventory manager's HTTP seam.
+"""REST coverage for /api/pellets -- the pellet inventory manager's HTTP surface.
 
 The React pellets page reads the pellet database over the socket
 (`socket_pellet_data`, blueprints/mobile/socket_io.py:174) and writes through
@@ -123,8 +123,8 @@ def test_hopper_check_does_not_clobber_notify_data(live_server, page):
 
     Layer 2 alone is already sufficient: this test passed BEFORE the minimal
     patch landed, because the whole-dict snapshot's notify_data was identical
-    to the ancestor and got reduced away. So this is a regression net for the
-    seam, not a reproducer for a live bug -- do not read a pass here as proof
+    to the ancestor and got reduced away. So this is a regression net, not a
+    reproducer for a live bug -- do not read a pass here as proof
     that layer 1 is load-bearing on its own.
     """
     before = read_control_from_server()["notify_data"]

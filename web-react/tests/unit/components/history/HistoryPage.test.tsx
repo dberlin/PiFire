@@ -23,8 +23,8 @@ rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
 }));
 
 // jsdom has no canvas, so the real uPlot chart is stubbed. The stub records
-// (a) the props it was handed, so the ms -> s conversion is observable at the
-// page seam, and (b) a per-INSTANCE id, so a test can tell a remount (which
+// (a) the props it was handed, so the ms -> s conversion is observable from
+// the page, and (b) a per-INSTANCE id, so a test can tell a remount (which
 // resets uPlot's scales) from a mere re-render.
 rs.mock("../../../../src/components/history/HistoryChart", () => ({
   HistoryChart: ({ times, series }: { times: number[]; series: { label: string }[] }) => {
@@ -441,9 +441,9 @@ describe("HistoryPage — auto refresh", () => {
   it("polls on the auto-refresh cadence when the setting is on (refetchInterval gated by the setting)", async () => {
     // Distinct from "refetches on the interval while autorefresh is on"
     // above: this one drives the tick with a bare `act(() =>
-    // advanceTimersByTime(...))`, the pattern the task brief calls out --
-    // proof that gating refetchInterval on `autoRefresh` (rather than, say,
-    // always polling) is what makes this tick produce a second fetch.
+    // advanceTimersByTime(...))`, proving that gating refetchInterval on
+    // `autoRefresh` (rather than, say, always polling) is what makes this
+    // tick produce a second fetch.
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
     rs.useFakeTimers();
 

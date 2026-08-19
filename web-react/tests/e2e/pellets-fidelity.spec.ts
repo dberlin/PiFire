@@ -115,8 +115,8 @@ for (const viewport of [DESKTOP, PHONE]) {
         // A skip, not a failure. This machine's pellet store is a different
         // shape from the one the reference was captured on, so its boxes are
         // legitimately different and there is nothing to compare. The gate is
-        // silent here BY DESIGN -- which is exactly why Task 15 requires this
-        // test to have RUN, not skipped, on the reviewing machine.
+        // silent here BY DESIGN -- which is why the gate is only meaningful
+        // when this test RAN, rather than skipped, on the reviewing machine.
         test.skip(
           JSON.stringify(want) !== JSON.stringify(fp),
           `pellet store differs from the baseline's: ${JSON.stringify(want)} vs ${JSON.stringify(fp)}. ` +

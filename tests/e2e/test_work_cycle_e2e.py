@@ -5,9 +5,8 @@ These re-run a subset of the golden-master characterization scenarios
 living in a real on-disk SQLite database via `SqliteStore`, instead of the
 hermetic `InMemoryStore`. Everything else stays a fake: grill/probes/distance
 devices, the notifier (`FakeNotifier`), and the clock (`ManualClock`). Only the
-STORE is real -- this is the seam that exercises common.common's live
-SQLite-backed funcs (queued control deltas, metrics replace-last,
-the display queue).
+STORE is real, so these exercise common.common's live SQLite-backed funcs
+(queued control deltas, metrics replace-last, the display queue).
 
 WHY THESE PROVE PARITY: each scenario asserts the exact same outcomes the
 InMemoryStore golden test asserts for the same inputs. If a scenario passes
@@ -22,7 +21,7 @@ display-command assertions here use list form. All other observable state
 (grill calls, notifications, final control mode/flags, metrics) is
 store-independent or JSON-clean and matches the golden values exactly.
 
-SETTINGS ARE SQLITE-BACKED THROUGH THIS SEAM: scenario fixtures are persisted
+SETTINGS ARE SQLITE-BACKED HERE TOO: scenario fixtures are persisted
 directly because their fractional durations intentionally bypass the public
 write validator, while `SqliteStore.read_settings()` still exercises the same
 `common.persistence.runtime` read path as production.

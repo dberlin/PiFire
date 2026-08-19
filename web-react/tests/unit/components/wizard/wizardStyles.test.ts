@@ -78,10 +78,9 @@ describe("wizard stylesheet coverage", () => {
 
   // The wizard's chrome buttons (Back/Next/Finish/Exit) and the probe cards'
   // buttons are the same object family and share ONE rule, which is why that
-  // rule carries both scopes. Moving it to .pf-probes-surface alone -- as an
-  // earlier draft of the plan directed -- would have left every wizard chrome
-  // button as dashboard.css's bare 25px shell, since .pf-probes-surface is on
-  // the probes step only.
+  // rule carries both scopes. Moving it to .pf-probes-surface alone would leave
+  // every wizard chrome button as dashboard.css's bare 25px shell, since
+  // .pf-probes-surface is on the probes step only.
   it("keeps the wizard's own chrome buttons in the shared button rule", () => {
     const css = readFileSync(PROBES_CSS, "utf8");
     expect(css).toContain(".pf-wizard .pf-btn,");

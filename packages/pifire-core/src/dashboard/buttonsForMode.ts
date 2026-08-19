@@ -207,8 +207,8 @@ export function buttonsForMode(dash: DashSocketPayload): ControlButton[] {
   // Smoke and Hold each carry accent only in their own mode, the same way the
   // idle row marks Monitor. Smoke additionally goes inert while smoking: the
   // controller's graph has no Smoke -> Smoke edge, so the press could only ask
-  // for a transition the seam refuses. Hold stays live while holding, because
-  // it opens the setpoint entry rather than commanding a mode.
+  // for a transition the controller refuses. Hold stays live while holding,
+  // because it opens the setpoint entry rather than commanding a mode.
   return [
     {
       label: "Smoke",
