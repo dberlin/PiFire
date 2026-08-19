@@ -5,7 +5,7 @@ import {
   GAUGE_START,
   GAUGE_SWEEP,
   valueAngle,
-} from "../../../src/helpers/gaugeMath";
+} from "../src/gaugeMath";
 
 describe("gauge math", () => {
   it("clamps fraction to [0,1]", () => {

@@ -1,4 +1,4 @@
-import { arcLength, describeArc, polarToCartesian, valueAngle } from "../../helpers/gaugeMath";
+import { arcLength, describeArc, polarToCartesian, valueAngle } from "@pifire/core/gaugeMath";
 
 interface GrillGaugeProps {
   /** Already rounded by deriveView, and already the last real reading when the

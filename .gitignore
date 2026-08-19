@@ -169,3 +169,8 @@ htmlcov/
 .superpowers/
 
 /node_modules/
+
+# TS incremental build cache -- also .gitignore'd per-project (web-react/.gitignore)
+# but bun workspace members under packages/* don't each carry their own, so this
+# generic rule covers them.
+*.tsbuildinfo

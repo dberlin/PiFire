@@ -31,6 +31,7 @@
     "@fontsource/barlow": "^5.3.0",
     "@fontsource/barlow-semi-condensed": "^5.3.0",
     "@melloware/react-logviewer": "6.5.5",
+    "@pifire/core": "workspace:*",
     "@tanstack/react-query": "5.101.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
