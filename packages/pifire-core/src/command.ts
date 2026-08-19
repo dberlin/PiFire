@@ -4,9 +4,9 @@ import type {
   PrimeCommandRequest,
   SystemCommand,
   TimerOptionsPayload,
-} from "@pifire/core/contracts/control";
-import type { CommandResponse } from "@pifire/core/contracts/core";
-import { postControl } from "./notify/notifyApi";
+} from "./contracts/control.gen";
+import type { CommandResponse } from "./contracts/core.gen";
+import { postControl } from "./postControl";
 
 // REST command client using PiFire's command grammar (common/api_commands.py
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
@@ -113,7 +113,7 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-    const body: CommandResponse = await res.json();
+    const body = (await res.json()) as CommandResponse;
     return { ok: body.result === "OK", message: body.message ?? "", data: body.data };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "network error" };

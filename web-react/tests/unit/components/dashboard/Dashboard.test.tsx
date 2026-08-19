@@ -1,3 +1,4 @@
+import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { NotifyUpdate } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import type {
@@ -12,7 +13,6 @@ import userEvent from "@testing-library/user-event";
 import { type ReactElement, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
-import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { createQueryClient } from "../../../../src/helpers/query/queryClient";

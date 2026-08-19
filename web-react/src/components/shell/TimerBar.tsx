@@ -1,7 +1,7 @@
+import type { CommandClient } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { useState } from "react";
 import { useNow } from "../../helpers/clock";
-import type { CommandClient } from "../../helpers/command";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
 import { TimerModal } from "./TimerModal";
 import "./shell.css";

@@ -9,7 +9,7 @@ const setUnitsMock = rs.fn();
 // "./UnitsTab"` above this mock hits the rstest hoisting TDZ (documented in
 // task-2b22-report.md) — import the module under test dynamically after the
 // mock is registered instead.
-rs.mock("../../../../../src/helpers/command", () => ({
+rs.mock("@pifire/core/command", () => ({
   createCommand: () => ({
     setMode: rs.fn(),
     hold: rs.fn(),

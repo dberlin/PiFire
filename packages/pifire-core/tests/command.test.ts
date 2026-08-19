@@ -1,7 +1,7 @@
-import type { TimerOptionsPayload } from "@pifire/core/contracts/control";
-import type { CommandResponse } from "@pifire/core/contracts/core";
+import type { TimerOptionsPayload } from "../src/contracts/control.gen";
+import type { CommandResponse } from "../src/contracts/core.gen";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { buildCommandUrl, createCommand } from "../../../src/helpers/command";
+import { buildCommandUrl, createCommand } from "../src/command";
 
 const OK_COMMAND_RESPONSE = {
   result: "OK",

@@ -1,8 +1,5 @@
-import type {
-  ControlPatchRequest,
-  ControlPatchResponse,
-  NotifyUpdate,
-} from "@pifire/core/contracts/control";
+import type { NotifyUpdate } from "@pifire/core/contracts/control";
+import { postControl } from "@pifire/core/postControl";
 
 // Per-probe notification state lives in control["notify_data"] -- runtime
 // CONTROL state, not settings. Written with a SINGLE POST /api/control
@@ -28,23 +25,7 @@ import type {
 // Verified live (Stop mode, 2026-07-25): a posted edit becomes visible on the
 // next read after ~110 ms -- it is queued, not immediate.
 
-/** POST a minimal control patch. Keep the patch to the keys you actually own:
- *  the server converts it to validated named delta operations, so unrelated
- *  control-loop updates remain untouched when the queue drains. */
-export async function postControl(baseUrl: string, patch: ControlPatchRequest): Promise<void> {
-  const res = await fetch(`${baseUrl}/api/control`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(`POST /api/control failed: HTTP ${res.status}`);
-  // This endpoint answers { result: "success" } with HTTP 201 -- lowercase, NOT
-  // the "OK" that common/app.py's api_response envelope uses everywhere else
-  // (blueprints/api/routes.py:211). Do NOT route this through command.ts's
-  // post(); it tests result === "OK" and would report every save as a failure.
-  const body: ControlPatchResponse = await res.json();
-  if (body.result !== "success") throw new Error(body.message ?? "control write rejected");
-}
+export { postControl };
 
 export function postNotifyUpdates(baseUrl: string, updates: NotifyUpdate[]): Promise<void> {
   return postControl(baseUrl, { notify_updates: updates });

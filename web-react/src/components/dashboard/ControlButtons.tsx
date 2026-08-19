@@ -1,6 +1,6 @@
+import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { useState } from "react";
-import type { CommandClient, CommandResult } from "../../helpers/command";
 import {
   type ButtonAction,
   buttonsForMode,

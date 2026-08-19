@@ -1,9 +1,9 @@
+import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
-import type { CommandClient, CommandResult } from "../../../../src/helpers/command";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { useShellState } from "../../../../src/helpers/shellContext";

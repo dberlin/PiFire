@@ -1,7 +1,7 @@
+import { createCommand } from "@pifire/core/command";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useState } from "react";
 import { useOutletContext, useRevalidator } from "react-router";
-import { createCommand } from "../../../helpers/command";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";

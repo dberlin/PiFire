@@ -1,9 +1,9 @@
+import type { CommandClient } from "@pifire/core/command";
 import type { DashSocketPayload, ProbeDataPayload } from "@pifire/core/contracts/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useState } from "react";
 import { useNavigate } from "react-router";
 import { useNow } from "../../helpers/clock";
-import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";

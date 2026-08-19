@@ -1,6 +1,6 @@
+import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { ManualOutput } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
-import type { CommandClient, CommandResult } from "../command";
 
 export type ButtonAction =
   | { type: "command"; run(c: CommandClient): Promise<CommandResult> }
