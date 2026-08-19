@@ -1,18 +1,13 @@
 appId: org.dberlin.pifire.mobile
 name: First run, connect, and walk every tab
 ---
-# Walks the path a person actually takes on first launch. Written this way
-# because three separate crashes shipped past a suite that only ever rendered
-# components in isolation with their providers supplied by hand:
-#   - launching with no stored host mounted the dashboard before a connection
-#     existed, and the dashboard throws without one;
-#   - tapping Connect navigated into the same screen with the same result;
-#   - guarding the routes then left Connect unable to reach anything at all.
-# Each was invisible until someone opened the app and pressed the button, so
-# this flow presses the buttons.
+# Covers first launch with no stored host, connecting, and reaching every tab.
+# Unit tests render components with their providers supplied directly, so they
+# cannot detect a provider the running app fails to supply; only launching the
+# app does.
 #
 # No grill is expected to answer. "Unreachable" is a correct outcome here; a
-# crash or a dead button is not.
+# crash or a button that does nothing is not.
 
 - launchApp:
     clearState: true
@@ -46,9 +41,9 @@ name: First run, connect, and walk every tab
 - assertVisible: ".*Events.*tab.*"
 - assertVisible: ".*Preferences.*tab.*"
 
-# Each tab is opened to prove it mounts without throwing. The tab bar staying
-# visible afterwards is the evidence: a screen that crashed on mount would
-# take the app down with it.
+# Opening each tab proves it mounts without throwing: a screen that threw on
+# mount would take the app down, so the tab bar still being visible afterwards
+# is the evidence.
 - tapOn: ".*History.*tab.*"
 - extendedWaitUntil:
     visible: ".*Dashboard.*tab.*"
