@@ -45,50 +45,62 @@ export function alertsFor(previous: DashSocketPayload | null, next: DashSocketPa
   }
 
   // Probe target reached: edge-triggered on CROSSING into "at or past
-  // target", not on being there. A probe sitting at its target for an hour
-  // must alert once, not on every payload -- so this compares the previous
-  // payload's own at-target state for the same probe, not just the current
-  // one.
+  // target", not on being there.
+  //
+  // This must be evaluated against the PREVIOUS payload's armed target, not
+  // the next payload's. notify/notifications.py's check_notify (~lines
+  // 105-115) fires the server's own "Probe_Temp_Achieved" notification and,
+  // in the SAME pass, clears the target it just fired for: sets
+  // control["notify_data"][index]["req"] = False and ["target"] = 0.
+  // blueprints/mobile/socket_io.py (~lines 872-876) maps that straight into
+  // the probe's targetReq/target fields. So the very first dash payload that
+  // reports temp >= target already carries targetReq: false and target: 0 --
+  // requiring the NEXT payload to still be armed (an earlier version of this
+  // function did) skips exactly the payload that should alert, and would
+  // never fire against a real grill. Requiring only that the PREVIOUS
+  // payload was armed and below target is what a probe sitting at its target
+  // for an hour still alerts once for: once the server clears the flag,
+  // every later payload's `before` is unarmed and the condition below is
+  // false.
   const previousByLabel = new Map(previous.foodProbes.map((p) => [p.label, p]));
-  for (const probe of next.foodProbes) {
-    if (!probe.targetReq || probe.target <= 0) {
+  for (const nextProbe of next.foodProbes) {
+    const before = previousByLabel.get(nextProbe.label);
+    if (before === undefined || !before.targetReq || before.target <= 0) {
       continue;
     }
-    if (probe.temp === null) {
-      // The contract types this nullable; there is no temperature to compare
-      // against a target without one.
+    if (before.temp === null || nextProbe.temp === null) {
+      // The contract types this nullable; there is no temperature to
+      // compare against a target without one.
       continue;
     }
-    const before = previousByLabel.get(probe.label);
-    const wasAtTarget =
-      before !== undefined &&
-      before.targetReq &&
-      before.target > 0 &&
-      before.temp !== null &&
-      before.temp >= before.target;
-    const isAtTarget = probe.temp >= probe.target;
-    if (isAtTarget && !wasAtTarget) {
+    if (before.temp < before.target && nextProbe.temp >= before.target) {
       alerts.push({
-        // Keyed to the target value too: if the target changes after this
-        // fires (armed again for a different temp), that is a genuinely new
-        // threshold to cross, not a repeat of the same event.
-        id: `probe-target:${probe.label}:${probe.target}`,
-        title: `${probe.title} reached target`,
-        body: `${probe.title} is at ${probe.temp}°, its ${probe.target}° target.`,
+        // Keyed to the armed target value too: a probe re-armed for a
+        // different temp after this fires is a genuinely new threshold to
+        // cross, not a repeat of the same event.
+        id: `probe-target:${before.label}:${before.target}`,
+        title: `${nextProbe.title} reached target`,
+        body: `${nextProbe.title} is at ${nextProbe.temp}°, its ${before.target}° target.`,
       });
     }
   }
 
   // Timer expiry. The control process decides a timer has expired by
-  // comparing control.timer.end against its own clock (see
-  // common/api_commands.py's docstring above _TIMER_EXPIRY_OPTIONS) and, once
-  // it fires the timer's shutdown/keep_warm action, resets control["timer"]
-  // back to the idle shape common/defaults.py seeds it with -- start, paused
-  // and end all 0 (common/defaults.py:564). A transition from an active
-  // countdown (end > 0) to that cleared state is the signal this side can
-  // observe. The id carries the specific end time so a new timer that
-  // happens to finish at the same instant on a later payload cannot be
-  // mistaken for a repeat of this one.
+  // comparing control.timer.end against its own clock and, once it fires the
+  // timer's shutdown/keep_warm action, resets control["timer"] back to the
+  // idle shape common/defaults.py seeds it with -- start, paused and end all
+  // 0 (common/defaults.py:564). See controller/runtime/controller.py:315 and
+  // notify/notifications.py:124 for where that clock comparison and reset
+  // actually happen (NOT common/api_commands.py's _TIMER_EXPIRY_OPTIONS
+  // docstring, which only documents the expiry-flag names a URL segment
+  // accepts). A transition from an active countdown (end > 0) to that
+  // cleared state is the signal this side can observe. The id carries the
+  // specific end time, so two payloads reporting a clear for the SAME end
+  // time collapse into one id -- correct for a reconnect replaying the same
+  // cleared state, but it also means a new timer that happened to end at
+  // that exact same epoch second would collide with the old one and not
+  // re-alert. That is an accepted, exceedingly unlikely edge case, not a
+  // guard against it.
   //
   // Known imprecision: @pifire/core's command.ts documents timerStop() as
   // ALSO clearing timer.end straight to 0 (verified against

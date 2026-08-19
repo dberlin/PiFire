@@ -31,6 +31,24 @@ function withError(dash: DashSocketPayload, code: string): DashSocketPayload {
   return clone;
 }
 
+// Models what the server ACTUALLY sends on the payload that reports a probe
+// crossing its target: notify/notifications.py's check_notify (~lines
+// 105-115) fires the notification and, in the same pass, clears
+// notify_data[index]["req"]/["target"] back to False/0; blueprints/mobile/
+// socket_io.py (~lines 872-876) maps that straight into the probe's
+// targetReq/target fields. So the crossing payload itself is already
+// unarmed -- withProbeTemp's fixture (which leaves targetReq true forever)
+// cannot produce this shape, and alertsFor must not require the NEXT
+// payload to still be armed.
+function withProbeCrossingAndCleared(dash: DashSocketPayload, name: string, temp: number): DashSocketPayload {
+  const clone = withProbeTemp(dash, name, temp);
+  const probe = clone.foodProbes.find((p) => p.label === name);
+  if (!probe) throw new Error(`withProbeCrossingAndCleared: no probe named ${name}`);
+  probe.targetReq = false;
+  probe.target = 0;
+  return clone;
+}
+
 it("alerts once when a probe reaches its target", () => {
   const before = withProbeTemp(FIXTURE_DASH, "Brisket", 200);
   const after = withProbeTemp(before, "Brisket", 204);
@@ -62,6 +80,24 @@ it("raises nothing on a reconnect that replays an identical payload", () => {
   // Same object twice: exactly what a reconnect that redelivers state already
   // seen looks like from alertsFor's point of view.
   expect(alertsFor(busy, busy)).toEqual([]);
+});
+
+it("alerts on the real server transition: crossing payload already carries targetReq:false and target:0", () => {
+  const before = withProbeTemp(FIXTURE_DASH, "Brisket", 200); // armed, below target
+  const crossed = withProbeCrossingAndCleared(before, "Brisket", 204); // server already cleared it
+  const alerts = alertsFor(before, crossed);
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0].title).toMatch(/Brisket/);
+});
+
+it("does not re-alert on the payload after the server clears targetReq/target", () => {
+  const before = withProbeTemp(FIXTURE_DASH, "Brisket", 200);
+  const cleared = withProbeCrossingAndCleared(before, "Brisket", 204);
+  // A further payload, still hot, with the clear already in effect: `before`
+  // for this comparison is `cleared`, whose targetReq is false, so nothing
+  // should fire even though the temperature is still at/above the old target.
+  const further = withProbeTemp(cleared, "Brisket", 210);
+  expect(alertsFor(cleared, further)).toEqual([]);
 });
 
 it("re-arms after a probe dips below target and reaches it again", () => {
