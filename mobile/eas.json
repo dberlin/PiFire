@@ -13,6 +13,12 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "simulator": {
+      "extends": "preview",
+      "ios": {
+        "simulator": true
+      }
     }
   }
 }
