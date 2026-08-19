@@ -8,6 +8,9 @@ This is a large fork of PiFire, adding support for lots of new things, including
 - Automatic online learning for MPC and PID-SP so they automatically adapt to your grill as you cook
 - a QT quick based UI with nice GPU based animations and higher resolution/cleaner display
 - a react based Web UI that mirrors the QT quick UI on the web
+- a native Expo/React Native mobile app (`mobile/`) for iOS/Android, sharing
+  its contract types, command grammar, and live-connection logic with the
+  React Web UI via the `@pifire/core` package
 - Lots more temperature probes, include thermoworks RFX, MAX31856
 - Support for EMC2101/2301 based fan controllers for PWM
 - Support for an RP2350 based I2C/PWM board (firmware in a separate project)
@@ -73,6 +76,9 @@ Just as with the PiSmoker project, I had a few goals in mind. I also wanted to h
   - VL53L0X, VL53L4CD, or VL53L1X Time of Flight Sensor (recommended) - installed via Adafruit's CircuitPython libraries
   - HCSR04 Ultrasonic Sensor
 - Socket IO for Android Application Support _(GitHub User [@weberbox](https://github.com/weberbox) has made a Android client app under development here: [https://github.com/weberbox/PiFire-Android](https://github.com/weberbox/PiFire-Android))_
+- Native mobile app (`mobile/`, Expo/React Native) — connect to a grill on
+  your LAN, live dashboard, history, and local push notifications for
+  probe/timer/error events. See `mobile/README.md`.
 - Recipes / Recipe Mode - Integrated recipe creation and a new mode for developing a recipe 'program' that will control the grill for you and follow the recipe that was programmed.
 - Lid open detection during hold mode to pause the controller and prevent overshoots.
 - ...And much more!

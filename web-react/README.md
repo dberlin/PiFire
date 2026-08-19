@@ -9,12 +9,19 @@ This spike is the highest-signal slice — it de-risks the two hard problems:
 1. **The data/command contract** — it binds to PiFire's *existing* API (no backend
    change) with a read/write split: `listen_app_data` → `socket_dash_data` (SocketIO)
    for live data, and the REST command grammar `POST /api/set|cmd/…` → `process_command`
-   → validated control deltas for commands. See `src/helpers/useDashData.ts`,
-   `src/helpers/command.ts`, `blueprints/mobile/socket_io.py`, and `common/api_commands.py`.
+   → validated control deltas for commands. The connection and command-building
+   logic that implements this now live in `@pifire/core` (`liveConnection.ts`,
+   `command.ts`) — a platform-free package shared with `mobile/`, the native
+   Expo app — not in `web-react/src/helpers/` directly. See
+   `packages/pifire-core/src/liveConnection.ts`,
+   `packages/pifire-core/src/command.ts`, `blueprints/mobile/socket_io.py`,
+   and `common/api_commands.py`.
 2. **Animation fidelity** — the signature **270° gauge** (`src/components/dashboard/GrillGauge.tsx`)
    with value-arc easing (250 ms OutCubic), pulsing glow, and setpoint marker,
    plus the accent-theme token system (`src/theme.css`, ported from
-   `display/qml/Theme.qml`; Ember/Ice/Crimson switchable live).
+   `display/qml/Theme.qml`; Ember/Ice/Crimson switchable live). The gauge's
+   geometry math is likewise shared via `@pifire/core/gaugeMath`, reused by
+   `mobile/`'s own gauge component.
 
 Scope of the spike: DashScreen **center column only** (gauge + control panel +
 one food-probe line). Deferred: food-probe column, right column, menus, keypads,
@@ -50,11 +57,23 @@ splash/sleep, responsive breakpoints — see the plan.
 
 ## Run
 
-Uses [bun](https://bun.sh) as the package manager / runner.
+This is part of a bun workspace (`workspaces: ["web-react", "packages/*",
+"mobile"]` in the repo-root `package.json`) that also contains `mobile/`
+(the native Expo app) and `packages/pifire-core` (the shared, platform-free
+package both UIs are built on — contract types, the REST command grammar,
+the SocketIO live connection, gauge geometry, and dashboard-derivation
+logic). `bun install` therefore runs from the **repository root**, not from
+`web-react/` — there is exactly one lockfile, at the root:
+
+```bash
+cd /path/to/PiFire   # repo root
+bun install
+```
+
+Then, from `web-react/`:
 
 ```bash
 cd web-react
-bun install
 bun run demo       # http://localhost:5173  — LIVE test data, no Pi needed
 bun run dev        # connects to a real PiFire (see PUBLIC_PIFIRE_URL)
 bun run test       # unit tests (rstest)
