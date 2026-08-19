@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { demoDashAt } from "../../../src/helpers/demoData";
+import { demoDashAt } from "../src/demoData";
 
 // A real probe reports null when it has no reading; the simulator is not a
 // probe and must always produce one, so this asserts that rather than casting

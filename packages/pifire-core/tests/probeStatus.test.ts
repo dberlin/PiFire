@@ -1,6 +1,6 @@
-import type { ProbeStatusPayload } from "@pifire/core/contracts/core";
+import type { ProbeStatusPayload } from "../src/contracts/core.gen";
 import { describe, expect, it } from "@rstest/core";
-import { batteryBadge, connectionBadge } from "../../../../src/helpers/dashboard/probeStatus";
+import { batteryBadge, connectionBadge } from "../src/dashboard/probeStatus";
 
 describe("connectionBadge", () => {
   it("is null when the probe has no `connected` key at all", () => {

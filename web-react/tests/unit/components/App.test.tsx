@@ -1,9 +1,9 @@
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { RouteObject } from "react-router";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 import { queryClient } from "../../../src/helpers/query/queryClient";
 import { SETTINGS_TABS } from "../../../src/helpers/settings/settingsTabs";
 import { testQueryClient } from "../test-utils";

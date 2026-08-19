@@ -1,11 +1,11 @@
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { describe, expect, it } from "@rstest/core";
 import {
   lidCountdown,
   modeCountdown,
   recipeLabel,
 } from "../../../../src/helpers/dashboard/countdowns";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 
 const NOW = 1_700_000_000;
 

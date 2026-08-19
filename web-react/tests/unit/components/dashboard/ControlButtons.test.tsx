@@ -1,10 +1,10 @@
 import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ControlButtons } from "../../../../src/components/dashboard/ControlButtons";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 
 const OK: CommandResult = { ok: true, message: "" };
 const at = (mode: string, over: Partial<DashSocketPayload> = {}): DashSocketPayload => ({

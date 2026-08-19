@@ -1,7 +1,7 @@
-import type { DashSocketPayload, ProbeDataPayload } from "@pifire/core/contracts/core";
+import type { DashSocketPayload, ProbeDataPayload } from "../src/contracts/core.gen";
 import { describe, expect, it } from "@rstest/core";
-import { deriveView, staleLabel } from "../../../../src/helpers/dashboard/deriveView";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
+import { deriveView, staleLabel } from "../src/dashboard/deriveView";
+import { FIXTURE_DASH } from "../src/fixture";
 
 // probeCard()'s existing fields (targetStr / tgtColor / barPct / barColor) are
 // covered through components/dashboard/ProbeCard.test.tsx, which renders them.

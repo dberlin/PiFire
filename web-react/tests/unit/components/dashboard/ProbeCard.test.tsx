@@ -1,9 +1,9 @@
+import { deriveView, type ProbeCardView } from "@pifire/core/dashboard/deriveView";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProbeCard } from "../../../../src/components/dashboard/ProbeCard";
-import { deriveView, type ProbeCardView } from "../../../../src/helpers/dashboard/deriveView";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 
 afterEach(cleanup);
 

@@ -1,9 +1,9 @@
+import { deriveView, type HopperView } from "@pifire/core/dashboard/deriveView";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { HopperGauge } from "../../../../src/components/dashboard/HopperGauge";
-import { deriveView, type HopperView } from "../../../../src/helpers/dashboard/deriveView";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 
 afterEach(cleanup);
 

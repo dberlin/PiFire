@@ -1,12 +1,12 @@
 import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
-import { useState } from "react";
 import {
   type ButtonAction,
   buttonsForMode,
   type ControlButton,
   type MenuItem,
-} from "../../helpers/dashboard/buttonsForMode";
+} from "@pifire/core/dashboard/buttonsForMode";
+import { useState } from "react";
 import { applySettings } from "../../helpers/settings/settingsApi";
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmAction } from "./ConfirmAction";

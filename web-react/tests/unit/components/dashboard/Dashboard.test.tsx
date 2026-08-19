@@ -6,6 +6,7 @@ import type {
   ModelEvidenceStatus,
   PidSpLearningReport,
 } from "@pifire/core/contracts/learning";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -13,7 +14,6 @@ import userEvent from "@testing-library/user-event";
 import { type ReactElement, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { createQueryClient } from "../../../../src/helpers/query/queryClient";
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {

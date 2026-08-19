@@ -1,8 +1,8 @@
-import type { CommandClient, CommandResult } from "@pifire/core/command";
-import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type { CommandClient, CommandResult } from "../src/command";
+import type { DashSocketPayload } from "../src/contracts/core.gen";
 import { describe, expect, it, rs } from "@rstest/core";
-import { buttonsForMode } from "../../../../src/helpers/dashboard/buttonsForMode";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
+import { buttonsForMode } from "../src/dashboard/buttonsForMode";
+import { FIXTURE_DASH } from "../src/fixture";
 
 const OK: CommandResult = { ok: true, message: "" };
 

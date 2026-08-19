@@ -1,5 +1,5 @@
+import { fmtDuration } from "@pifire/core/dashboard/deriveView";
 import { describe, expect, it } from "@rstest/core";
-import { fmtDuration } from "../../../../src/helpers/dashboard/deriveView";
 
 describe("fmtDuration", () => {
   it("formats zero as mm:ss", () => {

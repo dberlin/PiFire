@@ -1,4 +1,4 @@
-import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type { DashSocketPayload } from "./contracts/core.gen";
 import { FIXTURE_DASH } from "./fixture";
 
 // Live demo simulator: produces an evolving LiveState so the UI animates without

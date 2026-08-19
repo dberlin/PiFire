@@ -1,10 +1,10 @@
 import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { WizardState } from "@pifire/core/contracts/wizard";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
-import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 // The module-singleton client, NOT testQueryClient(): WizardShell's exit
 // handler invalidates settingsRoot on that exact singleton (the same one
 // useSaveSettings.ts writes through -- see useSaveSettings.test.tsx for the

@@ -1,6 +1,6 @@
+import type { HopperView } from "@pifire/core/dashboard/deriveView";
 import type { CSSProperties } from "react";
 import { Link } from "react-router";
-import type { HopperView } from "../../helpers/dashboard/deriveView";
 
 // Vertical pellet-hopper level with a subtle pellet-texture overlay; color and
 // caption escalate as it drains (green -> amber -> red / REFILL PELLETS).

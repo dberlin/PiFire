@@ -1,5 +1,6 @@
 import type { CommandClient } from "@pifire/core/command";
 import type { DashSocketPayload, ProbeDataPayload } from "@pifire/core/contracts/core";
+import { deriveView, type PillView, reading } from "@pifire/core/dashboard/deriveView";
 import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useState } from "react";
 import { useNavigate } from "react-router";
@@ -7,7 +8,6 @@ import { useNow } from "../../helpers/clock";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
-import { deriveView, type PillView, reading } from "../../helpers/dashboard/deriveView";
 import { useFitScale } from "../../helpers/dashboard/hooks";
 import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
 import { saveAccent } from "../../helpers/settings/accent";

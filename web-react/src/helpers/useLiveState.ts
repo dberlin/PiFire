@@ -2,10 +2,10 @@ import { type CommandClient, createCommand } from "@pifire/core/command";
 import type { PelletSocketPayload } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { deriveControlAlive } from "@pifire/core/dashboard/health";
+import { demoDashAt } from "@pifire/core/demoData";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { type ConnectionPhase, createLiveConnection } from "@pifire/core/liveConnection";
 import { useEffect, useMemo, useState } from "react";
-import { demoDashAt } from "./demoData";
-import { FIXTURE_DASH } from "./fixture";
 
 export type { ConnectionPhase };
 

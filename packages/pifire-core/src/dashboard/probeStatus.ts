@@ -1,4 +1,4 @@
-import type { ProbeStatusPayload } from "@pifire/core/contracts/core";
+import type { ProbeStatusPayload } from "../contracts/core.gen";
 
 // The two per-probe badges the Flask card carries and this port declared in its
 // types but never read: link state and battery level

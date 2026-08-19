@@ -1,6 +1,6 @@
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { describe, expect, it } from "@rstest/core";
-import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 
 const CONTRACT_DASH: DashSocketPayload = FIXTURE_DASH;
 

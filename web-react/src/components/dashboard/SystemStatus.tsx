@@ -1,5 +1,5 @@
+import { augerRunStroke, type OutputView } from "@pifire/core/dashboard/deriveView";
 import type { CSSProperties, ReactNode } from "react";
-import { augerRunStroke, type OutputView } from "../../helpers/dashboard/deriveView";
 
 // Right-column "System" card: fan / auger / igniter, each with a hand-drawn SVG
 // that animates only while that output is on (and animation is enabled).
