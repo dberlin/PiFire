@@ -137,7 +137,10 @@ only zeroconf code in the repository (`notify/wled_discovery.py`) is a client
 that finds WLED devices; nothing publishes a PiFire service to browse for. The
 app therefore defaults its host field to `pifire.local` and relies on the
 operating system resolving the hostname avahi publishes on Raspberry Pi OS,
-which is what a browser already does. Adding a real advertised service would be
+which is what a browser already does. **No port is appended**: an installed
+grill is nginx-fronted on 80/443 proxying to gunicorn on 8000, so
+`http://pifire.local` is the address that works. Port 5000 is only the manual
+development invocation, and an explicitly typed port is always preserved. Adding a real advertised service would be
 a backend change and is out of scope.
 
 ## Build and distribution

@@ -985,12 +985,18 @@ and the OS resolves the hostname avahi publishes on Raspberry Pi OS.
 ```ts
 import { normalizeHost } from "../src/host";
 
-it("adds the default scheme and port to a bare host", () => {
-  expect(normalizeHost("pifire.local")).toBe("http://pifire.local:5000");
+it("adds the default scheme to a bare host and no port", () => {
+  // An installed PiFire answers on nginx's port 80, not gunicorn's internal
+  // 8000 and not the dev-only 5000 -- so the default must add no port at all.
+  expect(normalizeHost("pifire.local")).toBe("http://pifire.local");
 });
 
 it("keeps an explicit scheme and port", () => {
   expect(normalizeHost("https://grill.example:8443")).toBe("https://grill.example:8443");
+});
+
+it("keeps an explicit dev port", () => {
+  expect(normalizeHost("pifire.local:5000")).toBe("http://pifire.local:5000");
 });
 
 it("strips a trailing slash so the API base never doubles it", () => {
@@ -1026,7 +1032,7 @@ Expected: FAIL — cannot resolve `../src/host`.
 
 - [ ] **Step 3: Implement `mobile/src/host.ts`**
 
-`normalizeHost` as specified above; port 5000 is the default because that is what `gunicorn` binds in `auto-install/supervisor/webapp.conf`. `loadHosts`/`rememberHost` wrap AsyncStorage under the key `pifire.hosts`, storing a JSON array, most-recent first, deduplicated, capped at 5.
+`normalizeHost` as specified above. **It adds no port by default.** An installed PiFire is nginx-fronted: `auto-install/nginx/pifire.nginx` listens on 80 and 443 and proxies to `127.0.0.1:8000`, where `auto-install/supervisor/webapp.conf` binds gunicorn, and `install-debian.sh` installs nginx as part of a standard install. So a grill answers on the scheme's default port and `http://pifire.local` is what reaches it. Port 5000 appears only in the manual dev invocation documented in `web-react/README.md`; a developer running that types the port explicitly, and an explicit port is always preserved. `loadHosts`/`rememberHost` wrap AsyncStorage under the key `pifire.hosts`, storing a JSON array, most-recent first, deduplicated, capped at 5.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
