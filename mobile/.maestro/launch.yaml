@@ -1,0 +1,32 @@
+appId: org.dberlin.pifire.mobile
+name: Launches without crashing and asks for a grill
+---
+# The regression this exists for: the app died on every launch with
+#   Unhandled JS Exception: Error: useLiveContext must be used within the
+#   connected app shell
+# because RootLayout mounted routes while the stored host was still being
+# read, and "/" is the dashboard, which requires a live connection context.
+#
+# Nothing in the jest suite could catch that: every unit test renders one
+# component with its providers supplied by hand, which by construction cannot
+# notice a provider the app itself fails to supply. Only launching the real
+# app can, which is what this does.
+
+- launchApp:
+    clearState: true          # first-run: no stored host, the crashing path
+
+# Surviving to the Connect screen proves three things at once: the bundle
+# loaded, the first render completed, and the redirect to /connect happened
+# without the dashboard mounting on the way.
+- assertVisible: "Connect"
+
+# The host field defaults to pifire.local. No port: an installed PiFire is
+# nginx-fronted on 80, and 5000 is only the manual dev invocation.
+- assertVisible:
+    text: ".*pifire\\.local.*"
+
+# Still alive a few seconds in -- catches a crash that arrives just after the
+# first paint rather than during it.
+- extendedWaitUntil:
+    visible: "Connect"
+    timeout: 5000
