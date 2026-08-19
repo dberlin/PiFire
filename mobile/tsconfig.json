@@ -1,6 +1,15 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // Without this, tsc only picks up @types/jest's ambient `namespace
+    // jest {...}` augmentation and not its `declare var jest: Jest`, so
+    // every bare `jest`/`it`/`expect` in tests fails with "cannot use
+    // namespace 'jest' as a value" / "cannot find name". This does not
+    // affect normal imports (e.g. @types/react): those are pulled in via
+    // the files that `import` them regardless of this list -- it only
+    // restricts *implicit*, unimported ambient type packages, which here
+    // was only ever meant to be jest's.
+    "types": ["jest"]
   }
 }
