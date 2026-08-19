@@ -1,0 +1,232 @@
+
+generated/
+!/native/generated/
+!/native/generated/**
+
+# acados build, FetchContent, generation transaction, and runtime publication state
+/build/
+/cmake-build-*/
+/native/.generated-stage-*/
+/native/.acados-exchange-probe-*/
+/controller/_native/
+
+*.pyc
+
+control.err.log
+
+docs/restricted/
+
+local/
+
+settings.json
+# ...but not the committed e2e fixture of the same name. The rule above has no
+# leading slash, so it matches at every depth, and the captured GET /api/settings
+# body would silently never be committed -- leaving the fidelity gate stubbing
+# from a file that exists only on the machine that captured it.
+!web-react/tests/e2e/fixtures/settings.json
+
+templates/backups/
+
+test-startup.json
+
+test-working.json
+
+.vs/
+
+.vscode/
+
+.idea/
+
+venv/
+.venv
+node_modules
+
+*.code-workspace
+
+test.json
+
+*.bak
+
+*.bak2
+
+pelletdb.json
+
+static/js/backups/
+
+/history/
+
+static/img/tmp/
+
+recipes/recipe/
+
+*.log
+
+backups/
+
+bin/
+settings-v1.8.0.json
+
+include/
+!/native/include/
+
+lib/
+
+share/
+
+lib64
+
+pyvenv.cfg
+
+root-control.sh
+
+venv-desktop.sh
+
+venv-laptop.sh
+
+dt.sh
+
+lt.sh
+
+pip_list.json
+
+os_info.json
+
+blueprints/example/
+*.1
+*.2
+*.3
+
+# Test files are included in the repository
+# test_wled_suggested_presets.py
+
+# WLED Discovery Test Files - Do not commit
+test_wled_suggested_presets.py
+manual_wled_test.py
+test_wled_api_format.py
+test_pifire_wled_integration.py
+test_wled_final.py
+debug_wled_discovery.py
+test_wled_api.py
+test_wled_ui.html
+
+# Other test/debug files
+debug_server_status.html
+test_server_status.py
+
+# General patterns for test files
+test_*.py
+debug_*.py
+debug_*.html
+*_test.py
+
+# Allow the proper test suite directory
+!tests/
+!tests/**
+
+# ...but never track compiled bytecode, even under tests/
+tests/**/__pycache__/
+__pycache__/
+
+# approxMPC experiment artifacts
+docs/superpowers/experiments/_ampc_data/
+docs/superpowers/experiments/training/
+/training/
+
+# externally-generated sample dumps
+pifire_from_other_machine_samples.npz
+
+# SQLite datastore (runtime state; never committed)
+pifire.db
+pifire.db-wal
+pifire.db-shm
+.gitattributes
+
+# Serena MCP server project config (local tool state; never committed)
+.serena/
+
+# Local git worktrees created by agent workflows
+.worktrees/
+worktrees/
+
+# Coverage measurement artifacts (regenerate via pytest --cov; see docs/coverage/README.md)
+coverage.json
+coverage.xml
+htmlcov/
+.coverage
+.coverage.*
+
+# Claude Code session scratch
+.claude/
+
+# Local tool state
+.lsp.json
+.pi/
+# tokensave's code-graph database, per-checkout and machine-local. The SQLite
+# WAL/shm sidecars change on every read, so tracking them made `jj st` dirty
+# constantly and dragged a 30MB binary toward every commit.
+.tokensave/
+
+.superpowers/
+
+/node_modules/
+
+# TS incremental build cache -- also .gitignore'd per-project (web-react/.gitignore)
+# but bun workspace members under packages/* don't each carry their own, so this
+# generic rule covers them.
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# EAS upload excludes (everything above is inherited from .gitignore, because
+# when this file exists EAS may use it INSTEAD of .gitignore -- so it must be a
+# strict superset, or node_modules/.venv/build would be re-included).
+#
+# An EAS build only needs what `bun install` at the workspace root touches plus
+# the Expo app itself: the root manifest and lockfile, mobile/, and
+# packages/pifire-core (which mobile imports as @pifire/core). Everything below
+# is PiFire's Raspberry Pi backend, its web client's sources, or local tooling
+# state -- none of it participates in building the phone app.
+# ---------------------------------------------------------------------------
+
+# Version-control internals. .jj is 829MB here and, unlike .git, no tool
+# excludes it by default -- it was the bulk of a 228MB upload.
+.jj/
+.git/
+
+# Python backend, hardware drivers, installer, and their tests.
+auto-install/
+common/
+controller/
+display/
+notify/
+probes/
+tests/
+updater/
+wizard/
+recipes/
+training/
+tools/
+*.py
+pyproject.toml
+uv.lock
+ruff.toml
+prek.toml
+pytest.ini
+
+# Docs and media (docs/ alone carries ~45MB of photos).
+docs/
+static/
+*.md
+!mobile/README.md
+
+# The web client's sources. Its package.json MUST remain: it is a declared bun
+# workspace member, and bun hard-errors on a workspace path that does not exist
+# (we hit exactly that in Task 1 with mobile/).
+web-react/*
+!web-react/package.json
+
+# Local tool caches that no build needs.
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+__pycache__/
