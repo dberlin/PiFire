@@ -25,6 +25,13 @@
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "owner": "danberlins-team",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e4b5a56f-5a06-4bed-b73c-c4d646ca0b33"
+      }
+    }
   }
 }
