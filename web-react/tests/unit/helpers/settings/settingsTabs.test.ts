@@ -1,14 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
-import { SETTINGS_TABS } from "../../../../src/helpers/settings/settingsTabs";
 import type {
   EditableSettingsTabId,
   SettingsTabId,
 } from "../../../../src/helpers/settings/settingsTabs";
+import { SETTINGS_TABS } from "../../../../src/helpers/settings/settingsTabs";
 
 type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-    ? true
-    : false;
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 type ExpectedSettingsTabId =
   | "general"
@@ -27,10 +25,8 @@ type ExpectedSettingsTabId =
 type ExpectedEditableSettingsTabId = Exclude<ExpectedSettingsTabId, "units" | "platform">;
 
 const settingsTabIdsAreExact: Equal<SettingsTabId, ExpectedSettingsTabId> = true;
-const editableSettingsTabIdsAreExact: Equal<
-  EditableSettingsTabId,
-  ExpectedEditableSettingsTabId
-> = true;
+const editableSettingsTabIdsAreExact: Equal<EditableSettingsTabId, ExpectedEditableSettingsTabId> =
+  true;
 
 const EXPECTED_TABS = [
   { id: "general", label: "General" },

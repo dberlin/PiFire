@@ -1,8 +1,8 @@
 import { Navigate, type RouteObject } from "react-router";
 import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
-import { SETTINGS_TABS } from "../helpers/settings/settingsTabs";
 import type { SettingsTabId } from "../helpers/settings/settingsTabs";
+import { SETTINGS_TABS } from "../helpers/settings/settingsTabs";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AdminPage } from "./admin/AdminPage";
 import { CookFilePage } from "./cookfiles/CookFilePage";

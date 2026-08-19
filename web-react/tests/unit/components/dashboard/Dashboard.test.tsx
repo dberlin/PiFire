@@ -335,9 +335,7 @@ describe("Dashboard MPC settings authority", () => {
 
     renderInQueryRouter(dashboardAt("/a/"), client);
 
-    expect(
-      await screen.findByRole("button", { name: "MPC learning: collecting" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: collecting" })).toBeVisible();
     expect(getSettingsMock).not.toHaveBeenCalled();
   });
 
@@ -359,9 +357,7 @@ describe("Dashboard MPC settings authority", () => {
       }),
     );
     renderInQueryRouter(dashboardAt("/a"), client);
-    expect(
-      await screen.findByRole("button", { name: "PID-SP learning: idle" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "PID-SP learning: idle" })).toBeVisible();
 
     act(() => {
       client.setQueryData(queryKeys.settings("/a"), {
@@ -369,9 +365,7 @@ describe("Dashboard MPC settings authority", () => {
       });
     });
 
-    expect(
-      await screen.findByRole("button", { name: "MPC learning: collecting" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: collecting" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /PID-SP learning:/i })).not.toBeInTheDocument();
   });
 
@@ -407,9 +401,7 @@ describe("Dashboard MPC settings authority", () => {
         }),
       );
       renderInQueryRouter(dashboardAt("/a"));
-      await user.click(
-        await screen.findByRole("button", { name: "MPC learning: collecting" }),
-      );
+      await user.click(await screen.findByRole("button", { name: "MPC learning: collecting" }));
       await user.click(
         screen.getByLabelText("The grill is empty, with normal grates and drip tray installed."),
       );

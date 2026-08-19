@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router";
 import type { RouteObject } from "react-router";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { FIXTURE_DASH } from "../../../src/helpers/fixture";
 import { queryClient } from "../../../src/helpers/query/queryClient";
 import { SETTINGS_TABS } from "../../../src/helpers/settings/settingsTabs";
@@ -203,9 +203,7 @@ describe("App routing", () => {
 
     expect(await screen.findByRole("heading", { name: "PWM Fan" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "PWM Fan" })).toBeNull();
-    expect(
-      screen.getByText(/PWM fan control is unavailable on this grill/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/PWM fan control is unavailable on this grill/)).toBeInTheDocument();
   });
 
   it("renders the Probes settings tab at /settings/probes", async () => {

@@ -1,7 +1,7 @@
 import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
-import type { SettingsSchema } from "./settingsTypes.gen";
 import type { EditableSettingsTabId } from "./settingsTabs";
+import type { SettingsSchema } from "./settingsTypes.gen";
 
 /**
  * Where a settings tab's in-progress edit lives while the user is somewhere

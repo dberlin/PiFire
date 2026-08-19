@@ -6,8 +6,10 @@ import { AppPrefsProvider } from "../../../../src/components/AppPrefs";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";
 import { PwmTab } from "../../../../src/components/settings/tabs/PwmTab";
 import { SafetyTab } from "../../../../src/components/settings/tabs/SafetyTab";
-import { useSettingsDraft } from "../../../../src/helpers/settings/settingsDrafts";
-import type { SettingsDrafts } from "../../../../src/helpers/settings/settingsDrafts";
+import type {
+  SettingsDrafts,
+  useSettingsDraft,
+} from "../../../../src/helpers/settings/settingsDrafts";
 import type { EditableSettingsTabId } from "../../../../src/helpers/settings/settingsTabs";
 import { testQueryClient } from "../../test-utils";
 
@@ -52,9 +54,7 @@ const SETTINGS = {
 };
 
 type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-    ? true
-    : false;
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 const draftStoreKeysMatchEditableTabs: Equal<keyof SettingsDrafts, EditableSettingsTabId> = true;
 const draftHookKeyMatchesEditableTabs: Equal<

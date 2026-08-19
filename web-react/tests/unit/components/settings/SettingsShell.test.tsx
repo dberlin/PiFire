@@ -69,10 +69,7 @@ describe("SettingsShell", () => {
     // synchronous — wait for the first tab link before asserting on the rest.
     await screen.findByRole("link", { name: "General" });
     for (const { id, label } of TAB_LINKS) {
-      expect(screen.getByRole("link", { name: label })).toHaveAttribute(
-        "href",
-        `/settings/${id}`,
-      );
+      expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", `/settings/${id}`);
     }
     expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(
       TAB_LINKS.map(({ label }) => label),
@@ -91,10 +88,7 @@ describe("SettingsShell", () => {
     expect(screen.queryByRole("link", { name: "PWM Fan" })).toBeNull();
     const visibleTabs = TAB_LINKS.filter(({ id }) => id !== "pwm");
     for (const { id, label } of visibleTabs) {
-      expect(screen.getByRole("link", { name: label })).toHaveAttribute(
-        "href",
-        `/settings/${id}`,
-      );
+      expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", `/settings/${id}`);
     }
     const rendered = screen.getAllByRole("link").map((a) => a.textContent);
     expect(rendered).toEqual(visibleTabs.map(({ label }) => label));

@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useState } from "react";
 import { useNavigate } from "react-router";
-import type { CommandClient } from "../../helpers/command";
 import { useNow } from "../../helpers/clock";
+import type { CommandClient } from "../../helpers/command";
 import type { DashSocketPayload, ProbeDataPayload } from "../../helpers/contracts/core.gen";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import { queryKeys } from "../../../../src/helpers/query/keys";
+import { createQueryClient } from "../../../../src/helpers/query/queryClient";
 import * as actualSettingsApi from "../../../../src/helpers/settings/settingsApi" with {
   rstest: "importActual",
 };
-import { createQueryClient } from "../../../../src/helpers/query/queryClient";
-import { queryKeys } from "../../../../src/helpers/query/keys";
 import { renderWithQuery } from "../../test-utils";
 
 const getSettingsMock = rs.fn();
