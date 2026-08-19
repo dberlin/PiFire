@@ -169,8 +169,10 @@ def test_manifest_max31865_has_spi_bus_fields():
     assert all(str(n) in cs["list_values"] for n in range(0, 9))
 
     deps = " ".join(entry["py_dependencies"])
-    assert "mcp2210" in deps
+    # The bridge driver is vendored at grillplat/mcp2210 and needs only hid.
+    # A pip dependency named mcp2210 installs a package nothing imports.
     assert "hid" in deps
+    assert "mcp2210" not in deps
 
 
 def test_manifest_list_defaults_are_valid_values():

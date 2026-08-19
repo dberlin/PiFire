@@ -2252,7 +2252,7 @@
         "description": "This SPI device reads RTD style probes, such as the Traeger PT100(PT1000) RTD probe.  This version uses the Adafruit CircuitPython modules.  It should be noted that this module does not allow the use of CE0 or CE1, thus another GPIO should be used for the CS pin. Note that special care may need to be taken if this is used with another SPI device (i.e. SPI Display) on the system.",
         "default": false,
         "image": "max31865.png",
-        "py_dependencies": ["adafruit-circuitpython-max31865>=2.2.24", "mcp2210", "hid>=1.0.4"],
+        "py_dependencies": ["adafruit-circuitpython-max31865>=2.2.24", "hid>=1.0.4"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2408,7 +2408,7 @@
         "description": "This SPI device reads thermocouple probes (types B, E, J, K, N, R, S, T) using the Adafruit CircuitPython MAX31856 module. Supports native SPI or an MCP2210 USB-to-SPI bridge. Use a GPIO other than CE0/CE1 for the chip select.",
         "default": false,
         "image": "max31865.png",
-        "py_dependencies": ["adafruit-circuitpython-max31856", "mcp2210", "hid>=1.0.4"],
+        "py_dependencies": ["adafruit-circuitpython-max31856", "hid>=1.0.4"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {

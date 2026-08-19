@@ -122,5 +122,9 @@ def test_manifest_max31856_entry():
 
     deps = " ".join(entry["py_dependencies"])
     assert "adafruit-circuitpython-max31856" in deps
-    assert "mcp2210" in deps
+    # hid is the bridge driver's only external requirement. The driver itself is
+    # vendored at grillplat/mcp2210, so pip-installing a distribution of that
+    # name fetches something nothing imports -- and would shadow the vendored
+    # package for anyone who still imports the bare name.
     assert "hid" in deps
+    assert "mcp2210" not in deps
