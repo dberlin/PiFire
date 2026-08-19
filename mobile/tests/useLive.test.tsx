@@ -28,10 +28,17 @@ it("reconnects when the app returns to the foreground", async () => {
   await renderHook(() => useLive("http://pifire.local:5000"));
   const connection = createLiveConnection.mock.results[0].value;
 
-  act(() => {
-    handler?.("background");
-    handler?.("active");
-  });
+  // Awaited async acts, not a sync one: a sync act() following renderHook's
+  // own (async) act makes React report "You called act(async () => ...)
+  // without await" on the console.
+  await act(async () => handler?.("background"));
+
+  // Backgrounding is what breaks the socket; reconnecting from here would be
+  // reconnecting the app on its way out, and would leave the assertion below
+  // unable to tell "reconnects on foreground" from "reconnects on any change".
+  expect(connection.reconnect).not.toHaveBeenCalled();
+
+  await act(async () => handler?.("active"));
 
   expect(connection.reconnect).toHaveBeenCalledTimes(1);
 });
