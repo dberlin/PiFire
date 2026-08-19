@@ -1,13 +1,13 @@
 import { type CommandClient, createCommand } from "@pifire/core/command";
 import type { PelletSocketPayload } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { io, type Socket } from "socket.io-client";
-import { deriveControlAlive } from "./dashboard/health";
+import { deriveControlAlive } from "@pifire/core/dashboard/health";
+import { type ConnectionPhase, createLiveConnection } from "@pifire/core/liveConnection";
+import { useEffect, useMemo, useState } from "react";
 import { demoDashAt } from "./demoData";
 import { FIXTURE_DASH } from "./fixture";
 
-export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
+export type { ConnectionPhase };
 
 // Exported because AppShell hands this exact bundle to its child routes via
 // Outlet context (helpers/shellContext.ts). Sharing the type keeps the context
@@ -33,7 +33,6 @@ export function useLiveState(): LiveStateResult {
   const [live, setLive] = useState<DashSocketPayload>(FIXTURE_DASH);
   const [phase, setPhase] = useState<ConnectionPhase>(FORCE_DEMO ? "demo" : "connecting");
   const [pellets, setPellets] = useState<PelletSocketPayload["pellets"] | null>(null);
-  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     if (FORCE_DEMO) {
@@ -43,32 +42,12 @@ export function useLiveState(): LiveStateResult {
       const id = window.setInterval(tick, 1000);
       return () => window.clearInterval(id);
     }
-    const socket = io(TARGET_URL || undefined, {
-      path: "/socket.io",
-      reconnection: true,
-      timeout: 4000,
+    const connection = createLiveConnection(TARGET_URL, {
+      onDash: setLive,
+      onPellets: setPellets,
+      onPhase: setPhase,
     });
-    socketRef.current = socket;
-    socket.on("connect", () => {
-      setPhase("live");
-      socket.emit("listen_app_data");
-    });
-    socket.on("connect_error", () => setPhase((p) => (p === "live" ? p : "unreachable")));
-    socket.on("disconnect", () => setPhase("unreachable"));
-    socket.on("socket_dash_data", (data: DashSocketPayload) => {
-      setPhase("live");
-      setLive(data);
-    });
-    // Deliberately does NOT touch setPhase: phase is socket_dash_data's and
-    // connect's business, and a pellet payload arriving is not evidence the
-    // dash feed is healthy.
-    socket.on("socket_pellet_data", (data: PelletSocketPayload) => {
-      setPellets(data.pellets);
-    });
-    return () => {
-      socket.close();
-      socketRef.current = null;
-    };
+    return () => connection.close();
   }, []);
 
   const command = useMemo(() => createCommand(TARGET_URL), []);

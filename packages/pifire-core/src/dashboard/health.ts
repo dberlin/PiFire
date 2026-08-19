@@ -1,4 +1,4 @@
-import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type { DashSocketPayload } from "../contracts/core.gen";
 
 // Substring of common/app.py's CONTROL_DOWN_ERROR, which
 // socket_io._get_dash_data composes into `errors` on every frame while the last

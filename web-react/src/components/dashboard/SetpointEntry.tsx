@@ -1,5 +1,5 @@
+import { setpointRange } from "@pifire/core/dashboard/health";
 import { useState } from "react";
-import { setpointRange } from "../../helpers/dashboard/health";
 
 interface Props {
   open: boolean;

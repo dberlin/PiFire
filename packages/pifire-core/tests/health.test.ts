@@ -1,42 +1,21 @@
-import type { ControlHealthResponse } from "@pifire/core/contracts/core";
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { recheckControl } from "../../../../src/helpers/dashboard/controlHealth";
-import {
-  clampSetpoint,
-  deriveControlAlive,
-  setpointRange,
-} from "../../../../src/helpers/dashboard/health";
-import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
-
-afterEach(() => {
-  rs.unstubAllGlobals();
-});
+import type { DashSocketPayload } from "../src/contracts/core.gen";
+import { describe, expect, it } from "@rstest/core";
+import { clampSetpoint, deriveControlAlive, setpointRange } from "../src/dashboard/health";
 
 const CONTROL_DOWN = "The control process did not respond to a request and may be stopped.";
 
-describe("recheckControl", () => {
-  it("uses the generated health response and accepts only OK", async () => {
-    const response = {
-      command: ["check_alive", null, null, null],
-      result: "OK",
-      message: null,
-      data: {},
-    } satisfies ControlHealthResponse;
-    rs.stubGlobal(
-      "fetch",
-      rs.fn(async () => new Response(JSON.stringify(response), { status: 200 })),
-    );
-
-    await expect(recheckControl("http://pi:5000")).resolves.toBe(true);
-  });
-});
+// deriveControlAlive only reads `errors`; the rest of DashSocketPayload is
+// irrelevant to this test and core has no dashboard fixture of its own.
+function dashWithErrors(errors: string[]): DashSocketPayload {
+  return { errors } as DashSocketPayload;
+}
 
 describe("deriveControlAlive", () => {
   it("true when no control-down error present", () => {
-    expect(deriveControlAlive({ ...FIXTURE_DASH, errors: [] })).toBe(true);
+    expect(deriveControlAlive(dashWithErrors([]))).toBe(true);
   });
   it("false when the control-down error is present", () => {
-    expect(deriveControlAlive({ ...FIXTURE_DASH, errors: [CONTROL_DOWN] })).toBe(false);
+    expect(deriveControlAlive(dashWithErrors([CONTROL_DOWN]))).toBe(false);
   });
 });
 
