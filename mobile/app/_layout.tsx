@@ -139,7 +139,7 @@ function useAlertNotifications(dash: DashSocketPayload, lastPayloadAt: number | 
   }, [dash, lastPayloadAt]);
 }
 
-function LiveShell({ host }: { host: string }) {
+function LiveShell({ host, children }: { host: string; children: React.ReactNode }) {
   const live = useLive(host);
   useAlertNotifications(live.live, live.lastPayloadAt);
 
@@ -159,7 +159,7 @@ function LiveShell({ host }: { host: string }) {
   return (
     <LiveContext.Provider value={live}>
       <StatusStrip live={live} />
-      <Stack />
+      {children}
     </LiveContext.Provider>
   );
 }
@@ -231,35 +231,40 @@ export default function RootLayout() {
     [prefs, host, updatePrefs],
   );
 
-  if (!host) {
-    // No live connection to provide -- but that makes rendering routes
-    // dangerous rather than merely useless, because "/" resolves to the
-    // dashboard (app/(tabs)/index.tsx) and the dashboard's first statement is
-    // useLiveContext(), which throws when this branch is what rendered it.
-    // The redirect below runs in an effect, i.e. AFTER a render, so it cannot
-    // prevent that first mount. Rendering the navigator here crashed the app
-    // on every launch:
-    //   Unhandled JS Exception: Error: useLiveContext must be used within the
-    //   connected app shell
-    //
-    // So routes are mounted only once there is somewhere safe to land: either
-    // the host is known (the branch below), or the user is already on
-    // /connect, which needs no live data. Until then this renders nothing,
-    // which is correct for the handful of frames it lasts -- the native splash
-    // is still up.
-    const onConnectScreen = pathname === "/connect";
-    return (
-      <PrefsContext.Provider value={prefsValue}>
-        {onConnectScreen ? <Stack /> : null}
-      </PrefsContext.Provider>
-    );
+  // The tab screens call useLiveContext(), which throws when no connection is
+  // provided. Guarding them at the navigator means the router will not mount
+  // them at all until a host is known, so no navigation can land on the
+  // dashboard before the connection exists. Doing this with a redirect
+  // instead cannot work: redirects run in effects, which is after the render
+  // that would already have thrown.
+  const connected = typeof host === "string";
+  const routes = (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Protected guard={connected}>
+        <Stack.Screen name="(tabs)" />
+      </Stack.Protected>
+      <Stack.Screen name="connect" />
+    </Stack>
+  );
+
+  if (host === undefined) {
+    // Storage has not answered yet. Rendering the navigator now would show
+    // the connect screen for a frame or two before bouncing to the dashboard,
+    // so render nothing instead -- the native splash is still up.
+    return <PrefsContext.Provider value={prefsValue}>{null}</PrefsContext.Provider>;
   }
 
-  // Keyed by host so switching to a different remembered grill tears down
-  // the old connection and its state rather than reusing it.
+  // Keyed by host so switching to a different remembered grill tears down the
+  // old connection and its state rather than reusing it.
   return (
     <PrefsContext.Provider value={prefsValue}>
-      <LiveShell host={host} key={host} />
+      {connected ? (
+        <LiveShell host={host as string} key={host as string}>
+          {routes}
+        </LiveShell>
+      ) : (
+        routes
+      )}
     </PrefsContext.Provider>
   );
 }

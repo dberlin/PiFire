@@ -30,3 +30,12 @@ name: Launches without crashing and asks for a grill
 - extendedWaitUntil:
     visible: "Connect"
     timeout: 5000
+
+# Tapping Connect is a second, distinct way into the dashboard, and it has its
+# own timing: the route changes before the layout has re-read stored hosts.
+# The first fix for the launch crash did not cover this path, and it crashed
+# here instead.
+- tapOn: "Connect"
+- extendedWaitUntil:
+    visible: "Live|Connecting|Unreachable|Stale|No data"
+    timeout: 10000
