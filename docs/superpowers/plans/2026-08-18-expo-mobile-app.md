@@ -274,7 +274,7 @@ platform-specific import fails to compile rather than passing review."
 - Modify: `common/web_contracts/export.py:16` (`TYPESCRIPT_DIRECTORY`)
 - Modify: `tests/unit/common/web_contracts/test_export.py`
 - Move: `web-react/src/helpers/contracts/*.gen.ts` → `packages/pifire-core/src/contracts/`
-- Move: `web-react/tests/unit/helpers/generatedContracts.test.ts` → `packages/pifire-core/tests/generatedContracts.test.ts`
+- Modify (do NOT move): `web-react/tests/unit/helpers/generatedContracts.test.ts`
 - Modify: 189 files under `web-react/src` and `web-react/tests`
 
 **Interfaces:**
@@ -336,36 +336,42 @@ grep -rlE '"[^"]*contracts/[a-z]+\.gen"' src tests --include=*.ts --include=*.ts
 
 The `\.gen` in the pattern is load-bearing: it is what keeps the JSON schema paths (`schema/contracts/manifest.json`) untouched.
 
-- [ ] **Step 6: Move and repoint the generated-contract guard test**
+- [ ] **Step 6: Repoint the generated-contract guard test — it STAYS in web-react**
 
-```bash
-mv web-react/tests/unit/helpers/generatedContracts.test.ts packages/pifire-core/tests/generatedContracts.test.ts
-```
+**Do not move this test.** It imports `scripts/extractWebTransports` from
+web-react and the `typescript` package, neither of which `@pifire/core` has.
+Moving it would make the shared package depend on a client's scripts, inverting
+the one dependency direction this whole design rests on. It stays at
+`web-react/tests/unit/helpers/generatedContracts.test.ts`, where both its imports
+already resolve, and is repointed at the contracts' new home.
 
-In the moved file, `WEB_ROOT` becomes two roots — the schemas stayed in `web-react`, the TypeScript did not:
-
-```ts
-const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const MANIFEST_PATH = join(REPO_ROOT, "web-react/schema/contracts/manifest.json");
-```
-
-and inside `generatedArtifacts()`:
+Its `WEB_ROOT` is the web-react root and stays as it is; the schemas stayed in
+`web-react` and the TypeScript did not, so add a repository root beside it:
 
 ```ts
-  const schemaRoot = join(REPO_ROOT, "web-react/schema/contracts");
+const REPO_ROOT = join(WEB_ROOT, "..");
+```
+
+`MANIFEST_PATH` and `schemaRoot` are unchanged (still under `WEB_ROOT`). Inside
+`generatedArtifacts()`, only the TypeScript root moves:
+
+```ts
   const typescriptRoot = join(REPO_ROOT, "packages/pifire-core/src/contracts");
 ```
 
-`HELPERS_ROOT` — the root scanned for hand-written types that duplicate generated ones — becomes both trees:
+`HELPERS_ROOT` — the root scanned for hand-written types that duplicate generated
+ones — becomes both trees, so the guard still catches a duplicate written in
+either place:
 
 ```ts
 const SCANNED_ROOTS = [
-  join(REPO_ROOT, "web-react/src/helpers"),
+  HELPERS_ROOT,
   join(REPO_ROOT, "packages/pifire-core/src"),
 ];
 ```
 
-and `filesBelow` is called once per entry in `SCANNED_ROOTS`, concatenating the results. This test also imports `../../scripts/extractWebTransports` from web-react; update that specifier to the relative path from its new home (`../../web-react/scripts/extractWebTransports`).
+and `filesBelow` is called once per entry in `SCANNED_ROOTS`, concatenating the
+results. The `extractWebTransports` import is unchanged.
 
 - [ ] **Step 7: Verify everything**
 
