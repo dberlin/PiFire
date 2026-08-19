@@ -232,13 +232,25 @@ export default function RootLayout() {
   );
 
   if (!host) {
-    // Loading, or nothing configured yet (the effect above is sending the
-    // user to /connect in the latter case) -- nothing to open a
-    // connection to, so no status strip or live context either. Prefs are
-    // still provided: the Connect screen itself reads the live accent.
+    // No live connection to provide -- but that makes rendering routes
+    // dangerous rather than merely useless, because "/" resolves to the
+    // dashboard (app/(tabs)/index.tsx) and the dashboard's first statement is
+    // useLiveContext(), which throws when this branch is what rendered it.
+    // The redirect below runs in an effect, i.e. AFTER a render, so it cannot
+    // prevent that first mount. Rendering the navigator here crashed the app
+    // on every launch:
+    //   Unhandled JS Exception: Error: useLiveContext must be used within the
+    //   connected app shell
+    //
+    // So routes are mounted only once there is somewhere safe to land: either
+    // the host is known (the branch below), or the user is already on
+    // /connect, which needs no live data. Until then this renders nothing,
+    // which is correct for the handful of frames it lasts -- the native splash
+    // is still up.
+    const onConnectScreen = pathname === "/connect";
     return (
       <PrefsContext.Provider value={prefsValue}>
-        <Stack />
+        {onConnectScreen ? <Stack /> : null}
       </PrefsContext.Provider>
     );
   }
