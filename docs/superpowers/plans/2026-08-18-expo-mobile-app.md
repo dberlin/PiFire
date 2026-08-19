@@ -785,7 +785,23 @@ cd packages/pifire-core && bun run typecheck && bun run test
 cd ../../web-react && bun run typecheck && bun run lint && bun run test && bun run build
 ```
 
-Expected: PASS throughout.
+Expected: PASS throughout, with `lint` at or below its 12-error baseline.
+
+- [ ] **Step 1b: Verify contract drift detection end to end**
+
+`bun run gen:types:check` shells to a bare `uv run`, which on macOS fails while
+building `bluepy` before any contract logic executes — a pre-existing environment
+gap, unrelated to this work. Run the two halves explicitly instead, which
+together cover the same ground:
+
+```bash
+cd /Users/dannyb/sources/PiFire/web-react && bun scripts/emitWebContracts.ts --check
+uv run --no-sync python -m common.web_contracts.export --check
+```
+
+Expected: both report up to date. If a machine is available where a bare
+`uv run` succeeds (Linux, or macOS once `bluepy` carries a platform marker),
+run `bun run gen:types:check` there as well and record the result.
 
 - [ ] **Step 2: Run the browser end-to-end suite**
 
