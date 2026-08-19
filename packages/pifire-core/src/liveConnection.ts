@@ -82,7 +82,12 @@ export function createLiveConnection(
   return {
     reconnect() {
       socket.close();
-      phase = "connecting";
+      // Notify the consumer immediately: on the path this exists for (a
+      // phone foregrounding after iOS tore the socket down), the old phase
+      // ("live" or "unreachable") is stale the instant the socket is
+      // closed, and must not keep being presented as current until the new
+      // socket happens to connect.
+      setPhase("connecting");
       socket = open();
     },
     close() {
