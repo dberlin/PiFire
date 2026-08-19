@@ -1,6 +1,6 @@
 import pytest
 from tests._fake_hid import FakeHID
-from mcp2210 import MCP2210, MCP2210BusUnavailableError
+from grillplat.mcp2210 import MCP2210, MCP2210BusUnavailableError
 
 
 def make_device():

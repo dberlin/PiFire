@@ -64,7 +64,7 @@ def resolve_mcp2210(serial=None):
     """
     key = serial or ""  # None and '' both mean "the first/only bridge"
     if key not in _MCP2210_CACHE:
-        from mcp2210 import MCP2210
+        from grillplat.mcp2210 import MCP2210
 
         _MCP2210_CACHE[key] = MCP2210(serial=serial or None)
     return _MCP2210_CACHE[key]

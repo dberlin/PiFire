@@ -2,7 +2,7 @@
 """End-to-end: emulate the SPIDevice transaction pattern Adafruit libs use."""
 
 from tests._fake_hid import FakeHID
-from mcp2210 import MCP2210, _protocol as p
+from grillplat.mcp2210 import MCP2210, _protocol as p
 
 
 def _spi_ok():

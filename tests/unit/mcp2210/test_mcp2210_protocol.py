@@ -1,5 +1,5 @@
 import struct
-from mcp2210 import _protocol as p
+from grillplat.mcp2210 import _protocol as p
 
 
 def test_command_constants():

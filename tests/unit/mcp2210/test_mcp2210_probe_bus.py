@@ -3,7 +3,7 @@ import types
 import pytest
 
 import probes.base as base
-import mcp2210
+from grillplat import mcp2210
 
 
 # --- _gp_index ---

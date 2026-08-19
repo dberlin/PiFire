@@ -1,6 +1,6 @@
 import struct
 from tests._fake_hid import FakeHID
-from mcp2210 import MCP2210, _protocol as p
+from grillplat.mcp2210 import MCP2210, _protocol as p
 
 
 def make():
