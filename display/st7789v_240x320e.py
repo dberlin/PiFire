@@ -30,9 +30,11 @@ Display class definition
 
 
 class Display(SimpleEncoderInputMixin, DisplayBase):
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         self.config = config
-        super().__init__(dev_pins, buttonslevel, rotation, units, config)
+        super().__init__(dev_pins, buttonslevel, rotation, units, config, event_log=event_log, control_log=control_log)
 
     def _init_display_device(self):
         # Init Device

@@ -60,3 +60,24 @@ def instantiate(mod, **overrides):
     ):
         mock_thread.return_value.start = lambda: None
         return mod.Display(**kwargs)
+
+
+class RecordingLogger:
+    """Substitutable stand-in for a stdlib logger, recording (level, message)
+    per call so a test can assert *which* of a driver's two loggers a message
+    went to. Mirrors tests/unit/runtime/test_logger_idiom.py's controller-side
+    equivalent."""
+
+    def __init__(self):
+        self.calls = []
+
+    def _record(self, level):
+        def log(message, *args, **kwargs):
+            self.calls.append((level, message))
+
+        return log
+
+    def __getattr__(self, name):
+        if name in ("debug", "info", "warning", "error", "exception", "critical"):
+            return self._record(name)
+        raise AttributeError(name)

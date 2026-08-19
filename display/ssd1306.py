@@ -23,6 +23,7 @@ from luma.core.interface.serial import i2c
 from luma.core.render import canvas
 from luma.oled.device import ssd1306
 from PIL import Image, ImageFont
+from display._loggers import resolve_loggers
 
 """
 Display class definition
@@ -30,8 +31,11 @@ Display class definition
 
 
 class Display:
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         # Init Global Variables and Constants
+        self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         self.units = units
         self.display_active = False
         self.in_data = None

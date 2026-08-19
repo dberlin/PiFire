@@ -32,7 +32,9 @@ Display class definition
 
 
 class Display(DisplayBase):
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         # Set display profile based on rotation
         self.rotation = config.get("rotation", 0)
         if self.rotation in [0, 2]:
@@ -40,8 +42,8 @@ class Display(DisplayBase):
         else:
             self.display_profile = "profile_2"
         self.config = config
-        super().__init__(dev_pins, buttonslevel, rotation, units, config)
-        self.eventLogger.debug("Display Initialized.")
+        super().__init__(dev_pins, buttonslevel, rotation, units, config, event_log=event_log, control_log=control_log)
+        self.controlLogger.debug("Display Initialized.")
 
     def _init_display_device(self):
         # Init Device
@@ -57,9 +59,9 @@ class Display(DisplayBase):
             translated_width = self.HEIGHT
             translated_height = self.WIDTH
 
-        # self.eventLogger.debug(f'Display Rotation: {self.rotation}')
-        # self.eventLogger.debug(f'Display Width: {translated_width}')
-        # self.eventLogger.debug(f'Display Height: {translated_height}')
+        # self.controlLogger.debug(f'Display Rotation: {self.rotation}')
+        # self.controlLogger.debug(f'Display Width: {translated_width}')
+        # self.controlLogger.debug(f'Display Height: {translated_height}')
 
         self.serial = spi(
             port=0,
@@ -91,7 +93,7 @@ class Display(DisplayBase):
 
         if "touch" in self.config["input_types_supported"]:
             # TODO: Implement Touch Input
-            self.eventLogger.debug("Touch Initialized.")
+            self.controlLogger.debug("Touch Initialized.")
 
         if "button" in self.config["input_types_supported"]:
             # Init GPIO for button input, setup callbacks: Uncomment to utilize GPIO input
@@ -113,7 +115,7 @@ class Display(DisplayBase):
             self.enter_button.when_pressed = self._enter_callback
             self.up_button.when_held = self._up_callback
             self.down_button.when_held = self._down_callback
-            self.eventLogger.debug("Buttons Initialized.")
+            self.controlLogger.debug("Buttons Initialized.")
 
         if "encoder" in self.config["input_types_supported"]:
             # Init constants and variables
@@ -141,11 +143,11 @@ class Display(DisplayBase):
             # Setup & Start Input Thread
             encoder_thread = threading.Thread(target=self.encoder.watch)
             encoder_thread.start()
-            self.eventLogger.debug("Encoder Initialized.")
+            self.controlLogger.debug("Encoder Initialized.")
 
         if "none" in self.config["input_types_supported"]:
             self.input_enabled = False
-            self.eventLogger.debug("Input Disabled.")
+            self.controlLogger.debug("Input Disabled.")
 
     def _display_loop(self):
         """
@@ -184,14 +186,14 @@ class Display(DisplayBase):
 
             time.sleep(1 / self.FRAMERATE)
 
-        # self.eventLogger.debug('Display Loop Ended.')
+        # self.controlLogger.debug('Display Loop Ended.')
 
     """
 	============== Graphics / Display / Draw Methods ============= 
 	"""
 
     def _wake_display(self):
-        # self.eventLogger.debug('_wake_display() called.')
+        # self.controlLogger.debug('_wake_display() called.')
         self.device.backlight(True)
         self.device.show()
 
@@ -200,7 +202,7 @@ class Display(DisplayBase):
         self.device.hide()
 
     def _display_clear(self):
-        # self.eventLogger.debug('_display_clear() called.')
+        # self.controlLogger.debug('_display_clear() called.')
         self.device.clear()
         self.device.backlight(False)
         self.device.hide()
@@ -238,15 +240,15 @@ class Display(DisplayBase):
 
     def _enter_callback(self):
         self.input_event = "ENTER"
-        # self.eventLogger.debug('Enter Button Pressed.')
+        # self.controlLogger.debug('Enter Button Pressed.')
 
     def _up_callback(self, held=False):
         self.input_event = "UP"
-        # self.eventLogger.debug('Up Button Pressed.')
+        # self.controlLogger.debug('Up Button Pressed.')
 
     def _down_callback(self, held=False):
         self.input_event = "DOWN"
-        # self.eventLogger.debug('Down Button Pressed.')
+        # self.controlLogger.debug('Down Button Pressed.')
 
     """ Encoder Callbacks """
 

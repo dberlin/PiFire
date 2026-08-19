@@ -39,8 +39,11 @@ def build_display(settings, *, errors, event_log, control_log):
     :param errors: Display errors list to append to (and persist under
         ErrorKind.DISPLAY -- the display process owns that kind, so a
         controller restart cannot erase what is recorded here)
-    :param event_log: Event logger
-    :param control_log: Control logger
+    :param event_log: Event logger, also handed to the driver so it logs
+        operator-facing messages through what it was given rather than
+        reaching for a global logger name
+    :param control_log: Control logger, handed to the driver on the same terms
+        for its diagnostics
     :return: (display_or_None, errors)
     """
     units = settings["globals"]["units"]
@@ -78,6 +81,8 @@ def build_display(settings, *, errors, event_log, control_log):
             rotation=disp_rotation,
             units=units,
             config=display_config,
+            event_log=event_log,
+            control_log=control_log,
         )
     except:
         control_log.exception(
@@ -91,6 +96,8 @@ def build_display(settings, *, errors, event_log, control_log):
             rotation=disp_rotation,
             units=units,
             config={},
+            event_log=event_log,
+            control_log=control_log,
         )
         error_event = (
             f"An error occurred configuring the [{settings['modules']['display']}] display object.  The "

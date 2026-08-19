@@ -15,9 +15,14 @@
 import curses
 import time
 
+from display._loggers import resolve_loggers
+
 
 class Display:
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
+        self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         self.units = units
         curses.wrapper(self._curses_main)
         curses.curs_set(0)  # Invisible Cursor

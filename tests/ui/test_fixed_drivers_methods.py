@@ -85,6 +85,7 @@ from PIL import Image, ImageFont
 import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
 
 from common.modes import Mode
+from tests.ui._driver_helpers import RecordingLogger
 from tests.ui._menu_walk import build_dash_menu_input_touch_steps, run_menu_walk
 
 FULL_DEV_PINS = {
@@ -782,7 +783,7 @@ def _ili9341f_config(**overrides):
     return config
 
 
-def _make_ili9341f(monkeypatch, **config_overrides):
+def _make_ili9341f(monkeypatch, event_log=None, control_log=None, **config_overrides):
     overlay = dict(_luma_lcd_stub())
     overlay.update(_gpiozero_stub())
     overlay.update(_pyky040_stub())
@@ -795,7 +796,13 @@ def _make_ili9341f(monkeypatch, **config_overrides):
     with _no_bg_threads() as mock_thread, _no_os_system("ili9341f"):
         mock_thread.return_value.start = lambda: None
         d = mod.Display(
-            dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=config["rotation"], units="F", config=config
+            dev_pins=FULL_DEV_PINS,
+            buttonslevel="HIGH",
+            rotation=config["rotation"],
+            units="F",
+            config=config,
+            event_log=event_log,
+            control_log=control_log,
         )
     return mod, d
 
@@ -805,6 +812,25 @@ def test_ili9341f_constructs_device_and_input(monkeypatch):
     assert d.device is not None
     assert d.up_button is not None and d.encoder is not None
     assert d.background is not None and d.display_canvas is not None
+
+
+def test_ili9341f_bring_up_diagnostics_go_to_the_control_log(monkeypatch):
+    """ "Display Initialized."/"Touch Initialized."/... are developer-facing
+    device bring-up traces, in the same territory as build_display()'s
+    control_log.exception() for a module that failed to configure. They belong
+    in control.log; nothing in this driver's construction is for the operator,
+    so events.log stays empty."""
+    events, control = RecordingLogger(), RecordingLogger()
+
+    _mod, _d = _make_ili9341f(monkeypatch, event_log=events, control_log=control)
+
+    assert control.calls == [
+        ("debug", "Touch Initialized."),
+        ("debug", "Buttons Initialized."),
+        ("debug", "Encoder Initialized."),
+        ("debug", "Display Initialized."),
+    ]
+    assert events.calls == []
 
 
 def test_ili9341f_rotation_90_translates_dimensions(monkeypatch):

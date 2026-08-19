@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 from common.modes import Mode
 from common.control_delta import control_delta
 from common.persistence.control import enqueue_control_delta, read_control
+from display._loggers import resolve_loggers
 
 """
 Display base class definition
@@ -44,7 +45,9 @@ class _DisplayBase:
     # transitions (0.1s == the steady cadence). Shims override per resolution.
     min_transition_delay = 0.1
 
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         # Init Global Variables and Constants
         self.dev_pins = dev_pins
         self.buttonslevel = buttonslevel
@@ -61,6 +64,10 @@ class _DisplayBase:
         # self.primary_font = 'DejaVuSans.ttf'  # May need to switch to a default font in Raspberry Pi OS Lite due to MSTCorefonts Package Deprecation
         # Attempt to set the log level of PIL so that it does not pollute the logs
         logging.getLogger("PIL").setLevel(logging.CRITICAL + 1)
+        # Setup loggers: both are handed in by build_display() (the display
+        # process configures them), and each is named for the log it writes to
+        # -- operator-facing messages to events.log, diagnostics to control.log.
+        self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         # Init Display Device, Input Device, Assets
         self._init_globals()
         self._init_assets()
@@ -1082,13 +1089,16 @@ class _DisplayBase:
                 if self.menu["current"]["option"] > maxTemp:
                     self.menu["current"]["option"] = minTemp  # Roll over to minTemp if you go greater than 500.
             elif action == "ENTER":
-                enqueue_control_delta(control_delta(
-                    set_values={
-                        "primary_setpoint": self.menu["current"]["option"],
-                        "updated": True,
-                        "mode": Mode.HOLD,
-                    }
-                ), origin="display")
+                enqueue_control_delta(
+                    control_delta(
+                        set_values={
+                            "primary_setpoint": self.menu["current"]["option"],
+                            "updated": True,
+                            "mode": Mode.HOLD,
+                        }
+                    ),
+                    origin="display",
+                )
                 self.menu["current"]["mode"] = "none"
                 self.menu["current"]["option"] = 0
                 self.menu_active = False
@@ -1137,27 +1147,35 @@ class _DisplayBase:
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.STARTUP}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.STARTUP}), origin="display"
+                    )
                 elif selected == "Monitor":
                     self.display_active = True
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.MONITOR}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.MONITOR}), origin="display"
+                    )
                 elif selected == "Stop":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display"
+                    )
                 elif selected == "Power":
                     self.menu["current"]["mode"] = "power_menu"
                     self.menu["current"]["option"] = 0
                 elif "Power_" in selected:
                     self.clear_display()
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display"
+                    )
 
                     if "Off" in selected:
                         self.display_text("Shutting Down...")
@@ -1188,7 +1206,9 @@ class _DisplayBase:
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.SHUTDOWN}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.SHUTDOWN}), origin="display"
+                    )
                 elif selected == "Hold":
                     self.display_active = True
                     self.menu["current"]["mode"] = "grill_hold_value"
@@ -1205,7 +1225,9 @@ class _DisplayBase:
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.SMOKE}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.SMOKE}), origin="display"
+                    )
                 elif selected == "SmokePlus":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
@@ -1237,14 +1259,17 @@ class _DisplayBase:
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    enqueue_control_delta(control_delta(
-                        set_values={
-                            "prime_amount": prime_amount,
-                            "next_mode": next_mode,
-                            "updated": True,
-                            "mode": Mode.PRIME,
-                        }
-                    ), origin="display")
+                    enqueue_control_delta(
+                        control_delta(
+                            set_values={
+                                "prime_amount": prime_amount,
+                                "next_mode": next_mode,
+                                "updated": True,
+                                "mode": Mode.PRIME,
+                            }
+                        ),
+                        origin="display",
+                    )
                 elif "NextStep" in selected:
                     self.display_active = True
                     self.menu["current"]["mode"] = "none"
@@ -1260,7 +1285,9 @@ class _DisplayBase:
                     if "triggered" in control["recipe"]["step_data"] and "pause" in control["recipe"]["step_data"]:
                         if control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]:
                             # 'Unpause' Recipe
-                            enqueue_control_delta(control_delta(set_values={"recipe": {"step_data": {"pause": False}}}), origin="display")
+                            enqueue_control_delta(
+                                control_delta(set_values={"recipe": {"step_data": {"pause": False}}}), origin="display"
+                            )
                         else:
                             # User is forcing next step
                             enqueue_control_delta(control_delta(set_values={"updated": True}), origin="display")

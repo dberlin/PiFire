@@ -65,7 +65,7 @@ import display.pygame_64x128 as mod_64
 import display.qtapp as qtapp_mod
 from common.modes import Mode
 from display.qtbackend import PiFireBackend
-from tests.ui._driver_helpers import instantiate
+from tests.ui._driver_helpers import RecordingLogger, instantiate
 from tests.ui._menu_walk import build_dash_menu_input_touch_steps, run_menu_walk
 
 FULL_DEV_PINS = {
@@ -522,7 +522,7 @@ def _dsi_config(**overrides):
     return config
 
 
-def _make_dsi(monkeypatch, **config_overrides):
+def _make_dsi(monkeypatch, event_log=None, control_log=None, **config_overrides):
     import display._base_flex as base_flex_mod
 
     # This dev box's /sys/class/backlight/ may or may not exist; forcing
@@ -539,7 +539,13 @@ def _make_dsi(monkeypatch, **config_overrides):
         mock_thread.return_value.start = lambda: None
         mock_proc.return_value.start = lambda: None
         d = dsi_mod.Display(
-            dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=config["rotation"], units="F", config=config
+            dev_pins=FULL_DEV_PINS,
+            buttonslevel="HIGH",
+            rotation=config["rotation"],
+            units="F",
+            config=config,
+            event_log=event_log,
+            control_log=control_log,
         )
     return d
 
@@ -577,6 +583,29 @@ def test_dsi_800x480t_constructs_with_dummy_backlight(monkeypatch):
     assert d.backlight.power is True
     assert d.background is not None and d.display_canvas is not None
     assert d.display_profile == "profile_1"
+
+
+def test_dsi_800x480t_screen_cleared_is_reported_to_the_event_log(monkeypatch):
+    """ "Screen Cleared." is an operator-visible lifecycle event logged at INFO,
+    so it belongs in events.log (configured at INFO in production). This driver
+    used to send it to control.log, which runs at ERROR unless debug_mode is on
+    -- i.e. the message was written and then dropped. Its twin in
+    display/pygame_240x320b.py always went to the "events" logger; the two now
+    agree."""
+    events, control = RecordingLogger(), RecordingLogger()
+    d = _make_dsi(monkeypatch, event_log=events, control_log=control)
+    pygame.init()
+    try:
+        # The real surface normally comes from the pygame worker process, which
+        # _make_dsi's patched multiprocessing.Process never starts.
+        d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
+        with mock.patch.object(pygame.time, "delay"):
+            d._display_clear()
+    finally:
+        pygame.quit()
+
+    assert ("info", "Screen Cleared.") in events.calls
+    assert control.calls == []
 
 
 def test_dsi_800x480t_rotation_90_uses_profile_2(monkeypatch):

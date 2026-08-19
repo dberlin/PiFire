@@ -17,7 +17,6 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import logging
 import time
 import threading
 import socket
@@ -30,9 +29,10 @@ Display class definition
 
 
 class Display(DisplayBase):
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
-        super().__init__(dev_pins, buttonslevel, rotation, units, config)
-        self.eventLogger = logging.getLogger("events")
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
+        super().__init__(dev_pins, buttonslevel, rotation, units, config, event_log=event_log, control_log=control_log)
 
     def _init_display_device(self):
         # Setup & Start Display Loop Thread

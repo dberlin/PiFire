@@ -20,6 +20,7 @@ import time
 import threading
 import ST7789 as ST7789
 from PIL import Image, ImageDraw, ImageFont
+from display._loggers import resolve_loggers
 
 """
 Display class definition
@@ -27,8 +28,11 @@ Display class definition
 
 
 class Display:
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         # Init Global Variables and Constants
+        self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         self.config = config
         self.dev_pins = dev_pins
         self.rotation = rotation

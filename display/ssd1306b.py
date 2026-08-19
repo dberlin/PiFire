@@ -29,6 +29,7 @@ from common.modes import Mode
 from common.control_delta import control_delta
 from common.persistence.control import enqueue_control_delta, read_control
 from gpiozero import Button
+from display._loggers import resolve_loggers
 
 """
 Display class definition
@@ -36,8 +37,11 @@ Display class definition
 
 
 class Display:
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         # Init Global Variables and Constants
+        self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         self.dev_pins = dev_pins
         self.buttonslevel = buttonslevel
         self.units = units
@@ -378,13 +382,16 @@ class Display:
                 if self.menu["current"]["option"] > maxTemp:
                     self.menu["current"]["option"] = minTemp  # Roll over to minTemp if you go greater than 500.
             elif action == "ENTER":
-                enqueue_control_delta(control_delta(
-                    set_values={
-                        "primary_setpoint": self.menu["current"]["option"],
-                        "updated": True,
-                        "mode": Mode.HOLD,
-                    }
-                ), origin="display")
+                enqueue_control_delta(
+                    control_delta(
+                        set_values={
+                            "primary_setpoint": self.menu["current"]["option"],
+                            "updated": True,
+                            "mode": Mode.HOLD,
+                        }
+                    ),
+                    origin="display",
+                )
                 self.menu["current"]["mode"] = "none"
                 self.menu["current"]["option"] = 0
                 self.menu_active = False
@@ -433,20 +440,26 @@ class Display:
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.STARTUP}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.STARTUP}), origin="display"
+                    )
                 elif selected == "Monitor":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.MONITOR}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.MONITOR}), origin="display"
+                    )
                 elif selected == "Stop":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display"
+                    )
                 # Active Mode
                 elif selected == "Shutdown":
                     self.menu["current"]["mode"] = "none"
@@ -454,7 +467,9 @@ class Display:
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.SHUTDOWN}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.SHUTDOWN}), origin="display"
+                    )
                 elif selected == "Hold":
                     self.menu["current"]["mode"] = "grill_hold_value"
                     if self.units == "F":
@@ -467,7 +482,9 @@ class Display:
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    enqueue_control_delta(control_delta(set_values={"updated": True, "mode": Mode.SMOKE}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"updated": True, "mode": Mode.SMOKE}), origin="display"
+                    )
                 elif selected == "SmokePlus":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0

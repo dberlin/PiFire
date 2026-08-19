@@ -393,6 +393,44 @@ def test_build_display_success_real_none_module(ds):
     assert type(display).__module__ == "display.none"
 
 
+def test_build_display_hands_both_loggers_to_the_driver(ds):
+    """The display process's own two loggers must reach the driver, not just
+    build_display's own log calls: a driver that acquires "events"/"control" by
+    name instead is how `self.eventLogger` came to hold the control logger.
+    Pins the far end of that hand-off -- see
+    tests/ui/test_display_logger_injection.py for the driver-side contract."""
+    from controller.runtime.devices import build_display
+
+    event_log, control_log = _RecordingLogger(), _RecordingLogger()
+
+    display, _errors = build_display(_settings(), errors=[], event_log=event_log, control_log=control_log)
+
+    assert display.eventLogger is event_log
+    assert display.controlLogger is control_log
+
+
+def test_build_display_hands_both_loggers_to_the_fallback_driver(ds, monkeypatch):
+    """Same for the display.none substituted after a construction failure: the
+    fallback is what actually runs on a misconfigured grill, so it is the one
+    that must not lose the loggers."""
+    from controller.runtime.devices import build_display
+
+    settings = _settings()
+    settings["modules"]["display"] = "broken_display"
+    settings["display"] = {"config": {"broken_display": {}}}
+    monkeypatch.setattr(
+        "controller.runtime.devices.importlib.import_module",
+        _selective_import({"display.broken_display": _FakeModule(Display=_RaisingDisplay)}),
+    )
+    event_log, control_log = _RecordingLogger(), _RecordingLogger()
+
+    display, _errors = build_display(settings, errors=[], event_log=event_log, control_log=control_log)
+
+    assert type(display).__module__ == "display.none"
+    assert display.eventLogger is event_log
+    assert display.controlLogger is control_log
+
+
 def test_build_display_configure_failure_falls_back_to_none(ds, monkeypatch):
     """First try succeeds (import + config lookup), so display_config/
     disp_rotation are set correctly; only DisplayModule.Display(...)

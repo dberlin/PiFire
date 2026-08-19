@@ -16,12 +16,12 @@ PiFire Qt Quick Display Interface Library
 *****************************************
 """
 
-import logging
 import multiprocessing
 import os
 import threading
 
 from display._base_flex import DisplayBase
+from display._loggers import resolve_loggers
 from common.control_delta import control_delta
 from common.persistence.control import enqueue_control_delta, read_control
 from common.persistence.runtime import read_status
@@ -29,7 +29,9 @@ from common.system import is_real_hardware
 
 
 class Display(DisplayBase):
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         # Intentionally do NOT call super().__init__(): the parent process only
         # needs to spawn the Qt child and expose no-op stubs. Full DisplayBase
         # init (PIL canvas, assets, pygame menu JSON) is neither needed nor
@@ -39,11 +41,11 @@ class Display(DisplayBase):
         self.units = units
         self.config = config
         self.rotation = config.get("rotation", 0)
-        self._init_dispatch_state()
+        self._init_dispatch_state(event_log, control_log)
         self._start_qt_process()
 
     @classmethod
-    def for_dispatch(cls, config, units):
+    def for_dispatch(cls, config, units, *, event_log=None, control_log=None):
         """Build a dispatch-only instance (no Qt process) for use in the child.
 
         Provides just the attributes DisplayBase._command_handler needs so the
@@ -52,16 +54,18 @@ class Display(DisplayBase):
         self = cls.__new__(cls)
         self.config = config
         self.units = units
-        self._init_dispatch_state()
+        self._init_dispatch_state(event_log, control_log)
         return self
 
-    def _init_dispatch_state(self):
+    def _init_dispatch_state(self, event_log=None, control_log=None):
         self.command = None
         self.command_data = None
         self.display_object_list = []
         self.last_status_data = {}
         self.real_hardware = bool(is_real_hardware())
-        self.eventLogger = logging.getLogger("control")
+        # Both loggers, each named for the log it writes to. Skipping
+        # super().__init__() means this is the only place they get set.
+        self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         self.display_active = None
         self.display_init = False
         self.display_timeout = None
@@ -84,7 +88,13 @@ class Display(DisplayBase):
 
     def _await_qt_exit(self):
         self._qt_process.join()
-        logging.getLogger("control").error("Qt display child exited; shutting down display process.")
+        # Both audiences need this one: the operator's display just went dark
+        # (events.log), and a process dying is what a developer greps
+        # control.log for. Mirrors build_display()'s dual record of a display
+        # module that failed to load.
+        message = "Qt display child exited; shutting down display process."
+        self.eventLogger.error(message)
+        self.controlLogger.error(message)
         os._exit(0)
 
     # ------------------------------------------------------------------
@@ -104,7 +114,10 @@ class Display(DisplayBase):
         if "hold" in command:
             temp = int(command_data) if command_data else 0
             if temp:
-                enqueue_control_delta(control_delta(set_values={"updated": True, "mode": "Hold", "primary_setpoint": temp}), origin="display")
+                enqueue_control_delta(
+                    control_delta(set_values={"updated": True, "mode": "Hold", "primary_setpoint": temp}),
+                    origin="display",
+                )
             return
         if "notify" in command:
             origin = command_data.get("origin") if isinstance(command_data, dict) else None
@@ -115,16 +128,19 @@ class Display(DisplayBase):
             control = read_control()
             for entry in control["notify_data"]:
                 if entry["name"] == origin:
-                    enqueue_control_delta(control_delta(
-                        ops=[
-                            {
-                                "op": "notify.set",
-                                "label": entry["label"],
-                                "type": entry["type"],
-                                "fields": {"target": target, "req": bool(target)},
-                            }
-                        ]
-                    ), origin="display")
+                    enqueue_control_delta(
+                        control_delta(
+                            ops=[
+                                {
+                                    "op": "notify.set",
+                                    "label": entry["label"],
+                                    "type": entry["type"],
+                                    "fields": {"target": target, "req": bool(target)},
+                                }
+                            ]
+                        ),
+                        origin="display",
+                    )
                     break
             return
         if command == "cmd_stop":
@@ -136,24 +152,30 @@ class Display(DisplayBase):
             enqueue_control_delta(control_delta(set_values={"s_plus": toggle}), origin="display")
             return
         if command == "cmd_primestartup":
-            enqueue_control_delta(control_delta(
-                set_values={
-                    "updated": True,
-                    "mode": "Prime",
-                    "prime_amount": command_data,
-                    "next_mode": "Startup",
-                }
-            ), origin="display")
+            enqueue_control_delta(
+                control_delta(
+                    set_values={
+                        "updated": True,
+                        "mode": "Prime",
+                        "prime_amount": command_data,
+                        "next_mode": "Startup",
+                    }
+                ),
+                origin="display",
+            )
             return
         if command == "cmd_primeonly":
-            enqueue_control_delta(control_delta(
-                set_values={
-                    "updated": True,
-                    "mode": "Prime",
-                    "prime_amount": command_data,
-                    "next_mode": "Stop",
-                }
-            ), origin="display")
+            enqueue_control_delta(
+                control_delta(
+                    set_values={
+                        "updated": True,
+                        "mode": "Prime",
+                        "prime_amount": command_data,
+                        "next_mode": "Stop",
+                    }
+                ),
+                origin="display",
+            )
             return
         # Everything else: reuse the inherited handler verbatim.
         self.command = command

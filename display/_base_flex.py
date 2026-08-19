@@ -68,6 +68,7 @@ from common.persistence.runtime import (
     read_current,
 )
 from common.system import is_real_hardware
+from display._loggers import resolve_loggers
 from display.staleness import resolve_reading
 
 """
@@ -91,7 +92,9 @@ NEW_EMBER_FLEX_TYPES = {
 
 
 class DisplayBase:
-    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+    def __init__(
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+    ):
         # Init Global Variables and Constants
         self.config = config
 
@@ -122,8 +125,10 @@ class DisplayBase:
         # Attempt to set the log level of PIL so that it does not pollute the logs
         logging.getLogger("PIL").setLevel(logging.CRITICAL + 1)
 
-        # Setup logger
-        self.eventLogger = logging.getLogger("control")
+        # Setup loggers: both are handed in by build_display() (the display
+        # process configures them), and each is named for the log it writes to
+        # -- operator-facing messages to events.log, diagnostics to control.log.
+        self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         # Init Display Device, Input Device, Assets
         self._init_globals()
         self._init_framework()
@@ -1390,19 +1395,22 @@ class DisplayBase:
             control = read_control()
             for notify_source in control["notify_data"]:
                 if notify_source["name"] == self.input_origin:
-                    enqueue_control_delta(control_delta(
-                        ops=[
-                            {
-                                "op": "notify.set",
-                                "label": notify_source["label"],
-                                "type": notify_source["type"],
-                                "fields": {
-                                    "target": notify_target,
-                                    "req": True if notify_target else False,
-                                },
-                            }
-                        ]
-                    ), origin="display")
+                    enqueue_control_delta(
+                        control_delta(
+                            ops=[
+                                {
+                                    "op": "notify.set",
+                                    "label": notify_source["label"],
+                                    "type": notify_source["type"],
+                                    "fields": {
+                                        "target": notify_target,
+                                        "req": True if notify_target else False,
+                                    },
+                                }
+                            ]
+                        ),
+                        origin="display",
+                    )
                     break
 
             self.input_origin = None
@@ -1463,7 +1471,9 @@ class DisplayBase:
             if "triggered" in data["recipe"]["step_data"] and "pause" in data["recipe"]["step_data"]:
                 if data["recipe"]["step_data"]["triggered"] and data["recipe"]["step_data"]["pause"]:
                     # 'Unpause' Recipe
-                    enqueue_control_delta(control_delta(set_values={"recipe": {"step_data": {"pause": False}}}), origin="display")
+                    enqueue_control_delta(
+                        control_delta(set_values={"recipe": {"step_data": {"pause": False}}}), origin="display"
+                    )
                 else:
                     # User is forcing next step
                     enqueue_control_delta(control_delta(set_values={"updated": True}), origin="display")
