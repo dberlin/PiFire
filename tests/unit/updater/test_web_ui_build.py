@@ -99,6 +99,20 @@ def test_test_artifacts_do_not_trigger_a_rebuild(repo):
     assert web_ui_needs_rebuild(repo) is False
 
 
+def test_a_shared_package_source_touched_after_the_build_triggers_a_rebuild(repo):
+    """web-react imports @pifire/core, so a bundle built before a change to
+    that package is as stale as one built before a change to web-react."""
+    write(os.path.join(repo, "packages/pifire-core/src/command.ts"), mtime=3000)
+
+    assert web_ui_needs_rebuild(repo) is True
+
+
+def test_the_shared_package_node_modules_does_not_make_the_bundle_look_stale(repo):
+    write(os.path.join(repo, "packages/pifire-core/node_modules/dep/index.js"), mtime=9000)
+
+    assert web_ui_needs_rebuild(repo) is False
+
+
 def test_rebuild_runs_the_shared_script_and_streams_its_output(repo):
     seen = []
     calls = []

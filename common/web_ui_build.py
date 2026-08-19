@@ -54,24 +54,35 @@ def web_dir(repo_root):
     return os.path.join(repo_root, "web-react")
 
 
+def shared_package_dir(repo_root):
+    """web-react imports @pifire/core, so that package's sources are the
+    bundle's sources too -- an edit there must trigger a rebuild."""
+    return os.path.join(repo_root, "packages", "pifire-core")
+
+
+def source_dirs(repo_root):
+    return [web_dir(repo_root), shared_package_dir(repo_root)]
+
+
 def bundle_entry(repo_root):
     """The artifact the SPA blueprint serves, and the build's own timestamp."""
     return os.path.join(web_dir(repo_root), "dist", "index.html")
 
 
 def newest_source_mtime(repo_root):
-    """The most recent mtime anywhere in web-react, outside SKIP_DIRS."""
+    """The most recent mtime anywhere in the source dirs, outside SKIP_DIRS."""
     newest = 0.0
-    for root, dirs, files in os.walk(web_dir(repo_root)):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        for name in files:
-            try:
-                mtime = os.path.getmtime(os.path.join(root, name))
-            except OSError:
-                # Raced with a checkout, or a broken symlink. One unreadable
-                # file is not a reason to skip a rebuild or to force one.
-                continue
-            newest = max(newest, mtime)
+    for source_dir in source_dirs(repo_root):
+        for root, dirs, files in os.walk(source_dir):
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+            for name in files:
+                try:
+                    mtime = os.path.getmtime(os.path.join(root, name))
+                except OSError:
+                    # Raced with a checkout, or a broken symlink. One unreadable
+                    # file is not a reason to skip a rebuild or to force one.
+                    continue
+                newest = max(newest, mtime)
     return newest
 
 
