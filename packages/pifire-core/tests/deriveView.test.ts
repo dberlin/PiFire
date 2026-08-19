@@ -13,9 +13,8 @@ const card = (over: Partial<ProbeDataPayload>) =>
 
 describe("probeCard identity", () => {
   // `label` is the key every notify write is addressed by
-  // (common/api_commands.py:441-449). ProbeCardView previously exposed only
-  // `name` (the display title), so there was no way to say which probe a card
-  // meant.
+  // (common/api_commands.py:550-551) -- distinct from `name`, the free-text
+  // display title, which cannot identify which probe a write is for.
   it("carries the probe's label, distinct from its display title", () => {
     const v = card({ title: "Brisket", label: "Probe1" });
     expect(v.label).toBe("Probe1");
@@ -25,8 +24,9 @@ describe("probeCard identity", () => {
 
 // A probe device may have no reading to give: a network-polled one returns
 // None for a channel whose cache went stale, and it reaches the wire as null.
-// Math.round(null) is 0, so the card used to render a confident zero -- a
-// plausible temperature, which reads as data rather than as absence.
+// Math.round(null) is 0, so treating a null reading as a temperature would
+// render a confident zero -- a plausible-looking value that reads as data
+// rather than as absence.
 describe("probeCard with no current reading", () => {
   const withLast = (over: Partial<ProbeDataPayload["status"]>) =>
     card({ temp: null, status: { ...FIXTURE_DASH.foodProbes[0].status, ...over } });
@@ -82,11 +82,11 @@ describe("staleLabel", () => {
 });
 
 describe("probeCard notifyOn", () => {
-  // hasNotifications, NOT targetReq. blueprints/mobile/socket_io.py:770-795
-  // sets it when ANY of the probe's three notify entries is armed, and since
-  // slice 2 the bell opens a modal that edits all three -- so a probe carrying
-  // only a high-limit alert used to show a struck-through bell for a
-  // notification it really had.
+  // hasNotifications, NOT targetReq. blueprints/mobile/socket_io.py:877-892
+  // sets it when ANY of the probe's three notify entries is armed, and the
+  // bell opens a modal that edits all three -- so gating on targetReq alone
+  // would show a struck-through bell for a probe carrying only a high-limit
+  // alert, even though it has a real notification armed.
   it("is set by an armed target", () => {
     expect(card({ targetReq: true, hasNotifications: true, target: 203 }).notifyOn).toBe(true);
     expect(card({ targetReq: false, hasNotifications: false, target: 203 }).notifyOn).toBe(false);

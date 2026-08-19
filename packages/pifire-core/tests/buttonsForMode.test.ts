@@ -69,7 +69,7 @@ describe("buttonsForMode", () => {
     },
   );
 
-  // I2: Flask offers six prime choices -- three amounts x two follow-on modes
+  // Flask offers six prime choices -- three amounts x two follow-on modes
   // (_macro_control_panel.html:80-85). React had one button that always primed
   // dash.primeAmount and always went on to Startup, so "prime and stop", the
   // variant for loading a fresh bag, was unreachable.
@@ -255,8 +255,8 @@ describe("buttonsForMode", () => {
     expect(buttonsForMode(at("Hold")).find((b) => b.label === "Smoke")?.disabled).toBeUndefined();
   });
 
-  // Hold stays live in Hold: it opens the setpoint entry, and changing the
-  // target mid-cook is the whole point of the button.
+  // Hold stays live in Hold: it opens the setpoint entry, so the user can
+  // change the target mid-cook.
   it("keeps Hold pressable while holding", () => {
     const hold = buttonsForMode(at("Hold")).find((b) => b.label === "Hold");
     expect(hold?.disabled).toBeUndefined();
@@ -334,7 +334,7 @@ describe("buttonsForMode", () => {
   });
 });
 
-// I3: Flask gates ignition behind a modal (_macro_control_panel.html:89-90).
+// Flask gates ignition behind a modal (_macro_control_panel.html:89-90).
 // React shipped Startup as a bare command, so the safety check and the hold
 // prompt both disappeared. buttonsForMode returns the INTENT; which of the two
 // variants to render is ControlButtons' decision.
@@ -385,10 +385,10 @@ describe("buttonsForMode startup confirmation", () => {
   });
 });
 
-// I4a: buttonsForMode used to fall through to the active-cook ladder for any
-// unrecognised mode, so a running recipe offered Smoke / Hold / Smoke+ --
-// exactly the buttons that break out of the recipe, and exactly the ones Flask
-// hides (control_panel.js:181-182).
+// An unrecognised mode must not fall through to the active-cook ladder: a
+// running recipe would then offer Smoke / Hold / Smoke+ -- exactly the
+// buttons that break out of the recipe, and exactly the ones Flask hides
+// (control_panel.js:181-182).
 describe("buttonsForMode during a recipe", () => {
   const inRecipe = (over: Partial<DashSocketPayload["recipeStatus"]> = {}, mode = "Recipe") =>
     at(mode, {

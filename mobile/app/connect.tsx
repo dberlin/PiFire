@@ -16,7 +16,7 @@ import { usePrefsContext } from "./_layout";
 export default function Connect() {
   const router = useRouter();
   const { reason } = useLocalSearchParams<{ reason?: string }>();
-  const { prefs } = usePrefsContext();
+  const { prefs, setActiveHost } = usePrefsContext();
   const tokens = THEME[prefs.accent];
 
   const [host, setHost] = useState("pifire.local");
@@ -42,6 +42,12 @@ export default function Connect() {
     };
   }, []);
 
+  // A remembered host that only restates what is already in the field is not
+  // an alternative the user can act on, and rendering it directly under the
+  // input reads as a second, mysterious URL box.
+  const typedAsHost = normalizeHost(host);
+  const recent = hosts.filter((h) => h !== typedAsHost);
+
   async function handleConnect(candidate?: string) {
     const normalized = normalizeHost(candidate ?? host);
     if (!normalized) {
@@ -54,9 +60,14 @@ export default function Connect() {
     try {
       const updated = await rememberHost(normalized);
       setHosts(updated);
-      // "/" resolves to app/(tabs)/index.tsx -- the real dashboard, since
-      // Task 13. Route groups like "(tabs)" don't add a URL segment, so
-      // this is unchanged from when "/" pointed at the placeholder screen.
+      // Tell the layout directly. It guards the tab routes on knowing a host,
+      // and it re-reads storage on navigation -- so waiting for the navigation
+      // to inform it would deadlock: the guard blocks the very navigation that
+      // would trigger the re-read.
+      setActiveHost(normalized);
+      // "/" resolves to app/(tabs)/index.tsx, the dashboard. Route groups
+      // like "(tabs)" don't add a URL segment, so this path reaches it
+      // directly.
       router.replace("/");
     } finally {
       setConnecting(false);
@@ -92,12 +103,13 @@ export default function Connect() {
 
       {error ? <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text> : null}
 
-      {hosts.length > 0 ? (
+      {recent.length > 0 ? (
         <View style={styles.hostList}>
-          {hosts.map((h) => (
+          <Text style={[styles.hostListLabel, { color: tokens.text }]}>Recent grills</Text>
+          {recent.map((h) => (
             <Pressable
               key={h}
-              style={[styles.hostOption, { backgroundColor: tokens.surface }]}
+              style={[styles.hostOption, { borderColor: tokens.surface }]}
               onPress={() => {
                 setHost(h);
                 handleConnect(h);
@@ -152,15 +164,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   hostList: {
-    gap: 8,
+    gap: 6,
   },
+  hostListLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    opacity: 0.6,
+    marginBottom: 2,
+  },
+  // Outlined rather than filled, so a tappable shortcut never reads as
+  // another text field sitting under the real one.
   hostOption: {
     borderRadius: 8,
+    borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   hostOptionText: {
     fontSize: 14,
+    opacity: 0.75,
   },
   button: {
     borderRadius: 8,

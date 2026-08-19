@@ -5,8 +5,8 @@ import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { ControlRow } from "../src/components/ControlRow";
 
 // FIXTURE_DASH is a real captured socket_dash_data payload (@pifire/core/fixture).
-// dashInMode overrides only currentMode, per the brief, so every test here
-// exercises the real payload shape rather than a hand-invented dash object.
+// dashInMode overrides only currentMode, so every test here exercises the
+// real payload shape rather than a hand-invented dash object.
 function dashInMode(mode: DashSocketPayload["currentMode"]): DashSocketPayload {
   return { ...FIXTURE_DASH, currentMode: mode };
 }
@@ -41,13 +41,13 @@ describe("ControlRow", () => {
     jest.restoreAllMocks();
   });
 
-  // The brief's own snippet presses "Startup" and expects an immediate
-  // dispatch, but FIXTURE_DASH.startupCheck is true, so buttonsForMode gives
+  // Startup cannot exercise "a press sends the mode the button names"
+  // directly: FIXTURE_DASH.startupCheck is true, so buttonsForMode gives
   // Startup a { type: "startup" } action (a confirm gate), not a bare
   // command -- pressing it does NOT call setMode until the check is
   // confirmed (see the second test below). "Manual" is a real,
-  // always-plain-command button in the same row, so it is used here to
-  // exercise the literal claim: a press sends the mode the button names.
+  // always-plain-command button in the same row, used here instead to
+  // exercise that claim.
   it("sends the mode a pressed button names", async () => {
     const command = makeCommand();
     const { getByText } = await render(
@@ -101,12 +101,12 @@ describe("ControlRow", () => {
     await waitFor(() => expect(command.setMode).toHaveBeenCalledWith("shutdown"));
   });
 
-  // The single most consequential behavior on this screen: if a dispatch
-  // does NOT land, the user must be told, not left to assume it worked (the
-  // walk-away-thinking-it-shut-down hazard the task brief calls out).
-  // fire()'s `!res.ok` branch (a rejected command the grill answered but
-  // refused) and its `catch` branch (a thrown fetch, e.g. the network drops
-  // mid-request) are two different code paths -- both covered here.
+  // If a dispatch does NOT land, the user must be told, not left to assume
+  // it worked -- otherwise they could walk away believing a shutdown
+  // succeeded when it didn't. fire()'s `!res.ok` branch (a rejected command
+  // the grill answered but refused) and its `catch` branch (a thrown fetch,
+  // e.g. the network drops mid-request) are two different code paths --
+  // both covered here.
   it("surfaces a rejected command via Alert", async () => {
     const command = {
       setMode: jest.fn().mockResolvedValue({ ok: false, message: "grill refused the command" }),

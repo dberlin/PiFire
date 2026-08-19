@@ -9,11 +9,10 @@ import { THEME } from "../theme";
 // variant. Web's ordinary instance passes no `min` override to SetpointEntry,
 // so it falls through to setpointRange()'s own floor (health.ts's
 // SETPOINT_MIN, 150°F/65°C) -- that is the floor this modal matches, both
-// bounds from the same shared function. (An earlier version of this file
-// used web's HOLD_PROMPT_MIN, 125°F/50°C, here -- that constant is real, but
-// it belongs to web's *startup*-hold-prompt modal specifically, a variant
-// mobile does not implement yet; see ControlRow.tsx's note on the
-// single-variant startup confirm.)
+// bounds from the same shared function. (Web's HOLD_PROMPT_MIN, 125°F/50°C,
+// is a real constant, but it belongs to web's *startup*-hold-prompt modal
+// specifically, a variant mobile does not implement yet -- it does not apply
+// here; see ControlRow.tsx's note on the single-variant startup confirm.)
 interface SetpointModalProps {
   open: boolean;
   /** Prefill, e.g. `dash.primaryProbe.setTemp || dash.primaryProbe.temp || 0`. */

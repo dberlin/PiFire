@@ -79,9 +79,9 @@ export default function Settings() {
             trackColor={{ true: tokens.accent }}
           />
         </View>
-        {/* Same limitation stated on the Events screen (events.tsx), carried
-            here too since this is the screen where the toggle it describes
-            actually lives -- Task 15 had nowhere else to put it yet. */}
+        {/* Same limitation stated on the Events screen (events.tsx); repeated
+            here because this is the screen where the toggle it describes
+            lives. */}
         <Text style={[styles.note, { color: tokens.text }]}>
           Local alerts only fire while PiFire is open on this phone. For
           notifications that reach you while it's closed, set up PiFire's

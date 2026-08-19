@@ -55,9 +55,9 @@ export function alertsFor(previous: DashSocketPayload | null, next: DashSocketPa
   // blueprints/mobile/socket_io.py (~lines 872-876) maps that straight into
   // the probe's targetReq/target fields. So the very first dash payload that
   // reports temp >= target already carries targetReq: false and target: 0 --
-  // requiring the NEXT payload to still be armed (an earlier version of this
-  // function did) skips exactly the payload that should alert, and would
-  // never fire against a real grill. Requiring only that the PREVIOUS
+  // requiring the NEXT payload to still be armed skips exactly the payload
+  // that should alert, and would never fire against a real grill. Requiring
+  // only that the PREVIOUS
   // payload was armed and below target is what a probe sitting at its target
   // for an hour still alerts once for: once the server clears the flag,
   // every later payload's `before` is unarmed and the condition below is
@@ -103,8 +103,8 @@ export function alertsFor(previous: DashSocketPayload | null, next: DashSocketPa
   // guard against it.
   //
   // Known imprecision: @pifire/core's command.ts documents timerStop() as
-  // ALSO clearing timer.end straight to 0 (verified against
-  // common/api_commands.py's _cmd_set_timer). A user who manually stops a
+  // ALSO clearing timer.end straight to 0, matching common/api_commands.py's
+  // _cmd_set_timer. A user who manually stops a
   // running timer therefore produces the same end>0 -> end==0 transition as
   // one that actually finished, and gets the same "Timer done" alert. There
   // is nothing else in this payload that tells the two apart.

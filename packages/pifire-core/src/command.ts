@@ -27,7 +27,7 @@ export interface CommandClient {
     grams: number,
     next?: NonNullable<PrimeCommandRequest["next_mode"]>,
   ): Promise<CommandResult>;
-  // NOTE (verified against common/api_commands.py _cmd_set_timer):
+  // NOTE (see common/api_commands.py _cmd_set_timer):
   //  - timerStart is ALSO the unpause command: when control.timer.paused != 0
   //    the backend ignores `seconds` and just shifts the existing end time.
   //  - timerPause CLEARS the whole timer (and the shutdown/keep_warm flags)

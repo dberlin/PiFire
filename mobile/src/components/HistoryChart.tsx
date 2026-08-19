@@ -79,10 +79,9 @@ function buildPath(
 
 // A readable, static chart: one stroked path per series, a legend, and
 // min/max axis labels for time and temperature. Pan and zoom are explicitly
-// out of scope for v1 (see task-14-brief.md) -- this is not a uPlot port,
-// since uPlot is DOM-only; it is a from-scratch react-native-svg rendering
-// of the same shaped data @pifire/core/history/historyAdapter produces for
-// the web chart.
+// out of scope for v1 -- this is not a uPlot port, since uPlot is DOM-only;
+// it is a from-scratch react-native-svg rendering of the same shaped data
+// @pifire/core/history/historyAdapter produces for the web chart.
 export function HistoryChart({ series, height = 160 }: HistoryChartProps) {
   const hasAnyPoints = series.some((s) => s.points.length > 0);
 

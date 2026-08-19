@@ -77,9 +77,9 @@ export function ControlRow({ dash, command, disabled }: ControlRowProps) {
     } else if (action.type === "startup") {
       // ONE variant here (unlike web's two-variant #startupModal): the
       // hold-goto variant needs a settings write (start_to_mode.primary_setpoint)
-      // this app has no REST settings client for yet -- see the report's
-      // Concerns. The plain safety-check confirm below is what the fixture's
-      // startupCheck: true, startToHoldPrompt: false actually resolves to.
+      // this app has no REST settings client for yet. The plain safety-check
+      // confirm below is what startupCheck: true, startToHoldPrompt: false
+      // resolves to.
       Alert.alert("Startup Check", "Confirm Startup Grill?", [
         { text: "Cancel", style: "cancel" },
         { text: "Startup", onPress: () => void fire((c) => c.setMode("startup")) },
@@ -89,8 +89,8 @@ export function ControlRow({ dash, command, disabled }: ControlRowProps) {
     } else if (action.type === "menu") {
       setMenu({ title: action.title, items: action.items, run: action.run });
     } else if (action.type === "pwm") {
-      // No PwmEntry equivalent shipped on mobile yet (out of this task's file
-      // list); degrade gracefully rather than silently doing nothing.
+      // No PwmEntry equivalent shipped on mobile yet; degrade gracefully
+      // rather than silently doing nothing.
       Alert.alert("Not available", "Fan speed control isn't available on mobile yet.");
     }
   };

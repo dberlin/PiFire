@@ -31,9 +31,9 @@ const STALE_AFTER_MS = 30_000;
 
 const LiveContext = createContext<LiveResult | null>(null);
 
-// Tasks 12-13's screens read the connection through this instead of
-// calling useLive() directly, so the app opens exactly one socket per
-// connected grill regardless of how many screens want the data.
+// Screens read the connection through this instead of calling useLive()
+// directly, so the app opens exactly one socket per connected grill
+// regardless of how many screens want the data.
 export function useLiveContext(): LiveResult {
   const value = useContext(LiveContext);
   if (!value) {
@@ -44,6 +44,10 @@ export function useLiveContext(): LiveResult {
 
 interface PrefsContextValue {
   prefs: Prefs;
+  /** Publishes a newly saved host so the layout can open a connection to it.
+   *  Storage alone is not enough: the tab routes are guarded on the host being
+   *  known, so nothing can navigate into them until this is called. */
+  setActiveHost: (host: string) => void;
   /** Merges `partial` into the current prefs, updates every consumer
    *  immediately (this is what makes an accent change apply live -- see the
    *  preferences screen), and persists the result in the background. */
@@ -227,7 +231,7 @@ export default function RootLayout() {
   // there is exactly one source of truth for "the active grill" and it can't
   // drift from what RootLayout itself is routing on.
   const prefsValue = useMemo<PrefsContextValue>(
-    () => ({ prefs: { ...prefs, host: host ?? null }, updatePrefs }),
+    () => ({ prefs: { ...prefs, host: host ?? null }, updatePrefs, setActiveHost: setHost }),
     [prefs, host, updatePrefs],
   );
 

@@ -11,10 +11,9 @@ import {
 // design's internal simulator). Kept side-effect free so it's unit-testable —
 // every color / label / geometry input the widgets need comes out of here.
 
-// One constant per semantic, all of them Theme.qml tokens. The lighter
-// companions (OK2/AMBER2/DANGER2) that used to sit beside these were a
-// React-only ramp with no Qt counterpart; the 2026-07-26 ruling replaced them
-// with the tokens themselves.
+// One constant per semantic, all of them Theme.qml tokens. Lighter
+// companions such as OK2/AMBER2/DANGER2 are a React-only ramp with no Qt
+// counterpart, so they are not used here.
 const OK = "var(--ok)";
 const AMBER = "var(--warn)";
 const DANGER = "var(--danger)";
@@ -64,7 +63,7 @@ export function reading(
 export interface ProbeCardView {
   name: string;
   /** The probe's `label`, not its display title: every notify write is
-   *  addressed by label (common/api_commands.py:441-449), and the title is a
+   *  addressed by label (common/api_commands.py:550-551), and the title is a
    *  free-text name the user can change. */
   label: string;
   /** The temperature to display, which is the last real reading when the probe
