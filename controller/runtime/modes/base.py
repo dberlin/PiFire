@@ -135,8 +135,6 @@ class ControlMode:
         accumulating augerontime metrics on auger-off. Hold overrides
         `_on_auger_on` to also recompute OnTime/OffTime/CycleTime and publish
         MQTT PID info -- that part is NOT reproduced here."""
-        import control as _control
-
         if self.state.manual_override["auger"] < now:
             had_manual_override = self.state.manual_override["auger"] != 0
             self.state.manual_override["auger"] = 0
@@ -147,7 +145,7 @@ class ControlMode:
             ):
                 self.grill.auger_on()
                 self.state.timers.auger_toggle = now
-                _control.eventLogger.debug("Cycle Event: Auger On")
+                self.ctx.event_log.debug("Cycle Event: Auger On")
                 self._on_auger_on(now)
 
             # If Auger is ON and time since toggle is greater than On Time
@@ -161,14 +159,12 @@ class ControlMode:
                 self.ctx.store.update_metrics(self.state.metrics)
                 # Set current last toggle time to now
                 self.state.timers.auger_toggle = now
-                _control.eventLogger.debug("Cycle Event: Auger Off")
+                self.ctx.event_log.debug("Cycle Event: Auger Off")
 
     def _smoke_plus_fan_tick(self, now, ptemp, current_output_status):
         """Smoke Plus fan cycling + the elif restore chain. Gated to Smoke
         always, and Hold only once target_temp_achieved. `ptemp` is the fresh
         probe reading for this tick."""
-        import control as _control
-
         settings = self.settings
         control = self.control
         grill_platform = self.grill
@@ -186,7 +182,7 @@ class ControlMode:
             ) and self.state.manual_override["fan"] < now:
                 if not current_output_status["fan"]:
                     start_fan(grill_platform, settings, control["duty_cycle"])
-                    _control.eventLogger.debug("Smoke Plus: Over or Under Temp Fan ON")
+                    self.ctx.event_log.debug("Smoke Plus: Over or Under Temp Fan ON")
             elif (now - self.state.fan.cycle_toggle_time) > settings["smoke_plus"]["on_time"] and current_output_status[
                 "fan"
             ]:
@@ -194,7 +190,7 @@ class ControlMode:
                     self.state.manual_override["fan"] = 0
                     grill_platform.fan_off()
                     self.state.fan.cycle_toggle_time = now
-                    _control.eventLogger.debug("Smoke Plus: Fan OFF")
+                    self.ctx.event_log.debug("Smoke Plus: Fan OFF")
             elif (
                 (now - self.state.fan.cycle_toggle_time) > settings["smoke_plus"]["off_time"]
                 and not current_output_status["fan"]
@@ -207,10 +203,10 @@ class ControlMode:
                 ):
                     grill_platform.pwm_fan_ramp(*ramp_params(settings["smoke_plus"], settings["pwm"]))
                     self.state.fan.pwm_ramping = True
-                    _control.eventLogger.debug("Smoke Plus: Fan Ramping Up")
+                    self.ctx.event_log.debug("Smoke Plus: Fan Ramping Up")
                 else:
                     start_fan(grill_platform, settings, control["duty_cycle"])
-                    _control.eventLogger.debug("Smoke Plus: Fan ON")
+                    self.ctx.event_log.debug("Smoke Plus: Fan ON")
 
         # If Smoke Plus was disabled when fan is OFF return fan to ON
         elif (
@@ -220,7 +216,7 @@ class ControlMode:
             and self.state.manual_override["fan"] < now
         ):
             start_fan(grill_platform, settings, control["duty_cycle"])
-            _control.eventLogger.debug("Smoke Plus: Fan Returned to On")
+            self.ctx.event_log.debug("Smoke Plus: Fan Returned to On")
 
         # If Smoke Plus was disabled while fan was ramping return it to the correct duty cycle
         elif (
@@ -232,7 +228,7 @@ class ControlMode:
         ):
             self.state.fan.pwm_ramping = False
             grill_platform.set_duty_cycle(control["duty_cycle"])
-            _control.eventLogger.debug("Smoke Plus: Fan Returned to " + str(control["duty_cycle"]) + "% duty cycle")
+            self.ctx.event_log.debug("Smoke Plus: Fan Returned to " + str(control["duty_cycle"]) + "% duty cycle")
 
         # Set Fan Duty Cycle based on Average Grill Temp Using Profile
         elif (
@@ -242,7 +238,7 @@ class ControlMode:
             and self.state.manual_override["fan"] < now
         ):
             grill_platform.set_duty_cycle(control["duty_cycle"])
-            _control.eventLogger.debug("Temp Fan Control: Fan Set to " + str(control["duty_cycle"]) + "% duty cycle")
+            self.ctx.event_log.debug("Temp Fan Control: Fan Set to " + str(control["duty_cycle"]) + "% duty cycle")
 
         # If PWM Fan Control is turned off check current Duty Cycle and set back to max_duty_cycle if required
         elif (
@@ -254,7 +250,7 @@ class ControlMode:
             control["duty_cycle"] = settings["pwm"]["max_duty_cycle"]
             self.ctx.store.write_control_snapshot(control, origin="control")
             grill_platform.set_duty_cycle(control["duty_cycle"])
-            _control.eventLogger.debug("Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle")
+            self.ctx.event_log.debug("Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle")
 
     def _stage_smoke_cycle_metrics(self):
         """Shared `on_metrics_stamped()` body for Startup/Reignite/Smoke: record
@@ -292,8 +288,6 @@ class ControlMode:
         of this module does. SmartStart disabled (or no profiles configured
         at all): falls back to the pre-fix `smoke_cycle_times()` path,
         unchanged."""
-        import control as _control
-
         settings = self.settings
         control = self.control
 
@@ -302,14 +296,14 @@ class ControlMode:
             profile_selected = control["smartstart"].get("profile_selected", 0)
 
             if not profiles:
-                _control.eventLogger.warning(
+                self.ctx.event_log.warning(
                     "SmartStart enabled but no profiles configured on settings reload; "
                     "falling back to cycle_data timing."
                 )
             else:
                 if not (0 <= profile_selected < len(profiles)):
                     clamped = len(profiles) - 1
-                    _control.eventLogger.warning(
+                    self.ctx.event_log.warning(
                         f"SmartStart profile_selected ({profile_selected}) is out of range "
                         f"for {len(profiles)} profile(s) on settings reload; clamping to {clamped}."
                     )
@@ -344,8 +338,6 @@ class ControlMode:
     def _setup_recipe_triggers(self, control):
         """Pre-loop recipe trigger setup (extracted from run()). Mutates control
         in place and writes it when any trigger was set."""
-        import control as _control  # module global: eventLogger
-
         ctx = self.ctx
         mode = self.name
         if control["mode"] == Mode.RECIPE:
@@ -376,13 +368,11 @@ class ControlMode:
                 if recipe_trigger_set:
                     ctx.store.write_control_snapshot(control, origin="control")
                 else:
-                    _control.eventLogger.warning("No trigger set for Hold/Smoke mode in recipe.")
+                    self.ctx.event_log.warning("No trigger set for Hold/Smoke mode in recipe.")
 
     def _process_control_flags(self, control, now, last, pelletdb):
         """Per-tick settings/distance/hopper/switch flag handling (extracted from
         run()). Mutates control in place; returns (last, pelletdb, should_break)."""
-        import control as _control  # module global: eventLogger
-
         ctx = self.ctx
         grill_platform = self.grill
         dist_device = self.dist_device
@@ -393,9 +383,9 @@ class ControlMode:
             ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
             if self.settings["globals"]["debug_mode"]:
-                _control.eventLogger.setLevel(logging.DEBUG)
+                self.ctx.event_log.setLevel(logging.DEBUG)
             else:
-                _control.eventLogger.setLevel(logging.INFO)
+                self.ctx.event_log.setLevel(logging.INFO)
             self.on_settings_reload()
 
         # Check if user changed hopper levels and update if required
@@ -415,7 +405,7 @@ class ControlMode:
             control["hopper_check"] = False
             ctx.store.write_control_snapshot(control, origin="control")
             dist_device.request_sample()
-            _control.eventLogger.info("Hopper Level Check requested.")
+            self.ctx.event_log.info("Hopper Level Check requested.")
 
         # Automatic refresh every HOPPER_LEVEL_REFRESH_INTERVAL seconds. (The
         # literal here used to be 60, under a comment claiming 300.) Reads a
@@ -432,7 +422,7 @@ class ControlMode:
         if not self.settings["platform"]["standalone"] and last != grill_platform.get_input_status():
             last = grill_platform.get_input_status()
             if not last:
-                _control.eventLogger.info("Switch set to off, going to monitor mode.")
+                self.ctx.event_log.info("Switch set to off, going to monitor mode.")
                 # The seam sets mode="Stop"/updated + writes; status is not part
                 # of the transition, so set it on control first (single OVERWRITE).
                 control["status"] = StatusState.ACTIVE
@@ -444,8 +434,6 @@ class ControlMode:
     def _apply_manual_overrides(self, control, now, current_output_status):
         """Per-tick manual output overrides (extracted from run()). Mutates control
         and self.state.manual_override in place."""
-        import control as _control  # module global: eventLogger
-
         self._last_now = now
         ctx = self.ctx
         mode = self.name
@@ -462,40 +450,40 @@ class ControlMode:
                 if control["manual"]["change"] == "fan":
                     if control["manual"]["output"] and not current_output_status["fan"]:
                         grill_platform.fan_on()
-                        _control.eventLogger.debug("Fan ON")
+                        self.ctx.event_log.debug("Fan ON")
                     elif not control["manual"]["output"] and current_output_status["fan"]:
                         grill_platform.fan_off()
-                        _control.eventLogger.debug("Fan OFF")
+                        self.ctx.event_log.debug("Fan OFF")
                     manual_override["fan"] = override_time
                     self._on_manual_output("fan", control["manual"]["output"])
 
                 if control["manual"]["change"] == "auger":
                     if control["manual"]["output"] and not current_output_status["auger"]:
                         grill_platform.auger_on()
-                        _control.eventLogger.debug("Auger ON")
+                        self.ctx.event_log.debug("Auger ON")
                     elif not control["manual"]["output"] and current_output_status["auger"]:
                         grill_platform.auger_off()
-                        _control.eventLogger.debug("Auger OFF")
+                        self.ctx.event_log.debug("Auger OFF")
                     manual_override["auger"] = override_time
                     self._on_manual_output("auger", control["manual"]["output"])
 
                 if control["manual"]["change"] == "igniter":
                     if control["manual"]["output"] and not current_output_status["igniter"]:
                         grill_platform.igniter_on()
-                        _control.eventLogger.debug("Igniter ON")
+                        self.ctx.event_log.debug("Igniter ON")
                     elif not control["manual"]["output"] and current_output_status["igniter"]:
                         grill_platform.igniter_off()
-                        _control.eventLogger.debug("Igniter OFF")
+                        self.ctx.event_log.debug("Igniter OFF")
                     manual_override["igniter"] = override_time
                     self._on_manual_output("igniter", control["manual"]["output"])
 
                 if control["manual"]["change"] == "power":
                     if control["manual"]["output"] and not current_output_status["power"]:
                         grill_platform.power_on()
-                        _control.eventLogger.debug("Power ON")
+                        self.ctx.event_log.debug("Power ON")
                     elif not control["manual"]["output"] and current_output_status["power"]:
                         grill_platform.power_off()
-                        _control.eventLogger.debug("Power OFF")
+                        self.ctx.event_log.debug("Power OFF")
                     manual_override["power"] = override_time
                     self._on_manual_output("power", control["manual"]["output"])
 
@@ -506,7 +494,7 @@ class ControlMode:
                     and not control["manual"]["pwm"] == current_output_status["pwm"]
                 ):
                     speed = control["manual"]["pwm"]
-                    _control.eventLogger.debug("PWM Speed: " + str(speed) + "%")
+                    self.ctx.event_log.debug("PWM Speed: " + str(speed) + "%")
                     grill_platform.set_duty_cycle(speed)
                     manual_override["pwm"] = override_time
                     # Fires only when this branch's own gate accepts the request --
@@ -603,8 +591,6 @@ class ControlMode:
 
     # ---- shared skeleton ----
     def run(self):
-        import control as _control  # module global: eventLogger
-
         ctx = self.ctx
         mode = self.name
         grill_platform = self.grill
@@ -625,7 +611,7 @@ class ControlMode:
         control["hopper_check"] = True
         ctx.store.write_control_snapshot(control, origin="control")
 
-        _control.eventLogger.info(f"{mode} Mode started.")
+        self.ctx.event_log.info(f"{mode} Mode started.")
 
         # Pre-Loop Setup Recipe Triggers
         self._setup_recipe_triggers(control)
@@ -830,12 +816,12 @@ class ControlMode:
         grill_platform.auger_off()
         grill_platform.igniter_off()
 
-        _control.eventLogger.debug("Auger OFF, Igniter OFF")
+        self.ctx.event_log.debug("Auger OFF, Igniter OFF")
 
         # ---- mode-specific teardown ----
         self.teardown(ptemp)
 
-        _control.eventLogger.info(f"{mode} mode ended.")
+        self.ctx.event_log.info(f"{mode} mode ended.")
 
         # Save Pellets Used
         pelletdb = ctx.store.read_pellet_db()

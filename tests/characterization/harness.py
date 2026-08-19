@@ -19,9 +19,11 @@ so post-loop cleanup (auger/igniter off, metrics, monitor.stop_monitor())
 still runs, exactly as it would for any other mode-change request.
 
 Other pitfalls handled here (see task brief):
-  1. `control.eventLogger` / `control.controlLogger` are only bound inside
-     control.py's `if __name__ == '__main__':` block, but `_work_cycle` calls
-     them directly. We bind them to stdlib loggers before running.
+  1. Controller logging goes to the operator's `events` / `control` loggers,
+     which `create_logger` points at real files at process startup. `make_ctx`
+     injects the `characterization` logger into `ControllerContext` instead, so
+     a captured run logs where the test can see it and nowhere else. Injection
+     IS the redirection seam -- there is no module global to rebind.
   2. `Process_Monitor` spawns a NON-DAEMON heartbeat thread and, 30s after a
      missed heartbeat, writes a critical_error and shells out to
      `supervisorctl restart control` -- for real, since `is_real_hw` reads
@@ -40,14 +42,14 @@ from common.control_delta import control_delta
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
-import control
 import controller.runtime.runner
 import controller.runtime.controller as controller_mod
 
 
-# --- Pitfall 1: loggers are normally bound in `if __name__ == '__main__':` ---
-control.eventLogger = logging.getLogger("characterization")
-control.controlLogger = logging.getLogger("characterization")
+#: --- Pitfall 1 --- The logger every captured run is redirected to. Handed to
+#: `ControllerContext` by `make_ctx` below; add a handler to it to read back
+#: what a work cycle logged.
+CAPTURE_LOGGER_NAME = "characterization"
 
 
 # --- Pitfall 2: Process_Monitor. There USED to be an autouse
@@ -115,11 +117,14 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None,
         outputs=tuple(settings["platform"]["outputs"]),
     )
     notifier = FakeNotifier()
+    capture_log = logging.getLogger(CAPTURE_LOGGER_NAME)
     ctx = ControllerContext(
         devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
         store=store,
         notifications=notifier,
         clock=ManualClock(),
+        event_log=capture_log,
+        control_log=capture_log,
     )
     return ctx, grill, notifier
 

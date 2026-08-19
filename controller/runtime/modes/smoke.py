@@ -32,14 +32,12 @@ class SmokeMode(ControlMode):
         # and self.name in ('Smoke', 'Hold')`) lives in the shared pre-loop
         # section of `ControlMode.run()` (base.py), which runs for every
         # ControlMode subclass -- it is not duplicated here.
-        import control as _control
-
         start_fan(self.grill, self.settings)
         self.grill.power_on()
-        _control.eventLogger.debug("Power ON, Fan ON, Igniter OFF, Auger OFF")
+        self.ctx.event_log.debug("Power ON, Fan ON, Igniter OFF, Auger OFF")
 
         self.grill.auger_on()
-        _control.eventLogger.debug("Auger ON")
+        self.ctx.event_log.debug("Auger ON")
 
         self._init_smoke_cycle()
 

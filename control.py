@@ -34,32 +34,10 @@ from controller.runtime.notifier import LiveNotifier
 from controller.runtime.controller import Controller
 
 
-# ---------------------------------------------------------------------------
-# Module-level loggers. Bound below in the __main__ block. The per-mode
-# handlers reference these via `import control as _control; _control.eventLogger`
-# (a deliberate module-global logging contract), so they must remain top-level
-# names on this module. Tests bind them directly (see the characterization
-# harness).
-# ---------------------------------------------------------------------------
-eventLogger = None
-controlLogger = None
-
-
 # Only run hardware init and the control loop when executed as the main
-# program. Guarding this lets the module be imported (e.g. by tests, and by the
-# per-mode handlers that reference control.eventLogger) without initializing
-# hardware, flushing the datastore, or entering the control loop.
+# program. Guarding this lets the module be imported (e.g. by tests) without
+# initializing hardware, flushing the datastore, or entering the control loop.
 if __name__ == "__main__":
-    # When launched as `python control.py`, this module is named `__main__`. The
-    # per-mode handlers do `import control as _control` to reach the loggers
-    # bound below; without this alias that import would load a SECOND, separate
-    # `control` module whose `__main__` block never ran (loggers unbound ->
-    # AttributeError on the first mode log). Alias `control` to this running
-    # module so those imports see the bound loggers.
-    import sys
-
-    sys.modules["control"] = sys.modules["__main__"]
-
     # First-boot migration: import existing settings.json / pelletdb.json into
     # SQLite if it hasn't happened yet. Must run before the first
     # read_settings()/read_control() call below -- this is the ONLY trigger of

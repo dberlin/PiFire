@@ -16,14 +16,12 @@ class PrimeMode(ControlMode):
     name = Mode.PRIME
 
     def setup(self):
-        import control as _control
-
         self.grill.fan_off()
         self.grill.power_on()
-        _control.eventLogger.debug("Power ON, Fan OFF, Igniter OFF, Auger OFF")
+        self.ctx.event_log.debug("Power ON, Fan OFF, Igniter OFF, Auger OFF")
 
         self.grill.auger_on()
-        _control.eventLogger.debug("Auger ON")
+        self.ctx.event_log.debug("Auger ON")
 
         control = self.ctx.store.read_control()
         auger_rate = self.settings["globals"]["augerrate"]
@@ -40,7 +38,7 @@ class PrimeMode(ControlMode):
         # Allow for the igniter to be turned on during prime mode - user selected
         if self.settings["globals"]["prime_ignition"] and control["next_mode"] == Mode.STARTUP:
             self.grill.igniter_on()
-            _control.eventLogger.debug("Igniter ON")
+            self.ctx.event_log.debug("Igniter ON")
 
     def on_tick(self, now, ptemp, current_output_status):
         self._auger_cycle_tick(now, current_output_status)
@@ -54,6 +52,4 @@ class PrimeMode(ControlMode):
     def teardown(self, ptemp):
         self.grill.fan_off()
         self.grill.power_off()
-        import control as _control
-
-        _control.eventLogger.debug("Fan OFF, Power OFF")
+        self.ctx.event_log.debug("Fan OFF, Power OFF")

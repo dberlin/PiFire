@@ -36,13 +36,6 @@ from tests.characterization._controller_harness import (
     _FakeOs,
 )
 from tests.fakes.grill import FakeGrillPlatform
-import control
-
-# The per-mode handlers reference control.eventLogger via `import control as
-# _control`; bind it so any stray logging call is harmless. (The loop itself
-# logs through ctx.event_log, set below.)
-control.eventLogger = logging.getLogger("characterization")
-control.controlLogger = logging.getLogger("characterization")
 
 
 class _HostileDistance(_RecordingDistance):

@@ -1,5 +1,4 @@
 import copy
-import control
 
 from common.control_trace import ActuationMode, MpcUpdatePayload
 from controller.base import MpcFailureState, MpcTraceDiagnostics
@@ -60,7 +59,7 @@ def test_hold_warns_once_for_an_unreachable_target_while_continuing_at_maximum_s
     warnings = []
 
     hold.setup()
-    monkeypatch.setattr(control.eventLogger, "warning", warnings.append)
+    monkeypatch.setattr(hold.ctx.event_log, "warning", warnings.append)
     records = []
     assert hold._control_trace is not None
     hold._control_trace.record = lambda kind, payload, timestamp: records.append(payload) or True
@@ -101,7 +100,7 @@ def test_hold_advisory_rearms_only_after_target_model_or_reachability_changes(ho
     warnings = []
 
     hold.setup()
-    monkeypatch.setattr(control.eventLogger, "warning", warnings.append)
+    monkeypatch.setattr(hold.ctx.event_log, "warning", warnings.append)
     for now in range(2, 20, 2):
         hold.on_tick(float(now), 100.0, hold.grill.get_output_status())
 

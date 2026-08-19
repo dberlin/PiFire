@@ -23,8 +23,6 @@ class StartupMode(ControlMode):
     name = Mode.STARTUP
 
     def setup(self):
-        import control as _control
-
         settings = self.settings
 
         if settings["platform"]["dc_fan"] and settings["startup"].get("pwm_duty_cycle") is not None:
@@ -32,13 +30,13 @@ class StartupMode(ControlMode):
         else:
             start_fan(self.grill, settings)
         self.grill.power_on()
-        _control.eventLogger.debug("Power ON, Fan ON, Igniter OFF, Auger OFF")
+        self.ctx.event_log.debug("Power ON, Fan ON, Igniter OFF, Auger OFF")
 
         self.grill.igniter_on()
-        _control.eventLogger.debug("Igniter ON")
+        self.ctx.event_log.debug("Igniter ON")
 
         self.grill.auger_on()
-        _control.eventLogger.debug("Auger ON")
+        self.ctx.event_log.debug("Auger ON")
 
         self._init_smoke_cycle()
 

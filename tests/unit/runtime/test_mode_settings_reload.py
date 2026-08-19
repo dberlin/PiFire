@@ -32,7 +32,6 @@ from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
 from tests.fakes.probes import FakeProbes
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
-import tests.characterization.harness as harness  # noqa: F401  (binds control.eventLogger/Process_Monitor)
 
 
 def _make_mode(mode_cls, control_mode_name, settings):

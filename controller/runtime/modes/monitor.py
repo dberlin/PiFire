@@ -13,13 +13,9 @@ class MonitorMode(ControlMode):
     def setup(self):
         self.grill.fan_off()
         self.grill.power_off()
-        import control as _control
-
-        _control.eventLogger.debug("Power OFF, Fan OFF, Igniter OFF, Auger OFF")
+        self.ctx.event_log.debug("Power OFF, Fan OFF, Igniter OFF, Auger OFF")
 
     def teardown(self, ptemp):
         self.grill.fan_off()
         self.grill.power_off()
-        import control as _control
-
-        _control.eventLogger.debug("Fan OFF, Power OFF")
+        self.ctx.event_log.debug("Fan OFF, Power OFF")

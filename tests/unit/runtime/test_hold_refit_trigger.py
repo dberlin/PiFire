@@ -82,6 +82,7 @@ def test_no_refit_when_identification_is_off(hold_cycle):
 
 def test_online_adaptation_without_identification_checkpoints_before_trace_close(hold_cycle, monkeypatch):
     import controller.runtime.modes.hold as hold_module
+
     events = []
 
     class _CloseRecorder:
@@ -372,16 +373,18 @@ def test_a_refit_that_refuses_still_reaches_the_operator(hold_cycle):
     runner = FakeControllerRunner(period=0.01)
     runner.refit_raises = RuntimeError("the controller worker did not stop")
     hold = _hold(hold_cycle, runner, identification=True)
-    import control as _control
 
     logged = []
-    original = _control.eventLogger.error
-    _control.eventLogger.error = logged.append
+    # setup() already handed the learning runtime the context's event logger, so
+    # substitute the method on that object rather than rebinding ctx.event_log.
+    original = hold.ctx.event_log.error
+    hold.ctx.event_log.error = logged.append
     try:
         hold.teardown(225)
     finally:
-        _control.eventLogger.error = original
+        hold.ctx.event_log.error = original
     assert any("did not stop" in line for line in logged)
+
 
 def test_hold_warns_and_skips_refit_when_runner_reports_stop_timeout(
     hold_cycle,
@@ -396,9 +399,7 @@ def test_hold_warns_and_skips_refit_when_runner_reports_stop_timeout(
     hold.teardown(225)
 
     assert len(runner.finalized_refits) == refits_before
-    assert warnings == [
-        "Controller worker did not stop; final checkpoint was not queued"
-    ]
+    assert warnings == ["Controller worker did not stop; final checkpoint was not queued"]
 
 
 def test_a_runner_that_forgets_to_refit_cannot_be_built():
@@ -467,8 +468,6 @@ def test_probe_frame_is_excluded_from_passive_online_validation_without_being_lo
     assert passive.observations == ()
     assert teardown.observe(probe).accepted
     assert teardown.observations == (probe,)
-
-
 
 
 class _FinalLifecycleRunner(FakeControllerRunner):
@@ -579,9 +578,7 @@ def test_final_checkpoint_failure_is_terminal_and_is_not_retried(hold_cycle):
     ]
 
 
-def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_and_close(
-    hold_cycle, monkeypatch
-):
+def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_and_close(hold_cycle, monkeypatch):
     import controller.runtime.modes.hold as hold_module
 
     runner = _FinalLifecycleRunner(
@@ -599,9 +596,7 @@ def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_
             self.attempts = []
 
         def submit_checkpoint(self, _name, snapshot):
-            runner.lifecycle.append(
-                f"checkpoint:{snapshot['cook_refit']['latest']}"
-            )
+            runner.lifecycle.append(f"checkpoint:{snapshot['cook_refit']['latest']}")
             self.attempts.append(snapshot)
             return len(self.attempts) > 1
 
@@ -627,10 +622,7 @@ def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_
         "checkpoint-failure",
     ]
     assert runner.final_outcomes[-1] is TeardownRefitOutcome.CHECKPOINT_FAILURE
-    assert (
-        runner.lifecycle.index("checkpoint:checkpoint-failure")
-        < runner.lifecycle.index("flush")
-    )
+    assert runner.lifecycle.index("checkpoint:checkpoint-failure") < runner.lifecycle.index("flush")
     assert runner.lifecycle.index("flush") < runner.lifecycle.index("close")
 
 
@@ -838,7 +830,3 @@ def test_completed_frame_feedback_and_observation_reach_incumbent_before_activat
         assert core.events.index(("observation", 0)) < core.events.index("install")
     finally:
         runner.stop()
-
-
-
-

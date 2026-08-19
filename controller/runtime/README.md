@@ -46,6 +46,11 @@ for module globals. The context bundles:
 - **`devices`** (`context.py` / `devices.py`) — grill platform, probes, distance
   sensor; built by `build_devices()`. `build_display()` builds the display for
   the display process.
+- **`event_log` / `control_log`** (`context.py`) — the operator-visible `events`
+  and `control` loggers. `create_logger()` configures their handlers, level and
+  file once per process at startup (`control.py`); every logging call inside the
+  controller runtime acquires them from the context, so a test substitutes a
+  recorder by injection rather than by rebinding a module global.
 
 ## Control flow
 

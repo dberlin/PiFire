@@ -14,16 +14,18 @@ from controller.runtime.framed_pulse import FramedPulseRuntime
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
 
 from tests.fakes.runner import FakeControllerRunner
+
+
 def _runtime(mode) -> FramedPulseRuntime:
     runtime = mode._framed_pulse
     assert isinstance(runtime, FramedPulseRuntime)
     return runtime
 
+
 def _trace(mode):
     trace = mode._control_trace
     assert trace is not None
     return trace
-
 
 
 def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
@@ -41,8 +43,6 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
             mode.grill.auger_off()
     mode._dispatch_framed_result(result, record_terminal_trace=False)
     return result.decision
-
-
 
 
 def _result(
@@ -153,9 +153,7 @@ def test_invalid_safety_ceiling_fault_deduplicates_and_recovers(
         "ControlTraceRecorder",
         lambda *, warning: recorder,
     )
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(index) for index in range(1, 9)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(index) for index in range(1, 9)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.state.metrics = {"id": "safety-ceiling"}
@@ -185,9 +183,7 @@ def test_invalid_safety_ceiling_fault_deduplicates_and_recovers(
         record.payload
         for record in recorder.records
         if isinstance(record.payload, SafetyEventPayload)
-        and record.payload.detail.startswith(
-            "cannot read the grill maximum temperature:"
-        )
+        and record.payload.detail.startswith("cannot read the grill maximum temperature:")
     ]
     assert len(faults) == 4
     assert "Celsius or Fahrenheit" in faults[0].detail
@@ -195,13 +191,13 @@ def test_invalid_safety_ceiling_fault_deduplicates_and_recovers(
     assert "not finite" in faults[2].detail
     assert "not finite" in faults[3].detail
     assert runner.safety_ceiling_c == pytest.approx(260.0)
+
+
 def test_safety_ceiling_callback_failure_deduplicates_and_recovers(
     hold_cycle,
     monkeypatch,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(index) for index in range(1, 5)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(index) for index in range(1, 5)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     trace = hold._control_trace
@@ -226,15 +222,10 @@ def test_safety_ceiling_callback_failure_deduplicates_and_recovers(
     monkeypatch.setattr(runner, "set_safety_ceiling_c", unsupported)
     hold.on_tick(8.0, 200.0, hold.grill.get_output_status())
 
-    assert attempted_ceilings == pytest.approx(
-        [(550.0 - 32.0) * 5.0 / 9.0] * 3
-    )
+    assert attempted_ceilings == pytest.approx([(550.0 - 32.0) * 5.0 / 9.0] * 3)
     assert len(safety) == 2
     assert all("ceiling unsupported" in event.detail for event in safety)
-    assert runner.safety_ceiling_c == pytest.approx(
-        (550.0 - 32.0) * 5.0 / 9.0
-    )
-
+    assert runner.safety_ceiling_c == pytest.approx((550.0 - 32.0) * 5.0 / 9.0)
 
 
 def test_safety_ceiling_and_calibration_command_precede_result_consumption(hold_cycle):
@@ -318,6 +309,7 @@ def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cy
     assert trace is not None and context is not None
     assert trace.ensure_open(context, timestamp_ms=22_000) is not None
     batches = []
+
     class _NoEvidencePersistence:
         evidence_blocked = False
         failed = False
@@ -371,13 +363,10 @@ def test_default_five_second_polls_terminalize_only_the_twenty_second_frame(hold
     assert len(runner.observations) == 1
 
 
-
 def test_automatic_lid_detection_cancels_active_probe_before_pause(
     hold_cycle,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.state.target_temp_achieved = True
@@ -393,9 +382,7 @@ def test_automatic_lid_detection_cancels_active_probe_before_pause(
 def test_operator_lid_open_cancels_active_probe_before_pause(
     hold_cycle,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -406,6 +393,7 @@ def test_operator_lid_open_cancels_active_probe_before_pause(
     assert hold.state.lid.open_detected is True
     assert hold.grill.get_output_status()["fan"] is False
     assert runner.calibration_cancellations == ["lid_open"]
+
 
 def test_hold_stamps_latched_probe_frame_before_lid_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
@@ -609,9 +597,7 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
 def test_manual_callback_then_in_flight_result_uses_one_cancellation_path(
     hold_cycle,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1), _result(2, probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -623,11 +609,7 @@ def test_manual_callback_then_in_flight_result_uses_one_cancellation_path(
     hold._on_manual_output("auger", True)
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
-    cancelled = [
-        observation
-        for observation in runner.observations
-        if observation.calibration_status == "cancelled"
-    ]
+    cancelled = [observation for observation in runner.observations if observation.calibration_status == "cancelled"]
     assert len(cancelled) == 1
     assert cancelled[0].calibration_cancellation_reason == "manual_override"
     assert runner.calibration_cancellations == ["manual_override"]
@@ -642,9 +624,7 @@ def test_stale_calibration_cancellation_resets_framed_pulse_once(
         stale_state=ResultStaleState.STALE,
         result_age_seconds=1.0,
     )
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1), stale]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), stale])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -676,9 +656,7 @@ def test_callbacks_cancel_active_frame_once_before_in_flight_result(
     intervention: str,
     expected_reason: str,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1), _result(2, probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -690,11 +668,7 @@ def test_callbacks_cancel_active_frame_once_before_in_flight_result(
         hold._on_safety_event("temperature_guard", 3.0)
         hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
-    cancelled = [
-        observation
-        for observation in runner.observations
-        if observation.calibration_status == "cancelled"
-    ]
+    cancelled = [observation for observation in runner.observations if observation.calibration_status == "cancelled"]
     assert len(cancelled) == 1
     assert cancelled[0].calibration_cancellation_reason == expected_reason
     assert runner.calibration_cancellations == [expected_reason]
@@ -709,9 +683,7 @@ def test_repeated_stale_active_result_is_handled_without_repeat_or_restart(
         stale_state=ResultStaleState.STALE,
         result_age_seconds=1.0,
     )
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1), stale, stale]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), stale, stale])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -744,16 +716,13 @@ def test_repeated_stale_active_result_is_handled_without_repeat_or_restart(
     assert resets == 1
     assert advances == 0
     assert runner.calibration_cancellations == ["stale_result"]
-    assert hold.state.controller.pulse_requested_duty == pytest.approx(
-        baseline.auger_duty
-    )
+    assert hold.state.controller.pulse_requested_duty == pytest.approx(baseline.auger_duty)
+
 
 def test_malformed_newer_command_does_not_cancel_active_probe(
     hold_cycle,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.control["mpc_calibration"] = {
@@ -765,17 +734,13 @@ def test_malformed_newer_command_does_not_cancel_active_probe(
 
     assert runner.calibration_cancellations == []
     assert hold.state.controller.pulse_calibration_status == "active"
-    assert hold.state.controller.pulse_calibration_probe_load == pytest.approx(
-        0.1
-    )
+    assert hold.state.controller.pulse_calibration_probe_load == pytest.approx(0.1)
 
 
 def test_absent_operator_command_leaves_active_probe_running(
     hold_cycle,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.control.pop("mpc_calibration", None)
@@ -784,9 +749,8 @@ def test_absent_operator_command_leaves_active_probe_running(
 
     assert runner.calibration_cancellations == []
     assert hold.state.controller.pulse_calibration_status == "active"
-    assert hold.state.controller.pulse_calibration_probe_load == pytest.approx(
-        0.1
-    )
+    assert hold.state.controller.pulse_calibration_probe_load == pytest.approx(0.1)
+
 
 def test_cancelling_probe_without_baseline_keeps_hardware_inhibited(
     hold_cycle,
@@ -804,17 +768,13 @@ def test_cancelling_probe_without_baseline_keeps_hardware_inhibited(
 
     assert runner.calibration_cancellations == ["safety"]
     assert hold.grill.get_output_status()["auger"] is False
-    assert (
-        hold.state.controller.pulse_calibration_cancellation_reason
-        == "safety"
-    )
+    assert hold.state.controller.pulse_calibration_cancellation_reason == "safety"
+
 
 def test_mode_transition_cancels_in_flight_probe_as_safety(
     hold_cycle,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.control["mode"] = "Smoke"
@@ -822,10 +782,7 @@ def test_mode_transition_cancels_in_flight_probe_as_safety(
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_cancellations == ["safety"]
-    assert (
-        hold.state.controller.pulse_calibration_cancellation_reason
-        == "safety"
-    )
+    assert hold.state.controller.pulse_calibration_cancellation_reason == "safety"
 
 
 @pytest.mark.parametrize("action", ("pause", "stop", "reset-progress"))
@@ -833,9 +790,7 @@ def test_operator_command_before_first_probe_frame_is_forwarded_and_cancels(
     hold_cycle,
     action,
 ) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.control["mpc_calibration"] = {
@@ -850,14 +805,10 @@ def test_operator_command_before_first_probe_frame_is_forwarded_and_cancels(
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     controller = hold.state.controller
-    assert (
-        controller.pulse_calibration_cancellation_reason
-        == f"operator_{action}"
-    )
+    assert controller.pulse_calibration_cancellation_reason == f"operator_{action}"
     assert runner.calibration_requests[-1].command_revision == 2
     assert runner.calibration_requests[-1].action == action
     assert runner.calibration_cancellations == []
-
 
 
 @pytest.mark.parametrize("action", ("pause", "stop", "reset-progress"))
@@ -911,6 +862,7 @@ def test_operator_cancellation_is_admitted_before_command_aware_latest(
     assert cancelled.cancellation_command_action == action
     assert [command.command_revision for command in runner.calibration_requests] == [2]
 
+
 def test_operator_cancellation_accepts_runner_ack_without_calibration_payload(
     hold_cycle,
 ) -> None:
@@ -952,6 +904,7 @@ def test_operator_cancellation_accepts_runner_ack_without_calibration_payload(
     assert hold.grill.get_output_status()["auger"] is False
     assert hold.state.controller.pulse_calibration_status == "inactive"
     assert runner.calibration_cancellations == []
+
 
 def test_cancelled_old_identity_does_not_strip_distinct_active_result(
     hold_cycle,
@@ -1043,9 +996,7 @@ def test_manual_callback_adopts_same_revision_inactive_baseline_without_restart(
     baseline = runner.inactive.baseline_allocation
     assert baseline is not None
     assert runner.calibration_cancellations == ["manual_override"]
-    assert hold.state.controller.pulse_requested_duty == pytest.approx(
-        baseline.auger_duty
-    )
+    assert hold.state.controller.pulse_requested_duty == pytest.approx(baseline.auger_duty)
     assert hold.state.controller.pulse_calibration_status == "inactive"
     assert hold.state.controller.pulse_calibration_probe_load == 0.0
     assert advances == 1
@@ -1094,9 +1045,7 @@ def test_operator_cancellation_inside_control_period_waits_for_post_command_resu
     advances = 0
     advance = runtime.advance
     assert hold.state.controller.pulse_frame_calibration_status == "active"
-    assert hold.state.controller.pulse_frame_calibration_probe_load == pytest.approx(
-        0.1
-    )
+    assert hold.state.controller.pulse_frame_calibration_probe_load == pytest.approx(0.1)
 
     def record_advance(*args, **kwargs):
         nonlocal advances
@@ -1123,23 +1072,16 @@ def test_operator_cancellation_inside_control_period_waits_for_post_command_resu
 
     baseline = runner.after_command.baseline_allocation
     assert baseline is not None
-    assert hold.state.controller.pulse_requested_duty == pytest.approx(
-        baseline.auger_duty
-    )
+    assert hold.state.controller.pulse_requested_duty == pytest.approx(baseline.auger_duty)
     assert hold.state.controller.pulse_calibration_status == "inactive"
     assert hold.state.controller.pulse_calibration_probe_load == 0.0
     assert advances == 1
     assert hold.state.controller.pulse_frame_calibration_status == "inactive"
     assert hold.state.controller.pulse_frame_calibration_probe_load == 0.0
-    assert len(
-        [
-            observation
-            for observation in runner.observations
-            if observation.calibration_status == "cancelled"
-        ]
-    ) == 1
+    assert (
+        len([observation for observation in runner.observations if observation.calibration_status == "cancelled"]) == 1
+    )
     assert [command.command_revision for command in runner.calibration_requests] == [2]
-
 
 
 @pytest.mark.parametrize("action", ("pause", "stop", "reset-progress"))
@@ -1159,8 +1101,6 @@ def test_newer_operator_cancellation_keeps_exact_command_identity(
         "empty_grill_confirmed": True,
         "pellets_confirmed": True,
     }
-
-
 
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
@@ -1224,9 +1164,7 @@ def test_manual_release_still_records_once_without_active_probe(
 
 
 def test_manual_release_cancels_an_active_probe_once(hold_cycle) -> None:
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(probe=0.1), _result(2, probe=0.1)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -1234,11 +1172,7 @@ def test_manual_release_cancels_an_active_probe_once(hold_cycle) -> None:
     hold._on_manual_release("auger", 3.0)
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
-    cancelled = [
-        observation
-        for observation in runner.observations
-        if observation.calibration_status == "cancelled"
-    ]
+    cancelled = [observation for observation in runner.observations if observation.calibration_status == "cancelled"]
     assert len(cancelled) == 1
     assert cancelled[0].calibration_cancellation_reason == "manual_override"
     assert runner.calibration_cancellations == ["manual_override"]
@@ -1387,6 +1321,7 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
         result_age_seconds=1.0,
         calibration=replace(current.calibration, command_generation=3),
     )
+
     class EvidenceRunner(FakeControllerRunner):
         observation_outcome: object
 
@@ -1411,23 +1346,15 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
     assert workers[0].flush_and_stop(timeout=1.0)
 
-    current_observations = [
-        observation
-        for observation in runner.observations
-        if observation.result_revision == 2
-    ]
+    current_observations = [observation for observation in runner.observations if observation.result_revision == 2]
     assert current_observations == []
     baseline = current.baseline_allocation
     assert baseline is not None
     controller = hold.state.controller
     assert controller.pulse_frame_result_revision == 1
     assert controller.pulse_requested_duty == pytest.approx(baseline.auger_duty)
-    assert controller.pulse_combustion_load == pytest.approx(
-        baseline.normalized_combustion_load
-    )
-    assert controller.pulse_baseline_combustion_load == pytest.approx(
-        baseline.normalized_combustion_load
-    )
+    assert controller.pulse_combustion_load == pytest.approx(baseline.normalized_combustion_load)
+    assert controller.pulse_baseline_combustion_load == pytest.approx(baseline.normalized_combustion_load)
     assert controller.pulse_calibration_command_revision == 7
     assert controller.pulse_calibration_command_action == "resume"
     assert controller.pulse_calibration_command_generation == 3
@@ -1438,14 +1365,12 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     raw = [
         record.payload
         for record in recorder.records
-        if record.event_kind is TraceEventKind.MODEL_OBSERVATION
-        and record.payload.result_revision == 2
+        if record.event_kind is TraceEventKind.MODEL_OBSERVATION and record.payload.result_revision == 2
     ]
     compact = [
         record.payload
         for record in persisted
-        if record.kind is EvidenceKind.CALIBRATION_SUMMARY
-        and record.payload.result_revision == 2
+        if record.kind is EvidenceKind.CALIBRATION_SUMMARY and record.payload.result_revision == 2
     ]
     safety = [
         record.payload
@@ -1459,6 +1384,7 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     assert compact == []
     assert len(safety) == 1
     assert safety[0].event is SafetyEventType.SCHEDULER_RESET
+
 
 def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, monkeypatch):
     import controller.runtime.modes.hold as hold_module
@@ -1566,15 +1492,13 @@ def test_a_command_that_cannot_be_built_is_rejected_once_and_named(hold_cycle, c
     # Rejected once, not once per tick.
     assert len([r for r in caplog.records if "calibration command" in r.getMessage()]) == 1
     assert "ambient_c" in caplog.text
+
+
 def test_unsupported_calibration_request_is_consumed_and_traced_once(
     hold_cycle,
     monkeypatch,
 ) -> None:
-    import control
-
-    runner = FakeControllerRunner(period=1.0).script(
-        [_result(), _result(2), _result(3)]
-    )
+    runner = FakeControllerRunner(period=1.0).script([_result(), _result(2), _result(3)])
     hold = hold_cycle(runner, controller="mpc")
     hold.control["mpc_calibration"] = {
         "action": "start",
@@ -1586,7 +1510,7 @@ def test_unsupported_calibration_request_is_consumed_and_traced_once(
     }
     hold.setup()
     errors = []
-    monkeypatch.setattr(control.eventLogger, "error", errors.append)
+    monkeypatch.setattr(hold.ctx.event_log, "error", errors.append)
     trace = hold._control_trace
     assert trace is not None
     safety = []
@@ -1610,4 +1534,3 @@ def test_unsupported_calibration_request_is_consumed_and_traced_once(
     assert len(errors) == 1
     assert len(safety) == 1
     assert "calibration unsupported" in safety[0].detail
-
