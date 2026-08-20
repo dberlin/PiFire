@@ -15,6 +15,7 @@
       }
     },
     "android": {
+      "package": "org.dberlin.pifire.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#959595",
         "foregroundImage": "./assets/android-icon-foreground.png",
