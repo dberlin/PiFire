@@ -31,36 +31,48 @@ name: First run, connect, and walk every tab
 
 # --- the tab bar exists and every tab opens --------------------------------
 # The tab bar mounts a beat after the first screen paints, so wait for it
-# rather than asserting the instant the status label appears. iOS exposes tab
-# labels as "Dashboard, tab, 1 of 4", and Maestro anchors its match to the
-# whole string, so these need to be patterns rather than bare words.
+# rather than asserting the instant the status label appears. Tabs are
+# addressed by their icon's testID (tabIconTestID() in
+# src/components/TabIcon.tsx) because labels are not portable: iOS exposes a
+# tab as "Dashboard, tab, 1 of 4" and Android as bare "Dashboard".
 - extendedWaitUntil:
-    visible: ".*Dashboard.*tab.*"
+    visible:
+      id: "tab-icon-dashboard"
     timeout: 8000
-- assertVisible: ".*History.*tab.*"
-- assertVisible: ".*Events.*tab.*"
-- assertVisible: ".*Preferences.*tab.*"
+- assertVisible:
+    id: "tab-icon-history"
+- assertVisible:
+    id: "tab-icon-events"
+- assertVisible:
+    id: "tab-icon-preferences"
 
 # Opening each tab proves it mounts without throwing: a screen that threw on
 # mount would take the app down, so the tab bar still being visible afterwards
 # is the evidence.
-- tapOn: ".*History.*tab.*"
+- tapOn:
+    id: "tab-icon-history"
 - extendedWaitUntil:
-    visible: ".*Dashboard.*tab.*"
+    visible:
+      id: "tab-icon-dashboard"
     timeout: 8000
 
-- tapOn: ".*Events.*tab.*"
+- tapOn:
+    id: "tab-icon-events"
 - extendedWaitUntil:
-    visible: ".*Dashboard.*tab.*"
+    visible:
+      id: "tab-icon-dashboard"
     timeout: 8000
 
-- tapOn: ".*Preferences.*tab.*"
+- tapOn:
+    id: "tab-icon-preferences"
 - extendedWaitUntil:
-    visible: ".*Dashboard.*tab.*"
+    visible:
+      id: "tab-icon-dashboard"
     timeout: 8000
 
 # Back to the dashboard, which must still be showing a connection state.
-- tapOn: ".*Dashboard.*tab.*"
+- tapOn:
+    id: "tab-icon-dashboard"
 - extendedWaitUntil:
     visible: "Live|Connecting|Unreachable|Stale|No data"
     timeout: 8000
