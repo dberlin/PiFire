@@ -1,0 +1,70 @@
+appId: org.dberlin.pifire.mobile
+name: Every tab shows its own icon, not the missing-icon placeholder
+---
+# Guards the regression where no Tabs.Screen supplied a tabBarIcon and every
+# tab fell back to expo-router's MissingIcon
+# (build/react-navigation/bottom-tabs/views/BottomTabBar.js), which renders the
+# single character U+23F7 -- a small triangle where the system font has that
+# glyph, and a .notdef box where it does not.
+#
+# Unit tests cover TabIcon's drawing, but they render it directly: they cannot
+# tell whether the tab bar ever asks for it. Only a running app can.
+#
+# Every tab here is addressed by its icon's testID (tabIconTestID() in
+# src/components/TabIcon.tsx), never by label. Labels are not portable: iOS
+# exposes a tab as "Dashboard, tab, 1 of 4" and Android as bare "Dashboard".
+# The ids are identical on both, and selecting on the icon means a missing
+# icon fails the step that needs it rather than being masked by a label that
+# is present either way.
+
+- launchApp:
+    clearState: true
+
+# --- reach the tab bar -----------------------------------------------------
+# Same preamble as launch.yaml: no host is stored after clearState, so the app
+# opens on connect. No grill is expected to answer; "Unreachable" is fine.
+- assertVisible: "Connect to your grill"
+- extendedWaitUntil:
+    visible: "Connect"
+    timeout: 5000
+- tapOn: "Connect"
+- extendedWaitUntil:
+    visible: "Live|Connecting|Unreachable|Stale|No data"
+    timeout: 15000
+
+# --- every tab draws its own glyph -----------------------------------------
+# The bar mounts a beat after the first screen paints, so the first of these
+# waits rather than asserting immediately.
+- extendedWaitUntil:
+    visible:
+      id: "tab-icon-dashboard"
+    timeout: 8000
+- assertVisible:
+    id: "tab-icon-history"
+- assertVisible:
+    id: "tab-icon-events"
+- assertVisible:
+    id: "tab-icon-preferences"
+
+# The placeholder is a text node, so this catches it whether the platform
+# exposes it on its own or folds it into the tab's accessibility label -- and
+# unlike a screenshot it does not depend on the font having the glyph.
+- assertNotVisible: ".*⏷.*"
+
+# The snapshot itself. Maestro does not diff screenshots, so this is an
+# artifact for review rather than an assertion; the four assertions above are
+# what fail the flow.
+- takeScreenshot: tab-bar-icons
+
+# --- the glyphs survive a tab change ---------------------------------------
+# The bar re-renders on every navigation, recoloring the active glyph. An icon
+# supplied only for the initially focused screen would go missing here.
+- tapOn:
+    id: "tab-icon-preferences"
+- extendedWaitUntil:
+    visible:
+      id: "tab-icon-dashboard"
+    timeout: 8000
+- assertVisible:
+    id: "tab-icon-preferences"
+- assertNotVisible: ".*⏷.*"

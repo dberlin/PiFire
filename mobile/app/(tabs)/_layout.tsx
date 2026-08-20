@@ -1,11 +1,13 @@
 import { Tabs } from "expo-router";
+import { TabIcon } from "../../src/components/TabIcon";
+import { TAB_SCREENS } from "../../src/tabs";
 import { THEME } from "../../src/theme";
 import { usePrefsContext } from "../_layout";
 
 // The tab bar for the four screens reachable once a grill is connected:
 // dashboard (index.tsx), history, events, and preferences (settings.tsx).
-// Route names below are the actual filenames in this (tabs) group -- there
-// is no separate route-name mapping to keep in sync.
+// Which screens those are, and the glyph each one carries, is TAB_SCREENS
+// (../../src/tabs.ts).
 //
 // Colored from the live accent (usePrefsContext, see its doc comment in
 // ../_layout.tsx) so switching accents on the preferences screen recolors
@@ -26,10 +28,16 @@ export default function TabsLayout() {
         },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: "Dashboard" }} />
-      <Tabs.Screen name="history" options={{ title: "History" }} />
-      <Tabs.Screen name="events" options={{ title: "Events" }} />
-      <Tabs.Screen name="settings" options={{ title: "Preferences" }} />
+      {TAB_SCREENS.map(({ name, title, icon }) => (
+        <Tabs.Screen
+          key={name}
+          name={name}
+          options={{
+            title,
+            tabBarIcon: ({ color, size }) => <TabIcon name={icon} color={color} size={size} />,
+          }}
+        />
+      ))}
     </Tabs>
   );
 }
