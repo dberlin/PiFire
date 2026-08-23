@@ -27,6 +27,26 @@ UPLOAD_URL = "/api/files/cookfiles/assets/upload"
 DELETE_URL = "/api/files/cookfiles/assets/delete"
 THUMB_URL = "/api/files/cookfiles/thumbnail"
 
+DIAGNOSTICS_BYTES = (
+    b'{\n  "schema_version" : 1,\n  "cook_id": "task-6-assets",\n'
+    b'  "captured_at_ms": 123456789,\n  "controllers": [],\n  "reports": [],\n'
+    b'  "control_trace": {"records": [], "record_schema_versions": []},\n'
+    b'  "model_evidence": {"records": [], "record_schema_versions": []},\n'
+    b'  "capture_errors": []\n}\n'
+)
+
+
+def _write_diagnostics(history_dir, name):
+    with zipfile.ZipFile(history_dir + name, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("learning_diagnostics.json", DIAGNOSTICS_BYTES)
+
+
+def _assert_diagnostics_unchanged(history_dir, name, operation):
+    with zipfile.ZipFile(history_dir + name) as archive:
+        assert archive.read("learning_diagnostics.json") == DIAGNOSTICS_BYTES, (
+            f"{operation} rewrote learning_diagnostics.json"
+        )
+
 
 @pytest.fixture
 def client(api_files_client):
@@ -82,6 +102,25 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch
     assert all(not os.path.exists(path) for path in staging_paths)
     parent_id = read_member(history_dir, name, "metadata")["id"]
     assert not os.path.exists(f"/tmp/pifire/{parent_id}")
+
+
+def test_asset_thumbnail_and_delete_mutations_preserve_learning_diagnostics_bytes(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Asset-Preservation-Cook")
+    _write_diagnostics(history_dir, name)
+
+    uploaded = upload(client, UPLOAD_URL, name, asset_name="preserve.png")
+    assert uploaded.status_code == 200
+    asset_name = uploaded.get_json()["data"]["assets"][0]["filename"]
+    _assert_diagnostics_unchanged(history_dir, name, "asset upload")
+
+    thumbnail = client.post(THUMB_URL, json={"file": name, "asset": asset_name})
+    assert thumbnail.status_code == 200
+    _assert_diagnostics_unchanged(history_dir, name, "thumbnail selection")
+
+    deleted = client.post(DELETE_URL, json={"file": name, "assets": [asset_name]})
+    assert deleted.status_code == 200
+    _assert_diagnostics_unchanged(history_dir, name, "asset deletion")
 
 
 def test_asset_upload_accepts_more_than_one_file(client, folders):

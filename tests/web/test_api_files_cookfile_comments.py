@@ -8,6 +8,8 @@ about failure modes, not tidiness -- see the tests.
 Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 """
 
+import zipfile
+
 import pytest
 from common.web_contracts.content import CookFileComment
 
@@ -15,6 +17,26 @@ from tests.web.archive_builders import write_cookfile
 
 URL = "/api/files/cookfiles/comments"
 ASSETS_URL = "/api/files/cookfiles/comments/assets"
+
+DIAGNOSTICS_BYTES = (
+    b'{\n  "schema_version" : 1,\n  "cook_id": "task-6-comments",\n'
+    b'  "captured_at_ms": 123456789,\n  "controllers": [],\n  "reports": [],\n'
+    b'  "control_trace": {"records": [], "record_schema_versions": []},\n'
+    b'  "model_evidence": {"records": [], "record_schema_versions": []},\n'
+    b'  "capture_errors": []\n}\n'
+)
+
+
+def _write_diagnostics(history_dir, name):
+    with zipfile.ZipFile(history_dir + name, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("learning_diagnostics.json", DIAGNOSTICS_BYTES)
+
+
+def _assert_diagnostics_unchanged(history_dir, name, operation):
+    with zipfile.ZipFile(history_dir + name) as archive:
+        assert archive.read("learning_diagnostics.json") == DIAGNOSTICS_BYTES, (
+            f"{operation} rewrote learning_diagnostics.json"
+        )
 
 
 @pytest.fixture
@@ -64,6 +86,35 @@ def test_comment_lifecycle_add_update_delete(client, folders):
     deleted = client.post(URL, json={"file": name, "action": "delete", "id": cid})
     assert deleted.status_code == 200
     assert _read_comments(history_dir, name) == []
+
+
+def test_comment_mutations_preserve_learning_diagnostics_bytes(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Comment-Preservation-Cook")
+    _write_diagnostics(history_dir, name)
+
+    added = client.post(URL, json={"file": name, "action": "add", "text": "First light"})
+    assert added.status_code == 200
+    comment_id = added.get_json()["data"]["id"]
+    _assert_diagnostics_unchanged(history_dir, name, "comment add")
+
+    updated = client.post(
+        URL,
+        json={"file": name, "action": "update", "id": comment_id, "text": "Second light"},
+    )
+    assert updated.status_code == 200
+    _assert_diagnostics_unchanged(history_dir, name, "comment update")
+
+    assets = client.post(
+        ASSETS_URL,
+        json={"file": name, "id": comment_id, "assets": ["photo.png"]},
+    )
+    assert assets.status_code == 200
+    _assert_diagnostics_unchanged(history_dir, name, "comment asset assignment")
+
+    deleted = client.post(URL, json={"file": name, "action": "delete", "id": comment_id})
+    assert deleted.status_code == 200
+    _assert_diagnostics_unchanged(history_dir, name, "comment delete")
 
 
 def test_adding_a_second_comment_keeps_the_first(client, folders):

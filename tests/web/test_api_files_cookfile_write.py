@@ -19,11 +19,30 @@ Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 
 import io
 import os
+import zipfile
 
 import pytest
 
 from tests.web._asset_helpers import read_member
 from tests.web.archive_builders import write_cookfile, write_legacy_cookfile
+
+DIAGNOSTICS_BYTES = (
+    b'{\n  "schema_version" : 1,\n  "cook_id": "task-6-write",\n'
+    b'  "captured_at_ms": 123456789,\n  "controllers": [],\n  "reports": [],\n'
+    b'  "control_trace": {"records": [], "record_schema_versions": []},\n'
+    b'  "model_evidence": {"records": [], "record_schema_versions": []},\n'
+    b'  "capture_errors": []\n}\n'
+)
+
+
+def _write_diagnostics(history_dir, name):
+    with zipfile.ZipFile(history_dir + name, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("learning_diagnostics.json", DIAGNOSTICS_BYTES)
+
+
+def _read_diagnostics(history_dir, name):
+    with zipfile.ZipFile(history_dir + name) as archive:
+        return archive.read("learning_diagnostics.json")
 
 
 @pytest.fixture
@@ -239,6 +258,17 @@ def test_title_rename_persists(client, folders):
     assert read_member(history_dir, name, "metadata")["title"] == "Sunday Brisket"
 
 
+def test_title_rename_preserves_learning_diagnostics_bytes(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Title-Preservation-Cook")
+    _write_diagnostics(history_dir, name)
+
+    resp = client.post("/api/files/cookfiles/title", json={"file": name, "title": "Renamed"})
+
+    assert resp.status_code == 200
+    assert _read_diagnostics(history_dir, name) == DIAGNOSTICS_BYTES
+
+
 def test_title_rename_does_not_rename_the_file(client, folders):
     """Flask's editTitle only touches metadata.json (routes.py:483-495). The
     filename is the identity the list and every URL use; renaming it here would
@@ -358,6 +388,17 @@ def test_recover_repair_runs_upgrade_then_fixup_assets(client, folders):
     name = write_cookfile(history_dir, "Repair-Cook")
     resp = client.post("/api/files/cookfiles/recover", json={"file": name, "action": "repair"})
     assert resp.status_code == 200 and resp.get_json()["result"] == "OK"
+
+
+def test_recover_repair_preserves_learning_diagnostics_bytes(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Repair-Preservation-Cook")
+    _write_diagnostics(history_dir, name)
+
+    resp = client.post("/api/files/cookfiles/recover", json={"file": name, "action": "repair"})
+
+    assert resp.status_code == 200
+    assert _read_diagnostics(history_dir, name) == DIAGNOSTICS_BYTES
 
 
 def test_recover_rejects_an_unknown_action(client, folders):

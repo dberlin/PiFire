@@ -11,10 +11,25 @@ traversal tests below are the point of the module, not a formality.
 Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 """
 
+import zipfile
+
 import pytest
 from common.web_contracts.content import CookFileChartData, CookFileDetail
 
 from tests.web.archive_builders import write_cookfile
+
+DIAGNOSTICS_BYTES = (
+    b'{\n  "schema_version" : 1,\n  "cook_id": "task-6-api-shape",\n'
+    b'  "captured_at_ms": 123456789,\n  "controllers": [],\n  "reports": [],\n'
+    b'  "control_trace": {"records": [], "record_schema_versions": []},\n'
+    b'  "model_evidence": {"records": [], "record_schema_versions": []},\n'
+    b'  "capture_errors": []\n}\n'
+)
+
+
+def _write_diagnostics(history_dir, name):
+    with zipfile.ZipFile(history_dir + name, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("learning_diagnostics.json", DIAGNOSTICS_BYTES)
 
 
 @pytest.fixture
@@ -44,6 +59,29 @@ def test_detail_returns_metadata_events_and_comments(client, folders):
     assert body["graph_labels"]["probes"] == {"grill1": "Grill"}
     assert body["comments"] == []
     assert body["assets"] == []
+
+
+def test_list_and_detail_do_not_expose_learning_diagnostics(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Diagnostics-Boundary-Cook")
+    _write_diagnostics(history_dir, name)
+
+    detail = client.get(f"/api/files/cookfiles/detail?file={name}")
+    assert detail.status_code == 200
+    assert set(detail.get_json()) == {
+        "filename",
+        "metadata",
+        "graph_labels",
+        "events",
+        "event_totals",
+        "comments",
+        "assets",
+    }
+
+    listing = client.get("/api/files/cookfiles")
+    assert listing.status_code == 200
+    item = next(item for item in listing.get_json()["items"] if item["filename"] == name)
+    assert set(item) == {"filename", "title", "thumbnail"}
 
 
 def test_detail_formats_times_and_keeps_the_epochs(client, folders):

@@ -92,6 +92,46 @@ def _write_zip(path, files):
             archive.writestr(name, json.dumps(obj))
 
 
+
+def test_update_json_file_data_preserves_unknown_member_bytes_and_metadata(tmp_path):
+    """Replacing one JSON member must copy every other ZIP member opaquely."""
+    from file_mgmt.common import update_json_file_data
+
+    path = tmp_path / "opaque-member.pifire"
+    diagnostics_bytes = b'{\n  "marker" : "task-6", "order": [3, 1, 2], "escaped": "\\u2603"\n}\n'
+    diagnostics_info = zipfile.ZipInfo("learning_diagnostics.json", date_time=(2024, 2, 3, 4, 5, 6))
+    diagnostics_info.compress_type = zipfile.ZIP_STORED
+    diagnostics_info.comment = b"opaque-learning-member"
+    diagnostics_info.extra = b"\xca\xfe\x00\x00"
+    diagnostics_info.external_attr = 0o640 << 16
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("metadata.json", json.dumps(_base_metadata("1.5.0")))
+        archive.writestr(diagnostics_info, diagnostics_bytes)
+    with zipfile.ZipFile(path) as archive:
+        before = archive.getinfo("learning_diagnostics.json")
+        before_metadata = (
+            before.date_time,
+            before.compress_type,
+            before.comment,
+            before.extra,
+            before.external_attr,
+        )
+
+    assert update_json_file_data(_base_metadata("1.5.0", title="Renamed"), str(path), "metadata") == "OK"
+
+    with zipfile.ZipFile(path) as archive:
+        after = archive.getinfo("learning_diagnostics.json")
+        assert archive.read("learning_diagnostics.json") == diagnostics_bytes
+        assert (
+            after.date_time,
+            after.compress_type,
+            after.comment,
+            after.extra,
+            after.external_attr,
+        ) == before_metadata
+
+
 def _current_version(ds):
     return cookfile_mod.read_settings()["versions"]["cookfile"]
 
