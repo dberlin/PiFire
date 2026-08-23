@@ -328,6 +328,21 @@ def _install_recorder(monkeypatch):
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: recorder)
     return recorder
 
+def test_trace_identity_uses_durable_control_cook_id_not_metric_row_id(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    _install_recorder(monkeypatch)
+    mode = hold_cycle(FakeControllerRunner(period=1.0), controller="pid_sp")
+    mode.setup()
+    mode.control["cook_id"] = "durable-cook-session"
+    mode.state.metrics = {"id": "per-mode-row-id"}
+
+    identity = _open_trace_session(mode, 0.0)
+
+    assert identity is not None
+    assert identity.cook_id == "durable-cook-session"
+
 
 
 def test_inactive_reconfigure_records_controller_fallback(
@@ -350,7 +365,7 @@ def test_inactive_reconfigure_records_controller_fallback(
         return "Inactive"
 
     monkeypatch.setattr(runner, "reconfigure", inactive_reconfigure)
-    mode.state.metrics = {"id": "inactive-reconfigure"}
+    mode.control["cook_id"] = "inactive-reconfigure"
     mode.control["controller_update"] = True
 
     mode.on_tick(2.0, 200.0, mode.grill.get_output_status())
@@ -375,7 +390,7 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc"}
+    mode.control["cook_id"] = "cook-mpc"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     mode.on_tick(2.0, 220.0, output)
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
@@ -439,7 +454,7 @@ def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch,
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script([result, result])
     mode = hold_cycle(runner, controller=controller)
     mode.setup()
-    mode.state.metrics = {"id": f"cook-{controller}"}
+    mode.control["cook_id"] = f"cook-{controller}"
 
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
@@ -460,7 +475,7 @@ def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_d
     mode.settings["globals"]["units"] = "F"
     mode.settings["controller"]["config"]["mpc"]["T_amb"] = 20.0
     mode.setup()
-    mode.state.metrics = {"id": "fahrenheit-ambient"}
+    mode.control["cook_id"] = "fahrenheit-ambient"
     _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
@@ -492,7 +507,7 @@ def test_first_framed_results_complete_the_initial_seed_once(hold_cycle, monkeyp
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-seed"}
+    mode.control["cook_id"] = "cook-mpc-seed"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
     mode.on_tick(2.0, 220.0, output)
@@ -518,7 +533,7 @@ def test_lid_reset_completes_deferred_initial_seed_before_first_frame_boundary(h
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-seed-lid-reset"}
+    mode.control["cook_id"] = "cook-mpc-seed-lid-reset"
     mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
 
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
@@ -543,7 +558,7 @@ def test_misaligned_feedback_gate_keeps_framed_applied_coverage_contiguous(hold_
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-misaligned"}
+    mode.control["cook_id"] = "cook-mpc-misaligned"
 
     for now in range(1, 43):
         mode.on_tick(float(now), 220.0, mode.grill.get_output_status())
@@ -559,7 +574,7 @@ def test_mpc_allocation_trace_preserves_disabled_fan_evidence(hold_cycle, monkey
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-no-fan"}
+    mode.control["cook_id"] = "cook-mpc-no-fan"
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
     allocation = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION)
 
@@ -579,7 +594,8 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     mode.ctx.store._control["pwm_control"] = True
     mode.setup()
     assert _trace(mode).status.recorder_available
-    mode.state.metrics = {"id": "calibration-seed", "augerontime": 0.0}
+    mode.control["cook_id"] = "calibration-seed"
+    mode.state.metrics = {"augerontime": 0.0}
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     for now in range(2, 64, 2):
         mode.on_tick(float(now), 225.0, output)
@@ -659,7 +675,7 @@ def test_hold_records_one_same_revision_mpc_stale_observation_without_duplicate_
     ).script([fresh, stale, stale, recovered])
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-stale-observation"}
+    mode.control["cook_id"] = "cook-stale-observation"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
     for now in (2.0, 4.0, 6.0, 8.0):
@@ -695,7 +711,7 @@ def test_mpc_trace_marks_the_first_fresh_result_after_runner_staleness(hold_cycl
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-recovery"}
+    mode.control["cook_id"] = "cook-recovery"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
     mode.on_tick(2.0, 220.0, output)
@@ -716,7 +732,7 @@ def test_mpc_trace_preserves_a_zero_raw_policy_load(hold_cycle, monkeypatch):
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-raw-zero"}
+    mode.control["cook_id"] = "cook-raw-zero"
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
     (update,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
 
@@ -727,7 +743,7 @@ def test_pid_sp_completed_update_records_exact_typed_fields_and_branch(hold_cycl
     recorder = _install_recorder(monkeypatch)
     mode = hold_cycle(FakeControllerRunner(period=1.0).script([_pid_sp_result()]), controller="pid_sp")
     mode.setup()
-    mode.state.metrics = {"id": "cook-pid-sp"}
+    mode.control["cook_id"] = "cook-pid-sp"
 
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
 
@@ -762,7 +778,7 @@ def test_real_pid_sp_first_hold_update_records_unidentified_model_trace(hold_cyc
     recorder = _install_recorder(monkeypatch)
     mode = hold_cycle(runner, controller="pid_sp")
     mode.setup()
-    mode.state.metrics = {"id": "cook-real-pid-sp"}
+    mode.control["cook_id"] = "cook-real-pid-sp"
 
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
@@ -797,7 +813,7 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     mode.ctx.store._settings["controller"]["config"]["mpc"]["trace_marker"] = "new-mpc-session"
     mode.ctx.store._control["pwm_control"] = True
     mode.setup()
-    mode.state.metrics = {"id": "cook-reconfigure"}
+    mode.control["cook_id"] = "cook-reconfigure"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     mode.on_tick(2.0, 220.0, output)
     old_session_id = _identity(mode).session_id
@@ -860,7 +876,7 @@ def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle,
         controller="mpc",
     )
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-zero"}
+    mode.control["cook_id"] = "cook-mpc-zero"
 
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
 
@@ -893,7 +909,7 @@ def test_refit_records_refit_then_its_verdict(hold_cycle, monkeypatch, accepted,
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.settings["controller"]["config"]["mpc"]["enable_identification"] = True
-    mode.state.metrics = {"id": f"cook-refit-{accepted}"}
+    mode.control["cook_id"] = f"cook-refit-{accepted}"
     _open_trace_session(mode, 1.0)
 
     mode.teardown(220.0)
@@ -912,7 +928,7 @@ def test_mpc_applied_load_is_measured_and_attributed_to_the_producing_frame(hold
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-feedback"}
+    mode.control["cook_id"] = "cook-mpc-feedback"
 
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
@@ -937,7 +953,8 @@ def test_mpc_lid_interval_records_measured_feedback_under_the_producing_frame_re
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-lid-feedback", "augerontime": 0}
+    mode.control["cook_id"] = "cook-mpc-lid-feedback"
+    mode.state.metrics = {"augerontime": 0}
     mode.state.target_temp_achieved = True
     mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
 
@@ -975,7 +992,8 @@ def test_mpc_manual_interval_records_measured_feedback_under_the_producing_frame
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-mpc-manual-feedback", "augerontime": 0}
+    mode.control["cook_id"] = "cook-mpc-manual-feedback"
+    mode.state.metrics = {"augerontime": 0}
 
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
@@ -1021,7 +1039,7 @@ def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monke
     ).script([first, second])
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-framed-latch"}
+    mode.control["cook_id"] = "cook-framed-latch"
 
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     mode.on_tick(4.0, 220.0, mode.grill.get_output_status())
@@ -1055,7 +1073,7 @@ def test_first_safety_callback_opens_and_binds_the_trace_session(
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "first-safety-callback"}
+    mode.control["cook_id"] = "first-safety-callback"
     trace = _trace(mode)
     assert trace.identity is None
 
@@ -1088,7 +1106,7 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
     runner.snapshot = {"revision": 1}
     mode = hold_cycle(runner, controller="mpc", model_store=_ModelStore())
     mode.setup()
-    mode.state.metrics = {"id": "cook-async-restore"}
+    mode.control["cook_id"] = "cook-async-restore"
 
     _open_trace_session(mode, 1.0)
 
@@ -1166,7 +1184,7 @@ def test_async_reconfigure_does_not_leak_the_old_published_model_into_new_sessio
     mode = hold_cycle(runner, controller="pid", model_store=_ModelStore())
     mode.ctx.store._settings["controller"]["selected"] = "mpc"
     mode.setup()
-    mode.state.metrics = {"id": f"cook-no-leak-{restore_accepted}"}
+    mode.control["cook_id"] = f"cook-no-leak-{restore_accepted}"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     mode.on_tick(2.0, 220.0, output)
 
@@ -1224,7 +1242,7 @@ def test_sync_runner_with_async_preferring_core_records_completed_restore(hold_c
     recorder = _install_recorder(monkeypatch)
     mode = hold_cycle(SyncControllerRunner(_Core()), controller="mpc", model_store=_ModelStore())
     mode.setup()
-    mode.state.metrics = {"id": "cook-sync-restore"}
+    mode.control["cook_id"] = "cook-sync-restore"
 
     _open_trace_session(mode, 1.0)
 
@@ -1247,7 +1265,7 @@ def test_initial_session_uses_the_current_published_model_without_restore(hold_c
     runner.snapshot = {"revision": 5}
     mode = hold_cycle(runner, controller="mpc", model_store=_NoModelStore())
     mode.setup()
-    mode.state.metrics = {"id": "cook-published-model"}
+    mode.control["cook_id"] = "cook-published-model"
 
     _open_trace_session(mode, 1.0)
 
@@ -1260,7 +1278,7 @@ def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cy
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE).script([_mpc_result(1)])
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-base-manual"}
+    mode.control["cook_id"] = "cook-base-manual"
     mode.settings["safety"]["manual_override_time"] = 30
     mode.settings["safety"]["allow_manual_changes"] = True
     _open_trace_session(mode, 1.0)
@@ -1297,7 +1315,7 @@ def test_automatic_lid_preempts_same_tick_framed_on_transition_and_keeps_replay_
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "cook-same-tick-lid"}
+    mode.control["cook_id"] = "cook-same-tick-lid"
     mode.state.target_temp_achieved = True
     mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
@@ -1467,7 +1485,7 @@ def _two_pending_learning_outcomes(hold_cycle, monkeypatch):
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "ordered-learning-trace"}
+    mode.control["cook_id"] = "ordered-learning-trace"
     _open_trace_session(mode, 0.0)
     first, second = _learning_observation(0.0), _learning_observation(20.0)
     _learning(mode).submit_completed_observation((0, 20), first)
@@ -1480,7 +1498,7 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "historical-evidence-rotation"}
+    mode.control["cook_id"] = "historical-evidence-rotation"
     old_identity = _open_trace_session(mode, 0.0)
     assert old_identity is not None
     trace = _trace(mode)
@@ -1535,7 +1553,7 @@ def test_unknown_selected_controller_keeps_control_live_without_trace_identity(
     ).script([_mpc_result(1), _mpc_result(2)])
     mode = hold_cycle(runner, controller="future-controller")
     mode.setup()
-    mode.state.metrics = {"id": "unknown-controller-trace"}
+    mode.control["cook_id"] = "unknown-controller-trace"
     mode.on_tick(2.0, 200.0, mode.grill.get_output_status())
     runner.reconfigure({}, {})
     mode.teardown(200.0)
@@ -1627,7 +1645,7 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
     try:
         assert gate.waiting.wait(1.0)
         mode.setup()
-        mode.state.metrics = {"id": "runner-stop-timeout"}
+        mode.control["cook_id"] = "runner-stop-timeout"
         _open_trace_session(mode, 0.0)
         controller = mode.state.controller
         controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
@@ -1730,7 +1748,7 @@ def test_framed_learning_trace_waits_for_the_matching_actual_async_outcome(hold_
     runner = _Runner()
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "async-learning-trace"}
+    mode.control["cook_id"] = "async-learning-trace"
     _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
@@ -1822,7 +1840,7 @@ def test_framed_learning_trace_uses_generation_latched_with_pulse_frame(hold_cyc
     runner = _Runner()
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "latched-generation-learning-trace"}
+    mode.control["cook_id"] = "latched-generation-learning-trace"
     _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = 1
@@ -1851,7 +1869,7 @@ def test_framed_learning_trace_retries_transient_recorder_failure(hold_cycle, mo
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "retry-learning-trace"}
+    mode.control["cook_id"] = "retry-learning-trace"
     _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
@@ -1989,7 +2007,7 @@ def test_mpc_lifecycle_records_one_rollback_event_without_stale_duplicates(hold_
         controller="mpc",
     )
     mode.setup()
-    mode.state.metrics = {"id": "rollback-lifecycle"}
+    mode.control["cook_id"] = "rollback-lifecycle"
     _open_trace_session(mode, 0.0)
     original = _trace(mode).record
     failed = False
@@ -2025,7 +2043,7 @@ def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_sess
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "runner-adoption"}
+    mode.control["cook_id"] = "runner-adoption"
     _open_trace_session(mode, 0.0)
     observation = _learning_observation(0.0)
     _learning(mode).submit_completed_observation((0, 20), observation)
@@ -2062,7 +2080,7 @@ def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(
         controller="mpc",
     )
     mode.setup()
-    mode.state.metrics = {"id": "bounded-trace-retry"}
+    mode.control["cook_id"] = "bounded-trace-retry"
     _open_trace_session(mode, 0.0)
     learning = _learning(mode)
     for sequence in range(60):
@@ -2108,7 +2126,7 @@ def test_hold_retires_self_evicted_submission_immediately(
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "self-evicted-submission"}
+    mode.control["cook_id"] = "self-evicted-submission"
     _open_trace_session(mode, 0.0)
     observation = FrameObservation(
         0.0,
@@ -2173,7 +2191,7 @@ def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "trace-append-recovery"}
+    mode.control["cook_id"] = "trace-append-recovery"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
     mode.on_tick(2.0, 212.0, output)
@@ -2224,7 +2242,7 @@ def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "failed-outcome-evidence"}
+    mode.control["cook_id"] = "failed-outcome-evidence"
     _open_trace_session(mode, 0.0)
     runner.bind_evidence_context(1, _identity(mode).session_id, _identity(mode).cook_id)
     first, second = _learning_observation(0.0), _learning_observation(20.0)
@@ -2257,7 +2275,7 @@ def test_missing_completed_frame_temperature_emits_sequence_linked_trace_gap(hol
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "missing-temperature-evidence"}
+    mode.control["cook_id"] = "missing-temperature-evidence"
     _open_trace_session(mode, 0.0)
     controller = mode.state.controller
     controller.pulse_result_revision = controller.pulse_frame_result_revision = 1
@@ -2284,7 +2302,7 @@ def test_allocation_join_failure_persists_an_ineligible_completed_observation(ho
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "allocation-join-evidence"}
+    mode.control["cook_id"] = "allocation-join-evidence"
     _open_trace_session(mode, 0.0)
     observation = replace(_learning_observation(0.0), allocation_join_reason=reason)
     _learning(mode).submit_completed_observation((0, 20), observation)
@@ -2305,7 +2323,7 @@ def test_invalid_probe_is_persisted_without_submitting_to_the_learner(hold_cycle
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "invalid-probe-evidence"}
+    mode.control["cook_id"] = "invalid-probe-evidence"
     _open_trace_session(mode, 0.0)
     observation = replace(_learning_observation(0.0), probe_valid=False, probe_source=None)
 
@@ -2326,7 +2344,7 @@ def test_invalid_probe_waits_for_an_earlier_learner_outcome_before_trace_publica
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "ordered-invalid-probe-evidence"}
+    mode.control["cook_id"] = "ordered-invalid-probe-evidence"
     _open_trace_session(mode, 0.0)
     first = replace(_learning_observation(0.0), observation_sequence=1)
     second = replace(_learning_observation(20.0), observation_sequence=2, probe_valid=False, probe_source=None)
@@ -2353,7 +2371,7 @@ def test_invalid_probe_queue_overflow_records_the_evicted_observation_gap_and_re
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "invalid-probe-overflow-evidence"}
+    mode.control["cook_id"] = "invalid-probe-overflow-evidence"
     _open_trace_session(mode, 0.0)
     first = replace(_learning_observation(0.0), observation_sequence=1)
 
@@ -2386,7 +2404,7 @@ def test_partial_terminal_frame_with_malformed_outcome_becomes_a_gap(hold_cycle,
     runner = FakeControllerRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "partial-terminal-frame"}
+    mode.control["cook_id"] = "partial-terminal-frame"
     _open_trace_session(mode, 0.0)
     observation = replace(
         _learning_observation(0.0),

@@ -1202,13 +1202,15 @@ def test_new_cookfile_contains_complete_learning_diagnostics(
     primary_label, food_labels = _default_probe_labels(settings)
     _seed_history_row(primary_label, food_labels, 100, 90)
     cook_id = "cook-diagnostics-7"
-    append_metric(dict(default_metrics(), mode="Smoke", augerontime=120))
-    update_metrics({"id": cook_id})
+    for mode in ("Startup", "Smoke", "Hold", "Stop"):
+        append_metric(dict(default_metrics(), mode=mode, augerontime=120))
+    metric_ids = [row["id"] for row in read_all_metrics()]
+    assert len(set(metric_ids)) == 4
     append_control_trace([_diagnostic_session(cook_id)])
     append_model_evidence([_diagnostic_evidence(cook_id)])
     flush_calls = _track_flush_history(monkeypatch)
 
-    create_cookfile(learning_report_provider=_diagnostic_provider)
+    create_cookfile(cook_id=cook_id, learning_report_provider=_diagnostic_provider)
 
     pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(pifire_files) == 1
@@ -1226,7 +1228,7 @@ def test_new_cookfile_contains_complete_learning_diagnostics(
         assert required_members <= set(archive.namelist())
         payload = json.loads(archive.read("learning_diagnostics.json"))
         assert json.loads(archive.read("raw_data.json"))[0]["P"][primary_label] == 100
-        assert json.loads(archive.read("events.json"))[0]["id"] == cook_id
+        assert [event["id"] for event in json.loads(archive.read("events.json"))] == metric_ids
     reread, status = read_cookfile(pifire_files[0])
     assert status == "OK"
     assert reread["learning_diagnostics"] == payload
@@ -1243,34 +1245,31 @@ def test_new_cookfile_contains_complete_learning_diagnostics(
         }
     ]
     assert payload["control_trace"]["records"]
+    assert {record["cook_id"] for record in payload["control_trace"]["records"]} == {cook_id}
     assert payload["model_evidence"]["records"]
+    assert {record["cook_id"] for record in payload["model_evidence"]["records"]} == {cook_id}
     assert payload["capture_errors"] == []
     assert flush_calls == [None]
     assert read_history() == []
     assert read_all_metrics() == []
 
 
-@pytest.mark.parametrize(
-    "metric_ids",
-    [(None,), ("cook-a", "cook-b")],
-    ids=["missing", "mixed"],
-)
-def test_invalid_metrics_identity_still_writes_diagnostics_and_flushes(
+def test_missing_durable_cook_identity_still_writes_diagnostics_and_flushes(
     ds,
     isolated_history_folder,
     monkeypatch,
-    metric_ids,
 ):
-    """Missing or mixed metric identity is recorded, never guessed or fatal."""
+    """Missing durable identity is recorded without deriving it from metric rows."""
     settings = cookfile_mod.read_settings()
     primary_label, food_labels = _default_probe_labels(settings)
     _seed_history_row(primary_label, food_labels, 100, 90)
-    for metric_id in metric_ids:
-        append_metric(dict(default_metrics(), mode="Smoke"))
-        update_metrics({"id": metric_id})
+    append_metric(dict(default_metrics(), mode="Smoke"))
+    append_metric(dict(default_metrics(), mode="Stop"))
+    metric_ids = [row["id"] for row in read_all_metrics()]
+    assert len(set(metric_ids)) == 2
     flush_calls = _track_flush_history(monkeypatch)
 
-    create_cookfile(learning_report_provider=_diagnostic_provider)
+    create_cookfile(cook_id=None, learning_report_provider=_diagnostic_provider)
 
     pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(pifire_files) == 1
@@ -1286,7 +1285,7 @@ def test_invalid_metrics_identity_still_writes_diagnostics_and_flushes(
             "learning_diagnostics.json",
         } <= set(archive.namelist())
         assert json.loads(archive.read("raw_data.json"))[0]["P"][primary_label] == 100
-        assert len(json.loads(archive.read("events.json"))) == len(metric_ids)
+        assert [event["id"] for event in json.loads(archive.read("events.json"))] == metric_ids
         payload = json.loads(archive.read("learning_diagnostics.json"))
 
     assert payload["cook_id"] is None
@@ -1386,7 +1385,7 @@ def test_diagnostics_source_failure_still_writes_archive_before_one_flush(
     monkeypatch.setattr(cookfile_mod, "collect_cook_learning_diagnostics", collect_with_injected_failures)
     provider = report_failure if failure_mode == "evidence-report" else _diagnostic_provider
 
-    create_cookfile(learning_report_provider=provider)
+    create_cookfile(cook_id=cook_id, learning_report_provider=provider)
 
     pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(pifire_files) == 1
@@ -1427,7 +1426,7 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
     append_metric(dict(default_metrics(), id=0, mode="Smoke", augerontime=120))
     append_metric(dict(default_metrics(), id=1, mode="Stop", augerontime=30))
 
-    create_cookfile(learning_report_provider=_no_learning_report)
+    create_cookfile(cook_id=None, learning_report_provider=_no_learning_report)
 
     pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(pifire_files) == 1
@@ -1563,7 +1562,7 @@ def test_create_cookfile_survives_poisoned_none_starttime_row(ds, isolated_histo
 
     assert read_all_metrics()[0]["starttime"] is None  # sanity: poisoned as expected
 
-    create_cookfile(learning_report_provider=_no_learning_report)
+    create_cookfile(cook_id=None, learning_report_provider=_no_learning_report)
 
     pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(pifire_files) == 1
@@ -1585,7 +1584,7 @@ def test_create_cookfile_title_collision_appends_numeric_suffix(ds, isolated_his
     primary_label, food_labels = _default_probe_labels(settings)
 
     _seed_history_row(primary_label, food_labels, 100, 90)
-    create_cookfile(learning_report_provider=_no_learning_report)
+    create_cookfile(cook_id=None, learning_report_provider=_no_learning_report)
 
     first_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(first_files) == 1
@@ -1593,7 +1592,7 @@ def test_create_cookfile_title_collision_appends_numeric_suffix(ds, isolated_his
     first_bytes = first_path.read_bytes()
 
     _seed_history_row(primary_label, food_labels, 200, 190)
-    create_cookfile(learning_report_provider=_no_learning_report)
+    create_cookfile(cook_id=None, learning_report_provider=_no_learning_report)
 
     all_files = sorted(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(all_files) == 2

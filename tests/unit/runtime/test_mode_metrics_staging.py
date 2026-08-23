@@ -26,6 +26,10 @@ reignite.py overrides only the startup timestamp and the MQTT publish), so it
 is covered by the Startup cases.
 """
 
+import controller.runtime.modes.base as base_mode_mod
+
+from common.defaults import default_metrics
+from controller.runtime.store import InMemoryStore
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import run_mode
 from tests.fakes.probes import FakeProbes
@@ -65,6 +69,60 @@ def _settings(smartstart_p_mode=None):
         ]
         settings["startup"]["smartstart"]["temp_range_list"] = []
     return settings
+
+
+def test_first_mode_persists_a_new_cook_session_identity(monkeypatch):
+    monkeypatch.setattr(base_mode_mod, "generate_uuid", lambda: "cook-session-7", raising=False)
+
+    result = _run("Smoke", _settings())
+
+    assert result.final_control["cook_id"] == "cook-session-7"
+
+
+def test_later_mode_reuses_persisted_cook_session_identity(monkeypatch):
+    monkeypatch.setattr(
+        base_mode_mod,
+        "generate_uuid",
+        lambda: (_ for _ in ()).throw(AssertionError("existing cook identity must be reused")),
+        raising=False,
+    )
+    control = base_control(mode="Smoke")
+    control["cook_id"] = "existing-cook-session"
+
+    result = run_mode(
+        "Smoke",
+        settings=_settings(),
+        control_data=control,
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([200]),
+        probe_cap=15,
+    )
+
+    assert result.final_control["cook_id"] == "existing-cook-session"
+
+
+def test_startup_recovers_legacy_prime_carry_over_identity(monkeypatch):
+    settings = _settings()
+    control = base_control(mode="Startup")
+    control["cook_id"] = None
+    store = InMemoryStore(control=control, settings=settings, pellet_db=base_pellet_db())
+    store.append_metric(dict(default_metrics(), mode="Prime"))
+    prime_identity = store.read_metrics()["id"]
+    monkeypatch.setattr(base_mode_mod, "generate_uuid", lambda: "wrong-new-cook", raising=False)
+
+    result = run_mode(
+        "Startup",
+        settings=settings,
+        control_data=control,
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([200]),
+        probe_cap=15,
+        store=store,
+    )
+
+    assert result.final_control["cook_id"] == prime_identity
+
+
 
 
 def test_smoke_publishes_the_configured_p_mode_to_the_display():

@@ -169,7 +169,11 @@ def test_safety_reignite_decrements_and_records_last_state():
 
 
 def test_terminal_stop_write():
-    control = _base_control(mode="Shutdown", primary_setpoint=225)
+    control = _base_control(
+        mode="Shutdown",
+        primary_setpoint=225,
+        cook_id="cook-session-7",
+    )
     ctx, store, notifier = _ctx(control)
     out = request_transition(ctx, control, "Stop", kind="terminal")
     assert out["mode"] == "Stop"
@@ -178,6 +182,7 @@ def test_terminal_stop_write():
     assert notifier.sent == []  # no notify
     assert store._display.pushed == []  # no display
     assert out["primary_setpoint"] == 225  # untouched
+    assert out["cook_id"] == "cook-session-7"
 
 
 # --------------------------------------------------------------------------

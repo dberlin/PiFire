@@ -178,7 +178,7 @@ def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malform
     hold.settings["controller"]["config"]["mpc"] = ["malformed"]
 
     hold.setup()
-    hold.state.metrics = {"id": "malformed-mpc-config"}
+    hold.control["cook_id"] = "malformed-mpc-config"
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert migrated_defaults == [dict(MPC_DEFAULTS)]

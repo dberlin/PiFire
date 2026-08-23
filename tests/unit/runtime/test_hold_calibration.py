@@ -156,7 +156,7 @@ def test_invalid_safety_ceiling_fault_deduplicates_and_recovers(
     runner = FakeControllerRunner(period=1.0).script([_result(index) for index in range(1, 9)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "safety-ceiling"}
+    hold.control["cook_id"] = "safety-ceiling"
     trace = hold._control_trace
     context = hold._trace_session_context()
     assert trace is not None and context is not None
@@ -303,7 +303,7 @@ def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cy
     observation = runner.observations[0]
     assert observation.calibration_status == "active"
     assert observation.probe_q == 0.0
-    hold.state.metrics = {"id": "zero-probe-evidence"}
+    hold.control["cook_id"] = "zero-probe-evidence"
     trace = hold._control_trace
     context = hold._trace_session_context()
     assert trace is not None and context is not None
@@ -1239,7 +1239,7 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     }
     hold = hold_cycle(runner, model_store=Store(), controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "cook-calibration"}
+    hold.control["cook_id"] = "cook-calibration"
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.state.lid.open_detected = True
@@ -1339,7 +1339,7 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     }
     hold = hold_cycle(runner, model_store=Store(), controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "current-stale-calibration"}
+    hold.control["cook_id"] = "current-stale-calibration"
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
@@ -1442,7 +1442,7 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     }
     hold = hold_cycle(runner, model_store=Store(), controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "cook-calibration"}
+    hold.control["cook_id"] = "cook-calibration"
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())

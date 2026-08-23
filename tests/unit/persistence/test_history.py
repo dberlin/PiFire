@@ -2,6 +2,7 @@ import json
 
 from common.defaults import METRIC_COLUMNS, default_metrics
 from common.persistence import history
+from common.persistence import control
 
 
 SAMPLE_HISTORY = {
@@ -122,6 +123,21 @@ def test_metric_append_stamps_mutable_input_and_preserves_column_shapes(monkeypa
     assert history.read_metrics()["smokeplus"] is False
 
 
+def test_metric_rows_keep_distinct_display_identities(monkeypatch, ds):
+    generated_ids = iter(("startup-row", "hold-row"))
+    monkeypatch.setattr(history, "generate_uuid", lambda: next(generated_ids))
+
+    history.append_metric(dict(default_metrics(), mode="Startup"))
+    history.append_metric(dict(default_metrics(), mode="Hold"))
+
+    assert [(row["id"], row["mode"]) for row in history.read_all_metrics()] == [
+        ("startup-row", "Startup"),
+        ("hold-row", "Hold"),
+    ]
+
+
+
+
 def test_metric_update_changes_only_last_row_and_inserts_when_empty(monkeypatch, ds):
     ids = iter(("first-id", "second-id"))
     monkeypatch.setattr(history, "generate_uuid", lambda: next(ids))
@@ -163,16 +179,21 @@ def test_metric_flush_is_isolated_but_history_flush_couples_all_owned_state(monk
     monkeypatch.setattr(history, "generate_uuid", lambda: "metric-id")
     history.write_history(SAMPLE_HISTORY)
     history.append_metric(default_metrics())
+    live_control = control.read_control()
+    live_control["cook_id"] = "cook-session-7"
+    control.write_control_snapshot(live_control, origin="control")
 
     assert history.flush_metrics() is None
     assert len(history.read_history()) == 1
     assert history.read_all_metrics() == []
+    assert control.read_control()["cook_id"] == "cook-session-7"
 
     history.append_metric(default_metrics())
     ds.set_blob("control:current", json.dumps({"marker": "must be reset"}))
     assert history.flush_history() is None
     assert history.read_history() == []
     assert history.read_all_metrics() == []
+    assert control.read_control()["cook_id"] is None
     assert json.loads(ds.get_blob("control:current")) != {"marker": "must be reset"}
 
 

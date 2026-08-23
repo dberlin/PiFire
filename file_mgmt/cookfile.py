@@ -81,7 +81,7 @@ def _default_cookfilestruct():
     return cookfilestruct
 
 
-def create_cookfile(*, learning_report_provider: LearningReportProvider) -> None:
+def create_cookfile(*, cook_id: str | None, learning_report_provider: LearningReportProvider) -> None:
     """
     This function gathers all of the data from the previous cook
     from startup to stop mode, and saves this to a Cook File stored
@@ -129,16 +129,6 @@ def create_cookfile(*, learning_report_provider: LearningReportProvider) -> None
         cook_file_struct["raw_data"] = raw_data
 
         metrics_rows = read_all_metrics()
-        metrics_ids = [row.get("id") for row in metrics_rows]
-        cook_id = (
-            metrics_ids[0]
-            if metrics_ids
-            and isinstance(metrics_ids[0], str)
-            and bool(metrics_ids[0])
-            and metrics_ids[0] == metrics_ids[0].strip()
-            and all(candidate == metrics_ids[0] for candidate in metrics_ids)
-            else None
-        )
         learning_diagnostics = collect_cook_learning_diagnostics(
             cook_id,
             learning_report_provider,

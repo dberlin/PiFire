@@ -76,11 +76,12 @@ class InMemoryStore:
     def read_control(self):
         return copy.deepcopy(self._control)
 
-    def flush_control(self):
-        # Mirror control_persistence.flush_control: reset control to
-        # defaults and discard pending writes + system-command queues. (The
-        # datastore persistence-config toggle is a no-op for the in-memory fake.)
+    def flush_control(self, *, cook_id=None):
+        # Mirror control_persistence.flush_control: reset control to defaults,
+        # optionally retaining the active cook identity, and discard pending
+        # writes plus system-command queues.
         self._control = default_control()
+        self._control["cook_id"] = cook_id
         self._write_queue.clear()
         self._systemq.flush()
         self._systemo.flush()
@@ -167,6 +168,7 @@ class InMemoryStore:
         # production would have cleared.
         self._history = []
         self.flush_current()
+        self._control["cook_id"] = None
         self.flush_metrics()
 
     def write_history(self, in_data, maxsizelines=28800, ext_data=False):
@@ -322,8 +324,8 @@ class SqliteStore:
     def read_control(self):
         return control_persistence.read_control()
 
-    def flush_control(self):
-        return control_persistence.flush_control()
+    def flush_control(self, *, cook_id=None):
+        return control_persistence.flush_control(cook_id=cook_id)
 
     def write_control_snapshot(self, control, *, origin="control"):
         control_persistence.write_control_snapshot(control, origin=origin)

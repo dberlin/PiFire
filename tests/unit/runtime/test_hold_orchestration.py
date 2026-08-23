@@ -203,7 +203,8 @@ def test_frame_boundary_commands_transition_before_one_identity_aligned_terminal
     runner = _OrderedRunner(events, duty=0.1)
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "frame-order", "augerontime": 0.0}
+    hold.control["cook_id"] = "frame-order"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     events.clear()
@@ -240,7 +241,8 @@ def test_inhibit_turns_actuator_off_before_terminal_feedback_and_safety_trace(
     _install_boundaries(monkeypatch, events)
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": f"inhibit-{scenario}", "augerontime": 0.0}
+    hold.control["cook_id"] = f"inhibit-{scenario}"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     events.clear()
     auger_off = hold.grill.auger_off
@@ -289,7 +291,8 @@ def test_reconfigure_retires_old_frame_and_generation_before_replacement_is_used
     hold = hold_cycle(runner, controller="mpc", model_store=store)
     _install_boundaries(monkeypatch, events)
     hold.setup()
-    hold.state.metrics = {"id": "reconfigure-order", "augerontime": 0.0}
+    hold.control["cook_id"] = "reconfigure-order"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     events.clear()
     hold.control["controller_update"] = True
@@ -351,7 +354,8 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
     persistence, _trace = _install_boundaries(monkeypatch, events)
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "activation-order", "augerontime": 0.0}
+    hold.control["cook_id"] = "activation-order"
+    hold.state.metrics = {"augerontime": 0.0}
     first = _activation_record("fallback-1", 1_000)
     second = _activation_record("fallback-2", 2_000)
     runner.activation_events[:] = [first, second]
@@ -389,7 +393,8 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(
     hold = hold_cycle(runner, controller="mpc")
     hold.settings["controller"].setdefault("config", {}).setdefault("mpc", {})["enable_identification"] = True
     hold.setup()
-    hold.state.metrics = {"id": f"teardown-{failure or 'success'}", "augerontime": 0.0}
+    hold.control["cook_id"] = f"teardown-{failure or 'success'}"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.grill.igniter_on()
     hold.ctx.clock.advance(3.0)
@@ -468,7 +473,8 @@ def test_teardown_retry_completes_cleanup_after_pre_cleanup_failure(hold_cycle, 
     _persistence, _trace = _install_boundaries(monkeypatch, events)
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "teardown-retry", "augerontime": 0.0}
+    hold.control["cook_id"] = "teardown-retry"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.ctx.clock.advance(3.0)
     runtime = hold._framed_pulse
@@ -987,7 +993,8 @@ def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypa
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", unavailable)
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "partial-setup", "augerontime": 0.0}
+    hold.control["cook_id"] = "partial-setup"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.ctx.clock.advance(1.0)
     stops_before_teardown = runner.stops

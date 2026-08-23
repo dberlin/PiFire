@@ -1832,7 +1832,7 @@ def test_hold_submission_overflow_marks_exact_gap_and_rebuilds_online_learning_g
     try:
         assert gate.waiting.wait(2.0)
         mode.setup()
-        mode.state.metrics = {"id": "hold-observation-overflow"}
+        mode.control["cook_id"] = "hold-observation-overflow"
         trace = mode._control_trace
         assert trace is not None
         context = mode._trace_session_context()

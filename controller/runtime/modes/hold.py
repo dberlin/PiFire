@@ -522,7 +522,7 @@ class HoldMode(ControlMode):
         runtime = self._framed_pulse
         scheduler = None if runtime is None else runtime.scheduler
         controller = self._trace_type()
-        cook_id = self.state.metrics.get("id")
+        cook_id = self.control.get("cook_id")
         if (
             trace is None
             or runner is None
@@ -530,6 +530,7 @@ class HoldMode(ControlMode):
             or controller is None
             or not isinstance(cook_id, str)
             or not cook_id
+            or cook_id != cook_id.strip()
         ):
             return None
         controller_settings = self.settings.get("controller", {})

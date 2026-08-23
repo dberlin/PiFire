@@ -260,7 +260,8 @@ def test_stale_command_inhibits_non_solve_ticks_until_a_fresh_result_arrives(hol
     runner = FakeControllerRunner(period=1.0).script([fresh, stale, recovered])
     hold = hold_cycle(runner, controller="mpc")
 
-    hold.state.metrics = {"id": "stale-recovery-no-catchup", "augerontime": 0.0}
+    hold.control["cook_id"] = "stale-recovery-no-catchup"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.setup()
     hold.on_tick(2.0, 200.0, _status(hold))
     hold.on_tick(4.0, 200.0, _status(hold))
@@ -298,7 +299,8 @@ def test_reconfiguration_uses_post_reset_auger_state_for_the_replacement_schedul
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.9)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "reconfigure-observed-state", "augerontime": 0.0}
+    hold.control["cook_id"] = "reconfigure-observed-state"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, _status(hold))
     original_scheduler = _runtime(hold).scheduler
     captured_before_reset = _status(hold)
@@ -376,7 +378,8 @@ def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_out
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.ctx.store._settings["controller"]["selected"] = "pid"
-    hold.state.metrics = {"id": "deferred-generation-accounting", "augerontime": 0.0}
+    hold.control["cook_id"] = "deferred-generation-accounting"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.control["controller_update"] = True
     status = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     hold.on_tick(2.0, 200.0, status)
@@ -467,7 +470,8 @@ def test_reset_keeps_cumulative_delivery_baselines_for_feedback_and_metrics(hold
     runner = FakeControllerRunner(period=1.0)
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
-    hold.state.metrics = {"id": "cook-reset-accounting", "augerontime": 0.0}
+    hold.control["cook_id"] = "cook-reset-accounting"
+    hold.state.metrics = {"augerontime": 0.0}
     hold.state.controller.pulse_requested_duty = 0.1
     runner.applied.clear()
 
@@ -641,7 +645,7 @@ def test_framed_completed_observations_are_exactly_aligned_and_deduplicated(hold
     runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "completed-frame-observations"}
+    mode.control["cook_id"] = "completed-frame-observations"
     _configure_frame_observation(mode)
 
     _advance_runtime(mode, 0.0, True, ptemp=212.0)
@@ -665,7 +669,7 @@ def test_framed_observation_latches_role_generation_at_frame_start(hold_cycle):
     runner.observation_status = {"adaptation": {"role_generation": 7}}
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "latched-role-generation"}
+    mode.control["cook_id"] = "latched-role-generation"
     _configure_frame_observation(mode)
 
     _advance_runtime(mode, 0.0, True, ptemp=212.0)
@@ -713,7 +717,7 @@ def test_framed_observation_normalizes_runner_role_generation_status(
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "normalized-role-generation"}
+    mode.control["cook_id"] = "normalized-role-generation"
     _configure_frame_observation(mode)
     monkeypatch.setattr(
         runner,
@@ -740,7 +744,7 @@ def test_framed_observation_survives_runner_status_failure(
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "unavailable-runner-status"}
+    mode.control["cook_id"] = "unavailable-runner-status"
     _configure_frame_observation(mode)
 
     def unavailable_status():
@@ -765,7 +769,7 @@ def test_framed_observation_survives_non_mapping_runner_status(
     )
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "malformed-runner-status"}
+    mode.control["cook_id"] = "malformed-runner-status"
     _configure_frame_observation(mode)
     monkeypatch.setattr(runner, "controller_state", lambda: None)
 
@@ -799,7 +803,7 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
     runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": f"ineligible-{case}"}
+    mode.control["cook_id"] = f"ineligible-{case}"
     identity = _open_trace_session(mode, 0.0)
     runner.bind_evidence_context(0, identity.session_id, identity.cook_id)
     _configure_frame_observation(mode, load=None if case == "unknown" else 0.3)  # type: ignore[arg-type]
@@ -841,7 +845,7 @@ def test_seed_and_zero_duration_frames_do_not_reach_the_runner(hold_cycle):
     runner = _ObservationStatusRunner(period=1.0, actuation_mode=ActuationMode.FRAMED_PULSE)
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
-    mode.state.metrics = {"id": "seed-zero-observations"}
+    mode.control["cook_id"] = "seed-zero-observations"
     _configure_frame_observation(mode, revision=0)
 
     _observe_runtime(mode, _completed_frame(), ptemp=212.0, inhibit=InhibitReason.NONE)

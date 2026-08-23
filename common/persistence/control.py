@@ -24,13 +24,14 @@ __all__ = (
 )
 
 
-def flush_control():
-    """Clear control-owned queues and blobs, then return a fresh default snapshot."""
+def flush_control(*, cook_id: str | None = None):
+    """Clear control-owned state and seed defaults with any retained cook identity."""
     for table in ("queue_control_write", "queue_systemq", "queue_systemo"):
         datastore.execute_write(f"DELETE FROM {table}")
     for key in ("control:general", "control:command"):
         datastore.delete_blob(key)
     control = default_control()
+    control["cook_id"] = cook_id
     write_control_snapshot(control, origin="common")
     return control
 

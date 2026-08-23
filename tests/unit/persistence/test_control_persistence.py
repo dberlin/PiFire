@@ -40,6 +40,43 @@ def test_snapshot_is_copied_and_does_not_consume_pending_deltas(ds):
     )
 
 
+def test_cook_session_identity_round_trips_in_process_readable_control(ds):
+    control = default_control()
+    assert control["cook_id"] is None
+    control["cook_id"] = "cook-session-7"
+
+    control_store.write_control_snapshot(control, origin="control")
+
+    assert control_store.read_control()["cook_id"] == "cook-session-7"
+    assert json.loads(datastore.get_blob("control:general"))["cook_id"] == "cook-session-7"
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [
+        lambda: control_delta(set_values={"cook_id": "client-selected"}),
+        lambda: control_delta(delete_paths=[["cook_id"]]),
+    ],
+)
+def test_cook_session_identity_is_not_client_writable(delta):
+    with pytest.raises(ControlDeltaError, match="cook_id"):
+        delta()
+
+
+def test_flush_control_can_atomically_preserve_active_cook_identity(ds):
+    control_store.write_control_snapshot(
+        dict(default_control(), cook_id="cook-session-7"),
+        origin="control",
+    )
+
+    reset = control_store.flush_control(cook_id="cook-session-7")
+
+    assert reset["cook_id"] == "cook-session-7"
+    assert control_store.read_control()["cook_id"] == "cook-session-7"
+
+
+
+
 def test_enqueue_validates_copies_and_preserves_fifo_origin(ds):
     first = control_delta(set_values={"manual": {"pwm": 25}})
     second = control_delta(set_values={"manual": {"pwm": 75}})

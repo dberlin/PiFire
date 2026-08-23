@@ -418,6 +418,7 @@ class Controller:
                 self.control["mode"] = Mode.STOP  # Stop any activity
                 self.control["units_change"] = False
                 store.flush_history()  # Clear history data
+                self.control["cook_id"] = None
                 # No need to write control, as it should be written by the 'Stop' mode change
 
             # Check if there was an Error flagged in Monitor Mode - If no, then change status to active
@@ -435,6 +436,8 @@ class Controller:
                 self.status["cycle_ratio"] = 0
                 self.status["fan_duty"] = 0
                 store.write_status(self.status)
+                cook_id = self.control.get("cook_id")
+                session_finalized = False
                 # Register Stop Mode in Metrics DB if this is not initial stop-mode on startup (i.e. DB is empty)
                 metrics_list = store.read_all_metrics()
                 if len(metrics_list) != 0:
@@ -461,7 +464,11 @@ class Controller:
                         # behavior (status/control resets, display clear, etc. below)
                         # still runs unconditionally.
                         try:
-                            create_cookfile(learning_report_provider=controller_learning_report)
+                            create_cookfile(
+                                cook_id=cook_id,
+                                learning_report_provider=controller_learning_report,
+                            )
+                            session_finalized = True
                         except Exception as e:
                             self.eventLogger.error(f"Failed to create cookfile: {e}")
                             # A failed cookfile write is potential cook-data loss;
@@ -488,6 +495,7 @@ class Controller:
                         # one session -- so it is the one case that is
                         # deliberately NOT flushed here.
                         store.flush_history()
+                        session_finalized = True
 
                 self.status["p_mode"] = 0
                 self.status["mode"] = Mode.STOP
@@ -512,6 +520,7 @@ class Controller:
                 # failed to build. The flag describes the hardware, not the
                 # cook, so it survives the reset and stays visible to the UI.
                 critical_error = self.control["critical_error"]
+                retained_cook_id = None if session_finalized else cook_id
 
                 if self.control["mode"] == Mode.STOP:
                     self.eventLogger.info("Stop Mode Started.")
@@ -520,7 +529,7 @@ class Controller:
                     # branch below). Setting status BEFORE this flush was a dead
                     # assignment -- flush_control() rebinds control to a fresh
                     # default_control() (status ""), discarding it, so Stop persisted "".
-                    self.control = store.flush_control()
+                    self.control = store.flush_control(cook_id=retained_cook_id)
                     self.control["critical_error"] = critical_error
                     self.control["status"] = StatusState.INACTIVE
                     self.control["updated"] = False
@@ -537,6 +546,7 @@ class Controller:
                     # Reset Control to Defaults but preserve 'Error' mode condition
                     self.control = default_control()
                     self.control["critical_error"] = critical_error
+                    self.control["cook_id"] = retained_cook_id
                     self.control["mode"] = Mode.ERROR
                     self.control["status"] = StatusState.INACTIVE
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on

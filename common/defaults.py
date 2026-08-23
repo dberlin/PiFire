@@ -516,6 +516,8 @@ def default_control():
 
     control["updated"] = True
 
+    control["cook_id"] = None  # Internal durable identity shared by one cook session
+
     control["mode"] = Mode.STOP
 
     control["next_mode"] = Mode.STOP

@@ -34,7 +34,7 @@ _ALLOWED_MEMBERS = frozenset({CONTROL_DELTA_KEY, "origin", "set", "delete", "ops
 #: (start/paused/end are one countdown and the code branches on their
 #: COMBINATIONS) and `notify_data` is an array whose elements need addressing;
 #: both are expressible only as ops, which is what lets the drain stop guessing.
-_SET_FORBIDDEN = frozenset({"timer", "notify_data"})
+_SET_FORBIDDEN = frozenset({"timer", "notify_data", "cook_id"})
 
 _CALIBRATION_ACTIONS = frozenset(("start", "pause", "resume", "stop", "reset-progress"))
 _AMBIENT_SOURCES = frozenset(("measured", "manual", "weather", "configured"))
@@ -157,6 +157,8 @@ def _validate_delete(delete_paths):
     for path in delete_paths:
         if not isinstance(path, list) or not path or not all(isinstance(k, str) for k in path):
             raise ControlDeltaError(f"delete path must be a non-empty list of strings, got {path!r}")
+        if path[0] == "cook_id":
+            raise ControlDeltaError("delete may not carry cook_id: cook identity is runtime-owned")
 
 
 def _validate_ops(ops):

@@ -209,6 +209,7 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     settings = base_settings()
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
+    control_data["cook_id"] = "cook-session-stop"
     c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
     store.append_metric(dict(default_metrics(), mode="Smoke"))
     _spy_dispatch(c)
@@ -218,8 +219,9 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     store.write_status(c.status)
     status_during_archive = {}
 
-    def capture_status(*, learning_report_provider):
+    def capture_status(*, cook_id, learning_report_provider):
         status_during_archive.update(store.read_status())
+        status_during_archive["cook_id"] = cook_id
         status_during_archive["learning_report_provider"] = learning_report_provider
 
     monkeypatch.setattr(controller_mod, "create_cookfile", capture_status)
@@ -231,6 +233,7 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     assert ("clear", None) in store.display_commands().list()
     assert status_during_archive["cycle_ratio"] == 0
     assert status_during_archive["fan_duty"] == 0
+    assert status_during_archive["cook_id"] == "cook-session-stop"
     assert status_during_archive["learning_report_provider"] is controller_mod.controller_learning_report
     status = store.read_status()
     assert status["mode"] == "Stop"
@@ -241,6 +244,7 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     # `control = flush_control()` reset, mirroring the Error branch, instead
     # of before it where it was a dead write discarded by the reset (had persisted '').
     assert control["status"] == "inactive"
+    assert control["cook_id"] is None
     assert control["updated"] is False
     assert control["next_mode"] == "Stop"
 
@@ -266,6 +270,7 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     settings = base_settings()
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
+    control_data["cook_id"] = "cook-session-failure"
     c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
     # A non-empty metrics list with a non-Prime last mode is what makes tick()
     # reach the create_cookfile() call at all (controller.py's `if len(
@@ -278,7 +283,8 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     monkeypatch.setattr(controller_mod, "check_notify", lambda *a, **k: sent.append(("check_notify", k)))
     monkeypatch.setattr(controller_mod, "send_notifications", lambda *a, **k: sent.append(("send_notifications", a, k)))
 
-    def _boom(*, learning_report_provider):
+    def _boom(*, cook_id, learning_report_provider):
+        assert cook_id == "cook-session-failure"
         assert learning_report_provider is controller_mod.controller_learning_report
         raise RuntimeError("disk full")
 
@@ -304,6 +310,7 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     assert ("clear", None) in store.display_commands().list()
     assert store.read_status()["mode"] == "Stop"
     control = store.read_control()
+    assert control["cook_id"] == "cook-session-failure"
     assert control["status"] == "inactive"
     assert control["updated"] is False
     assert control["next_mode"] == "Stop"
@@ -619,6 +626,7 @@ def _stop_after(monkeypatch, modes):
     sent = _neutralize_externals(monkeypatch)
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
+    control_data["cook_id"] = "cook-session-stop"
     c, ctx, store, grill, dist, notifier = make_controller(base_settings(), control_data, base_pellet_db())
     for mode in modes:
         store.append_metric(dict(default_metrics(), mode=mode))
@@ -639,11 +647,13 @@ def test_a_monitor_only_session_is_not_archived_but_is_still_flushed(monkeypatch
         "the next real cook's chart"
     )
     assert store.read_all_metrics() == []
+    assert store.read_control()["cook_id"] is None
 
 
-def test_a_real_cook_is_archived(monkeypatch):
-    archived, _store = _stop_after(monkeypatch, ["Startup", "Smoke", "Hold"])
+def test_a_real_cook_is_archived_and_clears_its_identity(monkeypatch):
+    archived, store = _stop_after(monkeypatch, ["Startup", "Smoke", "Hold"])
     assert archived
+    assert store.read_control()["cook_id"] is None
 
 
 def test_a_cook_that_ends_in_monitor_is_still_archived(monkeypatch):
@@ -666,6 +676,7 @@ def test_a_prime_only_session_keeps_its_carry_over(monkeypatch):
     archived, store = _stop_after(monkeypatch, ["Prime"])
     assert not archived
     assert store.read_history() != [], "Prime's carry-over into the following cook was dropped"
+    assert store.read_control()["cook_id"] == "cook-session-stop"
 
 
 def test_manual_counts_as_a_cook(monkeypatch):
