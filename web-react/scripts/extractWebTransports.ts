@@ -14,6 +14,7 @@ export interface ExtractedWebTransport {
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HELPERS_ROOT = join(WEB_ROOT, "src/helpers");
+const CORE_SOURCE_ROOT = resolve(WEB_ROOT, "../packages/pifire-core/src");
 
 function sourceFilesBelow(root: string): string[] {
   const files: string[] = [];
@@ -33,7 +34,7 @@ function propertyName(name: ts.PropertyName | ts.BindingName | undefined): strin
   return null;
 }
 
-export function extractFrontendWebTransports(root = HELPERS_ROOT): {
+export function extractFrontendWebTransports(root?: string): {
   json: ExtractedWebTransport[];
   non_json: ExtractedWebTransport[];
 } {
@@ -41,17 +42,21 @@ export function extractFrontendWebTransports(root = HELPERS_ROOT): {
   const nonJson = new Map<string, ExtractedWebTransport>();
   let hasBrowserFiles = false;
 
-  const sources = sourceFilesBelow(root).map((filename) => {
-    const source = readFileSync(filename, "utf8");
-    const sourceFile = ts.createSourceFile(
-      filename,
-      source,
-      ts.ScriptTarget.Latest,
-      true,
-      filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
-    return { filename, sourceFile };
-  });
+  const roots = root === undefined ? [HELPERS_ROOT, CORE_SOURCE_ROOT] : [root];
+  const sources = roots.flatMap((sourceRoot) =>
+    sourceFilesBelow(sourceRoot).map((filename) => {
+      const source = readFileSync(filename, "utf8");
+      const sourceFile = ts.createSourceFile(
+        filename,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      );
+      const relativeName = relative(sourceRoot, filename).replaceAll("\\", "/");
+      return { filename, relativeName, sourceFile };
+    }),
+  );
   const finiteTypeDomains = new Map<string, string[]>();
   for (const { sourceFile } of sources) {
     for (const statement of sourceFile.statements) {
@@ -93,8 +98,7 @@ export function extractFrontendWebTransports(root = HELPERS_ROOT): {
     nonJson.set(entry.name, entry);
   };
 
-  for (const { filename, sourceFile } of sources) {
-    const relativeName = relative(root, filename).replaceAll("\\", "/");
+  for (const { relativeName, sourceFile } of sources) {
     const variables = new Map<string, ts.VariableDeclaration[]>();
     const constants = new Map<string, ts.Expression>();
 
