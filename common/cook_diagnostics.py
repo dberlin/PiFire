@@ -281,8 +281,27 @@ def _collect_cook_learning_diagnostics(
                 warn=warn,
             )
             continue
-        if report is not None:
-            reports.append(report)
+        if report is None:
+            continue
+        if not isinstance(report, ControllerLearningReport):
+            _capture_error(
+                errors,
+                source=f"report:{controller}",
+                code="report-type-invalid",
+                detail=f"provider returned unsupported report type: {type(report).__name__}",
+                warn=warn,
+            )
+            continue
+        if report.controller != controller:
+            _capture_error(
+                errors,
+                source=f"report:{controller}",
+                code="report-controller-mismatch",
+                detail=f"provider returned report for {report.controller!r}",
+                warn=warn,
+            )
+            continue
+        reports.append(report)
 
     return CookLearningDiagnostics(
         cook_id=cook_id,

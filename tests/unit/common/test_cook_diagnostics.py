@@ -1,8 +1,9 @@
 """Cook-scoped learning diagnostic collector contracts."""
 
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 import pytest
+from pydantic import JsonValue
 
 from common.control_trace import (
     ActuationMode,
@@ -491,14 +492,15 @@ def test_top_level_failure_returns_minimal_valid_collector_fallback() -> None:
 
 
 def test_report_envelope_owns_and_serializes_nested_json() -> None:
-    source = {"values": [1.5]}
+    values: list[JsonValue] = [1.5]
+    source: dict[str, JsonValue] = {"values": values}
     report = ControllerLearningReport(
         controller="mpc",
         schema_version=1,
         revision="revision-1",
         report=source,
     )
-    source["values"].append(2.5)
+    values.append(2.5)
     session = _session(ControllerType.MPC, schema_version=6, session_id="session-mpc")
 
     bundle = collect_cook_learning_diagnostics(
@@ -585,3 +587,61 @@ def test_source_exception_without_a_usable_message_still_returns_valid_error_det
     assert [(error.code, error.detail) for error in bundle.capture_errors] == [
         ("control-trace-read-failed", "BrokenMessageError")
     ]
+
+
+def test_wrong_report_type_isolated_without_losing_sources_or_later_reports() -> None:
+    warnings: list[str] = []
+    pid_session = _session(ControllerType.PID_SP, schema_version=5, session_id="session-pid-sp")
+    mpc_session = _session(ControllerType.MPC, schema_version=6, session_id="session-mpc")
+    evidence = _evidence("evidence-v3", 3)
+
+    def provider(controller: str) -> ControllerLearningReport:
+        if controller == "pid_sp":
+            return cast(ControllerLearningReport, object())
+        return _provider(controller)
+
+    bundle = collect_cook_learning_diagnostics(
+        "cook-7",
+        provider,
+        read_trace=lambda cook_id: [pid_session, mpc_session],
+        read_evidence=lambda *, cook_id: [evidence],
+        clock_ms=lambda: _CAPTURED_AT_MS,
+        warn=warnings.append,
+    )
+
+    assert bundle.control_trace.records == (pid_session, mpc_session)
+    assert bundle.model_evidence.records == (evidence,)
+    assert bundle.controllers == ("pid_sp", "mpc")
+    assert [report.controller for report in bundle.reports] == ["mpc"]
+    assert [(error.source, error.code) for error in bundle.capture_errors] == [
+        ("report:pid_sp", "report-type-invalid")
+    ]
+    assert warnings == ["report:pid_sp: provider returned unsupported report type: object"]
+
+
+def test_mismatched_report_controller_isolated_without_losing_later_report() -> None:
+    warnings: list[str] = []
+    pid_session = _session(ControllerType.PID_SP, schema_version=5, session_id="session-pid-sp")
+    mpc_session = _session(ControllerType.MPC, schema_version=6, session_id="session-mpc")
+
+    def provider(controller: str) -> ControllerLearningReport:
+        if controller == "pid_sp":
+            return _provider("mpc")
+        return _provider(controller)
+
+    bundle = collect_cook_learning_diagnostics(
+        "cook-7",
+        provider,
+        read_trace=lambda cook_id: [pid_session, mpc_session],
+        read_evidence=lambda *, cook_id: [],
+        clock_ms=lambda: _CAPTURED_AT_MS,
+        warn=warnings.append,
+    )
+
+    assert bundle.control_trace.records == (pid_session, mpc_session)
+    assert bundle.controllers == ("pid_sp", "mpc")
+    assert [report.controller for report in bundle.reports] == ["mpc"]
+    assert [(error.source, error.code) for error in bundle.capture_errors] == [
+        ("report:pid_sp", "report-controller-mismatch")
+    ]
+    assert warnings == ["report:pid_sp: provider returned report for 'mpc'"]
