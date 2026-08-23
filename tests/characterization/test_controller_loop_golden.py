@@ -253,7 +253,7 @@ def test_tick_stop_mode_cleanup(monkeypatch):
 
 
 def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
-    generated_ids = iter(("old-mode-row", "rotated-cook-session", "stop-row"))
+    generated_ids = iter(("old-mode-row", "rotated-cook-session", "fresh-mode-row", "stop-row"))
     monkeypatch.setattr(store_mod, "generate_uuid", lambda: next(generated_ids))
     control_data = base_control(mode="Smoke")
     control_data["cook_id"] = "old-cook-session"
@@ -262,14 +262,19 @@ def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
         control_data,
         base_pellet_db(),
     )
+    store.write_history({"sentinel": "old-history"})
     probes = FakeProbes().script([200] * 8)
     reads = 0
+    queued_state = {}
 
     def read_probes():
         nonlocal reads
         reads += 1
         if reads == 3:
-            store.flush_history()
+            store.system_commands().push(["clear_history"])
+            queued_state["history"] = store.read_history()
+            queued_state["metrics"] = store.read_all_metrics()
+            queued_state["cook_id"] = store.read_control()["cook_id"]
         if reads == 5:
             store.enqueue_control_delta(control_delta(set_values={"updated": True}), origin="test-cap")
         return probes.read_probes()
@@ -277,8 +282,13 @@ def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
     ctx.devices.probe_complex.read_probes = read_probes
     controller_mod.run_work_cycle("Smoke", ctx)
     rotated_id = store.read_control()["cook_id"]
+    assert queued_state["history"] == [{"sentinel": "old-history"}]
+    assert queued_state["metrics"][0]["id"] == "old-mode-row"
+    assert queued_state["cook_id"] == "old-cook-session"
     assert rotated_id == "rotated-cook-session"
-    assert store.read_all_metrics()
+    assert [(row["id"], row["mode"]) for row in store.read_all_metrics()] == [
+        ("fresh-mode-row", "Smoke"),
+    ]
 
     control = store.read_control()
     control["mode"] = "Stop"
@@ -301,8 +311,6 @@ def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
 
     assert archived_ids == ["rotated-cook-session"]
     assert store.read_control()["cook_id"] is None
-
-
 
 
 def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):

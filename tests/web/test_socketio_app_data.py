@@ -55,6 +55,8 @@ from common.persistence.control import (
     read_control,
     write_control_snapshot,
 )
+from common.persistence.history import read_history, write_history
+from common.sqlite_queue import SqliteQueue
 from common.persistence.runtime import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
@@ -348,15 +350,46 @@ def test_post_invalid_type(sio, action):
 # =====================================================================
 
 
-def test_post_admin_clear_history_finalizes_active_cook_identity(sio):
+def test_post_admin_clear_history_queues_active_control_loop_finalization(sio):
     control = read_control()
+    control["mode"] = "Hold"
     control["cook_id"] = "active-cook-session"
     write_control_snapshot(control, origin="control")
+    write_history(
+        {
+            "probe_history": {"primary": {"Grill": 225}, "food": {}, "aux": {}},
+            "primary_setpoint": 225,
+            "notify_targets": {"Grill": 225},
+        }
+    )
+    before_history = read_history()
+
+    resp = sio.mod._post_app_data("admin_action", "clear_history")
+
+    assert resp["result"] == "OK"
+    assert read_control()["cook_id"] == "active-cook-session"
+    assert read_history() == before_history
+    assert SqliteQueue("queue_systemq").list() == [["clear_history"]]
+
+
+def test_post_admin_clear_history_is_immediate_while_inactive(sio):
+    control = read_control()
+    control["cook_id"] = "inactive-cook-session"
+    write_control_snapshot(control, origin="control")
+    write_history(
+        {
+            "probe_history": {"primary": {"Grill": 225}, "food": {}, "aux": {}},
+            "primary_setpoint": 225,
+            "notify_targets": {"Grill": 225},
+        }
+    )
 
     resp = sio.mod._post_app_data("admin_action", "clear_history")
 
     assert resp["result"] == "OK"
     assert read_control()["cook_id"] is None
+    assert read_history() == []
+    assert SqliteQueue("queue_systemq").list() == []
 
 
 def test_post_admin_clear_events(sio):

@@ -16,6 +16,8 @@ _HISTORY_SELECT = (
 )
 _AUTOTUNE_QUEUE = "queue_autotune"
 
+CLEAR_HISTORY_COMMAND = "clear_history"
+
 
 def _metrics_row_to_dict(row):
     metrics = dict(zip(METRIC_COLUMNS, row))
@@ -95,6 +97,24 @@ def flush_history():
     control_state = control.read_control()
     control_state["cook_id"] = None
     control.write_control_snapshot(control_state, origin="history")
+
+
+def request_history_clear() -> str:
+    """Queue active-session finalization or clear immediately while inactive."""
+    from common.modes import Mode, StatusState
+    from common.persistence import control
+
+    control_state = control.read_control()
+    inactive = (
+        control_state.get("mode") in (Mode.STOP, Mode.ERROR)
+        and control_state.get("status") not in (StatusState.ACTIVE, StatusState.MONITOR)
+    )
+    if inactive:
+        flush_history()
+        return "cleared"
+    SqliteQueue("queue_systemq").push([CLEAR_HISTORY_COMMAND])
+    return "queued"
+
 
 
 def read_history(num_items=0):

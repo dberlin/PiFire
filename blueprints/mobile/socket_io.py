@@ -54,7 +54,7 @@ from common.persistence.runtime import (
     flush_connected_users,
     remove_connected_user,
 )
-from common.persistence.history import flush_history
+from common.persistence.history import flush_history, request_history_clear
 from common.defaults import default_settings, default_control
 from common.system import (
     reboot_system,
@@ -568,7 +568,7 @@ def _post_app_data_update(settings, type, request):
 def _post_app_data_admin(settings, type, request):
     if type == "clear_history":
         write_log("Clearing History Log.")
-        flush_history()
+        request_history_clear()
         return _response(result="OK")
     elif type == "clear_events":
         write_log("Clearing Events Log.")

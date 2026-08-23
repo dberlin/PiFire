@@ -38,7 +38,7 @@ from common.persistence.runtime import (
     write_pellet_db,
     write_settings,
 )
-from common.persistence.history import flush_history
+from common.persistence.history import flush_history, request_history_clear
 from common.defaults import default_control, default_settings
 from common.modes import Mode
 from common.pellets_actions import clear_pellet_db
@@ -85,7 +85,7 @@ def _clear_pelletdb_log():
 
 #: Destructive, but recoverable -- none of these can stop a cook or the machine.
 _MAINTENANCE_ACTIONS = {
-    "clear_history": lambda: flush_history(),
+    "clear_history": request_history_clear,
     "clear_events": lambda: admin_api.clear_events_log(),
     "clear_pelletdb": lambda: clear_pellet_db(),
     "clear_pelletdb_log": _clear_pelletdb_log,

@@ -158,6 +158,39 @@ class ControlMode:
             self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
         return control
 
+    def _stamp_mode_metric(self, control, pelletdb) -> None:
+        self.ctx.store.append_metric()
+        self.state.metrics = self.ctx.store.read_metrics()
+        self.state.metrics["mode"] = self.name
+        self.state.metrics["smokeplus"] = control["s_plus"]
+        self.state.metrics["primary_setpoint"] = control["primary_setpoint"]
+        self.state.metrics["pellet_level_start"] = pelletdb["current"]["hopper_level"]
+        current_pellet_id = pelletdb["current"]["pelletid"]
+        pellet_brand = pelletdb["archive"][current_pellet_id]["brand"]
+        pellet_type = pelletdb["archive"][current_pellet_id]["wood"]
+        self.state.metrics["pellet_brand_type"] = f"{pellet_brand} {pellet_type}"
+        self.on_metrics_stamped()
+        self.ctx.store.update_metrics(self.state.metrics)
+
+    def _handle_history_clear(self, *, now):
+        previous_cook_id = self.control.get("cook_id")
+        self.ctx.store.flush_history()
+        cook_id = self.ctx.store.ensure_cook_id()
+        control = self.ctx.store.read_control()
+        control["cook_id"] = cook_id
+        self.control = control
+        self._stamp_mode_metric(control, self.ctx.store.read_pellet_db())
+        self.state.timers.auger_toggle = now
+        if self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
+            self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
+        return {
+            "result": "OK",
+            "message": "History cleared and cook identity rotated.",
+            "data": {"cook_id": cook_id},
+        }
+
+
+
 
     def _auger_cycle_tick(self, now, current_output_status):
         """Shared (non-Hold) auger toggle: turn the auger on/off based on
@@ -675,18 +708,7 @@ class ControlMode:
             preferred=retained_id,
         )
 
-        ctx.store.append_metric()
-        self.state.metrics = ctx.store.read_metrics()
-        self.state.metrics["mode"] = mode
-        self.state.metrics["smokeplus"] = control["s_plus"]
-        self.state.metrics["primary_setpoint"] = control["primary_setpoint"]
-        self.state.metrics["pellet_level_start"] = pelletdb["current"]["hopper_level"]
-        current_pellet_id = pelletdb["current"]["pelletid"]
-        pellet_brand = pelletdb["archive"][current_pellet_id]["brand"]
-        pellet_type = pelletdb["archive"][current_pellet_id]["wood"]
-        self.state.metrics["pellet_brand_type"] = f"{pellet_brand} {pellet_type}"
-        self.on_metrics_stamped()
-        ctx.store.update_metrics(self.state.metrics)
+        self._stamp_mode_metric(control, pelletdb)
 
         # Get initial probe sensor data, temperatures
         sensor_data = probe_complex.read_probes()
@@ -745,7 +767,11 @@ class ControlMode:
                 now=now,
             )
 
-            process_system_commands(ctx)
+            process_system_commands(
+                ctx,
+                clear_history=lambda: self._handle_history_clear(now=now),
+            )
+            control = self.control
 
             if control["updated"]:
                 if control["mode"] in (Mode.STOP, Mode.ERROR):

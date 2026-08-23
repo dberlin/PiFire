@@ -350,7 +350,8 @@ def test_active_history_clear_rotates_trace_and_evidence_identity_before_next_wr
 ) -> None:
     import controller.runtime.store as store_mod
 
-    monkeypatch.setattr(store_mod, "generate_uuid", lambda: "rotated-cook-session")
+    generated_ids = iter(("rotated-cook-session", "fresh-mode-row"))
+    monkeypatch.setattr(store_mod, "generate_uuid", lambda: next(generated_ids))
     recorder = _install_recorder(monkeypatch)
     runner = FakeControllerRunner(period=1.0)
     evidence_bindings = []
@@ -365,13 +366,25 @@ def test_active_history_clear_rotates_trace_and_evidence_identity_before_next_wr
     mode.setup()
     mode.control["cook_id"] = "old-cook-session"
     mode.ctx.store.write_control_snapshot(mode.control, origin="control")
+    mode.state.metrics = {
+        "id": "stale-mode-row",
+        "starttime": 1.0,
+        "augerontime": 99.0,
+        "mode": "Hold",
+    }
     old_identity = _open_trace_session(mode, 0.0)
     assert old_identity is not None
 
-    mode.ctx.store.flush_history()
-    refreshed = mode._refresh_cook_identity(mode.ctx.store.read_control(), now=2.0)
+    result = mode._handle_history_clear(now=2.0)
+    refreshed = mode.ctx.store.read_control()
 
+    assert result["result"] == "OK"
     assert refreshed["cook_id"] == "rotated-cook-session"
+    assert mode.state.metrics["id"] == "fresh-mode-row"
+    assert mode.state.metrics["mode"] == "Hold"
+    assert mode.state.metrics["augerontime"] == 0
+    assert mode.state.metrics["starttime"] != 1.0
+    assert mode.state.timers.auger_toggle == 2.0
     session_records = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     assert [record.cook_id for record in session_records] == [
         "old-cook-session",
@@ -381,9 +394,6 @@ def test_active_history_clear_rotates_trace_and_evidence_identity_before_next_wr
         "old-cook-session",
         "rotated-cook-session",
     ]
-
-
-
 
 
 def test_inactive_reconfigure_records_controller_fallback(

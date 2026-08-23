@@ -26,9 +26,16 @@ __all__ = (
 )
 
 
-def flush_control(*, cook_id: str | None = None):
+def flush_control(
+    *,
+    cook_id: str | None = None,
+    preserve_system_commands: bool = False,
+):
     """Clear control-owned state and seed defaults with any retained cook identity."""
-    for table in ("queue_control_write", "queue_systemq", "queue_systemo"):
+    tables = ["queue_control_write", "queue_systemo"]
+    if not preserve_system_commands:
+        tables.append("queue_systemq")
+    for table in tables:
         datastore.execute_write(f"DELETE FROM {table}")
     for key in ("control:general", "control:command"):
         datastore.delete_blob(key)

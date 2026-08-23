@@ -73,6 +73,48 @@ def test_unsupported_command_pushes_error_without_dispatch():
     assert "shutdown" in result["message"]
     assert "not supported" in result["message"]
 
+def test_clear_history_command_uses_control_loop_handler_before_hardware_dispatch():
+    grill_platform = MagicMock()
+    ctx = _ctx(grill_platform)
+    calls = []
+    ctx.store.system_commands().push(["clear_history"])
+
+    process_system_commands(
+        ctx,
+        clear_history=lambda: calls.append("clear") or {
+            "result": "OK",
+            "message": "History cleared.",
+            "data": {},
+        },
+    )
+
+    assert calls == ["clear"]
+    grill_platform.supported_commands.assert_not_called()
+    assert ctx.store.system_output().drain() == [
+        {
+            "command": ["clear_history"],
+            "result": "OK",
+            "message": "History cleared.",
+            "data": {},
+        }
+    ]
+
+
+def test_clear_history_command_without_active_mode_finalizes_immediately():
+    grill_platform = MagicMock()
+    ctx = _ctx(grill_platform)
+    control = ctx.store.read_control()
+    control["cook_id"] = "inactive-session"
+    ctx.store.write_control_snapshot(control, origin="control")
+    ctx.store.write_history({"probe": 225})
+    ctx.store.system_commands().push(["clear_history"])
+
+    process_system_commands(ctx)
+
+    assert ctx.store.read_history() == []
+    assert ctx.store.read_control()["cook_id"] is None
+    assert ctx.store.system_output().drain()[0]["result"] == "OK"
+
 
 def test_supported_cmds_fetched_once_for_multiple_queued_commands():
     """supported_cmds is only looked up when the local cache is empty, so

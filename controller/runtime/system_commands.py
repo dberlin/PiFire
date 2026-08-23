@@ -7,9 +7,10 @@ control process: every work cycle (controller.runtime.modes.base.ControlMode.run
 and the outer control loop (controller.runtime.controller.Controller.tick). A
 neutral home avoids an import cycle between those.
 """
+from common.persistence.history import CLEAR_HISTORY_COMMAND
 
 
-def process_system_commands(ctx):
+def process_system_commands(ctx, *, clear_history=None):
     grill_platform = ctx.devices.grill_platform
     # Setup access to the system command queue
     system_commands = ctx.store.system_commands()
@@ -19,10 +20,23 @@ def process_system_commands(ctx):
     supported_cmds = []
 
     while system_commands.length() > 0:
+        command = system_commands.pop()
+        if command[0] == CLEAR_HISTORY_COMMAND:
+            if clear_history is None:
+                ctx.store.flush_history()
+                result = {
+                    "result": "OK",
+                    "message": "History cleared.",
+                    "data": {},
+                }
+            else:
+                result = clear_history()
+            result["command"] = command
+            system_output.push(result)
+            continue
         if supported_cmds == []:
             # Get list of supported system commands
             supported_cmds = grill_platform.supported_commands(None)["data"]["supported_cmds"]
-        command = system_commands.pop()
         if command[0] in supported_cmds:
             command_method = getattr(grill_platform, command[0])
             result = command_method(command)

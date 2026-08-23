@@ -35,6 +35,15 @@ def test_routine_restart_preserves_prime_carry_over_identity_and_metrics(ds):
     assert read_all_metrics() == before_metrics
 
 
+def test_routine_restart_preserves_accepted_history_clear_command(ds):
+    store = SqliteStore()
+    store.system_commands().push(["clear_history"])
+
+    _initialize_runtime_state(store)
+
+    assert store.system_commands().list() == [["clear_history"]]
+
+
 def test_routine_restart_preserves_failed_archive_identity_history_and_metrics(ds):
     _seed_control("failed-archive-session")
     write_history(_HISTORY_ROW)
