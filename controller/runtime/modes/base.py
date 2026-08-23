@@ -767,11 +767,11 @@ class ControlMode:
                 now=now,
             )
 
-            process_system_commands(
+            control = process_system_commands(
                 ctx,
                 clear_history=lambda: self._handle_history_clear(now=now),
             )
-            control = self.control
+            self.control = control
 
             if control["updated"]:
                 if control["mode"] in (Mode.STOP, Mode.ERROR):

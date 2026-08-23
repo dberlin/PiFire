@@ -372,7 +372,7 @@ def test_post_admin_clear_history_queues_active_control_loop_finalization(sio):
     assert SqliteQueue("queue_systemq").list() == [["clear_history"]]
 
 
-def test_post_admin_clear_history_is_immediate_while_inactive(sio):
+def test_post_admin_clear_history_is_accepted_and_durable_while_control_is_down(sio):
     control = read_control()
     control["cook_id"] = "inactive-cook-session"
     write_control_snapshot(control, origin="control")
@@ -383,13 +383,14 @@ def test_post_admin_clear_history_is_immediate_while_inactive(sio):
             "notify_targets": {"Grill": 225},
         }
     )
+    before_history = read_history()
 
     resp = sio.mod._post_app_data("admin_action", "clear_history")
 
     assert resp["result"] == "OK"
-    assert read_control()["cook_id"] is None
-    assert read_history() == []
-    assert SqliteQueue("queue_systemq").list() == []
+    assert read_control()["cook_id"] == "inactive-cook-session"
+    assert read_history() == before_history
+    assert SqliteQueue("queue_systemq").list() == [["clear_history"]]
 
 
 def test_post_admin_clear_events(sio):

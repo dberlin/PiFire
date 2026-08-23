@@ -104,7 +104,7 @@ class Controller:
         )
 
     def process_system_commands(self):
-        process_system_commands(self.ctx)
+        return process_system_commands(self.ctx)
 
     def recipe_mode(self, start_step=0):
         """Recipe Mode Control -- walks recipe steps, running a work cycle each."""
@@ -299,7 +299,7 @@ class Controller:
         self.control = store.read_control()
 
         # Check for system commands
-        self.process_system_commands()
+        self.control = self.process_system_commands()
 
         # Check if there were updates to any of the settings that were flagged
         if self.control["settings_update"]:

@@ -115,6 +115,36 @@ def test_active_clear_history_is_queued_for_control_loop_authority(client):
     assert SqliteQueue("queue_systemq").list() == [["clear_history"]]
 
 
+def test_inactive_clear_history_is_accepted_and_durable_while_control_is_down(client):
+    from common.defaults import default_control
+    from common.persistence.control import read_control, write_control_snapshot
+    from common.persistence.history import read_history, write_history
+    from common.sqlite_queue import SqliteQueue
+
+    control = default_control()
+    control["mode"] = "Stop"
+    control["status"] = "inactive"
+    control["cook_id"] = "inactive-admin-session"
+    write_control_snapshot(control, origin="control")
+    write_history(
+        {
+            "probe_history": {"primary": {"Grill": 225}, "food": {}, "aux": {}},
+            "primary_setpoint": 225,
+            "notify_targets": {"Grill": 225},
+        }
+    )
+    before = read_history()
+
+    response = client.post("/api/admin/maintenance", json={"action": "clear_history"})
+
+    assert response.status_code == 200
+    assert response.get_json()["result"] == "OK"
+    assert read_control()["cook_id"] == "inactive-admin-session"
+    assert read_history() == before
+    assert SqliteQueue("queue_systemq").list() == [["clear_history"]]
+
+
+
 def test_clear_events_does_not_shell_out(client, tmp_path, monkeypatch):
     """Flask runs `os.system("rm ./logs/events.log")`. This surface builds the
     path server-side and calls os.remove, so no shell is ever involved."""

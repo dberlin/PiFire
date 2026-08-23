@@ -16,6 +16,34 @@ SAMPLE_HISTORY = {
 }
 
 
+
+def test_inactive_clear_request_is_queued_when_mode_startup_interleaves_enqueue(monkeypatch, ds):
+    persisted = control.read_control()
+    persisted["mode"] = "Stop"
+    persisted["status"] = "inactive"
+    persisted["cook_id"] = "inactive-session"
+    control.write_control_snapshot(persisted, origin="control")
+    history.write_history(SAMPLE_HISTORY)
+    before = history.read_history()
+    system_commands = history.SqliteQueue("queue_systemq")
+    original_push = history.SqliteQueue.push
+
+    def start_mode_then_push(queue, command):
+        starting = control.read_control()
+        starting["mode"] = "Startup"
+        starting["status"] = "active"
+        control.write_control_snapshot(starting, origin="control")
+        return original_push(queue, command)
+
+    monkeypatch.setattr(history.SqliteQueue, "push", start_mode_then_push)
+
+    assert history.request_history_clear() == "queued"
+    assert control.read_control()["mode"] == "Startup"
+    assert control.read_control()["cook_id"] == "inactive-session"
+    assert history.read_history() == before
+    assert system_commands.list() == [["clear_history"]]
+
+
 def test_empty_stores_preserve_exact_read_shapes_and_fresh_defaults(ds):
     assert history.read_history() == []
     assert history.read_all_metrics() == []

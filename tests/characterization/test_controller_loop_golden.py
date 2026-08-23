@@ -313,6 +313,38 @@ def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
     assert store.read_control()["cook_id"] is None
 
 
+def test_outer_clear_rebinds_control_before_settings_update_and_transition_writes(monkeypatch):
+    _neutralize_externals(monkeypatch)
+    control_data = base_control(mode="Stop")
+    control_data["cook_id"] = "stale-outer-loop-session"
+    control_data["settings_update"] = True
+    control_data["distance_update"] = True
+    control_data["updated"] = True
+    c, ctx, store, grill, dist, notifier = make_controller(
+        base_settings(),
+        control_data,
+        base_pellet_db(),
+    )
+    c.setup()
+    written_controls = []
+    write_control_snapshot = store.write_control_snapshot
+
+    def record_control_snapshot(snapshot, *, origin="control"):
+        written_controls.append(snapshot.copy())
+        return write_control_snapshot(snapshot, origin=origin)
+
+    monkeypatch.setattr(store, "write_control_snapshot", record_control_snapshot)
+    store.system_commands().push(["clear_history"])
+
+    c.tick()
+
+    assert written_controls
+    assert all(snapshot["cook_id"] is None for snapshot in written_controls)
+    assert c.control["cook_id"] is None
+    assert store.read_control()["cook_id"] is None
+
+
+
 def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     """DESIGN CALL: a failed create_cookfile() must not crash the control loop.
     On a real grill an uncaught exception here kills the whole `control.py`

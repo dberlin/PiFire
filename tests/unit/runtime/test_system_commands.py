@@ -109,11 +109,14 @@ def test_clear_history_command_without_active_mode_finalizes_immediately():
     ctx.store.write_history({"probe": 225})
     ctx.store.system_commands().push(["clear_history"])
 
-    process_system_commands(ctx)
+    post_command_control = process_system_commands(ctx)
 
     assert ctx.store.read_history() == []
     assert ctx.store.read_control()["cook_id"] is None
     assert ctx.store.system_output().drain()[0]["result"] == "OK"
+    assert post_command_control == ctx.store.read_control()
+    assert post_command_control["cook_id"] is None
+
 
 
 def test_supported_cmds_fetched_once_for_multiple_queued_commands():

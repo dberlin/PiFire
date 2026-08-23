@@ -100,18 +100,7 @@ def flush_history():
 
 
 def request_history_clear() -> str:
-    """Queue active-session finalization or clear immediately while inactive."""
-    from common.modes import Mode, StatusState
-    from common.persistence import control
-
-    control_state = control.read_control()
-    inactive = (
-        control_state.get("mode") in (Mode.STOP, Mode.ERROR)
-        and control_state.get("status") not in (StatusState.ACTIVE, StatusState.MONITOR)
-    )
-    if inactive:
-        flush_history()
-        return "cleared"
+    """Durably queue finalization for the control process."""
     SqliteQueue("queue_systemq").push([CLEAR_HISTORY_COMMAND])
     return "queued"
 

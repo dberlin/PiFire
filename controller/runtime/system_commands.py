@@ -49,3 +49,4 @@ def process_system_commands(ctx, *, clear_history=None):
                 "data": {},
             }
         system_output.push(result)
+    return ctx.store.read_control()
