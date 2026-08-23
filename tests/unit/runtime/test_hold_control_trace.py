@@ -344,6 +344,47 @@ def test_trace_identity_uses_durable_control_cook_id_not_metric_row_id(
     assert identity.cook_id == "durable-cook-session"
 
 
+def test_active_history_clear_rotates_trace_and_evidence_identity_before_next_write(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    import controller.runtime.store as store_mod
+
+    monkeypatch.setattr(store_mod, "generate_uuid", lambda: "rotated-cook-session")
+    recorder = _install_recorder(monkeypatch)
+    runner = FakeControllerRunner(period=1.0)
+    evidence_bindings = []
+    bind_evidence = runner.bind_evidence_context
+
+    def record_binding(generation, session_id, cook_id):
+        evidence_bindings.append((generation, session_id, cook_id))
+        bind_evidence(generation, session_id, cook_id)
+
+    monkeypatch.setattr(runner, "bind_evidence_context", record_binding)
+    mode = hold_cycle(runner, controller="pid_sp")
+    mode.setup()
+    mode.control["cook_id"] = "old-cook-session"
+    mode.ctx.store.write_control_snapshot(mode.control, origin="control")
+    old_identity = _open_trace_session(mode, 0.0)
+    assert old_identity is not None
+
+    mode.ctx.store.flush_history()
+    refreshed = mode._refresh_cook_identity(mode.ctx.store.read_control(), now=2.0)
+
+    assert refreshed["cook_id"] == "rotated-cook-session"
+    session_records = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
+    assert [record.cook_id for record in session_records] == [
+        "old-cook-session",
+        "rotated-cook-session",
+    ]
+    assert [binding[2] for binding in evidence_bindings] == [
+        "old-cook-session",
+        "rotated-cook-session",
+    ]
+
+
+
+
 
 def test_inactive_reconfigure_records_controller_fallback(
     hold_cycle,

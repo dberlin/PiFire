@@ -6,6 +6,7 @@ import json
 import logging
 
 from common import datastore
+from common.common import generate_uuid
 from common.control_delta import ControlDeltaError, is_control_delta, validate_control_delta
 from common.defaults import default_control
 from common.persistence.transforms import apply_control_delta
@@ -13,6 +14,7 @@ from common.sqlite_queue import SqliteQueue
 
 __all__ = (
     "enqueue_control_delta",
+    "ensure_cook_id",
     "execute_control_writes",
     "flush_control",
     "mpc_calibration_command_revision",
@@ -34,6 +36,32 @@ def flush_control(*, cook_id: str | None = None):
     control["cook_id"] = cook_id
     write_control_snapshot(control, origin="common")
     return control
+
+
+def ensure_cook_id(*, preferred: str | None = None) -> str:
+    """Atomically return the live cook identity, seeding it when absent."""
+    with datastore.transaction() as connection:
+        row = connection.execute(
+            "SELECT value FROM kv WHERE key='control:general'"
+        ).fetchone()
+        control = json.loads(row[0]) if row is not None else default_control()
+        current = control.get("cook_id")
+        if isinstance(current, str) and bool(current) and current == current.strip():
+            return current
+        cook_id = (
+            preferred
+            if isinstance(preferred, str)
+            and bool(preferred)
+            and preferred == preferred.strip()
+            else generate_uuid()
+        )
+        control["cook_id"] = cook_id
+        connection.execute(
+            "INSERT INTO kv(key,value) VALUES('control:general',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(control),),
+        )
+        return cook_id
 
 
 def read_control():

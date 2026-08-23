@@ -1001,6 +1001,7 @@ class HoldLearningRuntime:
 
     def bind_generation(self, generation: int) -> None:
         self._generation = generation
+        self._retired_generations.discard(generation)
         runner = self._runner
         identity = self._trace_identity
         if runner is None or identity is None:

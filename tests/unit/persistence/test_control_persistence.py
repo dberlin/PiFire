@@ -75,6 +75,21 @@ def test_flush_control_can_atomically_preserve_active_cook_identity(ds):
     assert control_store.read_control()["cook_id"] == "cook-session-7"
 
 
+def test_ensure_cook_id_atomically_reuses_prefers_or_generates(monkeypatch, ds):
+    monkeypatch.setattr(control_store, "generate_uuid", lambda: "generated-session", raising=False)
+    control_store.write_control_snapshot(
+        dict(default_control(), cook_id="existing-session"),
+        origin="control",
+    )
+    assert control_store.ensure_cook_id(preferred="ignored-prime") == "existing-session"
+
+    control_store.flush_control()
+    assert control_store.ensure_cook_id(preferred="retained-prime") == "retained-prime"
+    assert control_store.read_control()["cook_id"] == "retained-prime"
+
+    control_store.flush_control()
+    assert control_store.ensure_cook_id() == "generated-session"
+    assert control_store.read_control()["cook_id"] == "generated-session"
 
 
 def test_enqueue_validates_copies_and_preserves_fifo_origin(ds):

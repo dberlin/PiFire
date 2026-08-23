@@ -328,6 +328,20 @@ def test_socket_control_door_rejects_a_timer_value(sio):
     assert c.SqliteQueue("queue_control_write").length() == 0
 
 
+def test_socket_control_door_returns_validation_envelope_for_internal_cook_id(sio):
+    response = sio._post_app_data(
+        "update_action",
+        "control",
+        json.dumps({"cook_id": "client-selected"}),
+    )
+
+    assert response["result"] == "Error"
+    assert "cook_id" in response["message"]
+    assert c.SqliteQueue("queue_control_write").length() == 0
+
+
+
+
 def test_socket_control_door_still_accepts_ordinary_members(sio):
     assert sio._post_app_data("update_action", "control", json.dumps({"s_plus": True}))["result"] == "OK"
     control_persistence.execute_control_writes()

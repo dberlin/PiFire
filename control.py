@@ -16,9 +16,9 @@ Description: This script starts at boot, initializes the datastore and
 
  The control loop itself lives in controller/runtime/controller.py
  (Controller); the per-mode logic lives in controller/runtime/modes/. This
- file is only the process entry point: read settings, set up logging, flush
- the datastore, build devices + the injected ControllerContext, then
- Controller(ctx).run().
+ file is only the process entry point: read settings, set up logging, reset
+ ephemeral control/current state without deleting an unfinished cook, build
+ devices + the injected ControllerContext, then Controller(ctx).run().
 ==============================================================================
 """
 
@@ -32,6 +32,24 @@ from controller.runtime.store import SqliteStore
 from controller.runtime.clock import RealClock
 from controller.runtime.notifier import LiveNotifier
 from controller.runtime.controller import Controller
+
+
+def _initialize_runtime_state(store):
+    """Reset process-ephemeral state while retaining an unfinished cook session."""
+    persisted_control = store.read_control()
+    cook_id = persisted_control.get("cook_id")
+    unfinished = bool(store.read_history(num_items=1) or store.read_all_metrics())
+    retained_cook_id = (
+        cook_id
+        if unfinished
+        and isinstance(cook_id, str)
+        and bool(cook_id)
+        and cook_id == cook_id.strip()
+        else None
+    )
+    control = store.flush_control(cook_id=retained_cook_id)
+    store.flush_current()
+    return control
 
 
 # Only run hardware init and the control loop when executed as the main
@@ -76,17 +94,14 @@ if __name__ == "__main__":
     eventLogger.info(event_message)
     controlLogger.info(event_message)
 
-    # Flush datastore and create JSON structure
-    control = store.flush_control()
-    # Delete datastore entries for history / current
-    store.flush_history()
-    # Flush metrics DB for tracking certain metrics
-    store.flush_metrics()
+    # Reset process-ephemeral state. Unfinished cook history/metrics and their
+    # durable identity survive routine supervisor restarts.
+    control = _initialize_runtime_state(store)
     # Clear the errors list; flush_errors() hands back the fresh (empty)
     # accumulator that build_devices() appends into below.
     errors = store.flush_errors(ErrorKind.CONTROL)
 
-    eventLogger.info("Flushing datastore and creating new control structure")
+    eventLogger.info("Resetting ephemeral control state and preserving unfinished cook data")
 
     devices, errors = build_devices(settings, errors=errors, event_log=eventLogger, control_log=controlLogger)
 

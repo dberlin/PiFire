@@ -348,9 +348,15 @@ def test_post_invalid_type(sio, action):
 # =====================================================================
 
 
-def test_post_admin_clear_history(sio):
+def test_post_admin_clear_history_finalizes_active_cook_identity(sio):
+    control = read_control()
+    control["cook_id"] = "active-cook-session"
+    write_control_snapshot(control, origin="control")
+
     resp = sio.mod._post_app_data("admin_action", "clear_history")
+
     assert resp["result"] == "OK"
+    assert read_control()["cook_id"] is None
 
 
 def test_post_admin_clear_events(sio):

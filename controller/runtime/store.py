@@ -76,6 +76,20 @@ class InMemoryStore:
     def read_control(self):
         return copy.deepcopy(self._control)
 
+    def ensure_cook_id(self, *, preferred=None):
+        cook_id = self._control.get("cook_id")
+        if isinstance(cook_id, str) and bool(cook_id) and cook_id == cook_id.strip():
+            return cook_id
+        cook_id = (
+            preferred
+            if isinstance(preferred, str)
+            and bool(preferred)
+            and preferred == preferred.strip()
+            else generate_uuid()
+        )
+        self._control["cook_id"] = cook_id
+        return cook_id
+
     def flush_control(self, *, cook_id=None):
         # Mirror control_persistence.flush_control: reset control to defaults,
         # optionally retaining the active cook identity, and discard pending
@@ -323,6 +337,9 @@ class SqliteStore:
 
     def read_control(self):
         return control_persistence.read_control()
+
+    def ensure_cook_id(self, *, preferred=None):
+        return control_persistence.ensure_cook_id(preferred=preferred)
 
     def flush_control(self, *, cook_id=None):
         return control_persistence.flush_control(cook_id=cook_id)

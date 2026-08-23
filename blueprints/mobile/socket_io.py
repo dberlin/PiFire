@@ -555,9 +555,9 @@ def _post_app_data_update(settings, type, request):
                 try:
                     patch = ControlPatchRequest.model_validate(request, strict=True)
                     payload, ops = notify_ops_from_post(patch.model_dump(mode="python", exclude_unset=True))
+                    enqueue_control_delta(control_delta(set_values=payload, ops=ops), origin="app-socketio")
                 except (ControlDeltaError, ValidationError) as exc:
                     return _response(result="Error", message=f"Error: {exc}")
-                enqueue_control_delta(control_delta(set_values=payload, ops=ops), origin="app-socketio")
                 return _response(result="OK", data=control)
             else:
                 return _response(result="Error", message="Error: Key not found in control")

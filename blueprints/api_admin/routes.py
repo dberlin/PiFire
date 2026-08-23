@@ -211,6 +211,7 @@ def admin_factory_reset():
     control = default_control()
     notify_entries = control.pop("notify_data")
     control.pop("timer")
+    control.pop("cook_id")
     enqueue_control_delta(control_delta(
         set_values=control,
         ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],

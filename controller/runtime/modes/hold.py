@@ -516,6 +516,31 @@ class HoldMode(ControlMode):
             )
         self.state.controller.controls_fan = wants_fan and has_authority
 
+    def on_cook_identity_rotated(self, previous_cook_id, cook_id, now) -> None:
+        """Close old cook evidence authority before opening the replacement session."""
+        del previous_cook_id, cook_id
+        trace = self._control_trace
+        runner = self._runner
+        learning = self._hold_learning
+        if trace is None or runner is None or learning is None:
+            return
+        generation = self._runner_configuration_revision
+        remaining = learning.retire_generation(generation)
+        for reserved_generation in remaining:
+            if reserved_generation != generation:
+                learning.retire_generation(reserved_generation)
+        trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
+        context = self._trace_session_context()
+        identity = (
+            None
+            if context is None
+            else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+        )
+        if identity is not None:
+            learning.bind_generation(generation)
+        learning.reconcile_outcomes(now)
+
+
     def _trace_session_context(self) -> TraceSessionContext | None:
         trace = self._control_trace
         runner = self._runner

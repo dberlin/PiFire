@@ -13,8 +13,6 @@ the manual-override block) and threaded through the whole tick.
 
 import logging
 
-from common.common import generate_uuid
-
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
@@ -97,6 +95,9 @@ class ControlMode:
     def on_metrics_stamped(self):
         pass
 
+    def on_cook_identity_rotated(self, previous_cook_id, cook_id, now):
+        pass
+
     def on_settings_reload(self):
         pass
 
@@ -131,6 +132,33 @@ class ControlMode:
         pass
 
     # ---- shared helpers ----
+    @staticmethod
+    def _valid_cook_id(cook_id) -> bool:
+        return (
+            isinstance(cook_id, str)
+            and bool(cook_id)
+            and cook_id == cook_id.strip()
+        )
+
+    def _refresh_cook_identity(self, control, *, now, preferred=None):
+        previous_cook_id = (
+            self.control.get("cook_id")
+            if isinstance(self.control, dict)
+            else None
+        )
+        cook_id = control.get("cook_id")
+        if not self._valid_cook_id(cook_id):
+            cook_id = self.ctx.store.ensure_cook_id(preferred=preferred)
+            control["cook_id"] = cook_id
+        self.control = control
+        if (
+            self._valid_cook_id(previous_cook_id)
+            and previous_cook_id != cook_id
+        ):
+            self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
+        return control
+
+
     def _auger_cycle_tick(self, now, current_output_status):
         """Shared (non-Hold) auger toggle: turn the auger on/off based on
         elapsed time vs. cycle_time/cycle_ratio, honoring manual overrides and
@@ -635,26 +663,17 @@ class ControlMode:
 
         # ---- mode-specific pre-loop setup ----
         self.setup()
-        cook_id = control.get("cook_id")
-        if not (
-            isinstance(cook_id, str)
-            and bool(cook_id)
-            and cook_id == cook_id.strip()
-        ):
-            retained_metrics = ctx.store.read_all_metrics()
-            retained_id = (
-                retained_metrics[0].get("id")
-                if retained_metrics and retained_metrics[0].get("mode") == Mode.PRIME
-                else None
-            )
-            control["cook_id"] = (
-                retained_id
-                if isinstance(retained_id, str)
-                and bool(retained_id)
-                and retained_id == retained_id.strip()
-                else generate_uuid()
-            )
-        ctx.store.write_control_snapshot(control, origin="control")
+        retained_metrics = ctx.store.read_all_metrics()
+        retained_id = (
+            retained_metrics[0].get("id")
+            if retained_metrics and retained_metrics[0].get("mode") == Mode.PRIME
+            else None
+        )
+        control = self._refresh_cook_identity(
+            control,
+            now=ctx.clock.now(),
+            preferred=retained_id,
+        )
 
         ctx.store.append_metric()
         self.state.metrics = ctx.store.read_metrics()
@@ -721,8 +740,10 @@ class ControlMode:
             stamp_control_heartbeat(ctx)
 
             ctx.store.execute_control_writes()
-            control = ctx.store.read_control()
-            self.control = control
+            control = self._refresh_cook_identity(
+                ctx.store.read_control(),
+                now=now,
+            )
 
             process_system_commands(ctx)
 

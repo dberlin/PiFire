@@ -26,7 +26,7 @@ reignite.py overrides only the startup timestamp and the MQTT publish), so it
 is covered by the Startup cases.
 """
 
-import controller.runtime.modes.base as base_mode_mod
+import controller.runtime.store as store_mod
 
 from common.defaults import default_metrics
 from controller.runtime.store import InMemoryStore
@@ -72,20 +72,17 @@ def _settings(smartstart_p_mode=None):
 
 
 def test_first_mode_persists_a_new_cook_session_identity(monkeypatch):
-    monkeypatch.setattr(base_mode_mod, "generate_uuid", lambda: "cook-session-7", raising=False)
+    generated_ids = iter(("cook-session-7", "smoke-row-id"))
+    monkeypatch.setattr(store_mod, "generate_uuid", lambda: next(generated_ids))
 
     result = _run("Smoke", _settings())
 
     assert result.final_control["cook_id"] == "cook-session-7"
+    assert result.final_metrics["id"] == "smoke-row-id"
 
 
 def test_later_mode_reuses_persisted_cook_session_identity(monkeypatch):
-    monkeypatch.setattr(
-        base_mode_mod,
-        "generate_uuid",
-        lambda: (_ for _ in ()).throw(AssertionError("existing cook identity must be reused")),
-        raising=False,
-    )
+    monkeypatch.setattr(store_mod, "generate_uuid", lambda: "smoke-row-id")
     control = base_control(mode="Smoke")
     control["cook_id"] = "existing-cook-session"
 
@@ -99,6 +96,7 @@ def test_later_mode_reuses_persisted_cook_session_identity(monkeypatch):
     )
 
     assert result.final_control["cook_id"] == "existing-cook-session"
+    assert result.final_metrics["id"] == "smoke-row-id"
 
 
 def test_startup_recovers_legacy_prime_carry_over_identity(monkeypatch):
@@ -106,9 +104,10 @@ def test_startup_recovers_legacy_prime_carry_over_identity(monkeypatch):
     control = base_control(mode="Startup")
     control["cook_id"] = None
     store = InMemoryStore(control=control, settings=settings, pellet_db=base_pellet_db())
+    generated_ids = iter(("prime-row-id", "startup-row-id"))
+    monkeypatch.setattr(store_mod, "generate_uuid", lambda: next(generated_ids))
     store.append_metric(dict(default_metrics(), mode="Prime"))
     prime_identity = store.read_metrics()["id"]
-    monkeypatch.setattr(base_mode_mod, "generate_uuid", lambda: "wrong-new-cook", raising=False)
 
     result = run_mode(
         "Startup",
@@ -121,8 +120,7 @@ def test_startup_recovers_legacy_prime_carry_over_identity(monkeypatch):
     )
 
     assert result.final_control["cook_id"] == prime_identity
-
-
+    assert result.final_metrics["id"] == "startup-row-id"
 
 
 def test_smoke_publishes_the_configured_p_mode_to_the_display():

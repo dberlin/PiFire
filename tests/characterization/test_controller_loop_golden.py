@@ -23,9 +23,11 @@ import logging
 import time
 
 import controller.runtime.controller as controller_mod
+import controller.runtime.store as store_mod
 from controller.runtime.clock import ManualClock
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from common.common import ErrorKind
+from common.control_delta import control_delta
 from common.defaults import default_metrics
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.characterization._controller_harness import (
@@ -36,6 +38,7 @@ from tests.characterization._controller_harness import (
     _FakeOs,
 )
 from tests.fakes.grill import FakeGrillPlatform
+from tests.fakes.probes import FakeProbes
 
 
 class _HostileDistance(_RecordingDistance):
@@ -247,6 +250,59 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     assert control["cook_id"] is None
     assert control["updated"] is False
     assert control["next_mode"] == "Stop"
+
+
+def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
+    generated_ids = iter(("old-mode-row", "rotated-cook-session", "stop-row"))
+    monkeypatch.setattr(store_mod, "generate_uuid", lambda: next(generated_ids))
+    control_data = base_control(mode="Smoke")
+    control_data["cook_id"] = "old-cook-session"
+    c, ctx, store, grill, dist, notifier = make_controller(
+        base_settings(),
+        control_data,
+        base_pellet_db(),
+    )
+    probes = FakeProbes().script([200] * 8)
+    reads = 0
+
+    def read_probes():
+        nonlocal reads
+        reads += 1
+        if reads == 3:
+            store.flush_history()
+        if reads == 5:
+            store.enqueue_control_delta(control_delta(set_values={"updated": True}), origin="test-cap")
+        return probes.read_probes()
+
+    ctx.devices.probe_complex.read_probes = read_probes
+    controller_mod.run_work_cycle("Smoke", ctx)
+    rotated_id = store.read_control()["cook_id"]
+    assert rotated_id == "rotated-cook-session"
+    assert store.read_all_metrics()
+
+    control = store.read_control()
+    control["mode"] = "Stop"
+    control["updated"] = True
+    store.write_control_snapshot(control, origin="control")
+    archived_ids = []
+    _neutralize_externals(monkeypatch)
+
+    def archive(*, cook_id, learning_report_provider):
+        assert learning_report_provider is controller_mod.controller_learning_report
+        archived_ids.append(cook_id)
+        store.flush_history()
+
+    monkeypatch.setattr(controller_mod, "create_cookfile", archive)
+    terminal = controller_mod.Controller(ctx)
+    terminal.setup()
+    _spy_dispatch(terminal)
+
+    terminal.tick()
+
+    assert archived_ids == ["rotated-cook-session"]
+    assert store.read_control()["cook_id"] is None
+
+
 
 
 def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
