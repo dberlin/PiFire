@@ -107,6 +107,31 @@ def _payload(*, status: LearningStatus = LearningStatus.COLLECTING) -> dict[str,
     ).as_dict()
 
 
+def test_diagnostic_learning_report_wraps_only_the_backend_report(monkeypatch) -> None:
+    canonical = build_learning_report(
+        (),
+        activation_state=_activation(phase="aborted"),
+        live_status=_live(),
+        calibration_command_high_water=7,
+    )
+    records = (_evidence(),)
+    calls = []
+
+    def backend_report():
+        calls.append("backend")
+        return canonical, records
+
+    monkeypatch.setattr(report_module, "backend_learning_report", backend_report)
+
+    report = report_module.diagnostic_learning_report()
+
+    assert report.controller == "mpc"
+    assert report.schema_version == 1
+    assert report.revision == canonical.revision
+    assert report.report == canonical.as_dict()
+    assert calls == ["backend"]
+
+
 def _section(payload: dict[str, object], name: str) -> dict[str, object]:
     value = payload[name]
     assert isinstance(value, dict)

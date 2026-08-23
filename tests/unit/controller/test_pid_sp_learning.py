@@ -576,6 +576,25 @@ def test_backend_report_reads_status_and_checkpoint_once(monkeypatch):
     assert calls == ["status", ("checkpoint", "pid_sp")]
 
 
+def test_diagnostic_learning_report_wraps_the_backend_report_once(monkeypatch):
+    canonical = _report()
+    calls = []
+
+    def backend_report():
+        calls.append("backend")
+        return canonical
+
+    monkeypatch.setattr(learning, "backend_pid_sp_learning_report", backend_report)
+
+    report = learning.diagnostic_learning_report()
+
+    assert report.controller == "pid_sp"
+    assert report.schema_version == 1
+    assert report.revision == canonical.revision
+    assert report.report == canonical.as_dict()
+    assert calls == ["backend"]
+
+
 def test_checkpoint_contracts_are_immutable_and_discriminated():
     fopdt = FopdtPidSpCheckpoint(**_FOPDT_CHECKPOINT)
     ipdt = IpdtPidSpCheckpoint(

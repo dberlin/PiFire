@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from typing import TypeVar, cast
 
+from common.cook_diagnostics import ControllerLearningReport
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationLifecycleEvidence,
@@ -21,6 +22,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     SchemaInvalidationEvidence,
 )
+from common.persistence.protocols import JsonValue
 from common.web_contracts.learning import ModelEvidenceReport
 
 from .contracts import ActivationPolicy, CandidateOrigin, CheckStatus, FitStatus, LearningStatus
@@ -585,8 +587,13 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
     return report, records
 
 
-def learning_report_revision() -> str:
-    """Return only the invalidation token for clients that refetch the report."""
+def diagnostic_learning_report() -> ControllerLearningReport:
+    """Return the generic owned envelope for the final MPC report."""
 
     report, _records = backend_learning_report()
-    return report.revision
+    return ControllerLearningReport(
+        controller="mpc",
+        schema_version=1,
+        revision=report.revision,
+        report=cast(Mapping[str, JsonValue], report.as_dict()),
+    )

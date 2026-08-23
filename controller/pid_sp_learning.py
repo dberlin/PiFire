@@ -9,6 +9,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass as std_dataclass
 from typing import cast
 
+from common.cook_diagnostics import ControllerLearningReport
+from common.persistence.protocols import JsonValue
+
 from common.web_contracts.learning import (
     FopdtPidSpCheckpoint,
     IpdtPidSpCheckpoint,
@@ -499,3 +502,15 @@ def backend_pid_sp_learning_report() -> _CanonicalPidSpLearningReport:
     status = read_status()
     checkpoint = ControllerModelStore().load_strict("pid_sp")
     return current_pid_sp_learning_report(status=status, checkpoint=checkpoint)
+
+
+def diagnostic_learning_report() -> ControllerLearningReport:
+    """Return the generic owned envelope for the final PID-SP report."""
+
+    report = backend_pid_sp_learning_report()
+    return ControllerLearningReport(
+        controller="pid_sp",
+        schema_version=1,
+        revision=report.revision,
+        report=cast(Mapping[str, JsonValue], report.as_dict()),
+    )
