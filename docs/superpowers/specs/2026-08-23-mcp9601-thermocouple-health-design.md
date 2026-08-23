@@ -74,7 +74,7 @@ end states.
 ### Design-only follow-up scope
 
 1. Add shared inferred detection for MCP9600, MAX31856, MCP9601, and future
-   converters that expose hot and cold junctions.
+   thermocouple converters that expose both hot and cold junctions.
 2. Add `off | observe | enforce` inference policy, default `observe`.
 3. Add the conditional wizard warning for converters without enabled,
    board-supported hardware detection.
@@ -83,8 +83,10 @@ The inference engine is deliberately not part of the current MCP9601 code
 change. Its design is complete here so the MCP9601 health contract does not
 create an incompatible one-off path.
 
-Out of scope: calibration-drift detection, location validation, plant-model
-residuals, and automatic recovery of a primary controller from Error.
+Out of scope: non-thermocouple probe families, calibration-drift detection,
+reversed-polarity classification, intermittent-noise classification, location
+validation, plant-model residuals, and automatic recovery of a primary
+controller from Error.
 
 ## Shared health contract
 
@@ -95,7 +97,7 @@ ThermocoupleHealthReport
   state: unmonitored | healthy | suspected | confirmed
   faults: zero or more of open | short | malfunction
   evidence: zero or more of hardware | junction-collapse | stuck-response |
-            excitation-response
+            excitation-response | implausible-step
   temperature_valid: bool
   observed_at: monotonic timestamp
   detail: structured evidence metrics
@@ -226,18 +228,44 @@ MAX31856 maps `reference_temperature` to cold junction. MCP9600/MCP9601 map
 `ambient_temperature`. Drivers lacking a cold-junction reading remain
 `unmonitored` by this inference policy.
 
+This policy does not apply to thermistors through ADS1015/ADS1115, MAX31865
+RTDs, DS18B20, Bluetooth probes, or cloud probes. Those sensor families do not
+expose the hot/cold-junction relationship and require separate fault models.
+
 ### Channel 1: sensor-internal anomaly
 
-Evaluate after a complete five-minute window:
+The engine computes these candidates after a complete five-minute window:
 
 - **Junction collapse:** at least 95% of samples satisfy
   `abs(hot_c - cold_c) <= 1.0`, and the hot-minus-cold span is at most `1.0°C`.
 - **Stuck response:** hot-junction span is at most `1.0°C` while the independent
   witness defined below has materially warmed.
 
-Either result asserts the sensor-internal channel. Alone it produces
-`suspected`, never `confirmed`; a connected probe may legitimately be near
-ambient before a ramp.
+Outside a slow-path identification opportunity, these metrics are diagnostic
+only: they cannot move health to either `suspected` or `confirmed`. A flat
+probe at setpoint and ordinary maintenance auger pulses therefore cannot
+trigger an inferred state transition.
+
+### Fast path: live junction collapse
+
+The five-minute path covers a probe already disconnected when a ramp begins.
+A probe that disconnects during a cook has stronger temporal evidence and must
+not drive maximum heat for five minutes. Confirm a live collapse when all of
+these hold:
+
+1. Cook mode is active.
+2. Before the event, the probe had a valid hot-minus-cold separation of at
+   least `15°C`.
+3. Hot temperature falls by at least `20°C` within 10 seconds.
+4. The next five one-second samples all satisfy
+   `abs(hot_c - cold_c) <= 1.0°C`.
+
+The physically implausible step and the electrical junction-collapse signature
+are the two agreeing mechanisms. This path cannot trigger from a steady
+setpoint: maintenance has neither the step nor the collapse. A lid opening may
+cool the pit, but it does not make a connected thermocouple equal the
+cold-junction sensor within five seconds. Deliberately removing the primary
+probe during an active cook is correctly treated as loss of the control sensor.
 
 ### Channel 2: verified excitation mismatch
 
@@ -264,8 +292,11 @@ thermocouple failure.
 
 ### Fusion, authority, and recovery
 
-- One channel only: `suspected`; status visibility only.
-- Both channels in the same eligible window: `confirmed` inferred malfunction.
+- One slow-path channel in an eligible identification window: `suspected`;
+  status visibility only.
+- Both slow-path channels in the same eligible window: `confirmed` inferred
+  malfunction.
+- Both fast-path signatures: `confirmed` live junction collapse.
 - Enabled hardware OC/SC: `confirmed` without inference.
 - `observe`: default. Compute states and metrics; notify once on transition to
   confirmed, but never change controller mode.
@@ -280,7 +311,8 @@ select enforce explicitly authorize the two-channel primary safety action.
 A primary confirmation is latched through Error. Food/aux inferred confirmation
 requires 60 consecutive seconds of non-anomalous samples to clear. With no new
 identification opportunity, elapsed time alone cannot increase or clear
-confidence.
+slow-path confidence. The explicitly defined live-collapse fast path is the
+only inference path outside a verified ramp.
 
 ### Wizard warning
 
@@ -332,6 +364,27 @@ not persist every one-second sample. Repeated identical states are deduplicated.
 The current report is projected through probe device status for operator
 inspection.
 
+## Thermocouple failure signatures and coverage
+
+- **Open input or TC+ shorted to TC-:** commonly collapses thermocouple EMF so
+  hot follows cold junction. Covered by hardware OC when available, the live
+  fast path, or the verified-ramp slow path. A wire-to-wire short is not the
+  MCP9601 short-to-supply condition and may not assert its SC bit.
+- **Short to VDD or ground:** covered by enabled, board-supported MCP9601
+  hardware detection. Without trustworthy hardware support it may instead
+  saturate, report out of range, or produce a biased value; the inference
+  engine does not claim universal classification.
+- **Converter stuck at an arbitrary value:** covered only when the stuck
+  internal channel and independent verified-ramp response channel agree.
+- **Reversed polarity, intermittent contact, leakage/moisture, damaged
+  insulation, grounded-probe common-mode violations, and wrong thermocouple
+  type:** can produce reversed, noisy, biased, or location-dependent readings
+  rather than ambient. They are recorded as known failure signatures, but this
+  detector does not claim to confirm all of them.
+
+The UI and documentation must therefore describe this as open/collapse/stuck
+detection, not universal proof that every thermocouple malfunction is detected.
+
 ## Alternatives rejected
 
 ### Driver-local hot/cold heuristic
@@ -378,11 +431,13 @@ No automated test creates a power-supply short.
 
 ### Future inference implementation
 
-Deterministic sequence tests cover rest, valid ramp, disconnected ramp, stuck
-arbitrary value, failed ignition with no warming witness, sample gaps, Celsius
-and Fahrenheit UI settings, peer-witness priority, cold-junction fallback,
-observe notification without stop, enforce primary stop before actuation,
-food/aux continuation, latching, recovery, and warning visibility.
+Deterministic sequence tests cover rest, healthy setpoint maintenance with auger
+pulses, valid ramp, startup-disconnected ramp, live disconnection at setpoint,
+lid-open cooling without cold-junction collapse, stuck arbitrary value, failed
+ignition with no warming witness, sample gaps, Celsius and Fahrenheit UI
+settings, peer-witness priority, cold-junction fallback, observe notification
+without stop, enforce primary stop before actuation, food/aux continuation,
+latching, recovery, and warning visibility.
 
 Threshold boundary tests exercise values immediately below, at, and above every
 policy constant. Each test defends the externally visible health state,
