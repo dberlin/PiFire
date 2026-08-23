@@ -142,6 +142,9 @@ function renderPanel(props: Partial<React.ComponentProps<typeof PidSpLearningVie
       selectedController="pid_sp"
       modelLearningRevision="socket-a"
       {...props}
+      currentMode="Hold"
+      displayMode="Hold"
+      criticalError={false}
     />,
     {
       wrapper: ({ children }: React.PropsWithChildren) => (
@@ -391,7 +394,14 @@ describe("PidSpLearningView", () => {
     expect(screen.getByText("86.5", { exact: true })).toBeVisible();
 
     view.rerender(
-      <PidSpLearningView apiBase="" selectedController="pid_sp" modelLearningRevision="socket-b" />,
+      <PidSpLearningView
+        apiBase=""
+        selectedController="pid_sp"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
+        modelLearningRevision="socket-b"
+      />,
     );
     expect(await screen.findByRole("alert")).toHaveTextContent("report temporarily unavailable");
     expect(screen.getByText("86.5", { exact: true })).toBeVisible();
@@ -437,7 +447,14 @@ describe("PidSpLearningView", () => {
     const view = renderPanel({ modelLearningRevision: "wire-old" });
 
     view.rerender(
-      <PidSpLearningView apiBase="" selectedController="pid_sp" modelLearningRevision="wire-new" />,
+      <PidSpLearningView
+        apiBase=""
+        selectedController="pid_sp"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
+        modelLearningRevision="wire-new"
+      />,
     );
     expect(await screen.findByRole("button", { name: "PID-SP learning: active" })).toBeVisible();
 
@@ -475,6 +492,9 @@ describe("PidSpLearningView", () => {
         apiBase="https://new.example"
         selectedController="pid_sp"
         modelLearningRevision="socket-a"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
       />,
     );
     expect(await screen.findByRole("button", { name: "PID-SP learning: active" })).toBeVisible();
@@ -507,12 +527,26 @@ describe("PidSpLearningView", () => {
     });
 
     view.rerender(
-      <PidSpLearningView apiBase="" selectedController="mpc" modelLearningRevision="socket-a" />,
+      <PidSpLearningView
+        apiBase=""
+        selectedController="mpc"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
+        modelLearningRevision="socket-a"
+      />,
     );
     expect(signals[0]?.aborted).toBe(true);
 
     view.rerender(
-      <PidSpLearningView apiBase="" selectedController="pid_sp" modelLearningRevision={null} />,
+      <PidSpLearningView
+        apiBase=""
+        selectedController="pid_sp"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
+        modelLearningRevision={null}
+      />,
     );
     await act(async () => {
       await Promise.resolve();

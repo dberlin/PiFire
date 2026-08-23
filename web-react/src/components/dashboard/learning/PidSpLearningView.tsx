@@ -22,6 +22,9 @@ const GATE_LABELS: Record<string, string> = {
 export interface PidSpLearningViewProps {
   apiBase: string;
   selectedController: string | null;
+  currentMode: string;
+  displayMode: string;
+  criticalError: boolean;
   /** Raw socket invalidation digest. REST remains the rendered authority. */
   modelLearningRevision?: string | null;
 }
@@ -186,7 +189,13 @@ export function PidSpLearningView(props: PidSpLearningViewProps) {
   return props.selectedController === "pid_sp" ? <ActivePidSpLearningView {...props} /> : null;
 }
 
-function ActivePidSpLearningView({ apiBase, modelLearningRevision }: PidSpLearningViewProps) {
+function ActivePidSpLearningView({
+  apiBase,
+  currentMode,
+  displayMode,
+  criticalError,
+  modelLearningRevision,
+}: PidSpLearningViewProps) {
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => [REPORT_QUERY_ROOT, "pid_sp", apiBase] as const, [apiBase]);
   const requestGeneration = useRef(0);
@@ -247,6 +256,9 @@ function ActivePidSpLearningView({ apiBase, modelLearningRevision }: PidSpLearni
       title="PID-SP model learning"
       closeLabel="Close PID-SP model learning"
       status={dialogStatus}
+      currentMode={currentMode}
+      displayMode={displayMode}
+      criticalError={criticalError}
       loading={isPending && report === undefined}
       loadingLabel="Loading PID-SP learning report…"
       error={reportError}

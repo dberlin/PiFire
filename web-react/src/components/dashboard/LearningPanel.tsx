@@ -7,6 +7,9 @@ import { PidSpLearningView } from "./learning/PidSpLearningView";
 interface LearningPanelProps {
   apiBase: string;
   selectedController: string | null;
+  currentMode: string;
+  displayMode: string;
+  criticalError: boolean;
   units: Units;
   ambientC: number;
   modelLearningRevision?: string | null;
@@ -15,6 +18,9 @@ interface LearningPanelProps {
 export function LearningPanel({
   apiBase,
   selectedController,
+  currentMode,
+  displayMode,
+  criticalError,
   units,
   ambientC,
   modelLearningRevision,
@@ -36,6 +42,9 @@ export function LearningPanel({
       <MpcLearningView
         apiBase={apiBase}
         selectedController={selectedController}
+        currentMode={currentMode}
+        displayMode={displayMode}
+        criticalError={criticalError}
         units={units}
         ambientC={ambientC}
         modelLearningRevision={modelLearningRevision}
@@ -47,6 +56,9 @@ export function LearningPanel({
     return (
       <PidSpLearningView
         apiBase={apiBase}
+        currentMode={currentMode}
+        displayMode={displayMode}
+        criticalError={criticalError}
         selectedController={selectedController}
         modelLearningRevision={modelLearningRevision}
       />

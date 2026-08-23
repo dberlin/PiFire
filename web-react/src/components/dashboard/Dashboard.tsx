@@ -381,6 +381,9 @@ export function Dashboard({
             <LearningPanel
               apiBase={apiBase}
               selectedController={mpcConfig.selectedController}
+              currentMode={dash.currentMode}
+              displayMode={dash.displayMode}
+              criticalError={dash.criticalError}
               units={dash.tempUnits}
               ambientC={mpcConfig.ambientC}
               modelLearningRevision={dash.modelLearningRevision}

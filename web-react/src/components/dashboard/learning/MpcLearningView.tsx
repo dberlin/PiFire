@@ -30,6 +30,9 @@ interface MpcLearningViewProps {
   selectedController: string | null;
   units: Units;
   ambientC: number;
+  currentMode: string;
+  displayMode: string;
+  criticalError: boolean;
   /** Socket invalidation high-water. REST remains the only rendered authority. */
   modelLearningRevision?: string | null;
 }
@@ -79,6 +82,9 @@ function ActiveMpcLearningView({
   apiBase,
   units,
   ambientC,
+  currentMode,
+  displayMode,
+  criticalError,
   modelLearningRevision,
 }: MpcLearningViewProps) {
   const queryClient = useQueryClient();
@@ -266,6 +272,9 @@ function ActiveMpcLearningView({
       title="MPC model learning"
       closeLabel="Close MPC model learning"
       status={dialogStatus}
+      currentMode={currentMode}
+      displayMode={displayMode}
+      criticalError={criticalError}
       loading={isPending && report === undefined}
       loadingLabel="Loading model evidence…"
       error={reportError}

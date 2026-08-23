@@ -163,6 +163,9 @@ function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningView>
       ambientC={20}
       modelLearningRevision="wire-1"
       {...props}
+      currentMode="Hold"
+      displayMode="Hold"
+      criticalError={false}
     />,
     {
       wrapper: ({ children }: React.PropsWithChildren) => (
@@ -253,6 +256,9 @@ describe("MpcLearningView", () => {
         units="F"
         ambientC={20}
         modelLearningRevision="wire-11"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
       />,
     );
     const errorTrigger = await screen.findByRole("button", {
@@ -635,6 +641,9 @@ describe("MpcLearningView", () => {
         units="F"
         ambientC={20}
         modelLearningRevision="wire-41"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
       />,
     );
     expect(await screen.findByRole("button", { name: "MPC learning: active" })).toBeVisible();
@@ -682,6 +691,9 @@ describe("MpcLearningView", () => {
         units="F"
         ambientC={20}
         modelLearningRevision="wire-invalid"
+        currentMode="Hold"
+        displayMode="Hold"
+        criticalError={false}
       />,
     );
 

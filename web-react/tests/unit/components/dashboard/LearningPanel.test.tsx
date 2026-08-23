@@ -128,6 +128,9 @@ const panel = (
     ambientC={20}
     modelLearningRevision="wire-a"
     {...overrides}
+    currentMode="Hold"
+    displayMode="Hold"
+    criticalError={false}
   />
 );
 

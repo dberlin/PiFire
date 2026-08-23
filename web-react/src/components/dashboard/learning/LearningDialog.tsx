@@ -1,10 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  learningStatusLabel,
-  learningStatusTone,
-  normalizeLearningStatus,
-} from "./learningDisplay";
+import { learningPillStatus, learningStatusLabel, learningStatusTone } from "./learningDisplay";
 
 const FOCUS_RING =
   "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent";
@@ -16,6 +12,9 @@ export interface LearningDialogProps {
   title: string;
   closeLabel: string;
   status: string;
+  currentMode: string;
+  displayMode: string;
+  criticalError: boolean;
   loading: boolean;
   loadingLabel: string;
   error: string | null;
@@ -29,6 +28,9 @@ export function LearningDialog({
   title,
   closeLabel,
   status,
+  currentMode,
+  displayMode,
+  criticalError,
   loading,
   loadingLabel,
   error,
@@ -84,7 +86,7 @@ export function LearningDialog({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const normalizedStatus = normalizeLearningStatus(status);
+  const pillStatus = learningPillStatus(status, currentMode, displayMode, criticalError);
 
   return (
     <>
@@ -97,7 +99,7 @@ export function LearningDialog({
         aria-busy={loading || undefined}
         onClick={() => setOpen(true)}
       >
-        {controllerLabel} learning: {normalizedStatus}
+        {controllerLabel} learning: {pillStatus}
       </button>
       {open &&
         createPortal(

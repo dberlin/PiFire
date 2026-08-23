@@ -278,7 +278,7 @@ describe("Dashboard MPC settings authority", () => {
   it.each([
     {
       selectedController: "mpc",
-      expectedPill: "MPC learning: collecting",
+      expectedPill: "MPC learning: idle",
       report: dashboardLearningReport("collecting", 31),
     },
     {
@@ -335,7 +335,7 @@ describe("Dashboard MPC settings authority", () => {
 
     renderInQueryRouter(dashboardAt("/a/"), client);
 
-    expect(await screen.findByRole("button", { name: "MPC learning: collecting" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: idle" })).toBeVisible();
     expect(getSettingsMock).not.toHaveBeenCalled();
   });
 
@@ -365,7 +365,7 @@ describe("Dashboard MPC settings authority", () => {
       });
     });
 
-    expect(await screen.findByRole("button", { name: "MPC learning: collecting" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "MPC learning: idle" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /PID-SP learning:/i })).not.toBeInTheDocument();
   });
 
@@ -401,7 +401,7 @@ describe("Dashboard MPC settings authority", () => {
         }),
       );
       renderInQueryRouter(dashboardAt("/a"));
-      await user.click(await screen.findByRole("button", { name: "MPC learning: collecting" }));
+      await user.click(await screen.findByRole("button", { name: "MPC learning: idle" }));
       await user.click(
         screen.getByLabelText("The grill is empty, with normal grates and drip tray installed."),
       );
@@ -480,9 +480,7 @@ describe("Dashboard MPC settings authority", () => {
     rs.stubGlobal("fetch", fetchMock);
     renderRoute(<DashboardLearningRevisionHarness />, undefined);
 
-    expect(
-      await screen.findByRole("button", { name: "MPC learning: collecting" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "MPC learning: idle" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /MPC learning:/i })).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "Publish raw learning revision" }));

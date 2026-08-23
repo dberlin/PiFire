@@ -8,6 +8,9 @@ const DEFAULT_PROPS: React.ComponentProps<typeof LearningDialog> = {
   title: "PID-SP adaptation evidence",
   closeLabel: "Close PID-SP adaptation evidence",
   status: "ready-for-review",
+  currentMode: "Hold",
+  displayMode: "Hold",
+  criticalError: false,
   loading: false,
   loadingLabel: "Loading PID-SP evidence…",
   error: null,
@@ -44,6 +47,52 @@ describe("LearningDialog", () => {
 
     expect(screen.getByRole("button", { name: "PID-SP learning: ready for review" })).toBeVisible();
   });
+
+  it.each([
+    {
+      caseName: "stopped collection",
+      status: "collecting",
+      currentMode: "Stop",
+      displayMode: "Stop",
+      expected: "PID-SP learning: idle",
+    },
+    {
+      caseName: "recipe-driven Hold collection",
+      status: "collecting",
+      currentMode: "Recipe",
+      displayMode: "Hold",
+      expected: "PID-SP learning: collecting",
+    },
+    {
+      caseName: "grill error",
+      status: "collecting",
+      currentMode: "Error",
+      displayMode: "Error",
+      expected: "PID-SP learning: error",
+    },
+    {
+      caseName: "critical error while stopped",
+      status: "collecting",
+      currentMode: "Stop",
+      displayMode: "Stop",
+      criticalError: true,
+      expected: "PID-SP learning: error",
+    },
+    {
+      caseName: "report error while stopped",
+      status: "error",
+      currentMode: "Stop",
+      displayMode: "Stop",
+      expected: "PID-SP learning: error",
+    },
+  ])(
+    "projects $caseName into the pill as $expected",
+    ({ status, currentMode, displayMode, criticalError = false, expected }) => {
+      renderDialog({ status, currentMode, displayMode, criticalError });
+
+      expect(screen.getByRole("button", { name: expected })).toBeVisible();
+    },
+  );
 
   it("moves focus to Close when opened", async () => {
     renderDialog();
