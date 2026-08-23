@@ -9,13 +9,49 @@ import importlib
 import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.base import ControllerBase
+from controller.base import ControllerBase, ControllerLearningDiagnostics
 from common.control_trace import ActuationMode
 
 # Controllers with no optional dependency, so this runs on every install.
 PLAIN_CONTROLLERS = ["pid", "pid_sp"]
 
 CYCLE_DATA = {}
+
+
+def test_non_learning_controller_returns_no_learning_diagnostics():
+    core = ControllerBase({}, "F", {})
+    assert core.get_learning_diagnostics() is None
+
+
+def test_learning_diagnostics_owns_nested_state():
+    source = {"status": "collecting", "gates": [{"passed": False}]}
+    snapshot = ControllerLearningDiagnostics(schema_version=1, state=source)
+
+    source["gates"][0]["passed"] = True
+    first = snapshot.as_json()
+    first["gates"][0]["passed"] = True
+
+    assert snapshot.as_json()["gates"][0]["passed"] is False
+
+
+@pytest.mark.parametrize("schema_version", [False, True, 0, -1, 1.0, "1", None])
+def test_learning_diagnostics_rejects_invalid_schema_versions(schema_version):
+    with pytest.raises(ValueError, match="schema_version must be positive"):
+        ControllerLearningDiagnostics(schema_version=schema_version, state={})
+
+
+@pytest.mark.parametrize(
+    ("state", "error", "message"),
+    [
+        ({"sample": float("nan")}, ValueError, "finite"),
+        ({"sample": float("inf")}, ValueError, "finite"),
+        ({1: "not-json"}, TypeError, "keys must be strings"),
+        ({"sample": object()}, TypeError, "unsupported learning diagnostics value"),
+    ],
+)
+def test_learning_diagnostics_rejects_non_json_state(state, error, message):
+    with pytest.raises(error, match=message):
+        ControllerLearningDiagnostics(schema_version=1, state=state)
 
 
 def test_base_defaults_are_inert():

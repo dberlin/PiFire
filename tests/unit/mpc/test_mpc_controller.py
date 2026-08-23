@@ -11,7 +11,7 @@ from common.control_trace import ActuationMode, AmbientSource, ModelEvaluationPa
 from common.model_evidence import ForecastOriginEvidence
 from controller.acados import SolverDiagnostics, SolverError
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.base import MpcFailureState
+from controller.base import ControllerLearningDiagnostics, MpcFailureState
 from controller.model_learning.contracts import FrameObservation
 from controller.model_learning.evaluation import (
     CompletedForecastOrigin,
@@ -688,3 +688,40 @@ def test_control_capabilities_and_status_remain_stable(monkeypatch):
     status = controller.get_status()
     assert status["policy_kind"] == "acados-grey"
     assert status["n_horizon"] == 5
+
+
+def test_get_learning_diagnostics_returns_owned_mpc_state(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+
+    diagnostics = controller.get_learning_diagnostics()
+    first = diagnostics.as_json()
+    first["status"] = "mutated"
+
+    assert diagnostics.schema_version == 1
+    assert diagnostics.as_json()["status"] != "mutated"
+
+
+def test_get_status_uses_one_learning_capability_snapshot(monkeypatch):
+    controller, _estimator, _solver = _make(monkeypatch)
+    diagnostics = ControllerLearningDiagnostics(
+        schema_version=1,
+        state={"status": "owned", "checks": {"native_build": "pending"}},
+    )
+    calls = 0
+
+    def get_learning_diagnostics():
+        nonlocal calls
+        calls += 1
+        return diagnostics
+
+    monkeypatch.setattr(controller, "get_learning_diagnostics", get_learning_diagnostics)
+
+    status = controller.get_status()
+
+    assert calls == 1
+    assert status["learning"] == {
+        "status": "owned",
+        "checks": {"native_build": "pending"},
+    }
+
+

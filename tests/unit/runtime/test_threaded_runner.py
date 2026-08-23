@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.activation import (
     ActivationPhase,
     PreparedActivationRecord,
@@ -419,6 +420,45 @@ def test_threaded_result_retains_consumed_temperature_after_newer_submit():
     finally:
         core.first_release.set()
         core.second_release.set()
+        runner.stop()
+
+
+def test_threaded_result_retains_owned_learning_snapshot_across_repolls():
+    class LearningCore(FakeCore):
+        def __init__(self):
+            super().__init__()
+            self.learning_state = {"generation": 0, "gates": [{"passed": False}]}
+            self.learning_calls = 0
+
+        def update(self, temp):
+            self.learning_state["generation"] += 1
+            return super().update(temp)
+
+        def get_learning_diagnostics(self):
+            self.learning_calls += 1
+            return ControllerLearningDiagnostics(schema_version=1, state=self.learning_state)
+
+    core = LearningCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(70.0)
+        assert core.updated.wait(2.0)
+        assert _wait_for(lambda: runner.latest().revision == 1)
+        result = runner.latest()
+
+        core.learning_state["generation"] = 2
+        core.learning_state["gates"][0]["passed"] = True
+        repolled = runner.latest()
+
+        assert result.learning is not None
+        assert repolled.learning is not None
+        assert result.learning.as_json() == {
+            "generation": 1,
+            "gates": [{"passed": False}],
+        }
+        assert repolled.learning.as_json() == result.learning.as_json()
+        assert core.learning_calls == 1
+    finally:
         runner.stop()
 
 

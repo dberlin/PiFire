@@ -22,7 +22,7 @@ from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
 from controller import mpc_snapshot as _snapshot
 from controller.applied_output import AppliedOutput
-from controller.base import ControllerBase, MpcTraceDiagnostics
+from controller.base import ControllerBase, ControllerLearningDiagnostics, MpcTraceDiagnostics
 from controller.model_learning.activation import PreparedActivationRecord
 from controller.model_learning.activation_runtime import ActivationRuntime
 from controller.model_learning.calibration import CalibrationDecision
@@ -384,6 +384,12 @@ class Controller(ControllerBase):
     def poll_learning_off_path(self, *, live_origin=None):
         return self._grey_learning_runtime.poll_learning_off_path(live_origin=live_origin)
 
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state=self._grey_learning_runtime.learning_status(),
+        )
+
     def get_status(self):
         core = self.active_control_pair.core
         active_pair = self.active_control_pair
@@ -391,6 +397,7 @@ class Controller(ControllerBase):
         estimate = core.estimate
         feasibility = core.last_feasibility
         active_record = self._activation_runtime.active_record
+        diagnostics = self.get_learning_diagnostics()
         terminated_reason = self._activation_runtime.terminated_reason
         return {
             "set_point": finite_float(self.set_point),
@@ -418,7 +425,7 @@ class Controller(ControllerBase):
                 }
             ),
             "feasibility": (None if feasibility is None else feasibility.as_status()),
-            "learning": self._grey_learning_runtime.learning_status(),
+            "learning": diagnostics.as_json(),
             "activation": {
                 "active_kind": _snapshot.GREY_BOX_KIND,
                 "active_digest": active_pair.descriptor.model_digest,

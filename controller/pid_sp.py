@@ -47,7 +47,7 @@ import math
 import time
 
 from common.control_trace import ControllerBranch
-from controller.base import PidSpTraceDiagnostics
+from controller.base import ControllerLearningDiagnostics, PidSpTraceDiagnostics
 from controller.fopdt_identifier import FOPDTIdentifier
 from controller.pid_base import PIDControllerBase
 from controller.pid_sp_learning import build_pid_sp_live_learning
@@ -131,9 +131,15 @@ class Controller(PIDControllerBase):
         self.identifier.record_output(applied)
         self.predictor.record_output(applied)
 
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state=build_pid_sp_live_learning(self.identifier.status(), self.predictor.status()),
+        )
+
     def get_status(self):
-        identifier = self.identifier.status()
-        predictor = self.predictor.status()
+        diagnostics = self.get_learning_diagnostics()
+        learning = diagnostics.as_json()
         return {
             "p": self.p,
             "i": self.i,
@@ -145,9 +151,9 @@ class Controller(PIDControllerBase):
             "feed_forward": self.feed_forward,
             "selected_temp": self._selected,
             "last_selected": self.last,
-            "identifier": identifier,
-            "predictor": predictor,
-            "learning": build_pid_sp_live_learning(identifier, predictor),
+            "identifier": learning["identifier"],
+            "predictor": learning["predictor"],
+            "learning": learning,
         }
 
     def get_model_snapshot(self):

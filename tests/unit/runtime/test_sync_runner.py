@@ -3,9 +3,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.contracts import FrameObservation
-from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner, build_runner, _build_core
+from controller.runtime.runner import (
+    ControllerUpdateResult,
+    SyncControllerRunner,
+    _build_core,
+    _capture_completed_result,
+    build_runner,
+)
 from common.control_trace import ActuationMode, ResultStaleState
 from common.model_evidence import SessionSummaryEvidence
 from tests.fakes.runner import FakeControllerRunner
@@ -184,6 +193,56 @@ def test_sync_runner_result_revision_and_status_match_one_completed_update():
     assert first.solve_end_monotonic >= first.solve_start_monotonic
     assert first.solve_duration_seconds == first.solve_end_monotonic - first.solve_start_monotonic
     assert (first.input_temperature, second.input_temperature) == (190.0, 191.0)
+
+
+def test_completed_result_owns_the_learning_snapshot_from_that_update():
+    class LearningCore(_Core):
+        def __init__(self):
+            super().__init__()
+            self.learning_state = {"generation": 6}
+            self.learning_calls = 0
+
+        def update(self, temp):
+            self.learning_state["generation"] += 1
+            return 0.25
+
+        def get_learning_diagnostics(self):
+            self.learning_calls += 1
+            return ControllerLearningDiagnostics(schema_version=1, state=self.learning_state)
+
+    core = LearningCore()
+    monotonic_times = iter((10.0, 11.0))
+
+    result = _capture_completed_result(
+        core,
+        225.0,
+        7,
+        monotonic_clock=lambda: next(monotonic_times),
+        wall_clock=lambda: 100.0,
+    )
+    core.learning_state["generation"] = 8
+
+    assert result.revision == 7
+    assert result.learning is not None
+    assert result.learning.as_json()["generation"] == 7
+    assert core.learning_calls == 1
+
+
+def test_completed_result_rejects_an_invalid_learning_capability_value():
+    class InvalidLearningCore(_Core):
+        def get_learning_diagnostics(self):
+            return {"generation": 1}
+
+    monotonic_times = iter((10.0, 11.0))
+
+    with pytest.raises(TypeError, match="ControllerLearningDiagnostics or None"):
+        _capture_completed_result(
+            InvalidLearningCore(),
+            225.0,
+            1,
+            monotonic_clock=lambda: next(monotonic_times),
+            wall_clock=lambda: 100.0,
+        )
 
 
 def test_sync_controller_state_thaws_nested_completed_status_without_mutating_result():

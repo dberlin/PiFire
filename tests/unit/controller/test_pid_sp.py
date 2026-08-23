@@ -519,6 +519,18 @@ def test_an_untrusted_controller_offers_nothing_to_persist(clock):
     assert _controller("pid_sp", clock).get_model_snapshot() is None
 
 
+def test_get_learning_diagnostics_returns_owned_pid_sp_state(clock):
+    sp = _controller("pid_sp", clock)
+
+    diagnostics = sp.get_learning_diagnostics()
+    first = diagnostics.as_json()
+    first["gates"][0]["passed"] = True
+
+    assert diagnostics.schema_version == 1
+    assert diagnostics.as_json()["controller"] == "pid_sp"
+    assert diagnostics.as_json()["gates"][0]["passed"] is False
+
+
 def test_get_status_projects_one_identifier_and_predictor_snapshot(clock, monkeypatch):
     sp = _controller("pid_sp", clock)
     identifier = {
@@ -561,8 +573,10 @@ def test_get_status_projects_one_identifier_and_predictor_snapshot(clock, monkey
     status = sp.get_status()
 
     assert calls == {"identifier": 1, "predictor": 1}
-    assert status["identifier"] is identifier
-    assert status["predictor"] is predictor
+    assert status["identifier"] == identifier
+    assert status["predictor"] == predictor
+    assert status["identifier"] is status["learning"]["identifier"]
+    assert status["predictor"] is status["learning"]["predictor"]
     assert status["learning"] == {
         "schema_version": 1,
         "controller": "pid_sp",

@@ -42,7 +42,12 @@ from common.model_evidence import (
 )
 from common.persistence.model_evidence import ModelActivationState
 
-from controller.base import ControllerTraceDiagnostics, MpcTraceDiagnostics, normalize_controller_output
+from controller.base import (
+    ControllerLearningDiagnostics,
+    ControllerTraceDiagnostics,
+    MpcTraceDiagnostics,
+    normalize_controller_output,
+)
 from controller.mpc_allocator import AllocationResult
 from controller.runtime.model_fitting import TeardownRefitOutcome
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
@@ -384,6 +389,7 @@ class ControllerUpdateResult:
     fan: Mapping[str, float] | None
     input_temperature: float
     diagnostics: ControllerTraceDiagnostics | None = None
+    learning: ControllerLearningDiagnostics | None = None
     allocation: AllocationResult | None = None
     baseline_allocation: AllocationResult | None = None
     calibration: CalibrationDecision | None = None
@@ -462,6 +468,9 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
     solve_start = monotonic_clock()
     raw = core.update(temp)
     solve_end = monotonic_clock()
+    learning = getattr(core, "get_learning_diagnostics", lambda: None)()
+    if learning is not None and not isinstance(learning, ControllerLearningDiagnostics):
+        raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
     cycle_ratio, fan = normalize_controller_output(raw)
     status = getattr(core, "get_status", lambda: None)()
     diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
@@ -473,6 +482,7 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
         fan=fan,
         input_temperature=float(temp),
         diagnostics=diagnostics,
+        learning=learning,
         allocation=allocation,
         baseline_allocation=baseline_allocation,
         calibration=calibration,
@@ -863,6 +873,7 @@ class ThreadedControllerRunner(ControllerRunner):
             fan=None,
             input_temperature=0.0,
             diagnostics=None,
+            learning=None,
             status=None,
             revision=0,
             solve_start_monotonic=None,

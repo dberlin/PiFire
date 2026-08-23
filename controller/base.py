@@ -15,18 +15,66 @@
 Imported Libraries
 """
 import logging
+import math
 import time
 from collections.abc import Mapping
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from types import MappingProxyType
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 from common.control_trace import ActuationMode, ControllerBranch, MpcFailureState, ResultStaleState
 from controller.runtime.context import EVENT_LOG_NAME
 from controller.mpc_allocator import AllocationResult
+from common.persistence.protocols import JsonValue
 
 if TYPE_CHECKING:
     from controller.model_promotion import FeasibilityReport
+
+
+def _freeze_learning_json(value: JsonValue) -> JsonValue:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("learning diagnostics numbers must be finite")
+        return value
+    if isinstance(value, Mapping):
+        frozen: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("learning diagnostics object keys must be strings")
+            frozen[key] = _freeze_learning_json(item)
+        return MappingProxyType(frozen)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_learning_json(item) for item in value)
+    raise TypeError(f"unsupported learning diagnostics value: {type(value).__name__}")
+
+
+def _thaw_learning_json(value: JsonValue) -> JsonValue:
+    if isinstance(value, Mapping):
+        return {key: _thaw_learning_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_learning_json(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ControllerLearningDiagnostics:
+    schema_version: int
+    state: Mapping[str, JsonValue]
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.schema_version, bool)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version < 1
+        ):
+            raise ValueError("learning diagnostics schema_version must be positive")
+        object.__setattr__(self, "state", _freeze_learning_json(dict(self.state)))
+
+    def as_json(self) -> dict[str, JsonValue]:
+        return cast(dict[str, JsonValue], _thaw_learning_json(self.state))
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +226,11 @@ class ControllerBase:
         if hasattr(self, "set_point"):
             return {"set_point": self.set_point}
         return None
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics | None:
+        """Return an owned learning snapshot when this controller learns."""
+        return None
+
 
     def trace_diagnostics(self) -> ControllerTraceDiagnostics | None:
         """Immutable typed diagnostics from the most recent completed update."""
