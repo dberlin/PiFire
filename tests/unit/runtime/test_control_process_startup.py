@@ -35,9 +35,11 @@ def test_routine_restart_preserves_prime_carry_over_identity_and_metrics(ds):
     assert read_all_metrics() == before_metrics
 
 
-def test_routine_restart_preserves_accepted_history_clear_command(ds):
+def test_routine_restart_preserves_only_accepted_history_clear_commands(ds):
     store = SqliteStore()
+    store.system_commands().push(["scan"])
     store.system_commands().push(["clear_history"])
+    store.system_commands().push(["check_alive"])
 
     _initialize_runtime_state(store)
 

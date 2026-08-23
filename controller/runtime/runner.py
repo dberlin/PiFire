@@ -44,6 +44,7 @@ from common.persistence.model_evidence import ModelActivationState
 
 from controller.base import (
     ControllerLearningDiagnostics,
+    ControllerStatusCapture,
     ControllerTraceDiagnostics,
     MpcTraceDiagnostics,
     normalize_controller_output,
@@ -468,11 +469,19 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
     solve_start = monotonic_clock()
     raw = core.update(temp)
     solve_end = monotonic_clock()
-    learning = getattr(core, "get_learning_diagnostics", lambda: None)()
-    if learning is not None and not isinstance(learning, ControllerLearningDiagnostics):
-        raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
+    capture_status = getattr(core, "capture_status", None)
+    if callable(capture_status):
+        captured = capture_status()
+        if not isinstance(captured, ControllerStatusCapture):
+            raise TypeError("controller capture_status() must return ControllerStatusCapture")
+        learning = captured.learning
+        status = captured.status
+    else:
+        learning = getattr(core, "get_learning_diagnostics", lambda: None)()
+        if learning is not None and not isinstance(learning, ControllerLearningDiagnostics):
+            raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
+        status = getattr(core, "get_status", lambda: None)()
     cycle_ratio, fan = normalize_controller_output(raw)
-    status = getattr(core, "get_status", lambda: None)()
     diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
     allocation = getattr(core, "trace_allocation", lambda: None)()
     baseline_allocation = getattr(core, "trace_baseline_allocation", lambda: None)()

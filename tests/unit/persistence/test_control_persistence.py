@@ -7,6 +7,7 @@ from common import datastore
 from common.control_delta import CONTROL_DELTA_KEY, ControlDeltaError, control_delta
 from common.defaults import default_control
 from common.persistence import control as control_store
+from common.persistence.history import CLEAR_HISTORY_COMMAND
 from common.sqlite_queue import SqliteQueue
 
 
@@ -247,6 +248,28 @@ def test_flush_clears_control_owned_blobs_and_queues_and_reseeds_default(ds):
     assert SqliteQueue("queue_systemo").list() == []
     assert datastore.get_blob("control:command") is None
     assert json.loads(datastore.get_blob("unrelated")) == {"kept": True}
+
+
+def test_flush_control_preserves_a_clear_accepted_at_the_reset_boundary(monkeypatch, ds):
+    original_execute_write = datastore.execute_write
+    accepted_during_reset = False
+
+    def accept_clear_before_system_filter(sql, params=()):
+        nonlocal accepted_during_reset
+        if sql.startswith("DELETE FROM queue_systemq") and not accepted_during_reset:
+            accepted_during_reset = True
+            ds.connection().execute(
+                "INSERT INTO queue_systemq(value) VALUES(?)",
+                (json.dumps([CLEAR_HISTORY_COMMAND]),),
+            )
+        return original_execute_write(sql, params)
+
+    monkeypatch.setattr(datastore, "execute_write", accept_clear_before_system_filter)
+
+    control_store.flush_control()
+
+    assert accepted_during_reset is True
+    assert SqliteQueue("queue_systemq").list() == [[CLEAR_HISTORY_COMMAND]]
 
 
 def test_calibration_state_uses_first_command_at_highest_valid_revision():

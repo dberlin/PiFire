@@ -390,14 +390,13 @@ class Controller(ControllerBase):
             state=self._grey_learning_runtime.learning_status(),
         )
 
-    def get_status(self):
+    def _build_status(self, diagnostics):
         core = self.active_control_pair.core
         active_pair = self.active_control_pair
         model_meta = self._grey_learning_runtime.model_metadata
         estimate = core.estimate
         feasibility = core.last_feasibility
         active_record = self._activation_runtime.active_record
-        diagnostics = self.get_learning_diagnostics()
         terminated_reason = self._activation_runtime.terminated_reason
         return {
             "set_point": finite_float(self.set_point),

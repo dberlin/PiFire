@@ -137,8 +137,7 @@ class Controller(PIDControllerBase):
             state=build_pid_sp_live_learning(self.identifier.status(), self.predictor.status()),
         )
 
-    def get_status(self):
-        diagnostics = self.get_learning_diagnostics()
+    def _build_status(self, diagnostics):
         learning = diagnostics.as_json()
         return {
             "p": self.p,

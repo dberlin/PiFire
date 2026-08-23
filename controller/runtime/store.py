@@ -86,15 +86,22 @@ class InMemoryStore:
         self._control["cook_id"] = cook_id
         return cook_id
 
-    def flush_control(self, *, cook_id=None, preserve_system_commands=False):
-        # Mirror control_persistence.flush_control: reset control to defaults,
-        # optionally retaining the active cook identity, and discard pending
-        # writes plus completed system-command output.
+    def flush_control(self, *, cook_id=None):
+        # Mirror control_persistence.flush_control: reset transient control
+        # state while retaining only accepted durable history clears.
+        clear_commands = [
+            command
+            for command in self._systemq.list()
+            if isinstance(command, (list, tuple))
+            and bool(command)
+            and command[0] == history_persistence.CLEAR_HISTORY_COMMAND
+        ]
         self._control = default_control()
         self._control["cook_id"] = cook_id
         self._write_queue.clear()
-        if not preserve_system_commands:
-            self._systemq.flush()
+        self._systemq.flush()
+        for command in clear_commands:
+            self._systemq.push(command)
         self._systemo.flush()
         return copy.deepcopy(self._control)
 
@@ -336,11 +343,8 @@ class SqliteStore:
     def ensure_cook_id(self, *, preferred=None):
         return control_persistence.ensure_cook_id(preferred=preferred)
 
-    def flush_control(self, *, cook_id=None, preserve_system_commands=False):
-        return control_persistence.flush_control(
-            cook_id=cook_id,
-            preserve_system_commands=preserve_system_commands,
-        )
+    def flush_control(self, *, cook_id=None):
+        return control_persistence.flush_control(cook_id=cook_id)
 
     def write_control_snapshot(self, control, *, origin="control"):
         control_persistence.write_control_snapshot(control, origin=origin)

@@ -74,6 +74,18 @@ class ControllerLearningDiagnostics:
 
 
 @dataclass(frozen=True, slots=True)
+class ControllerStatusCapture:
+    """One controller-owned status projection and its exact learning snapshot."""
+
+    status: Mapping[str, JsonValue] | None
+    learning: ControllerLearningDiagnostics | None
+
+    def __post_init__(self) -> None:
+        if self.learning is not None and not isinstance(self.learning, ControllerLearningDiagnostics):
+            raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
+
+
+@dataclass(frozen=True, slots=True)
 class PidTraceDiagnostics:
     observed_dt_seconds: float
     error: float
@@ -217,11 +229,24 @@ class ControllerBase:
         """Abort calibration for a safety boundary without creating an operator revision."""
         raise NotImplementedError("controller does not support calibration")
 
-    def get_status(self):
-        """JSON-safe diagnostics for the MQTT payload, if this core exposes it."""
+    def _build_status(self, learning: ControllerLearningDiagnostics | None):
+        """Project status from the learning snapshot captured for this boundary."""
+        del learning
         if hasattr(self, "set_point"):
             return {"set_point": self.set_point}
         return None
+
+    def capture_status(self) -> ControllerStatusCapture:
+        """Capture learning once and use it for the status published beside it."""
+        learning = self.get_learning_diagnostics()
+        return ControllerStatusCapture(
+            status=self._build_status(learning),
+            learning=learning,
+        )
+
+    def get_status(self):
+        """JSON-safe diagnostics for the MQTT payload, if this core exposes it."""
+        return self.capture_status().status
 
     def get_learning_diagnostics(self) -> ControllerLearningDiagnostics | None:
         """Return an owned learning snapshot when this controller learns."""

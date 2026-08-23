@@ -22,6 +22,8 @@ boot-time hopper level was never read). See Controller.setup().
 import logging
 import time
 
+import pytest
+
 import controller.runtime.controller as controller_mod
 import controller.runtime.store as store_mod
 from controller.runtime.clock import ManualClock
@@ -428,6 +430,33 @@ def test_tick_error_mode_cleanup(monkeypatch):
     assert "power_off" in names
     assert ("clear", None) in store.display_commands().list()
     assert clock.now() >= 3  # the 3s error dwell went through ctx.clock.sleep
+
+
+@pytest.mark.parametrize("mode", ["Stop", "Error"])
+def test_tick_terminal_reset_preserves_racing_clear_and_discards_transient_commands(monkeypatch, mode):
+    _neutralize_externals(monkeypatch)
+    control_data = base_control(mode=mode)
+    control_data["updated"] = True
+    c, ctx, store, grill, dist, notifier = make_controller(
+        base_settings(),
+        control_data,
+        base_pellet_db(),
+        clock=ManualClock(),
+    )
+    _spy_dispatch(c)
+    c.setup()
+    original_fan_off = grill.fan_off
+
+    def queue_commands_during_terminal_shutdown():
+        store.system_commands().push(["scan"])
+        store.system_commands().push(["clear_history"])
+        original_fan_off()
+
+    monkeypatch.setattr(grill, "fan_off", queue_commands_during_terminal_shutdown)
+
+    c.tick()
+
+    assert store.system_commands().list() == [["clear_history"]]
 
 
 # --------------------------------------------------------------------------

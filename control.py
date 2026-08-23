@@ -42,10 +42,7 @@ def _initialize_runtime_state(store):
     retained_cook_id = (
         cook_id if unfinished and isinstance(cook_id, str) and bool(cook_id) and cook_id == cook_id.strip() else None
     )
-    control = store.flush_control(
-        cook_id=retained_cook_id,
-        preserve_system_commands=True,
-    )
+    control = store.flush_control(cook_id=retained_cook_id)
     store.flush_current()
     return control
 

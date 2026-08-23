@@ -545,10 +545,10 @@ class Controller:
                 else:
                     self.eventLogger.error("An error has occurred, Stop Mode enabled.")
                     self.controlLogger.error("An error has occurred, Stop Mode enabled.")
-                    # Reset Control to Defaults but preserve 'Error' mode condition
-                    self.control = default_control()
+                    # Reset transient control state while retaining the durable
+                    # clear-history command exactly as the Stop branch does.
+                    self.control = store.flush_control(cook_id=retained_cook_id)
                     self.control["critical_error"] = critical_error
-                    self.control["cook_id"] = retained_cook_id
                     self.control["mode"] = Mode.ERROR
                     self.control["status"] = StatusState.INACTIVE
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on

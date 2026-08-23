@@ -9,6 +9,7 @@ from common import datastore
 from common.common import generate_uuid
 from common.control_delta import ControlDeltaError, is_control_delta, validate_control_delta
 from common.defaults import default_control
+from common.persistence.history import CLEAR_HISTORY_COMMAND
 from common.persistence.transforms import apply_control_delta
 from common.sqlite_queue import SqliteQueue
 
@@ -26,17 +27,16 @@ __all__ = (
 )
 
 
-def flush_control(
-    *,
-    cook_id: str | None = None,
-    preserve_system_commands: bool = False,
-):
-    """Clear control-owned state and seed defaults with any retained cook identity."""
-    tables = ["queue_control_write", "queue_systemo"]
-    if not preserve_system_commands:
-        tables.append("queue_systemq")
-    for table in tables:
+def flush_control(*, cook_id: str | None = None):
+    """Reset control state while retaining only durable history-clear commands."""
+    for table in ("queue_control_write", "queue_systemo"):
         datastore.execute_write(f"DELETE FROM {table}")
+    datastore.execute_write(
+        "DELETE FROM queue_systemq "
+        "WHERE json_type(value) != 'array' "
+        "OR COALESCE(json_extract(value, '$[0]') != ?, 1)",
+        (CLEAR_HISTORY_COMMAND,),
+    )
     for key in ("control:general", "control:command"):
         datastore.delete_blob(key)
     control = default_control()

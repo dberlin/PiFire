@@ -1,4 +1,7 @@
 import json
+import sqlite3
+
+import pytest
 
 from common.defaults import METRIC_COLUMNS, default_metrics
 from common.persistence import history
@@ -221,6 +224,35 @@ def test_metric_flush_is_isolated_but_history_flush_couples_all_owned_state(monk
     assert control.read_control()["cook_id"] is None
     assert json.loads(ds.get_blob("control:current")) != {"marker": "must be reset"}
 
+
+
+def test_history_flush_rolls_back_every_session_field_when_control_clear_fails(monkeypatch, ds):
+    monkeypatch.setattr(history.time, "time", lambda: 1.0)
+    history.write_history(SAMPLE_HISTORY)
+    history.append_metric(default_metrics())
+    live_control = control.read_control()
+    live_control["cook_id"] = "cook-session-rollback"
+    control.write_control_snapshot(live_control, origin="control")
+    ds.set_blob("control:current", json.dumps({"marker": "retained"}))
+    connection = ds.connection()
+    connection.execute(
+        """
+        CREATE TRIGGER fail_cook_id_clear
+        BEFORE UPDATE OF value ON kv
+        WHEN OLD.key = 'control:general'
+        BEGIN
+            SELECT RAISE(FAIL, 'injected control snapshot failure');
+        END
+        """
+    )
+
+    with pytest.raises(sqlite3.IntegrityError, match="injected control snapshot failure"):
+        history.flush_history()
+
+    assert len(history.read_history()) == 1
+    assert len(history.read_all_metrics()) == 1
+    assert control.read_control()["cook_id"] == "cook-session-rollback"
+    assert json.loads(ds.get_blob("control:current")) == {"marker": "retained"}
 
 def test_tuning_blob_round_trip_and_copy_ownership(ds):
     assert history.read_tr() == {}

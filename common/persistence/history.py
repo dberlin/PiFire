@@ -82,16 +82,17 @@ def update_metrics(metrics):
 
 
 def flush_history():
-    """Clear history together with its coupled current and metrics state."""
+    """Atomically finalize history, current, metrics, and the durable cook identity."""
     from common.persistence import control, runtime
 
-    datastore.execute_write("DELETE FROM history")
-    runtime.flush_current()
-    flush_metrics()
+    with datastore.transaction() as connection:
+        connection.execute("DELETE FROM history")
+        runtime.flush_current()
+        connection.execute("DELETE FROM metrics")
 
-    control_state = control.read_control()
-    control_state["cook_id"] = None
-    control.write_control_snapshot(control_state, origin="history")
+        control_state = control.read_control()
+        control_state["cook_id"] = None
+        control.write_control_snapshot(control_state, origin="history")
 
 
 def request_history_clear() -> str:

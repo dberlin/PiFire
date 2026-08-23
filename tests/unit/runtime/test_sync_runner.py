@@ -8,6 +8,7 @@ import pytest
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.contracts import FrameObservation
+from controller.pid_sp import Controller as PidSpController
 from controller.runtime.runner import (
     ControllerUpdateResult,
     SyncControllerRunner,
@@ -227,6 +228,33 @@ def test_completed_result_owns_the_learning_snapshot_from_that_update():
     assert result.learning.as_json()["generation"] == 7
     assert core.learning_calls == 1
 
+
+def test_sync_pid_sp_completed_update_captures_one_aligned_learning_status_snapshot(monkeypatch):
+    core = PidSpController(
+        {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.001},
+        "F",
+        {"u_min": 0.1, "u_max": 0.9},
+    )
+    core.set_target(225.0)
+    original_capability = core.get_learning_diagnostics
+    capability_calls = 0
+
+    def counted_capability():
+        nonlocal capability_calls
+        capability_calls += 1
+        state = original_capability().as_json()
+        state["capture_sequence"] = capability_calls
+        return ControllerLearningDiagnostics(schema_version=1, state=state)
+
+    monkeypatch.setattr(core, "get_learning_diagnostics", counted_capability)
+    runner = SyncControllerRunner(core)
+    result = runner.latest_from(200.0)
+
+    assert capability_calls == 1
+    assert result.learning is not None
+    assert result.learning.as_json()["capture_sequence"] == 1
+    assert result.status is not None
+    assert runner.controller_state()["learning"] == result.learning.as_json()
 
 def test_completed_result_rejects_an_invalid_learning_capability_value():
     class InvalidLearningCore(_Core):

@@ -462,6 +462,64 @@ def test_threaded_result_retains_owned_learning_snapshot_across_repolls():
         runner.stop()
 
 
+def test_threaded_mpc_completed_update_captures_one_aligned_learning_status_snapshot(monkeypatch):
+    class _UpdateGate:
+        def __init__(self):
+            self.before_update = threading.Event()
+            self.release_update = threading.Event()
+            self.after_update = threading.Event()
+            self.release_stop = threading.Event()
+            self.waits = 0
+
+        def __call__(self, _seconds):
+            self.waits += 1
+            if self.waits == 1:
+                self.before_update.set()
+                assert self.release_update.wait(2.0)
+            else:
+                self.after_update.set()
+                assert self.release_stop.wait(2.0)
+
+        def close(self):
+            self.release_update.set()
+            self.release_stop.set()
+
+    core = MpcController(
+        dict(MPC_DEFAULTS, enable_online_adaptation=False, control_period=0.001),
+        "C",
+        {"u_min": 0.1, "u_max": 0.9},
+    )
+    core.set_target(110.0)
+    original_capability = core.get_learning_diagnostics
+    capability_calls = 0
+
+    def counted_capability():
+        nonlocal capability_calls
+        capability_calls += 1
+        state = original_capability().as_json()
+        state["capture_sequence"] = capability_calls
+        return ControllerLearningDiagnostics(schema_version=1, state=state)
+
+    monkeypatch.setattr(core, "get_learning_diagnostics", counted_capability)
+    gate = _UpdateGate()
+    runner = ThreadedControllerRunner(core, wait_for_period=gate)
+    capability_calls = 0
+    try:
+        assert gate.before_update.wait(2.0)
+        runner.submit(100.0)
+        gate.release_update.set()
+        assert gate.after_update.wait(2.0)
+        result = runner.latest()
+
+        assert capability_calls == 1
+        assert result.learning is not None
+        assert result.learning.as_json()["capture_sequence"] == 1
+        assert result.status is not None
+        assert runner.controller_state()["learning"] == result.learning.as_json()
+    finally:
+        runner.stop()
+
+
 def test_threaded_runner_repoll_preserves_completed_revision_and_advances_age():
     core = FakeCore()
     runner = ThreadedControllerRunner(core)
