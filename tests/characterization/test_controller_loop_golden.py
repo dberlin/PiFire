@@ -217,11 +217,12 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     c.status["fan_duty"] = 65
     store.write_status(c.status)
     status_during_archive = {}
-    monkeypatch.setattr(
-        controller_mod,
-        "create_cookfile",
-        lambda: status_during_archive.update(store.read_status()),
-    )
+
+    def capture_status(*, learning_report_provider):
+        status_during_archive.update(store.read_status())
+        status_during_archive["learning_report_provider"] = learning_report_provider
+
+    monkeypatch.setattr(controller_mod, "create_cookfile", capture_status)
     c.tick()
     # Outputs driven off, status reset to Stop, control reset, display cleared.
     names = [name for name, _ in grill.calls]
@@ -230,6 +231,7 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     assert ("clear", None) in store.display_commands().list()
     assert status_during_archive["cycle_ratio"] == 0
     assert status_during_archive["fan_duty"] == 0
+    assert status_during_archive["learning_report_provider"] is controller_mod.controller_learning_report
     status = store.read_status()
     assert status["mode"] == "Stop"
     assert status["cycle_ratio"] == 0
@@ -276,7 +278,8 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     monkeypatch.setattr(controller_mod, "check_notify", lambda *a, **k: sent.append(("check_notify", k)))
     monkeypatch.setattr(controller_mod, "send_notifications", lambda *a, **k: sent.append(("send_notifications", a, k)))
 
-    def _boom(*a, **k):
+    def _boom(*, learning_report_provider):
+        assert learning_report_provider is controller_mod.controller_learning_report
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(controller_mod, "create_cookfile", _boom)
@@ -623,7 +626,7 @@ def _stop_after(monkeypatch, modes):
     _spy_dispatch(c)
     c.setup()
     c.tick()
-    archived = ("create_cookfile",) in sent
+    archived = any(call[0] == "create_cookfile" for call in sent)
     return archived, store
 
 

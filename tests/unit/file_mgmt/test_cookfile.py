@@ -1,7 +1,7 @@
-"""Unit coverage for file_mgmt/cookfile.py: `read_cookfile`, `upgrade_cookfile`,
-`prepare_chartdata`, and `create_cookfile` -- the read/upgrade/build pipeline
-for PiFire `.pifire` cook-file zip archives (metadata/graph_data/raw_data/
-graph_labels/events/comments/assets JSON members, see `_default_cookfilestruct`).
+"""Unit coverage for the cookfile read, upgrade, chart, and creation pipeline.
+
+Cookfiles carry the seven historical JSON members plus the learning diagnostics
+member required from new writers and optional when reading legacy archives.
 
 Fixture strategy
 -----------------
@@ -49,9 +49,14 @@ import zipfile
 
 import pytest
 
+from common.control_trace import ControlTraceRecord, ControllerType, SessionPayload, TraceEventKind, TraceSetting
+from common.cook_diagnostics import ControllerLearningReport, collect_cook_learning_diagnostics
+from common.model_evidence import ConfidenceDecisionEvidence, EvidenceKind, ModelEvidenceRecord
 import file_mgmt.cookfile as cookfile_mod
 from common.common import epoch_to_time, process_metrics
+from common.persistence.control_trace import append_control_trace
 from common.persistence.history import append_metric, read_all_metrics, read_history, update_metrics, write_history
+from common.persistence.model_evidence import append_model_evidence
 from common.defaults import default_metrics
 from file_mgmt.cookfile import create_cookfile, prepare_chartdata, read_cookfile, upgrade_cookfile
 from file_mgmt.downsample import max_interpolation_error
@@ -664,9 +669,11 @@ def test_prepare_chartdata_reduce_path_ignores_the_mapper_entirely():
 
 
 def test_read_cookfile_ok_returns_full_struct_matching_file_contents(ds, tmp_path):
-    """Happy path: current-version file, all 7 members present and
-    well-formed. Asserts the returned struct is exactly what was written --
-    not just `status == "OK"`."""
+    """A current legacy archive without diagnostics remains readable.
+
+    Its seven required members round-trip unchanged and the optional
+    diagnostics value is explicitly absent.
+    """
     version = _current_version(ds)
     metadata = _base_metadata(version, title="My Cook", starttime=111, endtime=222)
     graph_data = {
@@ -703,6 +710,7 @@ def test_read_cookfile_ok_returns_full_struct_matching_file_contents(ds, tmp_pat
     assert struct["events"] == events
     assert struct["comments"] == comments
     assert struct["assets"] == []
+    assert struct["learning_diagnostics"] is None
 
 
 def test_read_cookfile_old_version_returns_warning_and_only_metadata(ds, tmp_path):
@@ -809,6 +817,19 @@ def test_read_cookfile_corrupt_zip_returns_error_status_instead_of_crashing(ds, 
     assert status.startswith("Error")
     # Only "metadata" was attempted before the read failure broke the loop.
     assert struct == {"metadata": {}}
+
+
+def test_read_cookfile_rejects_malformed_present_learning_diagnostics(ds, tmp_path):
+    """Present malformed diagnostics are an error, never legacy absence."""
+    path = str(tmp_path / "malformed-diagnostics.pifire")
+    _write_versioned_cookfile(path, _current_version(ds))
+    with zipfile.ZipFile(path, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("learning_diagnostics.json", b"{not-json")
+
+    struct, status = read_cookfile(path)
+
+    assert status == "Error: JSON Decoding Error."
+    assert struct["learning_diagnostics"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -1104,6 +1125,293 @@ def _seed_history_row(primary_label, food_labels, primary_val, food_val):
     )
 
 
+def _no_learning_report(_controller: str) -> None:
+    return None
+
+
+def _diagnostic_session(cook_id: str) -> ControlTraceRecord:
+    return ControlTraceRecord(
+        ts_ms=100,
+        session_id="session-pid-sp",
+        cook_id=cook_id,
+        controller=ControllerType.PID_SP,
+        event_kind=TraceEventKind.SESSION,
+        payload=SessionPayload(
+            controller=ControllerType.PID_SP,
+            controller_config=(TraceSetting(key="policy", value="pid_sp"),),
+            temperature_unit="F",
+            control_period_seconds=2.0,
+            model_revision=None,
+            model_provenance=None,
+            pulse_slot_seconds=2.0,
+            pulse_frame_seconds=20.0,
+            fan_authority=False,
+            fan_pwm_capable=True,
+            fan_min_duty=0.0,
+            fan_max_duty=1.0,
+            setpoint=225.0,
+            ambient_temperature=70.0,
+            software_version="1.2.3",
+            build_version="test",
+        ),
+    )
+
+
+def _diagnostic_evidence(cook_id: str) -> ModelEvidenceRecord:
+    return ModelEvidenceRecord(
+        evidence_id="evidence-confidence",
+        kind=EvidenceKind.CONFIDENCE_DECISION,
+        session_id="session-pid-sp",
+        cook_id=cook_id,
+        timestamp_ms=200,
+        role_generation=1,
+        model_digest=None,
+        provenance_digest=None,
+        payload=ConfidenceDecisionEvidence(decision_id="decision-confidence", blocked=False),
+    )
+
+
+def _diagnostic_provider(controller: str) -> ControllerLearningReport:
+    return ControllerLearningReport(
+        controller=controller,
+        schema_version=1,
+        revision=f"{controller}-revision",
+        report={"sample_count": 4},
+    )
+
+
+def _track_flush_history(monkeypatch):
+    real_flush_history = cookfile_mod.flush_history
+    calls = []
+
+    def tracked_flush_history():
+        calls.append(None)
+        real_flush_history()
+
+    monkeypatch.setattr(cookfile_mod, "flush_history", tracked_flush_history)
+    return calls
+
+
+def test_new_cookfile_contains_complete_learning_diagnostics(
+    ds,
+    isolated_history_folder,
+    monkeypatch,
+):
+    """A new archive carries validated diagnostics captured before the final flush."""
+    settings = cookfile_mod.read_settings()
+    primary_label, food_labels = _default_probe_labels(settings)
+    _seed_history_row(primary_label, food_labels, 100, 90)
+    cook_id = "cook-diagnostics-7"
+    append_metric(dict(default_metrics(), mode="Smoke", augerontime=120))
+    update_metrics({"id": cook_id})
+    append_control_trace([_diagnostic_session(cook_id)])
+    append_model_evidence([_diagnostic_evidence(cook_id)])
+    flush_calls = _track_flush_history(monkeypatch)
+
+    create_cookfile(learning_report_provider=_diagnostic_provider)
+
+    pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
+    assert len(pifire_files) == 1
+    with zipfile.ZipFile(pifire_files[0]) as archive:
+        required_members = {
+            "metadata.json",
+            "graph_data.json",
+            "raw_data.json",
+            "graph_labels.json",
+            "events.json",
+            "comments.json",
+            "assets.json",
+            "learning_diagnostics.json",
+        }
+        assert required_members <= set(archive.namelist())
+        payload = json.loads(archive.read("learning_diagnostics.json"))
+        assert json.loads(archive.read("raw_data.json"))[0]["P"][primary_label] == 100
+        assert json.loads(archive.read("events.json"))[0]["id"] == cook_id
+    reread, status = read_cookfile(pifire_files[0])
+    assert status == "OK"
+    assert reread["learning_diagnostics"] == payload
+
+    assert payload["schema_version"] == 1
+    assert payload["cook_id"] == cook_id
+    assert payload["controllers"] == ["pid_sp"]
+    assert payload["reports"] == [
+        {
+            "controller": "pid_sp",
+            "schema_version": 1,
+            "revision": "pid_sp-revision",
+            "report": {"sample_count": 4},
+        }
+    ]
+    assert payload["control_trace"]["records"]
+    assert payload["model_evidence"]["records"]
+    assert payload["capture_errors"] == []
+    assert flush_calls == [None]
+    assert read_history() == []
+    assert read_all_metrics() == []
+
+
+@pytest.mark.parametrize(
+    "metric_ids",
+    [(None,), ("cook-a", "cook-b")],
+    ids=["missing", "mixed"],
+)
+def test_invalid_metrics_identity_still_writes_diagnostics_and_flushes(
+    ds,
+    isolated_history_folder,
+    monkeypatch,
+    metric_ids,
+):
+    """Missing or mixed metric identity is recorded, never guessed or fatal."""
+    settings = cookfile_mod.read_settings()
+    primary_label, food_labels = _default_probe_labels(settings)
+    _seed_history_row(primary_label, food_labels, 100, 90)
+    for metric_id in metric_ids:
+        append_metric(dict(default_metrics(), mode="Smoke"))
+        update_metrics({"id": metric_id})
+    flush_calls = _track_flush_history(monkeypatch)
+
+    create_cookfile(learning_report_provider=_diagnostic_provider)
+
+    pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
+    assert len(pifire_files) == 1
+    with zipfile.ZipFile(pifire_files[0]) as archive:
+        assert {
+            "metadata.json",
+            "graph_data.json",
+            "raw_data.json",
+            "graph_labels.json",
+            "events.json",
+            "comments.json",
+            "assets.json",
+            "learning_diagnostics.json",
+        } <= set(archive.namelist())
+        assert json.loads(archive.read("raw_data.json"))[0]["P"][primary_label] == 100
+        assert len(json.loads(archive.read("events.json"))) == len(metric_ids)
+        payload = json.loads(archive.read("learning_diagnostics.json"))
+
+    assert payload["cook_id"] is None
+    assert payload["controllers"] == []
+    assert payload["control_trace"]["records"] == []
+    assert payload["model_evidence"]["records"] == []
+    assert payload["capture_errors"] == [
+        {
+            "source": "collector",
+            "code": "cook-identity-invalid",
+            "detail": "cook_id must be a non-blank, whitespace-trimmed string",
+        }
+    ]
+    assert flush_calls == [None]
+    assert read_history() == []
+    assert read_all_metrics() == []
+
+
+@pytest.mark.parametrize(
+    ("failure_mode", "expected_errors"),
+    [
+        (
+            "trace",
+            [
+                {
+                    "source": "control_trace",
+                    "code": "control-trace-read-failed",
+                    "detail": "trace unavailable",
+                }
+            ],
+        ),
+        (
+            "evidence-report",
+            [
+                {
+                    "source": "model_evidence",
+                    "code": "model-evidence-read-failed",
+                    "detail": "evidence unavailable",
+                },
+                {
+                    "source": "report:pid_sp",
+                    "code": "report-read-failed",
+                    "detail": "report unavailable",
+                },
+            ],
+        ),
+    ],
+)
+def test_diagnostics_source_failure_still_writes_archive_before_one_flush(
+    ds,
+    isolated_history_folder,
+    monkeypatch,
+    failure_mode,
+    expected_errors,
+):
+    """Contained source failures retain the archive and capture-before-flush order."""
+    settings = cookfile_mod.read_settings()
+    primary_label, food_labels = _default_probe_labels(settings)
+    _seed_history_row(primary_label, food_labels, 100, 90)
+    cook_id = "cook-failure-7"
+    append_metric(dict(default_metrics(), mode="Smoke"))
+    update_metrics({"id": cook_id})
+    order = []
+    real_flush_history = cookfile_mod.flush_history
+
+    def tracked_flush_history():
+        order.append("flush")
+        real_flush_history()
+
+    def trace_failure(_cook_id):
+        raise RuntimeError("trace unavailable")
+
+    def evidence_failure(*, cook_id):
+        raise RuntimeError("evidence unavailable")
+
+    def report_failure(_controller):
+        raise RuntimeError("report unavailable")
+
+    def successful_trace(_cook_id):
+        return [_diagnostic_session(cook_id)]
+
+    def successful_evidence(*, cook_id):
+        return []
+
+    def collect_with_injected_failures(captured_cook_id, report_provider, *, warn):
+        order.append("capture")
+        return collect_cook_learning_diagnostics(
+            captured_cook_id,
+            report_provider,
+            read_trace=trace_failure if failure_mode == "trace" else successful_trace,
+            read_evidence=evidence_failure if failure_mode == "evidence-report" else successful_evidence,
+            clock_ms=lambda: 1_787_490_000_000,
+            warn=warn,
+        )
+
+    monkeypatch.setattr(cookfile_mod, "flush_history", tracked_flush_history)
+    monkeypatch.setattr(cookfile_mod, "collect_cook_learning_diagnostics", collect_with_injected_failures)
+    provider = report_failure if failure_mode == "evidence-report" else _diagnostic_provider
+
+    create_cookfile(learning_report_provider=provider)
+
+    pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
+    assert len(pifire_files) == 1
+    with zipfile.ZipFile(pifire_files[0]) as archive:
+        assert {
+            "metadata.json",
+            "graph_data.json",
+            "raw_data.json",
+            "graph_labels.json",
+            "events.json",
+            "comments.json",
+            "assets.json",
+            "learning_diagnostics.json",
+        } <= set(archive.namelist())
+        assert json.loads(archive.read("raw_data.json"))[0]["P"][primary_label] == 100
+        assert json.loads(archive.read("events.json"))[0]["id"] == cook_id
+        payload = json.loads(archive.read("learning_diagnostics.json"))
+
+    assert payload["cook_id"] == cook_id
+    assert payload["capture_errors"] == expected_errors
+    assert order == ["capture", "flush"]
+    assert read_history() == []
+    assert read_all_metrics() == []
+
+
 def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(ds, isolated_history_folder):
     """End-to-end: seed real history + metrics rows in the datastore, call
     `create_cookfile()`, and read the produced `.pifire` archive straight off
@@ -1119,7 +1427,7 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
     append_metric(dict(default_metrics(), id=0, mode="Smoke", augerontime=120))
     append_metric(dict(default_metrics(), id=1, mode="Stop", augerontime=30))
 
-    create_cookfile()
+    create_cookfile(learning_report_provider=_no_learning_report)
 
     pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(pifire_files) == 1
@@ -1255,7 +1563,7 @@ def test_create_cookfile_survives_poisoned_none_starttime_row(ds, isolated_histo
 
     assert read_all_metrics()[0]["starttime"] is None  # sanity: poisoned as expected
 
-    create_cookfile()  # pre-fix: TypeError: unsupported operand type(s) for /: 'NoneType' and 'int'
+    create_cookfile(learning_report_provider=_no_learning_report)
 
     pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(pifire_files) == 1
@@ -1277,7 +1585,7 @@ def test_create_cookfile_title_collision_appends_numeric_suffix(ds, isolated_his
     primary_label, food_labels = _default_probe_labels(settings)
 
     _seed_history_row(primary_label, food_labels, 100, 90)
-    create_cookfile()
+    create_cookfile(learning_report_provider=_no_learning_report)
 
     first_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(first_files) == 1
@@ -1285,7 +1593,7 @@ def test_create_cookfile_title_collision_appends_numeric_suffix(ds, isolated_his
     first_bytes = first_path.read_bytes()
 
     _seed_history_row(primary_label, food_labels, 200, 190)
-    create_cookfile()
+    create_cookfile(learning_report_provider=_no_learning_report)
 
     all_files = sorted(pathlib.Path(isolated_history_folder).glob("*.pifire"))
     assert len(all_files) == 2

@@ -17,6 +17,8 @@ import json
 import tempfile
 import shutil
 
+from pydantic import JsonValue
+
 HISTORY_FOLDER = "./history/"  # Path to historical cook files
 RECIPE_FOLDER = "./recipes/"  # Path to recipe files
 
@@ -101,6 +103,22 @@ def read_json_file_data(filename, jsonfile, unpackassets=True):
         dictionary = {}
 
     return (dictionary, status)
+
+
+def read_optional_json_file_data(filename, member) -> tuple[JsonValue | None, str]:
+    """Read an optional JSON archive member without hiding present-data errors."""
+    try:
+        with zipfile.ZipFile(filename, mode="r") as archive:
+            json_string = archive.read(member + ".json")
+            return (json.loads(json_string), "OK")
+    except KeyError:
+        return (None, "OK")
+    except zipfile.BadZipFile as error:
+        return (None, f"Error: {error}")
+    except json.decoder.JSONDecodeError:
+        return (None, "Error: JSON Decoding Error.")
+    except Exception:
+        return (None, "Error: Unspecified")
 
 
 def update_json_file_data(filedata, filename, jsonfile):

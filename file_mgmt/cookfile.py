@@ -27,6 +27,7 @@ from common.common import (
     unpack_history,
     create_logger,
 )
+from common.cook_diagnostics import LearningReportProvider, collect_cook_learning_diagnostics
 from common.persistence.runtime import (
     read_settings,
 )
@@ -36,7 +37,7 @@ from common.persistence.history import (
     read_all_metrics,
 )
 from common.defaults import default_probe_config
-from file_mgmt.common import read_json_file_data, update_json_file_data
+from file_mgmt.common import read_json_file_data, read_optional_json_file_data, update_json_file_data
 from file_mgmt.downsample import select_indices
 
 HISTORY_FOLDER = "./history/"  # Path to historical cook files
@@ -74,10 +75,13 @@ def _default_cookfilestruct():
 
     cookfilestruct["assets"] = []
 
+    cookfilestruct["learning_diagnostics"] = None
+
+
     return cookfilestruct
 
 
-def create_cookfile():
+def create_cookfile(*, learning_report_provider: LearningReportProvider) -> None:
     """
     This function gathers all of the data from the previous cook
     from startup to stop mode, and saves this to a Cook File stored
@@ -124,10 +128,36 @@ def create_cookfile():
 
         cook_file_struct["raw_data"] = raw_data
 
-        cook_file_struct["events"] = process_metrics(read_all_metrics(), augerrate=settings["globals"]["augerrate"])
+        metrics_rows = read_all_metrics()
+        metrics_ids = [row.get("id") for row in metrics_rows]
+        cook_id = (
+            metrics_ids[0]
+            if metrics_ids
+            and isinstance(metrics_ids[0], str)
+            and bool(metrics_ids[0])
+            and metrics_ids[0] == metrics_ids[0].strip()
+            and all(candidate == metrics_ids[0] for candidate in metrics_ids)
+            else None
+        )
+        learning_diagnostics = collect_cook_learning_diagnostics(
+            cook_id,
+            learning_report_provider,
+            warn=eventLogger.warning,
+        )
+        cook_file_struct["events"] = process_metrics(metrics_rows, augerrate=settings["globals"]["augerrate"])
+        cook_file_struct["learning_diagnostics"] = learning_diagnostics.model_dump(mode="json")
 
         # 1. Create all JSON data files
-        files_list = ["metadata", "graph_data", "raw_data", "graph_labels", "events", "comments", "assets"]
+        files_list = [
+            "metadata",
+            "graph_data",
+            "raw_data",
+            "graph_labels",
+            "events",
+            "comments",
+            "assets",
+            "learning_diagnostics",
+        ]
         if not os.path.exists(HISTORY_FOLDER):
             os.mkdir(HISTORY_FOLDER)
         cook_file_path = f"{HISTORY_FOLDER}{title}"
@@ -200,6 +230,12 @@ def read_cookfile(filename):
             if semantic_ver_is_lower(cook_file_struct["metadata"]["version"], settings["versions"]["cookfile"]):
                 status = "WARNING: Older cookfile version format! "
                 break  # Exit loop and function, error string in status
+
+    if status == "OK":
+        cook_file_struct["learning_diagnostics"], status = read_optional_json_file_data(
+            filename,
+            "learning_diagnostics",
+        )
 
     return (cook_file_struct, status)
 

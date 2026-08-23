@@ -33,6 +33,7 @@ from os.path import exists
 
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 
+from controller.learning_report import controller_learning_report
 from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
@@ -460,7 +461,7 @@ class Controller:
                         # behavior (status/control resets, display clear, etc. below)
                         # still runs unconditionally.
                         try:
-                            create_cookfile()
+                            create_cookfile(learning_report_provider=controller_learning_report)
                         except Exception as e:
                             self.eventLogger.error(f"Failed to create cookfile: {e}")
                             # A failed cookfile write is potential cook-data loss;

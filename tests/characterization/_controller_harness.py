@@ -70,7 +70,11 @@ def _neutralize_externals(monkeypatch):
     sent = []
     monkeypatch.setattr(controller_mod, "check_notify", lambda *a, **k: sent.append(("check_notify", k)))
     monkeypatch.setattr(controller_mod, "send_notifications", lambda *a, **k: sent.append(("send_notifications", a, k)))
-    monkeypatch.setattr(controller_mod, "create_cookfile", lambda *a, **k: sent.append(("create_cookfile",)))
+    monkeypatch.setattr(
+        controller_mod,
+        "create_cookfile",
+        lambda *, learning_report_provider: sent.append(("create_cookfile", learning_report_provider)),
+    )
     monkeypatch.setattr(controller_mod, "os", _FakeOs(sent))
     return sent
 
