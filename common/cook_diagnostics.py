@@ -48,11 +48,7 @@ class ControllerLearningReport:
     def __post_init__(self) -> None:
         if not isinstance(self.controller, str) or not self.controller.strip():
             raise ValueError("controller must be a non-blank string")
-        if (
-            isinstance(self.schema_version, bool)
-            or not isinstance(self.schema_version, int)
-            or self.schema_version < 1
-        ):
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version < 1:
             raise ValueError("schema_version must be a positive integer")
         if not isinstance(self.revision, str) or not self.revision.strip():
             raise ValueError("revision must be a non-blank string")

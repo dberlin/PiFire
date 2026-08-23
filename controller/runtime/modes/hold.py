@@ -531,15 +531,10 @@ class HoldMode(ControlMode):
                 learning.retire_generation(reserved_generation)
         trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
         context = self._trace_session_context()
-        identity = (
-            None
-            if context is None
-            else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
-        )
+        identity = None if context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
         if identity is not None:
             learning.bind_generation(generation)
         learning.reconcile_outcomes(now)
-
 
     def _trace_session_context(self) -> TraceSessionContext | None:
         trace = self._control_trace

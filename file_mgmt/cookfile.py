@@ -77,7 +77,6 @@ def _default_cookfilestruct():
 
     cookfilestruct["learning_diagnostics"] = None
 
-
     return cookfilestruct
 
 

@@ -756,9 +756,9 @@ class ControlTraceSession:
         trace_start_ms = start_ms if start_ms is not None else int(frame.nominal_start_s * 1_000)
         trace_end_ms = int(frame.ended_at_s * 1_000)
         source = state.output_source or completion.source
-        sample_complete = (
-            applied.feedback_disposition is FrameFeedbackDisposition.COMPLETE
-            or completion.inhibit in (InhibitReason.SAFETY, InhibitReason.STALE_COMMAND)
+        sample_complete = applied.feedback_disposition is FrameFeedbackDisposition.COMPLETE or completion.inhibit in (
+            InhibitReason.SAFETY,
+            InhibitReason.STALE_COMMAND,
         )
         recorded = False
         if trace_start_ms < trace_end_ms:

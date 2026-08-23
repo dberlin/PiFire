@@ -16,7 +16,6 @@ SAMPLE_HISTORY = {
 }
 
 
-
 def test_inactive_clear_request_is_queued_when_mode_startup_interleaves_enqueue(monkeypatch, ds):
     persisted = control.read_control()
     persisted["mode"] = "Stop"
@@ -162,8 +161,6 @@ def test_metric_rows_keep_distinct_display_identities(monkeypatch, ds):
         ("startup-row", "Startup"),
         ("hold-row", "Hold"),
     ]
-
-
 
 
 def test_metric_update_changes_only_last_row_and_inserts_when_empty(monkeypatch, ds):

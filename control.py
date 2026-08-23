@@ -40,12 +40,7 @@ def _initialize_runtime_state(store):
     cook_id = persisted_control.get("cook_id")
     unfinished = bool(store.read_history(num_items=1) or store.read_all_metrics())
     retained_cook_id = (
-        cook_id
-        if unfinished
-        and isinstance(cook_id, str)
-        and bool(cook_id)
-        and cook_id == cook_id.strip()
-        else None
+        cook_id if unfinished and isinstance(cook_id, str) and bool(cook_id) and cook_id == cook_id.strip() else None
     )
     control = store.flush_control(
         cook_id=retained_cook_id,

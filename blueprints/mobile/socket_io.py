@@ -687,17 +687,20 @@ def _post_app_data_timer(settings, type, request):
                 seconds = request["timer_action"]["hours_range"] * 60 * 60
                 seconds = seconds + request["timer_action"]["minutes_range"] * 60
                 write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
-                enqueue_control_delta(control_delta(
-                    ops=[
-                        {
-                            "op": "timer.start_with_options",
-                            "at": now,
-                            "seconds": seconds,
-                            "shutdown": request["timer_action"]["timer_shutdown"],
-                            "keep_warm": request["timer_action"]["timer_keep_warm"],
-                        }
-                    ]
-                ), origin="app-socketio")
+                enqueue_control_delta(
+                    control_delta(
+                        ops=[
+                            {
+                                "op": "timer.start_with_options",
+                                "at": now,
+                                "seconds": seconds,
+                                "shutdown": request["timer_action"]["timer_shutdown"],
+                                "keep_warm": request["timer_action"]["timer_keep_warm"],
+                            }
+                        ]
+                    ),
+                    origin="app-socketio",
+                )
                 return _response(result="OK")
             else:
                 return _response(result="Error", message="Error: Start time not specified")
@@ -709,7 +712,9 @@ def _post_app_data_timer(settings, type, request):
                 "Timer unpaused.  Ends at: "
                 + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
             )
-            enqueue_control_delta(control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": None}]), origin="app-socketio")
+            enqueue_control_delta(
+                control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": None}]), origin="app-socketio"
+            )
             return _response(result="OK")
     elif type == "pause_timer":
         write_log("Timer paused.")
@@ -742,13 +747,16 @@ def _post_app_data_recipes(settings, type, request):
             filename = request["recipes_action"]["filename"]
             # recipe.filename is stated as a nested `set`, which deep-merges --
             # step/step_data are the control loop's and are not touched here.
-            enqueue_control_delta(control_delta(
-                set_values={
-                    "updated": True,
-                    "mode": Mode.RECIPE,
-                    "recipe": {"filename": recipe_folder + filename},
-                }
-            ), origin="app-socketio")
+            enqueue_control_delta(
+                control_delta(
+                    set_values={
+                        "updated": True,
+                        "mode": Mode.RECIPE,
+                        "recipe": {"filename": recipe_folder + filename},
+                    }
+                ),
+                origin="app-socketio",
+            )
             return _response(result="OK")
     else:
         return _response(result="Error", message="Error: Received request without valid type")

@@ -723,5 +723,3 @@ def test_get_status_uses_one_learning_capability_snapshot(monkeypatch):
         "status": "owned",
         "checks": {"native_build": "pending"},
     }
-
-

@@ -156,7 +156,6 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
     assert runner.restored[0]["version"] == 4
 
 
-
 def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malformed(
     hold_cycle,
     monkeypatch,
@@ -216,9 +215,8 @@ def test_mpc_setup_keeps_control_live_when_authority_migration_fails(
     learning = hold._hold_learning
     assert learning is not None
     assert learning.evidence_available is False
-    assert [applied.source for applied in runner.applied] == [
-        OutputSource.SEED
-    ]
+    assert [applied.source for applied in runner.applied] == [OutputSource.SEED]
+
 
 @pytest.mark.parametrize(
     "phase",
@@ -521,8 +519,7 @@ def test_reconfigure_terminalizes_old_frame_before_restore_and_reseed(hold_cycle
     hold.on_tick(now=4.0, ptemp=200.0, current_output_status=hold.grill.get_output_status())
 
     events = [
-        "seed" if kind == "apply" and payload.source is OutputSource.SEED else kind
-        for kind, payload in runner.calls
+        "seed" if kind == "apply" and payload.source is OutputSource.SEED else kind for kind, payload in runner.calls
     ]
     assert events.index("terminal") < events.index("reconfigure") < events.index("restore") < events.index("seed")
     assert runner.restored == [{"revision": 3, "K": 700.0}]
@@ -1226,9 +1223,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         activation_persistence=restart_worker,
     )
     restart_gate = _CrashRecoveryRunnerGate()
-    runner = ThreadedControllerRunner(
-        core, wait_for_period=restart_gate, monotonic_clock=_deterministic_monotonic()
-    )
+    runner = ThreadedControllerRunner(core, wait_for_period=restart_gate, monotonic_clock=_deterministic_monotonic())
     assert restart_gate.wait_for_arrivals(1)
     hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
     expected = candidate if durable_phase is ActivationPhase.ACTIVE and lifecycle_kind is None else incumbent

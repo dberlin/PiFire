@@ -196,9 +196,7 @@ def _activation_record(evidence_id, timestamp_ms):
     )
 
 
-def test_frame_boundary_commands_transition_before_one_identity_aligned_terminal_delivery(
-    hold_cycle, monkeypatch
-):
+def test_frame_boundary_commands_transition_before_one_identity_aligned_terminal_delivery(hold_cycle, monkeypatch):
     events = []
     runner = _OrderedRunner(events, duty=0.1)
     hold = hold_cycle(runner, controller="mpc")
@@ -221,9 +219,7 @@ def test_frame_boundary_commands_transition_before_one_identity_aligned_terminal
     terminal = [
         event
         for event in events
-        if isinstance(event, tuple)
-        and event[0] == "runner:feedback"
-        and event[2] is FrameFeedbackDisposition.COMPLETE
+        if isinstance(event, tuple) and event[0] == "runner:feedback" and event[2] is FrameFeedbackDisposition.COMPLETE
     ]
     observations = [event for event in events if isinstance(event, tuple) and event[0] == "runner:observation"]
     assert len(terminal) == len(observations) == 1
@@ -233,9 +229,7 @@ def test_frame_boundary_commands_transition_before_one_identity_aligned_terminal
 
 
 @pytest.mark.parametrize("scenario", ["lid-opening", "safety-inhibit", "stale-result"])
-def test_inhibit_turns_actuator_off_before_terminal_feedback_and_safety_trace(
-    hold_cycle, monkeypatch, scenario
-):
+def test_inhibit_turns_actuator_off_before_terminal_feedback_and_safety_trace(hold_cycle, monkeypatch, scenario):
     events = []
     runner = _OrderedRunner(events)
     _install_boundaries(monkeypatch, events)
@@ -274,9 +268,7 @@ def test_inhibit_turns_actuator_off_before_terminal_feedback_and_safety_trace(
     safety_trace = next(
         event
         for event in events
-        if isinstance(event, tuple)
-        and event[0] == "trace:record"
-        and event[1] is TraceEventKind.SAFETY_EVENT
+        if isinstance(event, tuple) and event[0] == "trace:record" and event[1] is TraceEventKind.SAFETY_EVENT
     )
     _assert_relative_order(events, ["hardware:auger-off", terminal, safety_trace])
 
@@ -300,11 +292,7 @@ def test_reconfigure_retires_old_frame_and_generation_before_replacement_is_used
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     terminal = next(
-        event
-        for event in events
-        if isinstance(event, tuple)
-        and event[0] == "runner:observation"
-        and event[3] is True
+        event for event in events if isinstance(event, tuple) and event[0] == "runner:observation" and event[3] is True
     )
     seed = next(
         event
@@ -327,9 +315,6 @@ def test_reconfigure_retires_old_frame_and_generation_before_replacement_is_used
     assert events.count(("runner:bind-evidence", 1)) == 1
 
 
-
-
-
 def test_unknown_safety_event_leaves_hardware_and_runner_unchanged(
     hold_cycle,
 ) -> None:
@@ -346,9 +331,8 @@ def test_unknown_safety_event_leaves_hardware_and_runner_unchanged(
     assert tuple(runner.applied) == applied_before
     assert runner.calibration_cancellations == []
 
-def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_closure(
-    hold_cycle, monkeypatch
-):
+
+def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_closure(hold_cycle, monkeypatch):
     events = []
     runner = _OrderedRunner(events)
     persistence, _trace = _install_boundaries(monkeypatch, events)
@@ -384,9 +368,7 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
     ],
     ids=["success", "runner-stop", "persistence-flush", "trace-close", "refit", "checkpoint"],
 )
-def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(
-    hold_cycle, monkeypatch, failure, propagates
-):
+def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle, monkeypatch, failure, propagates):
     events = []
     runner = _OrderedRunner(events, failure=failure)
     persistence, _trace = _install_boundaries(monkeypatch, events, failure=failure)
@@ -411,11 +393,7 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(
     hold.teardown(200.0)
 
     terminal = next(
-        event
-        for event in events
-        if isinstance(event, tuple)
-        and event[0] == "runner:observation"
-        and event[3] is True
+        event for event in events if isinstance(event, tuple) and event[0] == "runner:observation" and event[3] is True
     )
     _assert_relative_order(
         events,
@@ -441,18 +419,18 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(
     assert events.count("persistence:flush") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
-    assert sum(
-        isinstance(event, tuple)
-        and event[0] == "runner:observation"
-        and event[3] is True
-        for event in events
-    ) == 1
-    assert sum(
-        isinstance(event, tuple)
-        and event[0] == "runner:feedback"
-        and event[2] is not FrameFeedbackDisposition.PROGRESS
-        for event in events
-    ) == 1
+    assert (
+        sum(isinstance(event, tuple) and event[0] == "runner:observation" and event[3] is True for event in events) == 1
+    )
+    assert (
+        sum(
+            isinstance(event, tuple)
+            and event[0] == "runner:feedback"
+            and event[2] is not FrameFeedbackDisposition.PROGRESS
+            for event in events
+        )
+        == 1
+    )
     assert runner.stops - stops_before_teardown == 1
     assert runner.finished_teardowns - finishes_before_teardown == 1
     assert len(persistence.checkpoints) <= (2 if failure == "checkpoint" else 1)
@@ -567,22 +545,21 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
 
     assert calls == {"advance": 1, "feedback": 1, "reset": 1}
     assert delivery_attempts == 2
-    assert sum(
-        isinstance(event, tuple)
-        and event[0] == "runner:observation"
-        and event[3] is True
-        for event in events
-    ) == 1
-    assert sum(
-        isinstance(event, tuple)
-        and event[0] == "runner:feedback"
-        and event[2] is not FrameFeedbackDisposition.PROGRESS
-        for event in events
-    ) == 1
+    assert (
+        sum(isinstance(event, tuple) and event[0] == "runner:observation" and event[3] is True for event in events) == 1
+    )
+    assert (
+        sum(
+            isinstance(event, tuple)
+            and event[0] == "runner:feedback"
+            and event[2] is not FrameFeedbackDisposition.PROGRESS
+            for event in events
+        )
+        == 1
+    )
     assert events.count("runner:stop") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
-
 
 
 def test_teardown_retry_reprepares_feedback_without_repeating_advance(
@@ -792,8 +769,6 @@ def test_repeated_setup_starts_a_fresh_teardown_transaction(
     assert hold.grill.get_output_status()["igniter"] is False
 
 
-
-
 @pytest.mark.parametrize(
     "failure",
     ("fan_on", "power_on"),
@@ -840,6 +815,7 @@ def test_early_hardware_setup_failure_closes_created_trace_and_outputs(
         "frequency": 100,
     }
 
+
 def test_factory_failure_after_persistence_creation_closes_all_created_owners(
     hold_cycle,
     monkeypatch,
@@ -873,6 +849,8 @@ def test_factory_failure_after_persistence_creation_closes_all_created_owners(
     assert events.count("trace:close") == 1
     assert events.count("persistence:flush") == 1
     assert trace_recorder is not None
+
+
 def test_runner_revision_failure_before_learning_closes_every_created_owner(
     hold_cycle,
     monkeypatch,
@@ -905,6 +883,7 @@ def test_runner_revision_failure_before_learning_closes_every_created_owner(
     assert events.count("persistence:flush") == 1
     assert events.count("trace:close") == 1
     assert hold.grill.get_output_status()["auger"] is False
+
 
 @pytest.mark.parametrize(
     ("failure", "expected_warning"),
@@ -949,18 +928,21 @@ def test_partial_setup_cleanup_attempts_every_owner_once_after_boundary_failure(
     hold.ctx.control_log = SimpleNamespace(warning=warnings.append)
 
     if failure == "persistence-flush":
+
         def fail_persistence_flush():
             events.append("persistence:flush")
             raise RuntimeError("persistence flush failed")
 
         monkeypatch.setattr(persistence, "flush_and_stop", fail_persistence_flush)
     elif failure == "trace-flush":
+
         def fail_trace_flush():
             events.append("trace:flush-pending")
             raise RuntimeError("trace flush failed")
 
         monkeypatch.setattr(trace, "flush_pending", fail_trace_flush)
     else:
+
         def fail_runner_finish():
             events.append("runner:finish")
             raise RuntimeError("runner finish failed")
@@ -1008,9 +990,12 @@ def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypa
     assert events.count("runner:finish") == 1
     assert runner.stops - stops_before_teardown == 1
     assert runner.finished_teardowns - finishes_before_teardown == 1
-    assert sum(
-        isinstance(event, tuple)
-        and event[0] == "runner:feedback"
-        and event[2] is not FrameFeedbackDisposition.PROGRESS
-        for event in events
-    ) <= 1
+    assert (
+        sum(
+            isinstance(event, tuple)
+            and event[0] == "runner:feedback"
+            and event[2] is not FrameFeedbackDisposition.PROGRESS
+            for event in events
+        )
+        <= 1
+    )

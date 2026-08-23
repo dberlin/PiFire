@@ -344,7 +344,6 @@ def test_outer_clear_rebinds_control_before_settings_update_and_transition_write
     assert store.read_control()["cook_id"] is None
 
 
-
 def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     """DESIGN CALL: a failed create_cookfile() must not crash the control loop.
     On a real grill an uncaught exception here kills the whole `control.py`

@@ -40,7 +40,6 @@ from controller.fopdt_identifier import (
 )
 
 
-
 def _owned_json_value(value: object, path: str) -> object:
     if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
@@ -203,8 +202,6 @@ def build_pid_sp_live_learning(
         confirmation=confirmation,
         gates=gates,
     ).model_dump(mode="json")
-
-
 
 
 @std_dataclass(frozen=True, slots=True)
@@ -488,9 +485,7 @@ def current_pid_sp_learning_report(
             )
     payload["revision"] = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
     contract = PidSpLearningReport.model_validate(payload, strict=True)
-    return _CanonicalPidSpLearningReport(
-        _canonical_bytes(contract.model_dump(mode="json", exclude_unset=True))
-    )
+    return _CanonicalPidSpLearningReport(_canonical_bytes(contract.model_dump(mode="json", exclude_unset=True)))
 
 
 def backend_pid_sp_learning_report() -> _CanonicalPidSpLearningReport:

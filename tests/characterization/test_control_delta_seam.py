@@ -88,9 +88,7 @@ def test_an_unversioned_legacy_row_is_rejected_dequeued_and_logged(seeded, caplo
     assert queue.length() == 0
     messages = [record.getMessage() for record in caplog.records]
     assert any(
-        f"id={row_id}" in message
-        and "origin='legacy-web'" in message
-        and "unversioned legacy control write" in message
+        f"id={row_id}" in message and "origin='legacy-web'" in message and "unversioned legacy control write" in message
         for message in messages
     )
 
@@ -265,8 +263,6 @@ def test_post_control_rejects_explicit_null_notify_shutdown(client):
     assert "shutdown" in body["message"]
 
 
-
-
 def test_post_control_routes_notify_updates_through_per_entry_set_ops(client):
     """saveTargetEdit's shape. Names ONE entry and the fields it changes."""
     update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165, "shutdown": True}}
@@ -338,8 +334,6 @@ def test_socket_control_door_returns_validation_envelope_for_internal_cook_id(si
     assert response["result"] == "Error"
     assert "cook_id" in response["message"]
     assert c.SqliteQueue("queue_control_write").length() == 0
-
-
 
 
 def test_socket_control_door_still_accepts_ordinary_members(sio):

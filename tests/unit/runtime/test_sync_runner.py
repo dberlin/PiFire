@@ -524,9 +524,7 @@ def test_fake_runner_resets_only_delivered_eviction_counters():
 
     new_generation = runner.drain_observation_outcomes()
 
-    assert [
-        envelope.submission_sequence for envelope in new_generation.envelopes
-    ] == [31]
+    assert [envelope.submission_sequence for envelope in new_generation.envelopes] == [31]
     assert new_generation.terminal_drops == ()
     assert new_generation.dropped_count == 0
     assert new_generation.dropped_sequences == ()
@@ -534,9 +532,7 @@ def test_fake_runner_resets_only_delivered_eviction_counters():
     runner.bind_evidence_context(0, "old-session", "old-cook")
     old_generation = runner.drain_observation_outcomes()
 
-    assert [drop.submission_sequence for drop in old_generation.terminal_drops] == [
-        1
-    ]
+    assert [drop.submission_sequence for drop in old_generation.terminal_drops] == [1]
     assert old_generation.dropped_count == 1
     assert old_generation.dropped_sequences == (1,)
 

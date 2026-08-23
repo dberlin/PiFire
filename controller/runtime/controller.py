@@ -408,7 +408,9 @@ class Controller:
             )
             # Clear control flag
             self.control["updated"] = False  # Reset Control Updated to False
-            store.write_control_snapshot(self.control, origin="control")  # Commit change in 'updated' status to the file
+            store.write_control_snapshot(
+                self.control, origin="control"
+            )  # Commit change in 'updated' status to the file
 
             if self.control["units_change"]:
                 self.eventLogger.debug("Changing Base Units.")

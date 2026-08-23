@@ -134,27 +134,16 @@ class ControlMode:
     # ---- shared helpers ----
     @staticmethod
     def _valid_cook_id(cook_id) -> bool:
-        return (
-            isinstance(cook_id, str)
-            and bool(cook_id)
-            and cook_id == cook_id.strip()
-        )
+        return isinstance(cook_id, str) and bool(cook_id) and cook_id == cook_id.strip()
 
     def _refresh_cook_identity(self, control, *, now, preferred=None):
-        previous_cook_id = (
-            self.control.get("cook_id")
-            if isinstance(self.control, dict)
-            else None
-        )
+        previous_cook_id = self.control.get("cook_id") if isinstance(self.control, dict) else None
         cook_id = control.get("cook_id")
         if not self._valid_cook_id(cook_id):
             cook_id = self.ctx.store.ensure_cook_id(preferred=preferred)
             control["cook_id"] = cook_id
         self.control = control
-        if (
-            self._valid_cook_id(previous_cook_id)
-            and previous_cook_id != cook_id
-        ):
+        if self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
             self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
         return control
 
@@ -188,9 +177,6 @@ class ControlMode:
             "message": "History cleared and cook identity rotated.",
             "data": {"cook_id": cook_id},
         }
-
-
-
 
     def _auger_cycle_tick(self, now, current_output_status):
         """Shared (non-Hold) auger toggle: turn the auger on/off based on

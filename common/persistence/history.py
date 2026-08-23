@@ -10,10 +10,7 @@ from common.persistence.transforms import history_row_to_dict
 from common.sqlite_queue import SqliteQueue
 
 
-_HISTORY_SELECT = (
-    "SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data "
-    "FROM history ORDER BY id"
-)
+_HISTORY_SELECT = "SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data FROM history ORDER BY id"
 _AUTOTUNE_QUEUE = "queue_autotune"
 
 CLEAR_HISTORY_COMMAND = "clear_history"
@@ -35,9 +32,7 @@ def read_all_metrics():
 def read_metrics():
     """Return the most recently inserted metrics row or a fresh default."""
     columns = ", ".join(METRIC_COLUMNS)
-    row = datastore.connection().execute(
-        f"SELECT {columns} FROM metrics ORDER BY seq DESC LIMIT 1"
-    ).fetchone()
+    row = datastore.connection().execute(f"SELECT {columns} FROM metrics ORDER BY seq DESC LIMIT 1").fetchone()
     return _metrics_row_to_dict(row) if row else default_metrics()
 
 
@@ -105,7 +100,6 @@ def request_history_clear() -> str:
     return "queued"
 
 
-
 def read_history(num_items=0):
     """Return history rows in write order, optionally limited from the end."""
     rows = datastore.connection().execute(_HISTORY_SELECT).fetchall()
@@ -136,8 +130,7 @@ def write_history(in_data, maxsizelines=28800, ext_data=False):
         count = connection.execute("SELECT COUNT(*) FROM history").fetchone()[0]
         if count > maxsizelines:
             connection.execute(
-                "DELETE FROM history WHERE id IN "
-                "(SELECT id FROM history ORDER BY id LIMIT ?)",
+                "DELETE FROM history WHERE id IN (SELECT id FROM history ORDER BY id LIMIT ?)",
                 (count - maxsizelines,),
             )
 

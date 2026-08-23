@@ -22,7 +22,12 @@ from common.control_trace import (
     TraceEventKind,
 )
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource, seed_output
-from controller.base import ControllerLearningDiagnostics, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.base import (
+    ControllerLearningDiagnostics,
+    MpcTraceDiagnostics,
+    PidSpTraceDiagnostics,
+    PidTraceDiagnostics,
+)
 from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
@@ -647,7 +652,6 @@ def test_frame_and_terminal_applied_intervals_preserve_boundaries_and_identity()
     assert session.applied_state.result_revision == 5
 
 
-
 def test_measured_feedback_closes_prior_interval_and_seeds_next_realized_load() -> None:
     recorder = _Recorder()
     session = _open(recorder)
@@ -709,6 +713,7 @@ def test_seed_promotion_keeps_interval_boundary_and_adopts_first_frame_identity(
         6,
         OutputSource.CONTROLLER,
     )
+
 
 def test_reset_preserves_pending_fifo_and_clears_session_local_state() -> None:
     recorder = _Recorder()

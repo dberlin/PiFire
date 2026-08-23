@@ -73,6 +73,7 @@ def test_unsupported_command_pushes_error_without_dispatch():
     assert "shutdown" in result["message"]
     assert "not supported" in result["message"]
 
+
 def test_clear_history_command_uses_control_loop_handler_before_hardware_dispatch():
     grill_platform = MagicMock()
     ctx = _ctx(grill_platform)
@@ -81,11 +82,14 @@ def test_clear_history_command_uses_control_loop_handler_before_hardware_dispatc
 
     process_system_commands(
         ctx,
-        clear_history=lambda: calls.append("clear") or {
-            "result": "OK",
-            "message": "History cleared.",
-            "data": {},
-        },
+        clear_history=lambda: (
+            calls.append("clear")
+            or {
+                "result": "OK",
+                "message": "History cleared.",
+                "data": {},
+            }
+        ),
     )
 
     assert calls == ["clear"]
@@ -116,7 +120,6 @@ def test_clear_history_command_without_active_mode_finalizes_immediately():
     assert ctx.store.system_output().drain()[0]["result"] == "OK"
     assert post_command_control == ctx.store.read_control()
     assert post_command_control["cook_id"] is None
-
 
 
 def test_supported_cmds_fetched_once_for_multiple_queued_commands():

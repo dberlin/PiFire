@@ -57,10 +57,13 @@ from controller.runtime.modes.hold import HoldMode
 from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
 from tests.fakes.runner import FakeControllerRunner
 from controller.update_mpc import load_trace_samples
+
+
 def _runtime(mode) -> FramedPulseRuntime:
     runtime = mode._framed_pulse
     assert isinstance(runtime, FramedPulseRuntime)
     return runtime
+
 
 def _open_trace_session(mode, now):
     trace = mode._control_trace
@@ -74,10 +77,12 @@ def _open_trace_session(mode, now):
         learning.bind_generation(mode._runner_configuration_revision)
     return identity
 
+
 def _trace(mode):
     trace = mode._control_trace
     assert trace is not None
     return trace
+
 
 def _learning(mode):
     learning = mode._hold_learning
@@ -116,7 +121,6 @@ def _record_trace_update(mode, result, *, now, controller_interval):
     )
 
 
-
 def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
     result = _runtime(mode).advance(
         now,
@@ -132,6 +136,8 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
             mode.grill.auger_off()
     mode._dispatch_framed_result(result, record_terminal_trace=False)
     return result.decision
+
+
 def _observe_runtime(mode, frame, *, ptemp, inhibit, role_generation=None):
     runtime = _runtime(mode)
     controller = mode.state.controller
@@ -144,11 +150,7 @@ def _observe_runtime(mode, frame, *, ptemp, inhibit, role_generation=None):
     )
     controller.pulse_requested_duty = controller.pulse_frame_requested_auger_duty
     controller.pulse_maximum_duty = controller.pulse_frame_maximum_duty
-    runtime.latch(
-        mode._model_role_generation(mode._runner_status())
-        if role_generation is None
-        else role_generation
-    )
+    runtime.latch(mode._model_role_generation(mode._runner_status()) if role_generation is None else role_generation)
     completion = runtime.complete_frame(
         frame,
         sample=mode._framed_sample(ptemp),
@@ -163,9 +165,6 @@ def _observe_runtime(mode, frame, *, ptemp, inhibit, role_generation=None):
     elif completion.missing_observation_reason is not None:
         mode._trace_missing_frame_observation(completion)
     return completion
-
-
-
 
 
 class _Recorder:
@@ -328,6 +327,7 @@ def _install_recorder(monkeypatch):
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: recorder)
     return recorder
 
+
 def test_trace_identity_uses_durable_control_cook_id_not_metric_row_id(
     hold_cycle,
     monkeypatch,
@@ -426,12 +426,12 @@ def test_inactive_reconfigure_records_controller_fallback(
         for record in recorder.records
         if (
             record.event_kind is TraceEventKind.SAFETY_EVENT
-            and record.payload.event
-            is SafetyEventType.CONTROLLER_FALLBACK
+            and record.payload.event is SafetyEventType.CONTROLLER_FALLBACK
         )
     ]
     assert len(fallbacks) == 1
     assert fallbacks[0].detail == "controller reconfigure fell back"
+
 
 def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revision(hold_cycle, monkeypatch):
     recorder = _install_recorder(monkeypatch)
@@ -1086,7 +1086,6 @@ def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monke
         period=1.0,
         commands_fan=True,
         actuation_mode=ActuationMode.FRAMED_PULSE,
-
     ).script([first, second])
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
@@ -1113,6 +1112,8 @@ def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monke
     ]
     assert len(terminal) == 1
     assert terminal[0].producing_calibration_revision == 0
+
+
 def test_first_safety_callback_opens_and_binds_the_trace_session(
     hold_cycle,
     monkeypatch,
@@ -1131,11 +1132,7 @@ def test_first_safety_callback_opens_and_binds_the_trace_session(
     mode._on_safety_event("temperature_guard", 1.0)
 
     assert trace.identity is not None
-    safety = [
-        record.payload
-        for record in recorder.records
-        if record.event_kind is TraceEventKind.SAFETY_EVENT
-    ]
+    safety = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.SAFETY_EVENT]
     assert [payload.event for payload in safety] == [
         SafetyEventType.TEMPERATURE_GUARD,
         SafetyEventType.SCHEDULER_RESET,
@@ -1589,12 +1586,12 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
     intervals = [
         record.payload
         for record in recorder.records
-        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
-        and isinstance(record.payload, AppliedOutputPayload)
-
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and isinstance(record.payload, AppliedOutputPayload)
     ]
     assert (intervals[-1].interval_start_ms, intervals[-1].interval_end_ms) == (2_000, 4_000)
     assert intervals[-1].result_revision == 3
+
+
 def test_unknown_selected_controller_keeps_control_live_without_trace_identity(
     hold_cycle,
 ) -> None:
@@ -1609,10 +1606,7 @@ def test_unknown_selected_controller_keeps_control_live_without_trace_identity(
     runner.reconfigure({}, {})
     mode.teardown(200.0)
 
-    assert any(
-        applied.source is OutputSource.CONTROLLER
-        for applied in runner.applied
-    )
+    assert any(applied.source is OutputSource.CONTROLLER for applied in runner.applied)
     assert _trace(mode).identity is None
     assert mode.grill.get_output_status()["auger"] is False
 
@@ -1703,24 +1697,28 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         controller.pulse_frame_combustion_load = 0.3
         controller.pulse_frame_requested_auger_duty = 0.3
         controller.pulse_frame_maximum_duty = 0.5
-        _observe_runtime(mode, PulseFrameResult(
-            nominal_start_s=0.0,
-            nominal_end_s=20.0,
-            ended_at_s=20.0,
-            complete=True,
-            skipped=False,
-            latched_request=0.3,
-            credit_before_s=0.0,
-            credit_after_s=0.0,
-            scheduled_on_s=6.0,
-            delivered_on_s=6.0,
-            observed_transition_count=2,
-            actual_start_on=False,
-            actual_end_on=False,
-            reset_reason=None,
-        ),
-        ptemp=212.0,
-        inhibit=InhibitReason.NONE, role_generation=0)
+        _observe_runtime(
+            mode,
+            PulseFrameResult(
+                nominal_start_s=0.0,
+                nominal_end_s=20.0,
+                ended_at_s=20.0,
+                complete=True,
+                skipped=False,
+                latched_request=0.3,
+                credit_before_s=0.0,
+                credit_after_s=0.0,
+                scheduled_on_s=6.0,
+                delivered_on_s=6.0,
+                observed_transition_count=2,
+                actual_start_on=False,
+                actual_end_on=False,
+                reset_reason=None,
+            ),
+            ptemp=212.0,
+            inhibit=InhibitReason.NONE,
+            role_generation=0,
+        )
         gate.release.set()
         assert core.observation_started.wait(1.0)
         old_session_id = _identity(mode).session_id
@@ -1731,24 +1729,28 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         assert runner.reconfigure({}, {}) == "Active"
         with runner._lock:
             runner._configuration_revision = 1
-        _observe_runtime(mode, PulseFrameResult(
-            nominal_start_s=20.0,
-            nominal_end_s=40.0,
-            ended_at_s=40.0,
-            complete=True,
-            skipped=False,
-            latched_request=0.3,
-            credit_before_s=0.0,
-            credit_after_s=0.0,
-            scheduled_on_s=6.0,
-            delivered_on_s=6.0,
-            observed_transition_count=2,
-            actual_start_on=False,
-            actual_end_on=False,
-            reset_reason=None,
-        ),
-        ptemp=212.0,
-        inhibit=InhibitReason.NONE, role_generation=1)
+        _observe_runtime(
+            mode,
+            PulseFrameResult(
+                nominal_start_s=20.0,
+                nominal_end_s=40.0,
+                ended_at_s=40.0,
+                complete=True,
+                skipped=False,
+                latched_request=0.3,
+                credit_before_s=0.0,
+                credit_after_s=0.0,
+                scheduled_on_s=6.0,
+                delivered_on_s=6.0,
+                observed_transition_count=2,
+                actual_start_on=False,
+                actual_end_on=False,
+                reset_reason=None,
+            ),
+            ptemp=212.0,
+            inhibit=InhibitReason.NONE,
+            role_generation=1,
+        )
         with runner._lock:
             runner._configuration_revision = 0
 
@@ -1964,12 +1966,8 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
         second_outcome["evaluation_payload"], decision_id="generation-0-evaluation-2"
     )
     second_outcome["lifecycle"] = {**second_outcome["lifecycle"], "detail": "promotion-2"}
-    runner.append_observation_outcome(
-        ObservationOutcomeEnvelope(1, 0, first, first_outcome)
-    )
-    runner.append_observation_outcome(
-        ObservationOutcomeEnvelope(2, 0, second, second_outcome)
-    )
+    runner.append_observation_outcome(ObservationOutcomeEnvelope(1, 0, first, first_outcome))
+    runner.append_observation_outcome(ObservationOutcomeEnvelope(2, 0, second, second_outcome))
     original = _trace(mode).record
     failed = False
 
@@ -2007,9 +2005,7 @@ def test_learning_outcomes_hold_global_fifo_through_a_lifecycle_retry(hold_cycle
 
 def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeypatch):
     recorder, runner, mode, first, second = _two_pending_learning_outcomes(hold_cycle, monkeypatch)
-    runner.append_observation_outcome(
-        ObservationOutcomeEnvelope(2, 0, second, _promotion_outcome(frame_end_ms=40_000))
-    )
+    runner.append_observation_outcome(ObservationOutcomeEnvelope(2, 0, second, _promotion_outcome(frame_end_ms=40_000)))
 
     _learning(mode).reconcile_outcomes(22.0)
 
@@ -2019,9 +2015,7 @@ def test_learning_outcomes_wait_for_an_earlier_unready_frame(hold_cycle, monkeyp
         if record.event_kind
         in {TraceEventKind.MODEL_EVALUATION, TraceEventKind.MODEL_EVENT, TraceEventKind.MODEL_OBSERVATION}
     ]
-    runner.append_observation_outcome(
-        ObservationOutcomeEnvelope(1, 0, first, _promotion_outcome(frame_end_ms=20_000))
-    )
+    runner.append_observation_outcome(ObservationOutcomeEnvelope(1, 0, first, _promotion_outcome(frame_end_ms=20_000)))
     _learning(mode).reconcile_outcomes(23.0)
 
     assert [
@@ -2111,11 +2105,7 @@ def test_runner_configuration_adoption_retires_pending_trace_retry_from_old_sess
     )
     _learning(mode).reconcile_outcomes(2.0)
 
-    assert not [
-        record
-        for record in recorder.records
-        if isinstance(record.payload, ModelObservationPayload)
-    ]
+    assert not [record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
 
 
 def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(
@@ -2151,13 +2141,7 @@ def test_persistent_trace_retry_retention_is_bounded_to_pending_capacity(
     trace.record = original
     learning.reconcile_outcomes(2.0)
 
-    assert len(
-        [
-            record
-            for record in recorder.records
-            if isinstance(record.payload, ModelObservationPayload)
-        ]
-    ) == 60
+    assert len([record for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]) == 60
 
 
 def test_hold_retires_self_evicted_submission_immediately(
@@ -2204,14 +2188,8 @@ def test_hold_retires_self_evicted_submission_immediately(
     )
     _learning(mode).submit_completed_observation((0, 20), observation)
 
-    gaps = [
-        record.payload
-        for record in recorder.records
-        if isinstance(record.payload, RecorderGapPayload)
-    ]
-    assert [(gap.reason, gap.observation_sequence) for gap in gaps] == [
-        ("runner-observation-evicted", 0)
-    ]
+    gaps = [record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload)]
+    assert [(gap.reason, gap.observation_sequence) for gap in gaps] == [("runner-observation-evicted", 0)]
 
 
 def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_recovery_gap(hold_cycle, monkeypatch):
@@ -2299,9 +2277,7 @@ def test_failed_async_outcomes_remain_as_ordered_rejected_observations(
     first, second = _learning_observation(0.0), _learning_observation(20.0)
     _learning(mode).submit_completed_observation((0, 20), first)
     _learning(mode).submit_completed_observation((20, 40), second)
-    runner.append_observation_outcome(
-        ObservationOutcomeEnvelope(1, generation, first, outcome)
-    )
+    runner.append_observation_outcome(ObservationOutcomeEnvelope(1, generation, first, outcome))
     runner.append_observation_outcome(
         ObservationOutcomeEnvelope(
             2,
@@ -2466,9 +2442,7 @@ def test_partial_terminal_frame_with_malformed_outcome_becomes_a_gap(hold_cycle,
         observation_sequence=1,
     )
     _learning(mode).submit_completed_observation((0, 1_000), observation)
-    runner.append_observation_outcome(
-        ObservationOutcomeEnvelope(1, 0, observation, {})
-    )
+    runner.append_observation_outcome(ObservationOutcomeEnvelope(1, 0, observation, {}))
 
     _learning(mode).reconcile_outcomes(1.0)
     gap = next(record.payload for record in recorder.records if isinstance(record.payload, RecorderGapPayload))

@@ -65,11 +65,7 @@ class ControllerLearningDiagnostics:
     state: Mapping[str, JsonValue]
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.schema_version, bool)
-            or not isinstance(self.schema_version, int)
-            or self.schema_version < 1
-        ):
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version < 1:
             raise ValueError("learning diagnostics schema_version must be positive")
         object.__setattr__(self, "state", _freeze_learning_json(dict(self.state)))
 
@@ -230,7 +226,6 @@ class ControllerBase:
     def get_learning_diagnostics(self) -> ControllerLearningDiagnostics | None:
         """Return an owned learning snapshot when this controller learns."""
         return None
-
 
     def trace_diagnostics(self) -> ControllerTraceDiagnostics | None:
         """Immutable typed diagnostics from the most recent completed update."""

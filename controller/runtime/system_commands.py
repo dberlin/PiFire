@@ -7,6 +7,7 @@ control process: every work cycle (controller.runtime.modes.base.ControlMode.run
 and the outer control loop (controller.runtime.controller.Controller.tick). A
 neutral home avoids an import cycle between those.
 """
+
 from common.persistence.history import CLEAR_HISTORY_COMMAND
 
 

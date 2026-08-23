@@ -14,9 +14,7 @@ if TYPE_CHECKING:
     from common.model_evidence import EvidenceKind, ModelEvidenceRecord
 
 JsonScalar: TypeAlias = str | int | float | bool | None
-JsonValue: TypeAlias = (
-    JsonScalar | Mapping[str, "JsonValue"] | Sequence["JsonValue"]
-)
+JsonValue: TypeAlias = JsonScalar | Mapping[str, "JsonValue"] | Sequence["JsonValue"]
 JsonDocument: TypeAlias = dict[str, JsonValue]
 JsonMapping: TypeAlias = Mapping[str, JsonValue]
 QueueValue: TypeAlias = JsonValue
@@ -67,9 +65,7 @@ class ControlPersistence(Protocol):
         pending_writes: Sequence[JsonMapping] | None = None,
     ) -> int: ...
 
-    def queue_mpc_calibration_command(
-        self, delta: JsonMapping, command: JsonMapping, origin: str
-    ) -> bool: ...
+    def queue_mpc_calibration_command(self, delta: JsonMapping, command: JsonMapping, origin: str) -> bool: ...
 
 
 class RuntimePersistence(Protocol):
@@ -111,9 +107,7 @@ class HistoryPersistence(Protocol):
 
     def flush_history(self) -> None: ...
 
-    def write_history(
-        self, in_data: JsonMapping, maxsizelines: int = 28_800, ext_data: bool = False
-    ) -> None: ...
+    def write_history(self, in_data: JsonMapping, maxsizelines: int = 28_800, ext_data: bool = False) -> None: ...
 
     def read_metrics(self) -> JsonDocument: ...
 
@@ -184,9 +178,7 @@ class ModelEvidencePersistence(Protocol):
 
     def reset_model_evidence(self, *, database_path: str | PathLike[str] | None = None) -> None: ...
 
-    def invalidate_model_evidence_schema(
-        self, *, database_path: str | PathLike[str] | None = None
-    ) -> None: ...
+    def invalidate_model_evidence_schema(self, *, database_path: str | PathLike[str] | None = None) -> None: ...
 
 
 class _ControllerControlPersistence(Protocol):
@@ -267,4 +259,3 @@ class ControllerStore(
     def system_output(self) -> PersistentQueue: ...
 
     def display_commands(self) -> PersistentQueue: ...
-

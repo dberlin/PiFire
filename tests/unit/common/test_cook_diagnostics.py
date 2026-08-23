@@ -49,7 +49,10 @@ class _CommonUpdate(TypedDict):
     applied_fan_duty: float | None
     output_source: OutputSource
     inhibit_reason: InhibitReason
+
+
 _CAPTURED_AT_MS = 1_787_490_000_000
+
 
 def _session(
     controller: ControllerType,
@@ -106,6 +109,7 @@ def _common_update() -> _CommonUpdate:
         "inhibit_reason": InhibitReason.NONE,
     }
 
+
 def _pid_sp_update(*, schema_version: _TraceSchemaVersion, session_id: str) -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=200,
@@ -145,6 +149,7 @@ def _pid_sp_update(*, schema_version: _TraceSchemaVersion, session_id: str) -> C
             branch=ControllerBranch.NONE,
         ),
     )
+
 
 def _mpc_update(*, schema_version: _TraceSchemaVersion, session_id: str) -> ControlTraceRecord:
     return ControlTraceRecord(
@@ -324,9 +329,7 @@ def test_report_failure_isolated_from_other_controller_report() -> None:
     )
 
     assert [report.controller for report in bundle.reports] == ["pid_sp"]
-    assert [(error.source, error.code) for error in bundle.capture_errors] == [
-        ("report:mpc", "report-read-failed")
-    ]
+    assert [(error.source, error.code) for error in bundle.capture_errors] == [("report:mpc", "report-read-failed")]
     assert warnings == ["report:mpc: report unavailable"]
 
 
@@ -358,9 +361,7 @@ def test_null_cook_identity_avoids_all_source_calls() -> None:
     assert bundle.controllers == ()
     assert bundle.control_trace.records == ()
     assert bundle.model_evidence.records == ()
-    assert [(error.source, error.code) for error in bundle.capture_errors] == [
-        ("collector", "cook-identity-invalid")
-    ]
+    assert [(error.source, error.code) for error in bundle.capture_errors] == [("collector", "cook-identity-invalid")]
 
 
 def test_missing_session_context_retains_trace_without_requesting_reports() -> None:
@@ -613,9 +614,7 @@ def test_wrong_report_type_isolated_without_losing_sources_or_later_reports() ->
     assert bundle.model_evidence.records == (evidence,)
     assert bundle.controllers == ("pid_sp", "mpc")
     assert [report.controller for report in bundle.reports] == ["mpc"]
-    assert [(error.source, error.code) for error in bundle.capture_errors] == [
-        ("report:pid_sp", "report-type-invalid")
-    ]
+    assert [(error.source, error.code) for error in bundle.capture_errors] == [("report:pid_sp", "report-type-invalid")]
     assert warnings == ["report:pid_sp: provider returned unsupported report type: object"]
 
 

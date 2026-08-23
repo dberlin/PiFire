@@ -165,6 +165,7 @@ _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=Tru
 _OBSERVATION_FRAME_SECONDS = 20.0
 _FRAME_QUANTIZATION_S = 0.001
 
+
 def _validated_json_value(value: object) -> JsonValue:
     if value is None:
         return None

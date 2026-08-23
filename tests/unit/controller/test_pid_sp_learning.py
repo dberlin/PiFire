@@ -342,14 +342,20 @@ def test_pid_sp_report_contract_preserves_idle_and_structured_failure_projection
     malformed_live["identifier"]["accepted"] = True
     failed = _report(status={"learning": malformed_live}).as_dict()
 
-    assert WirePidSpLearningReport.model_validate(idle, strict=True).model_dump(
-        mode="json",
-        exclude_unset=True,
-    ) == idle
-    assert WirePidSpLearningReport.model_validate(failed, strict=True).model_dump(
-        mode="json",
-        exclude_unset=True,
-    ) == failed
+    assert (
+        WirePidSpLearningReport.model_validate(idle, strict=True).model_dump(
+            mode="json",
+            exclude_unset=True,
+        )
+        == idle
+    )
+    assert (
+        WirePidSpLearningReport.model_validate(failed, strict=True).model_dump(
+            mode="json",
+            exclude_unset=True,
+        )
+        == failed
+    )
 
 
 def test_checkpoint_and_live_predictor_models_remain_distinct_discriminated_unions():

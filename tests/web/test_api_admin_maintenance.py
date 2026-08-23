@@ -144,7 +144,6 @@ def test_inactive_clear_history_is_accepted_and_durable_while_control_is_down(cl
     assert SqliteQueue("queue_systemq").list() == [["clear_history"]]
 
 
-
 def test_clear_events_does_not_shell_out(client, tmp_path, monkeypatch):
     """Flask runs `os.system("rm ./logs/events.log")`. This surface builds the
     path server-side and calls os.remove, so no shell is ever involved."""

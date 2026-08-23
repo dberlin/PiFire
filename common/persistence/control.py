@@ -48,24 +48,19 @@ def flush_control(
 def ensure_cook_id(*, preferred: str | None = None) -> str:
     """Atomically return the live cook identity, seeding it when absent."""
     with datastore.transaction() as connection:
-        row = connection.execute(
-            "SELECT value FROM kv WHERE key='control:general'"
-        ).fetchone()
+        row = connection.execute("SELECT value FROM kv WHERE key='control:general'").fetchone()
         control = json.loads(row[0]) if row is not None else default_control()
         current = control.get("cook_id")
         if isinstance(current, str) and bool(current) and current == current.strip():
             return current
         cook_id = (
             preferred
-            if isinstance(preferred, str)
-            and bool(preferred)
-            and preferred == preferred.strip()
+            if isinstance(preferred, str) and bool(preferred) and preferred == preferred.strip()
             else generate_uuid()
         )
         control["cook_id"] = cook_id
         connection.execute(
-            "INSERT INTO kv(key,value) VALUES('control:general',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO kv(key,value) VALUES('control:general',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (json.dumps(control),),
         )
         return cook_id
@@ -116,9 +111,7 @@ def mpc_calibration_command_state(control=None, pending_writes=None):
             control = json.loads(row[0]) if row is not None else default_control()
             pending_writes = tuple(
                 json.loads(queued[0])
-                for queued in connection.execute(
-                    "SELECT value FROM queue_control_write ORDER BY id"
-                ).fetchall()
+                for queued in connection.execute("SELECT value FROM queue_control_write ORDER BY id").fetchall()
             )
     else:
         if control is None:
@@ -134,9 +127,7 @@ def mpc_calibration_command_state(control=None, pending_writes=None):
         revision = command.get("revision")
         accepted_value = accepted.get("revision") if accepted is not None else -1
         accepted_revision = (
-            accepted_value
-            if isinstance(accepted_value, int) and not isinstance(accepted_value, bool)
-            else -1
+            accepted_value if isinstance(accepted_value, int) and not isinstance(accepted_value, bool) else -1
         )
         if isinstance(revision, int) and not isinstance(revision, bool) and revision > accepted_revision:
             accepted = command
@@ -162,9 +153,7 @@ def queue_mpc_calibration_command(delta, command, origin):
         control = json.loads(row[0]) if row is not None else default_control()
         pending = tuple(
             json.loads(queued[0])
-            for queued in connection.execute(
-                "SELECT value FROM queue_control_write ORDER BY id"
-            ).fetchall()
+            for queued in connection.execute("SELECT value FROM queue_control_write ORDER BY id").fetchall()
         )
         accepted = mpc_calibration_command_state(control, pending)
         accepted_revision = accepted.get("revision") if accepted is not None else -1
@@ -186,9 +175,7 @@ def execute_control_writes():
     log = logging.getLogger("control")
     while True:
         with datastore.transaction() as connection:
-            row = connection.execute(
-                "SELECT id, value FROM queue_control_write ORDER BY id LIMIT 1"
-            ).fetchone()
+            row = connection.execute("SELECT id, value FROM queue_control_write ORDER BY id LIMIT 1").fetchone()
             if row is None:
                 return "OK"
 
@@ -200,9 +187,7 @@ def execute_control_writes():
                     raise ControlDeltaError("unversioned legacy control write")
                 validate_control_delta(command)
 
-                control_row = connection.execute(
-                    "SELECT value FROM kv WHERE key = 'control:general'"
-                ).fetchone()
+                control_row = connection.execute("SELECT value FROM kv WHERE key = 'control:general'").fetchone()
                 control = json.loads(control_row[0]) if control_row is not None else default_control()
                 apply_control_delta(control, command)
                 if control_row is None:

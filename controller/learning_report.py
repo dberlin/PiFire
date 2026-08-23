@@ -23,9 +23,7 @@ def controller_learning_report(controller_name: str) -> ControllerLearningReport
     if not isinstance(report, ControllerLearningReport):
         raise TypeError(f"{provider_module}.{_PROVIDER_FUNCTION} must return ControllerLearningReport")
     if report.controller != controller_name:
-        raise ValueError(
-            f"provider for {controller_name} returned a report for {report.controller}"
-        )
+        raise ValueError(f"provider for {controller_name} returned a report for {report.controller}")
     return ControllerLearningReport(
         controller=report.controller,
         schema_version=report.schema_version,

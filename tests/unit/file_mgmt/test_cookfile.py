@@ -92,7 +92,6 @@ def _write_zip(path, files):
             archive.writestr(name, json.dumps(obj))
 
 
-
 def test_update_json_file_data_preserves_unknown_member_bytes_and_metadata(tmp_path):
     """Replacing one JSON member must copy every other ZIP member opaquely."""
     from file_mgmt.common import update_json_file_data

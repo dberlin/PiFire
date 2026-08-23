@@ -53,8 +53,6 @@ class _DequeQueue:
         return _drain(self)
 
 
-
-
 class InMemoryStore:
     def __init__(self, control=None, settings=None, status=None, current=None, pellet_db=None, metrics=None):
         self._control = copy.deepcopy(control) if control is not None else default_control()
@@ -82,9 +80,7 @@ class InMemoryStore:
             return cook_id
         cook_id = (
             preferred
-            if isinstance(preferred, str)
-            and bool(preferred)
-            and preferred == preferred.strip()
+            if isinstance(preferred, str) and bool(preferred) and preferred == preferred.strip()
             else generate_uuid()
         )
         self._control["cook_id"] = cook_id
@@ -303,8 +299,6 @@ class InMemoryStore:
         return self._displayq
 
 
-
-
 class _SqliteQueueAdapter:
     def __init__(self, table):
         self._q = SqliteQueue(table)
@@ -388,9 +382,7 @@ class SqliteStore:
         history_persistence.flush_history()
 
     def write_history(self, in_data, maxsizelines=28800, ext_data=False):
-        history_persistence.write_history(
-            in_data, maxsizelines=maxsizelines, ext_data=ext_data
-        )
+        history_persistence.write_history(in_data, maxsizelines=maxsizelines, ext_data=ext_data)
 
     def read_metrics(self):
         return history_persistence.read_metrics()

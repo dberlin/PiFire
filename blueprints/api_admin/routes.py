@@ -212,10 +212,13 @@ def admin_factory_reset():
     notify_entries = control.pop("notify_data")
     control.pop("timer")
     control.pop("cook_id")
-    enqueue_control_delta(control_delta(
-        set_values=control,
-        ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],
-    ), origin="api-admin")
+    enqueue_control_delta(
+        control_delta(
+            set_values=control,
+            ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],
+        ),
+        origin="api-admin",
+    )
     set_server_status("restarting")
     restart_scripts()
     return jsonify(api_response("OK", None, dump_wire(FactoryResetResponse, {"action": "factory_reset"}))), 200

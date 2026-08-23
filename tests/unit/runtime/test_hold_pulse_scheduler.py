@@ -34,10 +34,13 @@ def _output(revision: int, duty: float, *, fan_duty: float | None = None) -> Con
 
 def _status(hold):
     return hold.grill.get_output_status()
+
+
 def _runtime(mode) -> FramedPulseRuntime:
     runtime = mode._framed_pulse
     assert isinstance(runtime, FramedPulseRuntime)
     return runtime
+
 
 def _trace(mode):
     trace = mode._control_trace
@@ -52,7 +55,6 @@ def _open_trace_session(mode, now):
     identity = trace.ensure_open(context, timestamp_ms=int(now * 1_000))
     assert identity is not None
     return identity
-
 
 
 def _scheduler(mode):
@@ -76,6 +78,8 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
             mode.grill.auger_off()
     mode._dispatch_framed_result(result, record_terminal_trace=False)
     return result.decision
+
+
 def _reset_runtime(mode, reason, now, inhibit, *, ptemp=None, terminal_feedback=False):
     result = _runtime(mode).reset(
         reason,
@@ -110,10 +114,6 @@ def _observe_runtime(mode, frame, *, ptemp, inhibit):
     elif completion.missing_observation_reason is not None:
         mode._trace_missing_frame_observation(completion)
     return completion
-
-
-
-
 
 
 class _OrderedTickRunner(FakeControllerRunner):
@@ -206,7 +206,6 @@ def test_result_is_adopted_once_and_latched_at_next_frame(hold_cycle):
     assert hold.state.controller.pulse_result_revision == 2
     assert hold.state.controller.pulse_requested_duty == 0.9
     assert hold.grill.get_output_status()["auger"] is True
-
 
 
 def test_lid_opening_turns_auger_off_before_dispatching_frame_progress(hold_cycle, monkeypatch):
@@ -682,6 +681,7 @@ def test_framed_observation_latches_role_generation_at_frame_start(hold_cycle):
 
     assert [(item.result_revision, item.role_generation) for item in runner.observations] == [(1, 7), (1, 8)]
 
+
 @pytest.mark.parametrize(
     ("runner_status", "expected_generation"),
     [
@@ -729,9 +729,7 @@ def test_framed_observation_normalizes_runner_role_generation_status(
     _advance_runtime(mode, 6.0, False, ptemp=212.0)
     _advance_runtime(mode, 20.0, False, ptemp=212.0)
 
-    assert [item.role_generation for item in runner.observations] == [
-        expected_generation
-    ]
+    assert [item.role_generation for item in runner.observations] == [expected_generation]
 
 
 def test_framed_observation_survives_runner_status_failure(
@@ -759,6 +757,7 @@ def test_framed_observation_survives_runner_status_failure(
     assert len(runner.observations) == 1
     assert runner.observations[0].role_generation == 0
 
+
 def test_framed_observation_survives_non_mapping_runner_status(
     hold_cycle,
     monkeypatch,
@@ -779,10 +778,6 @@ def test_framed_observation_survives_non_mapping_runner_status(
 
     assert len(runner.observations) == 1
     assert runner.observations[0].role_generation == 0
-
-
-
-
 
 
 @pytest.mark.parametrize(
@@ -820,9 +815,12 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
         "model_digest": "a" * 64,
     }
 
-    _observe_runtime(mode, _completed_frame(skipped=skipped, reset_reason=reset_reason),
-    ptemp=212.0,
-    inhibit=inhibit,)
+    _observe_runtime(
+        mode,
+        _completed_frame(skipped=skipped, reset_reason=reset_reason),
+        ptemp=212.0,
+        inhibit=inhibit,
+    )
 
     assert len(runner.observations) == 1
     learning = mode._hold_learning
@@ -858,9 +856,7 @@ def test_seed_and_zero_duration_frames_do_not_reach_the_runner(hold_cycle):
 def test_running_controller_receives_changed_setpoint_without_rebuild(
     hold_cycle,
 ) -> None:
-    runner = FakeControllerRunner(period=999).script(
-        [_output(1, 0.3)]
-    )
+    runner = FakeControllerRunner(period=999).script([_output(1, 0.3)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
@@ -870,5 +866,3 @@ def test_running_controller_receives_changed_setpoint_without_rebuild(
 
     assert runner.target == 250.0
     assert runner.configuration_revision() == 0
-
-

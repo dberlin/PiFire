@@ -320,6 +320,7 @@ def test_validate_records_accepts_pristine_typed_sessions(records):
     assert report.controller is records[0].controller
     assert report.issues == ()
 
+
 @pytest.mark.parametrize("schema_version", [2, 3, 4, 5])
 def test_validate_records_accepts_compatible_historical_sessions(schema_version):
     records = [
@@ -333,7 +334,6 @@ def test_validate_records_accepts_compatible_historical_sessions(schema_version)
 
     assert report.valid
     assert ReplayIssueCode.UNSUPPORTED_SCHEMA not in [issue.code for issue in report.issues]
-
 
 
 @pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP])

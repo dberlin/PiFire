@@ -166,8 +166,7 @@ def test_malformed_persisted_rows_are_logged_dequeued_and_do_not_mutate_live_con
     assert control_store.read_control() == opening
     assert control_store.read_pending_control_writes() == ()
     assert any(
-        "rejected queued control write" in record.getMessage()
-        and expected_error in record.getMessage()
+        "rejected queued control write" in record.getMessage() and expected_error in record.getMessage()
         for record in caplog.records
     )
 
@@ -301,18 +300,14 @@ def test_queue_calibration_command_preserves_origin_revision_and_idempotency(ds)
 
 def test_queue_calibration_command_rejects_equal_conflict_and_lower_revision(ds):
     accepted = _calibration_command(4)
-    assert control_store.queue_mpc_calibration_command(
-        _calibration_delta(accepted), accepted, "first"
-    )
+    assert control_store.queue_mpc_calibration_command(_calibration_delta(accepted), accepted, "first")
 
     for rejected in (
         _calibration_command(4, action="stop"),
         _calibration_command(3, action="pause"),
     ):
         with pytest.raises(ControlDeltaError, match="revision must exceed 4"):
-            control_store.queue_mpc_calibration_command(
-                _calibration_delta(rejected), rejected, "conflict"
-            )
+            control_store.queue_mpc_calibration_command(_calibration_delta(rejected), rejected, "conflict")
 
     assert len(control_store.read_pending_control_writes()) == 1
 
