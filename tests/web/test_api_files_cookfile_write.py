@@ -390,14 +390,23 @@ def test_recover_repair_runs_upgrade_then_fixup_assets(client, folders):
     assert resp.status_code == 200 and resp.get_json()["result"] == "OK"
 
 
-def test_recover_repair_preserves_learning_diagnostics_bytes(client, folders):
+def test_recover_repair_reconciles_assets_and_preserves_learning_diagnostics_bytes(client, folders):
     history_dir, _ = folders
-    name = write_cookfile(history_dir, "Repair-Preservation-Cook")
+    stale_asset = {"id": "missing", "filename": "missing.png", "type": "png"}
+    name = write_cookfile(
+        history_dir,
+        "Repair-Preservation-Cook",
+        assets=[stale_asset],
+    )
+    with zipfile.ZipFile(history_dir + name) as archive:
+        assert "assets/missing.png" not in archive.namelist()
+    assert read_member(history_dir, name, "assets") == [stale_asset]
     _write_diagnostics(history_dir, name)
 
     resp = client.post("/api/files/cookfiles/recover", json={"file": name, "action": "repair"})
 
     assert resp.status_code == 200
+    assert read_member(history_dir, name, "assets") == []
     assert _read_diagnostics(history_dir, name) == DIAGNOSTICS_BYTES
 
 

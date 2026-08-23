@@ -223,9 +223,6 @@ def recover(path, action):
     if status != "OK":
         return status
     if action == "repair":
-        struct, status = read_cookfile(path)
-        if status != "OK":
-            return status
         struct, status = fixup_assets(path, struct)
     return status
 

@@ -37,15 +37,34 @@ DIAGNOSTICS_BYTES = (
 
 
 def _write_diagnostics(history_dir, name):
+    info = zipfile.ZipInfo("learning_diagnostics.json", date_time=(2024, 2, 3, 4, 5, 6))
+    info.compress_type = zipfile.ZIP_STORED
+    info.comment = b"opaque-learning-member"
+    info.extra = b"\xca\xfe\x00\x00"
+    info.external_attr = 0o640 << 16
     with zipfile.ZipFile(history_dir + name, "a", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("learning_diagnostics.json", DIAGNOSTICS_BYTES)
+        archive.writestr(info, DIAGNOSTICS_BYTES)
 
 
 def _assert_diagnostics_unchanged(history_dir, name, operation):
     with zipfile.ZipFile(history_dir + name) as archive:
+        info = archive.getinfo("learning_diagnostics.json")
         assert archive.read("learning_diagnostics.json") == DIAGNOSTICS_BYTES, (
             f"{operation} rewrote learning_diagnostics.json"
         )
+        assert (
+            info.date_time,
+            info.compress_type,
+            info.comment,
+            info.extra,
+            info.external_attr,
+        ) == (
+            (2024, 2, 3, 4, 5, 6),
+            zipfile.ZIP_STORED,
+            b"opaque-learning-member",
+            b"\xca\xfe\x00\x00",
+            0o640 << 16,
+        ), f"{operation} rewrote learning_diagnostics.json ZIP metadata"
 
 
 @pytest.fixture
@@ -104,7 +123,7 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch
     assert not os.path.exists(f"/tmp/pifire/{parent_id}")
 
 
-def test_asset_thumbnail_and_delete_mutations_preserve_learning_diagnostics_bytes(client, folders):
+def test_asset_thumbnail_and_delete_mutations_preserve_learning_diagnostics_bytes_and_metadata(client, folders):
     history_dir, _ = folders
     name = write_cookfile(history_dir, "Asset-Preservation-Cook")
     _write_diagnostics(history_dir, name)
