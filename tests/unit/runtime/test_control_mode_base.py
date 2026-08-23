@@ -108,6 +108,50 @@ def test_control_mode_hook_order_one_bounded_tick():
     ]
 
 
+def test_preloop_identity_refresh_does_not_shift_mode_timer_origin():
+    ctx = _make_ctx()
+    real_now = ctx.clock.now
+    clock_reads = 0
+
+    def _now():
+        nonlocal clock_reads
+        clock_reads += 1
+        return real_now() if clock_reads == 1 else real_now() + 0.6
+
+    ctx.clock.now = _now
+    mode = _RecordingMode(ctx, WorkCycleState())
+    clock_reads_at_on_tick = []
+    on_tick = mode.on_tick
+
+    def record_on_tick(now, ptemp, current_output_status):
+        clock_reads_at_on_tick.append(clock_reads)
+        return on_tick(now, ptemp, current_output_status)
+
+    mode.on_tick = record_on_tick
+
+    mode.run()
+
+    assert mode.state.timers.start_time == 0.0
+    assert "status_fragment" in mode.calls
+    assert clock_reads_at_on_tick == [3]
+
+
+def test_loop_identity_refresh_rotates_with_supplied_loop_time():
+    mode = _make_mode()
+    mode.control["cook_id"] = "old-session"
+    refreshed = mode.control.copy()
+    refreshed["cook_id"] = "new-session"
+    rotations = []
+    mode.on_cook_identity_rotated = lambda previous, current, now: rotations.append(
+        (previous, current, now)
+    )
+
+    assert mode._refresh_cook_identity(refreshed, now=12.5) is refreshed
+    assert rotations == [("old-session", "new-session", 12.5)]
+
+
+
+
 def test_status_publishes_duty_fields():
     ctx = _make_ctx()
     real_now = ctx.clock.now

@@ -136,14 +136,18 @@ class ControlMode:
     def _valid_cook_id(cook_id) -> bool:
         return isinstance(cook_id, str) and bool(cook_id) and cook_id == cook_id.strip()
 
-    def _refresh_cook_identity(self, control, *, now, preferred=None):
+    def _refresh_cook_identity(self, control, *, now=None, preferred=None):
         previous_cook_id = self.control.get("cook_id") if isinstance(self.control, dict) else None
         cook_id = control.get("cook_id")
         if not self._valid_cook_id(cook_id):
             cook_id = self.ctx.store.ensure_cook_id(preferred=preferred)
             control["cook_id"] = cook_id
         self.control = control
-        if self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
+        if (
+            now is not None
+            and self._valid_cook_id(previous_cook_id)
+            and previous_cook_id != cook_id
+        ):
             self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
         return control
 
@@ -688,11 +692,7 @@ class ControlMode:
             if retained_metrics and retained_metrics[0].get("mode") == Mode.PRIME
             else None
         )
-        control = self._refresh_cook_identity(
-            control,
-            now=ctx.clock.now(),
-            preferred=retained_id,
-        )
+        control = self._refresh_cook_identity(control, preferred=retained_id)
 
         self._stamp_mode_metric(control, pelletdb)
 
