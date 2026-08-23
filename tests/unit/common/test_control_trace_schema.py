@@ -23,6 +23,7 @@ from common.control_trace import (
     GreyFitLifecyclePayload,
     GreyLearningFailurePayload,
     CompletedOriginPayload,
+    LearningSnapshotPayload,
     ControlTraceRecord,
     ControllerBranch,
     MpcFailureState,
@@ -507,6 +508,13 @@ def _pid_update_payload() -> PidUpdatePayload:
     raise AssertionError("representative PID update payload is missing")
 
 
+def _pid_sp_update_payload() -> PidSpUpdatePayload:
+    for _, _, payload in _payload_cases():
+        if isinstance(payload, PidSpUpdatePayload):
+            return payload
+    raise AssertionError("representative PID-SP update payload is missing")
+
+
 def _mpc_update_payload() -> MpcUpdatePayload:
     for _, _, payload in _payload_cases():
         if isinstance(payload, MpcUpdatePayload):
@@ -534,6 +542,94 @@ def test_every_payload_round_trips_through_pydantic_json(controller, event_kind,
     assert restored.payload.__class__.__slots__
     with pytest.raises(FrozenInstanceError):
         restored.payload.payload_type = "not-allowed"
+
+
+def test_pid_sp_update_round_trips_owned_learning_snapshot() -> None:
+    payload = replace(
+        _pid_sp_update_payload(),
+        learning=LearningSnapshotPayload(
+            schema_version=1,
+            state={
+                "status": "collecting",
+                "gates": [{"name": "accepted_samples", "passed": False}],
+            },
+        ),
+    )
+    record = ControlTraceRecord(
+        ts_ms=1_000,
+        session_id="session-learning",
+        cook_id="cook-learning",
+        controller=ControllerType.PID_SP,
+        event_kind=TraceEventKind.CONTROL_UPDATE,
+        payload=payload,
+    )
+
+    restored = ControlTraceRecord.model_validate_json(record.model_dump_json())
+
+    assert restored.schema_version == 6
+    assert isinstance(restored.payload, PidSpUpdatePayload)
+    assert restored.payload.learning is not None
+    assert restored.payload.learning.state == {
+        "status": "collecting",
+        "gates": [{"name": "accepted_samples", "passed": False}],
+    }
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"nested": [{"value": nan}]},
+        {"nested": {"value": inf}},
+        {"nested": {1: "non-string key"}},
+        {"nested": [object()]},
+    ],
+    ids=("nan", "infinity", "non-string-key", "unsupported-object"),
+)
+def test_learning_snapshot_rejects_values_that_are_not_strict_json(state) -> None:
+    with pytest.raises(ValidationError):
+        LearningSnapshotPayload(schema_version=1, state=state)
+
+
+def test_learning_snapshot_requires_a_positive_schema_version() -> None:
+    with pytest.raises(ValidationError):
+        LearningSnapshotPayload(schema_version=0, state={})
+
+
+def test_pid_update_without_learning_round_trips_as_none() -> None:
+    record = ControlTraceRecord(
+        ts_ms=1_000,
+        session_id="session-pid",
+        cook_id=None,
+        controller=ControllerType.PID,
+        event_kind=TraceEventKind.CONTROL_UPDATE,
+        payload=replace(_pid_update_payload(), learning=None),
+    )
+
+    restored = ControlTraceRecord.model_validate_json(record.model_dump_json())
+
+    assert isinstance(restored.payload, PidUpdatePayload)
+    assert restored.payload.learning is None
+
+
+@pytest.mark.parametrize("schema_version", [2, 3, 4, 5])
+def test_compatible_historical_control_updates_without_learning_remain_readable(schema_version) -> None:
+    record = ControlTraceRecord(
+        ts_ms=1_000,
+        session_id="historical-session",
+        cook_id=None,
+        controller=ControllerType.PID,
+        event_kind=TraceEventKind.CONTROL_UPDATE,
+        payload=_pid_update_payload(),
+    )
+    raw = record.model_dump(mode="json")
+    raw["schema_version"] = schema_version
+    raw["payload"].pop("learning", None)
+
+    restored = ControlTraceRecord.model_validate_json(json.dumps(raw))
+
+    assert restored.schema_version == schema_version
+    assert isinstance(restored.payload, PidUpdatePayload)
+    assert restored.payload.learning is None
 
 
 def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins() -> None:
@@ -1070,7 +1166,7 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
 
 
 def test_schema_four_has_one_canonical_model_evidence_contract():
-    assert TRACE_SCHEMA_VERSION == 5
+    assert TRACE_SCHEMA_VERSION == 6
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
     assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
     assert "FAN_ASSIST" not in OutputSource.__members__

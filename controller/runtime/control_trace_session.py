@@ -18,6 +18,7 @@ from common.control_trace import (
     FramedPulseFramePayload,
     InhibitReason,
     ModelEventPayload,
+    LearningSnapshotPayload,
     ModelEventType,
     MpcUpdatePayload,
     PidSpUpdatePayload,
@@ -401,6 +402,14 @@ class ControlTraceSession:
             return True
         if diagnostics is None or result.completed_wall_time is None or result.solve_end_monotonic is None:
             return False
+        learning = (
+            None
+            if result.learning is None
+            else LearningSnapshotPayload(
+                schema_version=result.learning.schema_version,
+                state=result.learning.as_json(),
+            )
+        )
 
         wall_ms = int(result.completed_wall_time * 1_000)
         monotonic_ms = int(result.solve_end_monotonic * 1_000)
@@ -455,6 +464,7 @@ class ControlTraceSession:
                 applied_fan_duty=context.prior_fan_duty,
                 output_source=source,
                 inhibit_reason=inhibit,
+                learning=learning,
                 error=diagnostics.error,
                 proportional_term=diagnostics.proportional_term,
                 integral_term=diagnostics.integral_term,
@@ -502,6 +512,7 @@ class ControlTraceSession:
                 applied_fan_duty=context.prior_fan_duty,
                 output_source=source,
                 inhibit_reason=inhibit,
+                learning=learning,
                 error=diagnostics.error,
                 proportional_term=diagnostics.proportional_term,
                 integral_term=diagnostics.integral_term,
@@ -537,6 +548,7 @@ class ControlTraceSession:
                 applied_fan_duty=context.prior_fan_duty,
                 output_source=source,
                 inhibit_reason=inhibit,
+                learning=learning,
                 state_names=diagnostics.state_names,
                 state_values=diagnostics.state_values,
                 disturbance_estimate=diagnostics.disturbance_estimate,

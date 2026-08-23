@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass as std_dataclass
+from dataclasses import dataclass as std_dataclass, field as std_field
 from enum import StrEnum
 from typing import Annotated, ClassVar, Literal, TypeAlias
 
@@ -19,6 +19,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    field_validator,
     StringConstraints,
     TypeAdapter,
     ValidationError,
@@ -28,7 +29,8 @@ from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
 
-TRACE_SCHEMA_VERSION = 5
+COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6)
+TRACE_SCHEMA_VERSION = 6
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
@@ -39,6 +41,7 @@ NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
 PositiveInt: TypeAlias = Annotated[int, Field(gt=0, strict=True)]
 NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 Digest: TypeAlias = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
+type JsonValue = str | int | float | bool | None | dict[str, JsonValue] | list[JsonValue]
 
 
 class ControllerType(StrEnum):
@@ -162,6 +165,40 @@ _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=Tru
 _OBSERVATION_FRAME_SECONDS = 20.0
 _FRAME_QUANTIZATION_S = 0.001
 
+def _validated_json_value(value: object) -> JsonValue:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("learning snapshot numbers must be finite")
+        return value
+    if type(value) is list:
+        return [_validated_json_value(item) for item in value]
+    if type(value) is dict:
+        if any(type(key) is not str for key in value):
+            raise ValueError("learning snapshot object keys must be strings")
+        return {key: _validated_json_value(item) for key, item in value.items()}
+    raise ValueError("learning snapshot state must contain only JSON values")
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class LearningSnapshotPayload:
+    schema_version: PositiveInt
+    state: dict[str, JsonValue]
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def validate_state(cls, value: object) -> object:
+        if type(value) is not dict:
+            raise ValueError("learning snapshot state must be a JSON object")
+        return _validated_json_value(value)
+
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class TraceSetting:
@@ -220,6 +257,7 @@ class _ControlUpdatePayload:
     applied_fan_duty: FiniteFloat | None
     output_source: OutputSource
     inhibit_reason: InhibitReason
+    learning: LearningSnapshotPayload | None = std_field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -894,7 +932,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2, 3, 4, 5] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3, 4, 5, 6] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -906,7 +944,7 @@ class ControlTraceRecord(BaseModel):
             self.payload, (CalibrationTracePayload, ModelObservationPayload, ModelEvaluationPayload)
         ):
             raise ValueError(f"trace schema version {self.schema_version} cannot contain canonical learning evidence")
-        if self.schema_version < TRACE_SCHEMA_VERSION and isinstance(
+        if self.schema_version < 5 and isinstance(
             self.payload,
             (
                 GreyFitLifecyclePayload,
@@ -916,6 +954,12 @@ class ControlTraceRecord(BaseModel):
             ),
         ):
             raise ValueError(f"trace schema version {self.schema_version} cannot contain grey lifecycle evidence")
+        if (
+            self.schema_version < 6
+            and isinstance(self.payload, (PidUpdatePayload, PidSpUpdatePayload, MpcUpdatePayload))
+            and self.payload.learning is not None
+        ):
+            raise ValueError(f"trace schema version {self.schema_version} cannot contain learning snapshots")
         if (
             self.schema_version == 2
             and isinstance(self.payload, ModelEventPayload)

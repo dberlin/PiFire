@@ -9,7 +9,12 @@ from pathlib import Path
 import sqlite3
 
 from common import datastore
-from common.control_trace import TRACE_SCHEMA_VERSION, ControlTraceDbRow, ControlTraceRecord
+from common.control_trace import (
+    COMPATIBLE_TRACE_SCHEMA_VERSIONS,
+    TRACE_SCHEMA_VERSION,
+    ControlTraceDbRow,
+    ControlTraceRecord,
+)
 
 
 CONTROL_TRACE_MAX_LIMIT = 10_000
@@ -103,8 +108,12 @@ def _read_control_trace_records(
     with _control_trace_connection(database_path) as connection:
         rows = connection.execute(
             f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace "
-            f"WHERE {where_column}=? AND schema_version=? ORDER BY id",
-            (identifier, TRACE_SCHEMA_VERSION),
+            f"WHERE {where_column}=? AND schema_version BETWEEN ? AND ? ORDER BY id",
+            (
+                identifier,
+                COMPATIBLE_TRACE_SCHEMA_VERSIONS[0],
+                COMPATIBLE_TRACE_SCHEMA_VERSIONS[-1],
+            ),
         ).fetchall()
     return _control_trace_records(rows)
 
@@ -168,8 +177,14 @@ def read_control_trace_range(start_ms: int, end_ms: int, *, limit: int) -> list[
         datastore.connection()
         .execute(
             f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace "
-            "WHERE ts_ms >= ? AND ts_ms <= ? AND schema_version=? ORDER BY id LIMIT ?",
-            (start_ms, end_ms, TRACE_SCHEMA_VERSION, limit),
+            "WHERE ts_ms >= ? AND ts_ms <= ? AND schema_version BETWEEN ? AND ? ORDER BY id LIMIT ?",
+            (
+                start_ms,
+                end_ms,
+                COMPATIBLE_TRACE_SCHEMA_VERSIONS[0],
+                COMPATIBLE_TRACE_SCHEMA_VERSIONS[-1],
+                limit,
+            ),
         )
         .fetchall()
     )
@@ -191,16 +206,22 @@ def prune_control_trace(before_ms: int, *, limit: int) -> int:
 
 
 def prune_incompatible_control_trace(before_schema_version: int, *, limit: int) -> int:
-    """Delete at most ``limit`` rows older than the supplied trace schema."""
+    """Delete at most ``limit`` older rows outside the compatible schema range."""
     if isinstance(before_schema_version, bool) or not isinstance(before_schema_version, int):
         raise ValueError("before_schema_version must be an integer")
     limit = _require_control_trace_limit(limit)
     with datastore.transaction() as connection:
         cursor = connection.execute(
             "DELETE FROM control_trace WHERE id IN ("
-            "SELECT id FROM control_trace WHERE schema_version < ? ORDER BY id LIMIT ?"
+            "SELECT id FROM control_trace "
+            "WHERE schema_version < ? AND schema_version NOT BETWEEN ? AND ? ORDER BY id LIMIT ?"
             ")",
-            (before_schema_version, limit),
+            (
+                before_schema_version,
+                COMPATIBLE_TRACE_SCHEMA_VERSIONS[0],
+                COMPATIBLE_TRACE_SCHEMA_VERSIONS[-1],
+                limit,
+            ),
         )
     return cursor.rowcount
 

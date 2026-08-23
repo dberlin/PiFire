@@ -8,8 +8,12 @@ from pydantic import ValidationError
 from common import datastore
 from common.control_trace import (
     TRACE_SCHEMA_VERSION,
+    ActuationMode,
     ControlTraceRecord,
     ControllerType,
+    InhibitReason,
+    LearningSnapshotPayload,
+    PidUpdatePayload,
     SessionPayload,
     TraceEventKind,
     TraceSetting,
@@ -24,6 +28,7 @@ from common.persistence.control_trace import (
     read_control_trace_range,
     read_control_trace_session,
 )
+from controller.applied_output import OutputSource
 from controller.runtime.control_trace_recorder import RETENTION_PERIOD_MS, ControlTraceRecorder
 
 
@@ -53,6 +58,54 @@ def _record(ts_ms: int, session_id: str, cook_id: str | None = None) -> ControlT
         controller=ControllerType.PID,
         event_kind=TraceEventKind.SESSION,
         payload=payload,
+    )
+
+
+def _learning_record(ts_ms: int, session_id: str, cook_id: str) -> ControlTraceRecord:
+    return ControlTraceRecord(
+        ts_ms=ts_ms,
+        session_id=session_id,
+        cook_id=cook_id,
+        controller=ControllerType.PID,
+        event_kind=TraceEventKind.CONTROL_UPDATE,
+        payload=PidUpdatePayload(
+            monotonic_ms=ts_ms,
+            wall_ms=ts_ms,
+            result_revision=3,
+            result_age_ms=0,
+            control_period_seconds=2.0,
+            observed_dt_seconds=2.0,
+            setpoint=225.0,
+            measured_temperature=220.0,
+            raw_output=0.4,
+            requested_output=0.4,
+            actuation_mode=ActuationMode.FRAMED_PULSE,
+            prior_requested_auger_duty=0.3,
+            prior_realized_auger_duty=0.3,
+            requested_fan_duty=None,
+            applied_fan_duty=None,
+            output_source=OutputSource.CONTROLLER,
+            inhibit_reason=InhibitReason.NONE,
+            learning=LearningSnapshotPayload(
+                schema_version=1,
+                state={"status": "collecting", "accepted_samples": 12},
+            ),
+            error=5.0,
+            proportional_term=0.2,
+            integral_term=0.1,
+            derivative_term=0.0,
+            integral_accumulator=0.1,
+            integral_clamped=False,
+            derivative_input=0.0,
+            derivative_state=0.0,
+            proportional_band=100.0,
+            kp=1.0,
+            ki=0.1,
+            kd=0.0,
+            center=225.0,
+            previous_temperature=219.0,
+            previous_update_ms=ts_ms - 2_000,
+        ),
     )
 
 
@@ -122,6 +175,34 @@ def test_batch_append_and_typed_reads_preserve_insertion_order(ds):
     assert all(isinstance(record, ControlTraceRecord) for record in range_records)
     assert delete_control_trace_session("session-a") == 2
     assert read_control_trace_session("session-a") == []
+
+
+def test_schema_six_store_round_trip_retains_learning_state(ds):
+    session = _record(1_000, "learning-session", "learning-cook")
+    update = _learning_record(3_000, "learning-session", "learning-cook")
+
+    append_control_trace([session, update])
+
+    restored = read_control_trace_session("learning-session")
+    assert [record.schema_version for record in restored] == [6, 6]
+    assert isinstance(restored[1].payload, PidUpdatePayload)
+    assert restored[1].payload.learning is not None
+    assert restored[1].payload.learning.state == {
+        "status": "collecting",
+        "accepted_samples": 12,
+    }
+
+
+@pytest.mark.parametrize("schema_version", [2, 3, 4, 5])
+def test_typed_reads_preserve_compatible_historical_records(ds, schema_version):
+    historical = _record(1_000, f"session-v{schema_version}", "historical-cook").model_copy(
+        update={"schema_version": schema_version}
+    )
+    append_control_trace([historical])
+
+    assert read_control_trace_session(historical.session_id) == [historical]
+    assert read_control_trace_cook("historical-cook") == [historical]
+    assert read_control_trace_range(0, 2_000, limit=10) == [historical]
 
 
 def test_identifiers_are_normalized_for_session_cook_reads_and_session_deletion(ds):
@@ -359,8 +440,13 @@ def test_prune_removes_only_rows_strictly_older_than_30_days_in_bounded_batches(
     assert read_control_trace_range(cutoff_ms, cutoff_ms + 1, limit=10) == [boundary, newer]
 
 
-def test_schema_filtered_reads_and_incompatible_pruning_are_bounded(ds):
+def test_schema_filtered_reads_and_incompatible_pruning_preserve_compatible_rows(ds):
+    compatible_v2 = _record(997, "shared", "shared-cook").model_copy(update={"schema_version": 2})
+    compatible_v5 = _record(998, "old-only", "old-cook").model_copy(update={"schema_version": 5})
+    v2_row = compatible_v2.to_db_row()
+    v5_row = compatible_v5.to_db_row()
     current = _record(1_000, "shared", "shared-cook")
+    current_second = _record(1_001, "current-second", "shared-cook")
     conn = ds.connection()
     conn.executemany(
         """
@@ -368,24 +454,39 @@ def test_schema_filtered_reads_and_incompatible_pruning_are_bounded(ds):
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (999, "shared", "shared-cook", "pid", "session", 2, '"old"'),
-            (998, "old-only", "old-cook", "pid", "session", 2, '"old"'),
-            (997, "future-only", "future-cook", "pid", "session", TRACE_SCHEMA_VERSION + 1, '"future"'),
+            (996, "incompatible", None, "pid", "session", 1, '"old"'),
+            (
+                v2_row.ts_ms,
+                v2_row.session_id,
+                v2_row.cook_id,
+                v2_row.controller,
+                v2_row.event_kind,
+                v2_row.schema_version,
+                v2_row.payload,
+            ),
+            (
+                v5_row.ts_ms,
+                v5_row.session_id,
+                v5_row.cook_id,
+                v5_row.controller,
+                v5_row.event_kind,
+                v5_row.schema_version,
+                v5_row.payload,
+            ),
+            (999, "future-only", "future-cook", "pid", "session", TRACE_SCHEMA_VERSION + 1, '"future"'),
         ],
     )
-    append_control_trace([current, _record(1_001, "current-second", "shared-cook")])
+    append_control_trace([current, current_second])
 
-    assert read_control_trace_session("shared") == [current]
-    assert read_control_trace_cook("shared-cook") == [current, _record(1_001, "current-second", "shared-cook")]
-    assert read_control_trace_range(0, 2_000, limit=2) == [
-        current,
-        _record(1_001, "current-second", "shared-cook"),
-    ]
+    assert read_control_trace_session("shared") == [compatible_v2, current]
+    assert read_control_trace_cook("shared-cook") == [compatible_v2, current, current_second]
+    assert read_control_trace_range(0, 2_000, limit=2) == [compatible_v2, compatible_v5]
 
-    assert prune_incompatible_control_trace(TRACE_SCHEMA_VERSION, limit=1) == 1
     assert prune_incompatible_control_trace(TRACE_SCHEMA_VERSION, limit=1) == 1
     assert prune_incompatible_control_trace(TRACE_SCHEMA_VERSION, limit=1) == 0
     assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [
+        (2,),
+        (5,),
         (TRACE_SCHEMA_VERSION + 1,),
         (TRACE_SCHEMA_VERSION,),
         (TRACE_SCHEMA_VERSION,),
@@ -410,7 +511,10 @@ def test_age_pruning_never_deletes_a_future_schema_row(ds):
     ]
 
 
-def test_recorder_maintenance_preserves_old_future_rows(ds):
+def test_recorder_maintenance_prunes_only_incompatible_historical_schemas(ds):
+    timestamp_ms = RETENTION_PERIOD_MS + 1
+    compatible = _record(timestamp_ms, "legacy").model_copy(update={"schema_version": 2})
+    compatible_row = compatible.to_db_row()
     conn = ds.connection()
     conn.executemany(
         """
@@ -418,19 +522,30 @@ def test_recorder_maintenance_preserves_old_future_rows(ds):
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (0, "legacy", None, "pid", "session", 2, '"legacy"'),
-            (0, "future", None, "pid", "session", TRACE_SCHEMA_VERSION + 1, '"future"'),
+            (
+                compatible_row.ts_ms,
+                compatible_row.session_id,
+                compatible_row.cook_id,
+                compatible_row.controller,
+                compatible_row.event_kind,
+                compatible_row.schema_version,
+                compatible_row.payload,
+            ),
+            (timestamp_ms, "incompatible", None, "pid", "session", 1, '"incompatible"'),
+            (timestamp_ms, "future", None, "pid", "session", TRACE_SCHEMA_VERSION + 1, '"future"'),
         ],
     )
-    append_control_trace([_record(0, "current")])
+    append_control_trace([_record(timestamp_ms, "current")])
 
     recorder = ControlTraceRecorder(
         append=lambda _records: None,
         monotonic_clock=lambda: 0,
-        wall_clock=lambda: RETENTION_PERIOD_MS + 1,
+        wall_clock=lambda: timestamp_ms,
     )
 
     assert recorder is not None
     assert conn.execute("SELECT schema_version FROM control_trace ORDER BY id").fetchall() == [
-        (TRACE_SCHEMA_VERSION + 1,)
+        (2,),
+        (TRACE_SCHEMA_VERSION + 1,),
+        (TRACE_SCHEMA_VERSION,),
     ]

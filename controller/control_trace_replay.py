@@ -14,7 +14,7 @@ import sqlite3
 from typing import Protocol, cast
 
 from common.control_trace import (
-    TRACE_SCHEMA_VERSION,
+    COMPATIBLE_TRACE_SCHEMA_VERSIONS,
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
@@ -147,7 +147,7 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
 
     sessions: list[tuple[int, ControlTraceRecord]] = []
     for index, record in enumerate(ordered):
-        if record.schema_version != TRACE_SCHEMA_VERSION:
+        if record.schema_version not in COMPATIBLE_TRACE_SCHEMA_VERSIONS:
             add(ReplayIssueCode.UNSUPPORTED_SCHEMA, f"schema revision {record.schema_version} is unsupported", index)
         if record.event_kind is TraceEventKind.SESSION:
             sessions.append((index, record))

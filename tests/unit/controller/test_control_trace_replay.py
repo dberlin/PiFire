@@ -320,6 +320,21 @@ def test_validate_records_accepts_pristine_typed_sessions(records):
     assert report.controller is records[0].controller
     assert report.issues == ()
 
+@pytest.mark.parametrize("schema_version", [2, 3, 4, 5])
+def test_validate_records_accepts_compatible_historical_sessions(schema_version):
+    records = [
+        ControlTraceRecord.model_validate_json(
+            record.model_copy(update={"schema_version": schema_version}).model_dump_json()
+        )
+        for record in _pid_records()
+    ]
+
+    report = validate_records(records)
+
+    assert report.valid
+    assert ReplayIssueCode.UNSUPPORTED_SCHEMA not in [issue.code for issue in report.issues]
+
+
 
 @pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP])
 def test_validate_records_accepts_completed_pid_family_framed_frames(controller):

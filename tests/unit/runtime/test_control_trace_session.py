@@ -22,7 +22,7 @@ from common.control_trace import (
     TraceEventKind,
 )
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource, seed_output
-from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.base import ControllerLearningDiagnostics, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
@@ -417,6 +417,7 @@ def test_record_update_builds_exact_controller_payloads(result, payload_type) ->
 
     update = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
     assert isinstance(update.payload, payload_type)
+    assert (update.schema_version, update.controller, update.ts_ms) == (6, controller, 2_000)
     assert (
         update.payload.result_revision,
         update.payload.setpoint,
@@ -424,12 +425,80 @@ def test_record_update_builds_exact_controller_payloads(result, payload_type) ->
         update.payload.prior_realized_auger_duty,
         update.payload.output_source,
     ) == (1, 225.0, 0.2, 0.15, OutputSource.CONTROLLER)
+    assert update.payload.learning is None
     if isinstance(update.payload, MpcUpdatePayload):
         allocation_record = next(
             record for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION
         )
         assert allocation_record.payload.result_revision == 1
         assert allocation_record.payload.mpc_has_fan_authority
+
+
+@pytest.mark.parametrize(
+    ("controller", "result", "expected_state"),
+    [
+        (
+            ControllerType.PID_SP,
+            _pid_result(sp=True, revision=7),
+            {
+                "status": "collecting",
+                "gates": [{"name": "accepted_samples", "passed": False}],
+            },
+        ),
+        (
+            ControllerType.MPC,
+            _mpc_result(revision=7),
+            {
+                "status": "evaluating",
+                "candidate": {"generation": 4, "eligible": True},
+            },
+        ),
+    ],
+)
+def test_record_update_aligns_result_owned_learning_snapshot_with_session_record(
+    controller, result, expected_state
+) -> None:
+    recorder = _Recorder()
+    session = _open(recorder, controller=controller)
+    result = replace(
+        result,
+        learning=ControllerLearningDiagnostics(schema_version=1, state=expected_state),
+    )
+
+    assert session.record_update(_update_context(result, timestamp_ms=2_345))
+
+    update = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
+    assert (update.schema_version, update.controller, update.ts_ms) == (6, controller, 2_345)
+    assert update.payload.result_revision == 7
+    assert update.payload.learning is not None
+    assert (update.payload.learning.schema_version, update.payload.learning.state) == (1, expected_state)
+
+
+def test_stale_mpc_duplicate_preserves_the_recorded_learning_snapshot() -> None:
+    recorder = _Recorder()
+    session = _open(recorder)
+    recorded_state = {"status": "evaluating", "candidate": {"generation": 4}}
+    fresh = replace(
+        _mpc_result(revision=3),
+        learning=ControllerLearningDiagnostics(schema_version=1, state=recorded_state),
+    )
+    assert session.record_update(_update_context(fresh))
+
+    stale_live_state = {"status": "collecting", "candidate": None}
+    stale = replace(
+        fresh,
+        stale_state=ResultStaleState.STALE,
+        result_age_seconds=4.0,
+        learning=ControllerLearningDiagnostics(schema_version=1, state=stale_live_state),
+    )
+    assert session.record_update(_update_context(stale, timestamp_ms=3_000))
+
+    updates = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
+    assert len(updates) == 2
+    assert updates[1].learning is updates[0].learning
+    assert updates[1].learning is not None
+    assert updates[1].learning.state == recorded_state
+    assert updates[1].learning.state != stale_live_state
 
 
 def test_update_revision_rules_stale_replay_and_lifecycle_fifo() -> None:
