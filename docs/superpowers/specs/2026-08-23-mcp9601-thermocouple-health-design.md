@@ -181,7 +181,25 @@ thermocouple OC/SC conditions.
 
 ## Controller safety ordering
 
-After both the initial probe read and every in-loop probe read, ordering is:
+Mode-specific `setup()` currently powers the grill and can start the fan,
+igniter, or auger before the existing initial probe read. Add a hardware-health
+preflight immediately after the shared igniter/auger-off baseline and before
+`setup()`:
+
+```text
+shared safe-off baseline
+→ fresh preflight probe read
+→ collect current thermocouple health
+→ confirmed-primary-fault guard
+→ mode-specific setup only when the guard is clear
+```
+
+A confirmed primary fault at preflight requests Mode.ERROR, forces fan and power
+off, stops the process monitor, and returns without calling mode setup or
+teardown; setup-owned state does not exist yet. Normal cleanup remains unchanged
+after setup begins.
+
+After the post-setup initial probe read and every in-loop probe read, ordering is:
 
 ```text
 fresh probe read
