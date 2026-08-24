@@ -26,6 +26,22 @@ const adsModule: ProbeModuleData = {
   },
 };
 
+const mcp9601Note =
+  "Hardware fault detection is disabled by default. A disconnected or electrically shorted/collapsed thermocouple can read as ambient temperature instead of reporting a fault. Enable hardware detection only when the board includes the required MCP9601 VSENSE network; SEN-30010-W is verified.";
+
+const mcp9601Module: ProbeModuleData = {
+  ...adsModule,
+  friendly_name: "MCP9601 Thermocouple Amplifier (SEN-30010-W)",
+  filename: "mcp9601_adafruit",
+  image: "mcp9601.png",
+  notes: mcp9601Note,
+  device_specific: {
+    ports: ["KTT0"],
+    type: "thermocouple",
+    config: [],
+  },
+};
+
 it("add mode renders the name input and one config field, and reports name changes", () => {
   const onNameChange = rs.fn();
   render(
@@ -95,4 +111,29 @@ it("surfaces the error and invokes onSubmit/onCancel", () => {
   expect(onSubmit).toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
   expect(onCancel).toHaveBeenCalled();
+});
+
+it("renders module notes with the existing warning presentation", () => {
+  render(
+    <DeviceForm
+      mode="add"
+      moduleData={mcp9601Module}
+      values={{}}
+      nameValue=""
+      availableProbes={[]}
+      baseUrl=""
+      onNameChange={rs.fn()}
+      onFieldChange={rs.fn()}
+      onSubmit={rs.fn()}
+      onCancel={rs.fn()}
+      error={null}
+    />,
+  );
+
+  expect(document.querySelector(".pf-module-notes")).toHaveTextContent(mcp9601Note);
+  expect(
+    screen.getByRole("img", {
+      name: "MCP9601 Thermocouple Amplifier (SEN-30010-W)",
+    }),
+  ).toHaveAttribute("src", "/static/img/wizard/mcp9601.png");
 });

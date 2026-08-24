@@ -2642,6 +2642,91 @@
           ]
         }
       },
+      "mcp9601_adafruit": {
+        "friendly_name": "MCP9601 Thermocouple Amplifier (SEN-30010-W)",
+        "filename": "mcp9601_adafruit",
+        "description": "This I2C device reads B, E, J, K, N, R, S, and T thermocouples using the MCP9601 and Adafruit CircuitPython modules.",
+        "notes": "Hardware fault detection is disabled by default. A disconnected or electrically shorted/collapsed thermocouple can read as ambient temperature instead of reporting a fault. Enable hardware detection only when the board includes the required MCP9601 VSENSE network; SEN-30010-W is verified.",
+        "default": false,
+        "image": "mcp9601.png",
+        "py_dependencies": [
+          "adafruit-circuitpython-mcp9600>=2.0.6",
+          "adafruit-extended-bus>=1.0.2"
+        ],
+        "apt_dependencies": [],
+        "command_list": [],
+        "settings_dependencies": {
+          "units": {
+            "friendly_name": "Temp Units",
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
+          }
+        },
+        "device_specific": {
+          "ports": ["KTT0"],
+          "type": "thermocouple",
+          "config": [
+            {
+              "label": "i2c_bus_addr",
+              "friendly_name": "I2C Bus Address",
+              "description": "Select the I2C bus address to use for this device. Default is 0x61.",
+              "type": "list",
+              "list_values": ["0x67", "0x66", "0x65", "0x64", "0x63", "0x62", "0x61", "0x60"],
+              "list_labels": ["0x67", "0x66", "0x65", "0x64", "0x63", "0x62", "0x61", "0x60"],
+              "default": "0x61",
+              "hidden": false
+            },
+            {
+              "label": "tc_type",
+              "friendly_name": "Thermocouple Type",
+              "description": "Thermocouple type. Type K is the most common for cooking.",
+              "type": "list",
+              "list_values": ["B", "E", "J", "K", "N", "R", "S", "T"],
+              "list_labels": [
+                "Type B",
+                "Type E",
+                "Type J",
+                "Type K",
+                "Type N",
+                "Type R",
+                "Type S",
+                "Type T"
+              ],
+              "default": "K",
+              "hidden": false
+            },
+            {
+              "label": "hardware_fault_detection",
+              "friendly_name": "Hardware Thermocouple Fault Detection",
+              "description": "Enable only when the installed MCP9601 board includes the required VSENSE open/short detection network. SEN-30010-W is verified.",
+              "type": "list",
+              "list_values": ["False", "True"],
+              "list_labels": ["Disabled", "Enabled — board has VSENSE detection"],
+              "default": "False",
+              "hidden": false
+            },
+            {
+              "label": "i2c_bus",
+              "friendly_name": "I2C Bus",
+              "description": "How this device's I2C bus is reached.",
+              "type": "i2c_bus",
+              "default": { "kind": "basic" },
+              "hidden": false
+            },
+            {
+              "label": "transient",
+              "friendly_name": "Transient",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "type": "list",
+              "list_values": ["False", "True"],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "default": "False",
+              "hidden": true
+            }
+          ]
+        }
+      },
       "bt_ibbq": {
         "friendly_name": "Bluetooth - iBBQ / Inkbird BT (4 Probes)",
         "filename": "bt_ibbq",
