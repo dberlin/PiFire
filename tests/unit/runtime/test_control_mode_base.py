@@ -8,6 +8,7 @@ should_exit] -> teardown.
 This complements (does not replace) the characterization oracle in
 tests/characterization/, which is the real behavior-preservation gate.
 """
+import json
 
 import pytest
 
@@ -74,6 +75,26 @@ class _RecordingMode(ControlMode):
         self.calls.append(("safety_event", event))
 
 
+class _RecordingEventLog:
+    def __init__(self):
+        self.messages = []
+
+    def debug(self, message):
+        self.messages.append(str(message))
+
+    def info(self, message):
+        self.messages.append(str(message))
+
+    def warning(self, message):
+        self.messages.append(str(message))
+
+    def error(self, message):
+        self.messages.append(str(message))
+
+    def setLevel(self, _level):
+        pass
+
+
 def _make_ctx(*, temperatures=None, health_reports=None, inference_policy=None):
     settings = base_settings()
     if inference_policy is not None:
@@ -89,6 +110,7 @@ def _make_ctx(*, temperatures=None, health_reports=None, inference_policy=None):
     return ControllerContext(
         devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
         store=store,
+        event_log=_RecordingEventLog(),
         notifications=notifier,
         clock=ManualClock(),
     )
@@ -105,6 +127,7 @@ def _confirmed(fault):
         status=fault.value,
     )
 
+
 def _inferred(policy, *, primary=True):
     inferred = ThermocoupleHealthReport(
         state=ThermocoupleHealthState.CONFIRMED,
@@ -115,6 +138,23 @@ def _inferred(policy, *, primary=True):
         ),
         temperature_valid=False,
         observed_at=0.0,
+        detail={
+            "policy_version": 1,
+            "sample_count": 25,
+            "coverage_seconds": 240.0,
+            "max_gap_seconds": 10.0,
+            "hot_span_c": 0.25,
+            "cold_span_c": 12.5,
+            "delta_span_c": 12.25,
+            "collapse_fraction": 0.96,
+            "heat_on_seconds": 75.0,
+            "witness_source": ["peer-device", "P0"],
+            "witness_rise_c": 12.0,
+            "asserted_channels": [
+                ThermocoupleEvidence.JUNCTION_COLLAPSE.value,
+                ThermocoupleEvidence.EXCITATION_RESPONSE.value,
+            ],
+        },
     )
     return fuse_thermocouple_health(
         hardware=None,
@@ -122,6 +162,45 @@ def _inferred(policy, *, primary=True):
         policy=ThermocoupleInferencePolicy(policy),
         is_primary=primary,
     )
+
+
+def _transition_message(report, *, label, role, authority=None):
+    detail = report.detail
+    payload = {
+        "label": label,
+        "role": role,
+        "state": report.state.value,
+        "faults": [fault.value for fault in report.faults],
+        "evidence": [evidence.value for evidence in report.evidence],
+        "policy": detail.get("policy"),
+        "authority": authority if authority is not None else detail.get("authority"),
+        "policy_version": detail.get("policy_version"),
+        "sample_count": detail.get("sample_count"),
+        "coverage_seconds": detail.get("coverage_seconds"),
+        "max_gap_seconds": detail.get("max_gap_seconds"),
+        "hot_span_c": detail.get("hot_span_c"),
+        "cold_span_c": detail.get("cold_span_c"),
+        "delta_span_c": detail.get("delta_span_c"),
+        "collapse_fraction": detail.get("collapse_fraction"),
+        "heat_on_seconds": detail.get("heat_on_seconds"),
+        "witness_source": detail.get("witness_source"),
+        "witness_rise_c": detail.get("witness_rise_c"),
+    }
+    if "status" in detail:
+        payload["hardware_status"] = detail["status"]
+    return "Thermocouple health transition " + json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _transition_messages(ctx):
+    return [
+        message
+        for message in ctx.event_log.messages
+        if message.startswith("Thermocouple health transition ")
+    ]
 
 
 def _suspected():
@@ -290,10 +369,19 @@ def test_observed_inferred_primary_remains_numeric_notifies_once_and_runs_tick()
     assert ctx.store.read_control()["mode"] == "Recording"
     assert mode.calls.count("on_tick") == 1
     assert mode.calls.count("setup_safety") == 1
-    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary_Observed"]
+    assert _transition_messages(ctx) == [
+        _transition_message(
+            report["Grill"],
+            label="Grill",
+            role="primary",
+        )
+    ]
 
 
-def test_enforced_inferred_primary_preflight_stops_before_setup_and_numeric_guards(monkeypatch):
+def test_enforced_inferred_primary_preflight_stops_before_setup_and_numeric_guards(
+    monkeypatch,
+):
     evaluated = []
     monkeypatch.setattr(
         base_mode,
@@ -313,6 +401,14 @@ def test_enforced_inferred_primary_preflight_stops_before_setup_and_numeric_guar
     assert "setup_safety" not in mode.calls
     assert "on_tick" not in mode.calls
     assert evaluated == []
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+    assert _transition_messages(ctx) == [
+        _transition_message(
+            ctx.devices.probe_complex.get_thermocouple_health()["Grill"],
+            label="Grill",
+            role="primary",
+        )
+    ]
 
 
 def test_enforced_inferred_primary_after_setup_stops_before_setup_safety(monkeypatch):
@@ -397,6 +493,7 @@ def test_suspected_primary_stays_numeric_without_notification_or_stop():
     assert ctx.store.read_control()["mode"] == "Recording"
     assert mode.calls.count("on_tick") == 1
     assert ctx.notifications.sent == []
+    assert _transition_messages(ctx) == []
 
 
 def test_observe_to_enforce_stops_existing_confirmation_without_duplicate_notification():
@@ -411,7 +508,14 @@ def test_observe_to_enforce_stops_existing_confirmation_without_duplicate_notifi
     mode.run()
 
     assert ctx.store.read_control()["mode"] == "Error"
-    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary_Observed"]
+    assert _transition_messages(ctx) == [
+        _transition_message(
+            observed["Grill"],
+            label="Grill",
+            role="primary",
+        )
+    ]
 
 
 def test_mode_reentry_does_not_repeat_consumed_confirmation_notification():
@@ -424,7 +528,14 @@ def test_mode_reentry_does_not_repeat_consumed_confirmation_notification():
     _RecordingMode(ctx, WorkCycleState()).run()
     _RecordingMode(ctx, WorkCycleState()).run()
 
-    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary_Observed"]
+    assert _transition_messages(ctx) == [
+        _transition_message(
+            observed["Grill"],
+            label="Grill",
+            role="primary",
+        )
+    ]
 
 
 def test_confirmed_primary_fault_after_setup_skips_none_safety_paths(monkeypatch):
@@ -453,6 +564,14 @@ def test_confirmed_primary_fault_after_setup_skips_none_safety_paths(monkeypatch
     assert evaluated == []
     assert ("safety_event", "thermocouple_fault") in mode.calls
     assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+    assert _transition_messages(ctx) == [
+        _transition_message(
+            ctx.devices.probe_complex.get_thermocouple_health()["Grill"],
+            label="Grill",
+            role="primary",
+            authority="stop",
+        )
+    ]
 
 
 def test_startup_post_setup_fault_persists_last_valid_primary_temperature():
@@ -543,7 +662,10 @@ def test_tick_health_fence_blocks_pending_positive_manual_override():
         pytest.param("aux", "Aux", id="aux"),
     ],
 )
-def test_inferred_secondary_fault_continues_and_repeated_sample_notifies_once(group, label):
+def test_inferred_secondary_fault_continues_and_repeated_sample_notifies_once(
+    group,
+    label,
+):
     sensor = _sensor(225.0)
     sensor[group][label] = None
     report = {"Grill": _healthy(), label: _inferred("observe", primary=False)}
@@ -558,6 +680,60 @@ def test_inferred_secondary_fault_continues_and_repeated_sample_notifies_once(gr
     assert ctx.store.read_control()["mode"] == "Recording"
     assert mode.calls.count("on_tick") == 1
     assert ctx.notifications.sent == ["Thermocouple_Fault_Secondary"]
+    assert _transition_messages(ctx) == [
+        _transition_message(
+            report[label],
+            label=label,
+            role="secondary",
+        )
+    ]
+
+
+def test_secondary_recovery_clears_current_report_without_notification_or_log():
+    sensor = _sensor(225.0)
+    sensor["food"]["Food"] = None
+    confirmed = {"Grill": _healthy(), "Food": _inferred("observe", primary=False)}
+    recovered = {"Grill": _healthy(), "Food": ThermocoupleHealthReport.healthy(now=60.0)}
+    ctx = _make_ctx(
+        temperatures=[sensor, sensor, sensor],
+        health_reports=[confirmed, recovered, recovered],
+    )
+    probe_complex = ctx.devices.probe_complex
+    probe_complex.get_device_info = lambda: [
+        {
+            "device": "test",
+            "status": {
+                "thermocouple_health": {
+                    label: report.as_dict()
+                    for label, report in probe_complex.get_thermocouple_health().items()
+                }
+            },
+        }
+    ]
+    mode = _RecordingMode(ctx, WorkCycleState())
+
+    mode.run()
+
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Secondary"]
+    assert _transition_messages(ctx) == [
+        _transition_message(
+            confirmed["Food"],
+            label="Food",
+            role="secondary",
+        )
+    ]
+    assert probe_complex.get_thermocouple_health() == recovered
+    assert ctx.store.read_generic_key("probe_device_info") == [
+        {
+            "device": "test",
+            "status": {
+                "thermocouple_health": {
+                    "Grill": recovered["Grill"].as_dict(),
+                    "Food": recovered["Food"].as_dict(),
+                }
+            },
+        }
+    ]
 
 
 def test_control_mode_hook_order_one_bounded_tick():

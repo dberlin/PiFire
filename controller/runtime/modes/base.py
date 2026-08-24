@@ -12,6 +12,7 @@ does the controller/auger/fan work on that fresh temperature before status
 and history publication.
 """
 
+import json
 import logging
 
 from common.modes import Mode, StatusState
@@ -38,6 +39,70 @@ _ACTIVE_THERMOCOUPLE_INFERENCE_MODES = frozenset(
         Mode.RECIPE,
     }
 )
+
+_THERMOCOUPLE_TRANSITION_LOG_PREFIX = "Thermocouple health transition "
+
+
+def _thermocouple_transition_role(transition, primary_label):
+    is_primary = transition.current.detail.get("is_primary")
+    if isinstance(is_primary, bool):
+        return "primary" if is_primary else "secondary"
+    return "primary" if transition.label == primary_label else "secondary"
+
+
+def _thermocouple_transition_authority(report, role):
+    if ThermocoupleEvidence.HARDWARE in report.evidence:
+        return "stop" if role == "primary" else "notify_only"
+    return report.detail.get("authority")
+
+
+def _thermocouple_transition_event(transition, primary_label):
+    report = transition.current
+    if not report.confirmed:
+        return None
+    role = _thermocouple_transition_role(transition, primary_label)
+    if role == "secondary":
+        return "Thermocouple_Fault_Secondary"
+    authority = _thermocouple_transition_authority(report, role)
+    if authority == "notify_only":
+        return "Thermocouple_Fault_Primary_Observed"
+    if authority == "stop":
+        return "Thermocouple_Fault_Primary"
+    return None
+
+
+def _thermocouple_transition_log(transition, primary_label):
+    report = transition.current
+    serialized = report.as_dict()
+    detail = serialized["detail"]
+    role = _thermocouple_transition_role(transition, primary_label)
+    payload = {
+        "label": transition.label,
+        "role": role,
+        "state": serialized["state"],
+        "faults": serialized["faults"],
+        "evidence": serialized["evidence"],
+        "policy": detail.get("policy"),
+        "authority": _thermocouple_transition_authority(report, role),
+        "policy_version": detail.get("policy_version"),
+        "sample_count": detail.get("sample_count"),
+        "coverage_seconds": detail.get("coverage_seconds"),
+        "max_gap_seconds": detail.get("max_gap_seconds"),
+        "hot_span_c": detail.get("hot_span_c"),
+        "cold_span_c": detail.get("cold_span_c"),
+        "delta_span_c": detail.get("delta_span_c"),
+        "collapse_fraction": detail.get("collapse_fraction"),
+        "heat_on_seconds": detail.get("heat_on_seconds"),
+        "witness_source": detail.get("witness_source"),
+        "witness_rise_c": detail.get("witness_rise_c"),
+    }
+    if "status" in detail:
+        payload["hardware_status"] = detail["status"]
+    return _THERMOCOUPLE_TRANSITION_LOG_PREFIX + json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 class ControlMode:
@@ -698,12 +763,13 @@ class ControlMode:
         primary_label = next(iter(sensor_data["primary"]), None)
 
         for transition in transitions:
-            if not transition.current.confirmed:
+            event = _thermocouple_transition_event(transition, primary_label)
+            if event is None:
                 continue
-            if transition.label == primary_label:
-                self.ctx.notifications.send("Thermocouple_Fault_Primary")
-            else:
-                self.ctx.notifications.send("Thermocouple_Fault_Secondary")
+            self.ctx.event_log.info(
+                _thermocouple_transition_log(transition, primary_label)
+            )
+            self.ctx.notifications.send(event)
 
         primary = reports.get(primary_label)
         if primary is None or not primary.confirmed or primary.temperature_valid:

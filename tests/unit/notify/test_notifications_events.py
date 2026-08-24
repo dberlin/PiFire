@@ -177,6 +177,15 @@ def test_probe_temp_limit_alarm(monkeypatch):
             id="thermocouple-fault-primary",
         ),
         pytest.param(
+            "Thermocouple_Fault_Primary_Observed",
+            "Primary Thermocouple Fault Observed!",
+            "A control-probe thermocouple fault was detected. Observe mode did not stop heating.",
+            True,
+            "pifire_error_alerts",
+            {"value1": "Primary thermocouple fault observed"},
+            id="thermocouple-fault-primary-observed",
+        ),
+        pytest.param(
             "Thermocouple_Fault_Secondary",
             "Thermocouple Fault!",
             "A food or auxiliary thermocouple fault was detected. The affected probe "

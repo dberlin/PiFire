@@ -293,6 +293,15 @@ def _evt_thermocouple_fault_primary(ctx):
     )
 
 
+def _evt_thermocouple_fault_primary_observed(ctx):
+    return (
+        "Primary Thermocouple Fault Observed!",
+        "A control-probe thermocouple fault was detected. Observe mode did not stop heating.",
+        "pifire_error_alerts",
+        {"value1": "Primary thermocouple fault observed"},
+    )
+
+
 def _evt_thermocouple_fault_secondary(ctx):
     return (
         "Thermocouple Fault!",
@@ -324,6 +333,7 @@ EVENTS = {
     "Test_Notify": _evt_test_notify,
     "Control_Process_Stopped": _evt_control_stopped,
     "Thermocouple_Fault_Primary": _evt_thermocouple_fault_primary,
+    "Thermocouple_Fault_Primary_Observed": _evt_thermocouple_fault_primary_observed,
     "Thermocouple_Fault_Secondary": _evt_thermocouple_fault_secondary,
 }
 
