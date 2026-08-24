@@ -2,6 +2,7 @@ import { render } from "@testing-library/react-native";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { PROBE_GAP, probeGrid } from "@pifire/core/dashboard/scale";
+import { wireHealth } from "./healthFixture";
 
 // The screen reads its connection and preferences through the root layout's
 // contexts, which only exist inside the running app. Mocking them is what lets
@@ -105,6 +106,94 @@ describe("the probe row", () => {
     for (const w of rest) {
       expect(w).toBe(first);
     }
+  });
+});
+
+describe("probe health layering", () => {
+  it("keeps Aux detail-only while surfacing its confirmed causes in the summary", async () => {
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({
+          role: "Aux",
+          label: "Stack",
+          displayName: "Stack",
+          port: "TC2",
+          report: {
+            state: "confirmed",
+            faults: ["short", "open"],
+            temperatureValid: false,
+          },
+          outcome: "unavailable",
+        }),
+      ],
+    };
+
+    const { getAllByTestId, getByRole, getByText } = await render(<Dashboard />);
+
+    expect(getAllByTestId("probe-card")).toHaveLength(FIXTURE_DASH.foodProbes.length);
+    expect(getByText("Stack")).toBeTruthy();
+    expect(getByText(/Hardware reported an open circuit/)).toBeTruthy();
+    expect(getByText(/Hardware reported a short circuit/)).toBeTruthy();
+    expect(getByRole("summary").props.accessibilityLabel).toContain("Stack");
+  });
+
+  it("shows the shared additional-issue count and lets long detail wrap", async () => {
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({
+          role: "Aux",
+          label: "Stack",
+          displayName: "Stack",
+          port: "TC2",
+          report: { state: "suspected" },
+        }),
+        wireHealth({
+          role: "Food",
+          label: FIXTURE_DASH.foodProbes[0].label,
+          displayName: FIXTURE_DASH.foodProbes[0].title,
+          port: "TC1",
+          report: { state: "suspected" },
+        }),
+      ],
+    };
+
+    const { getAllByText, getByTestId, getByText } = await render(<Dashboard />);
+
+    expect(getByText("+1 more")).toBeTruthy();
+    expect(getByTestId("health-summary").props.style).toEqual(
+      expect.arrayContaining([expect.objectContaining({ width: "100%" })]),
+    );
+    for (const copy of getAllByText("Possible thermocouple issue; reading still available.")) {
+      expect(copy.props.numberOfLines).toBeUndefined();
+    }
+  });
+
+  it("removes the summary when the latest payload reports recovery", async () => {
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({
+          role: "Aux",
+          label: "Stack",
+          displayName: "Stack",
+          report: { state: "suspected" },
+        }),
+      ],
+    };
+    const screen = await render(<Dashboard />);
+    expect(screen.getByTestId("health-summary")).toBeTruthy();
+
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({ role: "Aux", label: "Stack", displayName: "Stack" }),
+      ],
+    };
+    await screen.rerender(<Dashboard />);
+
+    expect(screen.queryByTestId("health-summary")).toBeNull();
   });
 });
 

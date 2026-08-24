@@ -12,6 +12,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { arcLength, describeArc, polarToCartesian, valueAngle } from "@pifire/core/gaugeMath";
 import { SCALE, gaugeModeBadge } from "@pifire/core/dashboard/scale";
+import type { ProbeHealthView } from "@pifire/core/dashboard/probeHealth";
+import { ProbeHealthInline } from "./HealthBanner";
 import {
   GAUGE_ACCENT,
   SETPOINT_COLOR,
@@ -70,6 +72,8 @@ interface GrillGaugeProps {
   units: "F" | "C";
   cooking: boolean;
   animate: boolean;
+  /** Shared, framework-free health presentation for the Primary probe. */
+  health?: ProbeHealthView | null;
 }
 
 // Same drawing coordinates as web-react/src/components/dashboard/GrillGauge.tsx
@@ -105,6 +109,7 @@ export function GrillGauge({
   units,
   cooking,
   animate,
+  health = null,
 }: GrillGaugeProps) {
   const accentColor = THEME[accent].accent;
   const gaugeAccent = GAUGE_ACCENT[accent];
@@ -157,7 +162,8 @@ export function GrillGauge({
   const outer = polarToCartesian(CX, CY, R + 9, spAngle);
 
   return (
-    <View style={styles.card} testID="gauge">
+    <View style={styles.container} testID="gauge">
+      <View style={styles.card}>
       <Svg width={GAUGE_SIZE} height={GAUGE_SIZE} viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}>
         <Defs>
           <LinearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
@@ -216,7 +222,7 @@ export function GrillGauge({
         <Text style={styles.caption}>Grill</Text>
         <View style={styles.num}>
           <Text style={styles.temp}>{temp === null ? "—" : temp}</Text>
-          <Text style={styles.unit}>{`°${units}`}</Text>
+          {temp === null ? null : <Text style={styles.unit}>{`°${units}`}</Text>}
         </View>
         {stale && <Text style={styles.stale}>{stale}</Text>}
         {hasSetpoint && <Text style={styles.set}>{`SET ${Math.round(setpoint)}°`}</Text>}
@@ -237,11 +243,17 @@ export function GrillGauge({
           {modeLabel}
         </Text>
       </View>
+      </View>
+      <ProbeHealthInline health={health} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    width: GAUGE_SIZE,
+    alignItems: "center",
+  },
   card: {
     width: GAUGE_SIZE,
     height: GAUGE_SIZE,

@@ -1,5 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import { probeMetrics } from "@pifire/core/dashboard/scale";
+import type { ProbeHealthView } from "@pifire/core/dashboard/probeHealth";
+import { ProbeHealthInline } from "./HealthBanner";
 import { CARD_BORDER_COLOR, LABEL_COLOR, PROBE_LABEL_COLOR, TEXT_COLOR, TEXT_DIM_COLOR, THEME, WARN_COLOR } from "../theme";
 
 interface ProbeCardProps {
@@ -40,6 +42,8 @@ interface ProbeCardProps {
    *  probes wrapped into a ragged 2+1. Omitted only by tests that render a
    *  card outside a row. */
   width?: number;
+  /** Shared, framework-free health presentation for this Food probe. */
+  health?: ProbeHealthView | null;
 }
 
 // No accent selector, matching GrillGauge.tsx: theme.ts's gauge gradient/glow
@@ -57,6 +61,7 @@ export function ProbeCard({
   barPct = 0,
   barColor,
   width,
+  health = null,
 }: ProbeCardProps) {
   const hasTarget = targetStr !== "AMBIENT";
   // The reading scales with the column, so a lone full-width probe reads as a
@@ -79,9 +84,10 @@ export function ProbeCard({
       </Text>
       <View style={styles.readingRow}>
         <Text style={[styles.tempInt, { fontSize: m.temp }]}>{temp === null ? "—" : temp}</Text>
-        <Text style={[styles.tempUnit, { fontSize: m.unit }]}>{"°"}{units}</Text>
+        {temp === null ? null : <Text style={[styles.tempUnit, { fontSize: m.unit }]}>{"°"}{units}</Text>}
       </View>
       {stale !== null ? <Text style={styles.stale}>{stale}</Text> : null}
+      <ProbeHealthInline health={health} />
       <Text
         numberOfLines={1}
         style={[

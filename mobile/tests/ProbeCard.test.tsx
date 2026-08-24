@@ -2,6 +2,7 @@ import { render } from "@testing-library/react-native";
 import { deriveView } from "@pifire/core/dashboard/deriveView";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { ProbeCard } from "../src/components/ProbeCard";
+import { projectedHealth } from "./healthFixture";
 
 // @testing-library/react-native@14's render() is async (see GrillGauge.test.tsx
 // / useLive.test.tsx for the same quirk) -- awaited here before destructuring
@@ -20,6 +21,118 @@ it("marks a stale reading", async () => {
     <ProbeCard name="Brisket" temp={165} targetStr="→ 203°" units="F" stale="last data 47s ago" />,
   );
   expect(getByText("last data 47s ago")).toBeTruthy();
+});
+
+it("keeps a suspected probe numeric and shows its amber health context", async () => {
+  const health = projectedHealth({
+    role: "Food",
+    label: "Probe1",
+    displayName: "Brisket",
+    report: { state: "suspected" },
+  });
+
+  const { getByText, getByRole } = await render(
+    <ProbeCard
+      name="Brisket"
+      temp={165}
+      targetStr="→ 203°"
+      units="F"
+      stale={null}
+      health={health}
+    />,
+  );
+
+  expect(getByText("165")).toBeTruthy();
+  expect(getByText("CHECK PROBE")).toBeTruthy();
+  expect(getByText("Possible thermocouple issue; reading still available.")).toBeTruthy();
+  expect(getByRole("alert").props.accessibilityLabel).toContain("Brisket");
+});
+
+it("shows Last reported independently of transport staleness", async () => {
+  const health = projectedHealth({
+    role: "Food",
+    label: "Probe1",
+    displayName: "Brisket",
+    report: { state: "suspected" },
+    freshness: { current: false, lastReportedAgeS: 47 },
+  });
+
+  const { getByText } = await render(
+    <ProbeCard
+      name="Brisket"
+      temp={165}
+      targetStr="AMBIENT"
+      units="F"
+      stale="last data 51s ago"
+      health={health}
+    />,
+  );
+
+  expect(getByText("Last reported")).toBeTruthy();
+  expect(getByText("last data 51s ago")).toBeTruthy();
+});
+
+it("removes health treatment immediately on recovery", async () => {
+  const suspected = projectedHealth({
+    role: "Food",
+    label: "Probe1",
+    displayName: "Brisket",
+    report: { state: "suspected" },
+  });
+  const healthy = projectedHealth({
+    role: "Food",
+    label: "Probe1",
+    displayName: "Brisket",
+  });
+
+  const screen = await render(
+    <ProbeCard
+      name="Brisket"
+      temp={165}
+      targetStr="AMBIENT"
+      units="F"
+      stale={null}
+      health={suspected}
+    />,
+  );
+  expect(screen.getByText("CHECK PROBE")).toBeTruthy();
+
+  await screen.rerender(
+    <ProbeCard
+      name="Brisket"
+      temp={166}
+      targetStr="AMBIENT"
+      units="F"
+      stale={null}
+      health={healthy}
+    />,
+  );
+  expect(screen.queryByText("CHECK PROBE")).toBeNull();
+});
+
+it("renders a confirmed-invalid probe as an em dash without a numeric fallback", async () => {
+  const health = projectedHealth({
+    role: "Food",
+    label: "Probe1",
+    displayName: "Brisket",
+    report: { state: "confirmed", faults: ["open"], temperatureValid: false },
+    outcome: "unavailable",
+  });
+
+  const { getByText, queryByText } = await render(
+    <ProbeCard
+      name="Brisket"
+      temp={null}
+      targetStr="AMBIENT"
+      units="F"
+      stale={null}
+      health={health}
+    />,
+  );
+
+  expect(getByText("—")).toBeTruthy();
+  expect(queryByText("165")).toBeNull();
+  expect(getByText("PROBE UNAVAILABLE")).toBeTruthy();
 });
 
 // deriveView's own probeCard() gates on `fp.target > 0 && fp.targetReq`

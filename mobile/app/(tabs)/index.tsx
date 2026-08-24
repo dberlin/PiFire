@@ -3,6 +3,7 @@ import { deriveView } from "@pifire/core/dashboard/deriveView";
 import { PROBE_GAP, SCALE, probeGrid } from "@pifire/core/dashboard/scale";
 import { ControlRow } from "../../src/components/ControlRow";
 import { GrillGauge } from "../../src/components/GrillGauge";
+import { HealthSummary } from "../../src/components/HealthBanner";
 import { ProbeCard } from "../../src/components/ProbeCard";
 import { CAPTION, CARD_BORDER_COLOR, CSS_VAR_COLOR, LABEL_COLOR, THEME } from "../../src/theme";
 import { useLiveContext, usePrefsContext } from "../_layout";
@@ -49,6 +50,7 @@ export default function Dashboard() {
           units={view.units}
           cooking={view.cooking}
           animate
+          health={view.primaryHealth}
         />
       </View>
 
@@ -71,10 +73,13 @@ export default function Dashboard() {
               barPct={p.barPct}
               barColor={CSS_VAR_COLOR[p.barColor] ?? tokens.accent}
               width={grid.width}
+              health={p.health}
             />
           ))}
         </View>
       ) : null}
+
+      <HealthSummary summary={view.probeHealthSummary} />
 
       {/* Head row (caption + percentage), level track, then the status label
           -- web-react's HopperGauge.tsx structure, with one deliberate

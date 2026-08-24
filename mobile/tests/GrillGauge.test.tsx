@@ -1,5 +1,6 @@
 import { render } from "@testing-library/react-native";
 import { GrillGauge } from "../src/components/GrillGauge";
+import { projectedHealth } from "./healthFixture";
 
 // @testing-library/react-native@14's render is async (see useLive.test.tsx's
 // note on renderHook for the same quirk); it must be awaited before
@@ -31,4 +32,77 @@ it("renders with a non-default accent", async () => {
   );
   expect(getByText("225")).toBeTruthy();
   expect(getByText("Hold")).toBeTruthy();
+});
+
+it("keeps a suspected primary numeric and surfaces it inline", async () => {
+  const health = projectedHealth({ report: { state: "suspected" } });
+  const { getByText, getByRole } = await render(
+    <GrillGauge
+      accent="ember"
+      temp={225}
+      stale={null}
+      setpoint={250}
+      maxTemp={600}
+      frac={0.375}
+      hasSetpoint
+      modeLabel="Hold"
+      units="F"
+      cooking
+      animate={false}
+      health={health}
+    />,
+  );
+
+  expect(getByText("225")).toBeTruthy();
+  expect(getByText("CHECK PROBE")).toBeTruthy();
+  expect(getByRole("alert").props.accessibilityLabel).toContain("reading still available");
+});
+
+it("shows an em dash without a unit for a confirmed-invalid primary", async () => {
+  const health = projectedHealth({
+    report: { state: "confirmed", faults: ["open"], temperatureValid: false },
+    outcome: "stopped",
+  });
+  const { getByText, queryByText } = await render(
+    <GrillGauge
+      accent="ember"
+      temp={null}
+      stale={null}
+      setpoint={250}
+      maxTemp={600}
+      frac={0}
+      hasSetpoint
+      modeLabel="Error"
+      units="F"
+      cooking={false}
+      animate={false}
+      health={health}
+    />,
+  );
+
+  expect(getByText("—")).toBeTruthy();
+  expect(queryByText("°F")).toBeNull();
+  expect(getByText("CONTROL PROBE UNAVAILABLE")).toBeTruthy();
+});
+
+it("does not render a health pill after recovery", async () => {
+  const { queryByText } = await render(
+    <GrillGauge
+      accent="ember"
+      temp={225}
+      stale={null}
+      setpoint={250}
+      maxTemp={600}
+      frac={0.375}
+      hasSetpoint
+      modeLabel="Hold"
+      units="F"
+      cooking
+      animate={false}
+      health={projectedHealth()}
+    />,
+  );
+
+  expect(queryByText("CHECK PROBE")).toBeNull();
+  expect(queryByText("FAULT")).toBeNull();
 });

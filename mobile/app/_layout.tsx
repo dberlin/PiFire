@@ -3,6 +3,8 @@ import { Platform, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter, usePathname } from "expo-router";
 import * as Notifications from "expo-notifications";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { projectProbeHealth } from "@pifire/core/dashboard/probeHealth";
+import { HealthBanner } from "../src/components/HealthBanner";
 import { alertsFor } from "../src/alerts";
 import { loadHosts } from "../src/host";
 import { defaultPrefs, loadPrefs, savePrefs, type Prefs } from "../src/prefs";
@@ -145,6 +147,10 @@ function useAlertNotifications(dash: DashSocketPayload, lastPayloadAt: number | 
 
 function LiveShell({ host, children }: { host: string; children: React.ReactNode }) {
   const live = useLive(host);
+  const primaryWire = live.live.thermocoupleHealth?.find(
+    (health) => health.role === "Primary" && health.label === live.live.primaryProbe.label,
+  );
+  const primaryHealth = primaryWire ? projectProbeHealth(primaryWire) : null;
   useAlertNotifications(live.live, live.lastPayloadAt);
 
   // Fire-and-forget: this is what actually raises the OS permission prompt
@@ -163,6 +169,7 @@ function LiveShell({ host, children }: { host: string; children: React.ReactNode
   return (
     <LiveContext.Provider value={live}>
       <StatusStrip live={live} />
+      <HealthBanner health={primaryHealth} />
       {children}
     </LiveContext.Provider>
   );
