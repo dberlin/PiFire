@@ -8,6 +8,7 @@ current throughout so it cannot be the thing doing the work.
 """
 
 import copy
+import json
 
 import pytest
 
@@ -54,6 +55,19 @@ def test_a_current_tree_runs_no_step(ds, monkeypatch):
     datastore._upgrade_settings_in_store()
 
     assert ran == []
+
+def test_a_sparse_pre_setting_tree_backfills_observe_without_a_schema_bump(ds, tmp_path):
+    settings = copy.deepcopy(default_settings())
+    settings.pop("thermocouple_health", None)
+    original_schema_version = settings["schema_version"]
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps(settings))
+
+    normalized = settings_migration.read_settings_file(filename=str(path), init=True)
+
+    assert normalized["thermocouple_health"] == {"inference_policy": "observe"}
+    assert normalized["schema_version"] == original_schema_version
+    assert SETTINGS_SCHEMA_VERSION == original_schema_version == 10
 
 
 def test_only_the_steps_above_the_stamp_run(ds, monkeypatch):

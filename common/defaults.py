@@ -47,6 +47,8 @@ def default_settings():
     settings["probe_settings"]["probe_profiles"] = _default_probe_profiles()
     settings["probe_settings"]["probe_map"] = default_probe_map(settings["probe_settings"]["probe_profiles"])
 
+    settings["thermocouple_health"] = {"inference_policy": "observe"}
+
     settings["globals"] = {
         "grill_name": "",
         "debug_mode": False,

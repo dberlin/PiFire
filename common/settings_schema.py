@@ -313,6 +313,10 @@ class ProbeSettings(_Section):
     probe_profiles: dict[str, dict] = {}
     probe_map: ProbeMap = ProbeMap()
 
+class ThermocoupleHealthSettings(_Section):
+    # Mirrors defaults.py settings["thermocouple_health"].
+    inference_policy: Literal["off", "observe", "enforce"] = "observe"
+
 
 class GlobalSettings(_Section):
     # Mirrors defaults.py settings["globals"].
@@ -657,6 +661,7 @@ class SettingsSchema(_Section):
     versions: Versions
     server_info: ServerInfo
     probe_settings: ProbeSettings = ProbeSettings()
+    thermocouple_health: ThermocoupleHealthSettings = ThermocoupleHealthSettings()
     globals: GlobalSettings = GlobalSettings()
     platform: Platform = Platform()
     cycle_data: CycleData = CycleData()

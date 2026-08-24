@@ -48,6 +48,32 @@ def assert_parity(settings: dict) -> None:
 def test_default_settings_round_trips():
     assert_parity(default_settings())
 
+def test_thermocouple_health_defaults_match_schema_and_round_trip():
+    settings = default_settings()
+
+    assert settings["thermocouple_health"] == {"inference_policy": "observe"}
+
+    model = SettingsSchema.model_validate(settings, strict=True)
+    assert model.thermocouple_health.model_dump(mode="json") == {"inference_policy": "observe"}
+    assert model.model_dump(mode="json", by_alias=True) == settings
+
+
+@pytest.mark.parametrize("policy", ["off", "observe", "enforce"])
+def test_thermocouple_inference_policy_accepts_every_supported_value(policy):
+    settings = default_settings()
+    settings["thermocouple_health"]["inference_policy"] = policy
+
+    model = SettingsSchema.model_validate(settings, strict=True)
+
+    assert model.thermocouple_health.inference_policy == policy
+
+def test_thermocouple_inference_policy_rejects_arbitrary_strings():
+    settings = default_settings()
+    settings["thermocouple_health"]["inference_policy"] = "sometimes"
+
+    with pytest.raises(ValidationError):
+        SettingsSchema.model_validate(settings, strict=True)
+
 
 def test_settings_response_validates_the_live_settings_envelope():
     payload = {"settings": default_settings()}

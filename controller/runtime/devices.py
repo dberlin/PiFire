@@ -200,12 +200,21 @@ def build_devices(settings, *, errors, event_log, control_log):
     try:
         from probes.main import ProbesMain  # Probe device library: loads probe devices and maps them to ports
 
-        probe_complex = ProbesMain(settings["probe_settings"]["probe_map"], settings["globals"]["units"])
+        probe_complex = ProbesMain(
+            settings["probe_settings"]["probe_map"],
+            settings["globals"]["units"],
+            inference_policy=settings["thermocouple_health"]["inference_policy"],
+        )
 
     except:
         control_log.exception(f"Error occurred loading probes modules. Trace dump: ")
         # settings['probe_settings']['probe_map'] = default_probe_map(settings["probe_settings"]['probe_profiles'])
-        probe_complex = ProbesMain(settings["probe_settings"]["probe_map"], settings["globals"]["units"], disable=True)
+        probe_complex = ProbesMain(
+            settings["probe_settings"]["probe_map"],
+            settings["globals"]["units"],
+            disable=True,
+            inference_policy=settings["thermocouple_health"]["inference_policy"],
+        )
         error_event = (
             f"An error occurred loading the probes module(s).  All probes & probe devices have been disabled. "
             f"This sometimes means that the hardware is not connected properly, or the module is not configured correctly. "

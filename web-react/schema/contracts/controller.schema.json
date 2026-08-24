@@ -2260,6 +2260,12 @@
             "startup_exit_temp": 0
           }
         },
+        "thermocouple_health": {
+          "$ref": "#/$defs/ThermocoupleHealthSettings",
+          "default": {
+            "inference_policy": "observe"
+          }
+        },
         "versions": {
           "$ref": "#/$defs/Versions"
         }
@@ -2653,6 +2659,23 @@
         "option_default"
       ],
       "title": "StringControllerOption",
+      "type": "object"
+    },
+    "ThermocoupleHealthSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "inference_policy": {
+          "default": "observe",
+          "enum": [
+            "off",
+            "observe",
+            "enforce"
+          ],
+          "title": "Inference Policy",
+          "type": "string"
+        }
+      },
+      "title": "ThermocoupleHealthSettings",
       "type": "object"
     },
     "Versions": {

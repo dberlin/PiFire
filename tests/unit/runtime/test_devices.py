@@ -40,6 +40,7 @@ def _settings(**overrides):
         "globals": {"units": "F", "debug_mode": False},
         "pwm": {"frequency": 100},
         "probe_settings": {"probe_map": {"probe_info": [], "probe_devices": []}},
+        "thermocouple_health": {"inference_policy": "observe"},
         "display": {"config": {"none": {}}},
     }
     settings.update(overrides)
@@ -130,6 +131,23 @@ def test_build_devices_prototype_success_random_hopper_and_probe_info_written(ds
     # Probe device info was forwarded to the frontend via write_generic_key.
     assert json.loads(datastore.get_blob("probe_device_info")) == []
     assert not read_control().get("critical_error")
+
+def test_build_devices_uses_the_normalized_initial_inference_policy(ds):
+    from controller.runtime.devices import build_devices
+    from probes.thermocouple_inference import ThermocoupleInferencePolicy
+
+    settings = _settings()
+    settings["thermocouple_health"]["inference_policy"] = "enforce"
+
+    devices, errors = build_devices(
+        settings,
+        errors=[],
+        event_log=_RecordingLogger(),
+        control_log=_RecordingLogger(),
+    )
+
+    assert errors == []
+    assert devices.probe_complex.thermocouple_inference_policy is ThermocoupleInferencePolicy.ENFORCE
 
 
 def test_build_devices_distance_else_branch_when_not_both_prototype(ds):
@@ -245,12 +263,13 @@ class _FakeProbesMain:
     disable=True, mirroring the "primary construction failed" / "disabled
     fallback succeeded" shape devices.py depends on."""
 
-    def __init__(self, probe_map, units, disable=False):
+    def __init__(self, probe_map, units, disable=False, *, inference_policy):
         if not disable:
             raise RuntimeError("boom: probe setup failed")
         self.probe_map = probe_map
         self.units = units
         self.disable = disable
+        self.inference_policy = inference_policy
 
     def get_errors(self):
         return []
@@ -265,11 +284,13 @@ def test_build_devices_probes_setup_failure_falls_back_to_disabled(ds, monkeypat
     monkeypatch.setattr("probes.main.ProbesMain", _FakeProbesMain)
     control_log = _RecordingLogger()
 
-    devices, errors = build_devices(_settings(), errors=[], event_log=_RecordingLogger(), control_log=control_log)
+    settings = _settings(thermocouple_health={"inference_policy": "enforce"})
+    devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=control_log)
 
     assert len(errors) == 1
     assert control_log.exceptions
     assert devices.probe_complex.disable is True
+    assert devices.probe_complex.inference_policy == "enforce"
 
 
 def test_build_devices_probes_setup_failure_falls_back_to_disabled_in_debug_mode(ds, monkeypatch):
