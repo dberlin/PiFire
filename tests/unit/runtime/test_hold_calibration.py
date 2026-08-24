@@ -3,7 +3,13 @@ from dataclasses import replace
 import pytest
 
 from common.controller_model_state import CheckpointSaveOutcome
-from common.control_trace import ResultStaleState, SafetyEventPayload, SafetyEventType, TraceEventKind
+from common.control_trace import (
+    InhibitReason,
+    ResultStaleState,
+    SafetyEventPayload,
+    SafetyEventType,
+    TraceEventKind,
+)
 from common.model_evidence import EvidenceKind
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_allocator import allocate
@@ -672,6 +678,58 @@ def test_callbacks_cancel_active_frame_once_before_in_flight_result(
     assert len(cancelled) == 1
     assert cancelled[0].calibration_cancellation_reason == expected_reason
     assert runner.calibration_cancellations == [expected_reason]
+
+
+def test_thermocouple_fault_cancels_calibration_inhibits_pulse_and_records_error(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    import controller.runtime.modes.hold as hold_module
+
+    class Recorder:
+        def __init__(self, *, warning):
+            self.records = []
+
+        def record(self, record):
+            self.records.append(record)
+
+        def flush_due(self, _now_ms):
+            return None
+
+        def close(self):
+            return None
+
+    recorder = Recorder(warning=lambda _message: None)
+    monkeypatch.setattr(
+        hold_module,
+        "ControlTraceRecorder",
+        lambda *, warning: recorder,
+    )
+    runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.control["cook_id"] = "thermocouple-fault"
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+
+    hold._on_safety_event("thermocouple_fault", 3.0)
+
+    safety = [
+        record.payload
+        for record in recorder.records
+        if isinstance(record.payload, SafetyEventPayload)
+    ]
+    assert runner.calibration_cancellations == ["safety"]
+    assert hold.grill.get_output_status()["auger"] is False
+    assert [
+        (payload.event, payload.inhibit_reason, payload.detail) for payload in safety
+    ] == [
+        (SafetyEventType.ERROR, InhibitReason.SAFETY, "thermocouple fault"),
+        (
+            SafetyEventType.SCHEDULER_RESET,
+            InhibitReason.SAFETY,
+            "framed pulse scheduler reset: safety",
+        ),
+    ]
 
 
 def test_repeated_stale_active_result_is_handled_without_repeat_or_restart(

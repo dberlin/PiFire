@@ -1961,6 +1961,7 @@ class HoldMode(ControlMode):
             "stop": SafetyEventType.STOP,
             "error": SafetyEventType.ERROR,
             "temperature_guard": SafetyEventType.TEMPERATURE_GUARD,
+            "thermocouple_fault": SafetyEventType.ERROR,
         }
         event_type = events.get(event)
         if event_type is not None:

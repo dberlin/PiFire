@@ -202,6 +202,31 @@ def test_confirmed_primary_fault_on_tick_breaks_before_numeric_guards_and_actuat
     assert not _positive_actuator_calls(ctx.devices.grill_platform.calls)
 
 
+def test_tick_health_fence_blocks_pending_positive_manual_override():
+    ctx = _make_ctx(
+        temperatures=[225.0, 225.0, None],
+        health_reports=[
+            {"Grill": _healthy()},
+            {"Grill": _healthy()},
+            {"Grill": _confirmed(ThermocoupleFault.SHORT)},
+        ],
+    )
+    control = ctx.store.read_control()
+    manual = control["manual"]
+    assert isinstance(manual, dict)
+    manual["change"] = "auger"
+    manual["output"] = True
+    ctx.store.write_control_snapshot(control, origin="test")
+    mode = _RecordingMode(ctx, WorkCycleState())
+    mode.name = "Manual"
+
+    mode.run()
+
+    assert ctx.store.read_control()["mode"] == "Error"
+    assert mode.calls.count("on_tick") == 0
+    assert not _positive_actuator_calls(ctx.devices.grill_platform.calls)
+
+
 @pytest.mark.parametrize(
     ("group", "label"),
     [

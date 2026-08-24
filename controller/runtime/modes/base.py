@@ -3,13 +3,13 @@ control work cycle.
 
 Concrete subclasses (Monitor, Manual, ...) override the hooks below to
 supply their mode-specific behavior. Each tick follows a strict
-sense -> health -> numeric safety -> act -> publish order: read the probes
-ONCE at the top of the tick, process thermocouple health, run the universal
-max-temp check and the mode `check_safety` BEFORE any actuation, then a single
-merged `on_tick` that does the controller/auger/fan work on that fresh
-temperature, then publish status and history. `current_output_status` is
-likewise captured once per tick (before the manual-override block) and threaded
-through the whole tick.
+sense -> health -> manual override -> numeric safety -> act -> publish order:
+read the probes ONCE at the top of the tick, process thermocouple health
+before any positive actuator command, apply pending manual overrides using
+`current_output_status` captured once on that fresh tick, run the universal
+max-temp check and mode `check_safety`, then a single merged `on_tick` that
+does the controller/auger/fan work on that fresh temperature before status
+and history publication.
 """
 
 import logging
@@ -813,10 +813,6 @@ class ControlMode:
             if _should_break:
                 break
 
-            current_output_status = grill_platform.get_output_status()
-
-            self._apply_manual_overrides(control, now, current_output_status)
-
             # Grab current probe profiles if they have changed since the last loop.
             if control["probe_profile_update"]:
                 self.settings = ctx.store.read_settings()
@@ -827,6 +823,7 @@ class ControlMode:
             # ---- SENSE: single fresh probe read for the whole tick ----
             sensor_data = probe_complex.read_probes()
             ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
+            current_output_status = grill_platform.get_output_status()
             ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
 
             in_data["probe_history"] = sensor_data
@@ -850,8 +847,10 @@ class ControlMode:
             if self._process_thermocouple_health(sensor_data):
                 self._on_safety_event("thermocouple_fault", now)
                 break
+            # Manual outputs are fenced behind the fresh primary health check.
+            self._apply_manual_overrides(control, now, current_output_status)
 
-            # ---- SAFETY (before any actuation) ----
+            # ---- SAFETY (before mode-specific actuation) ----
             # Declarative pre_act guards, evaluated BEFORE the merged on_tick so
             # an unsafe temperature breaks the loop without cycling the auger or
             # advancing the controller. GUARDS["*"]["pre_act"] holds the UNIVERSAL
