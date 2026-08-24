@@ -323,5 +323,8 @@ export const SETTINGS_DEFAULTS = {
       "start_to_hold_prompt": false
     },
     "startup_exit_temp": 0
+  },
+  "thermocouple_health": {
+    "inference_policy": "observe"
   }
 } as const;

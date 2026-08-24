@@ -219,6 +219,7 @@ export type AfterStartupMode = "Smoke" | "Hold";
 type PrimarySetpoint = number;
 type StartToHoldPrompt = boolean;
 type StartupExitTemp = number;
+type InferencePolicy = "off" | "observe" | "enforce";
 type Build = number;
 type Cookfile = string;
 type Recipe1 = string;
@@ -246,6 +247,7 @@ export interface SettingsSchema {
   shutdown?: ShutdownSettings;
   smoke_plus?: SmokePlus;
   startup?: StartupSettings;
+  thermocouple_health?: ThermocoupleHealthSettings;
   versions: Versions;
 }
 export interface ControllerSettings {
@@ -674,6 +676,9 @@ export interface StartToMode {
   after_startup_mode?: AfterStartupMode;
   primary_setpoint?: PrimarySetpoint;
   start_to_hold_prompt?: StartToHoldPrompt;
+}
+export interface ThermocoupleHealthSettings {
+  inference_policy?: InferencePolicy;
 }
 /**
  * This interface was referenced by `SettingsSchema`'s JSON-Schema
