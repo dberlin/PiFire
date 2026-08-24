@@ -92,6 +92,56 @@ def test_report_rejects_invalid_state_combinations(state, faults, temperature_va
         )
 
 
+def test_confirmed_valid_report_requires_owned_observe_primary_inference_authority():
+    source_detail = {
+        "policy": "observe",
+        "authority": "notify_only",
+        "is_primary": True,
+    }
+    report = ThermocoupleHealthReport(
+        state=ThermocoupleHealthState.CONFIRMED,
+        faults=(ThermocoupleFault.MALFUNCTION,),
+        evidence=(ThermocoupleEvidence.JUNCTION_COLLAPSE,),
+        temperature_valid=True,
+        detail=source_detail,
+    )
+
+    source_detail["authority"] = "stop"
+    assert report.temperature_valid is True
+    assert report.detail["authority"] == "notify_only"
+
+
+@pytest.mark.parametrize(
+    "evidence, detail",
+    [
+        (
+            (ThermocoupleEvidence.HARDWARE,),
+            {"policy": "observe", "authority": "notify_only", "is_primary": True},
+        ),
+        (
+            (ThermocoupleEvidence.JUNCTION_COLLAPSE,),
+            {"policy": "enforce", "authority": "notify_only", "is_primary": True},
+        ),
+        (
+            (ThermocoupleEvidence.JUNCTION_COLLAPSE,),
+            {"policy": "observe", "authority": "stop", "is_primary": True},
+        ),
+        (
+            (ThermocoupleEvidence.JUNCTION_COLLAPSE,),
+            {"policy": "observe", "authority": "notify_only", "is_primary": False},
+        ),
+    ],
+)
+def test_other_confirmed_valid_reports_remain_rejected(evidence, detail):
+    with pytest.raises(ValueError):
+        ThermocoupleHealthReport(
+            state=ThermocoupleHealthState.CONFIRMED,
+            evidence=evidence,
+            temperature_valid=True,
+            detail=detail,
+        )
+
+
 def test_primary_hardware_fault_latches_across_clean_samples():
     latch = HardwareFaultLatch(recovery_seconds=60.0)
     fault = latch.update((ThermocoupleFault.OPEN,), now=10.0, primary=True)

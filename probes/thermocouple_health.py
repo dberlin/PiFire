@@ -35,13 +35,27 @@ class ThermocoupleHealthReport:
     detail: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.state is ThermocoupleHealthState.CONFIRMED and self.temperature_valid:
+        owned_detail = MappingProxyType(dict(self.detail))
+        object.__setattr__(self, "detail", owned_detail)
+        confirmed_valid_inferred_primary_observe = (
+            self.state is ThermocoupleHealthState.CONFIRMED
+            and self.temperature_valid
+            and bool(self.evidence)
+            and ThermocoupleEvidence.HARDWARE not in self.evidence
+            and owned_detail.get("policy") == "observe"
+            and owned_detail.get("authority") == "notify_only"
+            and owned_detail.get("is_primary") is True
+        )
+        if (
+            self.state is ThermocoupleHealthState.CONFIRMED
+            and self.temperature_valid
+            and not confirmed_valid_inferred_primary_observe
+        ):
             raise ValueError("confirmed thermocouple health cannot have a valid temperature")
         if self.state is not ThermocoupleHealthState.CONFIRMED and any(
             fault in (ThermocoupleFault.OPEN, ThermocoupleFault.SHORT) for fault in self.faults
         ):
             raise ValueError("open and short faults require confirmed thermocouple health")
-        object.__setattr__(self, "detail", MappingProxyType(dict(self.detail)))
 
     @property
     def confirmed(self) -> bool:
@@ -88,6 +102,7 @@ class ThermocoupleHealthReport:
             "observed_at": self.observed_at,
             "detail": dict(self.detail),
         }
+
 
 
 @dataclass(frozen=True, slots=True)
