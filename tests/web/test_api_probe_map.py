@@ -27,9 +27,9 @@ def test_probe_modules_lists_every_manifest_module(ds, client):
     body = resp.get_json()
     assert body["result"] == "OK"
     modules = body["data"]["modules"]
-    # 18 probe modules ship in wizard/wizard_manifest.json (verified 2026-07-26).
-    assert len(modules) == 18
-    assert "ds18b20" in modules and "virtual_average" in modules
+    # 19 probe modules ship in wizard/wizard_manifest.json.
+    assert len(modules) == 19
+    assert {"ds18b20", "mcp9601_adafruit", "virtual_average"} <= set(modules)
     # The card components read exactly these keys.
     ds18b20 = modules["ds18b20"]
     assert ds18b20["friendly_name"]
