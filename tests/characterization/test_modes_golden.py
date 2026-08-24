@@ -236,7 +236,7 @@ class _InjectManualPwm:
         self._pwm = pwm
         self._reads = 0
 
-    def read_probes(self):
+    def read_probes(self, *, excitation=None, now=None):
         self._reads += 1
         # ControlMode performs a health preflight read before its original
         # setup/tick sequence, so the first logical tick is now read three.
@@ -245,7 +245,7 @@ class _InjectManualPwm:
                 control_delta(set_values={"manual": {"change": "pwm", "pwm": self._pwm}}),
                 origin="test-manual-pwm",
             )
-        return self._probes.read_probes()
+        return self._probes.read_probes(excitation=excitation, now=now)
 
     def __getattr__(self, name):
         return getattr(self._probes, name)

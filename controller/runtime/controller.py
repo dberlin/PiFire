@@ -306,6 +306,9 @@ class Controller:
             self.control["settings_update"] = False
             store.write_control_snapshot(self.control, origin="control")
             self.settings = settings = store.read_settings()
+            self.probe_complex.set_thermocouple_inference_policy(
+                settings["thermocouple_health"]["inference_policy"]
+            )
 
         # Check if there are any notifications pending
         check_notify(settings, self.control, pelletdb=self.pelletdb, grill_platform=grill_platform)

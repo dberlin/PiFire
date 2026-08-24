@@ -24,6 +24,20 @@ from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.logic.smartstart import profile_cycle
 from controller.runtime.system_commands import process_system_commands
 from controller.runtime.transitions import request_transition, evaluate_phase, TransitionKind
+from probes.thermocouple_health import ThermocoupleEvidence
+from probes.thermocouple_inference import ThermocoupleExcitationContext
+
+
+_ACTIVE_THERMOCOUPLE_INFERENCE_MODES = frozenset(
+    {
+        Mode.STARTUP,
+        Mode.REIGNITE,
+        Mode.SMOKE,
+        Mode.HOLD,
+        Mode.MANUAL,
+        Mode.RECIPE,
+    }
+)
 
 
 class ControlMode:
@@ -82,6 +96,7 @@ class ControlMode:
         self.dist_device = ctx.devices.dist_device
         self.settings = None
         self.control = None
+        self._excitation_last_read_at = None
 
     # ---- hooks (safe defaults) ----
     def setup(self):
@@ -432,6 +447,9 @@ class ControlMode:
             control["settings_update"] = False
             ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
+            self.probe_complex.set_thermocouple_inference_policy(
+                self.settings["thermocouple_health"]["inference_policy"]
+            )
             if self.settings["globals"]["debug_mode"]:
                 self.ctx.event_log.setLevel(logging.DEBUG)
             else:
@@ -640,26 +658,59 @@ class ControlMode:
                 # Continue until 'pause' variable is cleared
         return False
 
+    def _read_probes_with_excitation(self, now=None):
+        settings = self.settings
+        control = self.control
+        if settings is None or control is None:
+            raise RuntimeError("thermocouple excitation requires loaded control settings")
+        if now is None:
+            now = self.ctx.clock.now()
+        output_status = self.grill.get_output_status()
+        elapsed = (
+            0.0
+            if self._excitation_last_read_at is None
+            else max(0.0, now - self._excitation_last_read_at)
+        )
+        delivered_heat_on_s = (
+            elapsed
+            if output_status.get("auger", False)
+            or output_status.get("igniter", False)
+            else 0.0
+        )
+        self._excitation_last_read_at = now
+        primary_setpoint_c = float(control["primary_setpoint"])
+        if settings["globals"]["units"] == "F":
+            primary_setpoint_c = (primary_setpoint_c - 32.0) * 5.0 / 9.0
+        excitation = ThermocoupleExcitationContext(
+            active_cook=self.name in _ACTIVE_THERMOCOUPLE_INFERENCE_MODES,
+            primary_setpoint_c=primary_setpoint_c,
+            delivered_heat_on_s=delivered_heat_on_s,
+        )
+        sensor_data = self.probe_complex.read_probes(
+            excitation=excitation,
+            now=now,
+        )
+        return sensor_data, output_status
+
     def _process_thermocouple_health(self, sensor_data) -> bool:
         reports = self.probe_complex.get_thermocouple_health()
         transitions = self.probe_complex.consume_thermocouple_health_transitions()
         primary_label = next(iter(sensor_data["primary"]), None)
-        primary_notified = False
 
         for transition in transitions:
             if not transition.current.confirmed:
                 continue
             if transition.label == primary_label:
                 self.ctx.notifications.send("Thermocouple_Fault_Primary")
-                primary_notified = True
             else:
                 self.ctx.notifications.send("Thermocouple_Fault_Secondary")
 
         primary = reports.get(primary_label)
-        if primary is None or not primary.confirmed:
+        if primary is None or not primary.confirmed or primary.temperature_valid:
             return False
-        if not primary_notified:
-            self.ctx.notifications.send("Thermocouple_Fault_Primary")
+        hardware_authority = ThermocoupleEvidence.HARDWARE in primary.evidence
+        if not hardware_authority and primary.detail.get("authority") != "stop":
+            return False
         request_transition(
             self.ctx,
             self.control,
@@ -710,7 +761,7 @@ class ControlMode:
         grill_platform.igniter_off()
         grill_platform.auger_off()
 
-        preflight_data = probe_complex.read_probes()
+        preflight_data, _ = self._read_probes_with_excitation()
         ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
         preflight_ptemp = next(iter(preflight_data["primary"].values()), None)
         last_valid_ptemp = preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
@@ -734,7 +785,7 @@ class ControlMode:
         self._stamp_mode_metric(control, pelletdb)
 
         # Get initial probe sensor data, temperatures
-        sensor_data = probe_complex.read_probes()
+        sensor_data, _ = self._read_probes_with_excitation()
         ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
         ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
 
@@ -821,9 +872,7 @@ class ControlMode:
                 probe_complex.update_probe_profiles(self.settings["probe_settings"]["probe_map"]["probe_info"])
 
             # ---- SENSE: single fresh probe read for the whole tick ----
-            sensor_data = probe_complex.read_probes()
-            ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
-            current_output_status = grill_platform.get_output_status()
+            sensor_data, current_output_status = self._read_probes_with_excitation(now)
             ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
 
             in_data["probe_history"] = sensor_data

@@ -12,6 +12,8 @@ class FakeProbes:
         self._health = {}
         self._health_transitions = []
         self.update_probe_map_calls = []
+        self.read_calls = []
+        self.inference_policy_calls = []
 
     def script(self, items):
         norm = []
@@ -31,7 +33,8 @@ class FakeProbes:
         self._health_transitions = []
         return self
 
-    def read_probes(self):
+    def read_probes(self, *, excitation=None, now=None):
+        self.read_calls.append({"excitation": excitation, "now": now})
         if not self._script:
             item = {"primary": {"Grill": 0}, "food": {}, "aux": {}, "tr": {}}
         else:
@@ -72,6 +75,9 @@ class FakeProbes:
     def update_probe_map(self, probe_map):
         self.update_probe_map_calls.append(probe_map)
         return []
+
+    def set_thermocouple_inference_policy(self, policy):
+        self.inference_policy_calls.append(policy)
 
     def update_units(self, x):
         pass

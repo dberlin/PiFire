@@ -90,11 +90,11 @@ class _CappedProbes:
         self._cap = cap
         self._n = 0
 
-    def read_probes(self):
+    def read_probes(self, *, excitation=None, now=None):
         self._n += 1
         if self._n >= self._cap:
             self._store.enqueue_control_delta(control_delta(set_values={"updated": True}), origin="test-cap")
-        return self._probes.read_probes()
+        return self._probes.read_probes(excitation=excitation, now=now)
 
     def __getattr__(self, name):
         return getattr(self._probes, name)

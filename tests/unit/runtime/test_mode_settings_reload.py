@@ -19,6 +19,8 @@ ReigniteMode inherits StartupMode's on_settings_reload verbatim (no override
 covers it; no separate Reignite test is needed.
 """
 
+import copy
+
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
@@ -32,6 +34,11 @@ from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
 from tests.fakes.probes import FakeProbes
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
+from tests.characterization._controller_harness import (
+    _neutralize_externals,
+    _spy_dispatch,
+    make_controller,
+)
 
 
 def _make_mode(mode_cls, control_mode_name, settings):
@@ -219,3 +226,50 @@ def test_smoke_reload_clamps_out_of_range_profile_selected():
     assert mode.state.cycle.cycle_time == expected_ct.cycle_time
     assert mode.state.startup.timer == expected_timer
     assert mode.state.metrics["p_mode"] == expected_mbits["p_mode"]
+
+
+def test_active_mode_settings_reload_updates_inference_policy_without_probe_rebuild():
+    settings = base_settings()
+    mode = _make_mode(StartupMode, "Startup", settings)
+    updated = copy.deepcopy(settings)
+    updated["thermocouple_health"]["inference_policy"] = "enforce"
+    mode.ctx.store._settings = updated
+    mode.control["settings_update"] = True
+
+    mode._process_control_flags(
+        mode.control,
+        now=0.0,
+        last=True,
+        pelletdb=base_pellet_db(),
+    )
+
+    probes = mode.probe_complex
+    assert probes.inference_policy_calls == ["enforce"]
+    assert probes.update_probe_map_calls == []
+
+
+def test_stopped_controller_settings_reload_updates_inference_policy_without_probe_rebuild(
+    monkeypatch,
+):
+    settings = base_settings()
+    control = base_control(mode="Stop")
+    controller, ctx, store, _grill, _dist, _notifier = make_controller(
+        settings,
+        control,
+        base_pellet_db(),
+    )
+    _neutralize_externals(monkeypatch)
+    _spy_dispatch(controller)
+    controller.setup()
+    updated = copy.deepcopy(settings)
+    updated["thermocouple_health"]["inference_policy"] = "off"
+    store._settings = updated
+    control = store.read_control()
+    control["settings_update"] = True
+    store.write_control_snapshot(control, origin="test")
+
+    controller.tick()
+
+    probes = ctx.devices.probe_complex
+    assert probes.inference_policy_calls == ["off"]
+    assert probes.update_probe_map_calls == []
