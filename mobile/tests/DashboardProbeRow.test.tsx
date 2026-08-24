@@ -138,6 +138,69 @@ describe("probe health layering", () => {
     expect(getByRole("summary").props.accessibilityLabel).toContain("Stack");
   });
 
+  it("matches an Aux-only live region to dynamic appearance and escalation", async () => {
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({ role: "Aux", label: "Stack", displayName: "Stack" }),
+      ],
+    };
+    const screen = await render(<Dashboard />);
+    expect(screen.queryByTestId("health-summary")).toBeNull();
+
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({
+          role: "Aux",
+          label: "Stack",
+          displayName: "Stack",
+          report: { state: "suspected" },
+        }),
+      ],
+    };
+    await screen.rerender(<Dashboard />);
+    expect(screen.getByTestId("health-summary").props.accessibilityLiveRegion).toBe("polite");
+
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({
+          role: "Aux",
+          label: "Stack",
+          displayName: "Stack",
+          report: {
+            state: "confirmed",
+            faults: ["open"],
+            temperatureValid: false,
+          },
+          outcome: "unavailable",
+        }),
+      ],
+    };
+    await screen.rerender(<Dashboard />);
+    expect(screen.getByTestId("health-summary").props.accessibilityLiveRegion).toBe("assertive");
+  });
+
+  it("keeps the summary quiet when a configured probe card owns the announcement", async () => {
+    live.dash = {
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [
+        wireHealth({
+          role: "Food",
+          label: FIXTURE_DASH.foodProbes[0].label,
+          displayName: FIXTURE_DASH.foodProbes[0].title,
+          report: { state: "suspected" },
+        }),
+      ],
+    };
+
+    const screen = await render(<Dashboard />);
+
+    expect(screen.getByTestId("probe-health-inline").props.accessibilityLiveRegion).toBe("polite");
+    expect(screen.getByTestId("health-summary").props.accessibilityLiveRegion).toBeUndefined();
+  });
+
   it("shows the shared additional-issue count and lets long detail wrap", async () => {
     live.dash = {
       ...FIXTURE_DASH,
@@ -193,6 +256,7 @@ describe("probe health layering", () => {
     };
     await screen.rerender(<Dashboard />);
 
+    expect(screen.queryByRole("summary")).toBeNull();
     expect(screen.queryByTestId("health-summary")).toBeNull();
   });
 });

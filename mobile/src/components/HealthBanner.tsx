@@ -127,6 +127,9 @@ export function HealthSummary({ summary }: { summary: ProbeHealthSummary | null 
       accessibilityRole="summary"
       accessible
       accessibilityLabel={accessibilityCopy(highest, summary.additionalCopy)}
+      accessibilityLiveRegion={
+        highest.role === "Aux" ? (danger ? "assertive" : "polite") : undefined
+      }
       style={[
         styles.summary,
         {
