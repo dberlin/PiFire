@@ -90,13 +90,13 @@ def test_observation_metadata_change_does_not_emit_transition():
     probes = _main_with_device_health(
         {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
     )
-    probes.read_probes()
+    probes.read_probes(now=5.0)
     probes.consume_thermocouple_health_transitions()
     probes.probe_device_list[0].health = {
         "Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=6.0, status=0x11)
     }
 
-    probes.read_probes()
+    probes.read_probes(now=6.0)
 
     assert probes.consume_thermocouple_health_transitions() == ()
     assert probes.get_thermocouple_health()["Grill"].observed_at == 6.0

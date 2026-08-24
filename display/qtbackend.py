@@ -30,7 +30,7 @@ from pydantic import ValidationError
 
 from common.modes import Mode
 from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER
-from common.web_contracts.core import ThermocoupleHealthView
+from common.web_contracts.core import ThermocoupleHealthView, project_thermocouple_health_outcome
 from display.staleness import resolve_reading
 
 
@@ -123,7 +123,7 @@ def _finite_float(value):
     return number if math.isfinite(number) else None
 
 
-def project_thermocouple_health(settings, probe_device_info, controller_mode, *, now=None):
+def project_thermocouple_health(settings, probe_device_info, *, now=None):
     """Adapt producer reports to the validated shared health wire projection."""
     if not isinstance(probe_device_info, list) or not isinstance(settings, Mapping):
         return []
@@ -152,7 +152,7 @@ def project_thermocouple_health(settings, probe_device_info, controller_mode, *,
             if isinstance(label, str) and isinstance(report, Mapping):
                 reports_by_probe[(device, label)] = report
 
-    now = time.time() if now is None else now
+    now = time.monotonic() if now is None else now
     now = _finite_float(now)
     if now is None:
         return []
@@ -194,14 +194,7 @@ def project_thermocouple_health(settings, probe_device_info, controller_mode, *,
 
         state = report.get("state")
         temperature_valid = report.get("temperature_valid")
-        outcome = "none"
-        if state == "confirmed":
-            if role == "Primary" and temperature_valid is True:
-                outcome = "notify_only"
-            elif role == "Primary" and controller_mode == Mode.ERROR:
-                outcome = "stopped"
-            else:
-                outcome = "unavailable"
+        outcome = project_thermocouple_health_outcome(role, state, evidence, detail)
 
         try:
             view = ThermocoupleHealthView.model_validate(
@@ -408,6 +401,28 @@ class ProbeHealthModel(QAbstractListModel):
         self._summary = summary
         self.summaryChanged.emit()
 
+    def advance_freshness(self, elapsed_s):
+        elapsed_s = _finite_float(elapsed_s)
+        if elapsed_s is None or elapsed_s <= 0.0 or not self._rows:
+            return
+        rows = []
+        for row in self._rows:
+            age_s = row["lastReportedAgeS"] + elapsed_s
+            current = row["freshnessCurrent"] and age_s <= CONTROL_HEARTBEAT_STALE_AFTER
+            rows.append(
+                {
+                    **row,
+                    "freshnessCurrent": current,
+                    "lastReportedAgeS": age_s,
+                    "freshnessQualifier": None if current else "Last reported",
+                }
+            )
+        self.beginResetModel()
+        self._rows = rows
+        self.endResetModel()
+        self._summary = self._summarize(rows)
+        self.summaryChanged.emit()
+
     def invalid_labels(self):
         return {
             row["label"]
@@ -500,12 +515,15 @@ class PiFireBackend(QObject):
     def _poll_health(self, now):
         if self._health_fetch_fn is None:
             return
-        if self._last_health_check is not None and now - self._last_health_check < self.HEALTH_POLL_SECONDS:
+        previous_check = self._last_health_check
+        if previous_check is not None and now - previous_check < self.HEALTH_POLL_SECONDS:
             return
         self._last_health_check = now
         try:
             health = self._health_fetch_fn()
         except Exception:
+            if previous_check is not None:
+                self._health_model.advance_freshness(max(0.0, now - previous_check))
             return
         self._health_model.update(health)
 

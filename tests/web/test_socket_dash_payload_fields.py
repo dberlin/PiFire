@@ -187,15 +187,10 @@ def test_health_projection_defaults_missing_and_empty_reports_to_empty(ds):
 
     settings = _health_settings(_probe("Grill", role="Primary"))
 
-    assert _project_thermocouple_health(settings, None, "Hold", now=100.0) == []
-    assert _project_thermocouple_health(settings, [], "Hold", now=100.0) == []
+    assert _project_thermocouple_health(settings, None, now=100.0) == []
+    assert _project_thermocouple_health(settings, [], now=100.0) == []
     assert (
-        _project_thermocouple_health(
-            settings,
-            _device_info("tc0", {}),
-            "Hold",
-            now=100.0,
-        )
+        _project_thermocouple_health(settings, _device_info("tc0", {}), now=100.0)
         == []
     )
 
@@ -225,7 +220,6 @@ def test_health_projection_preserves_every_state_and_identifies_source(
     result = _project_thermocouple_health(
         _health_settings(_probe("Food1", name="Brisket")),
         _device_info("tc0", {"Food1": report}),
-        "Hold",
         now=100.0,
     )
 
@@ -254,26 +248,27 @@ def test_health_projection_preserves_every_state_and_identifies_source(
 
 
 @pytest.mark.parametrize(
-    ("role", "policy", "temperature_valid", "mode", "outcome"),
+    ("role", "policy", "temperature_valid", "authority", "outcome"),
     [
-        ("Primary", "observe", True, "Hold", "notify_only"),
-        ("Primary", "enforce", False, "Error", "stopped"),
-        ("Primary", "enforce", False, "Hold", "unavailable"),
-        ("Food", "observe", False, "Hold", "unavailable"),
-        ("Aux", "enforce", False, "Error", "unavailable"),
+        ("Primary", "observe", True, "notify_only", "notify_only"),
+        ("Primary", "enforce", False, "stop", "stopped"),
+        ("Primary", "off", False, None, "unavailable"),
+        ("Food", "observe", False, "stop", "unavailable"),
+        ("Aux", "enforce", False, "stop", "unavailable"),
     ],
 )
-def test_health_projection_uses_policy_and_actual_controller_outcome(
-    ds, role, policy, temperature_valid, mode, outcome
+def test_health_projection_uses_report_authority_without_global_mode(
+    ds, role, policy, temperature_valid, authority, outcome
 ):
     from blueprints.mobile.socket_io import _project_thermocouple_health
 
     label = f"{role}Probe"
     detail = {
         "policy": policy,
-        "authority": "notify_only" if temperature_valid else "stop",
         "is_primary": role == "Primary",
     }
+    if authority is not None:
+        detail["authority"] = authority
     result = _project_thermocouple_health(
         _health_settings(
             _probe(
@@ -297,7 +292,6 @@ def test_health_projection_uses_policy_and_actual_controller_outcome(
                 )
             },
         ),
-        mode,
         now=100.0,
     )
 
@@ -325,7 +319,6 @@ def test_health_projection_preserves_open_and_short_without_error_strings(ds):
                 )
             },
         ),
-        "Error",
         now=100.0,
     )
 
@@ -359,7 +352,6 @@ def test_health_projection_rejects_malformed_detail_and_computes_finite_age(ds):
     result = _project_thermocouple_health(
         settings,
         _device_info("tc0", reports),
-        "Hold",
         now=100.0,
     )
 
@@ -375,7 +367,7 @@ def test_health_projection_rejects_malformed_detail_and_computes_finite_age(ds):
     )
 
 
-def test_health_projection_uses_epoch_time_and_age_crosses_current_threshold(
+def test_health_projection_uses_producer_monotonic_clock_and_ages_current_threshold(
     ds, monkeypatch
 ):
     from blueprints.mobile import socket_io
@@ -383,30 +375,23 @@ def test_health_projection_uses_epoch_time_and_age_crosses_current_threshold(
     settings = _health_settings(_probe("Grill", role="Primary"))
     reports = _device_info(
         "tc0",
-        {"Grill": _report("healthy", observed_at=1_800_000_000.0)},
+        {"Grill": _report("healthy", observed_at=10_000.0)},
     )
-    now = 1_800_000_001.0
-    monkeypatch.setattr(socket_io.time, "time", lambda: now)
+    now = 10_000.5
+    monkeypatch.setattr(socket_io.time, "monotonic", lambda: now)
+    monkeypatch.setattr(socket_io.time, "time", lambda: 1_800_000_000.0)
 
-    fresh = socket_io._project_thermocouple_health(
-        settings,
-        reports,
-        "Hold",
-    )
+    fresh = socket_io._project_thermocouple_health(settings, reports)
     now += socket_io.CONTROL_HEARTBEAT_STALE_AFTER + 1.0
-    stale = socket_io._project_thermocouple_health(
-        settings,
-        reports,
-        "Hold",
-    )
+    stale = socket_io._project_thermocouple_health(settings, reports)
 
     assert fresh[0]["freshness"] == {
         "current": True,
-        "lastReportedAgeS": 1.0,
+        "lastReportedAgeS": 0.5,
     }
     assert stale[0]["freshness"] == {
         "current": False,
-        "lastReportedAgeS": socket_io.CONTROL_HEARTBEAT_STALE_AFTER + 2.0,
+        "lastReportedAgeS": socket_io.CONTROL_HEARTBEAT_STALE_AFTER + 1.5,
     }
 
 
@@ -453,13 +438,11 @@ def test_inactive_policy_reprojection_uses_controller_epoch_for_advancing_socket
     first = socket_io._project_thermocouple_health(
         _health_settings(_probe("Grill", role="Primary"), policy="off"),
         projected,
-        "Stop",
         now=controller_now + 1.0,
     )
     later = socket_io._project_thermocouple_health(
         _health_settings(_probe("Grill", role="Primary"), policy="off"),
         projected,
-        "Stop",
         now=controller_now + 3.0,
     )
 

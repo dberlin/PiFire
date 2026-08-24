@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from typing import Generic, Literal, TypeVar
 
 from pydantic import (
@@ -132,6 +134,27 @@ class ThermocoupleHealthDetectorView(WireModel):
 class ThermocoupleHealthFreshnessView(WireModel):
     current: bool
     last_reported_age_s: FiniteNumber = Field(alias="lastReportedAgeS")
+
+
+def project_thermocouple_health_outcome(
+    role: object,
+    state: object,
+    evidence: object,
+    detail: object,
+) -> Literal["none", "notify_only", "unavailable", "stopped"]:
+    """Project control impact from the report's own safety authority."""
+    if state != "confirmed":
+        return "none"
+    if role != "Primary":
+        return "unavailable"
+    if isinstance(evidence, list) and "hardware" in evidence:
+        return "stopped"
+    authority = detail.get("authority") if isinstance(detail, Mapping) else None
+    if authority == "stop":
+        return "stopped"
+    if authority == "notify_only":
+        return "notify_only"
+    return "unavailable"
 
 
 class ThermocoupleHealthView(WireModel):

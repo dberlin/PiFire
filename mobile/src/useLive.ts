@@ -13,6 +13,8 @@ import {
 
 export type { ConnectionPhase };
 
+export const LIVE_STALE_AFTER_MS = 30_000;
+
 export interface LiveResult {
   live: DashSocketPayload;
   phase: ConnectionPhase;
@@ -28,6 +30,31 @@ export interface LiveResult {
    *  `/api/history/chart` fetch -- need this directly; `command` only
    *  exposes control writes, not a base URL. */
   host: string;
+}
+
+export function qualifyRetainedHealth(result: LiveResult, now: number): LiveResult {
+  const payloadAgeMs =
+    result.lastPayloadAt === null ? null : Math.max(0, now - result.lastPayloadAt);
+  const retained =
+    result.phase !== "live" ||
+    payloadAgeMs === null ||
+    payloadAgeMs > LIVE_STALE_AFTER_MS;
+  if (!retained || !result.live.thermocoupleHealth?.length) {
+    return result;
+  }
+  return {
+    ...result,
+    live: {
+      ...result.live,
+      thermocoupleHealth: result.live.thermocoupleHealth.map((health) => ({
+        ...health,
+        freshness: {
+          ...health.freshness,
+          current: false,
+        },
+      })),
+    },
+  };
 }
 
 // A backgrounded iOS app suspends its socket without reliably surfacing a

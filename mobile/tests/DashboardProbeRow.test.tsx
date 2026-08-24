@@ -1,5 +1,7 @@
 import { render } from "@testing-library/react-native";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type { LiveResult } from "../src/useLive";
+import { qualifyRetainedHealth } from "../src/useLive";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { PROBE_GAP, probeGrid } from "@pifire/core/dashboard/scale";
 import { wireHealth } from "./healthFixture";
@@ -106,6 +108,91 @@ describe("the probe row", () => {
     for (const w of rest) {
       expect(w).toBe(first);
     }
+  });
+});
+
+describe("transport-retained probe health", () => {
+  const health = [
+    wireHealth({ report: { state: "suspected" } }),
+    wireHealth({
+      role: "Food",
+      label: FIXTURE_DASH.foodProbes[0].label,
+      displayName: FIXTURE_DASH.foodProbes[0].title,
+      port: "TC1",
+      report: { state: "suspected" },
+    }),
+    wireHealth({
+      role: "Aux",
+      label: "Stack",
+      displayName: "Stack",
+      port: "TC2",
+      report: {
+        state: "confirmed",
+        faults: ["open"],
+        temperatureValid: false,
+      },
+      outcome: "unavailable",
+    }),
+  ];
+
+  function qualifiedDash(
+    phase: LiveResult["phase"],
+    lastPayloadAt: number,
+    healthItems: NonNullable<DashSocketPayload["thermocoupleHealth"]> = health,
+  ) {
+    return qualifyRetainedHealth(
+      {
+        live: { ...FIXTURE_DASH, thermocoupleHealth: healthItems },
+        phase,
+        controlAlive: true,
+        pellets: null,
+        command: {} as LiveResult["command"],
+        lastPayloadAt,
+        host: "http://pifire.local:5000",
+      },
+      100_000,
+    ).live;
+  }
+
+  it.each([
+    ["a disconnected socket", "unreachable" as const, 100_000],
+    ["a silent live socket", "live" as const, 69_000],
+  ])("qualifies the gauge, food card, and Aux summary after %s", async (_case, phase, lastPayloadAt) => {
+    live.dash = qualifiedDash(phase, lastPayloadAt);
+
+    const screen = await render(<Dashboard />);
+
+    expect(screen.getAllByText("Last reported")).toHaveLength(3);
+    expect(screen.getByRole("summary").props.accessibilityLabel).toContain("Last reported");
+  });
+
+  it("keeps current live health unqualified", async () => {
+    live.dash = qualifiedDash("live", 100_000);
+
+    const screen = await render(<Dashboard />);
+
+    expect(screen.queryByText("Last reported")).toBeNull();
+    expect(screen.getAllByTestId("probe-health-inline")).toHaveLength(2);
+    expect(screen.getByTestId("health-summary")).toBeTruthy();
+  });
+
+  it("keeps retained healthy reports pill-free", async () => {
+    live.dash = qualifiedDash("unreachable", 100_000, [
+      wireHealth(),
+      wireHealth({
+        role: "Food",
+        label: FIXTURE_DASH.foodProbes[0].label,
+        displayName: FIXTURE_DASH.foodProbes[0].title,
+        port: "TC1",
+      }),
+      wireHealth({ role: "Aux", label: "Stack", displayName: "Stack", port: "TC2" }),
+    ]);
+
+    const screen = await render(<Dashboard />);
+
+    expect(screen.queryByText("Last reported")).toBeNull();
+    expect(screen.queryByTestId("probe-health-inline")).toBeNull();
+    expect(screen.queryByTestId("health-summary")).toBeNull();
   });
 });
 

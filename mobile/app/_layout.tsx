@@ -9,7 +9,12 @@ import { alertsFor } from "../src/alerts";
 import { loadHosts } from "../src/host";
 import { defaultPrefs, loadPrefs, savePrefs, type Prefs } from "../src/prefs";
 import { THEME } from "../src/theme";
-import { useLive, type LiveResult } from "../src/useLive";
+import {
+  LIVE_STALE_AFTER_MS,
+  qualifyRetainedHealth,
+  useLive,
+  type LiveResult,
+} from "../src/useLive";
 
 // Foreground behavior: expo-notifications' default handler does not present a
 // notification while the app is open, and a local alert that only shows once
@@ -25,11 +30,6 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
-
-// A payload older than this is not "current" -- see useLive's
-// lastPayloadAt doc comment. A phone that sat in a pocket for ten minutes
-// must not look live just because the socket is still technically open.
-const STALE_AFTER_MS = 30_000;
 
 const LiveContext = createContext<LiveResult | null>(null);
 
@@ -69,21 +69,11 @@ export function usePrefsContext(): PrefsContextValue {
   return value;
 }
 
-function StatusStrip({ live }: { live: LiveResult }) {
+function StatusStrip({ live, now }: { live: LiveResult; now: number }) {
   const { prefs } = usePrefsContext();
   const tokens = THEME[prefs.accent];
-
-  // Ticks once a second purely to re-render this label -- lastPayloadAt
-  // itself only changes when a new dash payload arrives, but the reported
-  // age needs to keep counting up between payloads.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
   const ageMs = live.lastPayloadAt === null ? null : now - live.lastPayloadAt;
-  const stale = ageMs === null || ageMs > STALE_AFTER_MS;
+  const stale = ageMs === null || ageMs > LIVE_STALE_AFTER_MS;
 
   let label: string;
   let color: string = tokens.text;
@@ -163,8 +153,17 @@ function LiveShell({
   children: React.ReactNode;
 }) {
   const live = useLive(host);
-  const primaryWire = live.live.thermocoupleHealth?.find(
-    (health) => health.role === "Primary" && health.label === live.live.primaryProbe.label,
+  // One shell clock drives both the transport strip and retained health.
+  // Without it, an open-but-silent socket could age the strip while every
+  // health surface stayed permanently "current".
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const displayLive = useMemo(() => qualifyRetainedHealth(live, now), [live, now]);
+  const primaryWire = displayLive.live.thermocoupleHealth?.find(
+    (health) => health.role === "Primary" && health.label === displayLive.live.primaryProbe.label,
   );
   const primaryHealth = primaryWire ? projectProbeHealth(primaryWire) : null;
   useAlertNotifications(live.live, live.lastPayloadAt, alertsEnabled);
@@ -183,8 +182,8 @@ function LiveShell({
   }, [alertsEnabled]);
 
   return (
-    <LiveContext.Provider value={live}>
-      <StatusStrip live={live} />
+    <LiveContext.Provider value={displayLive}>
+      <StatusStrip live={live} now={now} />
       <HealthBanner health={primaryHealth} />
       {children}
     </LiveContext.Provider>

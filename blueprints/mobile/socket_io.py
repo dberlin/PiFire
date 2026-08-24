@@ -83,6 +83,7 @@ from common.web_contracts.core import (
     DashSocketPayload,
     PelletSocketPayload,
     ThermocoupleHealthView,
+    project_thermocouple_health_outcome,
 )
 from flask import request
 from werkzeug.utils import secure_filename
@@ -313,7 +314,6 @@ def _finite_float(value):
 def _project_thermocouple_health(
     settings,
     probe_device_info,
-    controller_mode,
     *,
     now=None,
 ):
@@ -348,7 +348,7 @@ def _project_thermocouple_health(
                 reports_by_probe[(device, label)] = report
 
     if now is None:
-        now = time.time()
+        now = time.monotonic()
     now = _finite_float(now)
     if now is None:
         return []
@@ -400,14 +400,7 @@ def _project_thermocouple_health(
 
         state = report.get("state")
         temperature_valid = report.get("temperature_valid")
-        outcome = "none"
-        if state == "confirmed":
-            if role == "Primary" and temperature_valid is True:
-                outcome = "notify_only"
-            elif role == "Primary" and controller_mode == Mode.ERROR:
-                outcome = "stopped"
-            else:
-                outcome = "unavailable"
+        outcome = project_thermocouple_health_outcome(role, state, evidence, detail)
 
         try:
             view = ThermocoupleHealthView.model_validate(
@@ -547,7 +540,6 @@ def _get_dash_data(settings, pelletdb):
         "thermocoupleHealth": _project_thermocouple_health(
             settings,
             probe_device_info,
-            control["mode"],
         ),
     }
     return DashSocketPayload.model_validate(dash_data, strict=True).model_dump(

@@ -31,12 +31,9 @@ def _fetch():
 
 def _fetch_health(*, now=None):
     """Read and project the slower generic health blob."""
-    status = read_status()
-    mode = status.get("mode", "Stop") if isinstance(status, dict) else "Stop"
     return project_thermocouple_health(
         read_settings_store(),
         read_generic_key("probe_device_info"),
-        mode,
         now=now,
     )
 

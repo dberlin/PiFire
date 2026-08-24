@@ -36,7 +36,10 @@ jest.mock("../src/prefs", () => ({
   loadPrefs: async () => mockPrefsState.current,
   savePrefs: jest.fn(),
 }));
-jest.mock("../src/useLive", () => ({ useLive: () => mockLiveState.current }));
+jest.mock("../src/useLive", () => ({
+  ...jest.requireActual("../src/useLive"),
+  useLive: () => mockLiveState.current,
+}));
 
 import RootLayout from "../app/_layout";
 const command = {} as LiveResult["command"];
@@ -44,6 +47,7 @@ const command = {} as LiveResult["command"];
 function liveResult(
   thermocoupleHealth: NonNullable<DashSocketPayload["thermocoupleHealth"]>,
   phase: LiveResult["phase"] = "live",
+  lastPayloadAt: number | null = Date.now(),
 ): LiveResult {
   return {
     live: { ...FIXTURE_DASH, thermocoupleHealth },
@@ -51,7 +55,7 @@ function liveResult(
     controlAlive: true,
     pellets: null,
     command,
-    lastPayloadAt: Date.now(),
+    lastPayloadAt,
     host: "http://pifire.local:5000",
   };
 }
@@ -59,11 +63,6 @@ function liveResult(
 const CONFIRMED_PRIMARY_CURRENT = wireHealth({
   report: { state: "confirmed", faults: ["malfunction"], temperatureValid: true },
   outcome: "notify_only",
-});
-const CONFIRMED_PRIMARY_LAST_REPORTED = wireHealth({
-  report: { state: "confirmed", faults: ["malfunction"], temperatureValid: true },
-  outcome: "notify_only",
-  freshness: { current: false, lastReportedAgeS: 63 },
 });
 
 beforeEach(() => {
@@ -82,13 +81,27 @@ it("keeps transport status separate from a persistent primary health banner", as
   expect(screen.getByRole("alert").props.accessibilityLabel).toContain("Grill");
   expect(screen.queryByRole("button")).toBeNull();
   expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+  expect(screen.queryByText("Last reported")).toBeNull();
 });
 
-it("retains a confirmed banner offline, qualified as Last reported", async () => {
-  mockLiveState.current = liveResult([CONFIRMED_PRIMARY_LAST_REPORTED], "unreachable");
+it("retains a current confirmed banner after disconnect, qualified as Last reported", async () => {
+  mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT], "unreachable");
   const screen = await render(<RootLayout />);
 
   await waitFor(() => expect(screen.getByText("Unreachable")).toBeTruthy());
+  expect(screen.getByText("FAULT")).toBeTruthy();
+  expect(screen.getByText("Last reported")).toBeTruthy();
+});
+
+it("ages a current confirmed banner to Last reported after a silent live socket stall", async () => {
+  mockLiveState.current = liveResult(
+    [CONFIRMED_PRIMARY_CURRENT],
+    "live",
+    Date.now() - 31_000,
+  );
+  const screen = await render(<RootLayout />);
+
+  await waitFor(() => expect(screen.getByText("Stale · 31s ago")).toBeTruthy());
   expect(screen.getByText("FAULT")).toBeTruthy();
   expect(screen.getByText("Last reported")).toBeTruthy();
 });
