@@ -340,4 +340,22 @@ describe("ProbesTab", () => {
     expect(region).toHaveTextContent("junction spread c: 0.2");
     expect(region).toHaveTextContent("window samples: 12");
   });
+
+  it("qualifies retained health and its frozen report age when transport is unreachable", async () => {
+    renderTab(
+      <ProbesTab />,
+      {
+        ...ctx(),
+        phase: "unreachable",
+        thermocoupleHealth: [
+          health("Primary", "Grill", "confirmed", "unavailable", true),
+        ],
+      },
+      CATALOG,
+    );
+
+    const region = await screen.findByRole("region", { name: "Thermocouple health" });
+    expect(region).toHaveTextContent("Last reported: PROBE UNAVAILABLE");
+    expect(screen.getByText("Report age at last update").closest("div")).toHaveTextContent("0s");
+  });
 });

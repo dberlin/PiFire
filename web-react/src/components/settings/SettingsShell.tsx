@@ -82,6 +82,7 @@ export function SettingsShell() {
             mode,
             controllerMeta,
             thermocoupleHealth: shell?.live.thermocoupleHealth ?? [],
+            phase: shell?.phase,
             ...draftStore,
           }}
         />

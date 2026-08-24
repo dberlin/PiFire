@@ -29,6 +29,9 @@ const adsModule: ProbeModuleData = {
 const mcp9601Note =
   "Hardware fault detection is disabled by default. A disconnected or electrically shorted/collapsed thermocouple can read as ambient temperature instead of reporting a fault. Enable hardware detection only when the board includes the required MCP9601 VSENSE network; SEN-30010-W is verified.";
 
+const softwareDetectionWarning =
+  "WARNING: This amplifier does not have enabled, board-supported thermocouple fault detection. A disconnected or electrically shorted/collapsed probe may read as the cold-junction (ambient) temperature instead of reporting a fault. Software thermocouple fault detection is STRONGLY RECOMMENDED.";
+
 const mcp9601Module: ProbeModuleData = {
   ...adsModule,
   friendly_name: "MCP9601 Thermocouple Amplifier (SEN-30010-W)",
@@ -131,12 +134,8 @@ it("replaces static thermocouple notes with a conditional software-detection war
   );
 
   const warning = document.querySelector(".pf-module-notes");
-  expect(warning).toHaveTextContent(
-    "Hardware fault detection is unavailable or disabled for this thermocouple module.",
-  );
-  expect(warning).toHaveTextContent(
-    "Keep software thermocouple detection set to Observe or Enforce",
-  );
+  expect(warning).toHaveTextContent(softwareDetectionWarning);
+  expect(warning?.textContent).toBe(softwareDetectionWarning);
   expect(screen.queryByText(mcp9601Note)).toBeNull();
   expect(
     screen.getByRole("img", {
@@ -162,9 +161,7 @@ it("shows the warning when a thermocouple module has no hardware detection setti
     />,
   );
 
-  expect(document.querySelector(".pf-module-notes")).toHaveTextContent(
-    "Hardware fault detection is unavailable or disabled",
-  );
+  expect(document.querySelector(".pf-module-notes")).toHaveTextContent(softwareDetectionWarning);
 });
 
 it("shows no warning or duplicate static note when thermocouple hardware detection is enabled", () => {

@@ -176,7 +176,7 @@ describe("SettingsShell", () => {
     expect(document.documentElement.getAttribute("data-accent")).toBe("crimson");
   });
 
-  it("forwards thermocouple health from the parent shell context instead of subscribing again", async () => {
+  it("forwards thermocouple health and transport phase from the parent shell context", async () => {
     const health: ThermocoupleHealthView = {
       device: "Aux amplifier",
       port: "KTT2",
@@ -195,13 +195,20 @@ describe("SettingsShell", () => {
       freshness: { current: true, lastReportedAgeS: 0 },
     };
     function LiveParent() {
-      return <Outlet context={{ live: { thermocoupleHealth: [health] } }} />;
+      return (
+        <Outlet context={{ live: { thermocoupleHealth: [health] }, phase: "unreachable" }} />
+      );
     }
     function HealthProbe() {
-      const { thermocoupleHealth = [] } = useOutletContext<{
+      const { thermocoupleHealth = [], phase } = useOutletContext<{
         thermocoupleHealth?: ThermocoupleHealthView[];
+        phase?: string;
       }>();
-      return <span>health:{thermocoupleHealth.map((item) => item.displayName).join(",")}</span>;
+      return (
+        <span>
+          health:{thermocoupleHealth.map((item) => item.displayName).join(",")}; phase:{phase}
+        </span>
+      );
     }
     const router = createMemoryRouter(
       [
@@ -233,7 +240,7 @@ describe("SettingsShell", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("health:Ambient")).toBeInTheDocument();
+    expect(await screen.findByText("health:Ambient; phase:unreachable")).toBeInTheDocument();
   });
 });
 

@@ -13,6 +13,7 @@ import {
 import { queryKeys } from "../../../helpers/query/keys";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
+import type { ConnectionPhase } from "../../../helpers/useLiveState";
 import { DevicesCard } from "../../wizard/probes/DevicesCard";
 import { PortsCard } from "../../wizard/probes/PortsCard";
 import { Section } from "../fields/Section";
@@ -80,10 +81,11 @@ function blockedModules(
 }
 
 export function ProbesTab() {
-  const { settings, mode, thermocoupleHealth = [] } = useOutletContext<{
+  const { settings, mode, thermocoupleHealth = [], phase } = useOutletContext<{
     settings: SettingsSchema;
     mode: string;
     thermocoupleHealth?: readonly ThermocoupleHealthView[];
+    phase?: ConnectionPhase;
   }>();
   const catalog = useLoaderData<ProbeModuleCatalog>();
   const revalidator = useRevalidator();
@@ -244,6 +246,8 @@ export function ProbesTab() {
               .replaceAll("_", " ")
               .replace(/(^| )\S/g, (letter) => letter.toUpperCase());
             const status = health.headline ?? stateCopy;
+            const retainedHealth =
+              phase === "unreachable" || health.freshnessQualifier !== null;
             return (
               <article
                 className={`pf-probe-health-detail pf-probe-health-detail--${health.severity}`}
@@ -253,7 +257,7 @@ export function ProbesTab() {
                   {health.role} · {health.displayName}
                 </h3>
                 <p className="pf-probe-health-detail-status">
-                  {health.freshnessQualifier !== null ? "Last reported: " : null}
+                  {retainedHealth ? "Last reported: " : null}
                   {status}
                 </p>
                 {health.impactCopy !== null ? <p>{health.impactCopy}</p> : null}
@@ -300,7 +304,7 @@ export function ProbesTab() {
                     <dd>{health.evidence.length > 0 ? health.evidence.join(", ") : "None"}</dd>
                   </div>
                   <div>
-                    <dt>Report age</dt>
+                    <dt>{phase === "unreachable" ? "Report age at last update" : "Report age"}</dt>
                     <dd>{Math.round(health.lastReportedAgeS)}s</dd>
                   </div>
                   {Object.entries(item.report.detail).map(([key, value]) => (

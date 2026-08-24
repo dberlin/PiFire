@@ -2,6 +2,9 @@ import type { Config, ProbeModuleData, WireValue } from "@pifire/core/contracts/
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { DeviceConfigField } from "./DeviceConfigField";
 
+const SOFTWARE_DETECTION_WARNING =
+  "WARNING: This amplifier does not have enabled, board-supported thermocouple fault detection. A disconnected or electrically shorted/collapsed probe may read as the cold-junction (ambient) temperature instead of reporting a fault. Software thermocouple fault detection is STRONGLY RECOMMENDED.";
+
 export interface DeviceFormProps {
   mode: "add" | "edit";
   moduleData: ProbeModuleData;
@@ -35,11 +38,7 @@ export function DeviceForm(props: DeviceFormProps) {
       <h3 className="pf-module-name">{moduleData.friendly_name}</h3>
       {moduleData.description && <p className="pf-module-description">{moduleData.description}</p>}
       {showSoftwareDetectionWarning ? (
-        <p className="pf-module-notes">
-          Hardware fault detection is unavailable or disabled for this thermocouple module. Keep
-          software thermocouple detection set to Observe or Enforce so a failed probe that still
-          looks like ambient temperature can be identified.
-        </p>
+        <p className="pf-module-notes">{SOFTWARE_DETECTION_WARNING}</p>
       ) : !thermocoupleModule && moduleData.notes ? (
         <p className="pf-module-notes">{moduleData.notes}</p>
       ) : null}
