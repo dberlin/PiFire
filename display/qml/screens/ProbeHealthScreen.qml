@@ -21,7 +21,7 @@ Item {
 		objectName: "probeHealthDetailsCard"
 		anchors.horizontalCenter: parent.horizontalCenter
 		anchors.top: parent.top
-		anchors.topMargin: Math.min(128, Math.max(76, parent.height * 0.18))
+		anchors.topMargin: Math.max(122, Math.min(128, parent.height * 0.18))
 		width: Math.min(parent.width - 24, 920)
 		height: Math.min(parent.height - anchors.topMargin - 12, 660)
 		radius: Theme.cardRadius
@@ -192,5 +192,5 @@ Item {
 		}
 	}
 
-	Component.onCompleted: closeButton.forceActiveFocus()
+	StackView.onActivated: closeButton.forceActiveFocus()
 }

@@ -36,6 +36,7 @@ Rectangle {
 	Accessible.role: Accessible.Button
 	Accessible.name: "Thermocouple health alert"
 	Accessible.description: summaryText + ". Open details."
+	Accessible.onPressAction: banner.clicked()
 
 	TapHandler { onTapped: banner.clicked() }
 	Keys.onReturnPressed: banner.clicked()

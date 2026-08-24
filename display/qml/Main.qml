@@ -33,6 +33,7 @@ Window {
 
 		StackView {
 			id: stack
+			objectName: "mainStack"
 			anchors.fill: parent
 			initialItem: splashComponent
 		}

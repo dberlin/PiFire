@@ -2,11 +2,12 @@ import gc
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, QMetaObject, Qt, QUrl, qInstallMessageHandler
-from PySide6.QtGui import QAccessible, QGuiApplication
+from PySide6.QtCore import QObject, QPointF, QMetaObject, Qt, QUrl, qInstallMessageHandler
+from PySide6.QtGui import QAccessible, QAccessibleActionInterface, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtTest import QTest
 from PySide6.QtQuick import QQuickItem, QQuickWindow
@@ -123,7 +124,46 @@ def _text(root, name):
     return str(_find(root, name).property("text"))
 
 
-def _save(root, name):
+def _wait_until(predicate, message, timeout_ms=2000):
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        _app().processEvents()
+        if predicate():
+            return
+        QTest.qWait(10)
+    assert predicate(), message
+
+
+def _wait_for_active_details(root):
+    _wait_until(
+        lambda: root.findChild(QObject, "probeHealthScreen") is not None,
+        "thermocouple health details were not created",
+    )
+    details = _find(root, "probeHealthScreen")
+    stack = _find(root, "mainStack")
+    _wait_until(
+        lambda: not bool(stack.property("busy")) and stack.property("currentItem") == details,
+        "thermocouple health details did not become the settled StackView item",
+    )
+    return details
+
+
+def _open_details(root):
+    QMetaObject.invokeMethod(root, "openHealthDetails", Qt.ConnectionType.DirectConnection)
+    return _wait_for_active_details(root)
+
+
+def _item_rect_in(item, ancestor):
+    origin = item.mapToItem(ancestor, QPointF(0, 0))
+    return origin.x(), origin.y(), float(item.property("width")), float(item.property("height"))
+
+def _save(root, name, active_item=None):
+    if active_item is not None:
+        stack = _find(root, "mainStack")
+        _wait_until(
+            lambda: not bool(stack.property("busy")) and stack.property("currentItem") == active_item,
+            "screenshot requested before the target StackView item settled",
+        )
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
     path = SCREENSHOT_DIR / f"{name}.png"
     image = root.grabWindow()
@@ -228,8 +268,7 @@ def test_multiple_faults_and_aux_are_available_in_scrollable_details():
     banner.forceActiveFocus()
     assert banner.property("activeFocus") is True
     backend.navEnter()
-    QTest.qWait(500)
-    details = _find(root, "probeHealthScreen")
+    details = _wait_for_active_details(root)
     assert details.property("visible") is True
     assert warnings == [], f"QML warnings: {warnings}"
     assert banner.property("visible") is True
@@ -240,7 +279,7 @@ def test_multiple_faults_and_aux_are_available_in_scrollable_details():
     assert _find(root, "probeHealthDetailsFlick").property("contentHeight") >= _find(
         root, "probeHealthDetailsFlick"
     ).property("height")
-    _save(root, "multiple-and-aux-details-1280x720")
+    _save(root, "multiple-and-aux-details-1280x720", active_item=details)
     _assert_no_qml_warnings(warnings)
 
 
@@ -308,12 +347,20 @@ def test_banner_and_details_fit_compact_and_rotated_viewports(size, rotation):
     assert banner.property("y") >= 0
     assert banner.property("x") + banner.property("width") <= logical_width
     assert banner.property("y") + banner.property("height") <= logical_height
-    QMetaObject.invokeMethod(root, "openHealthDetails", Qt.ConnectionType.DirectConnection)
-    QTest.qWait(30)
+    details = _open_details(root)
     details_card = _find(root, "probeHealthDetailsCard")
+    close_button = _find(root, "probeHealthCloseButton")
     assert details_card.property("width") <= logical_width - 24
     assert details_card.property("height") <= logical_height - 24
-    _save(root, f"layout-{size[0]}x{size[1]}-r{rotation}")
+    close_x, close_y, close_width, close_height = _item_rect_in(close_button, rotor)
+    banner_bottom = float(banner.property("y")) + float(banner.property("height"))
+    assert close_width >= 44
+    assert close_height >= 44
+    assert close_y >= banner_bottom
+    assert close_x >= 0
+    assert close_x + close_width <= logical_width
+    assert close_y + close_height <= logical_height
+    _save(root, f"layout-{size[0]}x{size[1]}-r{rotation}", active_item=details)
     _assert_no_qml_warnings(warnings)
 
 
@@ -334,6 +381,42 @@ def test_rotated_dashboard_reflows_to_vertical_scroll_without_horizontal_clippin
     _save(root, f"dashboard-1024x600-r{rotation}")
     _assert_no_qml_warnings(warnings)
 
+def test_banner_accessible_press_action_opens_settled_details():
+    health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]
+    engine, backend, root, warnings = _load_main(health)
+    banner = _find(root, "probeHealthBanner")
+    interface = QAccessible.queryAccessibleInterface(banner)
+    assert interface is not None
+    action = interface.actionInterface()
+    assert action is not None
+    assert QAccessibleActionInterface.pressAction() in action.actionNames()
+    action.doAction(QAccessibleActionInterface.pressAction())
+    details = _wait_for_active_details(root)
+    assert details.property("visible") is True
+    _assert_no_qml_warnings(warnings)
+
+
+def test_natural_encoder_flow_opens_details_with_close_focused_and_closes_it():
+    health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]
+    engine, backend, root, warnings = _load_main(health)
+    banner = _find(root, "probeHealthBanner")
+    assert isinstance(banner, QQuickItem)
+    banner.forceActiveFocus()
+    assert root.activeFocusItem() == banner
+    backend.navEnter()
+    details = _wait_for_active_details(root)
+    close_button = _find(root, "probeHealthCloseButton")
+    assert root.activeFocusItem() == close_button
+    assert close_button.property("activeFocus") is True
+    backend.navEnter()
+    stack = _find(root, "mainStack")
+    _wait_until(
+        lambda: not bool(stack.property("busy")) and stack.property("currentItem") != details,
+        "encoder close did not settle on the previous StackView item",
+    )
+    _assert_no_qml_warnings(warnings)
+
+
 def test_banner_and_details_actions_have_accessible_metadata_and_focus_targets():
     health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]
     engine, backend, root, warnings = _load_main(health)
@@ -344,8 +427,7 @@ def test_banner_and_details_actions_have_accessible_metadata_and_focus_targets()
     assert interface.text(QAccessible.Text.Description)
     assert interface.role() == QAccessible.Role.Button
     assert banner.property("activeFocusOnTab") is True
-    QMetaObject.invokeMethod(root, "openHealthDetails", Qt.ConnectionType.DirectConnection)
-    QTest.qWait(30)
+    details = _open_details(root)
     close_button = _find(root, "probeHealthCloseButton")
     assert close_button.property("width") >= 44
     assert close_button.property("height") >= 44
@@ -353,11 +435,8 @@ def test_banner_and_details_actions_have_accessible_metadata_and_focus_targets()
     assert close_interface is not None
     assert close_interface.text(QAccessible.Text.Name) == "Close thermocouple health details"
     assert close_interface.text(QAccessible.Text.Description)
-    assert isinstance(close_button, QQuickItem)
-    close_button.forceActiveFocus()
-    backend.navEnter()
-    QTest.qWait(500)
-    assert root.findChild(QObject, "probeHealthScreen") is None
+    assert root.activeFocusItem() == close_button
+    assert details.property("visible") is True
     _assert_no_qml_warnings(warnings)
 
 
