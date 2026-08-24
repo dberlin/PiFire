@@ -5,6 +5,7 @@ from probes.thermocouple_health import (
     ThermocoupleHealthReport,
     ThermocoupleHealthState,
 )
+from probes.thermocouple_inference import ThermocoupleInferencePolicy
 
 
 class _HealthDevice:
@@ -47,7 +48,11 @@ def _empty_probe_map():
 
 
 def _main_with_device_health(health):
-    probes = ProbesMain(_empty_probe_map(), "F")
+    probes = ProbesMain(
+        _empty_probe_map(),
+        "F",
+        inference_policy=ThermocoupleInferencePolicy.OFF,
+    )
     probes.probe_device_list = [_HealthDevice(health)]
     return probes
 

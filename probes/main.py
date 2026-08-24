@@ -18,15 +18,33 @@ Description:
 """
 import importlib
 import logging
+import time
+from dataclasses import replace
 
 from probes.thermocouple_health import (
     ThermocoupleHealthReport,
+    ThermocoupleHealthState,
     ThermocoupleHealthTransition,
+)
+from probes.thermocouple_inference import (
+    ThermocoupleExcitationContext,
+    ThermocoupleInferenceEngine,
+    ThermocoupleInferencePolicy,
+    ThermocoupleJunctionSample,
+    ThermocoupleWitnessSample,
+    fuse_thermocouple_health,
 )
 
 
 class ProbesMain:
-    def __init__(self, probe_map, units, disable=False):
+    def __init__(
+        self,
+        probe_map,
+        units,
+        disable=False,
+        inference_policy=ThermocoupleInferencePolicy.OBSERVE,
+    ):
+        policy = ThermocoupleInferencePolicy(inference_policy)
         self.errors = []
         self.logger = logging.getLogger("control")
         self.units = units
@@ -34,7 +52,14 @@ class ProbesMain:
         self.probe_devices = probe_map["probe_devices"]
         self.probe_info = probe_map["probe_info"]
         self.device_info_list = []
+        self.thermocouple_inference_policy = policy
+        self._thermocouple_inference_engines: dict[
+            tuple[str, str], ThermocoupleInferenceEngine
+        ] = {}
         self._thermocouple_health: dict[str, ThermocoupleHealthReport] = {}
+        self._thermocouple_health_by_device: dict[
+            str, dict[str, ThermocoupleHealthReport]
+        ] = {}
         self._thermocouple_health_transitions: list[ThermocoupleHealthTransition] = []
         self._setup_probe_devices(self.probe_devices)
 
@@ -79,7 +104,9 @@ class ProbesMain:
         error_event = None
         errors = []
         self._close_probe_devices()
+        self._thermocouple_inference_engines.clear()
         self._thermocouple_health.clear()
+        self._thermocouple_health_by_device.clear()
         self._thermocouple_health_transitions.clear()
         self.probe_device_list = []
         for device in probe_devices:
@@ -115,30 +142,141 @@ class ProbesMain:
 
         return errors
 
-    def read_probes(self):
-        """
-        Loop through all probe devices and get all data
-        """
+    def set_thermocouple_inference_policy(self, policy) -> None:
+        next_policy = ThermocoupleInferencePolicy(policy)
+        if next_policy is ThermocoupleInferencePolicy.OFF:
+            self._thermocouple_inference_engines.clear()
+        self.thermocouple_inference_policy = next_policy
+
+    def read_probes(self, *, excitation=None, now=None):
+        """Read probes, fuse hardware and inferred health, then invalidate output."""
+        observed_at = time.monotonic() if now is None else now
+        base_excitation = excitation or ThermocoupleExcitationContext(
+            active_cook=False,
+            primary_setpoint_c=0.0,
+            delivered_heat_on_s=0.0,
+        )
         output_data = {"primary": {}, "food": {}, "aux": {}, "tr": {}}
+        probe_by_identity = {
+            (str(probe["device"]), str(probe["port"])): probe
+            for probe in self.probe_info
+        }
+        current_samples = {}
+        hardware_health = {}
+        hardware_by_device = {}
+
+        # Phase A owns all hardware reads. No inferred state changes until every
+        # current sample and hardware report has been captured.
         for device in self.probe_device_list:
             device_data = device.read_all_ports(output_data)
-            # Apply the Kalman filter uniformly, regardless of which read_all_ports
-            # variant the device module implements. Virtual/derived probes read the
-            # already-filtered values above and opt out via applies_kalman = False.
             device.apply_filters(device_data)
             for group in device_data:
                 for probe in device_data[group]:
                     output_data[group][probe] = device_data[group][probe]
 
-        health = {}
-        for device in self.probe_device_list:
-            health.update(device.get_thermocouple_health())
-        for label, current in health.items():
-            previous = self._thermocouple_health.get(label, ThermocoupleHealthReport.unmonitored(current.observed_at))
-            if (previous.state, previous.faults) != (current.state, current.faults):
-                self._thermocouple_health_transitions.append(ThermocoupleHealthTransition(label, previous, current))
-        self._thermocouple_health = health
+            device_info = getattr(device, "device_info", {})
+            device_name = str(device_info.get("device", ""))
+            device_health = device.get_thermocouple_health()
+            hardware_health.update(device_health)
+            hardware_by_device[device_name] = dict(device_health)
+            get_samples = getattr(device, "get_thermocouple_samples", None)
+            samples = get_samples() if get_samples is not None else {}
+            for port, sample in samples.items():
+                if not isinstance(sample, ThermocoupleJunctionSample):
+                    continue
+                identity = (device_name, str(port))
+                probe = probe_by_identity.get(identity)
+                if probe is None:
+                    continue
+                current_samples[identity] = (
+                    probe,
+                    sample,
+                    device_health.get(probe["label"]),
+                )
 
+        policy = self.thermocouple_inference_policy
+        if policy is not ThermocoupleInferencePolicy.OFF:
+            for identity in current_samples:
+                if identity not in self._thermocouple_inference_engines:
+                    self._thermocouple_inference_engines[identity] = (
+                        ThermocoupleInferenceEngine()
+                    )
+
+        # Witness eligibility is frozen before observation. Consequently a
+        # report produced for one thermocouple in this pass cannot affect any
+        # other thermocouple's witnesses in the same pass.
+        prepass_health = {}
+        if policy is not ThermocoupleInferencePolicy.OFF:
+            for identity, (probe, _sample, hardware) in current_samples.items():
+                prepass_health[identity] = fuse_thermocouple_health(
+                    hardware,
+                    self._thermocouple_inference_engines[identity].current_report(),
+                    policy,
+                    probe["type"] == "Primary",
+                )
+
+        health = dict(hardware_health)
+        fused_by_device = {
+            device_name: dict(reports)
+            for device_name, reports in hardware_by_device.items()
+        }
+        if policy is not ThermocoupleInferencePolicy.OFF:
+            for identity in sorted(current_samples):
+                probe, sample, hardware = current_samples[identity]
+                witnesses = tuple(
+                    ThermocoupleWitnessSample(
+                        source=candidate_identity,
+                        temperature_c=candidate_sample.hot_c,
+                    )
+                    for candidate_identity, (
+                        candidate_probe,
+                        candidate_sample,
+                        _candidate_hardware,
+                    ) in sorted(current_samples.items())
+                    if candidate_identity != identity
+                    and candidate_probe["type"] in ("Primary", "Aux")
+                    and prepass_health[candidate_identity].state
+                    is ThermocoupleHealthState.HEALTHY
+                    and prepass_health[candidate_identity].temperature_valid
+                )
+                inferred = self._thermocouple_inference_engines[identity].observe(
+                    sample,
+                    replace(base_excitation, witnesses=witnesses),
+                    probe["type"] == "Primary",
+                    observed_at,
+                )
+                fused = fuse_thermocouple_health(
+                    hardware,
+                    inferred,
+                    policy,
+                    probe["type"] == "Primary",
+                )
+                label = probe["label"]
+                health[label] = fused
+                fused_by_device.setdefault(identity[0], {})[label] = fused
+
+        for probe in self.probe_info:
+            report = health.get(probe["label"])
+            if report is None or report.temperature_valid:
+                continue
+            group = {
+                "Primary": "primary",
+                "Food": "food",
+                "Aux": "aux",
+            }.get(probe["type"])
+            if group is not None and probe["label"] in output_data[group]:
+                output_data[group][probe["label"]] = None
+
+        for label, current in health.items():
+            previous = self._thermocouple_health.get(
+                label, ThermocoupleHealthReport.unmonitored(current.observed_at)
+            )
+            if (previous.state, previous.faults) != (current.state, current.faults):
+                self._thermocouple_health_transitions.append(
+                    ThermocoupleHealthTransition(label, previous, current)
+                )
+        self._thermocouple_health = health
+        self._thermocouple_health_by_device = fused_by_device
         return output_data
 
     def update_probe_map(self, probe_map):
@@ -192,8 +330,20 @@ class ProbesMain:
         return self.errors
 
     def get_device_info(self):
-        """for each device in the self.probe_device_list, get the device info"""
+        """Return driver information with the fused health used by safety."""
         self.device_info_list = []
         for device in self.probe_device_list:
-            self.device_info_list.append(device.get_device_info())
+            driver_info = device.get_device_info()
+            info = dict(driver_info)
+            status = dict(info.get("status", {}))
+            device_name = str(info.get("device", ""))
+            fused = self._thermocouple_health_by_device.get(device_name, {})
+            if fused:
+                status["thermocouple_health"] = {
+                    label: report.as_dict() for label, report in fused.items()
+                }
+            else:
+                status.pop("thermocouple_health", None)
+            info["status"] = status
+            self.device_info_list.append(info)
         return self.device_info_list
