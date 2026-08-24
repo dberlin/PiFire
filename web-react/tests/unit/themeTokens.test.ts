@@ -190,6 +190,9 @@ const FIXED_ACCENT_TOKENS: Record<string, Accent> = {
  *  accident. */
 const UNCONSUMED: Record<string, string> = {
   notify: "the Qt on-device notification banner has no web counterpart",
+  warningSurface: "Qt health warning surface uses fixed alpha; web uses color-mix",
+  dangerSurface: "Qt health danger surface uses fixed alpha; web uses color-mix",
+  focusRing: "Qt encoder focus ring has no standalone web palette token",
   // Theme.qml's back-compat aliases for the older menu/input QML components.
   // They resolve to properties already mapped above, so a token for them would
   // be a second name for a colour the web app already has.
