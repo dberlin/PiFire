@@ -701,6 +701,65 @@ def test_fast_path_requires_exactly_five_strictly_subsequent_collapsed_samples()
     )
 
 
+def _fast_sequence_with_followup_times(
+    followup_times: tuple[float, ...],
+) -> list[ThermocoupleHealthReport]:
+    engine = ThermocoupleInferenceEngine()
+    reports = [
+        engine.observe(
+            _sample(50.0, 30.0),
+            _context(),
+            is_primary=False,
+            now=0.0,
+        ),
+        engine.observe(
+            _sample(30.0, 30.0),
+            _context(),
+            is_primary=False,
+            now=1.0,
+        ),
+    ]
+    reports.extend(
+        engine.observe(
+            _sample(30.0, 30.0),
+            _context(),
+            is_primary=False,
+            now=now,
+        )
+        for now in followup_times
+    )
+    return reports
+
+
+def test_fast_path_allows_realistic_one_point_zero_five_second_admission_cadence():
+    reports = _fast_sequence_with_followup_times(
+        (2.05, 3.10, 4.15, 5.20, 6.25),
+    )
+
+    assert all(not report.confirmed for report in reports[:-1])
+    assert reports[-1].confirmed
+    assert reports[-1].evidence == (
+        ThermocoupleEvidence.IMPLAUSIBLE_STEP,
+        ThermocoupleEvidence.JUNCTION_COLLAPSE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("fifth_followup_at", "confirmed"),
+    [(7.0, True), (7.001, False)],
+)
+def test_fast_path_six_second_expiry_boundary_is_inclusive(
+    fifth_followup_at,
+    confirmed,
+):
+    reports = _fast_sequence_with_followup_times(
+        (2.0, 3.0, 4.0, 5.0, fifth_followup_at),
+    )
+
+    assert reports[-1].confirmed is confirmed
+    assert reports[-1].detail["fast_path_armed"] is False
+
+
 def test_fast_path_does_not_arm_during_inactive_cook():
     reports = _fast_sequence(active=False)
 

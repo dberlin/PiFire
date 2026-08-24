@@ -322,7 +322,7 @@ def _advance_fast_path(
 ) -> tuple[_FastArm | None, tuple[ThermocoupleEvidence, ...]]:
     current = history[-1]
     if arm is not None:
-        if not current.active_cook or abs(current.delta_c) > 1.0 or current.now - arm.event_at > 5.0:
+        if not current.active_cook or abs(current.delta_c) > 1.0 or current.now - arm.event_at > 6.0:
             arm = None
         else:
             collapsed_samples = arm.collapsed_samples + 1
