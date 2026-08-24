@@ -513,7 +513,8 @@ class ControlMode:
             ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
             self.probe_complex.set_thermocouple_inference_policy(
-                self.settings["thermocouple_health"]["inference_policy"]
+                self.settings["thermocouple_health"]["inference_policy"],
+                now=now,
             )
             if self.settings["globals"]["debug_mode"]:
                 self.ctx.event_log.setLevel(logging.DEBUG)

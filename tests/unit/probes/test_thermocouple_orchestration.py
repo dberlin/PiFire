@@ -288,7 +288,7 @@ def test_policy_lifecycle_drops_only_when_off_and_invalid_change_is_atomic(recor
     assert main._thermocouple_inference_engines[("device", "port")] is not engine
 
 
-def test_off_policy_immediately_reprojects_cached_inference_without_followup_read(
+def test_off_policy_immediately_reprojects_cached_health_at_controller_time_without_mutating_hardware(
     recording_engines,
 ):
     inferred_probe = _probe("device", "p0", "Pit", "Primary")
@@ -310,14 +310,18 @@ def test_off_policy_immediately_reprojects_cached_inference_without_followup_rea
     engine.report = _raw_inferred(ThermocoupleHealthState.CONFIRMED, now=2.0)
     main.read_probes(now=2.0)
 
-    main.set_thermocouple_inference_policy("off")
+    controller_now = 1_800_000_000.0
+    main.set_thermocouple_inference_policy("off", now=controller_now)
 
     health = main.get_thermocouple_health()
+    assert device.health["Food"] is hardware
+    assert device.health["Food"].observed_at == 2.0
     assert health["Pit"].state is ThermocoupleHealthState.UNMONITORED
-    assert health["Pit"].observed_at == 2.0
+    assert health["Pit"].observed_at == controller_now
     assert health["Pit"].detail == {"policy": "off"}
     assert health["Food"] == replace(
         hardware,
+        observed_at=controller_now,
         detail={"status": 0x10, "policy": "off"},
     )
     assert main.get_device_info()[0]["status"]["thermocouple_health"] == {

@@ -14,6 +14,7 @@ class FakeProbes:
         self.update_probe_map_calls = []
         self.read_calls = []
         self.inference_policy_calls = []
+        self.inference_policy_now_calls = []
 
     def script(self, items):
         norm = []
@@ -76,8 +77,9 @@ class FakeProbes:
         self.update_probe_map_calls.append(probe_map)
         return []
 
-    def set_thermocouple_inference_policy(self, policy):
+    def set_thermocouple_inference_policy(self, policy, *, now=None):
         self.inference_policy_calls.append(policy)
+        self.inference_policy_now_calls.append(now)
 
     def update_units(self, x):
         pass

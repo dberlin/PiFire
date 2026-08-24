@@ -138,7 +138,7 @@ class ProbesMain:
 
         return errors
 
-    def _reproject_cached_health_without_inference(self) -> None:
+    def _reproject_cached_health_without_inference(self, observed_at: float) -> None:
         probe_is_primary = {
             (str(probe["device"]), str(probe["label"])): probe["type"] == "Primary" for probe in self.probe_info
         }
@@ -155,17 +155,27 @@ class ProbesMain:
                     ThermocoupleInferencePolicy.OFF,
                     probe_is_primary.get((device_name, label), False),
                 )
-            health.update(reports)
-            health_by_device[device_name] = reports
+            normalized = {}
+            for label, report in reports.items():
+                detail = dict(report.detail)
+                detail["policy"] = ThermocoupleInferencePolicy.OFF.value
+                normalized[label] = replace(
+                    report,
+                    observed_at=observed_at,
+                    detail=detail,
+                )
+            health.update(normalized)
+            health_by_device[device_name] = normalized
         self._thermocouple_health = health
         self._thermocouple_health_by_device = health_by_device
         self._thermocouple_health_transitions.clear()
 
-    def set_thermocouple_inference_policy(self, policy) -> None:
+    def set_thermocouple_inference_policy(self, policy, *, now=None) -> None:
         next_policy = ThermocoupleInferencePolicy(policy)
         if next_policy is ThermocoupleInferencePolicy.OFF:
             self._thermocouple_inference_engines.clear()
-            self._reproject_cached_health_without_inference()
+            observed_at = time.time() if now is None else now
+            self._reproject_cached_health_without_inference(observed_at)
         self.thermocouple_inference_policy = next_policy
 
     def read_probes(self, *, excitation=None, now=None):

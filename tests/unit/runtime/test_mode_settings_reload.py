@@ -236,15 +236,18 @@ def test_active_mode_settings_reload_updates_inference_policy_without_probe_rebu
     mode.ctx.store._settings = updated
     mode.control["settings_update"] = True
 
+    controller_now = 1_800_000_000.0
+    mode.ctx.clock.advance(controller_now)
     mode._process_control_flags(
         mode.control,
-        now=0.0,
+        now=controller_now,
         last=True,
         pelletdb=base_pellet_db(),
     )
 
     probes = mode.probe_complex
     assert probes.inference_policy_calls == ["enforce"]
+    assert probes.inference_policy_now_calls == [controller_now]
     assert probes.update_probe_map_calls == []
 
 
@@ -258,6 +261,8 @@ def test_stopped_controller_settings_reload_updates_inference_policy_without_pro
         control,
         base_pellet_db(),
     )
+    controller_now = 1_800_000_000.0
+    ctx.clock.advance(controller_now)
     _neutralize_externals(monkeypatch)
     _spy_dispatch(controller)
     controller.setup()
@@ -272,4 +277,5 @@ def test_stopped_controller_settings_reload_updates_inference_policy_without_pro
 
     probes = ctx.devices.probe_complex
     assert probes.inference_policy_calls == ["off"]
+    assert probes.inference_policy_now_calls == [controller_now]
     assert probes.update_probe_map_calls == []

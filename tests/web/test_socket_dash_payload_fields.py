@@ -410,6 +410,71 @@ def test_health_projection_uses_epoch_time_and_age_crosses_current_threshold(
     }
 
 
+def test_inactive_policy_reprojection_uses_controller_epoch_for_advancing_socket_age(
+    ds,
+):
+    from blueprints.mobile import socket_io
+    from probes.main import ProbesMain
+    from probes.thermocouple_health import ThermocoupleFault, ThermocoupleHealthReport
+
+    controller_now = 1_800_000_000.0
+    hardware = ThermocoupleHealthReport.confirmed_hardware(
+        (ThermocoupleFault.OPEN,),
+        now=32.0,
+        status=0x10,
+    )
+
+    class CachedHardwareDevice:
+        device_info = {"device": "tc0"}
+
+        def get_thermocouple_health(self):
+            return {"Grill": hardware}
+
+        def get_device_info(self):
+            return {"device": "tc0", "status": {"driver": "ready"}}
+
+    probes = ProbesMain(
+        {"probe_devices": [], "probe_info": []},
+        "F",
+    )
+    probes.probe_info = [
+        {
+            "device": "tc0",
+            "port": "CH0",
+            "label": "Grill",
+            "type": "Primary",
+            "profile": {},
+        }
+    ]
+    probes.probe_device_list = [CachedHardwareDevice()]
+
+    probes.set_thermocouple_inference_policy("off", now=controller_now)
+    projected = probes.get_device_info()
+    first = socket_io._project_thermocouple_health(
+        _health_settings(_probe("Grill", role="Primary"), policy="off"),
+        projected,
+        "Stop",
+        now=controller_now + 1.0,
+    )
+    later = socket_io._project_thermocouple_health(
+        _health_settings(_probe("Grill", role="Primary"), policy="off"),
+        projected,
+        "Stop",
+        now=controller_now + 3.0,
+    )
+
+    assert hardware.observed_at == 32.0
+    assert projected[0]["status"]["thermocouple_health"]["Grill"]["observed_at"] == controller_now
+    assert first[0]["freshness"] == {
+        "current": True,
+        "lastReportedAgeS": 1.0,
+    }
+    assert later[0]["freshness"] == {
+        "current": True,
+        "lastReportedAgeS": 3.0,
+    }
+
+
 def test_dash_payload_projects_persisted_health_and_accepts_old_omission(ds):
     probe_info = _device_info(
         "proto_adc",
