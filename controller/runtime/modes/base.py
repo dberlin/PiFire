@@ -716,6 +716,10 @@ class ControlMode:
 
         preflight_data = probe_complex.read_probes()
         ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
+        preflight_ptemp = next(iter(preflight_data["primary"].values()), None)
+        last_valid_ptemp = (
+            preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
+        )
         if self._process_thermocouple_health(preflight_data):
             grill_platform.fan_off()
             grill_platform.power_off()
@@ -745,6 +749,8 @@ class ControlMode:
             self._on_safety_event("thermocouple_fault", ctx.clock.now())
             status = "Inactive"
         else:
+            if isinstance(ptemp, (int, float)):
+                last_valid_ptemp = ptemp
             status = self.setup_safety(ptemp)
 
         # Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
@@ -847,6 +853,8 @@ class ControlMode:
             if self._process_thermocouple_health(sensor_data):
                 self._on_safety_event("thermocouple_fault", now)
                 break
+            if isinstance(ptemp, (int, float)):
+                last_valid_ptemp = ptemp
             # Manual outputs are fenced behind the fresh primary health check.
             self._apply_manual_overrides(control, now, current_output_status)
 
@@ -921,7 +929,7 @@ class ControlMode:
         self.ctx.event_log.debug("Auger OFF, Igniter OFF")
 
         # ---- mode-specific teardown ----
-        self.teardown(ptemp)
+        self.teardown(last_valid_ptemp)
 
         self.ctx.event_log.info(f"{mode} mode ended.")
 

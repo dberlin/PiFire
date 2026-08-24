@@ -76,23 +76,38 @@ class MCP960xProbe(ProbeInterface):
         label = self.port_map[port]
         faults = self._read_hardware_faults()
         now = time.monotonic()
-        if faults is None:
-            report = ThermocoupleHealthReport.unmonitored(now)
-        else:
+        temperature = None
+        if faults or (
+            faults is not None
+            and port == self.primary_port
+            and self._thermocouple_health_report.confirmed
+        ):
             report = self._hardware_fault_latch.update(
                 faults,
                 now=now,
                 primary=port == self.primary_port,
                 status=self._last_hardware_status,
             )
-        self._thermocouple_health_report = report
-
-        temperature = None
-        if report.temperature_valid:
-            temp_c = round(self.device.temperature, 1)
+        else:
+            try:
+                temp_c = round(self.device.temperature, 1)
+            except Exception:
+                self._hardware_fault_latch.cancel_clean_recovery()
+                raise
             temp_f = round(temp_c * (9 / 5) + 32, 1)
             temperature = temp_f if self.units == "F" else temp_c
-
+            if faults is None:
+                report = ThermocoupleHealthReport.unmonitored(now)
+            else:
+                report = self._hardware_fault_latch.update(
+                    faults,
+                    now=now,
+                    primary=port == self.primary_port,
+                    status=self._last_hardware_status,
+                )
+                if not report.temperature_valid:
+                    temperature = None
+        self._thermocouple_health_report = report
         self.output_data["tr"][label] = 0
         if port == self.primary_port:
             self.output_data["primary"][label] = temperature

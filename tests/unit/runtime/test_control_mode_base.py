@@ -17,6 +17,7 @@ from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
 from controller.runtime.state import WorkCycleState
 from controller.runtime.modes.base import ControlMode
+from controller.runtime.modes.startup import StartupMode
 from probes.thermocouple_health import ThermocoupleFault, ThermocoupleHealthReport
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.distance import FakeDistance
@@ -31,6 +32,7 @@ class _RecordingMode(ControlMode):
     def __init__(self, ctx, state):
         super().__init__(ctx, state)
         self.calls = []
+        self.teardown_ptemps = []
 
     def setup(self):
         self.calls.append("setup")
@@ -57,6 +59,7 @@ class _RecordingMode(ControlMode):
 
     def teardown(self, ptemp):
         self.calls.append("teardown")
+        self.teardown_ptemps.append(ptemp)
 
     def _on_safety_event(self, event, now):
         self.calls.append(("safety_event", event))
@@ -173,6 +176,30 @@ def test_confirmed_primary_fault_after_setup_skips_none_safety_paths(monkeypatch
     assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
 
 
+def test_startup_post_setup_fault_persists_last_valid_primary_temperature():
+    fault_sample = _sensor(None)
+    ctx = _make_ctx(
+        temperatures=[225.0, fault_sample],
+        health_reports=[
+            {"Grill": _healthy()},
+            {"Grill": _confirmed(ThermocoupleFault.OPEN)},
+        ],
+    )
+    control = ctx.store.read_control()
+    control["mode"] = "Startup"
+    ctx.store.write_control_snapshot(control, origin="test")
+
+    StartupMode(ctx, WorkCycleState()).run()
+
+    saved_control = ctx.store.read_control()
+    safety = saved_control["safety"]
+    assert isinstance(safety, dict)
+    after_start_temp = safety["afterstarttemp"]
+    assert after_start_temp == 225.0
+    assert isinstance(after_start_temp, (int, float))
+    assert fault_sample["primary"]["Grill"] is None
+
+
 def test_confirmed_primary_fault_on_tick_breaks_before_numeric_guards_and_actuation(monkeypatch):
     evaluated = []
 
@@ -200,6 +227,9 @@ def test_confirmed_primary_fault_on_tick_breaks_before_numeric_guards_and_actuat
     assert ("safety_event", "thermocouple_fault") in mode.calls
     assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
     assert not _positive_actuator_calls(ctx.devices.grill_platform.calls)
+    assert mode.teardown_ptemps == [225.0]
+    assert isinstance(ctx.store, InMemoryStore)
+    assert ctx.store.read_current()["P"]["Grill"] is None
 
 
 def test_tick_health_fence_blocks_pending_positive_manual_override():
