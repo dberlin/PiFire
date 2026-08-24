@@ -1,6 +1,6 @@
 """Structural test for `ControlMode.run()`'s shared skeleton: a trivial
 subclass records every hook invocation and we assert the ORDER matches the
-template method's sense -> safety -> act -> publish contract:
+template method's sense -> health -> safety -> act -> publish contract:
 setup -> setup_safety -> [loop: check_safety -> on_tick -> status_fragment
 (only when the 0.5s publish gate fires, AFTER the merged on_tick) ->
 should_exit] -> teardown.
@@ -11,11 +11,13 @@ tests/characterization/, which is the real behavior-preservation gate.
 
 import pytest
 
+import controller.runtime.modes.base as base_mode
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
 from controller.runtime.state import WorkCycleState
 from controller.runtime.modes.base import ControlMode
+from probes.thermocouple_health import ThermocoupleFault, ThermocoupleHealthReport
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
@@ -42,6 +44,7 @@ class _RecordingMode(ControlMode):
 
     def check_safety(self, now, ptemp):
         self.calls.append("check_safety")
+        return False
 
     def status_fragment(self):
         self.calls.append("status_fragment")
@@ -55,22 +58,172 @@ class _RecordingMode(ControlMode):
     def teardown(self, ptemp):
         self.calls.append("teardown")
 
+    def _on_safety_event(self, event, now):
+        self.calls.append(("safety_event", event))
 
-def _make_ctx():
+
+def _make_ctx(*, temperatures=None, health_reports=None):
     settings = base_settings()
     control_data = base_control(mode="Recording")
     pellet_db = base_pellet_db()
-    probes = FakeProbes().script([120])
+    probes = FakeProbes().script(temperatures or [120])
+    if health_reports is not None:
+        probes.script_health(health_reports)
     store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
     grill = FakeGrillPlatform(outputs=tuple(settings["platform"]["outputs"]))
     notifier = FakeNotifier()
-    ctx = ControllerContext(
+    return ControllerContext(
         devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
         store=store,
         notifications=notifier,
         clock=ManualClock(),
     )
-    return ctx
+
+
+def _healthy():
+    return ThermocoupleHealthReport.healthy(now=0.0)
+
+
+def _confirmed(fault):
+    return ThermocoupleHealthReport.confirmed_hardware(
+        faults=(fault,),
+        now=0.0,
+        status=fault.value,
+    )
+
+
+def _sensor(primary):
+    return {
+        "primary": {"Grill": primary},
+        "food": {},
+        "aux": {},
+        "tr": {},
+    }
+
+
+def _positive_actuator_calls(calls):
+    positive_names = {"igniter_on", "auger_on", "fan_on", "power_on", "pwm_fan_ramp"}
+    return [call for call in calls if call[0] in positive_names]
+
+
+def test_confirmed_primary_fault_preflight_skips_mode_setup_and_positive_actuation(monkeypatch):
+    monitor_events = []
+
+    class RecordingMonitor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start_monitor(self):
+            monitor_events.append("start")
+
+        def stop_monitor(self):
+            monitor_events.append("stop")
+
+    monkeypatch.setattr(base_mode, "Process_Monitor", RecordingMonitor)
+    ctx = _make_ctx(
+        temperatures=[None],
+        health_reports=[{"Grill": _confirmed(ThermocoupleFault.OPEN)}],
+    )
+    ctx.devices.probe_complex.consume_thermocouple_health_transitions = lambda: ()
+    mode = _RecordingMode(ctx, WorkCycleState())
+
+    mode.run()
+
+    assert ctx.store.read_control()["mode"] == "Error"
+    assert "setup" not in mode.calls
+    assert "teardown" not in mode.calls
+    assert "on_tick" not in mode.calls
+    assert ctx.store.read_all_metrics() == []
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+    assert not _positive_actuator_calls(ctx.devices.grill_platform.calls)
+    assert [name for name, _args in ctx.devices.grill_platform.calls] == [
+        "igniter_off",
+        "auger_off",
+        "fan_off",
+        "power_off",
+    ]
+    assert monitor_events == ["start", "stop"]
+
+
+def test_confirmed_primary_fault_after_setup_skips_none_safety_paths(monkeypatch):
+    evaluated = []
+
+    def record_evaluate_phase(mode, ctx, phase, now, ptemp):
+        evaluated.append((phase, ptemp))
+        return False
+
+    monkeypatch.setattr(base_mode, "evaluate_phase", record_evaluate_phase)
+    ctx = _make_ctx(
+        temperatures=[225.0, None],
+        health_reports=[
+            {"Grill": _healthy()},
+            {"Grill": _confirmed(ThermocoupleFault.OPEN)},
+        ],
+    )
+    mode = _RecordingMode(ctx, WorkCycleState())
+
+    mode.run()
+
+    assert ctx.store.read_control()["mode"] == "Error"
+    assert "setup" in mode.calls
+    assert "setup_safety" not in mode.calls
+    assert "on_tick" not in mode.calls
+    assert evaluated == []
+    assert ("safety_event", "thermocouple_fault") in mode.calls
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+
+
+def test_confirmed_primary_fault_on_tick_breaks_before_numeric_guards_and_actuation(monkeypatch):
+    evaluated = []
+
+    def reject_none(mode, ctx, phase, now, ptemp):
+        assert ptemp is not None
+        evaluated.append((phase, ptemp))
+        return False
+
+    monkeypatch.setattr(base_mode, "evaluate_phase", reject_none)
+    ctx = _make_ctx(
+        temperatures=[225.0, 225.0, None],
+        health_reports=[
+            {"Grill": _healthy()},
+            {"Grill": _healthy()},
+            {"Grill": _confirmed(ThermocoupleFault.SHORT)},
+        ],
+    )
+    mode = _RecordingMode(ctx, WorkCycleState())
+
+    mode.run()
+
+    assert ctx.store.read_control()["mode"] == "Error"
+    assert mode.calls.count("on_tick") == 0
+    assert evaluated == [("pre_loop", 225.0)]
+    assert ("safety_event", "thermocouple_fault") in mode.calls
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Primary"]
+    assert not _positive_actuator_calls(ctx.devices.grill_platform.calls)
+
+
+@pytest.mark.parametrize(
+    ("group", "label"),
+    [
+        pytest.param("food", "Food", id="food"),
+        pytest.param("aux", "Aux", id="aux"),
+    ],
+)
+def test_confirmed_secondary_fault_continues_and_repeated_sample_notifies_once(group, label):
+    sensor = _sensor(225.0)
+    sensor[group][label] = None
+    report = {"Grill": _healthy(), label: _confirmed(ThermocoupleFault.OPEN)}
+    ctx = _make_ctx(
+        temperatures=[sensor, sensor, sensor],
+        health_reports=[report, report, report],
+    )
+    mode = _RecordingMode(ctx, WorkCycleState())
+
+    mode.run()
+
+    assert ctx.store.read_control()["mode"] == "Recording"
+    assert mode.calls.count("on_tick") == 1
+    assert ctx.notifications.sent == ["Thermocouple_Fault_Secondary"]
 
 
 def test_control_mode_hook_order_one_bounded_tick():

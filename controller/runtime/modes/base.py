@@ -3,12 +3,13 @@ control work cycle.
 
 Concrete subclasses (Monitor, Manual, ...) override the hooks below to
 supply their mode-specific behavior. Each tick follows a strict
-sense -> safety -> act -> publish order: read the probes ONCE at the top of
-the tick, run the universal max-temp check and the mode `check_safety`
-BEFORE any actuation, then a single merged `on_tick` that does the
-controller/auger/fan work on that fresh temperature, then publish status and
-history. `current_output_status` is likewise captured once per tick (before
-the manual-override block) and threaded through the whole tick.
+sense -> health -> numeric safety -> act -> publish order: read the probes
+ONCE at the top of the tick, process thermocouple health, run the universal
+max-temp check and the mode `check_safety` BEFORE any actuation, then a single
+merged `on_tick` that does the controller/auger/fan work on that fresh
+temperature, then publish status and history. `current_output_status` is
+likewise captured once per tick (before the manual-override block) and threaded
+through the whole tick.
 """
 
 import logging
@@ -643,6 +644,35 @@ class ControlMode:
                 # Continue until 'pause' variable is cleared
         return False
 
+    def _process_thermocouple_health(self, sensor_data) -> bool:
+        reports = self.probe_complex.get_thermocouple_health()
+        transitions = self.probe_complex.consume_thermocouple_health_transitions()
+        primary_label = next(iter(sensor_data["primary"]), None)
+        primary_notified = False
+
+        for transition in transitions:
+            if not transition.current.confirmed:
+                continue
+            if transition.label == primary_label:
+                self.ctx.notifications.send("Thermocouple_Fault_Primary")
+                primary_notified = True
+            else:
+                self.ctx.notifications.send("Thermocouple_Fault_Secondary")
+
+        primary = reports.get(primary_label)
+        if primary is None or not primary.confirmed:
+            return False
+        if not primary_notified:
+            self.ctx.notifications.send("Thermocouple_Fault_Primary")
+        request_transition(
+            self.ctx,
+            self.control,
+            Mode.ERROR,
+            kind=TransitionKind.SAFETY,
+            display=("text", "ERROR"),
+        )
+        return True
+
     # ---- shared skeleton ----
     def run(self):
         ctx = self.ctx
@@ -684,6 +714,15 @@ class ControlMode:
         grill_platform.igniter_off()
         grill_platform.auger_off()
 
+        preflight_data = probe_complex.read_probes()
+        ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
+        if self._process_thermocouple_health(preflight_data):
+            grill_platform.fan_off()
+            grill_platform.power_off()
+            monitor.stop_monitor()
+            self.ctx.event_log.error("Primary thermocouple fault blocked mode setup.")
+            return ()
+
         # ---- mode-specific pre-loop setup ----
         self.setup()
         retained_metrics = ctx.store.read_all_metrics()
@@ -698,10 +737,15 @@ class ControlMode:
 
         # Get initial probe sensor data, temperatures
         sensor_data = probe_complex.read_probes()
+        ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
         ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
 
-        # ---- mode-specific pre-loop safety check (abort contract) ----
-        status = self.setup_safety(ptemp)
+        # ---- thermocouple health precedes mode-specific numeric safety ----
+        if self._process_thermocouple_health(sensor_data):
+            self._on_safety_event("thermocouple_fault", ctx.clock.now())
+            status = "Inactive"
+        else:
+            status = self.setup_safety(ptemp)
 
         # Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
         # override self.state.startup.timer from their own setup())
@@ -715,7 +759,7 @@ class ControlMode:
         # of in setup_safety. A fired guard aborts the loop exactly as
         # setup_safety returning "Inactive" does. This reuses start_time (no
         # extra clock read) -- the pre_loop flameout guards do not use `now`. ----
-        if evaluate_phase(self, ctx, "pre_loop", start_time, ptemp):
+        if status == "Active" and evaluate_phase(self, ctx, "pre_loop", start_time, ptemp):
             status = "Inactive"
 
         # Set time since toggle for temperature
@@ -780,11 +824,9 @@ class ControlMode:
                 ctx.store.write_control_snapshot(control, origin="control")
                 probe_complex.update_probe_profiles(self.settings["probe_settings"]["probe_map"]["probe_info"])
 
-            # Get probe device info for frontend
-            ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
-
             # ---- SENSE: single fresh probe read for the whole tick ----
             sensor_data = probe_complex.read_probes()
+            ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
             ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
 
             in_data["probe_history"] = sensor_data
@@ -803,6 +845,11 @@ class ControlMode:
             # Write Tr data to the database if in tuning mode
             if control["tuning_mode"]:
                 ctx.store.write_tr(in_data["probe_history"]["tr"])
+
+            # ---- HEALTH (before numeric safety or actuation) ----
+            if self._process_thermocouple_health(sensor_data):
+                self._on_safety_event("thermocouple_fault", now)
+                break
 
             # ---- SAFETY (before any actuation) ----
             # Declarative pre_act guards, evaluated BEFORE the merged on_tick so

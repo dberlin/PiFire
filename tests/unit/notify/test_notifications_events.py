@@ -167,6 +167,26 @@ def test_probe_temp_limit_alarm(monkeypatch):
             id="control-process-stopped",
         ),
         pytest.param(
+            "Thermocouple_Fault_Primary",
+            "Primary Thermocouple Fault!",
+            "Primary thermocouple fault detected. PiFire is shutting down because "
+            "the control temperature is unavailable.",
+            True,
+            "pifire_error_alerts",
+            {"value1": "Primary thermocouple fault"},
+            id="thermocouple-fault-primary",
+        ),
+        pytest.param(
+            "Thermocouple_Fault_Secondary",
+            "Thermocouple Fault!",
+            "A food or auxiliary thermocouple fault was detected. The affected probe "
+            "is unavailable; grill control continues.",
+            True,
+            "pifire_error_alerts",
+            {"value1": "Secondary thermocouple fault"},
+            id="thermocouple-fault-secondary",
+        ),
+        pytest.param(
             "Zzz",
             "PiFire: Unknown Notification issue",
             "Whoops! PiFire had the following unhandled notify event: Zzz at ",

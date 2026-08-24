@@ -238,7 +238,9 @@ class _InjectManualPwm:
 
     def read_probes(self):
         self._reads += 1
-        if self._reads == 2:
+        # ControlMode performs a health preflight read before its original
+        # setup/tick sequence, so the first logical tick is now read three.
+        if self._reads == 3:
             self._store.enqueue_control_delta(
                 control_delta(set_values={"manual": {"change": "pwm", "pwm": self._pwm}}),
                 origin="test-manual-pwm",
@@ -306,7 +308,7 @@ def test_manual_dc_fan_publishes_selected_pwm():
         pellet_db=pellet_db,
         probes=probes,
         grill=FakeGrillPlatform(dc_fan=True),
-        probe_cap=15,
+        probe_cap=16,
         store=store,
     )
 
@@ -777,7 +779,8 @@ def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
     settings["controller"] = settings.get("controller", {})
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
-    probes = FakeProbes().script([200, 200, 210, 220, 550])  # [pre-loop, tick1..3 (under), tick4 (over)]
+    # [health preflight, pre-loop, tick1..3 (under), tick4 (over)]
+    probes = FakeProbes().script([200, 200, 200, 210, 220, 550])
     runner = FakeControllerRunner(period=1000.0).script(
         [ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 6
     )
@@ -805,7 +808,8 @@ def test_hold_controller_receives_current_tick_ptemp():
     # auger's pulse frame.
     control_data = base_control(mode="Hold")
     control_data["primary_setpoint"] = 225
-    probes = FakeProbes().script([200, 205, 210, 215, 220])
+    # [health preflight, pre-loop, tick1..4]
+    probes = FakeProbes().script([200, 200, 205, 210, 215, 220])
     runner = FakeControllerRunner(period=0.0).script(
         [ControllerUpdateResult(cycle_ratio=0.5, fan=None, input_temperature=0.0)] * 8
     )
@@ -815,7 +819,7 @@ def test_hold_controller_receives_current_tick_ptemp():
         control_data=control_data,
         pellet_db=base_pellet_db(),
         probes=probes,
-        probe_cap=4,
+        probe_cap=5,
         grill=FakeGrillPlatform(),
         runner=runner,
     )

@@ -284,6 +284,26 @@ def _evt_control_stopped(ctx):
     )
 
 
+def _evt_thermocouple_fault_primary(ctx):
+    return (
+        "Primary Thermocouple Fault!",
+        "Primary thermocouple fault detected. PiFire is shutting down because "
+        "the control temperature is unavailable.",
+        "pifire_error_alerts",
+        {"value1": "Primary thermocouple fault"},
+    )
+
+
+def _evt_thermocouple_fault_secondary(ctx):
+    return (
+        "Thermocouple Fault!",
+        "A food or auxiliary thermocouple fault was detected. The affected probe "
+        "is unavailable; grill control continues.",
+        "pifire_error_alerts",
+        {"value1": "Secondary thermocouple fault"},
+    )
+
+
 # Exact-key mapping of event string -> builder(ctx) -> (title, body, channel, query_args).
 # Looked up with EVENTS.get(notify_event); a miss falls through to the Unknown-Notification
 # fallback. Every caller passes an exact literal key (verified repo-wide -- no concatenation),
@@ -304,6 +324,8 @@ EVENTS = {
     "Recipe_Step_Message": _evt_recipe_step,
     "Test_Notify": _evt_test_notify,
     "Control_Process_Stopped": _evt_control_stopped,
+    "Thermocouple_Fault_Primary": _evt_thermocouple_fault_primary,
+    "Thermocouple_Fault_Secondary": _evt_thermocouple_fault_secondary,
 }
 
 
