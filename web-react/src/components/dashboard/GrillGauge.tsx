@@ -1,3 +1,4 @@
+import type { ProbeHealthView } from "@pifire/core/dashboard/probeHealth";
 import { arcLength, describeArc, polarToCartesian, valueAngle } from "@pifire/core/gaugeMath";
 
 interface GrillGaugeProps {
@@ -6,6 +7,10 @@ interface GrillGaugeProps {
   temp: number | null;
   /** Set when `temp` is a carried-over reading, e.g. "last data 47s ago". */
   stale: string | null;
+  /** Authoritative probe health; quiet states render no dashboard pill. */
+  health?: ProbeHealthView | null;
+  /** Retained socket state is useful but must never read as current. */
+  healthLastReported?: boolean;
   setpoint: number;
   maxTemp: number;
   frac: number;
@@ -23,6 +28,8 @@ export function GrillGauge({
   temp,
   stale,
   setpoint,
+  health = null,
+  healthLastReported = false,
   maxTemp,
   frac,
   hasSetpoint,
@@ -86,6 +93,29 @@ export function GrillGauge({
           <span className="pf-dash-gauge-unit">°{units}</span>
         </div>
         {stale && <div className="pf-dash-gauge-stale">{stale}</div>}
+        {health !== null && health.severity !== "quiet" ? (
+          <div
+            className={`pf-dash-gauge-health pf-dash-gauge-health--${health.severity}`}
+            aria-label="Control probe health"
+          >
+            <strong
+              className={`pf-badge pf-badge-${
+                health.severity === "warning"
+                  ? "warn"
+                  : health.severity === "danger"
+                    ? "danger"
+                    : "unknown"
+              }`}
+            >
+              {healthLastReported || health.freshnessQualifier !== null
+                ? "Last reported: "
+                : null}
+              {health.headline}
+            </strong>
+            {health.impactCopy !== null ? <span>{health.impactCopy}</span> : null}
+            {health.causeCopy !== null ? <span>{health.causeCopy}</span> : null}
+          </div>
+        ) : null}
         {hasSetpoint && <div className="pf-dash-gauge-set">SET {Math.round(setpoint)}°</div>}
         <div className="pf-dash-gauge-mode">{modeLabel}</div>
       </div>

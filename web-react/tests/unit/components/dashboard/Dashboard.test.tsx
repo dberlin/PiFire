@@ -1,6 +1,6 @@
 import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { NotifyUpdate } from "@pifire/core/contracts/control";
-import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type { DashSocketPayload, ThermocoupleHealthView } from "@pifire/core/contracts/core";
 import type {
   ModelEvidenceReport,
   ModelEvidenceStatus,
@@ -170,6 +170,31 @@ function renderDashboard(
     />,
     undefined,
   );
+}
+
+function dashboardProbeHealth(
+  role: ThermocoupleHealthView["role"],
+  label: string,
+  displayName: string,
+  outcome: ThermocoupleHealthView["outcome"],
+): ThermocoupleHealthView {
+  return {
+    device: `${displayName} device`,
+    port: "KTT0",
+    label,
+    displayName,
+    role,
+    report: {
+      state: "confirmed",
+      faults: ["open"],
+      evidence: ["hardware"],
+      temperatureValid: outcome === "notify_only",
+      detail: {},
+    },
+    detector: { source: "hardware", policy: "observe" },
+    outcome,
+    freshness: { current: true, lastReportedAgeS: 0 },
+  };
 }
 
 function renderInQueryRouter(ui: ReactElement, client = createQueryClient()) {
@@ -1191,5 +1216,35 @@ describe("Dashboard Smoke+ control", () => {
     });
     expect(screen.queryByRole("button", { name: /SMOKE\+/ })).not.toBeInTheDocument();
     expect(screen.getByText("SMOKE+")).toBeInTheDocument();
+  });
+});
+
+describe("Dashboard thermocouple health wiring", () => {
+  it("passes retained health to the primary gauge and food card without changing their outcomes", () => {
+    const food = FIXTURE_DASH.foodProbes[0];
+    renderDashboard(
+      {
+        ...FIXTURE_DASH,
+        primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 225 },
+        foodProbes: [{ ...food, temp: 147 }],
+        thermocoupleHealth: [
+          dashboardProbeHealth(
+            "Primary",
+            FIXTURE_DASH.primaryProbe.label,
+            FIXTURE_DASH.primaryProbe.title,
+            "notify_only",
+          ),
+          dashboardProbeHealth("Food", food.label, food.title, "unavailable"),
+        ],
+      },
+      { phase: "unreachable" },
+    );
+
+    expect(screen.getByText("225")).toBeInTheDocument();
+    expect(screen.getByText("Last reported: FAULT")).toBeInTheDocument();
+    expect(screen.getByText("Fault detected — Observe mode did not stop heating.")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByText("Last reported: PROBE UNAVAILABLE")).toBeInTheDocument();
+    expect(screen.getByText("Grill control continues.")).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import type { CommandClient, CommandResult } from "@pifire/core/command";
-import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type { DashSocketPayload, ThermocoupleHealthView } from "@pifire/core/contracts/core";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -73,10 +73,10 @@ function ContextProbe() {
   );
 }
 
-function mountShell(over: Partial<DashSocketPayload> = {}) {
+function mountShell(over: Partial<DashSocketPayload> = {}, phase = "live") {
   useLiveStateMock.mockReturnValue({
     live: { ...FIXTURE_DASH, timer: timerBlock(), ...over },
-    phase: "live",
+    phase,
     controlAlive: true,
     targetUrl: "http://pifire.local:5000",
     command: stubCommand(),
@@ -97,6 +97,31 @@ function mountShell(over: Partial<DashSocketPayload> = {}) {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+}
+
+function probeHealth(
+  displayName: string,
+  state: ThermocoupleHealthView["report"]["state"],
+  outcome: ThermocoupleHealthView["outcome"],
+  role: ThermocoupleHealthView["role"] = "Food",
+): ThermocoupleHealthView {
+  return {
+    device: `${displayName} device`,
+    port: "KTT0",
+    label: displayName,
+    displayName,
+    role,
+    report: {
+      state,
+      faults: state === "confirmed" ? ["open"] : [],
+      evidence: state === "healthy" ? [] : ["hardware"],
+      temperatureValid: outcome === "none" || outcome === "notify_only",
+      detail: {},
+    },
+    detector: { source: "hardware", policy: "observe" },
+    outcome,
+    freshness: { current: true, lastReportedAgeS: 0 },
+  };
 }
 
 // A full live-state frame to vary uiHash on, one socket tick at a time --
@@ -189,6 +214,46 @@ describe("AppShell chrome", () => {
     const { container } = mountShell({ errors: [], warnings: [], criticalError: false });
 
     expect(container.querySelector(".pf-banners")).toBeNull();
+  });
+
+  it("summarizes confirmed health from the existing live frame", () => {
+    mountShell({
+      thermocoupleHealth: [
+        probeHealth("Grill", "confirmed", "stopped", "Primary"),
+        probeHealth("Brisket", "confirmed", "unavailable"),
+        probeHealth("Ambient", "suspected", "none", "Aux"),
+      ],
+    });
+
+    const banner = screen.getByRole("alert");
+    expect(banner).toHaveTextContent("CONTROL PROBE UNAVAILABLE: Grill");
+    expect(banner).toHaveTextContent("+1 more");
+    expect(banner).not.toHaveTextContent("+2 more");
+  });
+
+  it("keeps suspected and recovered health out of global banners", () => {
+    const { container } = mountShell({
+      thermocoupleHealth: [
+        probeHealth("Brisket", "suspected", "none"),
+        probeHealth("Grill", "healthy", "none", "Primary"),
+      ],
+    });
+
+    expect(container.querySelector(".pf-banner--probe-health")).toBeNull();
+    expect(screen.queryByText("CHECK PROBE")).toBeNull();
+  });
+
+  it("marks retained confirmed health as last reported when transport is stale", () => {
+    mountShell(
+      {
+        thermocoupleHealth: [probeHealth("Grill", "confirmed", "stopped", "Primary")],
+      },
+      "unreachable",
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Last reported: CONTROL PROBE UNAVAILABLE: Grill",
+    );
   });
 });
 

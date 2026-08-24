@@ -1,9 +1,12 @@
+import type { ThermocoupleHealthView } from "@pifire/core/contracts/core";
 import { describe, expect, it } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   createMemoryRouter,
+  Outlet,
   RouterProvider,
+  useOutletContext,
   useRevalidator,
   useRouteLoaderData,
 } from "react-router";
@@ -171,6 +174,66 @@ describe("SettingsShell", () => {
     await flushObservers();
 
     expect(document.documentElement.getAttribute("data-accent")).toBe("crimson");
+  });
+
+  it("forwards thermocouple health from the parent shell context instead of subscribing again", async () => {
+    const health: ThermocoupleHealthView = {
+      device: "Aux amplifier",
+      port: "KTT2",
+      label: "Ambient",
+      displayName: "Ambient",
+      role: "Aux",
+      report: {
+        state: "confirmed",
+        faults: ["open"],
+        evidence: ["hardware"],
+        temperatureValid: false,
+        detail: {},
+      },
+      detector: { source: "hardware", policy: "observe" },
+      outcome: "unavailable",
+      freshness: { current: true, lastReportedAgeS: 0 },
+    };
+    function LiveParent() {
+      return <Outlet context={{ live: { thermocoupleHealth: [health] } }} />;
+    }
+    function HealthProbe() {
+      const { thermocoupleHealth = [] } = useOutletContext<{
+        thermocoupleHealth?: ThermocoupleHealthView[];
+      }>();
+      return <span>health:{thermocoupleHealth.map((item) => item.displayName).join(",")}</span>;
+    }
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/",
+          element: <LiveParent />,
+          children: [
+            {
+              path: "settings",
+              element: <SettingsShell />,
+              loader: () => ({
+                settings: { globals: { units: "F" }, platform: { dc_fan: true } },
+                mode: "Stop",
+                controllerMeta: null,
+              }),
+              HydrateFallback,
+              children: [{ index: true, element: <HealthProbe /> }],
+            },
+          ],
+        },
+      ],
+      { initialEntries: ["/settings"] },
+    );
+    render(
+      <QueryClientProvider client={testQueryClient()}>
+        <AppPrefsProvider>
+          <RouterProvider router={router} />
+        </AppPrefsProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("health:Ambient")).toBeInTheDocument();
   });
 });
 

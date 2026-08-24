@@ -791,6 +791,24 @@
   margin-top: 2px;
   white-space: nowrap;
 }
+.pf-dash-probehealth {
+  @apply flex flex-col;
+  max-width: 100%;
+  margin-top: 2px;
+  font: 600 11px/1.15 "Barlow";
+}
+.pf-dash-probehealth strong {
+  letter-spacing: 0.7px;
+}
+.pf-dash-probehealth--warning {
+  color: var(--warn);
+}
+.pf-dash-probehealth--danger {
+  color: var(--danger);
+}
+.pf-dash-probehealth--info {
+  color: var(--label);
+}
 .pf-dash-bar {
   height: 6px;
   @apply rounded-[6px] mt-[8px] overflow-hidden;
@@ -861,6 +879,24 @@
   font: 600 14px "Barlow";
   letter-spacing: 0.4px;
   @apply text-warn mt-[2px] whitespace-nowrap;
+}
+.pf-dash-gauge-health {
+  @apply flex flex-col items-center text-center;
+  max-width: min(360px, 80%);
+  margin-top: 3px;
+  font: 600 12px/1.15 "Barlow";
+}
+.pf-dash-gauge-health strong {
+  letter-spacing: 0.8px;
+}
+.pf-dash-gauge-health--warning {
+  color: var(--warn);
+}
+.pf-dash-gauge-health--danger {
+  color: var(--danger);
+}
+.pf-dash-gauge-health--info {
+  color: var(--label);
 }
 .pf-dash-gauge-set {
   font: 600 20px "Barlow";

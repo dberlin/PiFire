@@ -277,7 +277,12 @@ export function Dashboard({
                 Food Probes
               </div>
               {view.probes.map((p, i) => (
-                <ProbeCard key={`${p.name}-${i}`} p={p} onOpenNotify={openNotify} />
+                <ProbeCard
+                  key={`${p.name}-${i}`}
+                  p={p}
+                  onOpenNotify={openNotify}
+                  healthLastReported={phase === "unreachable"}
+                />
               ))}
             </div>
           )}
@@ -287,6 +292,8 @@ export function Dashboard({
             <GrillGauge
               temp={view.tempInt}
               stale={view.stale}
+              health={view.primaryHealth}
+              healthLastReported={phase === "unreachable"}
               setpoint={dash.primaryProbe.setTemp}
               maxTemp={view.maxTemp}
               frac={view.gaugeFrac}

@@ -13,9 +13,11 @@ const BATTERY_GLYPH = ["\u25AB", "\u25E7", "\u25E8", "\u25AA"] as const;
 export function ProbeCard({
   p,
   onOpenNotify,
+  healthLastReported = false,
 }: {
   p: ProbeCardView;
   onOpenNotify(label: string): void;
+  healthLastReported?: boolean;
 }) {
   // Per-frame data from deriveView; the card's boxes are in dashboard.css.
   const vars = {
@@ -61,6 +63,29 @@ export function ProbeCard({
           Without this line it reads as live, which is the whole defect: a
           temperature is plausible at any value, so absence has to be said. */}
       {p.stale && <div className="pf-dash-probestale">{p.stale}</div>}
+      {p.health !== null && p.health.severity !== "quiet" ? (
+        <div
+          className={`pf-dash-probehealth pf-dash-probehealth--${p.health.severity}`}
+          aria-label={`Probe health for ${p.name}`}
+        >
+          <strong
+            className={`pf-badge pf-badge-${
+              p.health.severity === "warning"
+                ? "warn"
+                : p.health.severity === "danger"
+                  ? "danger"
+                  : "unknown"
+            }`}
+          >
+            {healthLastReported || p.health.freshnessQualifier !== null
+              ? "Last reported: "
+              : null}
+            {p.health.headline}
+          </strong>
+          {p.health.impactCopy !== null ? <span>{p.health.impactCopy}</span> : null}
+          {p.health.causeCopy !== null ? <span>{p.health.causeCopy}</span> : null}
+        </div>
+      ) : null}
       <div className="pf-dash-bar">
         <div className="pf-dash-bar-fill" />
       </div>

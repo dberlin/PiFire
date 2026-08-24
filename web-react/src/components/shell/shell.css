@@ -261,6 +261,13 @@
   border: 1px solid var(--danger);
   color: #ffd0cb;
 }
+.pf-banner--probe-health {
+  @apply flex flex-wrap items-baseline gap-x-[8px] gap-y-[2px];
+}
+.pf-banner-more {
+  @apply whitespace-nowrap;
+  color: var(--danger);
+}
 .pf-banner-dismiss {
   @apply cursor-pointer self-end rounded-[4px] px-[10px] py-[3px];
   background: none;

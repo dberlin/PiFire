@@ -113,11 +113,43 @@ it("surfaces the error and invokes onSubmit/onCancel", () => {
   expect(onCancel).toHaveBeenCalled();
 });
 
-it("renders module notes with the existing warning presentation", () => {
+it("replaces static thermocouple notes with a conditional software-detection warning", () => {
   render(
     <DeviceForm
       mode="add"
       moduleData={mcp9601Module}
+      values={{ hardware_fault_detection: "False" }}
+      nameValue=""
+      availableProbes={[]}
+      baseUrl=""
+      onNameChange={rs.fn()}
+      onFieldChange={rs.fn()}
+      onSubmit={rs.fn()}
+      onCancel={rs.fn()}
+      error={null}
+    />,
+  );
+
+  const warning = document.querySelector(".pf-module-notes");
+  expect(warning).toHaveTextContent(
+    "Hardware fault detection is unavailable or disabled for this thermocouple module.",
+  );
+  expect(warning).toHaveTextContent(
+    "Keep software thermocouple detection set to Observe or Enforce",
+  );
+  expect(screen.queryByText(mcp9601Note)).toBeNull();
+  expect(
+    screen.getByRole("img", {
+      name: "MCP9601 Thermocouple Amplifier (SEN-30010-W)",
+    }),
+  ).toHaveAttribute("src", "/static/img/wizard/mcp9601.png");
+});
+
+it("shows the warning when a thermocouple module has no hardware detection setting", () => {
+  render(
+    <DeviceForm
+      mode="add"
+      moduleData={{ ...mcp9601Module, notes: undefined }}
       values={{}}
       nameValue=""
       availableProbes={[]}
@@ -130,10 +162,50 @@ it("renders module notes with the existing warning presentation", () => {
     />,
   );
 
-  expect(document.querySelector(".pf-module-notes")).toHaveTextContent(mcp9601Note);
-  expect(
-    screen.getByRole("img", {
-      name: "MCP9601 Thermocouple Amplifier (SEN-30010-W)",
-    }),
-  ).toHaveAttribute("src", "/static/img/wizard/mcp9601.png");
+  expect(document.querySelector(".pf-module-notes")).toHaveTextContent(
+    "Hardware fault detection is unavailable or disabled",
+  );
+});
+
+it("shows no warning or duplicate static note when thermocouple hardware detection is enabled", () => {
+  const { container } = render(
+    <DeviceForm
+      mode="edit"
+      moduleData={mcp9601Module}
+      values={{ hardware_fault_detection: "True" }}
+      nameValue="MCP9601"
+      availableProbes={[]}
+      baseUrl=""
+      onNameChange={rs.fn()}
+      onFieldChange={rs.fn()}
+      onSubmit={rs.fn()}
+      onCancel={rs.fn()}
+      error={null}
+    />,
+  );
+
+  expect(container.querySelector(".pf-module-notes")).toBeNull();
+  expect(screen.queryByText(mcp9601Note)).toBeNull();
+});
+
+it("preserves ordinary notes for non-thermocouple modules", () => {
+  render(
+    <DeviceForm
+      mode="add"
+      moduleData={{ ...adsModule, notes: "Install this ADC on the primary I2C bus." }}
+      values={{}}
+      nameValue=""
+      availableProbes={[]}
+      baseUrl=""
+      onNameChange={rs.fn()}
+      onFieldChange={rs.fn()}
+      onSubmit={rs.fn()}
+      onCancel={rs.fn()}
+      error={null}
+    />,
+  );
+
+  expect(document.querySelector(".pf-module-notes")).toHaveTextContent(
+    "Install this ADC on the primary I2C bus.",
+  );
 });

@@ -1,11 +1,12 @@
 import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useEffect, useRef } from "react";
-import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
+import { NavLink, Outlet, useLoaderData, useNavigate, useOutletContext } from "react-router";
 import { readAccent } from "../../helpers/settings/accent";
 import { hasDcFan } from "../../helpers/settings/platform";
 import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";
 import { SETTINGS_TABS } from "../../helpers/settings/settingsTabs";
+import type { ShellContext } from "../../helpers/shellContext";
 import { useAppPrefs } from "../AppPrefs";
 
 export function SettingsShell() {
@@ -14,6 +15,7 @@ export function SettingsShell() {
     mode: string;
     controllerMeta: ControllerCatalog | null;
   };
+  const shell = useOutletContext<ShellContext | null>();
   const navigate = useNavigate();
   // A deep link into /settings never passes the dashboard, so this is the other
   // place the stored accent has to be picked up from.
@@ -74,7 +76,15 @@ export function SettingsShell() {
         ))}
       </aside>
       <main className="pf-settings-content">
-        <Outlet context={{ settings, mode, controllerMeta, ...draftStore }} />
+        <Outlet
+          context={{
+            settings,
+            mode,
+            controllerMeta,
+            thermocoupleHealth: shell?.live.thermocoupleHealth ?? [],
+            ...draftStore,
+          }}
+        />
       </main>
     </div>
   );

@@ -1,3 +1,8 @@
+import type { ThermocoupleHealthView } from "@pifire/core/contracts/core";
+import {
+  projectProbeHealth,
+  summarizeProbeHealth,
+} from "@pifire/core/dashboard/probeHealth";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Banners } from "../../../../src/components/shell/Banners";
@@ -9,6 +14,36 @@ afterEach(() => {
   rs.resetAllMocks();
   cleanup();
 });
+
+function health(
+  displayName: string,
+  outcome: ThermocoupleHealthView["outcome"],
+  current = true,
+): ThermocoupleHealthView {
+  return {
+    device: `${displayName} device`,
+    port: "KTT0",
+    label: displayName,
+    displayName,
+    role: outcome === "stopped" || outcome === "notify_only" ? "Primary" : "Food",
+    report: {
+      state: "confirmed",
+      faults: ["open"],
+      evidence: ["hardware"],
+      temperatureValid: outcome === "notify_only",
+      detail: {},
+    },
+    detector: { source: "hardware", policy: "observe" },
+    outcome,
+    freshness: { current, lastReportedAgeS: current ? 0 : 42 },
+  };
+}
+
+function summary(...items: ThermocoupleHealthView[]) {
+  const result = summarizeProbeHealth(items.map(projectProbeHealth));
+  if (result === null) throw new Error("health fixture must contain an active issue");
+  return result;
+}
 
 describe("Banners", () => {
   it("renders one banner per error and warning", () => {
@@ -149,5 +184,76 @@ describe("Banners", () => {
     fireEvent.click(screen.getByRole("button", { name: /dismiss warnings/i }));
     await waitFor(() => expect(screen.queryByText("hopper low")).toBeNull());
     expect(screen.getByText("boom")).toBeTruthy();
+  });
+
+  it("renders confirmed health as a structured non-dismissible danger banner", () => {
+    render(
+      <Banners
+        errors={[]}
+        warnings={[]}
+        warningsMaxId={null}
+        criticalError={false}
+        probeHealthSummary={summary(health("Grill", "notify_only"))}
+      />,
+    );
+
+    const banner = screen.getByRole("alert");
+    expect(banner).toHaveClass("pf-banner--critical");
+    expect(banner).toHaveTextContent("FAULT");
+    expect(banner).toHaveTextContent("Grill");
+    expect(banner).toHaveTextContent("Fault detected — Observe mode did not stop heating.");
+    expect(banner).toHaveTextContent("Hardware reported an open circuit.");
+    expect(screen.queryByRole("button", { name: /dismiss/i })).toBeNull();
+  });
+
+  it("summarizes additional confirmed probes without adding dismiss controls", () => {
+    render(
+      <Banners
+        errors={[]}
+        warnings={[]}
+        warningsMaxId={null}
+        criticalError={false}
+        probeHealthSummary={summary(
+          health("Grill", "stopped"),
+          health("Brisket", "unavailable"),
+          health("Ambient", "unavailable"),
+        )}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("CONTROL PROBE UNAVAILABLE");
+    expect(screen.getByRole("alert")).toHaveTextContent("+2 more");
+    expect(screen.queryByRole("button", { name: /dismiss/i })).toBeNull();
+  });
+
+  it("qualifies retained health when the live transport is stale", () => {
+    render(
+      <Banners
+        errors={[]}
+        warnings={[]}
+        warningsMaxId={null}
+        criticalError={false}
+        probeHealthSummary={summary(health("Grill", "stopped"))}
+        healthLastReported
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Last reported: CONTROL PROBE UNAVAILABLE");
+  });
+
+  it("removes current health treatment immediately after recovery", () => {
+    const props = {
+      errors: [],
+      warnings: [],
+      warningsMaxId: null,
+      criticalError: false,
+    };
+    const { rerender } = render(
+      <Banners {...props} probeHealthSummary={summary(health("Grill", "stopped"))} />,
+    );
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    rerender(<Banners {...props} probeHealthSummary={null} />);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

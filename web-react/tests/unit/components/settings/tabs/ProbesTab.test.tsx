@@ -1,3 +1,4 @@
+import type { ThermocoupleHealthView } from "@pifire/core/contracts/core";
 import type { ProbeModuleCatalog } from "@pifire/core/contracts/wizard";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -28,10 +29,21 @@ rs.mock("../../../../../src/helpers/probes/probeMapApi", () => ({
   applyProbeMap: rs.fn(async () => ({ ok: true })),
 }));
 
+import * as realSettingsApi from "../../../../../src/helpers/settings/settingsApi" with {
+  rstest: "importActual",
+};
+
+rs.mock("../../../../../src/helpers/settings/settingsApi", () => ({
+  ...realSettingsApi,
+  applySettings: rs.fn(async () => ({ ok: true, message: "", errors: [] })),
+}));
+
 import { applyProbeMap } from "../../../../../src/helpers/probes/probeMapApi";
 import { useSettingsDraftStore } from "../../../../../src/helpers/settings/settingsDrafts";
+import { applySettings } from "../../../../../src/helpers/settings/settingsApi";
 
 const applyMock = applyProbeMap as ReturnType<typeof rs.fn>;
+const applySettingsMock = rs.mocked(applySettings);
 
 // renderRoute (src/test-utils.tsx) supplies an outlet context but no loader
 // data, and this tab reads BOTH. Same two-level router, plus a loader on the
@@ -112,11 +124,41 @@ function liveSettings() {
         ],
       },
     },
+    thermocouple_health: { inference_policy: "observe" as const },
   };
 }
 
 function ctx(mode = "Stop") {
   return { settings: liveSettings(), mode };
+}
+
+function health(
+  role: ThermocoupleHealthView["role"],
+  displayName: string,
+  state: ThermocoupleHealthView["report"]["state"],
+  outcome: ThermocoupleHealthView["outcome"],
+  current = true,
+): ThermocoupleHealthView {
+  return {
+    device: `${displayName} amplifier`,
+    port: role === "Aux" ? "KTT2" : "KTT0",
+    label: displayName,
+    displayName,
+    role,
+    report: {
+      state,
+      faults: state === "confirmed" ? ["open", "short"] : [],
+      evidence: state === "healthy" ? [] : ["hardware", "junction-collapse"],
+      temperatureValid: outcome === "none" || outcome === "notify_only",
+      detail: { junction_spread_c: 0.2, window_samples: 12 },
+    },
+    detector: {
+      source: state === "confirmed" ? "mixed" : "software",
+      policy: "observe",
+    },
+    outcome,
+    freshness: { current, lastReportedAgeS: current ? 0 : 75 },
+  };
 }
 
 // No `exact: true` on getByRole: ByRoleOptions has no such member (it is a
@@ -138,6 +180,8 @@ async function renameGrillTo(next: string) {
 beforeEach(() => {
   applyMock.mockClear();
   applyMock.mockResolvedValue({ ok: true });
+  applySettingsMock.mockClear();
+  applySettingsMock.mockResolvedValue({ ok: true, message: "", errors: [] });
 });
 
 afterEach(cleanup);
@@ -239,5 +283,61 @@ describe("ProbesTab", () => {
     renderTab(<ProbesTab />, ctx(), CATALOG);
     await screen.findByRole("region", { name: "Probe devices" });
     expect(screen.getByRole("link", { name: "Tune a probe" })).toHaveAttribute("href", "/tuner");
+  });
+
+  it("offers the exact software detection policies with truthful selected impact copy", async () => {
+    renderTab(<ProbesTab />, ctx(), CATALOG);
+    const selector = await screen.findByLabelText("Software thermocouple detection");
+
+    expect(selector).toHaveValue("observe");
+    expect(screen.getByText("Reports confirmed software-detected faults without stopping heating.")).toBeInTheDocument();
+    fireEvent.change(selector, { target: { value: "enforce" } });
+    expect(screen.getByText("Stops heating when the control probe has a confirmed fault.")).toBeInTheDocument();
+  });
+
+  it("saves a policy-only change without rewriting the probe map", async () => {
+    renderTab(<ProbesTab />, ctx(), CATALOG);
+    fireEvent.change(await screen.findByLabelText("Software thermocouple detection"), {
+      target: { value: "enforce" },
+    });
+
+    expect(saveButton()).toBeEnabled();
+    fireEvent.click(saveButton());
+
+    await waitFor(() =>
+      expect(applySettingsMock).toHaveBeenCalledWith(
+        "",
+        { thermocouple_health: { inference_policy: "enforce" } },
+        [],
+      ),
+    );
+    expect(applyMock).not.toHaveBeenCalled();
+  });
+
+  it("renders Primary, Food, and Aux health details including source, policy, causes, evidence, and stale age", async () => {
+    renderTab(
+      <ProbesTab />,
+      {
+        ...ctx(),
+        thermocoupleHealth: [
+          health("Primary", "Grill", "healthy", "none"),
+          health("Food", "Brisket", "suspected", "none"),
+          health("Aux", "Ambient", "confirmed", "unavailable", false),
+        ],
+      },
+      CATALOG,
+    );
+
+    const region = await screen.findByRole("region", { name: "Thermocouple health" });
+    expect(region).toHaveTextContent("Primary · Grill");
+    expect(region).toHaveTextContent("Food · Brisket");
+    expect(region).toHaveTextContent("Aux · Ambient");
+    expect(region).toHaveTextContent("Last reported: PROBE UNAVAILABLE");
+    expect(region).toHaveTextContent("Hardware + software");
+    expect(region).toHaveTextContent("Observe");
+    expect(region).toHaveTextContent("open, short");
+    expect(region).toHaveTextContent("hardware, junction-collapse");
+    expect(region).toHaveTextContent("junction spread c: 0.2");
+    expect(region).toHaveTextContent("window samples: 12");
   });
 });

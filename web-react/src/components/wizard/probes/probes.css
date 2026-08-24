@@ -253,3 +253,74 @@
 .pf-discovery-actions {
   @apply flex justify-end gap-[10px] pt-[4px];
 }
+
+/* Settings > Probes is also the all-role health details surface. Aux probes
+   belong here rather than gaining fabricated dashboard cards. */
+.pf-probe-health-details {
+  @apply mt-[20px] grid gap-[12px] rounded-card bg-card px-[20px] py-[18px];
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-probe-health-details > h2,
+.pf-probe-health-details > .pf-settings-hint {
+  grid-column: 1 / -1;
+}
+.pf-probe-health-details > h2 {
+  @apply m-0 text-text;
+  font: 700 20px "Barlow";
+}
+.pf-probe-health-detail {
+  @apply min-w-0 rounded-[14px] bg-inset px-[16px] py-[14px] text-text;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.pf-probe-health-detail--warning {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+}
+.pf-probe-health-detail--danger {
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+}
+.pf-probe-health-detail > h3 {
+  @apply m-0;
+  font: 700 17px "Barlow";
+}
+.pf-probe-health-detail > p {
+  @apply mb-0 mt-[5px];
+  overflow-wrap: anywhere;
+  font: 500 13px/1.4 "Barlow";
+}
+.pf-probe-health-detail-status {
+  @apply font-bold uppercase;
+  letter-spacing: 0.7px;
+}
+.pf-probe-health-detail--warning .pf-probe-health-detail-status {
+  color: var(--warn);
+}
+.pf-probe-health-detail--danger .pf-probe-health-detail-status {
+  color: var(--danger);
+}
+.pf-probe-health-detail > dl {
+  @apply mb-0 mt-[12px] grid gap-x-[14px] gap-y-[6px];
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pf-probe-health-detail > dl > div {
+  @apply min-w-0;
+}
+.pf-probe-health-detail dt {
+  @apply text-label;
+  font: 600 11px "Barlow";
+  text-transform: uppercase;
+}
+.pf-probe-health-detail dd {
+  @apply m-0 text-text;
+  overflow-wrap: anywhere;
+  font: 500 13px "Barlow";
+}
+
+@media (max-width: 760px) {
+  .pf-probe-health-details {
+    grid-template-columns: 1fr;
+  }
+  .pf-probe-health-detail > dl {
+    grid-template-columns: 1fr;
+  }
+}

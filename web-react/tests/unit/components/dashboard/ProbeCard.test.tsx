@@ -1,3 +1,4 @@
+import type { ThermocoupleHealthView } from "@pifire/core/contracts/core";
 import { deriveView, type ProbeCardView } from "@pifire/core/dashboard/deriveView";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -21,6 +22,31 @@ function barVars(container: HTMLElement): { pct: string; color: string } {
   return {
     pct: card.style.getPropertyValue("--pf-bar-pct"),
     color: card.style.getPropertyValue("--pf-bar-color"),
+  };
+}
+
+function foodHealth(
+  state: ThermocoupleHealthView["report"]["state"],
+  outcome: ThermocoupleHealthView["outcome"],
+  current = true,
+): ThermocoupleHealthView {
+  const food = FIXTURE_DASH.foodProbes[0];
+  return {
+    device: "Food amplifier",
+    port: "KTT0",
+    label: food.label,
+    displayName: food.title,
+    role: "Food",
+    report: {
+      state,
+      faults: state === "confirmed" ? ["open"] : [],
+      evidence: state === "healthy" ? [] : ["junction-collapse"],
+      temperatureValid: outcome !== "unavailable",
+      detail: {},
+    },
+    detector: { source: state === "confirmed" ? "hardware" : "software", policy: "observe" },
+    outcome,
+    freshness: { current, lastReportedAgeS: current ? 0 : 75 },
   };
 }
 
@@ -125,6 +151,76 @@ describe("ProbeCard", () => {
     });
     render(<ProbeCard p={noEta.probes[0]} onOpenNotify={rs.fn()} />);
     expect(screen.queryByText(/^ETA/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ProbeCard thermocouple health", () => {
+  it("keeps a suspected probe numeric and renders amber inline copy only", () => {
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], temp: 147 }],
+      thermocoupleHealth: [foodHealth("suspected", "none")],
+    });
+    const { container } = render(<ProbeCard p={view.probes[0]} onOpenNotify={rs.fn()} />);
+
+    expect(screen.getByText("147")).toBeInTheDocument();
+    expect(screen.getByText("CHECK PROBE")).toBeInTheDocument();
+    expect(screen.getByText("Possible thermocouple issue; reading still available.")).toBeInTheDocument();
+    expect(container.querySelector(".pf-dash-probehealth")).toHaveClass(
+      "pf-dash-probehealth--warning",
+    );
+  });
+
+  it("shows an em dash and truthful continue copy for confirmed unavailable food", () => {
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      foodProbes: [
+        {
+          ...FIXTURE_DASH.foodProbes[0],
+          temp: 147,
+          status: { ...FIXTURE_DASH.foodProbes[0].status, lastTemp: 146, lastReadingAge: 30 },
+        },
+      ],
+      thermocoupleHealth: [foodHealth("confirmed", "unavailable")],
+    });
+    render(<ProbeCard p={view.probes[0]} onOpenNotify={rs.fn()} />);
+
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText("147")).toBeNull();
+    expect(screen.queryByText("146")).toBeNull();
+    expect(screen.getByText("PROBE UNAVAILABLE")).toBeInTheDocument();
+    expect(screen.getByText("Grill control continues.")).toBeInTheDocument();
+    expect(screen.getByText("Hardware reported an open circuit.")).toBeInTheDocument();
+  });
+
+  it("shows no health pill for healthy or unmonitored probes", () => {
+    const healthy = deriveView({
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [foodHealth("healthy", "none")],
+    });
+    const { container, rerender } = render(
+      <ProbeCard p={healthy.probes[0]} onOpenNotify={rs.fn()} />,
+    );
+    expect(container.querySelector(".pf-dash-probehealth")).toBeNull();
+
+    const unmonitored = deriveView({
+      ...FIXTURE_DASH,
+      thermocoupleHealth: [foodHealth("unmonitored", "none")],
+    });
+    rerender(<ProbeCard p={unmonitored.probes[0]} onOpenNotify={rs.fn()} />);
+    expect(container.querySelector(".pf-dash-probehealth")).toBeNull();
+  });
+
+  it("qualifies stale health independently from the reading", () => {
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], temp: 147 }],
+      thermocoupleHealth: [foodHealth("suspected", "none", false)],
+    });
+    render(<ProbeCard p={view.probes[0]} onOpenNotify={rs.fn()} />);
+
+    expect(screen.getByText("147")).toBeInTheDocument();
+    expect(screen.getByText("Last reported: CHECK PROBE")).toBeInTheDocument();
   });
 });
 

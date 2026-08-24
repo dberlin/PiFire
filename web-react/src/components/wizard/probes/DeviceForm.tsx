@@ -18,6 +18,11 @@ export interface DeviceFormProps {
 
 export function DeviceForm(props: DeviceFormProps) {
   const { moduleData, values, nameValue, availableProbes, baseUrl } = props;
+  const thermocoupleModule = moduleData.device_specific.type === "thermocouple";
+  const hardwareFaultDetectionEnabled =
+    values.hardware_fault_detection === true || values.hardware_fault_detection === "True";
+  const showSoftwareDetectionWarning =
+    thermocoupleModule && !hardwareFaultDetectionEnabled;
   return (
     <div className="pf-device-form" role="dialog" aria-label={`${props.mode} device`}>
       {moduleImageUrl(baseUrl, moduleData.image) && (
@@ -29,7 +34,15 @@ export function DeviceForm(props: DeviceFormProps) {
       )}
       <h3 className="pf-module-name">{moduleData.friendly_name}</h3>
       {moduleData.description && <p className="pf-module-description">{moduleData.description}</p>}
-      {moduleData.notes && <p className="pf-module-notes">{moduleData.notes}</p>}
+      {showSoftwareDetectionWarning ? (
+        <p className="pf-module-notes">
+          Hardware fault detection is unavailable or disabled for this thermocouple module. Keep
+          software thermocouple detection set to Observe or Enforce so a failed probe that still
+          looks like ambient temperature can be identified.
+        </p>
+      ) : !thermocoupleModule && moduleData.notes ? (
+        <p className="pf-module-notes">{moduleData.notes}</p>
+      ) : null}
       {props.error && <p role="alert">{props.error}</p>}
       {moduleData.device_specific.config.map((field) => (
         <DeviceConfigField

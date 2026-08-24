@@ -1,3 +1,4 @@
+import type { ProbeHealthSummary } from "@pifire/core/dashboard/probeHealth";
 import { useState } from "react";
 import { dismissWarnings } from "../../helpers/shell/warningsApi";
 import "./shell.css";
@@ -17,11 +18,15 @@ export function Banners({
   warnings,
   warningsMaxId,
   criticalError,
+  probeHealthSummary = null,
+  healthLastReported = false,
 }: {
   errors: string[];
   warnings: string[];
   warningsMaxId: number | null;
   criticalError: boolean;
+  probeHealthSummary?: ProbeHealthSummary | null;
+  healthLastReported?: boolean;
 }) {
   // Ids start at 1, so 0 means "nothing dismissed yet".
   const [dismissedThroughId, setDismissedThroughId] = useState(0);
@@ -35,7 +40,7 @@ export function Banners({
     ...errors.map((t) => ({ t, level: errorLevel })),
     ...(showWarnings ? warnings.map((t) => ({ t, level: "warning" as const })) : []),
   ];
-  if (items.length === 0) return null;
+  if (items.length === 0 && probeHealthSummary === null) return null;
 
   const onDismiss = async () => {
     if (warningsMaxId === null) return;
@@ -51,6 +56,25 @@ export function Banners({
           {it.t}
         </div>
       ))}
+      {probeHealthSummary !== null ? (
+        <div className="pf-banner pf-banner--critical pf-banner--probe-health" role="alert">
+          <strong>
+            {healthLastReported || probeHealthSummary.highest.freshnessQualifier !== null
+              ? "Last reported: "
+              : null}
+            {probeHealthSummary.highest.headline}: {probeHealthSummary.highest.displayName}
+          </strong>
+          {probeHealthSummary.highest.impactCopy !== null ? (
+            <span>{probeHealthSummary.highest.impactCopy}</span>
+          ) : null}
+          {probeHealthSummary.highest.causeCopy !== null ? (
+            <span>{probeHealthSummary.highest.causeCopy}</span>
+          ) : null}
+          {probeHealthSummary.additionalCopy !== null ? (
+            <span className="pf-banner-more">{probeHealthSummary.additionalCopy}</span>
+          ) : null}
+        </div>
+      ) : null}
       {canDismiss ? (
         <button
           type="button"

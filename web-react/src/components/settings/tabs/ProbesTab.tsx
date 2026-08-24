@@ -1,3 +1,5 @@
+import type { ThermocoupleHealthView } from "@pifire/core/contracts/core";
+import { projectProbeHealth } from "@pifire/core/dashboard/probeHealth";
 import type { ProbeMap, ProbeModuleCatalog } from "@pifire/core/contracts/wizard";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,11 +12,51 @@ import {
 } from "../../../helpers/probes/probeMapApi";
 import { queryKeys } from "../../../helpers/query/keys";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { DevicesCard } from "../../wizard/probes/DevicesCard";
 import { PortsCard } from "../../wizard/probes/PortsCard";
 import { Section } from "../fields/Section";
+import { Select } from "../fields/Select";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
+
+type InferencePolicy = NonNullable<
+  NonNullable<SettingsSchema["thermocouple_health"]>["inference_policy"]
+>;
+
+interface ProbesDraft {
+  probeMap: ProbeMap;
+  policy: InferencePolicy;
+}
+
+const POLICY_OPTIONS: { value: InferencePolicy; label: string }[] = [
+  { value: "off", label: "Off — hardware detection only" },
+  { value: "observe", label: "Observe — report without stopping" },
+  { value: "enforce", label: "Enforce — stop on a confirmed control-probe fault" },
+];
+
+const POLICY_IMPACT: Readonly<Record<InferencePolicy, string>> = {
+  off: "Software thermocouple detection is disabled; only supported hardware can report faults.",
+  observe: "Reports confirmed software-detected faults without stopping heating.",
+  enforce: "Stops heating when the control probe has a confirmed fault.",
+};
+
+function readProbesDraft(settings: SettingsSchema): ProbesDraft {
+  return {
+    probeMap: readLiveProbeMap(settings),
+    policy: settings.thermocouple_health?.inference_policy ?? "observe",
+  };
+}
+
+
+function displayDetailValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
 
 /** Modules being ADDED that the running system cannot install. Mirrors
  *  blueprints/api/probe_map_actions.py::unsupported_new_modules exactly -- the
@@ -38,20 +80,25 @@ function blockedModules(
 }
 
 export function ProbesTab() {
-  const { settings, mode } = useOutletContext<{ settings: SettingsSchema; mode: string }>();
+  const { settings, mode, thermocoupleHealth = [] } = useOutletContext<{
+    settings: SettingsSchema;
+    mode: string;
+    thermocoupleHealth?: readonly ThermocoupleHealthView[];
+  }>();
   const catalog = useLoaderData<ProbeModuleCatalog>();
   const revalidator = useRevalidator();
   const queryClient = useQueryClient();
+  const { save: saveSettings, saving: savingSettings, status: policyStatus } = useSaveSettings();
 
-  const live = readLiveProbeMap(settings);
-  // Held on SettingsShell, so a half-built probe map survives a trip to another
-  // tab -- the most expensive edit on this whole surface to have to redo.
+  const live = readProbesDraft(settings);
+  // Held on SettingsShell, so policy and a half-built probe map survive a trip
+  // to another tab as one coherent thermocouple configuration draft.
   const {
     value: working,
     setValue: setWorking,
     markSaved,
     clear: discard,
-  } = useSettingsDraft("probes", readLiveProbeMap);
+  } = useSettingsDraft("probes", readProbesDraft);
   const [prev, setPrev] = useState(settings);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,32 +116,49 @@ export function ProbesTab() {
 
   // JSON compare, not identity: the reducer returns fresh objects on every
   // edit, so a no-op round trip would otherwise read as dirty forever.
-  const dirty = JSON.stringify(working) !== JSON.stringify(live);
-  const blocked = blockedModules(working, live, catalog.requires_install);
+  const probeMapDirty = JSON.stringify(working.probeMap) !== JSON.stringify(live.probeMap);
+  const policyDirty = working.policy !== live.policy;
+  const dirty = probeMapDirty || policyDirty;
+  const blocked = blockedModules(working.probeMap, live.probeMap, catalog.requires_install);
   const running = mode !== "Stop";
-  const canSave = dirty && !running && blocked.length === 0 && !saving;
+  const canSave =
+    dirty &&
+    (!probeMapDirty || (!running && blocked.length === 0)) &&
+    !saving &&
+    !savingSettings;
 
   const onSave = async () => {
     setSaving(true);
     setSaved(false);
     setError(null);
-    const r = await applyProbeMap(BASE_URL, working);
-    setSaving(false);
-    if (r.ok) {
-      setSaved(true);
-      markSaved(); // the draft is spent; the next loader result supersedes it
-      // Same reason as useSaveSettings.ts: settingsLoader now primes itself
-      // through fetchQuery, which serves a fresh cache entry unchanged, so
-      // without invalidating first, revalidate() would re-run settingsLoader
-      // AND probeModulesLoader but put the PRE-save probe map back on screen.
-      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(BASE_URL) });
-      revalidator.revalidate(); // re-runs settingsLoader AND probeModulesLoader
-    } else {
-      // Deliberately keeps `working` -- the store is untouched on every
-      // rejection path, so there is no drift to correct, and discarding the
-      // user's edits exactly when they need to fix them is the worse bug.
-      setError(r.message);
+
+    if (
+      policyDirty &&
+      !(await saveSettings(
+        { thermocouple_health: { inference_policy: working.policy } },
+        [],
+      ))
+    ) {
+      setSaving(false);
+      return;
     }
+
+    if (probeMapDirty) {
+      const result = await applyProbeMap(BASE_URL, working.probeMap);
+      if (!result.ok) {
+        setSaving(false);
+        // Keep the whole draft. If the policy write already succeeded, fresh
+        // loader data makes only that half clean while this rejected map stays.
+        setError(result.message);
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(BASE_URL) });
+      revalidator.revalidate();
+    }
+
+    setSaving(false);
+    setSaved(true);
+    markSaved();
   };
 
   return (
@@ -112,14 +176,33 @@ export function ProbesTab() {
           </p>
         )}
         {error && <p role="alert">{error}</p>}
+        {policyStatus.kind === "error" ? <p role="alert">{policyStatus.message}</p> : null}
+
+        <Select
+          label="Software thermocouple detection"
+          value={working.policy}
+          options={POLICY_OPTIONS}
+          onChange={(value) =>
+            setWorking((draft) => ({
+              ...draft,
+              policy: value as InferencePolicy,
+            }))
+          }
+          path="thermocouple_health.inference_policy"
+        />
+        <p className="pf-settings-hint">{POLICY_IMPACT[working.policy]}</p>
 
         <DevicesCard
-          probeMap={working}
+          probeMap={working.probeMap}
           modules={catalog.modules}
           baseUrl={BASE_URL}
-          onChange={setWorking}
+          onChange={(probeMap) => setWorking((draft) => ({ ...draft, probeMap }))}
         />
-        <PortsCard probeMap={working} profiles={readLiveProfiles(settings)} onChange={setWorking} />
+        <PortsCard
+          probeMap={working.probeMap}
+          profiles={readLiveProfiles(settings)}
+          onChange={(probeMap) => setWorking((draft) => ({ ...draft, probeMap }))}
+        />
 
         <div className="pf-settings-actions">
           <button
@@ -128,12 +211,12 @@ export function ProbesTab() {
             disabled={!canSave}
             onClick={() => void onSave()}
           >
-            {saving ? "Applying…" : "Save probe configuration"}
+            {saving || savingSettings ? "Applying…" : "Save probe configuration"}
           </button>
           <button
             type="button"
             className="pf-modal-btn"
-            disabled={!dirty || saving}
+            disabled={!dirty || saving || savingSettings}
             onClick={discard}
           >
             Discard changes
@@ -149,6 +232,89 @@ export function ProbesTab() {
           </Link>
         </div>
       </Section>
+
+      <section className="pf-probe-health-details" aria-label="Thermocouple health">
+        <h2>Thermocouple health</h2>
+        {thermocoupleHealth.length === 0 ? (
+          <p className="pf-settings-hint">No thermocouple health has been reported.</p>
+        ) : (
+          thermocoupleHealth.map((item) => {
+            const health = projectProbeHealth(item);
+            const stateCopy = health.state
+              .replaceAll("_", " ")
+              .replace(/(^| )\S/g, (letter) => letter.toUpperCase());
+            const status = health.headline ?? stateCopy;
+            return (
+              <article
+                className={`pf-probe-health-detail pf-probe-health-detail--${health.severity}`}
+                key={`${health.device}\u0000${health.port}\u0000${health.role}\u0000${health.label}`}
+              >
+                <h3>
+                  {health.role} · {health.displayName}
+                </h3>
+                <p className="pf-probe-health-detail-status">
+                  {health.freshnessQualifier !== null ? "Last reported: " : null}
+                  {status}
+                </p>
+                {health.impactCopy !== null ? <p>{health.impactCopy}</p> : null}
+                {health.causeCopy !== null ? <p>{health.causeCopy}</p> : null}
+                <dl>
+                  <div>
+                    <dt>Device</dt>
+                    <dd>{health.device}</dd>
+                  </div>
+                  <div>
+                    <dt>Port</dt>
+                    <dd>{health.port}</dd>
+                  </div>
+                  <div>
+                    <dt>State</dt>
+                    <dd>{stateCopy}</dd>
+                  </div>
+                  <div>
+                    <dt>Source</dt>
+                    <dd>{health.sourceCopy}</dd>
+                  </div>
+                  <div>
+                    <dt>Policy</dt>
+                    <dd>
+                      {health.policy
+                        .replaceAll("_", " ")
+                        .replace(/(^| )\S/g, (letter) => letter.toUpperCase())}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Outcome</dt>
+                    <dd>
+                      {health.outcome
+                        .replaceAll("_", " ")
+                        .replace(/(^| )\S/g, (letter) => letter.toUpperCase())}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Faults</dt>
+                    <dd>{health.faults.length > 0 ? health.faults.join(", ") : "None"}</dd>
+                  </div>
+                  <div>
+                    <dt>Evidence</dt>
+                    <dd>{health.evidence.length > 0 ? health.evidence.join(", ") : "None"}</dd>
+                  </div>
+                  <div>
+                    <dt>Report age</dt>
+                    <dd>{Math.round(health.lastReportedAgeS)}s</dd>
+                  </div>
+                  {Object.entries(item.report.detail).map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{key.replaceAll("_", " ")}: </dt>
+                      <dd>{displayDetailValue(value)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </article>
+            );
+          })
+        )}
+      </section>
     </div>
   );
 }

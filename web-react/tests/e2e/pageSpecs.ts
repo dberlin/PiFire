@@ -570,6 +570,26 @@ export const CHROME_PROBES: StyleProbe[] = [
   { name: "banner-error", className: "pf-banner pf-banner--error" },
   { name: "banner-warning", className: "pf-banner pf-banner--warning" },
   { name: "banner-critical", className: "pf-banner pf-banner--critical" },
+  {
+    name: "banner-probe-health",
+    className: "pf-banner pf-banner--critical pf-banner--probe-health",
+  },
+  {
+    name: "probe-health-warning",
+    className: "pf-dash-probehealth pf-dash-probehealth--warning",
+  },
+  {
+    name: "probe-health-danger",
+    className: "pf-dash-probehealth pf-dash-probehealth--danger",
+  },
+  {
+    name: "gauge-health-danger",
+    className: "pf-dash-gauge-health pf-dash-gauge-health--danger",
+  },
+  {
+    name: "health-detail-danger",
+    className: "pf-probe-health-detail pf-probe-health-detail--danger",
+  },
   { name: "banners", className: "pf-banners" },
   { name: "timer-bar", className: "pf-timer-bar" },
   { name: "timer-readout", className: "pf-timer-readout" },

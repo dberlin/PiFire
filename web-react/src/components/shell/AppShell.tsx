@@ -1,5 +1,9 @@
+import {
+  projectProbeHealthList,
+  summarizeProbeHealth,
+} from "@pifire/core/dashboard/probeHealth";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Outlet } from "react-router";
 import { normalizeApiBase, queryKeys } from "../../helpers/query/keys";
 import { useTimerVisibility } from "../../helpers/timer/timerVisibility";
@@ -28,6 +32,15 @@ export function AppShell() {
   const liveState = useLiveState();
   const { live, command } = liveState;
 
+  const probeHealthSummary = useMemo(
+    () =>
+      summarizeProbeHealth(
+        projectProbeHealthList(live.thermocoupleHealth).filter(
+          (health) => health.state === "confirmed",
+        ),
+      ),
+    [live.thermocoupleHealth],
+  );
   const { visible, toggle } = useTimerVisibility(live.timer.start);
   // Same derivation the bar makes; the navbar only needs the yes/no, so it is
   // computed at render rather than lifted out of deriveTimer's richer result.
@@ -66,6 +79,8 @@ export function AppShell() {
         warnings={live.warnings ?? []}
         warningsMaxId={live.warningsMaxId ?? null}
         criticalError={live.criticalError}
+        probeHealthSummary={probeHealthSummary}
+        healthLastReported={liveState.phase === "unreachable"}
       />
       <main className="pf-shell-main">
         <Outlet context={liveState} />
