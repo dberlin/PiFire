@@ -506,7 +506,7 @@ class PiFireBackend(QObject):
         try:
             health = self._health_fetch_fn()
         except Exception:
-            health = None
+            return
         self._health_model.update(health)
 
     @Slot()

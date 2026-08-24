@@ -614,6 +614,87 @@ def test_backend_throttles_health_reads_independently_from_fast_polling():
     assert health_calls == [1000.0, 1001.0]
 
 
+def test_backend_failed_health_read_preserves_confirmed_invalid_state_and_suppression():
+    clock = {"t": 1000.0}
+    health_reads = iter(
+        [
+            [
+                _health_item(
+                    state="confirmed",
+                    faults=["open"],
+                    evidence=["hardware"],
+                    source="hardware",
+                    outcome="stopped",
+                    temperature_valid=False,
+                )
+            ],
+            OSError("health transport unavailable"),
+        ]
+    )
+
+    def fetch_health():
+        result = next(health_reads)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    backend = PiFireBackend(
+        lambda: ({"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, {"mode": "Error"}),
+        lambda c, d: None,
+        PROBE_INFO,
+        health_fetch_fn=fetch_health,
+    )
+    backend._now = lambda: clock["t"]
+
+    backend.poll()
+    clock["t"] += backend.HEALTH_POLL_SECONDS
+    backend.poll()
+
+    assert backend.probeHealth.rowCount() == 1
+    assert backend.probeHealth.summary["highest"]["severity"] == "danger"
+    assert backend.probeHealth.invalid_labels() == {"Grill"}
+    assert backend.primaryTemp == 0.0
+    assert backend.primaryHasTemp is False
+
+
+@pytest.mark.parametrize("empty_health", [None, []])
+def test_backend_successful_empty_health_read_clears_confirmed_invalid_state(empty_health):
+    clock = {"t": 1000.0}
+    health_reads = iter(
+        [
+            [
+                _health_item(
+                    state="confirmed",
+                    faults=["open"],
+                    evidence=["hardware"],
+                    source="hardware",
+                    outcome="stopped",
+                    temperature_valid=False,
+                )
+            ],
+            empty_health,
+        ]
+    )
+    backend = PiFireBackend(
+        lambda: ({"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, {"mode": "Error"}),
+        lambda c, d: None,
+        PROBE_INFO,
+        health_fetch_fn=lambda: next(health_reads),
+    )
+    backend._now = lambda: clock["t"]
+
+    backend.poll()
+    assert backend.probeHealth.invalid_labels() == {"Grill"}
+
+    clock["t"] += backend.HEALTH_POLL_SECONDS
+    backend.poll()
+
+    assert backend.probeHealth.rowCount() == 0
+    assert backend.probeHealth.invalid_labels() == set()
+    assert backend.primaryTemp == 225.0
+    assert backend.primaryHasTemp is True
+
+
 def test_backend_exposes_health_list_model_and_clears_malformed_reads():
     health = {"value": [_health_item()]}
     backend = PiFireBackend(
