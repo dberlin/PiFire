@@ -449,6 +449,11 @@ def _add_mcp2221_selector(settings):
     return True
 
 
+def _acknowledge_thermocouple_health_settings(_settings):
+    """Record the modeled settings addition; normalization supplies the default."""
+    return False
+
+
 #: The shape migrations, in ascending order, as (target_version, migration).
 #: A step's number is the version the tree is AT once that step has run, and
 #: each callable mutates the tree in place and returns True if it changed
@@ -464,6 +469,7 @@ _SHAPE_MIGRATIONS = [
     (8, _add_mcp2221_selector),
     (9, _migrate_acados_mpc_settings),
     (10, _reset_uncalibrated_mpc_parameters),
+    (11, _acknowledge_thermocouple_health_settings),
 ]
 
 

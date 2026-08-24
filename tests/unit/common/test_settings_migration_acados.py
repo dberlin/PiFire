@@ -100,8 +100,8 @@ def test_schema_nine_migration_is_idempotent_and_preserves_non_mpc_settings():
     migrated = _migrate(settings)
     once = deepcopy(settings)
 
-    assert SETTINGS_SCHEMA_VERSION == 10
-    assert settings["schema_version"] == 10
+    assert SETTINGS_SCHEMA_VERSION == 11
+    assert settings["schema_version"] == 11
     assert settings["controller"]["selected"] == "mpc"
     assert settings["controller"]["config"]["pid"] == expected_pid
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is False

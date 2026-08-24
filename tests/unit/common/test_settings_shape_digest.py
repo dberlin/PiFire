@@ -10,7 +10,7 @@ from common.settings_schema import SettingsSchema
 
 #: Regenerate with:
 #:   uv run python -m common.schema_digest common.settings_schema:SettingsSchema
-SETTINGS_SHAPE_DIGEST = "d4cc741c89fb6cb0df6a527282aaea0b1c0bbf5c29251584035e41ce571045b2"
+SETTINGS_SHAPE_DIGEST = "c421e1233979c1ea03bbeee5ed22bd64536e4db90694f6462bbe927702b2e8a8"
 
 _MESSAGE = """The modeled settings shape changed. Two things to do, in order:
 

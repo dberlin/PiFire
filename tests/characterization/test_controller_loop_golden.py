@@ -269,7 +269,7 @@ def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
     reads = 0
     queued_state = {}
 
-    def read_probes():
+    def read_probes(**kwargs):
         nonlocal reads
         reads += 1
         if reads == 3:
@@ -279,7 +279,7 @@ def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
             queued_state["cook_id"] = store.read_control()["cook_id"]
         if reads == 5:
             store.enqueue_control_delta(control_delta(set_values={"updated": True}), origin="test-cap")
-        return probes.read_probes()
+        return probes.read_probes(**kwargs)
 
     ctx.devices.probe_complex.read_probes = read_probes
     controller_mod.run_work_cycle("Smoke", ctx)
