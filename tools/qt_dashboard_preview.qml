@@ -12,6 +12,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Shapes
 import QtQuick.Layouts
+import "../display/qml/components" as Components
 
 Window {
     id: win
@@ -63,6 +64,43 @@ Window {
     property bool animate: true
     property int probeCount: 3
     property bool lidOpen: false
+    property var healthScenarios: [
+        "none", "suspected", "observe-primary", "stopped-primary",
+        "secondary-unavailable", "multiple-faults", "aux-detail",
+        "recovery", "stale-transport"
+    ]
+    property int healthIdx: Math.max(0, healthScenarios.indexOf(
+        typeof initialHealthScenario !== "undefined" ? initialHealthScenario : "none"))
+    property string healthScenario: healthScenarios[healthIdx]
+
+    function healthSummaryFor(scenario) {
+        if (scenario === "suspected")
+            return {highest: {displayName: "Grill", state: "suspected", headline: "CHECK PROBE",
+                impactCopy: "Possible thermocouple issue; reading still available.", freshnessQualifier: null},
+                additionalCopy: null}
+        if (scenario === "observe-primary")
+            return {highest: {displayName: "Grill", state: "confirmed", headline: "FAULT",
+                impactCopy: "Fault detected — Observe mode did not stop heating.", freshnessQualifier: null},
+                additionalCopy: null}
+        if (scenario === "stopped-primary")
+            return {highest: {displayName: "Grill", state: "confirmed", headline: "CONTROL PROBE UNAVAILABLE",
+                impactCopy: "PiFire stopped heating.", freshnessQualifier: null}, additionalCopy: null}
+        if (scenario === "secondary-unavailable")
+            return {highest: {displayName: "Brisket", state: "confirmed", headline: "PROBE UNAVAILABLE",
+                impactCopy: "Grill control continues.", freshnessQualifier: null}, additionalCopy: null}
+        if (scenario === "multiple-faults")
+            return {highest: {displayName: "Grill", state: "confirmed", headline: "CONTROL PROBE UNAVAILABLE",
+                impactCopy: "PiFire stopped heating.", freshnessQualifier: null}, additionalCopy: "+2 more"}
+        if (scenario === "aux-detail")
+            return {highest: {displayName: "Cabinet", state: "confirmed", headline: "PROBE UNAVAILABLE",
+                impactCopy: "Grill control continues.", freshnessQualifier: null}, additionalCopy: null}
+        if (scenario === "stale-transport")
+            return {highest: {displayName: "Grill", state: "confirmed", headline: "CONTROL PROBE UNAVAILABLE",
+                impactCopy: "PiFire stopped heating.", freshnessQualifier: "Last reported"}, additionalCopy: null}
+        return {}
+    }
+
+    property var healthSummary: healthSummaryFor(healthScenario)
 
     // Mode-dependent control buttons (mirrors the design's controlButtons()).
     function controlButtons(m) {
@@ -620,6 +658,73 @@ Window {
     }
     // ---------------- end scaled design canvas ----------------
 
+    // ---------------- Thermocouple health scenarios ----------------
+    Components.ProbeHealthBanner {
+        anchors.top: parent.top
+        anchors.topMargin: 64
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(parent.width - 24, 820)
+        compact: parent.width < 900
+        summary: win.healthSummary
+        z: 100
+    }
+
+    Rectangle {
+        visible: win.healthScenario === "suspected"
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: parent.height * 0.42
+        width: 300
+        height: 44
+        radius: 12
+        color: "#2b2418"
+        border.color: win.warnCol
+        border.width: 2
+        z: 100
+        Text {
+            anchors.centerIn: parent
+            text: "GRILL  ·  CHECK PROBE"
+            color: win.warnCol
+            font.family: win.sans
+            font.pixelSize: 15
+            font.bold: true
+        }
+    }
+
+    Rectangle {
+        visible: win.healthScenario === "multiple-faults" || win.healthScenario === "aux-detail"
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 80, 720)
+        height: 250
+        radius: 18
+        color: "#0c0a09"
+        border.color: win.dangerCol
+        border.width: 2
+        z: 90
+        Column {
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 14
+            Text {
+                text: "THERMOCOUPLE HEALTH"
+                color: win.textCol
+                font.family: win.sans
+                font.pixelSize: 24
+                font.bold: true
+            }
+            Text {
+                text: win.healthScenario === "aux-detail"
+                    ? "CABINET · AUX\nPROBE UNAVAILABLE\nHardware reported an open circuit.\nSource: Hardware · Grill control continues."
+                    : "GRILL · PRIMARY — CONTROL PROBE UNAVAILABLE\nBRISKET · FOOD — PROBE UNAVAILABLE\nCABINET · AUX — PROBE UNAVAILABLE"
+                width: parent.width
+                color: win.textCol
+                font.family: win.sans
+                font.pixelSize: 16
+                lineHeight: 1.35
+                wrapMode: Text.Wrap
+            }
+        }
+    }
+
     // ---------------- Click-through mode cycle ----------------
     MouseArea {
         anchors.fill: parent
@@ -638,6 +743,10 @@ Window {
             else if (e.key === Qt.Key_P) win.probeCount = win.probeCount > 0 ? 0 : 3
             else if (e.key === Qt.Key_L) win.lidOpen = !win.lidOpen
             else if (e.key === Qt.Key_F) win.animate = !win.animate
+            else if (e.key === Qt.Key_H) {
+                win.healthIdx = (win.healthIdx + 1) % win.healthScenarios.length
+                win.healthSummary = win.healthSummaryFor(win.healthScenario)
+            }
         }
     }
 
@@ -660,7 +769,7 @@ Window {
     }
     Text {
         anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.margins: 6
-        text: "click/M: mode(" + win.mode + ") · A: accent(" + win.accent + ") · P: probes(" + win.probeCount + ") · L: lid(" + (win.lidOpen ? "open" : "closed") + ") · F: anim(" + (win.animate ? "on" : "off") + ")"
+        text: "click/M: mode(" + win.mode + ") · A: accent(" + win.accent + ") · P: probes(" + win.probeCount + ") · L: lid(" + (win.lidOpen ? "open" : "closed") + ") · F: anim(" + (win.animate ? "on" : "off") + ") · H: health(" + win.healthScenario + ")"
         color: Qt.rgba(1, 1, 1, 0.35); font.family: win.sans; font.pixelSize: 12
     }
 }

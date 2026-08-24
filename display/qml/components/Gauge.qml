@@ -28,6 +28,16 @@ Item {
 	property string probeName: ""
 	property color arcColor: Theme.accentColor
 	property string modeLabel: ""
+	property var healthModel: null
+	property var health: null
+	readonly property bool healthIssue: health !== null
+		&& (health.state === "suspected" || health.state === "confirmed")
+	readonly property string statusText: healthIssue
+		? ((health.freshnessQualifier ? health.freshnessQualifier + ": " : "") + health.headline)
+		: stale
+	readonly property color statusColor: healthIssue
+		? (health.severity === "danger" ? Theme.danger : Theme.warn)
+		: Theme.warn
 	signal tapped()
 
 	TapHandler { id: tap; onTapped: g.tapped() }
@@ -132,6 +142,32 @@ Item {
 		}
 	}
 
+	Repeater {
+		model: g.healthModel
+		delegate: Item {
+			width: 0
+			height: 0
+			visible: false
+			readonly property var healthSnapshot: ({
+				"displayName": model.displayName,
+				"state": model.state,
+				"severity": model.severity,
+				"headline": model.headline,
+				"freshnessQualifier": model.freshnessQualifier
+			})
+			function syncHealth() {
+				if (model.displayName === g.probeName)
+					g.health = healthSnapshot;
+			}
+			Component.onCompleted: syncHealth()
+			onHealthSnapshotChanged: syncHealth()
+			Component.onDestruction: {
+				if (g.health && g.health.displayName === model.displayName)
+					g.health = null;
+			}
+		}
+	}
+
 	Column {
 		anchors.centerIn: parent
 		spacing: 2
@@ -147,6 +183,7 @@ Item {
 			anchors.horizontalCenter: parent.horizontalCenter
 			spacing: 4
 			Text {
+				objectName: "primaryTemperature"
 				text: g.hasValue ? Math.round(g.value) : "—"
 				font.family: Theme.condensed
 				font.pixelSize: g.compact ? 66 : 84
@@ -162,15 +199,16 @@ Item {
 				anchors.bottomMargin: 10
 			}
 		}
-		// Same role as the probe cards' stale line, sized for the gauge.
+		// Health and stale transport share one reserved status line.
 		Text {
+			objectName: "primaryHealthStatus"
 			anchors.horizontalCenter: parent.horizontalCenter
-			visible: g.stale !== ""
-			text: g.stale
+			visible: g.statusText !== ""
+			text: g.statusText
 			font.family: Theme.sans
 			font.pixelSize: g.compact ? 13 : 15
 			font.bold: true
-			color: Theme.warn
+			color: g.statusColor
 		}
 		Text {
 			anchors.horizontalCenter: parent.horizontalCenter

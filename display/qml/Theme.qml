@@ -21,6 +21,9 @@ QtObject {
 	readonly property color dangerColor: "#ff5a4d"
 	readonly property color trackColor: "#4a4034"
 	readonly property color cookingColor: "#ffd23f"
+	readonly property color warningSurface: Qt.rgba(1.0, 0.69, 0.13, 0.14)
+	readonly property color dangerSurface:  Qt.rgba(1.0, 0.35, 0.30, 0.16)
+	readonly property color focusRing:      "#ffffff"
 
 	// SystemCard tokens (design-verbatim, fixed regardless of accent)
 	readonly property color igniterColor: "#ff7a1a"

@@ -24,6 +24,7 @@ Item {
 	// reachable from the menu (Menus.js, "main_active_normal").
 	property bool smoking: backend.mode === "Smoke"
 	readonly property bool compact: width <= 1100
+	readonly property bool portrait: height > width
 
 	ColumnLayout {
 		anchors.fill: parent
@@ -36,6 +37,8 @@ Item {
 		}
 
 		RowLayout {
+			objectName: "landscapeDashBody"
+			visible: !dash.portrait
 			Layout.fillWidth: true
 			Layout.fillHeight: true
 			Layout.leftMargin: dash.compact ? 14 : 18
@@ -69,6 +72,7 @@ Item {
 						Layout.fillWidth: true
 						Layout.fillHeight: true
 						compact: dash.compact
+						healthModel: backend.probeHealth
 						name: model.name
 						temp: model.temp
 						hasTemp: model.hasTemp
@@ -103,6 +107,7 @@ Item {
 						width: dash.compact ? 300 : 392
 						height: dash.compact ? 300 : 392
 						compact: dash.compact
+						healthModel: backend.probeHealth
 						value: backend.primaryTemp
 						hasValue: backend.primaryHasTemp
 						stale: backend.primaryStale
@@ -201,6 +206,160 @@ Item {
 					compact: dash.compact
 					onCheckRequested: backend.hopperCheck()
 				}
+			}
+		}
+
+		Loader {
+			visible: dash.portrait
+			active: dash.portrait
+			Layout.fillWidth: true
+			Layout.fillHeight: true
+			sourceComponent: Component {
+				Flickable {
+					id: portraitFlick
+					objectName: "portraitDashFlick"
+					contentWidth: width
+					contentHeight: portraitColumn.implicitHeight
+					flickableDirection: Flickable.VerticalFlick
+					boundsBehavior: Flickable.StopAtBounds
+					clip: true
+
+			Column {
+				id: portraitColumn
+				x: 14
+				width: portraitFlick.width - 28
+				spacing: 14
+
+				// Preserve room for Main's persistent health banner.
+				Item {
+					width: parent.width
+					height: backend.probeHealth.summary && backend.probeHealth.summary.highest
+						&& backend.probeHealth.summary.highest.state === "confirmed" ? 72 : 12
+				}
+
+				Rectangle {
+					id: portraitGaugeCard
+					objectName: "portraitGaugeCard"
+					width: parent.width
+					height: Math.min(width, 390)
+					color: Theme.card
+					radius: Theme.cardRadius
+					border.color: Theme.cardBorder
+					clip: true
+
+					Gauge {
+						anchors.centerIn: parent
+						width: Math.min(parent.width, 360)
+						height: width
+						compact: true
+						healthModel: backend.probeHealth
+						value: backend.primaryTemp
+						hasValue: backend.primaryHasTemp
+						stale: backend.primaryStale
+						setpoint: backend.primarySetpoint
+						target: backend.primaryNotifyTarget
+						maxValue: backend.primaryMax
+						units: backend.units
+						probeName: backend.primaryName
+						modeLabel: backend.modeText
+						onTapped: dash.requestInput("notify", backend.primaryName)
+					}
+				}
+
+				RowLayout {
+					width: parent.width
+					height: 44
+					spacing: 12
+					CookTimeBar {
+						Layout.fillWidth: true
+						Layout.fillHeight: true
+						compact: true
+					}
+					Alert {
+						shown: backend.lidOpen
+						message: "LID OPEN"
+					}
+				}
+
+				ControlPanel {
+					width: parent.width
+					height: 76
+					compact: true
+					mode: backend.mode
+					recipe: backend.recipe
+					recipePaused: backend.recipePaused
+					onOpenMenu: (name) => dash.requestMenu(name)
+					onOpenInput: (name, origin) => dash.requestInput(name, origin)
+				}
+
+				Text {
+					visible: backend.foodProbeCount > 0
+					text: "FOOD PROBES"
+					font.family: Theme.sans
+					font.pixelSize: 13
+					font.letterSpacing: 2.5
+					color: Theme.label
+				}
+
+				Repeater {
+					model: backend.foodProbes
+					ProbeCard {
+						width: portraitColumn.width
+						height: 180
+						compact: true
+						healthModel: backend.probeHealth
+						name: model.name
+						temp: model.temp
+						hasTemp: model.hasTemp
+						stale: model.stale
+						target: model.target
+						maxTemp: model.maxTemp
+						units: backend.units
+						onTapped: dash.requestInput("notify", model.name)
+					}
+				}
+
+				SystemCard {
+					width: parent.width
+					compact: true
+				}
+
+				RowLayout {
+					width: parent.width
+					height: 48
+					spacing: 12
+					DutyPill {
+						Layout.fillWidth: true
+						Layout.fillHeight: true
+						compact: true
+						label: dash.smoking ? "P-MODE" : "AUGER DUTY"
+						value: dash.smoking ? "P-" + backend.pMode : backend.augerDuty + "%"
+						highlighted: false
+						clickable: dash.smoking
+						onTapped: dash.requestMenu("pmode")
+					}
+					DutyPill {
+						Layout.fillWidth: true
+						Layout.fillHeight: true
+						compact: true
+						label: dash.smoking ? "SMOKE+" : "FAN DUTY"
+						value: dash.smoking ? (backend.smokePlus ? "ON" : "OFF") : backend.fanDuty + "%"
+						highlighted: dash.smoking ? backend.smokePlus : backend.fanOn
+						clickable: dash.smoking
+						onTapped: backend.toggleSmokePlus()
+					}
+				}
+
+				HopperCard {
+					width: parent.width
+					height: 180
+					compact: true
+					onCheckRequested: backend.hopperCheck()
+				}
+
+				Item { width: parent.width; height: 14 }
+			}
+		}
 			}
 		}
 	}

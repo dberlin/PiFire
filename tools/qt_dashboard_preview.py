@@ -14,11 +14,13 @@ Usage:
     uv run --with pyside6 python tools/qt_dashboard_preview.py      # if PySide6 isn't on this interpreter
     /usr/bin/python3 tools/qt_dashboard_preview.py --check          # load + exit (offscreen syntax check)
     /usr/bin/python3 tools/qt_dashboard_preview.py --shot out.png   # render one frame to a PNG (offscreen)
+    /usr/bin/python3 tools/qt_dashboard_preview.py --health-scenario stopped-primary
 
 Controls (in the window):
     click / M  cycle mode          A  cycle accent
     P          toggle probes       L  toggle lid-open alert
     F          toggle animation (isolate layout cost)
+    H          cycle thermocouple health scenario
 """
 
 import os
@@ -36,6 +38,27 @@ def main():
     if check or shot:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+
+    health_scenarios = (
+        "none",
+        "suspected",
+        "observe-primary",
+        "stopped-primary",
+        "secondary-unavailable",
+        "multiple-faults",
+        "aux-detail",
+        "recovery",
+        "stale-transport",
+    )
+    health_scenario = "none"
+    if "--health-scenario" in sys.argv:
+        health_scenario = sys.argv[sys.argv.index("--health-scenario") + 1]
+        if health_scenario not in health_scenarios:
+            print(
+                "ERROR: --health-scenario must be one of " + ", ".join(health_scenarios),
+                file=sys.stderr,
+            )
+            return 2
     view_w, view_h = 1280, 720
     if "--size" in sys.argv:
         spec = sys.argv[sys.argv.index("--size") + 1]
@@ -50,19 +73,21 @@ def main():
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("viewW", view_w)
     engine.rootContext().setContextProperty("viewH", view_h)
+    engine.rootContext().setContextProperty("initialHealthScenario", health_scenario)
     engine.load(QUrl.fromLocalFile(QML))
     if not engine.rootObjects():
         print("ERROR: failed to load qt_dashboard_preview.qml", file=sys.stderr)
         return 1
 
     if check:
-        print("OK: qt_dashboard_preview.qml loaded")
+        print(f"OK: qt_dashboard_preview.qml loaded; health scenario: {health_scenario}")
         # Give the scene one event-loop pass, then quit.
         QTimer.singleShot(0, app.quit)
         return app.exec()
 
     if shot:
         root = engine.rootObjects()[0]
+        assert isinstance(root, QQuickWindow)
 
         def _grab():
             img = root.grabWindow()

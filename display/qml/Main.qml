@@ -3,6 +3,7 @@ import QtQuick.Window
 import QtQuick.Controls
 import "."
 import "screens"
+import "components"
 import "Menus.js" as Menus
 
 Window {
@@ -34,6 +35,18 @@ Window {
 			id: stack
 			anchors.fill: parent
 			initialItem: splashComponent
+		}
+
+		ProbeHealthBanner {
+			id: healthBanner
+			anchors.top: parent.top
+			anchors.topMargin: 64
+			anchors.horizontalCenter: parent.horizontalCenter
+			width: Math.min(parent.width - 24, 820)
+			compact: parent.width < 900
+			summary: backend ? backend.probeHealth.summary : ({})
+			z: 100
+			onClicked: root.openHealthDetails()
 		}
 
 		// Button/encoder parity: hardware GPIO handlers call backend.navUp/navDown/
@@ -120,6 +133,13 @@ Window {
 		           name === "hold" ? {} : {origin: origin});
 	}
 
+	function openHealthDetails() {
+		if (stack.currentItem && stack.currentItem.objectName === "probeHealthScreen")
+			return;
+		if (backend && backend.probeHealth.summary && backend.probeHealth.summary.highest)
+			stack.push(healthComponent);
+	}
+
 	Component {
 		id: dashComponent
 		DashScreen {
@@ -129,6 +149,11 @@ Window {
 		}
 	}
 
+
+	Component {
+		id: healthComponent
+		ProbeHealthScreen { onClose: stack.pop() }
+	}
 	Component {
 		id: menuComponent
 		MenuScreen {

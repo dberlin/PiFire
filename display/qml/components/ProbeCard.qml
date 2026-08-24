@@ -20,6 +20,16 @@ Rectangle {
 	property real target: 0
 	property real maxTemp: 300
 	property string units: "F"
+	property var healthModel: null
+	property var health: null
+	readonly property bool healthIssue: health !== null
+		&& (health.state === "suspected" || health.state === "confirmed")
+	readonly property string statusText: healthIssue
+		? ((health.freshnessQualifier ? health.freshnessQualifier + ": " : "") + health.headline)
+		: stale
+	readonly property color statusColor: healthIssue
+		? (health.severity === "danger" ? Theme.danger : Theme.warn)
+		: Theme.warn
 	signal tapped()
 
 	readonly property bool done: hasTemp && target > 0 && temp >= target - 1
@@ -30,6 +40,32 @@ Rectangle {
 
 	TapHandler { id: tap; onTapped: card.tapped() }
 	PressOverlay { pressed: tap.pressed }
+
+	Repeater {
+		model: card.healthModel
+		delegate: Item {
+			width: 0
+			height: 0
+			visible: false
+			readonly property var healthSnapshot: ({
+				"displayName": model.displayName,
+				"state": model.state,
+				"severity": model.severity,
+				"headline": model.headline,
+				"freshnessQualifier": model.freshnessQualifier
+			})
+			function syncHealth() {
+				if (model.displayName === card.name)
+					card.health = healthSnapshot;
+			}
+			Component.onCompleted: syncHealth()
+			onHealthSnapshotChanged: syncHealth()
+			Component.onDestruction: {
+				if (card.health && card.health.displayName === model.displayName)
+					card.health = null;
+			}
+		}
+	}
 
 	Column {
 		anchors.verticalCenter: parent.verticalCenter
@@ -66,6 +102,7 @@ Rectangle {
 		Row {
 			spacing: 2
 			Text {
+				objectName: "foodTemperature-" + card.name
 				text: card.hasTemp ? Math.round(card.temp) : "—"
 				font.family: Theme.condensed
 				font.pixelSize: card.compact ? 52 : 66
@@ -82,16 +119,15 @@ Rectangle {
 			}
 		}
 
-		// Says the number above is not current. Without it the card reads as
-		// live, which is the whole defect: a temperature is plausible at any
-		// value, so absence has to be said rather than implied.
+		// Health and stale transport share one reserved status line.
 		Text {
-			visible: card.stale !== ""
-			text: card.stale
+			objectName: "foodHealthStatus-" + card.name
+			visible: card.statusText !== ""
+			text: card.statusText
 			font.family: Theme.sans
 			font.pixelSize: card.compact ? 11 : 13
 			font.bold: true
-			color: Theme.warn
+			color: card.statusColor
 		}
 
 		Rectangle {
