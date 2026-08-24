@@ -1,4 +1,6 @@
-from display.qtbackend import PiFireBackend
+import pytest
+
+from display.qtbackend import PiFireBackend, ProbeHealthModel, project_thermocouple_health
 
 PROBE_INFO = {"primary": {"name": "Grill", "max_temp": 600}, "food": [{"name": "Probe 1", "max_temp": 300}], "aux": []}
 
@@ -319,3 +321,454 @@ def test_timeout_live_reread():
     clock["t"] = 1002.0  # >1s since last settings check -> re-read
     b.poll()
     assert b.TIMEOUT == 5
+
+
+def _health_item(
+    *,
+    label="Grill",
+    display_name="Grill",
+    role="Primary",
+    state="healthy",
+    faults=None,
+    evidence=None,
+    temperature_valid=True,
+    source="software",
+    policy="observe",
+    outcome="none",
+    current=True,
+    age=0.25,
+):
+    return {
+        "device": "max31856",
+        "port": "TC0",
+        "label": label,
+        "displayName": display_name,
+        "role": role,
+        "report": {
+            "state": state,
+            "faults": [] if faults is None else faults,
+            "evidence": ["stuck-response"] if evidence is None else evidence,
+            "temperatureValid": temperature_valid,
+            "detail": {"policy": policy},
+        },
+        "detector": {"source": source, "policy": policy},
+        "outcome": outcome,
+        "freshness": {"current": current, "lastReportedAgeS": age},
+    }
+
+
+def _health_row(model, index=0):
+    roles = {bytes(name).decode(): role for role, name in model.roleNames().items()}
+    model_index = model.index(index, 0)
+    return {name: model.data(model_index, role) for name, role in roles.items()}
+
+
+def test_probe_health_model_exposes_the_frozen_semantic_roles_exactly():
+    model = ProbeHealthModel()
+
+    assert {bytes(name) for name in model.roleNames().values()} == {
+        b"device",
+        b"port",
+        b"label",
+        b"displayName",
+        b"role",
+        b"state",
+        b"faults",
+        b"evidence",
+        b"temperatureValid",
+        b"source",
+        b"policy",
+        b"outcome",
+        b"severity",
+        b"availability",
+        b"headline",
+        b"impactCopy",
+        b"causeCopy",
+        b"sourceCopy",
+        b"priority",
+        b"freshnessCurrent",
+        b"lastReportedAgeS",
+        b"freshnessQualifier",
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "state",
+        "outcome",
+        "temperature_valid",
+        "severity",
+        "availability",
+        "headline",
+        "impact_copy",
+        "priority",
+    ),
+    [
+        ("unmonitored", "none", True, "quiet", "current", None, None, 0),
+        ("healthy", "none", True, "quiet", "current", None, None, 0),
+        (
+            "suspected",
+            "none",
+            True,
+            "warning",
+            "current",
+            "CHECK PROBE",
+            "Possible thermocouple issue; reading still available.",
+            1,
+        ),
+        ("confirmed", "none", True, "danger", "current", "FAULT", None, 2),
+        (
+            "confirmed",
+            "unavailable",
+            False,
+            "danger",
+            "unavailable",
+            "PROBE UNAVAILABLE",
+            "Grill control continues.",
+            2,
+        ),
+        (
+            "confirmed",
+            "notify_only",
+            True,
+            "danger",
+            "current",
+            "FAULT",
+            "Fault detected — Observe mode did not stop heating.",
+            3,
+        ),
+        (
+            "confirmed",
+            "stopped",
+            False,
+            "danger",
+            "unavailable",
+            "CONTROL PROBE UNAVAILABLE",
+            "PiFire stopped heating.",
+            4,
+        ),
+    ],
+)
+def test_probe_health_model_projects_every_state_and_outcome(
+    state,
+    outcome,
+    temperature_valid,
+    severity,
+    availability,
+    headline,
+    impact_copy,
+    priority,
+):
+    model = ProbeHealthModel()
+    model.update(
+        [
+            _health_item(
+                state=state,
+                outcome=outcome,
+                temperature_valid=temperature_valid,
+            )
+        ]
+    )
+
+    row = _health_row(model)
+    assert (
+        row["state"],
+        row["outcome"],
+        row["severity"],
+        row["availability"],
+        row["headline"],
+        row["impactCopy"],
+        row["priority"],
+    ) == (state, outcome, severity, availability, headline, impact_copy, priority)
+
+
+def test_probe_health_model_projects_canonical_fault_source_policy_and_freshness_copy():
+    model = ProbeHealthModel()
+    model.update(
+        [
+            _health_item(
+                state="confirmed",
+                faults=["malfunction", "short", "open", "short"],
+                evidence=["stuck-response", "hardware"],
+                source="mixed",
+                policy="enforce",
+                outcome="unavailable",
+                temperature_valid=False,
+                current=False,
+                age=12.5,
+            )
+        ]
+    )
+
+    row = _health_row(model)
+    assert row["faults"] == ["open", "short", "malfunction"]
+    assert row["evidence"] == ["stuck-response", "hardware"]
+    assert row["source"] == "mixed"
+    assert row["sourceCopy"] == "Hardware + software"
+    assert row["policy"] == "enforce"
+    assert row["causeCopy"] == (
+        "Hardware reported an open circuit. "
+        "Hardware reported a short circuit. "
+        "Software detected an abnormal thermocouple response."
+    )
+    assert row["freshnessCurrent"] is False
+    assert row["lastReportedAgeS"] == 12.5
+    assert row["freshnessQualifier"] == "Last reported"
+
+
+@pytest.mark.parametrize(
+    "source,source_copy",
+    [
+        ("hardware", "Hardware"),
+        ("software", "Software"),
+        ("mixed", "Hardware + software"),
+    ],
+)
+def test_probe_health_model_projects_every_detector_source(source, source_copy):
+    model = ProbeHealthModel()
+    model.update([_health_item(source=source)])
+    assert _health_row(model)["sourceCopy"] == source_copy
+
+
+def test_probe_health_model_keeps_aux_for_summary_and_details():
+    model = ProbeHealthModel()
+    model.update(
+        [
+            _health_item(state="suspected"),
+            _health_item(
+                label="Ambient",
+                display_name="Ambient",
+                role="Aux",
+                state="confirmed",
+                faults=["open"],
+                evidence=["hardware"],
+                source="hardware",
+                outcome="unavailable",
+                temperature_valid=False,
+            ),
+        ]
+    )
+
+    assert model.rowCount() == 2
+    assert _health_row(model, 1)["role"] == "Aux"
+    assert model.summary["highest"]["label"] == "Ambient"
+    assert model.summary["additionalCount"] == 1
+    assert model.summary["additionalCopy"] == "+1 more"
+
+
+def test_probe_health_model_omits_malformed_items_and_missing_payload_clears_state():
+    model = ProbeHealthModel()
+    model.update([_health_item()])
+    assert model.rowCount() == 1
+
+    malformed = _health_item()
+    malformed["freshness"]["lastReportedAgeS"] = float("nan")
+    model.update([None, {}, malformed])
+    assert model.rowCount() == 0
+    assert model.summary == {}
+
+    model.update(None)
+    assert model.rowCount() == 0
+
+
+def test_probe_health_model_recovery_is_immediately_quiet():
+    model = ProbeHealthModel()
+    model.update(
+        [
+            _health_item(
+                state="confirmed",
+                faults=["open"],
+                evidence=["hardware"],
+                source="hardware",
+                outcome="stopped",
+                temperature_valid=False,
+            )
+        ]
+    )
+    assert model.summary["highest"]["headline"] == "CONTROL PROBE UNAVAILABLE"
+
+    model.update([_health_item(state="healthy", faults=[], evidence=[])])
+    assert _health_row(model)["severity"] == "quiet"
+    assert model.summary == {}
+
+
+def test_backend_throttles_health_reads_independently_from_fast_polling():
+    clock = {"t": 1000.0}
+    health_calls = []
+    backend = PiFireBackend(
+        lambda: ({"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, {"mode": "Hold"}),
+        lambda c, d: None,
+        PROBE_INFO,
+        health_fetch_fn=lambda: health_calls.append(clock["t"]) or [_health_item()],
+    )
+    backend._now = lambda: clock["t"]
+
+    backend.poll()
+    for _ in range(20):
+        clock["t"] += 0.04
+        backend.poll()
+    assert health_calls == [1000.0]
+
+    clock["t"] = 1001.0
+    backend.poll()
+    assert health_calls == [1000.0, 1001.0]
+
+
+def test_backend_exposes_health_list_model_and_clears_malformed_reads():
+    health = {"value": [_health_item()]}
+    backend = PiFireBackend(
+        lambda: ({"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, {"mode": "Hold"}),
+        lambda c, d: None,
+        PROBE_INFO,
+        health_fetch_fn=lambda: health["value"],
+    )
+    clock = {"t": 1000.0}
+    backend._now = lambda: clock["t"]
+    backend.poll()
+    assert backend.probeHealth.rowCount() == 1
+
+    health["value"] = {"not": "a list"}
+    clock["t"] += 1.0
+    backend.poll()
+    assert backend.probeHealth.rowCount() == 0
+
+
+def _configured_probe(*, role="Primary", label="Grill", name="Grill", port="TC0"):
+    return {
+        "device": "max31856",
+        "port": port,
+        "label": label,
+        "name": name,
+        "type": role,
+    }
+
+
+def _device_report(*, label="Grill", state="healthy", temperature_valid=True, observed_at=90.0, detail=None):
+    return {
+        "device": "max31856",
+        "status": {
+            "thermocouple_health": {
+                label: {
+                    "state": state,
+                    "faults": ["open"] if state == "confirmed" else [],
+                    "evidence": ["hardware"],
+                    "temperature_valid": temperature_valid,
+                    "observed_at": observed_at,
+                    "detail": {"policy": "observe"} if detail is None else detail,
+                }
+            }
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "role,state,temperature_valid,mode,expected_outcome",
+    [
+        ("Primary", "healthy", True, "Hold", "none"),
+        ("Primary", "confirmed", True, "Hold", "notify_only"),
+        ("Primary", "confirmed", False, "Error", "stopped"),
+        ("Primary", "confirmed", False, "Hold", "unavailable"),
+        ("Food", "confirmed", True, "Hold", "unavailable"),
+        ("Aux", "confirmed", True, "Hold", "unavailable"),
+    ],
+)
+def test_qt_health_transport_projects_backend_owned_outcomes(
+    role,
+    state,
+    temperature_valid,
+    mode,
+    expected_outcome,
+):
+    settings = {"probe_settings": {"probe_map": {"probe_info": [_configured_probe(role=role)]}}}
+
+    projected = project_thermocouple_health(
+        settings,
+        [_device_report(state=state, temperature_valid=temperature_valid)],
+        mode,
+        now=100.0,
+    )
+
+    assert len(projected) == 1
+    assert projected[0]["role"] == role
+    assert projected[0]["outcome"] == expected_outcome
+
+
+def test_qt_health_transport_keeps_aux_identity_and_backend_relative_freshness():
+    settings = {
+        "probe_settings": {
+            "probe_map": {
+                "probe_info": [
+                    _configured_probe(role="Aux", label="Ambient", name="Ambient", port="TC1")
+                ]
+            }
+        }
+    }
+
+    current = project_thermocouple_health(
+        settings,
+        [_device_report(label="Ambient", observed_at=120.0)],
+        "Hold",
+        now=100.0,
+    )
+    stale = project_thermocouple_health(
+        settings,
+        [_device_report(label="Ambient", observed_at=60.0)],
+        "Hold",
+        now=100.0,
+    )
+
+    assert current[0]["label"] == "Ambient"
+    assert current[0]["displayName"] == "Ambient"
+    assert current[0]["port"] == "TC1"
+    assert current[0]["freshness"] == {"current": True, "lastReportedAgeS": 0.0}
+    assert stale[0]["freshness"] == {"current": False, "lastReportedAgeS": 40.0}
+
+
+@pytest.mark.parametrize(
+    "settings,device_info,now",
+    [
+        ({}, [], 100.0),
+        ({"probe_settings": {"probe_map": {"probe_info": "bad"}}}, [], 100.0),
+        (
+            {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}},
+            [_device_report(detail={"sample_count": 5})],
+            100.0,
+        ),
+        (
+            {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}},
+            [_device_report(observed_at=float("nan"))],
+            100.0,
+        ),
+        (
+            {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}},
+            [_device_report()],
+            float("inf"),
+        ),
+    ],
+)
+def test_qt_health_transport_omits_missing_and_malformed_data(settings, device_info, now):
+    assert project_thermocouple_health(settings, device_info, "Hold", now=now) == []
+
+
+def test_qtapp_health_fetch_reads_and_projects_the_generic_blob_once(monkeypatch):
+    import display.qtapp as qtapp
+
+    reads = []
+    monkeypatch.setattr(
+        qtapp,
+        "read_settings_store",
+        lambda: {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        qtapp,
+        "read_generic_key",
+        lambda key: reads.append(key) or [_device_report(observed_at=99.5)],
+        raising=False,
+    )
+    monkeypatch.setattr(qtapp, "read_status", lambda: {"mode": "Hold"})
+
+    projected = qtapp._fetch_health(now=100.0)
+
+    assert reads == ["probe_device_info"]
+    assert projected[0]["freshness"] == {"current": True, "lastReportedAgeS": 0.5}

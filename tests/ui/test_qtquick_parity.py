@@ -196,6 +196,7 @@ def test_backend_exposes_parity_surface():
         "asleep",
         "primaryHasTemp",
         "primaryStale",
+        "probeHealth",
     ]:
         assert meta.indexOfProperty(prop) >= 0, f"backend missing property {prop}"
     assert meta.indexOfMethod("registerInteraction()") >= 0

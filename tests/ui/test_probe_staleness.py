@@ -15,7 +15,7 @@ import pytest
 from PySide6.QtCore import QObject, QUrl
 from PySide6.QtQml import QQmlComponent
 
-from display.qtbackend import FoodProbeModel
+from display.qtbackend import FoodProbeModel, PiFireBackend
 from display.staleness import resolve_reading, stale_label
 
 MINUTE = 60_000
@@ -132,6 +132,82 @@ def test_food_model_still_works_against_a_blob_written_before_LAST_existed():
     assert _row(model)["temp"] == 140.0
     assert _row(model)["hasTemp"] is True
     assert _row(model)["stale"] == ""
+
+
+def test_confirmed_invalid_health_overrides_a_carried_food_reading_and_its_stale_copy():
+    model = _model()
+    model.update(
+        {"F": {"Probe1": None}, "NT": {}, "LAST": {"Probe1": {"temp": 147, "ts": NOW - 47_000}}},
+        NOW,
+        invalid_labels={"Probe1"},
+    )
+
+    assert _row(model)["temp"] == 0.0
+    assert _row(model)["hasTemp"] is False
+    assert _row(model)["stale"] == ""
+
+
+def _primary_health(*, state, temperature_valid, outcome, current):
+    return {
+        "device": "max31856",
+        "port": "TC0",
+        "label": "Grill",
+        "displayName": "Grill",
+        "role": "Primary",
+        "report": {
+            "state": state,
+            "faults": ["open"] if state == "confirmed" else [],
+            "evidence": ["hardware"],
+            "temperatureValid": temperature_valid,
+            "detail": {"policy": "observe"},
+        },
+        "detector": {"source": "hardware", "policy": "observe"},
+        "outcome": outcome,
+        "freshness": {"current": current, "lastReportedAgeS": 47.0},
+    }
+
+
+def test_confirmed_invalid_health_beats_primary_last_value_even_when_health_transport_is_stale():
+    backend = PiFireBackend(
+        lambda: (
+            {"P": {"Grill": None}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}, "LAST": {"Grill": {"temp": 225, "ts": NOW - 47_000}}},
+            {"mode": "Error", "units": "F", "outpins": {}},
+        ),
+        lambda c, d: None,
+        {"primary": {"name": "Grill", "label": "Grill"}, "food": [], "aux": []},
+        health_fetch_fn=lambda: [
+            _primary_health(state="confirmed", temperature_valid=False, outcome="stopped", current=False)
+        ],
+    )
+    backend._now = lambda: NOW / 1000
+
+    backend.poll()
+
+    assert backend.primaryTemp == 0.0
+    assert backend.primaryHasTemp is False
+    assert backend.primaryStale == ""
+    assert backend.probeHealth.summary["highest"]["freshnessQualifier"] == "Last reported"
+
+
+def test_suspected_health_retains_the_primary_numeric_reading():
+    backend = PiFireBackend(
+        lambda: (
+            {"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}, "LAST": {}},
+            {"mode": "Hold", "units": "F", "outpins": {}},
+        ),
+        lambda c, d: None,
+        {"primary": {"name": "Grill", "label": "Grill"}, "food": [], "aux": []},
+        health_fetch_fn=lambda: [
+            _primary_health(state="suspected", temperature_valid=True, outcome="none", current=True)
+        ],
+    )
+    backend._now = lambda: NOW / 1000
+
+    backend.poll()
+
+    assert backend.primaryTemp == 225.0
+    assert backend.primaryHasTemp is True
+    assert backend.probeHealth.summary["highest"]["headline"] == "CHECK PROBE"
 
 
 def _texts(item):

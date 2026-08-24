@@ -18,8 +18,8 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from common.common import read_generic_json
-from common.persistence.runtime import read_current, read_status
-from display.qtbackend import PiFireBackend
+from common.persistence.runtime import read_current, read_generic_key, read_settings_store, read_status
+from display.qtbackend import PiFireBackend, project_thermocouple_health
 from display.screen_power import ScreenPowerController
 
 QML_DIR = Path(__file__).parent / "qml"
@@ -27,6 +27,18 @@ QML_DIR = Path(__file__).parent / "qml"
 
 def _fetch():
     return read_current(), read_status()
+
+
+def _fetch_health(*, now=None):
+    """Read and project the slower generic health blob."""
+    status = read_status()
+    mode = status.get("mode", "Stop") if isinstance(status, dict) else "Stop"
+    return project_thermocouple_health(
+        read_settings_store(),
+        read_generic_key("probe_device_info"),
+        mode,
+        now=now,
+    )
 
 
 def build_engine(config, backend):
@@ -51,7 +63,6 @@ def build_engine(config, backend):
 def build_backend(config):
     """Construct the backend wired to the framework's data + command layer."""
     from display.qtquick_flex import Display
-    from common.persistence.runtime import read_settings_store
     from common.common import display_sleep_timeout
 
     def _accent_fn():
@@ -70,7 +81,12 @@ def build_backend(config):
 
     dispatcher = Display.for_dispatch(config, config.get("units", "F"))
     backend = PiFireBackend(
-        _fetch, dispatcher._dispatch_command, config.get("probe_info", {}), accent_fn=_accent_fn, timeout_fn=_timeout_fn
+        _fetch,
+        dispatcher._dispatch_command,
+        config.get("probe_info", {}),
+        accent_fn=_accent_fn,
+        timeout_fn=_timeout_fn,
+        health_fetch_fn=_fetch_health,
     )
     backend._accent_theme = config.get("accent_theme", "Ember")
     backend._ip_address = config.get("ip_address", "") or backend.ipAddress

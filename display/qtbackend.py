@@ -11,11 +11,26 @@ PiFire Qt Quick Display — Backend Bridge
 *****************************************
 """
 
+from collections.abc import Mapping
+import math
 import time
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Property, Qt, Signal, Slot
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QByteArray,
+    QModelIndex,
+    QObject,
+    Property,
+    QPersistentModelIndex,
+    Qt,
+    Signal,
+    Slot,
+)
+from pydantic import ValidationError
 
 from common.modes import Mode
+from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER
+from common.web_contracts.core import ThermocoupleHealthView
 from display.staleness import resolve_reading
 
 
@@ -70,18 +85,22 @@ class FoodProbeModel(QAbstractListModel):
             self.StaleRole: row["stale"],
         }.get(role)
 
-    def update(self, in_data, now_ms=None):
+    def update(self, in_data, now_ms=None, *, invalid_labels=None):
         f = in_data.get("F", {})
         nt = in_data.get("NT", {})
         last = in_data.get("LAST", {})
         if now_ms is None:
             now_ms = int(time.time() * 1000)
+        invalid_labels = invalid_labels or set()
         changed = False
         for row in self._rows:
             # .get with no default on purpose: a probe reporting None and a
             # probe whose key is missing are the same thing to the card, and
             # `f.get(label, 0)` only defaulted the second.
-            temp, has_temp, stale = resolve_reading(f.get(row["label"]), last.get(row["label"]), now_ms)
+            if row["label"] in invalid_labels:
+                temp, has_temp, stale = 0.0, False, ""
+            else:
+                temp, has_temp, stale = resolve_reading(f.get(row["label"]), last.get(row["label"]), now_ms)
             target = nt.get(row["label"], 0)
             if (row["temp"], row["hasTemp"], row["stale"], row["target"]) != (temp, has_temp, stale, target):
                 row["temp"], row["hasTemp"], row["stale"], row["target"] = temp, has_temp, stale, target
@@ -92,6 +111,313 @@ class FoodProbeModel(QAbstractListModel):
                 self.index(len(self._rows) - 1, 0),
                 [self.TempRole, self.TargetRole, self.HasTempRole, self.StaleRole],
             )
+
+
+def _finite_float(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def project_thermocouple_health(settings, probe_device_info, controller_mode, *, now=None):
+    """Adapt producer reports to the validated shared health wire projection."""
+    if not isinstance(probe_device_info, list) or not isinstance(settings, Mapping):
+        return []
+    probe_settings = settings.get("probe_settings")
+    if not isinstance(probe_settings, Mapping):
+        return []
+    probe_map = probe_settings.get("probe_map")
+    if not isinstance(probe_map, Mapping):
+        return []
+    configured_probes = probe_map.get("probe_info")
+    if not isinstance(configured_probes, list):
+        return []
+
+    reports_by_probe = {}
+    for device_info in probe_device_info:
+        if not isinstance(device_info, Mapping):
+            continue
+        device = device_info.get("device")
+        status = device_info.get("status")
+        if not isinstance(device, str) or not isinstance(status, Mapping):
+            continue
+        reports = status.get("thermocouple_health")
+        if not isinstance(reports, Mapping):
+            continue
+        for label, report in reports.items():
+            if isinstance(label, str) and isinstance(report, Mapping):
+                reports_by_probe[(device, label)] = report
+
+    now = time.time() if now is None else now
+    now = _finite_float(now)
+    if now is None:
+        return []
+
+    projected = []
+    for probe in configured_probes:
+        if not isinstance(probe, Mapping):
+            continue
+        device = probe.get("device")
+        port = probe.get("port")
+        label = probe.get("label")
+        display_name = probe.get("name")
+        role = probe.get("type")
+        if (
+            not isinstance(device, str)
+            or not isinstance(port, str)
+            or not isinstance(label, str)
+            or not isinstance(display_name, str)
+            or role not in {"Primary", "Food", "Aux"}
+        ):
+            continue
+
+        report = reports_by_probe.get((device, label))
+        if report is None:
+            continue
+        observed_at = _finite_float(report.get("observed_at"))
+        detail = report.get("detail")
+        evidence = report.get("evidence")
+        if observed_at is None or not isinstance(detail, Mapping) or not isinstance(evidence, list):
+            continue
+        policy = detail.get("policy")
+        if policy not in {"off", "observe", "enforce"}:
+            continue
+
+        age_s = max(0.0, now - observed_at)
+        has_hardware = "hardware" in evidence
+        has_software = any(item != "hardware" for item in evidence)
+        source = "mixed" if has_hardware and has_software else "hardware" if has_hardware else "software"
+
+        state = report.get("state")
+        temperature_valid = report.get("temperature_valid")
+        outcome = "none"
+        if state == "confirmed":
+            if role == "Primary" and temperature_valid is True:
+                outcome = "notify_only"
+            elif role == "Primary" and controller_mode == Mode.ERROR:
+                outcome = "stopped"
+            else:
+                outcome = "unavailable"
+
+        try:
+            view = ThermocoupleHealthView.model_validate(
+                {
+                    "device": device,
+                    "port": port,
+                    "label": label,
+                    "displayName": display_name,
+                    "role": role,
+                    "report": {
+                        "state": state,
+                        "faults": report.get("faults"),
+                        "evidence": evidence,
+                        "temperatureValid": temperature_valid,
+                        "detail": dict(detail),
+                    },
+                    "detector": {"source": source, "policy": policy},
+                    "outcome": outcome,
+                    "freshness": {
+                        "current": age_s <= CONTROL_HEARTBEAT_STALE_AFTER,
+                        "lastReportedAgeS": age_s,
+                    },
+                },
+                strict=True,
+            )
+        except ValidationError:
+            continue
+        projected.append(view.model_dump(mode="json", by_alias=True, exclude_none=False))
+    return projected
+
+
+class ProbeHealthModel(QAbstractListModel):
+    summaryChanged = Signal()
+
+    DeviceRole = int(Qt.ItemDataRole.UserRole) + 1
+    PortRole = int(Qt.ItemDataRole.UserRole) + 2
+    LabelRole = int(Qt.ItemDataRole.UserRole) + 3
+    DisplayNameRole = int(Qt.ItemDataRole.UserRole) + 4
+    ProbeRole = int(Qt.ItemDataRole.UserRole) + 5
+    StateRole = int(Qt.ItemDataRole.UserRole) + 6
+    FaultsRole = int(Qt.ItemDataRole.UserRole) + 7
+    EvidenceRole = int(Qt.ItemDataRole.UserRole) + 8
+    TemperatureValidRole = int(Qt.ItemDataRole.UserRole) + 9
+    SourceRole = int(Qt.ItemDataRole.UserRole) + 10
+    PolicyRole = int(Qt.ItemDataRole.UserRole) + 11
+    OutcomeRole = int(Qt.ItemDataRole.UserRole) + 12
+    SeverityRole = int(Qt.ItemDataRole.UserRole) + 13
+    AvailabilityRole = int(Qt.ItemDataRole.UserRole) + 14
+    HeadlineRole = int(Qt.ItemDataRole.UserRole) + 15
+    ImpactCopyRole = int(Qt.ItemDataRole.UserRole) + 16
+    CauseCopyRole = int(Qt.ItemDataRole.UserRole) + 17
+    SourceCopyRole = int(Qt.ItemDataRole.UserRole) + 18
+    PriorityRole = int(Qt.ItemDataRole.UserRole) + 19
+    FreshnessCurrentRole = int(Qt.ItemDataRole.UserRole) + 20
+    LastReportedAgeRole = int(Qt.ItemDataRole.UserRole) + 21
+    FreshnessQualifierRole = int(Qt.ItemDataRole.UserRole) + 22
+
+    _ROLE_NAMES = {
+        DeviceRole: QByteArray(b"device"),
+        PortRole: QByteArray(b"port"),
+        LabelRole: QByteArray(b"label"),
+        DisplayNameRole: QByteArray(b"displayName"),
+        ProbeRole: QByteArray(b"role"),
+        StateRole: QByteArray(b"state"),
+        FaultsRole: QByteArray(b"faults"),
+        EvidenceRole: QByteArray(b"evidence"),
+        TemperatureValidRole: QByteArray(b"temperatureValid"),
+        SourceRole: QByteArray(b"source"),
+        PolicyRole: QByteArray(b"policy"),
+        OutcomeRole: QByteArray(b"outcome"),
+        SeverityRole: QByteArray(b"severity"),
+        AvailabilityRole: QByteArray(b"availability"),
+        HeadlineRole: QByteArray(b"headline"),
+        ImpactCopyRole: QByteArray(b"impactCopy"),
+        CauseCopyRole: QByteArray(b"causeCopy"),
+        SourceCopyRole: QByteArray(b"sourceCopy"),
+        PriorityRole: QByteArray(b"priority"),
+        FreshnessCurrentRole: QByteArray(b"freshnessCurrent"),
+        LastReportedAgeRole: QByteArray(b"lastReportedAgeS"),
+        FreshnessQualifierRole: QByteArray(b"freshnessQualifier"),
+    }
+
+    _SOURCE_COPY = {
+        "hardware": "Hardware",
+        "software": "Software",
+        "mixed": "Hardware + software",
+    }
+    _FAULT_ORDER = ("open", "short", "malfunction")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows = []
+        self._summary = {}
+
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):
+        return 0 if parent.isValid() else len(self._rows)
+
+    def roleNames(self) -> dict[int, QByteArray]:
+        return self._ROLE_NAMES
+
+    def data(self, index, role: int = int(Qt.ItemDataRole.DisplayRole)):
+        if not index.isValid() or index.row() < 0 or index.row() >= len(self._rows):
+            return None
+        name = self._ROLE_NAMES.get(role)
+        return self._rows[index.row()].get(bytes(name.data()).decode()) if name is not None else None
+
+    @staticmethod
+    def _presentation(state, outcome):
+        if state in {"unmonitored", "healthy"}:
+            return "quiet", None, None, 0
+        if state == "suspected":
+            return "warning", "CHECK PROBE", "Possible thermocouple issue; reading still available.", 1
+        if outcome == "stopped":
+            return "danger", "CONTROL PROBE UNAVAILABLE", "PiFire stopped heating.", 4
+        if outcome == "notify_only":
+            return "danger", "FAULT", "Fault detected — Observe mode did not stop heating.", 3
+        if outcome == "unavailable":
+            return "danger", "PROBE UNAVAILABLE", "Grill control continues.", 2
+        return "danger", "FAULT", None, 2
+
+    @classmethod
+    def _project(cls, item):
+        try:
+            wire = ThermocoupleHealthView.model_validate(item, strict=True)
+        except (TypeError, ValidationError):
+            return None
+        raw = wire.model_dump(mode="json", by_alias=True, exclude_none=False)
+        report = raw["report"]
+        detector = raw["detector"]
+        freshness = raw["freshness"]
+        state = report["state"]
+        outcome = raw["outcome"]
+        severity, headline, impact_copy, priority = cls._presentation(state, outcome)
+        faults = [fault for fault in cls._FAULT_ORDER if fault in report["faults"]]
+        causes = []
+        if state == "confirmed":
+            if "open" in faults:
+                causes.append("Hardware reported an open circuit.")
+            if "short" in faults:
+                causes.append("Hardware reported a short circuit.")
+            if "malfunction" in faults:
+                causes.append("Software detected an abnormal thermocouple response.")
+        unavailable = (
+            outcome in {"stopped", "unavailable"}
+            or (state == "confirmed" and report["temperatureValid"] is False)
+        )
+        return {
+            "device": raw["device"],
+            "port": raw["port"],
+            "label": raw["label"],
+            "displayName": raw["displayName"],
+            "role": raw["role"],
+            "state": state,
+            "faults": faults,
+            "evidence": list(report["evidence"]),
+            "temperatureValid": report["temperatureValid"],
+            "source": detector["source"],
+            "policy": detector["policy"],
+            "outcome": outcome,
+            "severity": severity,
+            "availability": "unavailable" if unavailable else "current",
+            "headline": headline,
+            "impactCopy": impact_copy,
+            "causeCopy": " ".join(causes) if causes else None,
+            "sourceCopy": cls._SOURCE_COPY[detector["source"]],
+            "priority": priority,
+            "freshnessCurrent": freshness["current"],
+            "lastReportedAgeS": freshness["lastReportedAgeS"],
+            "freshnessQualifier": None if freshness["current"] else "Last reported",
+        }
+
+    @staticmethod
+    def _summarize(rows):
+        highest = None
+        issue_count = 0
+        for row in rows:
+            if row["priority"] == 0:
+                continue
+            issue_count += 1
+            if highest is None or row["priority"] > highest["priority"]:
+                highest = row
+        if highest is None:
+            return {}
+        additional_count = issue_count - 1
+        return {
+            "highest": dict(highest),
+            "additionalCount": additional_count,
+            "additionalCopy": f"+{additional_count} more" if additional_count else None,
+        }
+
+    def update(self, health):
+        rows = []
+        if isinstance(health, list):
+            for item in health:
+                row = self._project(item)
+                if row is not None:
+                    rows.append(row)
+        summary = self._summarize(rows)
+        if rows == self._rows:
+            return
+        self.beginResetModel()
+        self._rows = rows
+        self.endResetModel()
+        self._summary = summary
+        self.summaryChanged.emit()
+
+    def invalid_labels(self):
+        return {
+            row["label"]
+            for row in self._rows
+            if row["state"] == "confirmed" and row["temperatureValid"] is False
+        }
+
+    @Property(dict, notify=summaryChanged)
+    def summary(self):
+        return self._summary
 
 
 class PiFireBackend(QObject):
@@ -106,7 +432,18 @@ class PiFireBackend(QObject):
     navEvent = Signal(str)
     accentThemeChanged = Signal()
 
-    def __init__(self, fetch_fn, command_fn, probe_info, accent_fn=None, timeout_fn=None, parent=None):
+    HEALTH_POLL_SECONDS = 1.0
+
+    def __init__(
+        self,
+        fetch_fn,
+        command_fn,
+        probe_info,
+        accent_fn=None,
+        timeout_fn=None,
+        parent=None,
+        health_fetch_fn=None,
+    ):
         super().__init__(parent)
         self._fetch_fn = fetch_fn
         self._command_fn = command_fn
@@ -114,6 +451,8 @@ class PiFireBackend(QObject):
         self._now = time.time
         self._accent_fn = accent_fn
         self._timeout_fn = timeout_fn
+        self._health_fetch_fn = health_fetch_fn
+        self._last_health_check = None
         self._accent_theme = "Ember"
         self._last_settings_check = 0.0
         primary = self._probe_info.get("primary", {})
@@ -123,6 +462,7 @@ class PiFireBackend(QObject):
         self._primary_notify = 0
         self._ip_address = self._probe_info.get("ip_address", "") or ""
         self._food_model = FoodProbeModel(self._probe_info.get("food", []))
+        self._health_model = ProbeHealthModel(self)
         self._mode = "Stop"
         self._units = "F"
         self._primary_temp = 0
@@ -157,6 +497,18 @@ class PiFireBackend(QObject):
             setattr(self, attr, value)
             signal.emit()
 
+    def _poll_health(self, now):
+        if self._health_fetch_fn is None:
+            return
+        if self._last_health_check is not None and now - self._last_health_check < self.HEALTH_POLL_SECONDS:
+            return
+        self._last_health_check = now
+        try:
+            health = self._health_fetch_fn()
+        except Exception:
+            health = None
+        self._health_model.update(health)
+
     @Slot()
     def poll(self):
         in_data, status = self._fetch_fn()
@@ -164,14 +516,20 @@ class PiFireBackend(QObject):
             return
         self._set("_mode", status.get("mode", Mode.STOP), self.modeChanged)
         self._set("_units", status.get("units", "F"), self.unitsChanged)
+        now = self._now()
+        self._poll_health(now)
+        invalid_labels = self._health_model.invalid_labels()
         p = in_data.get("P", {})
-        primary_key = next(iter(p), None)
-        now_ms = int(self._now() * 1000)
-        primary_temp, primary_has_temp, primary_stale = resolve_reading(
-            p.get(primary_key) if primary_key is not None else 0,
-            in_data.get("LAST", {}).get(primary_key),
-            now_ms,
-        )
+        primary_key = next(iter(p), self._primary_label)
+        now_ms = int(now * 1000)
+        if primary_key in invalid_labels:
+            primary_temp, primary_has_temp, primary_stale = 0.0, False, ""
+        else:
+            primary_temp, primary_has_temp, primary_stale = resolve_reading(
+                p.get(primary_key),
+                in_data.get("LAST", {}).get(primary_key),
+                now_ms,
+            )
         self._set("_primary_temp", primary_temp, self.primaryChanged)
         self._set("_primary_has_temp", primary_has_temp, self.primaryChanged)
         self._set("_primary_stale", primary_stale, self.primaryChanged)
@@ -191,8 +549,7 @@ class PiFireBackend(QObject):
         self._set("_recipe_paused", bool(status.get("recipe_paused", False)), self.statusChanged)
         self._set("_hopper_enabled", bool(status.get("hopper_level_enabled", False)), self.hopperChanged)
         self._set("_hopper_level", max(status.get("hopper_level", 0) or 0, 0), self.hopperChanged)
-        self._food_model.update(in_data, now_ms)
-        now = self._now()
+        self._food_model.update(in_data, now_ms, invalid_labels=invalid_labels)
         self._update_timer_text(status, now)
         self._update_cook_elapsed(status, now)
         mode = status.get("mode", Mode.STOP)
@@ -410,6 +767,10 @@ class PiFireBackend(QObject):
     @Property(QObject, constant=True)
     def foodProbes(self):
         return self._food_model
+
+    @Property(QObject, constant=True)
+    def probeHealth(self):
+        return self._health_model
 
     @Property(int, notify=hopperChanged)
     def hopperLevel(self):
